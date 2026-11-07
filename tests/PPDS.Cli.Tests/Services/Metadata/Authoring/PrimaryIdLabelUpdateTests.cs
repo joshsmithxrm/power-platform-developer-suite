@@ -28,18 +28,52 @@ public sealed class PrimaryIdLabelUpdateTests : IDisposable
     private readonly Mock<ICachedMetadataProvider> _cache = new();
     private readonly List<OrganizationRequest> _requests = [];
     private readonly DataverseMetadataAuthoringService _service;
+    private readonly SemaphoreSlim _slot = new(1, 1);
+    private readonly List<string> _lifecycle = [];
     private AttributeMetadata _attribute = NewCandidate();
     private EntityMetadata? _entity = NewEntity("NEW_RECORDKEY");
     private Exception? _lookupFault;
     private Exception? _updateFault;
+    private Exception? _checkoutFault;
+    private int _failedCheckout;
+    private int _checkoutCount;
 
     public PrimaryIdLabelUpdateTests()
     {
-        var client = new Mock<IPooledClient>();
-        _pool.Setup(p => p.GetClientAsync(null, null, _cancellation.Token)).ReturnsAsync(client.Object);
+        _pool.Setup(p => p.GetClientAsync(null, null, _cancellation.Token)).ReturnsAsync(CheckOutClient);
+        _cache.Setup(c => c.InvalidateEntity(Table)).Callback(() => _lifecycle.Add("invalidate"));
+        _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(),
+            new InactiveFakeShakedownGuard(), cacheProvider: _cache.Object);
+    }
+
+    private IPooledClient CheckOutClient()
+    {
+        if (++_checkoutCount == _failedCheckout)
+        {
+            _lifecycle.Add("checkout failed");
+            throw _checkoutFault!;
+        }
+
+        // A second checkout while the only slot is occupied would wait for itself. Fail immediately.
+        if (!_slot.Wait(0, _cancellation.Token))
+            throw new TimeoutException("The metadata operation still holds the only pool slot.");
+
+        _lifecycle.Add("checkout");
+        var client = new Mock<IPooledClient>(MockBehavior.Strict);
+        var released = false;
+        client.Setup(c => c.DisposeAsync()).Returns(() =>
+        {
+            Assert.False(released);
+            released = true;
+            _slot.Release();
+            _lifecycle.Add("dispose");
+            return ValueTask.CompletedTask;
+        });
         client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), _cancellation.Token))
             .Returns<OrganizationRequest, CancellationToken>((request, _) =>
             {
+                Assert.False(released);
+                _lifecycle.Add(request.RequestName);
                 _requests.Add(request);
                 OrganizationResponse response = request switch
                 {
@@ -59,8 +93,74 @@ public sealed class PrimaryIdLabelUpdateTests : IDisposable
                 };
                 return Task.FromResult(response);
             });
-        _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(),
-            new InactiveFakeShakedownGuard(), cacheProvider: _cache.Object);
+        return client.Object;
+    }
+
+    [Theory, Trait("AC", "AC-74"), Trait("AC", "AC-77")]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    public async Task SingleSlot_UpdatesAndPublishesInOrder(bool primaryId, bool publish)
+    {
+        if (!primaryId)
+            _attribute = new StringAttributeMetadata { LogicalName = Key, SchemaName = "new_RecordKey" };
+
+        await UpdateAsync(NewRequest("New label", publish: publish));
+        var expected = new List<string> { "RetrieveAttribute" };
+        if (primaryId) expected.Add("RetrieveEntity");
+        expected.Add("UpdateAttribute");
+        expected.Add("invalidate");
+        if (publish) expected.Add("PublishXml");
+        AssertSingleSlotOrder(expected);
+    }
+
+    [Theory, Trait("AC", "AC-77")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SingleSlot_FailedOperationReturnsClient(bool cancelLookup)
+    {
+        Exception fault;
+        if (cancelLookup)
+            _lookupFault = fault = new OperationCanceledException(_cancellation.Token);
+        else
+            _updateFault = fault = new PpdsException(MetadataErrorCodes.SdkOperationFailed, "Synthetic update fault.");
+
+        var failure = await Record.ExceptionAsync(() => UpdateAsync(NewRequest("New label", publish: true)));
+        Assert.Same(fault, failure);
+        var expected = new List<string> { "RetrieveAttribute", "RetrieveEntity" };
+        if (!cancelLookup) expected.Add("UpdateAttribute");
+        AssertSingleSlotOrder(expected);
+        _cache.VerifyNoOtherCalls();
+    }
+
+    [Theory, Trait("AC", "AC-77")]
+    [InlineData(2)] // Authoritative table read.
+    [InlineData(3)] // Update.
+    public async Task SingleSlot_CheckoutFailureLeavesSlotFree(int checkout)
+    {
+        _failedCheckout = checkout;
+        _checkoutFault = new TimeoutException("Synthetic checkout timeout.");
+        var failure = await Record.ExceptionAsync(() => UpdateAsync(NewRequest("New label", publish: true)));
+        Assert.Same(_checkoutFault, failure);
+        var expected = new List<string> { "RetrieveAttribute" };
+        if (checkout == 3) expected.Add("RetrieveEntity");
+        expected.Add("checkout failed");
+        AssertSingleSlotOrder(expected);
+        _cache.VerifyNoOtherCalls();
+    }
+
+    private void AssertSingleSlotOrder(List<string> steps)
+    {
+        var expected = new List<string>();
+        foreach (var step in steps)
+        {
+            if (step is "invalidate" or "checkout failed")
+                expected.Add(step);
+            else
+                expected.AddRange(["checkout", step, "dispose"]);
+        }
+        Assert.Equal(expected, _lifecycle);
+        Assert.Equal(1, _slot.CurrentCount);
     }
 
     [Theory]
@@ -304,5 +404,9 @@ public sealed class PrimaryIdLabelUpdateTests : IDisposable
         return XElement.Load(stream);
     }
 
-    public void Dispose() => _cancellation.Dispose();
+    public void Dispose()
+    {
+        _slot.Dispose();
+        _cancellation.Dispose();
+    }
 }

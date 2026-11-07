@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.Text.Json;
+using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
@@ -90,7 +91,13 @@ public sealed class CombinedMetadataWorkflowTests : IDisposable
         await UpdateKeyLabelAsync();
     }
 
-    private async Task UpdateKeyLabelAsync()
+    [Fact]
+    public async Task PrimaryIdLabelsWithPublish_ReturnsUpdateLeaseBeforePublish()
+    {
+        await UpdateKeyLabelAsync(publish: true);
+    }
+
+    private async Task UpdateKeyLabelAsync(bool publish = false)
     {
         var key = new AttributeMetadata
         {
@@ -131,9 +138,17 @@ public sealed class CombinedMetadataWorkflowTests : IDisposable
             Assert.Null(fresh.IsPrimaryId);
             return new UpdateAttributeResponse();
         });
+        if (publish)
+        {
+            Expect<PublishXmlRequest>(r =>
+            {
+                Assert.Contains($"<entity>{Table}</entity>", r.ParameterXml);
+                return new PublishXmlResponse();
+            });
+        }
         await _service.UpdateColumnAsync(new UpdateColumnRequest
         {
-            SolutionUniqueName = Solution, EntityLogicalName = Table, ColumnLogicalName = Key, DisplayName = "Record key"
+            SolutionUniqueName = Solution, EntityLogicalName = Table, ColumnLogicalName = Key, DisplayName = "Record key", Publish = publish
         }, ct: _cancellation.Token);
         AssertReleased();
     }
