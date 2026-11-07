@@ -1,7 +1,7 @@
 # Metadata Authoring
 
 **Status:** Implemented (extending — #1159/#1160/#1161 ratified, in implementation; AC-37–AC-60 reach ✅ as their tests land; #1208 positional `<entity>` shipped, AC-61/AC-62)
-**Last Updated:** 2026-06-10
+**Last Updated:** 2026-11-07
 **Code:** [src/PPDS.Dataverse/Metadata/](../src/PPDS.Dataverse/Metadata/) | [src/PPDS.Cli/Commands/Metadata/](../src/PPDS.Cli/Commands/Metadata/) | [src/PPDS.Cli/Services/Metadata/](../src/PPDS.Cli/Services/Metadata/) | [src/PPDS.Mcp/Tools/](../src/PPDS.Mcp/Tools/) | [src/PPDS.Cli/Tui/Screens/](../src/PPDS.Cli/Tui/Screens/) | [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
 **Surfaces:** CLI, TUI, Extension, MCP
 
@@ -584,6 +584,19 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 | AC-64 | `optionset update-option` matches the `attribute update-option` shape: (`--value` \| `--label`) selector, `--new-label` for the new label, optional `--color`; the current label is preserved on color-only updates | `MetadataGlobalOptionServiceTests.UpdateOptionValue_ByLabel_AppliesNewLabel`, `UpdateOptionValue_ColorOnly_PreservesCurrentLabelAndForwardsColor` | ✅ |
 | AC-65 | `optionset add-option`/`update-option`/`remove-option` honor `--dry-run` with a service-layer early exit; update/remove still validate the target exists, and `remove-option --dry-run` skips the confirmation prompt | `MetadataGlobalOptionServiceTests.AddOptionValue_DryRun_DoesNotCallSdk`, `UpdateOptionValue_DryRun_ValidatesTargetWithoutMutating`, `DeleteOptionValue_DryRun_ValidatesTargetWithoutMutating`, `DeleteOptionValue_DryRun_TargetNotFound_StillThrows` | ✅ |
 
+### Primary ID column labels (#1534)
+
+A real column update can change the display name, description, or both on a table's primary ID. Some tables have multiple GUID columns with `IsPrimaryId` set, including address IDs. When an existing column has runtime type exactly `AttributeMetadata`, `AttributeType == Uniqueidentifier`, and `IsPrimaryId == true`, validate the requested changes and retrieve just the table definition (`EntityFilters.Entity`). Its `PrimaryIdAttribute` must match both the requested column and the retrieved attribute logical name, ignoring case. The SDK enforces the table's managed customization rules.
+
+Build a fresh base attribute with the retrieved logical and schema names and only the requested LCID 1033 labels. Set `UpdateAttributeRequest.MergeLabels` to true for this path so Dataverse retains translations in other languages. Required level, length, range, precision, format, audit, security, Advanced Find and auto-number settings are incompatible even when explicitly set to false, zero or an empty string. A dry run continues to validate the required input identifiers before any metadata retrieval.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-74 | Display name, description, or both on the verified primary ID generate one targeted update with a fresh minimal base attribute and merged labels. Other language labels survive through the SDK's merge contract. Optional publish follows successful update only. | `PrimaryIdLabelUpdateTests.VerifiedPrimaryId_SendsOnlyRequestedLabels` | ✅ |
+| AC-75 | Reject unrelated base attributes, state/status attributes, misleading address IDs, and missing or inconsistent primary ID metadata before any update or publish. Only an eligible candidate triggers the table lookup. | `PrimaryIdLabelUpdateTests.UnsupportedShape_RemainsRejected`, `PrimaryIdLabelUpdateTests.UnconfirmedPrimaryId_RejectsBeforeWrite` | ✅ |
+| AC-76 | Require at least one supplied label. Reject every supplied incompatible field on an otherwise eligible primary ID with a clear validation error before the table lookup or any write. | `PrimaryIdLabelUpdateTests.IncompatibleSettings_RejectBeforeTableLookup`, `PrimaryIdLabelUpdateTests.NoLabels_RejectsBeforeTableLookup` | ✅ |
+| AC-77 | Preserve input-only dry-run, typed updates, mutation guard, SDK and cancellation routing. Both CLI command names accept both label flags. Table lookup failures and cancellation prevent update and publish. | `PrimaryIdLabelUpdateTests.DryRun_ValidatesInputsWithoutMetadata`, `PrimaryIdLabelUpdateTests.TypedUpdate_PreservesRequestShape`, `MetadataAuthoringServiceGuardTests.EveryMutationMethod_Blocks` (`UpdateColumnAsync`), `PrimaryIdLabelUpdateTests.UpdateFailure_SkipsPublishAndCacheInvalidation`, `PrimaryIdLabelUpdateTests.TableLookupFailure_StopsBeforeWrite`, `PrimaryIdLabelUpdateTests.CliUpdate_AcceptsBothLabelFlags` | ✅ |
+
 ### Edge Cases
 
 | Scenario | Input | Expected Output |
@@ -854,6 +867,7 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 | 2026-04-01 | Post-implementation cleanup: fixed CodeQL findings, completed TUI choice editing, replaced Extension webview stubs with VS Code input collection, updated AC statuses |
 | 2026-05-29 | Surface rationalization (#1159 — canonical `entity`/`attribute`/`optionset` nouns + `table`/`column`/`choice` deprecation shims), status reason management (#1160 — add/list/update/remove on `entity`), local Choice/OptionSet column fix + local option management (#1161 — `IsGlobal=false`), shared `OptionValueDeriver`. Added AC-37–AC-58. |
 | 2026-06-10 | `entity` authoring verbs accept positional `<entity>` alongside `--entity` (#1208) — amended the #1160 Form A decision (Form B accepted additively), rewrote the §"CLI Surface" rationale, added AC-61/AC-62. `attribute`/`key` unchanged. |
+| 2026-11-07 | #1534 added primary ID label updates with table-key verification and locale merging. Added AC-74–AC-77. |
 
 ---
 
