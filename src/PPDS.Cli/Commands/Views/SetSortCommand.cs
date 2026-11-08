@@ -12,7 +12,10 @@ namespace PPDS.Cli.Commands.Views;
 /// </summary>
 public static class SetSortCommand
 {
-    public static Command Create()
+    public static Command Create() => Create(null);
+
+    internal static Command Create(
+        Func<string?, string?, GlobalOptionValues, CancellationToken, Task<ServiceProvider>>? providerFactory)
     {
         var viewOption = new Option<string>("--view", "-v")
         {
@@ -32,6 +35,7 @@ public static class SetSortCommand
         {
             ViewsCommandGroup.ProfileOption,
             ViewsCommandGroup.EnvironmentOption,
+            ViewsCommandGroup.ConfirmEnvironmentOption,
             ViewsCommandGroup.EntityOption,
             viewOption,
             sortOption,
@@ -45,6 +49,7 @@ public static class SetSortCommand
         {
             var profile = parseResult.GetValue(ViewsCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(ViewsCommandGroup.EnvironmentOption);
+            var confirmEnvironment = parseResult.GetValue(ViewsCommandGroup.ConfirmEnvironmentOption);
             var entity = parseResult.GetValue(ViewsCommandGroup.EntityOption)!;
             var viewName = parseResult.GetValue(viewOption)!;
             var sortSpecs = parseResult.GetValue(sortOption) ?? [];
@@ -68,11 +73,15 @@ public static class SetSortCommand
 
             try
             {
-                await using var sp = await ProfileServiceFactory.CreateFromProfilesAsync(
-                    profile, environment,
-                    globalOptions.Verbose, globalOptions.Debug,
-                    ProfileServiceFactory.DefaultDeviceCodeCallback,
-                    cancellationToken);
+                await using var sp = providerFactory is null
+                    ? await ProfileServiceFactory.CreateFromProfilesAsync(
+                        profile, environment,
+                        globalOptions.Verbose, globalOptions.Debug,
+                        ProfileServiceFactory.DefaultDeviceCodeCallback,
+                        cancellationToken)
+                    : await providerFactory(profile, environment, globalOptions, cancellationToken);
+
+                await ViewsCommandGroup.ConfirmEnvironmentAsync(sp, confirmEnvironment, cancellationToken);
 
                 if (!globalOptions.IsJsonMode)
                 {

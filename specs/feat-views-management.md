@@ -1,7 +1,7 @@
 # View Management
 
 **Status:** Draft
-**Last Updated:** 2026-05-31
+**Last Updated:** 2026-11-03
 **Code:** [src/PPDS.Cli/Commands/Views/](../src/PPDS.Cli/Commands/Views/), [src/PPDS.Cli/Services/Views/](../src/PPDS.Cli/Services/Views/), [src/PPDS.Dataverse/Metadata/](../src/PPDS.Dataverse/Metadata/)
 **Surfaces:** CLI
 
@@ -122,6 +122,12 @@ If the relationship is not found in metadata, the operation throws `PpdsExceptio
 
 Related layout cells use `alias.attribute` identities, e.g. `parentaccountid.name`. Use that same qualified identity for update-column, remove-column and reorder-columns. Inspection derives relationship details from the FetchXML link, while retaining support for legacy layouts.
 
+### Reorder contract
+
+`reorder-columns --columns "a,b,c"` requires a complete, case-insensitive permutation of the current layout columns. Every existing column must appear exactly once. Empty lists/segments, partial lists, unknown names and duplicate names are rejected before any write, solution association or publication. Names are trimmed at the input boundary; qualified `alias.attribute` identities remain distinct. Layouts without one unambiguous row of uniquely named cells are rejected rather than guessing which column to retain.
+
+Reordering changes only cell order. Cell attributes, widths, other layout nodes/settings and FetchXML projections, filters, links and sort remain intact. Use the separate `remove-column` command to remove a displayed column; omission from a reorder list never removes it.
+
 ### Sort Syntax
 
 `--sort "attributename:asc|desc"` — multiple flags applied in declaration order (first = primary sort).
@@ -183,6 +189,24 @@ The `object` attribute on `<grid>` is the entity's OTC, resolved from `ICachedMe
 Adding a column ensures both its layout cell and its FetchXML projection exist. Retrying repairs an existing layout cell with a missing projection. Existing filters, ordering, links and aliases are preserved; all-attributes already includes direct attributes. Removing/reordering cells changes the display layout and retains query projections used by other query logic.
 
 Every XML write reads back the unpublished draft up to three times and compares every written XML field with the intended state. Formatting, XML attribute order and the platform-maintained root fetch savedqueryid annotation are ignored; query attributes, filters, links and ordering remain significant. Equivalent no-op writes are valid. A missing record or different draft raises View.UpdateNotPersisted. Unavailable verification raises View.VerificationFailed; the write may have applied, so inspect the draft before retrying or publishing. Verification confirms only the observed state and does not lock out subsequent writers.
+
+### Environment acknowledgement
+
+All nine writers enforce the shared [environment confirmation](./environment-confirmation.md) policy before acquiring a client, including no-op edits. The shakedown guard remains effective. Each CLI writer accepts `--confirm-env <resolved-url>`, separately from target selection, `--solution` and `--publish`; the acknowledgement and write use the same provider's captured profile/target. Read-only sessions always reject writing. Missing context fails closed. List/get remain acknowledgement-free.
+
+The existing four-parameter ViewService constructor remains available for readers; writers require the additional confirmation service. No IViewService method or result shape changes. Publication remains entity-scoped with the existing solution-before-publication order.
+
+### View writer safety acceptance criteria
+
+| ID | Criterion | Test | Status |
+|---|---|---|---|
+| AC-29 | Every writer fails closed before client acquisition for absent context or denied confirmation. | ViewConfirmationCoverageTests.EveryWriter_FailsClosedBeforeClientAcquisition | ✅ |
+| AC-30 | Views use the real shared effective-protection policy, including overrides and read-only denial. | ViewConfirmationCoverageTests.RegisteredWriter_UsesSharedPolicy, PolicyUnavailable_FailsClosedBeforeClientAcquisition | ✅ |
+| AC-31 | All nine CLI adapters forward exact acknowledgement separately from profile/target/solution/publication; errors stay structured and reads need no acknowledgement. | ViewsCommandGroupTests.EveryMutation_ForwardsAcknowledgementAndOptions, EveryMutation_RejectsMismatchedTargetWithStructuredError, Reads_DoNotExposeAcknowledgement | ✅ |
+| AC-32 | Acknowledgement and writer share captured session/identity/target and policy; another scope or changed policy cannot authorize the write. | ViewConfirmationCoverageTests.Acknowledgement_IsScopedAndPolicyRechecked | ✅ |
+| AC-33 | Shakedown and cancellation stop all writers before client acquisition; read-only also denies no-op edits. | ViewConfirmationCoverageTests.EveryWriter_ShakedownAndCancellationStopBeforeClientAcquisition, EveryWriter_CancellationDuringPolicyReadStopsBeforeClientAcquisition, EveryWriter_ReadOnlyRejectsBeforeClientAcquisition | ✅ |
+| AC-34 | Authorized reads, XML/layout/managed handling, verification and solution-before-publication behavior retain existing results. | ViewServiceTests.GetAsync_DefaultsToPublishedRead, SetFetchXml_ManagedView_WriteRejected_ThrowsManagedComponentNotEditableWithGuidance, SetFetchXml_ReadBackFails_ReportsUnverifiedWrite; ViewMetadataCorrectnessTests.RelatedColumns_RoundTripDistinctIdentities, WriteVerification_RejectsIncorrectState; ViewConfirmationCoverageTests.RegisteredWriter_UsesSharedPolicy | ✅ |
+| AC-35 | Four-argument CLR constructor remains usable for reads and fails closed for writes; production DI resolves the guarded implementation. | ViewConfirmationCoverageTests.LegacyConstructor_PreservesSignatureAndReadAccess, RegisteredWriter_UsesSharedPolicy | ✅ |
 
 ### `--publish` Behavior
 
@@ -250,6 +274,8 @@ After a successful mutation, calls `AddSolutionComponentRequest` with component 
 | `--entity` | Required, non-empty | `Validation.RequiredField` |
 | `--view` (mutation commands) | Required, non-empty. Accepts name or GUID (with or without braces). GUID-formatted values query by `savedqueryid`; other values query by `name`. | `Validation.RequiredField` / `View.NotFound` |
 | `--column` | Format `"name"` or `"name:width"` | `Validation.InvalidValue` |
+| reorder `--columns` | Non-empty complete permutation of current layout names, case-insensitive; no empty segments or duplicates | `Validation.InvalidValue` |
+| reorder layout | Exactly one row; non-empty, unique cell names, case-insensitive | `Validation.SchemaInvalid` |
 | `--sort` | Format `"attr:asc"` or `"attr:desc"` | `Validation.InvalidValue` |
 | `--condition` | Exactly 3 colon-separated segments | `Validation.InvalidValue` |
 | `--filter-file` + `--condition` together | Mutually exclusive | `Validation.InvalidArguments` |
@@ -272,7 +298,7 @@ After a successful mutation, calls `AddSolutionComponentRequest` with component 
 | AC-04 | `add-column --via-relationship` adds related entity columns via the lookup attribute | `ViewServiceTests.AddColumn_ViaRelationship_AddsRelatedCell` | ❌ |
 | AC-05 | `remove-column` removes a column by attribute name | `ViewServiceTests.RemoveColumn_RemovesMatchingCell` | ❌ |
 | AC-06 | `update-column --width N` updates the width of an existing column | `ViewServiceTests.UpdateColumn_SetsNewWidth` | ❌ |
-| AC-07 | `reorder-columns --columns "a,b,c"` sets the authoritative column order | `ViewServiceTests.ReorderColumns_SetsExactOrder` | ❌ |
+| AC-07 | `reorder-columns --columns "a,b,c"` applies a complete permutation without dropping columns | `ViewServiceTests.ReorderColumns_SetsExactOrder` | ✅ |
 | AC-08 | `set-sort` sets sort order; multiple `--sort` flags applied in declaration order | `ViewServiceTests.SetSort_MultipleFlags_AppliedInOrder` | ❌ |
 | AC-09 | `clear-sort` removes all sort configuration | `ViewServiceTests.ClearSort_RemovesAllOrderElements` | ❌ |
 | AC-10 | `set-filter --filter-file` applies a FetchXML `<filter>` fragment from file | `ViewServiceTests.SetFilter_FromFile_ReplacesFilter` | ❌ |
@@ -290,6 +316,18 @@ After a successful mutation, calls `AddSolutionComponentRequest` with component 
 | AC-22 | `remove-column` with nonexistent attribute throws `PpdsException` with `View.ColumnNotFound` | `ViewServiceTests.RemoveColumn_ColumnNotFound_ThrowsPpdsException` | ❌ |
 | AC-23 | `GetAsync` throws `PpdsException` with `View.NotFound` when view name not found | `ViewServiceTests.GetAsync_ViewNotFound_ThrowsPpdsException` | ❌ |
 | AC-24 | `UpdateAsync` failures (any mutation) are wrapped in `PpdsException` with `View.UpdateFailed` | `ViewServiceTests.MutationAsync_UpdateException_ThrowsPpdsException` | ❌ |
+
+### Lossless reorder correction (#1533)
+
+AC-29–35 above define the environment-confirmation contract enforced before layout acquisition, including reorder validation.
+
+| ID | Criterion | Test | Status |
+|---|---|---|---|
+| AC-36 | Empty, partial, unknown, duplicate or blank input names fail with structured validation before any Update, Publish or solution write, even when those options are requested. | `ViewReorderSafetyTests.Reorder_InvalidPermutation_DoesNotMutate` | ✅ |
+| AC-37 | Missing/ambiguous rows and missing, blank or case-insensitively duplicate layout names fail before mutation. | `ViewReorderSafetyTests.Reorder_AmbiguousLayout_DoesNotMutate` | ✅ |
+| AC-38 | A full case-insensitive permutation, including qualified aliases, updates only cell order while preserving cell metadata, other layout nodes/settings and all FetchXML/query content; explicit remove-column remains separate. | `ViewReorderSafetyTests.Reorder_CompletePermutation_PreservesEverythingExceptCellOrder`, `RemoveColumn_RemainsExplicit` | ✅ |
+| AC-39 | CLI parsing rejects empty comma-separated segments and duplicate names instead of silently removing them; help describes the complete-list requirement and separate removal command. | `ViewReorderCommandTests.Columns_InvalidSyntax_IsParseError`, `Columns_CompleteSyntax_Parses`, `Help_ExplainsLosslessReorder` | ✅ |
+| AC-40 | Complete and partial reorder requests for an unconfirmed protected target fail before client/metadata acquisition; acknowledged complete requests retain the exact AC-38 payload and layout guarantees. | `ViewReorderSafetyTests.Reorder_UnconfirmedProtectedTarget_RejectsBeforeLayoutAcquisition`, `Reorder_CompletePermutation_PreservesEverythingExceptCellOrder` | ✅ |
 
 ### Edge Cases
 
@@ -506,7 +544,7 @@ public interface IViewService
 
 **Context:** `reorder-columns` must express an ordered list of column names in a single atomic specification. `add-column` is an append operation where multiple flags are naturally order-independent (columns are appended in the order supplied).
 
-**Decision:** `--columns` takes a single comma-separated string for `reorder-columns`. Repeated `--column` flags are for `add-column`. The two commands have different semantic models: append vs. replace.
+**Decision:** `--columns` takes a single comma-separated complete permutation for `reorder-columns`. Repeated `--column` flags are for `add-column`. Reordering preserves membership; removal is explicit through `remove-column`.
 
 **Alternatives considered:**
 - Repeated `--column` flags for reorder: ambiguous about whether order is preserved across multiple invocations

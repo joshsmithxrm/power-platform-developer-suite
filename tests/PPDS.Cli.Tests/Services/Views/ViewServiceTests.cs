@@ -113,8 +113,6 @@ public class ViewServiceTests
     {
         var layout = """<grid name="resultset" object="10050" jump="name" select="1" preview="1" icon="1"><row name="result" id="accountid"><cell name="name" width="200" /></row></grid>""";
         var doc = XDocument.Parse(layout);
-        var result = ViewService.ReorderCells(doc, ["name", "telephone1"]);
-        // ReorderCells drops columns not in list; use RemoveCell to test removal
         // Test AddCells indirectly via the row structure
         var row = doc.Descendants("row").First();
         row.Add(new XElement("cell", new XAttribute("name", "telephone1"), new XAttribute("width", "150")));
@@ -171,10 +169,9 @@ public class ViewServiceTests
     {
         var layout = """<grid><row><cell name="a" width="100" /><cell name="b" width="100" /><cell name="c" width="100" /></row></grid>""";
         var doc = XDocument.Parse(layout);
-        var result = ViewService.ReorderCells(doc, ["c", "a"]);
+        var result = ViewService.ReorderCells(doc, ["c", "a", "b"]);
         var cells = result.Descendants("cell").Select(c => (string?)c.Attribute("name")).ToList();
-        cells.Should().ContainInOrder("c", "a");
-        cells.Should().HaveCount(2); // "b" dropped
+        cells.Should().Equal("c", "a", "b");
     }
 
     // ─── Related (via-relationship) link-entity ─────────────────────────────────
@@ -347,7 +344,7 @@ public class ViewServiceTests
         var layoutXml = """<grid><row><cell name="a" width="100" /><cell name="b" width="100" /><cell name="c" width="100" /></row></grid>""";
         // Post-write layout returned by the read-back verification (differs from the original so the
         // honest-write read-back (#1194) sees the change as persisted).
-        var reorderedLayout = """<grid><row><cell name="c" width="100" /><cell name="a" width="100" /></row></grid>""";
+        var reorderedLayout = """<grid><row><cell name="c" width="100" /><cell name="a" width="100" /><cell name="b" width="100" /></row></grid>""";
 
         var client = new Mock<IPooledClient>();
         client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
@@ -378,9 +375,9 @@ public class ViewServiceTests
         meta.Setup(m => m.GetEntitiesAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync([new EntitySummary { LogicalName = "account", DisplayName = "Account", SchemaName = "account", ObjectTypeCode = 1 }]);
 
-        var service = new ViewService(pool.Object, meta.Object, new InactiveFakeShakedownGuard(), NullLogger<ViewService>.Instance);
+        var service = new ViewService(pool.Object, meta.Object, new InactiveFakeShakedownGuard(), NullLogger<ViewService>.Instance, ViewConfirmationCoverageTests.DevelopmentConfirmation());
 
-        await service.ReorderColumnsAsync("account", "My View", ["c", "a"]);
+        await service.ReorderColumnsAsync("account", "My View", ["c", "a", "b"]);
 
         // Verify RetrieveUnpublishedMultiple was used (not plain RetrieveMultiple). The write path
         // reads unpublished twice now — the initial fetch and the honest-write read-back (#1194).
@@ -391,7 +388,7 @@ public class ViewServiceTests
         capturedUpdate.Should().NotBeNull();
         var updatedDoc = XDocument.Parse(capturedUpdate!.GetAttributeValue<string>("layoutxml")!);
         var cells = updatedDoc.Descendants("cell").Select(c => (string?)c.Attribute("name")).ToList();
-        cells.Should().ContainInOrder("c", "a");
+        cells.Should().Equal("c", "a", "b");
     }
 
     // ─── GetAsync read-default: published unless --unpublished (parity with forms/web-resource) ──
@@ -554,7 +551,7 @@ public class ViewServiceTests
                 .Callback<Entity, CancellationToken>((e, _) => { written = e; onUpdate?.Invoke(e); })
                 .Returns(Task.CompletedTask);
 
-        return new ViewService(pool.Object, metadata.Object, new InactiveFakeShakedownGuard(), new NullLogger<ViewService>());
+        return new ViewService(pool.Object, metadata.Object, new InactiveFakeShakedownGuard(), new NullLogger<ViewService>(), ViewConfirmationCoverageTests.DevelopmentConfirmation());
     }
 
     private static FaultException<OrganizationServiceFault> DataverseFault(int code, string message)

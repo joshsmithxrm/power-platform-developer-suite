@@ -1,9 +1,19 @@
 using System.CommandLine;
+using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
+using Moq;
+using PPDS.Auth.Profiles;
+using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Services.Environment;
+using PPDS.Cli.Services.Views;
+using PPDS.Cli.Tests.TestHelpers;
 using PPDS.Cli.Commands.Views;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Views;
 
+[Collection(nameof(ConsoleCaptureCollection))]
 public class ViewsCommandGroupTests
 {
     private readonly Command _command;
@@ -156,5 +166,157 @@ public class ViewsCommandGroupTests
         var sub = _command.Subcommands.First(c => c.Name == subcommandName);
         Assert.NotNull(sub.Options.FirstOrDefault(o => o.Name == "--solution"));
         Assert.NotNull(sub.Options.FirstOrDefault(o => o.Name == "--publish"));
+    }
+
+    private static readonly string[] WriterNames =
+    [
+        "add-column", "remove-column", "update-column", "reorder-columns",
+        "set-sort", "clear-sort", "set-filter", "clear-filter", "set-fetchxml"
+    ];
+
+    public static IEnumerable<object[]> Writers => WriterNames.Select(name => new object[] { name });
+
+    public static IEnumerable<object[]> DeniedCommands =>
+        Writers.SelectMany(row => new[] { "missing", "mismatch", "read-only" }
+            .Select(mode => new object[] { row[0], mode }));
+
+    [Theory]
+    [MemberData(nameof(Writers))]
+    public async Task EveryMutation_ForwardsAcknowledgementAndOptions(string writer)
+        => await InvokeMutation(writer, "allowed");
+
+    [Theory]
+    [MemberData(nameof(DeniedCommands))]
+    public async Task EveryMutation_RejectsMismatchedTargetWithStructuredError(string writer, string mode)
+        => await InvokeMutation(writer, mode);
+
+    [Theory]
+    [InlineData("list")]
+    [InlineData("get")]
+    public void Reads_DoNotExposeAcknowledgement(string name)
+    {
+        var command = _command.Subcommands.Single(c => c.Name == name);
+        Assert.DoesNotContain(command.Options, o => o.Name == "--confirm-env");
+        var args = name == "list" ? "--entity account" : "--entity account --view View";
+        Assert.Empty(command.Parse(args).Errors);
+    }
+
+    private static Command CreateWriter(string writer,
+        Func<string?, string?, GlobalOptionValues, CancellationToken, Task<ServiceProvider>> providerFactory)
+        => writer switch
+        {
+            "add-column" => AddColumnCommand.Create(providerFactory),
+            "remove-column" => RemoveColumnCommand.Create(providerFactory),
+            "update-column" => UpdateColumnCommand.Create(providerFactory),
+            "reorder-columns" => ReorderColumnsCommand.Create(providerFactory),
+            "set-sort" => SetSortCommand.Create(providerFactory),
+            "clear-sort" => ClearSortCommand.Create(providerFactory),
+            "set-filter" => SetFilterCommand.Create(providerFactory),
+            "clear-filter" => ClearFilterCommand.Create(providerFactory),
+            "set-fetchxml" => SetFetchXmlCommand.Create(providerFactory),
+            _ => throw new ArgumentOutOfRangeException(nameof(writer))
+        };
+
+    private static async Task InvokeMutation(string writer, string mode)
+    {
+        const string target = "https://views.example.test";
+        // Selection may be a friendly name. Only the resolved URL can acknowledge it.
+        const string selector = "Selected Environment";
+        var config = new Mock<IEnvironmentConfigService>(MockBehavior.Strict);
+        config.Setup(c => c.GetConfigAsync(target, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EnvironmentConfig { Type = EnvironmentType.Production });
+        var confirmation = new EnvironmentConfirmationService(
+            new EnvironmentConfirmationContext("command-session", "command-profile", target, mode == "read-only"),
+            config.Object, new EnvironmentAcknowledgementStore());
+        var service = new Mock<IViewService>();
+        CancellationToken providerToken = default;
+        var command = CreateWriter(writer, (profile, environment, options, ct) =>
+        {
+            Assert.Equal("chosen-profile", profile);
+            Assert.Equal(selector, environment);
+            Assert.True(options.IsJsonMode);
+            providerToken = ct;
+            return Task.FromResult(new ServiceCollection()
+                .AddSingleton<IEnvironmentConfirmationService>(confirmation)
+                .AddSingleton(service.Object).BuildServiceProvider());
+        });
+        var file = Path.GetTempFileName();
+        var priorOut = Console.Out;
+        var priorError = Console.Error;
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        try
+        {
+            await File.WriteAllTextAsync(file, "<fetch><entity name='account'/></fetch>");
+            string[] specific = writer switch
+            {
+                "add-column" => ["--column", "name:200"],
+                "remove-column" => ["--column", "name"],
+                "update-column" => ["--column", "name", "--width", "200"],
+                "reorder-columns" => ["--columns", "name"],
+                "set-sort" => ["--sort", "name:asc"],
+                "set-filter" => ["--condition", "statecode:eq:0"],
+                "set-fetchxml" => ["--fetchxml", file],
+                _ => []
+            };
+            var args = new List<string> { "--entity", "account", "--view", "View", "--profile", "chosen-profile",
+                "--environment", selector, "--solution", "solution-name", "--publish", "--output-format", "Json" };
+            args.AddRange(specific);
+            if (mode != "missing") args.AddRange(["--confirm-env", mode == "mismatch" ? "https://wrong.example.test" : target]);
+            var parsed = command.Parse(args.ToArray());
+            Assert.Empty(parsed.Errors);
+            Console.SetOut(stdout);
+            Console.SetError(stderr);
+            var exit = await parsed.InvokeAsync();
+            // Parsing the complete stdout also rejects extra status text or multiple JSON envelopes.
+            using var json = JsonDocument.Parse(stdout.ToString());
+            Assert.Empty(stderr.ToString());
+            if (mode == "allowed")
+            {
+                Assert.Equal(ExitCodes.Success, exit);
+                Assert.True(json.RootElement.GetProperty("success").GetBoolean());
+                var call = Assert.Single(service.Invocations);
+                var expectedMethod = writer switch
+                {
+                    "add-column" => nameof(IViewService.AddColumnAsync),
+                    "remove-column" => nameof(IViewService.RemoveColumnAsync),
+                    "update-column" => nameof(IViewService.UpdateColumnAsync),
+                    "reorder-columns" => nameof(IViewService.ReorderColumnsAsync),
+                    "set-sort" => nameof(IViewService.SetSortAsync),
+                    "clear-sort" => nameof(IViewService.ClearSortAsync),
+                    "set-filter" => nameof(IViewService.SetFilterAsync),
+                    "clear-filter" => nameof(IViewService.ClearFilterAsync),
+                    _ => nameof(IViewService.SetFetchXmlAsync)
+                };
+                Assert.Equal(expectedMethod, call.Method.Name);
+                var parameters = call.Method.GetParameters();
+                Assert.Equal("account", call.Arguments[0]);
+                Assert.Equal("View", call.Arguments[1]);
+                Assert.Equal(true, call.Arguments[Array.FindIndex(parameters, p => p.Name == "publish")]);
+                Assert.Equal("solution-name", call.Arguments[Array.FindIndex(parameters, p => p.Name == "solution")]);
+                Assert.Equal(providerToken, call.Arguments[^1]);
+                // The CLI supplied the URL to the real guard: its scoped acknowledgement is now reusable.
+                await confirmation.EnsureConfirmedAsync("writer gate", cancellationToken: providerToken);
+            }
+            else
+            {
+                Assert.Equal(ExitCodes.Failure, exit);
+                Assert.False(json.RootElement.GetProperty("success").GetBoolean());
+                var expectedCode = mode switch
+                {
+                    "missing" => EnvironmentConfirmationErrorCodes.Required,
+                    "mismatch" => EnvironmentConfirmationErrorCodes.TargetMismatch,
+                    _ => EnvironmentConfirmationErrorCodes.ReadOnly
+                };
+                Assert.Equal(expectedCode, json.RootElement.GetProperty("error").GetProperty("code").GetString());
+                Assert.Empty(service.Invocations);
+            }
+        }
+        finally
+        {
+            Console.SetOut(priorOut);
+            Console.SetError(priorError);
+            File.Delete(file);
+        }
     }
 }
