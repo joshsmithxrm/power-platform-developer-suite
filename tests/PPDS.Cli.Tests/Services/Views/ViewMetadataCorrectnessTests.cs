@@ -93,7 +93,7 @@ public class ViewMetadataCorrectnessTests
                     RelationshipType = "ManyToOne"
                 }).ToList()
             });
-            return new ViewService(pool.Object, metadata.Object, Mock.Of<IShakedownGuard>(), NullLogger<ViewService>.Instance);
+            return new ViewService(pool.Object, metadata.Object, Mock.Of<IShakedownGuard>(), NullLogger<ViewService>.Instance, ViewConfirmationCoverageTests.DevelopmentConfirmation());
         }
     }
 
@@ -138,10 +138,11 @@ public class ViewMetadataCorrectnessTests
         XDocument.Parse(h.State.GetAttributeValue<string>("layoutxml")).Descendants("cell")
             .SelectMany(c => c.Attributes()).Select(a => a.Name.LocalName).Distinct().Should().BeEquivalentTo("name", "width");
         await service.UpdateColumnAsync("account", "Test", "PARENTACCOUNTID.NAME", 321);
-        await service.ReorderColumnsAsync("account", "Test", ["otherparentid.name", "parentaccountid.name", "name"]);
+        await service.ReorderColumnsAsync("account", "Test",
+            ["otherparentid.name", "parentaccountid.name", "name", "parentaccountid.telephone1", "otherparentid.telephone1"]);
         await service.RemoveColumnAsync("account", "Test", "otherparentid.name");
         var remaining = ViewService.ParseLayoutXml(h.State.GetAttributeValue<string>("layoutxml"));
-        remaining.Select(c => c.AttributeName).Should().Equal("parentaccountid.name", "name");
+        remaining.Select(c => c.AttributeName).Should().Equal("parentaccountid.name", "name", "parentaccountid.telephone1", "otherparentid.telephone1");
         remaining[0].Width.Should().Be(321);
     }
 
