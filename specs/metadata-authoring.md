@@ -512,6 +512,12 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 - No UI-level business logic — all validation and orchestration in `IMetadataAuthoringService` (Constitution A1)
 - Extension webview forms must render Dataverse-sourced metadata (display names, descriptions) via `textContent` or proper escaping — never `innerHTML` (Constitution S1)
 
+### Connection lifetime and existing error contracts
+
+Generic option add/update, status-reason update/removal, and table creation return their mutation connection before optional color/publication or unrelated postprocessing. Global/local color helpers acquire separate connections for the metadata read and update. Publisher-prefix resolution acquires separate connections for its solution and publisher queries, retains only the publisher ID between them, and keeps the existing prefix cache and table dry-run metadata reads.
+
+This lifetime correction preserves existing SDK payloads, read modes, validation, guards, cache success stages and error contracts. SDK cancellation wrapping and raw acquisition-error propagation remain as currently implemented; their cancellation-classification and coded-service-error (D4) gaps require separate decisions. Adding a new color-write checkout does not place acquisition inside an SDK catch or normalize its errors. Multi-request authoring remains non-atomic: a later failure can follow a successful mutation, and no automatic retry or rollback is introduced.
+
 ---
 
 ## Acceptance Criteria
@@ -633,6 +639,19 @@ When creating a Choice or Choices column that references a global choice, resolv
 | AC-79 | An absent or ambiguous global name or incompatible definition produces a validation error before column creation. Duplicate exact matches are ambiguous. | `GlobalChoiceReferenceTests.UnresolvableName_StopsBeforeCreate`, `IncompatibleChoice_StopsBeforeCreate` | ✅ |
 | AC-80 | The lookup uses fresh unpublished metadata from the caller's pool, releases its own lease before matching or obtaining a create lease, and skips create, publish and cache invalidation on failure. Raw transport and pool configuration or argument failures retain their mapped codes, exits and original causes in coded service exceptions, including the Dataverse reauthentication flag when present. Cancellation and already-coded errors retain their identities. | `GlobalChoiceReferenceTests.ConsecutiveCreates_ReadCurrentCatalog`, `LookupFailure_StopsBeforeCreate`, `InvalidCatalog_StopsBeforeCreate`, `CatalogLease_IsReturnedBeforeCreateCheckout`, `CatalogCheckoutFailure_IsCodedAndSkipsCreate` | ✅ |
 | AC-81 | Existing local, non-choice, validation, dry-run and safety-guard paths perform their established operations without a global-choice lookup. The create lease is returned before cache invalidation and any requested publication. | `GlobalChoiceReferenceTests.UnrelatedPath_SkipsCatalog`, `DryRunAndInputErrors_SkipCatalog`, `Guard_PrecedesAllLookups`, `Attach_UsesCanonicalName`, `Publish_ObtainsLeaseAfterCreateLeaseIsReturned` | ✅ |
+
+### Connection-lifetime acceptance criteria
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-82 | Generic option add/update with color, status update with color/publication and status removal with publication complete with one available connection; each mutation lease returns before another checkout | `MetadataLeaseLifetimeTests.SingleSlot_WorkflowsReturnEachLeaseBeforeNextOperation` | ✅ |
+| AC-83 | Table creation returns its lease before cache invalidation/publication, preserves result identity, skips later work after failed create and never replays create after publication failure | `MetadataLeaseLifetimeTests.SingleSlot_WorkflowsReturnEachLeaseBeforeNextOperation`, `FailureAtEachStep_ReturnsLeasesAndStopsLaterWork` | ✅ |
+| AC-84 | Each global/local color read/update uses one SDK operation per short lease; read failure/missing target prevents update and failed new write checkout returns all acquired leases | `MetadataLeaseLifetimeTests.SingleSlot_WorkflowsReturnEachLeaseBeforeNextOperation`, `FailureAtEachStep_ReturnsLeasesAndStopsLaterWork`, `ColorRead_MissingTarget_PreventsWriteAndPublication` | ✅ |
+| AC-87 | Covered faults and cancellation retain their existing stage-specific exception identity or SDK wrapping, codes, causes and CLI classification, with no retry or later work | `MetadataLeaseLifetimeTests.ColorSdkFaults_PreserveBaselineWrappingAndCliEnvelope`, `CheckoutFailures_PreserveRawIdentityAndCliClassification`, `FailureAtEachStep_ReturnsLeasesAndStopsLaterWork` | ✅ |
+| AC-88 | Payloads, read modes, target/value/label/solution/token and minimal local carriers stay unchanged; guards, validation and actual dry-run read behavior remain intact | `MetadataLeaseLifetimeTests.Payloads_ReadModesAndResultsRemainStable`, `PrefixLookup_UsesSeparateLeasesAndCachesAcrossDryRuns`, `MetadataAuthoringServiceGuardTests.EveryMutationMethod_Blocks`, `MetadataGlobalOptionServiceTests.AddOptionValue_DryRun_DoesNotCallSdk`, `UpdateOptionValue_DryRun_ValidatesTargetWithoutMutating` | ✅ |
+| AC-89 | Already-correct status-add and local-option add/update/remove outer scopes continue to complete with one available connection | `MetadataLeaseLifetimeTests.SingleSlot_WorkflowsReturnEachLeaseBeforeNextOperation` | ✅ |
+| AC-90 | The actual MCP option-add tool preserves raw pool exhaustion as internal error, coded SDK failures, raw cancellation identity, existing coded faults and one-time request forwarding; no transport cancellation response is implied | `MetadataAddOptionValueLeaseContractTests.RawPoolExhaustion_RemainsInternalAtMcpBoundary`, `WrappedSdkCancellation_RemainsCodedAndFaulted`, `RawCancellation_PropagatesOriginalAndCanceled`, `AlreadyCodedFault_PreservesCodeAndContext`, `SuccessfulInvocation_ForwardsRequestOnce` | ✅ |
+| AC-91 | Publisher-prefix lookup uses separate solution/publisher leases, retains cached/dry-run behavior and stops before create/publication after either checkout/query failure or cancellation | `MetadataLeaseLifetimeTests.PrefixLookup_UsesSeparateLeasesAndCachesAcrossDryRuns`, `FailureAtEachStep_ReturnsLeasesAndStopsLaterWork` | ✅ |
 
 ### Edge Cases
 
