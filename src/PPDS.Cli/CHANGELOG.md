@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `views reorder-columns` now requires every existing column exactly once and rejects empty, partial, unknown or duplicate names before writing. Reordering preserves cell metadata and other layout content; use `views remove-column` for removal (#1533).
+- Form `add-field` and newly created `reorder-fields` controls use the resolved metadata logical name for bindings and control IDs regardless of input casing. Existing controls and label behavior are preserved; invalid new-field requests are rejected before writes even for sections without rows (#1527).
+- Form XML raw get/set roundtrips accept repeated reusable `customControl` type IDs at their schema-defined path. Instance GUID uniqueness and schema validation remain enforced; set-xml help now distinguishes instance IDs from reusable type IDs (#1541).
 
 ## [1.5.0] - 2026-11-01
 

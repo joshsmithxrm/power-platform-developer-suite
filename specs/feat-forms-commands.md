@@ -1,7 +1,7 @@
 # Form Management Commands
 
 **Status:** Draft
-**Last Updated:** 2026-10-29
+**Last Updated:** 2026-11-08
 **Code:** [src/PPDS.Cli/Commands/Forms/](../src/PPDS.Cli/Commands/Forms/) | [src/PPDS.Cli/Services/Forms/](../src/PPDS.Cli/Services/Forms/) | [src/PPDS.Cli/Resources/Schemas/](../src/PPDS.Cli/Resources/Schemas/)
 **Surfaces:** CLI
 
@@ -126,7 +126,7 @@ All create/update operations follow this pipeline:
 3. **Validate** mutated XML using `FormXmlValidator`:
    - Schema validation against bundled Dataverse customization XSD
    - GUID format validation: the XSD types structural IDs as `FormGuidType`, accepting braced or unbraced GUIDs; logical-name IDs remain strings
-   - GUID uniqueness: no duplicate GUID-valued `id` or `labelid` values within the document (normalized for braces and case)
+   - GUID uniqueness: no duplicate instance GUID-valued `id` or `labelid` values (normalized for braces and case); reusable control-type IDs at the exact schema path are excluded
 4. **Update** the `systemform` record through the pooled SDK client: `IPooledClient.UpdateAsync(new Entity("systemform", formId) { ["formxml"] = xml })`. There is no generated early-bound `systemform` entity — use a late-bound `Entity`. (PPDS uses the SDK through `IDataverseConnectionPool`, not raw Web API HTTP; D1/D2.)
 5. **Optionally** add form to solution (`AddSolutionComponentRequest`, component type 60 = `componenttype.SystemForm`). This request is **not** idempotent — re-adding a component already in the solution throws `FaultException<OrganizationServiceFault>` with `ErrorCode == -2147159998` ("Component already exists in the solution"). `FormService` catches that specific fault and treats it as a no-op, mirroring `PluginRegistrationService.AddToSolutionAsync`.
 6. **Optionally** publish entity via the pooled-client extension `IPooledClient.PublishXmlAsync(parameterXml, environmentKey, ct)` with `<importexportxml><entities><entity>{logicalName}</entity></entities></importexportxml>`
@@ -139,11 +139,13 @@ Timeline controls accept `UClientActivitiesConfigurationJSON` as string content 
 
 The official Dataverse customization schema (v9.0.0.2090) is bundled as embedded resources in `src/PPDS.Cli/Resources/Schemas/`. Form validation needs four files — `FormXml.xsd` (root; defines `<form>`) plus its `xs:include` chain `RibbonCore.xsd` → `RibbonTypes.xsd` + `RibbonWSS.xsd`. They are loaded via `FormSchemaResources` at validation time (never downloaded at runtime), using `System.Xml.Schema.XmlSchemaSet` with a custom `XmlResolver` that resolves the `xs:include` filenames back to embedded resources. Schema load/compile failure throws `Operation.Internal` — it never silently falls back to GUID-only checks.
 
-The schema's `FormGuidType` permits both braced and unbraced GUIDs (`\{?...\}?`). Since #1209, format is enforced only by the XSD. The custom check enforces document-wide uniqueness for GUID-valued `id` and `labelid` attributes, normalizing braces and case. Logical-name IDs on elements such as `<control>`, `<data>`, and `<dependency>` do not participate in that uniqueness check.
+The schema's `FormGuidType` permits both braced and unbraced GUIDs (`\{?...\}?`). Since #1209, format is enforced only by the XSD. The custom check enforces document-wide uniqueness for GUID-valued instance `id` and `labelid` attributes, normalizing braces and case. Logical-name IDs on elements such as `<control>`, `<data>`, and `<dependency>` do not participate in that uniqueness check. The unqualified `id` at the exact document-root path `form/controlDescriptions/controlDescription/customControl` identifies a reusable control type and is excluded from uniqueness, but still validated by the XSD. Only this attribute is excluded: label IDs, other paths, namespaced lookalikes and nested parameter content retain their existing checks. No bundled schema optionality or opaque parameter rules change.
 
 Validation failure produces a `PpdsValidationException` with `FormErrorCodes.InvalidFormXml` and an error message that includes the failing element name and the line/position.
 
 ### classid Resolution for add-field
+
+Column lookup for `add-field` and newly created `reorder-fields` cells is case-insensitive. New controls use the resolved metadata `LogicalName` exactly for both `datafieldname` and control `id`. Existing cells retain their IDs, bindings, labels and properties when moved. Existing display label, duplicate, movement and omission rules still apply.
 
 `FormService` resolves classid by calling `IMetadataQueryService.GetAttributesAsync(entityLogicalName)`, locating the attribute whose `LogicalName` matches the requested column, and reading its `AttributeType` (a `string`, e.g. `"String"`, `"Picklist"`). `AttributeMetadataDto.AttributeType` is a string — there is no `AttributeTypeCode` enum on the DTO — so `ClassIdResolver` keys off the string value. The mapping is:
 
@@ -316,7 +318,7 @@ ppds forms set-xml --entity <logical-name> --form "<name-or-id>" --xml <path-to-
 ```
 
 Reads XML from the given file path, validates it, and writes it back. Works on all form types.
-Help text explicitly states: schema validation is applied, brace-format GUIDs are required on all `id` and `labelid` attributes, and all IDs within the document must be unique.
+Help text states that schema validation defines GUID format, instance id/labelid GUIDs must be unique, and customControl type IDs under controlDescriptions may repeat.
 
 **Tab commands:**
 
@@ -395,7 +397,7 @@ Sub-grid properties map onto schema-defined `<control><parameters>` element name
 | `--columns` (tab) | Value must be 1, 2, or 3 | `Validation.InvalidValue` |
 | `--columns` (section) | Value must be 1 or 2 | `Validation.InvalidValue` |
 | `id` / `labelid` format | GUID-typed attributes accept braced or unbraced GUIDs; the XSD defines which IDs are logical-name strings | `FormErrorCodes.InvalidFormXml` |
-| GUID uniqueness | No duplicate GUID-valued `id` or `labelid` values in document after brace/case normalization | `FormErrorCodes.DuplicateGuid` |
+| GUID uniqueness | No duplicate instance GUID-valued `id` or `labelid` values after brace/case normalization; exact-path reusable control-type IDs excluded | `FormErrorCodes.DuplicateGuid` |
 | XSD validation | formxml must conform to bundled Dataverse schema | `FormErrorCodes.InvalidFormXml` |
 
 ---
@@ -409,7 +411,7 @@ Sub-grid properties map onto schema-defined `<control><parameters>` element name
 | AC-03 | `SetFormXmlAsync` validates XML against bundled Dataverse customization XSD before writing | `FormXmlValidatorTests.Validate_SchemaViolation_ThrowsWithInvalidFormXml` | ✅ |
 | AC-04 | Validation failure from XSD includes the failing element name and line number in the error message | `FormXmlValidatorTests.Validate_SchemaViolation_ErrorMessageIncludesElementAndLine` | ✅ |
 | AC-05 | Validation rejects malformed GUID-typed IDs and accepts valid unbraced GUIDs | `FormXmlValidatorTests.Validate_MalformedGuidOnGuidTypedId_ThrowsWithInvalidFormXml`, `FormXmlValidatorTests.Validate_UnbracedGuidOnSectionId_DoesNotThrow` | ✅ |
-| AC-06 | Validation rejects formxml with duplicate GUID-valued `id` or `labelid` values | `FormXmlValidatorTests.Validate_DuplicateGuid_ThrowsWithDuplicateGuid` | ✅ |
+| AC-06 | Validation rejects formxml with duplicate instance GUID-valued `id` or `labelid` values | `FormXmlValidatorTests.Validate_DuplicateGuid_ThrowsWithDuplicateGuid` | ✅ |
 | AC-07 | `ppds forms set-xml` reads XML from file, validates, and PATCHes the `systemforms` record | `SetFormXmlCommandTests.SetXml_ValidFile_PatchesRecord` | 🔲 |
 | AC-08 | `ppds forms add-tab` creates a tab with all supported properties and correct defaults (show-label=true, expanded=true, visible=true, available-on-phone=true, columns=1) | `FormServiceTests.AddTab_DefaultProperties_GeneratesCorrectXml` | 🔲 |
 | AC-09 | `ppds forms update-tab` modifies only the provided properties on the existing tab; omitted `bool?` properties are unchanged | `FormServiceTests.UpdateTab_PartialUpdate_ChangesOnlyProvidedProperties` | 🔲 |
@@ -435,7 +437,7 @@ Sub-grid properties map onto schema-defined `<control><parameters>` element name
 | AC-27 | `--solution <name>` adds the form to the named solution using `AddSolutionComponentRequest` with component type 60 after a successful write; a `-2147159998` fault (already present) is caught and treated as success | `FormServiceTests.SetFormXml_WithSolution_AddsSolutionComponent`, `FormServiceTests.SetFormXml_FormAlreadyInSolution_Swallows­Fault` | 🔲 |
 | AC-28 | `ppds forms --help` lists all subcommands | `FormsCommandGroupTests.Create_HasAllSubcommands` | 🔲 |
 | AC-29 | Each subcommand's `--help` text is present, non-empty, and describes its purpose | `FormsCommandGroupTests.AllSubcommands_HaveDescriptions` | 🔲 |
-| AC-30 | `ppds forms set-xml --help` text explicitly documents schema validation, brace-format GUID requirement, and GUID uniqueness check | `SetFormXmlCommandTests.Command_HelpTextDescribesValidation` | 🔲 |
+| AC-30 | `ppds forms set-xml --help` text explicitly documents schema validation, schema-defined GUID format and instance GUID uniqueness | `SetFormXmlCommandTests.Command_HelpTextMentionsSchemaDefinedGuidFormat`, `Command_HelpTextMentionsUniqueness` | ✅ |
 | AC-31 | All exceptions from `IFormService` are wrapped in `PpdsException` with a `FormErrorCodes.*` code | `FormServiceTests.AllMethods_WrapExceptionsInPpdsException` | 🔲 |
 | AC-32 | `CancellationToken` is passed to every async call in `FormService`; pre-cancelled token causes `OperationCanceledException` | `FormServiceTests.Methods_PropagatesCancellationToken` | 🔲 |
 | AC-33 | `IProgressReporter` receives phase updates during `SetFormXmlAsync` (read → validate → write) | `FormServiceTests.SetFormXml_ReportsPhases` | 🔲 |
@@ -562,7 +564,7 @@ public static class FormErrorCodes
 | `Forms.ViewNotFound` | `savedqueries` record not found for GUID | Verify view GUID exists |
 | `Forms.InvalidMaxRows` | max-rows not in range 2–250 | Use a value between 2 and 250 |
 | `Forms.InvalidFormXml` | Malformed XML or XSD validation failure, including malformed GUID-typed IDs | Fix the XML |
-| `Forms.DuplicateGuid` | Duplicate id/labelid value in document | Make all GUIDs unique |
+| `Forms.DuplicateGuid` | Duplicate instance id/labelid GUID in document | Make instance GUIDs unique; retain reusable control-type IDs |
 | `Solution.NotFound` | Solution unique name not found | Verify solution name |
 
 ### Recovery Strategies
@@ -643,6 +645,32 @@ This preserves typed checks on known parameters and structure elsewhere in the f
 | 2026-06-12 | `forms remove-subgrid --label` now accepts a GUID (control `id`) in addition to a label. `ElementMatches` corrected: element `id` attribute is compared as a brace-normalised string rather than re-parsed as a Guid, so pre-existing forms with non-canonical `id` values can still be matched by ID. |
 | 2026-06-12 | `forms get` gains `--raw` flag (writes raw `formxml` to stdout) and now shows element names in the text-mode tree output (`Label [name]` format). `FormDetail` gains `FormXml?`, `TabDetail` gains `Name`, `SectionDetail` gains `Name`, `SubgridDetail.Id` (Guid) replaced by `Name` (string, the control `id` attribute). |
 | 2026-06-12 | Tab/section `name` attribute now generated as `tab_<sanitized_label>` / `section_<sanitized_label>` instead of a GUID (passes Dataverse designer name validation). Subgrid `control.id` now set to `subgrid_<sanitized_label>`; `uniqueid` GUID attribute added for Dataverse use. Name uniqueness enforced on add: `DuplicateTabName`, `DuplicateSectionName`, `DuplicateSubgridName`. `--tab`/`--section`/`--label` (subgrid) now match by label OR `name` attribute (no GUID detection). |
+
+## Canonical new field bindings (#1527)
+
+| ID | Criterion | Test | Status |
+|---|---|---|---|
+| AC-48 | Case-insensitive add-field lookup emits the metadata LogicalName for new control ID and binding, retaining metadata display labels and duplicate additions. | FormFieldBindingTests.Add_UsesMetadataLogicalName, Add_DuplicatesRemainAllowed | ✅ |
+| AC-49 | Reorder creates missing cells with metadata LogicalName, preserves existing cells/IDs/properties and non-field controls, and retains omission, movement and label behavior. | FormFieldBindingTests.Reorder_CanonicalizesOnlyNewCells, Reorder_ExistingFieldNeedsNoSupportedMetadata | ✅ |
+| AC-50 | Unknown or unsupported new fields and empty requests fail without Update, solution association or publication, including rowless sections. A valid reorder of a rowless section leaves the section empty. | FormFieldBindingTests.InvalidFields_DoNotWrite, Reorder_RowlessInvalidField_DoesNotWrite, Reorder_RowlessValidField_PreservesNoNewCellBehavior | ✅ |
+| AC-51 | Normal CLI parsing and action invoke the common service and produce canonical new bindings. Existing MCP draft authoring uses the metadata logical name. | FormFieldBindingCommandTests.Command_UsesRealService, FormAuthoringTests.AddField_ManagedOrUnmanaged_PreservesTimelineAndPriorDraftWithoutPublishing | ✅ |
+
+## Reusable control type IDs (#1541)
+
+| ID | Criterion | Test | Status |
+|---|---|---|---|
+| AC-52 | Full-schema valid forms may repeat reusable customControl type IDs at the exact unqualified root path, including brace/case variants and separate control instances. | FormControlTypeIdTests.Fixture_PassesBundledSchema; SetXml_RepeatedTypeIds_PreservesExactInput | ✅ |
+| AC-53 | Actual instance GUID IDs and label IDs remain unique; malformed type IDs, invalid structure and namespaced/nested lookalikes remain rejected before Update/solution/publish. | FormControlTypeIdTests.InvalidXml_DoesNotWrite; GuidUniqueness_DoesNotExemptLookalikes | ✅ |
+| AC-54 | Parsed get --raw → set-xml preserves exact input XML and IDs/references/properties through real service calls, with unchanged target/confirmation/cancellation behavior. | FormControlTypeRoundTripCommandTests.RawGetThenSet_PreservesExactPayload; FormControlTypeIdTests.CancelledSet_DoesNotWrite; ConfirmationDenied_DoesNotAcquireClient | ✅ |
+| AC-55 | set-xml command and --xml help explain schema-defined GUID format, unique instance GUIDs and reusable control-type IDs. | FormControlTypeRoundTripCommandTests.Help_ExplainsInstanceAndTypeIds | ✅ |
+
+## Combined field and control validation
+
+| ID | Criterion | Test | Status |
+|---|---|---|---|
+| AC-56 | Canonical add and reorder accept an existing form containing repeated reusable control types and Timeline JSON while retaining authored cells, references and metadata. | FormCombinationCommandTests.CanonicalMutation_ThenRawGetSet_PreservesPayload | ✅ |
+| AC-57 | Published and draft raw get output after canonical mutation survives file-backed set-xml exactly, including mixed-case metadata bindings, Timeline JSON and reusable type IDs. | FormCombinationCommandTests.CanonicalMutation_ThenRawGetSet_PreservesPayload | ✅ |
+| AC-58 | Combined forms still reject duplicate instance IDs, malformed type GUIDs and invalid Timeline parameter content without update, solution association or publication; denied confirmation prevents canonical mutation writes. | FormCombinationCommandTests.MutatedForm_InvalidPayload_DoesNotWrite; CanonicalMutation_DeniedConfirmation_DoesNotWrite | ✅ |
 
 ## Safe MCP authoring surface
 
