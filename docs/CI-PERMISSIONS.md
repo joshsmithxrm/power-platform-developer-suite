@@ -23,6 +23,15 @@ There is no Integration OIDC exception or skipped-as-passed aggregate. This
 workflow hold does not revoke credentials, historical runs or other refs, and
 does not change Build/Test protection or certify live acceptance.
 
+## Adopting the Integration hold
+
+A PR base change is the `edited` activity. Build/Test use the default
+`pull_request` activities, so retargeting alone may not create their checks.
+Inspect the actual merge source and required checks after targeting main; use a
+separately reviewed safe synchronization when needed. Never substitute a
+historical Integration rerun or an absent/skipped Integration check for live
+acceptance.
+
 ## Intentional elevated scopes
 
 The regression suite inventories all jobs and permits only these existing
