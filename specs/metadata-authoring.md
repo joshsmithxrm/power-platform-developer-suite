@@ -1,7 +1,7 @@
 # Metadata Authoring
 
 **Status:** Implemented (extending — #1159/#1160/#1161 ratified, in implementation; AC-37–AC-60 reach ✅ as their tests land; #1208 positional `<entity>` shipped, AC-61/AC-62)
-**Last Updated:** 2026-11-07
+**Last Updated:** 2026-11-08
 **Code:** [src/PPDS.Dataverse/Metadata/](../src/PPDS.Dataverse/Metadata/) | [src/PPDS.Cli/Commands/Metadata/](../src/PPDS.Cli/Commands/Metadata/) | [src/PPDS.Cli/Services/Metadata/](../src/PPDS.Cli/Services/Metadata/) | [src/PPDS.Mcp/Tools/](../src/PPDS.Mcp/Tools/) | [src/PPDS.Cli/Tui/Screens/](../src/PPDS.Cli/Tui/Screens/) | [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
 **Surfaces:** CLI, TUI, Extension, MCP
 
@@ -652,6 +652,17 @@ When creating a Choice or Choices column that references a global choice, resolv
 | AC-89 | Already-correct status-add and local-option add/update/remove outer scopes continue to complete with one available connection | `MetadataLeaseLifetimeTests.SingleSlot_WorkflowsReturnEachLeaseBeforeNextOperation` | ✅ |
 | AC-90 | The actual MCP option-add tool preserves raw pool exhaustion as internal error, coded SDK failures, raw cancellation identity, existing coded faults and one-time request forwarding; no transport cancellation response is implied | `MetadataAddOptionValueLeaseContractTests.RawPoolExhaustion_RemainsInternalAtMcpBoundary`, `WrappedSdkCancellation_RemainsCodedAndFaulted`, `RawCancellation_PropagatesOriginalAndCanceled`, `AlreadyCodedFault_PreservesCodeAndContext`, `SuccessfulInvocation_ForwardsRequestOnce` | ✅ |
 | AC-91 | Publisher-prefix lookup uses separate solution/publisher leases, retains cached/dry-run behavior and stops before create/publication after either checkout/query failure or cancellation | `MetadataLeaseLifetimeTests.PrefixLookup_UsesSeparateLeasesAndCachesAcrossDryRuns`, `FailureAtEachStep_ReturnsLeasesAndStopsLaterWork` | ✅ |
+
+### Table-update connection lifetime
+
+Table updates return their mutation connection before cache invalidation, optional publication and success reporting. Publication remains an explicit follow-up request; a later failure can leave an acknowledged update without publication. Existing raw/already-coded exception and cancellation contracts are preserved. This lifetime correction adds no normalization, retry, rollback or atomicity guarantee and does not resolve broader D4/cancellation gaps.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-93 | Updating a table with optional publication completes with one available connection; the update lease returns before cache/publication/success, and no-publish uses only one SDK operation | `TableUpdateLeaseTests.SingleSlot_UpdateAndPublish_ReturnsMutationLeaseBeforeFollowup`, `UpdateWithoutPublish_ReturnsLeaseBeforeCacheAndSuccess`, `TwoSlotControl_CompletesSameUpdateAndPublication` | ✅ |
+| AC-94 | Covered update/publication checkout/SDK failures and cancellation retain original identity or existing coded error, task state and CLI classification; leases return, caches follow the acknowledged update stage, no mutation is replayed and later publication stops | `TableUpdateLeaseTests.FailureAtEachBoundary_PreservesRawContractAndStopsLaterWork`, `CacheFailure_AfterReturnedMutationLease_PreservesCauseAndStopsPublication` | ✅ |
+| AC-95 | Existing guard/required-input validation and input-only dry run, including Publish=true, perform no checkout, mutation, cache invalidation or publication | `TableUpdateLeaseTests.DryRunValidationAndGuard_DoNotAcquire` | ✅ |
+| AC-96 | Table update retains request identity/solution/token, metadata labels, explicit false/empty/omitted fields/icons, cache order and existing success reporting | `TableUpdateLeaseTests.PayloadAndSuccessMessages_RemainUnchanged` | ✅ |
 
 ### Edge Cases
 
