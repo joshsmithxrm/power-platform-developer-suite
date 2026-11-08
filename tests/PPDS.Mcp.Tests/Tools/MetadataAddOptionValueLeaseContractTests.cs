@@ -36,8 +36,8 @@ public sealed class MetadataAddOptionValueLeaseContractTests
         using var payload = JsonDocument.Parse(actual.Message);
         Assert.Equal(ErrorCodes.Operation.Internal, payload.RootElement.GetProperty("errorCode").GetString());
         Assert.DoesNotContain(timeout.Message, actual.Message);
-        // Deliberately preserve the existing distinction from the CLI mapper. Changing
-        // the raw acquisition/service contract is a separately pending decision.
+        // This mock bypasses service acquisition normalization. Its generic fallback
+        // remains distinct from the corrected real-service route below.
         var (cliError, cliExit) = ExceptionMapper.MapWithExitCode(timeout);
         Assert.Equal(ErrorCodes.Connection.Timeout, cliError.Code);
         Assert.Equal(4, cliExit);
@@ -134,6 +134,99 @@ public sealed class MetadataAddOptionValueLeaseContractTests
         Assert.Null(request.EntityLogicalName);
         Assert.Null(request.AttributeLogicalName);
         Assert.Equal(cancellation.Token, fixture.Token);
+        fixture.AssertCalledOnce();
+    }
+
+    [Fact, Trait("AC", "AC-100")]
+    public async Task ActualServicePoolTimeout_IsConnectionTimeoutAtMcpBoundary()
+    {
+        var timeout = new PoolExhaustedException(1, 1, TimeSpan.FromMilliseconds(40));
+        var pool = new Mock<IDataverseConnectionPool>(MockBehavior.Strict);
+        pool.Setup(p => p.GetClientAsync(null, null, CancellationToken.None)).ThrowsAsync(timeout);
+        var service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(),
+            new Mock<PPDS.Cli.Infrastructure.Safety.IShakedownGuard>().Object);
+        using var fixture = await Fixture.CreateAsync((request, token) => service.AddOptionValueAsync(request, token));
+
+        var task = fixture.InvokeAsync();
+        var actual = await Assert.ThrowsAsync<McpException>(() => task);
+        Assert.True(task.IsFaulted);
+        using var payload = JsonDocument.Parse(actual.Message);
+        Assert.Equal(ErrorCodes.Connection.Timeout, payload.RootElement.GetProperty("errorCode").GetString());
+        Assert.Equal("Could not acquire a Dataverse connection.", payload.RootElement.GetProperty("userMessage").GetString());
+        Assert.DoesNotContain(timeout.Message, actual.Message);
+        pool.Verify(p => p.GetClientAsync(null, null, CancellationToken.None), Times.Once);
+        pool.VerifyNoOtherCalls();
+        fixture.AssertCalledOnce();
+    }
+
+    [Theory, Trait("AC", "AC-100")]
+    [InlineData("global-color-read")]
+    [InlineData("global-color-write")]
+    public async Task ActualColorCancellation_PropagatesOriginalAtMcpBoundary(string stage)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var original = new OperationCanceledException("Actual service SDK cancellation", cancellation.Token);
+        var pool = new Mock<IDataverseConnectionPool>(MockBehavior.Strict);
+        var acquired = 0;
+        var disposed = 0;
+        var sdkCalls = new List<string>();
+        pool.Setup(p => p.GetClientAsync(null, null, cancellation.Token)).ReturnsAsync(() =>
+        {
+            acquired++;
+            var lease = new Mock<IPooledClient>(MockBehavior.Strict);
+            lease.Setup(c => c.DisposeAsync()).Returns(() =>
+            {
+                disposed++;
+                return ValueTask.CompletedTask;
+            });
+            lease.Setup(c => c.ExecuteAsync(It.IsAny<Microsoft.Xrm.Sdk.OrganizationRequest>(), cancellation.Token))
+                .Returns<Microsoft.Xrm.Sdk.OrganizationRequest, CancellationToken>((request, _) =>
+                {
+                    var current = request switch
+                    {
+                        Microsoft.Xrm.Sdk.Messages.InsertOptionValueRequest => "insert",
+                        Microsoft.Xrm.Sdk.Messages.RetrieveOptionSetRequest => "global-color-read",
+                        Microsoft.Xrm.Sdk.Messages.UpdateOptionSetRequest => "global-color-write",
+                        _ => throw new InvalidOperationException("Unexpected SDK operation")
+                    };
+                    sdkCalls.Add(current);
+                    if (stage == current)
+                    {
+                        cancellation.Cancel();
+                        return Task.FromException<Microsoft.Xrm.Sdk.OrganizationResponse>(original);
+                    }
+                    Microsoft.Xrm.Sdk.OrganizationResponse response;
+                    if (request is Microsoft.Xrm.Sdk.Messages.InsertOptionValueRequest)
+                        response = new Microsoft.Xrm.Sdk.Messages.InsertOptionValueResponse
+                        {
+                            Results = new Microsoft.Xrm.Sdk.ParameterCollection { ["NewOptionValue"] = 77 }
+                        };
+                    else
+                    {
+                        var options = new Microsoft.Xrm.Sdk.Metadata.OptionSetMetadata { Name = "fixture_choice" };
+                        options.Options.Add(new Microsoft.Xrm.Sdk.Metadata.OptionMetadata(new Microsoft.Xrm.Sdk.Label("Changed", 1033), 77));
+                        response = new Microsoft.Xrm.Sdk.Messages.RetrieveOptionSetResponse
+                        {
+                            Results = new Microsoft.Xrm.Sdk.ParameterCollection { ["OptionSetMetadata"] = options }
+                        };
+                    }
+                    return Task.FromResult(response);
+                });
+            return lease.Object;
+        });
+        var service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(),
+            new Mock<PPDS.Cli.Infrastructure.Safety.IShakedownGuard>().Object);
+        using var fixture = await Fixture.CreateAsync((request, token) => service.AddOptionValueAsync(request, token));
+
+        var task = fixture.InvokeAsync(cancellation.Token);
+        var actual = await Assert.ThrowsAsync<OperationCanceledException>(() => task);
+        Assert.Same(original, actual);
+        Assert.Equal(cancellation.Token, actual.CancellationToken);
+        Assert.True(task.IsCanceled);
+        Assert.False(task.IsFaulted);
+        Assert.Equal(stage == "global-color-read" ? new[] { "insert", "global-color-read" } : ["insert", "global-color-read", "global-color-write"], sdkCalls);
+        Assert.Equal(stage == "global-color-read" ? 2 : 3, acquired);
+        Assert.Equal(acquired, disposed);
         fixture.AssertCalledOnce();
     }
 

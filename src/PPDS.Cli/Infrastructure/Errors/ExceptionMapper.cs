@@ -66,6 +66,9 @@ public static class ExceptionMapper
             // Cancellation
             OperationCanceledException => ExitCodes.Failure,
 
+            // Preserve only the explicitly captured metadata-acquisition mapping.
+            MetadataConnectionAcquisitionException acquisition => acquisition.ExitCode,
+
             // PPDS exceptions - use error code category to determine exit code
             PpdsNotFoundException => ExitCodes.NotFoundError,
             PpdsValidationException => ExitCodes.InvalidArguments,

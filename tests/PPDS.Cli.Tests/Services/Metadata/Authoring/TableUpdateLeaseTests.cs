@@ -16,7 +16,7 @@ using Xunit.Abstractions;
 namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 
 [Trait("Category", "Unit")]
-public sealed class TableUpdateLeaseTests(ITestOutputHelper output)
+public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
 {
     [Fact]
     [Trait("AC", "AC-93")]
@@ -91,7 +91,7 @@ public sealed class TableUpdateLeaseTests(ITestOutputHelper output)
     [Theory]
     [MemberData(nameof(Failures))]
     [Trait("AC", "AC-94")]
-    public async Task FailureAtEachBoundary_PreservesRawContractAndStopsLaterWork(string boundary, string kind)
+    public async Task FailureAtEachBoundary_PreservesStageContractAndStopsLaterWork(string boundary, string kind)
     {
         // Two slots let the original code reach each injected boundary without incidental saturation.
         using var h = new Harness(publish: true, capacity: 2, failureBoundary: boundary, failureKind: kind);
@@ -100,7 +100,9 @@ public sealed class TableUpdateLeaseTests(ITestOutputHelper output)
         {
             var error = await Record.ExceptionAsync(() => operation);
             Assert.NotNull(error);
-            Assert.Same(h.Injected, error);
+            if (boundary.EndsWith("checkout", StringComparison.Ordinal) && kind is not ("coded" or "cancel"))
+                Assert.Same(h.Injected, Assert.IsAssignableFrom<PpdsException>(error).InnerException);
+            else Assert.Same(h.Injected, error);
             Assert.Equal(kind == "cancel", operation.IsCanceled);
             Assert.Equal(kind != "cancel", operation.IsFaulted);
             if (kind == "cancel") Assert.Equal(h.Token, Assert.IsType<OperationCanceledException>(error).CancellationToken);

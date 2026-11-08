@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Return the table-update connection before cache invalidation and optional publication, allowing an update followed by publication with one available pooled connection. Existing payload, dry-run, cancellation and error contracts remain; separate requests can still complete partially after a later failure.
-- Return metadata authoring connections before option-color or publication follow-ups, and use separate connections for color read/update and publisher-prefix queries. This lets the covered option/status/table-create workflows complete with one available pooled connection. Existing cancellation and error classifications remain unchanged; separate requests can still complete partially if a later operation fails.
+- Preserve cancellation identity and report Operation.Cancelled for the covered option-color operations (CLI exit 2 remains). Normalize connection checkout failures in the bounded metadata workflows and shared prefix/publication helpers with their original mapped CLI exits and causes. Prefix checkout normalization also applies to existing table, column, one-to-many/many-to-many relationship, global choice and key creation callers. MCP option-add now reports Connection.Timeout for pool exhaustion (CLI exit 4 remains). Other direct column acquisitions, catalog reads, SDK contracts and partial-operation limits remain.
+- Return the table-update connection before cache invalidation and optional publication, allowing an update followed by publication with one available pooled connection. Existing payload, dry-run and SDK contracts remain; scoped checkout normalization is listed above. Separate requests can still complete partially after a later failure.
+- Return metadata authoring connections before option-color or publication follow-ups, and use separate connections for color read/update and publisher-prefix queries. This lets the covered option/status/table-create workflows complete with one available pooled connection. The scoped cancellation and acquisition changes are listed above; separate requests can still complete partially if a later operation fails.
 
 ## [1.5.0] - 2026-11-01
 
