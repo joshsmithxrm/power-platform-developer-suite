@@ -1,4 +1,6 @@
 using System.CommandLine;
+using Microsoft.Extensions.DependencyInjection;
+using PPDS.Cli.Services.Environment;
 
 namespace PPDS.Cli.Commands.Views;
 
@@ -16,6 +18,16 @@ public static class ViewsCommandGroup
     {
         Description = "Override the environment URL."
     };
+
+    /// <summary>Exact target acknowledgement, separate from target selection and publication.</summary>
+    public static readonly Option<string?> ConfirmEnvironmentOption = new("--confirm-env")
+    {
+        Description = "Acknowledge writing to this exact resolved environment URL"
+    };
+
+    internal static Task ConfirmEnvironmentAsync(IServiceProvider provider, string? confirmedEnvironment, CancellationToken ct)
+        => provider.GetRequiredService<IEnvironmentConfirmationService>()
+            .EnsureConfirmedAsync("modify view", confirmedEnvironment, ct);
 
     public static readonly Option<string> EntityOption = new("--entity")
     {

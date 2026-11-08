@@ -72,8 +72,8 @@ internal static class FormXmlValidator
     }
 
     /// <summary>
-    /// Validates that GUID-valued <c>id</c> and <c>labelid</c> attributes are unique
-    /// within the document.
+    /// Validates uniqueness of GUID-valued instance <c>id</c> and <c>labelid</c>
+    /// attributes, excluding reusable custom-control type IDs at their schema-defined path.
     /// </summary>
     /// <remarks>
     /// GUID <em>format</em> is intentionally not re-checked here. The bundled XSD is
@@ -86,7 +86,9 @@ internal static class FormXmlValidator
     /// logical-name ids (e.g. <c>fullname</c>, <c>absoluteurl</c>). The one constraint
     /// the schema cannot express is cross-element uniqueness, so that is all we keep.
     /// Only GUID-shaped values participate; logical-name ids are plain strings that
-    /// may legitimately repeat across a form.
+    /// may legitimately repeat across a form. A customControl type ID at the exact
+    /// root form/controlDescriptions/controlDescription/customControl path is also reusable;
+    /// its format is still checked by the XSD. This does not exclude descendant parameters.
     /// </remarks>
     internal static void ValidateGuids(XDocument formXml)
     {
@@ -98,6 +100,8 @@ internal static class FormXmlValidator
         {
             foreach (var attrName in GuidAttributeNames)
             {
+                if (attrName == "id" && IsReusableControlType(element, formXml)) continue;
+
                 var attr = element.Attribute(attrName);
                 if (attr is null) continue;
 
@@ -113,12 +117,26 @@ internal static class FormXmlValidator
                 if (!seen.Add(normalized))
                 {
                     throw new PpdsValidationException("formxml",
-                        $"Form XML contains duplicate GUID '{value}'. All id and labelid values must be unique within the document.")
+                        $"Form XML contains duplicate instance GUID '{value}'. Instance id and labelid GUID values must be unique within the document.")
                     {
                         ErrorCode = FormErrorCodes.DuplicateGuid
                     };
                 }
             }
         }
+    }
+
+    private static bool IsReusableControlType(XElement element, XDocument document)
+    {
+        var description = element.Parent;
+        var descriptions = description?.Parent;
+        var form = descriptions?.Parent;
+        // XName equality deliberately requires the unqualified schema names. Anchor at the
+        // document root so lookalike paths inside opaque parameters are not exempted.
+        return element.Name == "customControl"
+            && description?.Name == "controlDescription"
+            && descriptions?.Name == "controlDescriptions"
+            && form?.Name == "form"
+            && ReferenceEquals(form, document.Root);
     }
 }

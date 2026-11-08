@@ -10,8 +10,27 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import zipfile
+
+
+def _cleanup_owned_tempdir(sandbox):
+    """Bound retries for a Windows sharing violation in this fixture's own sandbox."""
+    deadline = time.monotonic() + 5.0
+    while True:
+        try:
+            sandbox.cleanup()
+            return
+        except OSError as error:
+            if os.name != "nt" or getattr(error, "winerror", None) != 32:
+                raise
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            time.sleep(min(0.1, remaining))
+            if time.monotonic() >= deadline:
+                raise
 
 
 class SingleFileExtractionTests(unittest.TestCase):
@@ -55,7 +74,7 @@ class SingleFileExtractionTests(unittest.TestCase):
         else:
             print(f"Cold-cache verification: {cls.cache}", file=sys.stderr)
         cls.sandbox = tempfile.TemporaryDirectory(prefix="ppds single file ")
-        cls.addClassCleanup(cls.sandbox.cleanup)
+        cls.addClassCleanup(_cleanup_owned_tempdir, cls.sandbox)
         cls.root = Path(cls.sandbox.name)
         binary_dir = cls.root / "binary only"
         binary_dir.mkdir()

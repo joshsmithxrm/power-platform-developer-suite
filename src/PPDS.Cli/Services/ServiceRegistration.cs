@@ -328,7 +328,8 @@ public static class ServiceRegistration
             sp.GetRequiredService<IDataverseConnectionPool>(),
             sp.GetRequiredService<ICachedMetadataProvider>(),
             sp.GetRequiredService<IShakedownGuard>(),
-            sp.GetRequiredService<ILogger<ViewService>>()));
+            sp.GetRequiredService<ILogger<ViewService>>(),
+            sp.GetRequiredService<IEnvironmentConfirmationService>()));
         // Form management service
         services.AddTransient<IFormService>(sp => new FormService(
             sp.GetRequiredService<IDataverseConnectionPool>(),
