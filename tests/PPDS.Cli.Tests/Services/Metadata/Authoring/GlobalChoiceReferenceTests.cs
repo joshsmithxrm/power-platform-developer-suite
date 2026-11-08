@@ -208,9 +208,10 @@ public sealed class GlobalChoiceReferenceTests : IDisposable
         await CreateAsync(Request(SchemaColumnType.Choice, Stored));
         Assert.Equal(new[]
         {
-            "checkout 1", "dispose 1", // existing solution and publisher queries
-            "checkout 2", "RetrieveAllOptionSets 2", "dispose 2",
-            "checkout 3", "CreateAttribute 3", "dispose 3"
+            "checkout 1", "dispose 1", // solution query
+            "checkout 2", "dispose 2", // publisher query
+            "checkout 3", "RetrieveAllOptionSets 3", "dispose 3",
+            "checkout 4", "CreateAttribute 4", "dispose 4"
         }, _leaseEvents);
     }
 
@@ -222,9 +223,10 @@ public sealed class GlobalChoiceReferenceTests : IDisposable
         Assert.Equal(new[]
         {
             "checkout 1", "dispose 1",
-            "checkout 2", "RetrieveAllOptionSets 2", "dispose 2",
-            "checkout 3", "CreateAttribute 3", "dispose 3",
-            "invalidate", "checkout 4", "PublishXml 4", "dispose 4"
+            "checkout 2", "dispose 2",
+            "checkout 3", "RetrieveAllOptionSets 3", "dispose 3",
+            "checkout 4", "CreateAttribute 4", "dispose 4",
+            "invalidate", "checkout 5", "PublishXml 5", "dispose 5"
         }, _leaseEvents);
     }
 
@@ -245,7 +247,7 @@ public sealed class GlobalChoiceReferenceTests : IDisposable
         Assert.Equal(expectedCode, wrapped.ErrorCode);
         Assert.Same(_checkoutFailure, wrapped.InnerException);
         Assert.Equal(ExceptionMapper.ToExitCode(_checkoutFailure), ExceptionMapper.ToExitCode(wrapped));
-        Assert.Equal(new[] { "checkout 1", "dispose 1", "checkout 2" }, _leaseEvents);
+        Assert.Equal(new[] { "checkout 1", "dispose 1", "checkout 2", "dispose 2", "checkout 3" }, _leaseEvents);
         Assert.Empty(_requests);
         _cache.VerifyNoOtherCalls();
     }
@@ -394,7 +396,7 @@ public sealed class GlobalChoiceReferenceTests : IDisposable
     private void AssertLookupOnly()
     {
         Assert.True(Assert.IsType<RetrieveAllOptionSetsRequest>(Assert.Single(_requests)).RetrieveAsIfPublished);
-        Assert.Equal(new[] { "checkout 1", "dispose 1", "checkout 2", "RetrieveAllOptionSets 2", "dispose 2" }, _leaseEvents);
+        Assert.Equal(new[] { "checkout 1", "dispose 1", "checkout 2", "dispose 2", "checkout 3", "RetrieveAllOptionSets 3", "dispose 3" }, _leaseEvents);
         _cache.VerifyNoOtherCalls();
     }
 
