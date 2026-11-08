@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using System.CommandLine;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Commands.Metadata.Attribute;
@@ -286,7 +287,9 @@ public static class ColumnCommandGroup
         return command;
     }
 
-    internal static Command CreateDeleteCommand()
+    internal static Command CreateDeleteCommand() => CreateDeleteCommand(null);
+
+    internal static Command CreateDeleteCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -314,7 +317,7 @@ public static class ColumnCommandGroup
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Show dependencies without deleting",
+            Description = MetadataDeletePreview.InputOnlyHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -345,7 +348,7 @@ public static class ColumnCommandGroup
             DeprecationWarning.Write("ppds metadata column delete", "ppds metadata attribute delete");
             return await AttributeCommandGroup.ExecuteDeleteAsync(
                 solution, entity, column, force, dryRun,
-                profileVal, environmentVal, globalOptions, cancellationToken);
+                profileVal, environmentVal, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
