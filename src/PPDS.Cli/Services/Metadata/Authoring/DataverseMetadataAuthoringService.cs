@@ -223,8 +223,10 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             SolutionUniqueName = request.SolutionUniqueName
         };
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-        await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        {
+            await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
 
         _cacheProvider?.InvalidateEntityList();
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);

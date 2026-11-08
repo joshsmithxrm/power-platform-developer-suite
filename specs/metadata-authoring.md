@@ -1,7 +1,7 @@
 # Metadata Authoring
 
 **Status:** Implemented (extending — #1159/#1160/#1161 ratified, in implementation; AC-37–AC-60 reach ✅ as their tests land; #1208 positional `<entity>` shipped, AC-61/AC-62)
-**Last Updated:** 2026-06-10
+**Last Updated:** 2026-11-08
 **Code:** [src/PPDS.Dataverse/Metadata/](../src/PPDS.Dataverse/Metadata/) | [src/PPDS.Cli/Commands/Metadata/](../src/PPDS.Cli/Commands/Metadata/) | [src/PPDS.Cli/Services/Metadata/](../src/PPDS.Cli/Services/Metadata/) | [src/PPDS.Mcp/Tools/](../src/PPDS.Mcp/Tools/) | [src/PPDS.Cli/Tui/Screens/](../src/PPDS.Cli/Tui/Screens/) | [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
 **Surfaces:** CLI, TUI, Extension, MCP
 
@@ -583,6 +583,17 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 | AC-63 | `optionset remove-option` targets a global option by `--value` or `--label` (exactly one; service-side resolution against unpublished metadata; `OPTION_NOT_FOUND` when unresolved) | `MetadataGlobalOptionServiceTests.DeleteOptionValue_ByLabel_ResolvesAndDeletes`, `DeleteOptionValue_ValueNotFound_ThrowsOptionNotFound`, `DeleteOptionValue_Resolution_RetrievesAsIfPublished` | ✅ |
 | AC-64 | `optionset update-option` matches the `attribute update-option` shape: (`--value` \| `--label`) selector, `--new-label` for the new label, optional `--color`; the current label is preserved on color-only updates | `MetadataGlobalOptionServiceTests.UpdateOptionValue_ByLabel_AppliesNewLabel`, `UpdateOptionValue_ColorOnly_PreservesCurrentLabelAndForwardsColor` | ✅ |
 | AC-65 | `optionset add-option`/`update-option`/`remove-option` honor `--dry-run` with a service-layer early exit; update/remove still validate the target exists, and `remove-option --dry-run` skips the confirmation prompt | `MetadataGlobalOptionServiceTests.AddOptionValue_DryRun_DoesNotCallSdk`, `UpdateOptionValue_DryRun_ValidatesTargetWithoutMutating`, `DeleteOptionValue_DryRun_ValidatesTargetWithoutMutating`, `DeleteOptionValue_DryRun_TargetNotFound_StillThrows` | ✅ |
+
+### Table-update connection lifetime
+
+Table updates return their mutation connection before cache invalidation, optional publication and success reporting. Publication remains an explicit follow-up request; a later failure can leave an acknowledged update without publication. Existing raw/already-coded exception and cancellation contracts are preserved. This lifetime correction adds no normalization, retry, rollback or atomicity guarantee and does not resolve broader D4/cancellation gaps.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-93 | Updating a table with optional publication completes with one available connection; the update lease returns before cache/publication/success, and no-publish uses only one SDK operation | `TableUpdateLeaseTests.SingleSlot_UpdateAndPublish_ReturnsMutationLeaseBeforeFollowup`, `UpdateWithoutPublish_ReturnsLeaseBeforeCacheAndSuccess`, `TwoSlotControl_CompletesSameUpdateAndPublication` | ✅ |
+| AC-94 | Covered update/publication checkout/SDK failures and cancellation retain original identity or existing coded error, task state and CLI classification; leases return, caches follow the acknowledged update stage, no mutation is replayed and later publication stops | `TableUpdateLeaseTests.FailureAtEachBoundary_PreservesRawContractAndStopsLaterWork`, `CacheFailure_AfterReturnedMutationLease_PreservesCauseAndStopsPublication` | ✅ |
+| AC-95 | Existing guard/required-input validation and input-only dry run, including Publish=true, perform no checkout, mutation, cache invalidation or publication | `TableUpdateLeaseTests.DryRunValidationAndGuard_DoNotAcquire` | ✅ |
+| AC-96 | Table update retains request identity/solution/token, metadata labels, explicit false/empty/omitted fields/icons, cache order and existing success reporting | `TableUpdateLeaseTests.PayloadAndSuccessMessages_RemainUnchanged` | ✅ |
 
 ### Edge Cases
 

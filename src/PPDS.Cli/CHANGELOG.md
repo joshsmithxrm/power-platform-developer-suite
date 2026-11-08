@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Return the table-update connection before cache invalidation and optional publication, allowing an update followed by publication with one available pooled connection. Existing payload, dry-run, cancellation and error contracts remain; separate requests can still complete partially after a later failure.
+
 ## [1.5.0] - 2026-11-01
 
 ### Added
