@@ -12,7 +12,10 @@ namespace PPDS.Cli.Commands.Forms;
 /// </summary>
 public static class ReorderFieldsCommand
 {
-    public static Command Create()
+    public static Command Create() => Create(null);
+
+    internal static Command Create(
+        Func<string?, string?, GlobalOptionValues, CancellationToken, Task<ServiceProvider>>? providerFactory)
     {
         var entityOption = new Option<string>("--entity")
         {
@@ -78,7 +81,7 @@ public static class ReorderFieldsCommand
             var confirmEnvironment = parseResult.GetValue(FormsCommandGroup.ConfirmEnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(entity, form, section, fields, publish, solution, profile, environment, confirmEnvironment, globalOptions, cancellationToken);
+            return await ExecuteAsync(entity, form, section, fields, publish, solution, profile, environment, confirmEnvironment, globalOptions, cancellationToken, providerFactory);
         });
 
         return command;
@@ -95,7 +98,8 @@ public static class ReorderFieldsCommand
         string? environment,
         string? confirmEnvironment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string?, string?, GlobalOptionValues, CancellationToken, Task<ServiceProvider>>? providerFactory)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
@@ -109,13 +113,15 @@ public static class ReorderFieldsCommand
                 return ExitCodes.InvalidArguments;
             }
 
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = providerFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile,
                 environment,
                 globalOptions.Verbose,
                 globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await providerFactory(profile, environment, globalOptions, cancellationToken);
 
             await FormsCommandGroup.ConfirmEnvironmentAsync(serviceProvider, confirmEnvironment, cancellationToken);
             var formService = serviceProvider.GetRequiredService<IFormService>();

@@ -14,7 +14,10 @@ namespace PPDS.Cli.Commands.Forms;
 /// </summary>
 public static class SetXmlCommand
 {
-    public static Command Create()
+    public static Command Create() => Create(null);
+
+    internal static Command Create(
+        Func<string?, string?, GlobalOptionValues, CancellationToken, Task<ServiceProvider>>? providerFactory)
     {
         var entityOption = new Option<string>("--entity")
         {
@@ -32,8 +35,8 @@ public static class SetXmlCommand
         {
             Description = "Path to the XML file to write. " +
                 "Schema validation is applied before writing. " +
-                "All id and labelid attributes must use brace-format GUIDs ({xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}). " +
-                "All id and labelid values must be unique within the document.",
+                "GUID format is defined by the schema. Instance id and labelid GUIDs must be unique; " +
+                "customControl type IDs under controlDescriptions may repeat.",
             Required = true
         };
 
@@ -51,8 +54,8 @@ public static class SetXmlCommand
         var command = new Command("set-xml",
             "Write raw form XML to a Dataverse systemform record. " +
             "Schema validation is applied before writing. " +
-            "All id and labelid attributes must use brace-format GUIDs ({xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}). " +
-            "All id and labelid values must be unique within the document.")
+            "GUID format is defined by the schema. Instance id and labelid GUIDs must be unique; " +
+            "customControl type IDs under controlDescriptions may repeat.")
         {
             entityOption,
             formOption,
@@ -78,7 +81,7 @@ public static class SetXmlCommand
             var confirmEnvironment = parseResult.GetValue(FormsCommandGroup.ConfirmEnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(entity, form, xmlPath, publish, solution, profile, environment, confirmEnvironment, globalOptions, cancellationToken);
+            return await ExecuteAsync(entity, form, xmlPath, publish, solution, profile, environment, confirmEnvironment, globalOptions, cancellationToken, providerFactory);
         });
 
         return command;
@@ -94,7 +97,8 @@ public static class SetXmlCommand
         string? environment,
         string? confirmEnvironment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string?, string?, GlobalOptionValues, CancellationToken, Task<ServiceProvider>>? providerFactory)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
@@ -107,13 +111,15 @@ public static class SetXmlCommand
 
             var xml = await File.ReadAllTextAsync(xmlPath, cancellationToken);
 
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = providerFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile,
                 environment,
                 globalOptions.Verbose,
                 globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await providerFactory(profile, environment, globalOptions, cancellationToken);
 
             await FormsCommandGroup.ConfirmEnvironmentAsync(serviceProvider, confirmEnvironment, cancellationToken);
             var formService = serviceProvider.GetRequiredService<IFormService>();
