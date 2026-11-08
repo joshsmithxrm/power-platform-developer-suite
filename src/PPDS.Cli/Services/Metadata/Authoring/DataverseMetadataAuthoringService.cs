@@ -138,8 +138,11 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             SolutionUniqueName = request.SolutionUniqueName
         };
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-        var response = (CreateEntityResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        CreateEntityResponse response;
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        {
+            response = (CreateEntityResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
 
         _cacheProvider?.InvalidateEntityList();
         _cacheProvider?.InvalidateEntity(request.SchemaName.ToLowerInvariant());
@@ -889,8 +892,11 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         if (!string.IsNullOrEmpty(request.AttributeLogicalName))
             sdkRequest["AttributeLogicalName"] = request.AttributeLogicalName;
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-        var response = (InsertOptionValueResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        InsertOptionValueResponse response;
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        {
+            response = (InsertOptionValueResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
 
         // Color is applied via OptionMetadata.Color (UpdateOptionSet/UpdateAttribute), never the
         // InsertOptionValue["Color"] indexer — that parameter is silently dropped by the platform.
@@ -944,8 +950,10 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         if (!string.IsNullOrEmpty(request.AttributeLogicalName))
             sdkRequest["AttributeLogicalName"] = request.AttributeLogicalName;
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-        await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        {
+            await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
 
         // Color is applied to the resolved option via OptionMetadata.Color (UpdateOptionSet/UpdateAttribute),
         // never the UpdateOptionValue["Color"] indexer — that parameter is silently dropped by the platform.
@@ -1454,17 +1462,19 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
         sdkRequest["AttributeLogicalName"] = "statuscode";
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-        try
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
         {
-            await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
-        {
-            throw new PpdsException(
-                MetadataErrorCodes.SdkOperationFailed,
-                $"Failed to update status reason (value {targetValue}) on '{request.EntityLogicalName}': {ex.Message}",
-                ex);
+            try
+            {
+                await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+            {
+                throw new PpdsException(
+                    MetadataErrorCodes.SdkOperationFailed,
+                    $"Failed to update status reason (value {targetValue}) on '{request.EntityLogicalName}': {ex.Message}",
+                    ex);
+            }
         }
 
         if (!string.IsNullOrEmpty(request.Color))
@@ -1537,17 +1547,19 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
         sdkRequest["AttributeLogicalName"] = "statuscode";
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-        try
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
         {
-            await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
-        {
-            throw new PpdsException(
-                MetadataErrorCodes.SdkOperationFailed,
-                $"Failed to remove status reason (value {targetValue}) from '{request.EntityLogicalName}': {ex.Message}",
-                ex);
+            try
+            {
+                await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+            {
+                throw new PpdsException(
+                    MetadataErrorCodes.SdkOperationFailed,
+                    $"Failed to remove status reason (value {targetValue}) from '{request.EntityLogicalName}': {ex.Message}",
+                    ex);
+            }
         }
 
         _logger?.LogInformation("Removed status reason (value {Value}) from '{Entity}'", targetValue, request.EntityLogicalName);
@@ -1821,60 +1833,67 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             return cached;
         }
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-
-        // Query solution for publisher reference
-        var solutionQuery = new QueryExpression("solution")
+        Guid publisherId;
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
         {
-            ColumnSet = new ColumnSet("publisherid"),
-            Criteria =
+            // Query solution for publisher reference
+            var solutionQuery = new QueryExpression("solution")
             {
-                Conditions =
+                ColumnSet = new ColumnSet("publisherid"),
+                Criteria =
                 {
-                    new ConditionExpression("uniquename", ConditionOperator.Equal, solutionUniqueName)
+                    Conditions =
+                    {
+                        new ConditionExpression("uniquename", ConditionOperator.Equal, solutionUniqueName)
+                    }
                 }
+            };
+
+            var solutionResult = await client.RetrieveMultipleAsync(solutionQuery, ct).ConfigureAwait(false);
+
+            if (solutionResult.Entities.Count == 0)
+            {
+                throw new MetadataValidationException(
+                    MetadataErrorCodes.EntityNotFound,
+                    $"Solution '{solutionUniqueName}' not found.",
+                    "SolutionUniqueName");
             }
-        };
 
-        var solutionResult = await client.RetrieveMultipleAsync(solutionQuery, ct).ConfigureAwait(false);
-
-        if (solutionResult.Entities.Count == 0)
-        {
-            throw new MetadataValidationException(
-                MetadataErrorCodes.EntityNotFound,
-                $"Solution '{solutionUniqueName}' not found.",
-                "SolutionUniqueName");
+            var publisherRef = solutionResult.Entities[0].GetAttributeValue<EntityReference>("publisherid")
+                ?? throw new MetadataValidationException(MetadataErrorCodes.EntityNotFound,
+                    $"Solution '{solutionUniqueName}' has no publisher reference.", "SolutionUniqueName");
+            publisherId = publisherRef.Id;
         }
 
-        var publisherRef = solutionResult.Entities[0].GetAttributeValue<EntityReference>("publisherid")
-            ?? throw new MetadataValidationException(MetadataErrorCodes.EntityNotFound,
-                $"Solution '{solutionUniqueName}' has no publisher reference.", "SolutionUniqueName");
-        var publisherId = publisherRef.Id;
-
-        // Query publisher for customization prefix
-        var publisherQuery = new QueryExpression("publisher")
+        string prefix;
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
         {
-            ColumnSet = new ColumnSet("customizationprefix"),
-            Criteria =
+            // Query publisher for customization prefix
+            var publisherQuery = new QueryExpression("publisher")
             {
-                Conditions =
+                ColumnSet = new ColumnSet("customizationprefix"),
+                Criteria =
                 {
-                    new ConditionExpression("publisherid", ConditionOperator.Equal, publisherId)
+                    Conditions =
+                    {
+                        new ConditionExpression("publisherid", ConditionOperator.Equal, publisherId)
+                    }
                 }
+            };
+
+            var publisherResult = await client.RetrieveMultipleAsync(publisherQuery, ct).ConfigureAwait(false);
+
+            if (publisherResult.Entities.Count == 0)
+            {
+                throw new MetadataValidationException(
+                    MetadataErrorCodes.EntityNotFound,
+                    $"Publisher for solution '{solutionUniqueName}' not found.",
+                    "SolutionUniqueName");
             }
-        };
 
-        var publisherResult = await client.RetrieveMultipleAsync(publisherQuery, ct).ConfigureAwait(false);
-
-        if (publisherResult.Entities.Count == 0)
-        {
-            throw new MetadataValidationException(
-                MetadataErrorCodes.EntityNotFound,
-                $"Publisher for solution '{solutionUniqueName}' not found.",
-                "SolutionUniqueName");
+            prefix = publisherResult.Entities[0].GetAttributeValue<string>("customizationprefix");
         }
 
-        var prefix = publisherResult.Entities[0].GetAttributeValue<string>("customizationprefix");
         _publisherPrefixCache[solutionUniqueName] = prefix;
 
         return prefix;
@@ -2069,21 +2088,22 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
     private async Task ApplyGlobalOptionColorAsync(
         string optionSetName, int value, string color, string? solutionUniqueName, CancellationToken ct)
     {
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-
         OptionSetMetadata? optionSet;
-        try
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
         {
-            var retrieveResponse = (RetrieveOptionSetResponse)await client
-                .ExecuteAsync(new RetrieveOptionSetRequest { Name = optionSetName }, ct).ConfigureAwait(false);
-            // RetrieveOptionSetResponse.OptionSetMetadata is typed as the base; the Options collection lives on
-            // the picklist-typed OptionSetMetadata. A boolean choice (no Options) falls through to OptionNotFound.
-            optionSet = retrieveResponse.OptionSetMetadata as OptionSetMetadata;
-        }
-        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
-        {
-            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                $"Failed to retrieve global choice '{optionSetName}' to apply color: {ex.Message}", ex);
+            try
+            {
+                var retrieveResponse = (RetrieveOptionSetResponse)await client
+                    .ExecuteAsync(new RetrieveOptionSetRequest { Name = optionSetName }, ct).ConfigureAwait(false);
+                // RetrieveOptionSetResponse.OptionSetMetadata is typed as the base; the Options collection lives on
+                // the picklist-typed OptionSetMetadata. A boolean choice (no Options) falls through to OptionNotFound.
+                optionSet = retrieveResponse.OptionSetMetadata as OptionSetMetadata;
+            }
+            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+            {
+                throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                    $"Failed to retrieve global choice '{optionSetName}' to apply color: {ex.Message}", ex);
+            }
         }
 
         var target = optionSet?.Options?.FirstOrDefault(o => o.Value == value)
@@ -2092,18 +2112,21 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         target.Color = color;
 
-        try
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
         {
-            await client.ExecuteAsync(new UpdateOptionSetRequest
+            try
             {
-                OptionSet = optionSet,
-                SolutionUniqueName = solutionUniqueName
-            }, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
-        {
-            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                $"Failed to apply color to option {value} in global choice '{optionSetName}': {ex.Message}", ex);
+                await client.ExecuteAsync(new UpdateOptionSetRequest
+                {
+                    OptionSet = optionSet,
+                    SolutionUniqueName = solutionUniqueName
+                }, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+            {
+                throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                    $"Failed to apply color to option {value} in global choice '{optionSetName}': {ex.Message}", ex);
+            }
         }
 
         _cacheProvider?.InvalidateGlobalOptionSets();
@@ -2113,20 +2136,21 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
     private async Task ApplyLocalOptionColorAsync(
         string entityLogicalName, string attributeLogicalName, int value, string color, string? solutionUniqueName, CancellationToken ct)
     {
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-
         AttributeMetadata? attribute;
-        try
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
         {
-            var retrieveResponse = (RetrieveAttributeResponse)await client.ExecuteAsync(
-                new RetrieveAttributeRequest { EntityLogicalName = entityLogicalName, LogicalName = attributeLogicalName },
-                ct).ConfigureAwait(false);
-            attribute = retrieveResponse.AttributeMetadata;
-        }
-        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
-        {
-            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                $"Failed to retrieve attribute '{attributeLogicalName}' on '{entityLogicalName}' to apply color: {ex.Message}", ex);
+            try
+            {
+                var retrieveResponse = (RetrieveAttributeResponse)await client.ExecuteAsync(
+                    new RetrieveAttributeRequest { EntityLogicalName = entityLogicalName, LogicalName = attributeLogicalName },
+                    ct).ConfigureAwait(false);
+                attribute = retrieveResponse.AttributeMetadata;
+            }
+            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+            {
+                throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                    $"Failed to retrieve attribute '{attributeLogicalName}' on '{entityLogicalName}' to apply color: {ex.Message}", ex);
+            }
         }
 
         // EnumAttributeMetadata is the base for Picklist / MultiSelectPicklist / State / Status — all expose OptionSet.
@@ -2149,19 +2173,22 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         // e.g. RequiredLevel); a fresh attribute leaves every unset property null, so the platform changes only
         // the option collection (and thus OptionMetadata.Color). Mirrors CreateUpdateAttribute on the column path.
         var carrier = BuildOptionColorCarrierAttribute(enumAttribute, optionSet);
-        try
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
         {
-            await client.ExecuteAsync(new UpdateAttributeRequest
+            try
             {
-                EntityName = entityLogicalName,
-                Attribute = carrier,
-                SolutionUniqueName = solutionUniqueName
-            }, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
-        {
-            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                $"Failed to apply color to option {value} on '{entityLogicalName}.{attributeLogicalName}': {ex.Message}", ex);
+                await client.ExecuteAsync(new UpdateAttributeRequest
+                {
+                    EntityName = entityLogicalName,
+                    Attribute = carrier,
+                    SolutionUniqueName = solutionUniqueName
+                }, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+            {
+                throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                    $"Failed to apply color to option {value} on '{entityLogicalName}.{attributeLogicalName}': {ex.Message}", ex);
+            }
         }
 
         _cacheProvider?.InvalidateEntity(entityLogicalName);

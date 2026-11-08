@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Return metadata authoring connections before option-color or publication follow-ups, and use separate connections for color read/update and publisher-prefix queries. This lets the covered option/status/table-create workflows complete with one available pooled connection. Existing cancellation and error classifications remain unchanged; separate requests can still complete partially if a later operation fails.
+
 ## [1.5.0] - 2026-11-01
 
 ### Added
