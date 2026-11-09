@@ -218,7 +218,12 @@ public sealed class FormExplicitLayoutTests
             var phone = Cell(doc, "telephone1"); var phoneRow = phone.Parent!; phoneRow.SetAttributeValue("height", "23"); phoneRow.Remove();
             var rows = Section(doc, "General").Element("rows")!;
             if (mixed) { var nameRow = Cell(doc, "name").Parent!; nameRow.SetAttributeValue("height", "17"); phone.Remove(); nameRow.Add(phone); }
-            else rows.Add(phoneRow);
+            else
+            {
+                // Append after Timeline23's22 reserved rows, preserving its original cell.
+                rows.Elements("row").Last().AddAfterSelf(Enumerable.Range(0, 22).Select(_ => new XElement("row")));
+                rows.Add(phoneRow);
+            }
             if (span) phone.SetAttributeValue("rowspan", "2");
         });
         FormXmlValidator.Validate(XDocument.Parse(h.Original)); return h;

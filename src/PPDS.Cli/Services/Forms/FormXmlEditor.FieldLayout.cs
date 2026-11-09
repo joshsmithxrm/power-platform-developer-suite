@@ -61,6 +61,10 @@ internal static partial class FormXmlEditor
         if (rows == targetRows && (anchor is null || row.Elements("cell").Count() == 1 && row.ElementsAfterSelf("row").FirstOrDefault() == anchor.Parent))
             return false;
         RequireUnitSpan(cell);
+        if (row.Elements("cell").Count() == 1) RequireUncrossedRowBoundary(rows, row);
+        else if (cell.ElementsAfterSelf("cell").Any(sibling => RowSpan(sibling) > 1))
+            throw new PpdsException(FormErrorCodes.UnsupportedLayout, "Moving a cell before a spanning sibling requires an explicit layout edit.");
+        if (targetRows is not null) RequireUncrossedRowBoundary(targetRows, anchor?.Parent);
         // A whole row carries its authored attributes. A cell leaving a mixed row
         // leaves that row and its siblings intact and receives a new plain target row.
         XElement movedRow;
@@ -78,6 +82,22 @@ internal static partial class FormXmlEditor
         if (anchor is null) targetRows.Add(movedRow);
         else anchor.Parent!.AddBeforeSelf(movedRow);
         return true;
+    }
+
+    private static void RequireUncrossedRowBoundary(XElement rows, XElement? nextRow)
+    {
+        var preceding = rows.Elements("row").TakeWhile(row => row != nextRow).ToList();
+        for (var index = 0; index < preceding.Count; index++)
+            if (preceding[index].Elements("cell").Any(cell => RowSpan(cell) > preceding.Count - index))
+                throw new PpdsException(FormErrorCodes.UnsupportedLayout, "Moving rows across an active row span requires an explicit layout edit.");
+    }
+
+    private static int RowSpan(XElement cell)
+    {
+        var value = (string?)cell.Attribute("rowspan");
+        if (value is null) return 1;
+        if (int.TryParse(value, out var span) && span > 0) return span;
+        throw new PpdsException(FormErrorCodes.UnsupportedLayout, "Row span geometry must be a positive integer for an explicit field move.");
     }
 
     private static List<XElement> LayoutCells(XElement section)

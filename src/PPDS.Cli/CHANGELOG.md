@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `forms move-field` refuses source-row removal and target-row insertion across active row spans, and refuses shifting a later spanning sibling. Safe mixed rows, expired spans and unchanged-position retries remain supported.
 - Repeating `forms add-field` in the same section preserves existing controls/custom labels and skips redundant XML updates. Casing and batch duplicates report accurate already-present and duplicate-input outcomes; intentional placements in other sections remain supported (#1528).
 - New cells created by legacy form reorder use metadata display labels and canonical bindings; existing custom labels are retained. The additive result API keeps the original Task-based add-field signature and reports unknown counts truthfully for legacy implementations (#1529).
 - Plugin deploy preview reads existing image inventory and distinguishes reused types (#1517). Registration version 2.0 explicitly opts into supported nonsecret desired-state defaults and read-only post-write verification; missing/version 1.0 retains legacy optional preservation. Established Update empty-string clears are preserved (#1519).
