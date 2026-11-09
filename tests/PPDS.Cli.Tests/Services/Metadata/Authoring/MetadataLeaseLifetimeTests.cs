@@ -19,7 +19,7 @@ using SdkDeleteOption = Microsoft.Xrm.Sdk.Messages.DeleteOptionValueRequest;
 namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 
 [Trait("Category", "Unit")]
-public sealed class MetadataLeaseLifetimeTests
+public sealed partial class MetadataLeaseLifetimeTests
 {
     public static TheoryData<string, bool, bool> Workflows => new()
     {
@@ -121,7 +121,7 @@ public sealed class MetadataLeaseLifetimeTests
         var expectedCode = Harness.ExpectedFailureCode(route, stage, fault);
         if (expectedCode != null)
         {
-            Assert.Equal(expectedCode, Assert.IsType<PpdsException>(error).ErrorCode);
+            Assert.Equal(expectedCode, Assert.IsAssignableFrom<PpdsException>(error).ErrorCode);
             Assert.Same(h.Injected, error.InnerException);
         }
         else Assert.Same(h.Injected, error);
@@ -140,13 +140,13 @@ public sealed class MetadataLeaseLifetimeTests
     [InlineData("column-add", "local-color-read", "cancel")]
     [InlineData("column-add", "local-color-write", "cancel")]
     [Trait("AC", "AC-87")]
-    public async Task ColorSdkFaults_PreserveBaselineWrappingAndCliEnvelope(string route, string stage, string fault)
+    public async Task ColorSdkFaults_PreserveSdkFaultAndCancellationCliEnvelope(string route, string stage, string fault)
     {
         using var h = new Harness(route, true, false, stage, fault, capacity: 8);
         var operation = h.Run();
         var error = await Record.ExceptionAsync(() => operation);
-        // The existing combined source already preserves local color-read cancellation (#1538).
-        if (stage == "local-color-read" && fault == "cancel")
+        // All four color stages now preserve cancellation; ordinary SDK faults stay coded.
+        if (fault == "cancel")
         {
             var canceled = Assert.IsType<OperationCanceledException>(error);
             Assert.Same(h.Injected, canceled);
@@ -175,11 +175,11 @@ public sealed class MetadataLeaseLifetimeTests
     [InlineData("table-create", "table-create")]
     [InlineData("table-create", "publish")]
     [Trait("AC", "AC-87")]
-    public async Task CheckoutFailures_PreserveRawIdentityAndCliClassification(string route, string stage)
+    public async Task CheckoutFailures_PreserveCodedCauseAndCliClassification(string route, string stage)
     {
         using var h = new Harness(route, route != "table-create", true, stage, "checkout", capacity: 8);
-        var error = await Assert.ThrowsAsync<PoolExhaustedException>(() => h.Run());
-        Assert.Same(h.Injected, error);
+        var error = Assert.IsAssignableFrom<PpdsException>(await Record.ExceptionAsync(() => h.Run()));
+        Assert.Same(h.Injected, error.InnerException);
         AssertCliEnvelope(error, "Connection.Timeout", 4);
         h.AssertReturned();
     }
@@ -222,6 +222,11 @@ public sealed class MetadataLeaseLifetimeTests
         private readonly bool _color, _publish, _missingColorTarget;
         private readonly string? _failStage, _fault;
         private readonly int _capacity;
+        private readonly bool _delayFault;
+        private readonly Func<Exception>? _faultFactory;
+        private readonly TaskCompletionSource _releaseFault = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource FaultReached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal void ReleaseFault() => _releaseFault.TrySetResult();
         private int _nextId;
         private bool _mutated;
         private readonly Guid _publisherId = Guid.NewGuid();
@@ -239,10 +244,10 @@ public sealed class MetadataLeaseLifetimeTests
         internal int Acquired => _acquired.Count;
         internal int PeakActive { get; private set; }
 
-        internal Harness(string route, bool color, bool publish, string? failStage = null, string? fault = null, int capacity = 1, bool missingColorTarget = false)
+        internal Harness(string route, bool color, bool publish, string? failStage = null, string? fault = null, int capacity = 1, bool missingColorTarget = false, bool delayFault = false, Func<Exception>? faultFactory = null)
         {
             _route = route; _color = color; _publish = publish; _failStage = failStage; _fault = fault;
-            _missingColorTarget = missingColorTarget;
+            _missingColorTarget = missingColorTarget; _delayFault = delayFault; _faultFactory = faultFactory;
             _capacity = capacity; _slots = new SemaphoreSlim(capacity, capacity);
             ExpectedStages = Stages(route, color, publish);
             var pool = new Mock<IDataverseConnectionPool>(MockBehavior.Strict);
@@ -286,8 +291,10 @@ public sealed class MetadataLeaseLifetimeTests
         {
             if (route == "column-add" && stage == "insert")
                 return fault == "coded" ? null : MetadataErrorCodes.SdkOperationFailed; // Existing try also owns checkout.
+            if (fault == "checkout" && CodedAcquisitionBoundaries().Any(row => (string)row[0] == route && (string)row[1] == stage))
+                return ErrorCodes.Connection.Timeout;
             if (fault.StartsWith("checkout", StringComparison.Ordinal)) return null;
-            if (stage == "local-color-read" && fault == "cancel") return null; // Existing #1538 combined-source contract.
+            if (stage.Contains("color", StringComparison.Ordinal) && fault == "cancel") return null; // Approved color cancellation contract.
             if (stage is "status-target" or "local-target")
                 return fault == "cancel" ? null : MetadataErrorCodes.EntityNotFound; // Existing list readers wrap coded errors too.
             if (fault == "coded") return null;
@@ -297,6 +304,7 @@ public sealed class MetadataLeaseLifetimeTests
 
         private Exception Failure(string kind)
         {
+            if (_faultFactory != null) return Injected = _faultFactory();
             if (kind.Contains("cancel", StringComparison.Ordinal))
             {
                 _cts.Cancel();
@@ -329,7 +337,9 @@ public sealed class MetadataLeaseLifetimeTests
             lease.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), Token)).Returns<OrganizationRequest, CancellationToken>((request, _) =>
             {
                 Assert.False(disposed);
-                return Task.FromResult(Execute(id, request));
+                return _delayFault && IsDelayedFaultRequest(request)
+                    ? ExecuteAfterReleaseAsync(id, request)
+                    : Task.FromResult(Execute(id, request));
             });
             lease.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), Token)).Returns<QueryBase, CancellationToken>((query, _) =>
             {
@@ -366,6 +376,22 @@ public sealed class MetadataLeaseLifetimeTests
                 return Task.FromResult(new EntityCollection([row]));
             });
             return lease.Object;
+        }
+
+        private bool IsDelayedFaultRequest(OrganizationRequest request) => request switch
+        {
+            RetrieveOptionSetRequest => _mutated && _failStage == "global-color-read",
+            UpdateOptionSetRequest => _failStage == "global-color-write",
+            RetrieveAttributeRequest => _mutated && _failStage == "local-color-read",
+            UpdateAttributeRequest => _failStage == "local-color-write",
+            _ => false
+        };
+
+        private async Task<OrganizationResponse> ExecuteAfterReleaseAsync(int lease, OrganizationRequest request)
+        {
+            FaultReached.TrySetResult();
+            await _releaseFault.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            return Execute(lease, request);
         }
 
         private void Begin(int lease, string stage)

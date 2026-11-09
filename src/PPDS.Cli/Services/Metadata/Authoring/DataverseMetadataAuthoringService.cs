@@ -140,7 +140,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         };
 
         CreateEntityResponse response;
-        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
         {
             response = (CreateEntityResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
         }
@@ -227,8 +227,10 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             SolutionUniqueName = request.SolutionUniqueName
         };
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-        await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
+        {
+            await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
 
         _cacheProvider?.InvalidateEntityList();
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
@@ -917,7 +919,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             sdkRequest["AttributeLogicalName"] = request.AttributeLogicalName;
 
         InsertOptionValueResponse response;
-        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
         {
             response = (InsertOptionValueResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
         }
@@ -974,7 +976,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         if (!string.IsNullOrEmpty(request.AttributeLogicalName))
             sdkRequest["AttributeLogicalName"] = request.AttributeLogicalName;
 
-        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
         {
             await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
         }
@@ -1492,7 +1494,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
         sdkRequest["AttributeLogicalName"] = "statuscode";
 
-        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
         {
             try
             {
@@ -1577,7 +1579,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
         sdkRequest["AttributeLogicalName"] = "statuscode";
 
-        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
         {
             try
             {
@@ -1862,6 +1864,28 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
     #region Private Helpers
 
+    // This acquisition contract is intentionally limited to the corrected metadata workflows.
+    // SDK operations and unrelated acquisitions retain their own existing exception contracts.
+    private async Task<IPooledClient> GetMetadataClientAsync(CancellationToken ct)
+    {
+        try
+        {
+            return await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not PpdsException and not MetadataValidationException)
+        {
+            var (error, exitCode) = ExceptionMapper.MapWithExitCode(ex);
+            if (exitCode == ExitCodes.AuthError)
+                throw new PpdsAuthException(error.Code, "Could not acquire a Dataverse connection.", ex)
+                {
+                    RequiresReauthentication = ex is DataverseAuthenticationException { RequiresReauthentication: true }
+                };
+
+            throw new MetadataConnectionAcquisitionException(error.Code,
+                "Could not acquire a Dataverse connection.", exitCode, ex);
+        }
+    }
+
     private async Task<string> ResolvePublisherPrefixAsync(string solutionUniqueName, CancellationToken ct)
     {
         if (_publisherPrefixCache.TryGetValue(solutionUniqueName, out var cached))
@@ -1870,7 +1894,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         }
 
         Guid publisherId;
-        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
         {
             // Query solution for publisher reference
             var solutionQuery = new QueryExpression("solution")
@@ -1902,7 +1926,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         }
 
         string prefix;
-        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
         {
             // Query publisher for customization prefix
             var publisherQuery = new QueryExpression("publisher")
@@ -2174,7 +2198,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         string optionSetName, int value, string color, string? solutionUniqueName, CancellationToken ct)
     {
         OptionSetMetadata? optionSet;
-        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
         {
             try
             {
@@ -2184,7 +2208,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
                 // the picklist-typed OptionSetMetadata. A boolean choice (no Options) falls through to OptionNotFound.
                 optionSet = retrieveResponse.OptionSetMetadata as OptionSetMetadata;
             }
-            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
             {
                 throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
                     $"Failed to retrieve global choice '{optionSetName}' to apply color: {ex.Message}", ex);
@@ -2197,7 +2221,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
 
         target.Color = color;
 
-        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
         {
             try
             {
@@ -2207,7 +2231,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
                     SolutionUniqueName = solutionUniqueName
                 }, ct).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
             {
                 throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
                     $"Failed to apply color to option {value} in global choice '{optionSetName}': {ex.Message}", ex);
@@ -2222,7 +2246,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         string entityLogicalName, string attributeLogicalName, int value, string color, string? solutionUniqueName, CancellationToken ct)
     {
         AttributeMetadata? attribute;
-        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
         {
             try
             {
@@ -2268,7 +2292,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         // e.g. RequiredLevel); a fresh attribute leaves every unset property null, so the platform changes only
         // the option collection (and thus OptionMetadata.Color). Mirrors CreateUpdateAttribute on the column path.
         var carrier = BuildOptionColorCarrierAttribute(enumAttribute, optionSet);
-        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
         {
             try
             {
@@ -2279,7 +2303,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
                     SolutionUniqueName = solutionUniqueName
                 }, ct).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
             {
                 throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
                     $"Failed to apply color to option {value} on '{entityLogicalName}.{attributeLogicalName}': {ex.Message}", ex);
@@ -2646,7 +2670,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         var parameterXml = $"<importexportxml><entities><entity>{entityLogicalName}</entity></entities></importexportxml>";
         var publishRequest = new PublishXmlRequest { ParameterXml = parameterXml };
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+        await using var client = await GetMetadataClientAsync(ct).ConfigureAwait(false);
         await client.ExecuteAsync(publishRequest, ct).ConfigureAwait(false);
 
         _logger?.LogInformation("Published entity '{Entity}'", entityLogicalName);
