@@ -59,6 +59,7 @@
     <PackageReference Include="System.Security.Cryptography.Pkcs" />
     <!-- Override Cryptography.Xml transitive (GHSA-37gx-xxp4-5rgx, GHSA-w3x6-4m5h-cxqf) -->
     <PackageReference Include="System.Security.Cryptography.Xml" />
+    <PackageReference Include="System.Text.Json" />
   </ItemGroup>
 
 </Project>

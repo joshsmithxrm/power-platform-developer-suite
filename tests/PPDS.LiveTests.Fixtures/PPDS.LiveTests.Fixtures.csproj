@@ -17,6 +17,7 @@
   <ItemGroup>
     <!-- For IPlugin interface -->
     <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" />
+    <PackageReference Include="System.Text.Json" />
   </ItemGroup>
 
   <ItemGroup>
