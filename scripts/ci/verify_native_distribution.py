@@ -144,14 +144,301 @@ def windows_runtime_root():
     raise ValueError("Refuse existing Windows private runtime child")
 
 
+WINDOWS_SECURITY_SCRIPT = r"""
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$observedRows = [System.Collections.Generic.List[object]]::new()
+$requestedPaths = @()
+$currentUserSidText = $null
+$snapshotComplete = $false
+$snapshotErrorType = $null
+try {
+    $requestText = [Console]::In.ReadToEnd()
+    if ([Text.Encoding]::UTF8.GetByteCount($requestText) -gt 16384) { throw 'request_bound' }
+    $requestObject = ConvertFrom-Json -InputObject $requestText
+    if ($requestObject.paths -isnot [System.Array]) { throw 'path_array_required' }
+    $requestedPaths = @($requestObject.paths)
+    if ($requestedPaths.Count -lt 1 -or $requestedPaths.Count -gt 16) { throw 'path_count_bound' }
+    $uniquePaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($securityPathText in $requestedPaths) {
+        if ($securityPathText -isnot [string] -or $securityPathText.Length -gt 512 -or
+            $securityPathText -notmatch '^C:\\' -or $securityPathText -match '(^|[\\/])\.\.?([\\/]|$)' -or
+            -not $uniquePaths.Add($securityPathText)) { throw 'invalid_literal_path' }
+    }
+    $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    try { $currentUserSidText = $currentIdentity.User.Value }
+    finally { $currentIdentity.Dispose() }
+    if ([string]::IsNullOrWhiteSpace($currentUserSidText)) { throw 'current_user_sid_unavailable' }
+    foreach ($securityPathText in $requestedPaths) {
+        $securityObject = Get-Acl -LiteralPath $securityPathText -ErrorAction Stop
+        $descriptorBytes = $securityObject.GetSecurityDescriptorBinaryForm()
+        if ($descriptorBytes.Length -lt 1 -or $descriptorBytes.Length -gt 65536) { throw 'descriptor_bound' }
+        $rawDescriptor = [Security.AccessControl.RawSecurityDescriptor]::new($descriptorBytes, 0)
+        $aceRows = [System.Collections.Generic.List[object]]::new()
+        if ($null -ne $rawDescriptor.DiscretionaryAcl) {
+            if ($rawDescriptor.DiscretionaryAcl.Count -gt 128) { throw 'ace_count_bound' }
+            foreach ($rawAce in $rawDescriptor.DiscretionaryAcl) {
+                $sidText = $null
+                $unsignedMask = $null
+                $qualifierValue = $null
+                $isCallback = $null
+                if ($rawAce -is [Security.AccessControl.KnownAce]) {
+                    $sidText = $rawAce.SecurityIdentifier.Value
+                    $unsignedMask = [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$rawAce.AccessMask), 0)
+                }
+                if ($rawAce -is [Security.AccessControl.QualifiedAce]) {
+                    $qualifierValue = [int]$rawAce.AceQualifier
+                    $isCallback = [bool]$rawAce.IsCallback
+                }
+                $aceRows.Add([ordered]@{
+                    type = [int]$rawAce.AceType
+                    qualifier = $qualifierValue
+                    callback = $isCallback
+                    flags = [int]$rawAce.AceFlags
+                    mask = $unsignedMask
+                    sid = $sidText
+                })
+            }
+        }
+        $acesValue = $null
+        if ($null -ne $rawDescriptor.DiscretionaryAcl) { $acesValue = @($aceRows.ToArray()) }
+        $ownerSidText = $null
+        if ($null -ne $rawDescriptor.Owner) { $ownerSidText = $rawDescriptor.Owner.Value }
+        $observedRows.Add([ordered]@{
+            path = $securityPathText
+            ownerSid = $ownerSidText
+            daclPresent = ([int]$rawDescriptor.ControlFlags -band 4) -ne 0
+            daclNull = $null -eq $rawDescriptor.DiscretionaryAcl
+            controlFlags = [int]$rawDescriptor.ControlFlags
+            descriptorBytes = $descriptorBytes.Length
+            aces = $acesValue
+        })
+    }
+    $snapshotComplete = $true
+}
+catch { $snapshotErrorType = $_.Exception.GetType().FullName }
+$snapshotPayload = [ordered]@{
+    complete = $snapshotComplete
+    currentUserSid = $currentUserSidText
+    requestedCount = $requestedPaths.Count
+    observedCount = $observedRows.Count
+    errorType = $snapshotErrorType
+    rows = @($observedRows.ToArray())
+}
+$snapshotJson = ConvertTo-Json -InputObject $snapshotPayload -Depth 8 -Compress
+if ([Text.Encoding]::UTF8.GetByteCount($snapshotJson) -gt 131072) {
+    $snapshotComplete = $false
+    $snapshotJson = ConvertTo-Json -InputObject ([ordered]@{
+        complete = $false
+        currentUserSid = $currentUserSidText
+        requestedCount = $requestedPaths.Count
+        observedCount = $observedRows.Count
+        metadataDroppedForSize = $true
+        rows = @()
+    }) -Compress
+}
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+[Console]::Out.Write($snapshotJson)
+if ($snapshotComplete) { exit 0 }
+exit 1
+"""
+
+
+WINDOWS_READ_MASK = 0xA01200A9
+WINDOWS_ANCESTOR_MASK = WINDOWS_READ_MASK | 0x6
+WINDOWS_SYSTEM_SID = "S-1-5-18"
+WINDOWS_ADMIN_SID = "S-1-5-32-544"
+WINDOWS_INSTALLER_SID = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
+WINDOWS_SID = re.compile(r"S-1-[0-9]+(?:-[0-9]+){1,15}\Z")
+
+
+def valid_windows_sid(value):
+    return isinstance(value, str) and len(value) <= 184 and WINDOWS_SID.fullmatch(value) is not None
+
+
+def security_reader_failure(paths, kind):
+    return {"complete": False, "requestedCount": len(paths), "observedCount": 0,
+            "currentUserSid": None, "rows": [], "errorType": kind}
+
+
+def read_windows_security(paths):
+    """Read bounded security metadata only. No setters, shell or account-name lookup."""
+    require(sys.platform == "win32" and os.getenv("GITHUB_ACTIONS") == "true" and
+            os.getenv("RUNNER_ENVIRONMENT") == "github-hosted", "Windows security reader is hosted-CI only")
+    require(isinstance(paths, (list, tuple)) and 0 < len(paths) <= 16, "Invalid security path count")
+    names = [str(path) for path in paths]
+    require(len(set(name.casefold() for name in names)) == len(names) and all(
+        0 < len(name) <= 512 and PureWindowsPath(name).is_absolute() and
+        PureWindowsPath(name).drive.upper() == "C:" and name == str(PureWindowsPath(name)) and
+        not any(p in {".", ".."} for p in re.split(r"[\\/]", name)) for name in names),
+        "Invalid canonical security paths")
+    executable = Path("C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
+    require(plain(executable).resolve(strict=True) == executable, "Noncanonical OS security reader")
+    command = [str(executable), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_SECURITY_SCRIPT]
+    env = {k: v for k, v in os.environ.items() if k.upper() in OS_KEYS}
+    try:
+        result = subprocess.run(command, input=json.dumps({"paths": names}, ensure_ascii=True).encode("ascii"),
+                                env=env, stdin=None, capture_output=True, timeout=15, check=False,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return security_reader_failure(paths, type(error).__name__)
+    if len(result.stdout) > 131072 or len(result.stderr) > 16384:
+        return security_reader_failure(paths, "SecurityMetadataOutputBound")
+    try:
+        value = json.loads(result.stdout.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return security_reader_failure(paths, "InvalidSecurityMetadataJson")
+    if not isinstance(value, dict):
+        return security_reader_failure(paths, "InvalidSecurityMetadataShape")
+    if result.returncode != 0 or result.stderr:
+        value["complete"] = False
+    return value
+
+
+def windows_descriptor_policy(row, current_sid, ancestor):
+    reasons, mutation = [], []
+    trusted = {current_sid, WINDOWS_SYSTEM_SID, WINDOWS_ADMIN_SID}
+    if ancestor:
+        trusted.add(WINDOWS_INSTALLER_SID)
+    if not valid_windows_sid(row.get("ownerSid")) or row.get("ownerSid") not in trusted:
+        reasons.append("untrusted_owner")
+    control = row.get("controlFlags")
+    if (type(control) is not int or not 0 <= control <= 0xFFFF or not control & 4 or
+            row.get("daclPresent") is not True or row.get("daclNull") is not False):
+        reasons.append("missing_invalid_or_null_dacl")
+    size = row.get("descriptorBytes")
+    if type(size) is not int or not 0 < size <= 65536:
+        reasons.append("invalid_descriptor_size")
+    aces = row.get("aces")
+    if not isinstance(aces, list) or len(aces) > 128:
+        return {"accepted": False, "reasons": reasons + ["unavailable_or_oversized_ace_inventory"],
+                "ownerSid": row.get("ownerSid"), "allowMutation": mutation}
+    permitted = WINDOWS_ANCESTOR_MASK if ancestor else WINDOWS_READ_MASK
+    for index, ace in enumerate(aces):
+        if not isinstance(ace, dict):
+            reasons.append("unavailable_ace")
+            continue
+        kind, flags, mask, sid = (ace.get(k) for k in ["type", "flags", "mask", "sid"])
+        if (type(kind) is int and kind in {0, 4, 5, 9, 11} and type(mask) is int and
+                0 <= mask <= 0xFFFFFFFF and valid_windows_sid(sid) and mask & ~WINDOWS_READ_MASK):
+            mutation.append({"index": index, "sid": sid, "mask": mask, "flags": flags})
+        if not (type(kind) is int and kind in {0, 1} and type(flags) is int and 0 <= flags <= 0x1F and
+                type(mask) is int and 0 <= mask <= 0xFFFFFFFF and valid_windows_sid(sid) and
+                type(ace.get("qualifier")) is int and ace["qualifier"] == kind and ace.get("callback") is False):
+            reasons.append("unsupported_or_invalid_ace")
+            continue
+        if ancestor and flags & 8:
+            continue
+        if kind == 1:
+            continue
+        if mask & ~permitted and sid not in trusted:
+            reasons.append("untrusted_mutation_grant")
+    return {"accepted": not reasons, "reasons": sorted(set(reasons)),
+            "ownerSid": row.get("ownerSid"), "allowMutation": mutation}
+
+
+def security_evidence_metadata(snapshot):
+    """Keep only explicit security fields, including unsupported ACE metadata."""
+    if not isinstance(snapshot, dict):
+        return {"complete": False, "metadataIncomplete": True, "rows": []}
+    result = {k: snapshot.get(k) if type(snapshot.get(k)) in {bool, int, type(None)} else None
+              for k in ["complete", "requestedCount", "observedCount"]}
+    result["currentUserSid"] = snapshot.get("currentUserSid") if valid_windows_sid(snapshot.get("currentUserSid")) else None
+    error_type = snapshot.get("errorType")
+    if isinstance(error_type, str) and re.fullmatch(r"[A-Za-z0-9_.]{1,200}", error_type):
+        result["errorType"] = error_type
+    if snapshot.get("metadataDroppedForSize") is True:
+        result["metadataDroppedForSize"] = True
+    result["rows"] = []
+    if not isinstance(snapshot.get("rows"), list) or len(snapshot["rows"]) > 16:
+        result["metadataIncomplete"] = True
+        return result
+    for row in snapshot["rows"]:
+        if not isinstance(row, dict):
+            result["metadataIncomplete"] = True
+            continue
+        path = row.get("path")
+        safe = {"path": path if isinstance(path, str) and len(path) <= 512 else None,
+                "ownerSid": row.get("ownerSid") if valid_windows_sid(row.get("ownerSid")) else None}
+        for key in ["daclPresent", "daclNull", "descriptorBytes", "controlFlags"]:
+            safe[key] = row.get(key) if type(row.get(key)) in {bool, int, type(None)} else None
+        aces = row.get("aces")
+        safe["aces"] = None
+        if isinstance(aces, list) and len(aces) <= 128:
+            safe["aces"] = []
+            for ace in aces:
+                if not isinstance(ace, dict):
+                    safe["aces"].append({"unsupported": True})
+                    continue
+                fields = {k: ace.get(k) if type(ace.get(k)) in {bool, int, type(None)} else None
+                          for k in ["type", "qualifier", "callback", "flags", "mask"]}
+                fields["sid"] = ace.get("sid") if valid_windows_sid(ace.get("sid")) else None
+                safe["aces"].append(fields)
+        elif aces is not None:
+            safe["metadataIncomplete"] = True
+            safe["omittedAceCount"] = len(aces) if isinstance(aces, list) else None
+        result["rows"].append(safe)
+    return result
+
+
+def inspect_windows_paths(paths, destination, *, ancestor):
+    snapshot = read_windows_security(paths)
+    evidence = {"ancestor": ancestor, "snapshot": security_evidence_metadata(snapshot), "policies": []}
+    names = [str(path) for path in paths]
+    reasons = []
+    if not isinstance(snapshot, dict) or snapshot.get("complete") is not True:
+        reasons.append("incomplete_security_read")
+    else:
+        allowed = {"complete", "currentUserSid", "requestedCount", "observedCount", "rows", "errorType"}
+        current = snapshot.get("currentUserSid")
+        rows = snapshot.get("rows")
+        if (set(snapshot) - allowed or not valid_windows_sid(current) or current.startswith(("S-1-3-", "S-1-1-")) or
+                type(snapshot.get("requestedCount")) is not int or snapshot["requestedCount"] != len(names) or
+                type(snapshot.get("observedCount")) is not int or snapshot["observedCount"] != len(names) or
+                not isinstance(rows, list) or len(rows) != len(names) or
+                any(not isinstance(row, dict) for row in rows) or [row.get("path") for row in rows] != names):
+            reasons.append("invalid_security_snapshot")
+        else:
+            for row in rows:
+                policy = windows_descriptor_policy(row, current, ancestor)
+                evidence["policies"].append(dict(policy, path=row["path"]))
+                if not policy["accepted"]:
+                    reasons.append("unsafe_security_descriptor")
+    evidence.update({"accepted": not reasons, "reasons": sorted(set(reasons))})
+    if len(json.dumps(evidence, ensure_ascii=True).encode("ascii")) > 131072:
+        evidence = {"accepted": False, "reasons": ["security_evidence_bound"], "metadataIncomplete": True,
+                    "requestedCount": len(names), "observedCount": len(evidence["snapshot"].get("rows", []))}
+    save(destination, evidence)
+    require(evidence["accepted"], "Windows runtime security metadata is unsafe or incomplete; retained diagnostics")
+
+
 def private_environment(root):
     require(not root.exists() and not root.is_symlink(), "Refuse existing runtime directory")
-    if sys.platform == "win32":
-        root = windows_runtime_root()
-    root.mkdir(mode=0o700)
     names = ["home", "appdata", "localappdata", "config", "data", "temp", "docker"]
-    for name in names:
-        (root / name).mkdir(mode=0o700)
+    if sys.platform == "win32":
+        evidence = root.parent
+        root = windows_runtime_root()
+        ancestors = list(reversed([root.parent, *root.parent.parents]))
+        require(len(ancestors) <= 8, "Windows runtime ancestor path bound exceeded")
+        inspect_windows_paths(ancestors, evidence / "windows-security-parent.json", ancestor=True)
+        # Windows0700 creates an OWNER_RIGHTS grant. Use default inheritance,
+        # inspect actual descriptors, and never repair permissions or weaken trust.
+        root.mkdir()
+        private_paths = [root]
+        for name in names:
+            path = root / name
+            path.mkdir()
+            private_paths.append(path)
+        for path in private_paths:
+            info = path.lstat()
+            require(stat.S_ISDIR(info.st_mode) and not path.is_symlink() and
+                    not getattr(info, "st_file_attributes", 0) & 0x400 and path.resolve(strict=True) == path,
+                    "New Windows private runtime path is not a canonical plain directory")
+        inspect_windows_paths(private_paths, evidence / "windows-security-runtime.json", ancestor=False)
+    else:
+        root.mkdir(mode=0o700)
+        for name in names:
+            (root / name).mkdir(mode=0o700)
     env = {k: v for k, v in os.environ.items() if k.upper() in OS_KEYS}
     env.update({"HOME": str(root / "home"), "USERPROFILE": str(root / "home"),
                 "APPDATA": str(root / "appdata"), "LOCALAPPDATA": str(root / "localappdata"),

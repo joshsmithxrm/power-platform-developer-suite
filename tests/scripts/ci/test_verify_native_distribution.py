@@ -90,6 +90,10 @@ class WindowsDirectoryFixture:
     def __init__(self):
         self.nodes = {}
         self.created = []
+        self.reader_requests = []
+        self.saved = []
+        self.forced_security = {}
+        self.response_mutation = None
         for value in ["C:/", "C:/Users", "C:/Users/runneradmin", "C:/Users/runneradmin/AppData",
                       "C:/Users/runneradmin/AppData/Local", "D:/", "D:/a", "D:/a/_temp", "D:/a/_temp/evidence"]:
             self.nodes[str(PureWindowsPath(value))] = {"reparse": False, "symlink": False, "redirect": None}
@@ -122,8 +126,44 @@ class WindowsDirectoryFixture:
                 if not self.parent.exists(): raise FileNotFoundError(str(self.parent))
                 fixture.nodes[str(self)] = {"reparse": False, "symlink": False, "redirect": None}
                 fixture.created.append((str(self), mode))
+                fixture.nodes[str(self)]["security"] = synthetic_descriptor(owner_rights=mode == 0o700)
 
         return Directory(value)
+
+
+    def read_security(self, paths):
+        names = [str(p) for p in paths]
+        self.reader_requests.append(names)
+        rows = []
+        for name in names:
+            value = copy.deepcopy(self.forced_security.get(name,
+                self.nodes[name].get("security", synthetic_descriptor())))
+            rows.append(dict(value, path=name))
+        reply = {"complete": True, "currentUserSid": SYNTHETIC_USER, "requestedCount": len(names),
+                 "observedCount": len(rows), "rows": rows}
+        if self.response_mutation == "partial": reply["complete"] = False
+        if self.response_mutation == "count": reply["observedCount"] -= 1
+        if self.response_mutation == "boolean-count": reply["requestedCount"] = True
+        if self.response_mutation == "duplicate": reply["rows"][-1] = copy.deepcopy(reply["rows"][0])
+        if self.response_mutation == "foreign": reply["rows"][0]["path"] = "C:/OtherProfile"
+        if self.response_mutation == "missing-sid": reply["currentUserSid"] = None
+        if self.response_mutation == "boolean-sid": reply["currentUserSid"] = True
+        if self.response_mutation == "empty": reply["rows"] = []
+        return reply
+
+    def record(self, path, value):
+        self.saved.append((str(path), copy.deepcopy(value)))
+
+
+SYNTHETIC_USER = "S-1-5-21-1-2-3-1001"
+
+
+def synthetic_descriptor(*, owner_rights=False):
+    sid = "S-1-3-4" if owner_rights else SYNTHETIC_USER
+    return {"ownerSid": SYNTHETIC_USER, "daclPresent": True, "daclNull": False,
+            "descriptorBytes": 256, "controlFlags": 4,
+            "aces": [{"type": 0, "qualifier": 0, "flags": 3, "mask": 0x1f01ff,
+                      "sid": sid, "callback": False}]}
 
 
 def windows_environment_fixture(monkeypatch):
@@ -131,6 +171,8 @@ def windows_environment_fixture(monkeypatch):
     monkeypatch.setattr(gate.sys, "platform", "win32")
     monkeypatch.setattr(gate, "Path", fixture.path)
     monkeypatch.setattr(gate, "uuid", SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="a" * 32)), raising=False)
+    monkeypatch.setattr(gate, "read_windows_security", fixture.read_security, raising=False)
+    monkeypatch.setattr(gate, "save", fixture.record)
     for name, value in {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted", "SYSTEMDRIVE": "C:",
                         "USERPROFILE": "C:/Users/runneradmin", "LOCALAPPDATA": "C:/Users/runneradmin/AppData/Local",
                         "RUNNER_TEMP": "D:/a/_temp"}.items():
@@ -151,7 +193,7 @@ def test_windows_private_state_uses_fresh_system_profile_child_and_keeps_evidenc
     assert all(PureWindowsPath(env[k]).is_relative_to(expected) for k in private_keys)
     assert PureWindowsPath(env["HOME"]) == expected / "home"
     assert not requested.exists()
-    assert all(PureWindowsPath(path).is_relative_to(expected) and mode == 0o700 for path, mode in fixture.created)
+    assert all(PureWindowsPath(path).is_relative_to(expected) and mode == 0o777 for path, mode in fixture.created)
     assert not any(key in env for key in ["GH_TOKEN", "AZURE_CLIENT_SECRET", "PPDS_PROFILE", "PPDS_FORMS_LIVE_CONFIRM", "EXISTING_PROFILE_PATH", "RUNNER_TEMP"])
     assert env["DOTNET_GENERATE_ASPNET_CERTIFICATE"] == "false"
 
@@ -316,3 +358,250 @@ def test_compiled_metadata_existing_evidence_is_refused_without_clobber(tmp_path
     assert (evidence / name).read_bytes() == sentinel
     assert [p.name for p in evidence.iterdir()] == [name]
     assert all((directory / key).read_bytes() == data for key, data in blobs.items())
+
+
+# Common before/fixed calls use the unchanged private_environment entrypoint.
+ACL_CONTRACT_VECTORS = [
+    {'name': 'concrete_current_user_full_control', 'accepted': True, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'system_full_control', 'accepted': True, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-5-18', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'administrators_full_control', 'accepted': True, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-5-32-544', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'trustedinstaller_ancestor', 'accepted': True, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': True, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'trustedinstaller_not_owned_node_trustee', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'foreign_owner', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-9-8-7-1002', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'owner_rights_not_concrete_owner', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-3-4', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'null_dacl', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': True, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'missing_dacl', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': False, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'owner_rights_full_control_grant', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-3-4', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'world_generic_write', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-1-0', 'mask': 1073741824, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'world_generic_all', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-1-0', 'mask': 268435456, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'world_delete', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-1-0', 'mask': 65536, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'world_delete_children', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-1-0', 'mask': 64, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'world_change_permissions', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-1-0', 'mask': 262144, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'world_take_ownership', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-1-0', 'mask': 524288, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'world_read_execute_sync', 'accepted': True, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-1-0', 'mask': 1179817, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'world_generic_read', 'accepted': True, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-1-0', 'mask': 2147483648, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'world_generic_execute', 'accepted': True, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-1-0', 'mask': 536870912, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'world_create_owned_node', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-1-0', 'mask': 6, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'world_create_traversal_ancestor', 'accepted': True, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': True, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-1-0', 'mask': 6, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'inherit_only_ancestor', 'accepted': True, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': True, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-1-0', 'mask': 2032127, 'type': 0, 'flags': 11, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'inherit_only_owned_node', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-1-0', 'mask': 2032127, 'type': 0, 'flags': 11, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'unsupported_object_allow_ACE', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 5, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'callback_allow_ACE', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 9, 'flags': 3, 'callback': True, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'missing_mask', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-5-21-1-2-3-1001', 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'negative_mask', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-5-21-1-2-3-1001', 'mask': -1, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'boolean_mask', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-5-21-1-2-3-1001', 'mask': True, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'unsupported_flags', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 32, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'invalid_sid', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'not-a-sid', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'too_many_ACEs', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}, {'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'zero_descriptor_size', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 0, 'aces': [{'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'oversized_descriptor', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 65537, 'aces': [{'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+    {'name': 'unavailable_ACE_inventory', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': None, 'controlFlags': 4}},
+    {'name': 'world_denial_not_grant', 'accepted': True, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': 'S-1-5-21-1-2-3-1001', 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-1-0', 'mask': 2032127, 'type': 1, 'flags': 3, 'callback': False, 'qualifier': 1}], 'controlFlags': 4}},
+    {'name': 'missing_owner', 'accepted': False, 'current_sid': 'S-1-5-21-1-2-3-1001', 'ancestor': False, 'descriptor': {'ownerSid': None, 'daclPresent': True, 'daclNull': False, 'descriptorBytes': 256, 'aces': [{'sid': 'S-1-5-21-1-2-3-1001', 'mask': 2032127, 'type': 0, 'flags': 3, 'callback': False, 'qualifier': 0}], 'controlFlags': 4}},
+]
+
+
+@pytest.mark.parametrize("case", ACL_CONTRACT_VECTORS, ids=lambda case: case["name"])
+def test_windows_acl_contract(monkeypatch, case):
+    fixture, requested = windows_environment_fixture(monkeypatch)
+    selected = "C:/Users/runneradmin/AppData/Local" if case["ancestor"] else (
+        "C:/Users/runneradmin/AppData/Local/ppds-native-ci-" + "a" * 32)
+    fixture.forced_security[str(PureWindowsPath(selected))] = copy.deepcopy(case["descriptor"])
+    if case["accepted"]:
+        env = gate.private_environment(requested)
+        assert PureWindowsPath(env["HOME"]).drive == "C:"
+        assert len(fixture.reader_requests) == 2 and len(fixture.saved) == 2
+        assert all(mode == 0o777 for _, mode in fixture.created)
+    else:
+        with pytest.raises(ValueError): gate.private_environment(requested)
+        assert fixture.saved, "Rejected metadata must remain inspectable"
+        if case["ancestor"]: assert fixture.created == []
+
+
+@pytest.mark.parametrize("mutation", ["partial", "count", "boolean-count", "duplicate", "foreign", "missing-sid", "boolean-sid", "empty"])
+def test_windows_acl_response_contract(monkeypatch, mutation):
+    fixture, requested = windows_environment_fixture(monkeypatch)
+    fixture.response_mutation = mutation
+    with pytest.raises(ValueError): gate.private_environment(requested)
+    assert fixture.created == []
+    assert fixture.saved, "Malformed metadata must be retained before failure"
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_posix_private_directories_keep700(monkeypatch, platform):
+    fixture, requested = windows_environment_fixture(monkeypatch)
+    monkeypatch.setattr(gate.sys, "platform", platform)
+    env = gate.private_environment(requested)
+    assert PureWindowsPath(env["HOME"]) == requested.value / "home"
+    assert all(mode == 0o700 for _, mode in fixture.created)
+    assert fixture.reader_requests == [] and fixture.saved == []
+
+
+# Additional reader/ordering tests are separate from the immutable common66 block.
+def reader_process_fixture(monkeypatch):
+    reader = gate.read_windows_security
+    timeout_type = gate.subprocess.TimeoutExpired
+    fixture, requested = windows_environment_fixture(monkeypatch)
+    ps = str(PureWindowsPath("C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"))
+    fixture.nodes[ps] = {"reparse": False, "symlink": False, "redirect": None}
+    monkeypatch.setattr(gate, "plain", lambda path: path)
+    calls = []
+    behavior = {"failure": None}
+
+    def process(command, **kwargs):
+        calls.append((command, kwargs))
+        paths = json.loads(kwargs["input"])["paths"]
+        rows = [dict(synthetic_descriptor(), path=path) for path in paths]
+        payload = {"complete": True, "currentUserSid": SYNTHETIC_USER, "requestedCount": len(paths),
+                   "observedCount": len(rows), "errorType": None, "rows": rows}
+        if behavior["failure"] == "timeout": raise timeout_type(command, 15)
+        if behavior["failure"] == "oserror": raise OSError("synthetic-unreported-reader-message")
+        output = json.dumps(payload).encode()
+        stderr, code = b"", 0
+        if behavior["failure"] == "malformed": output = b"{"
+        if behavior["failure"] == "encoding": output = b"\xff"
+        if behavior["failure"] == "shape": output = b"[]"
+        if behavior["failure"] == "stdout-bound": output = b" " * 131073
+        if behavior["failure"] == "stderr-bound": stderr = b"x" * 16385
+        if behavior["failure"] == "nonzero": code = 1
+        if behavior["failure"] == "stderr": stderr = b"synthetic-unreported-reader-message"
+        return SimpleNamespace(returncode=code, stdout=output, stderr=stderr)
+
+    monkeypatch.setattr(gate, "subprocess", SimpleNamespace(run=process, TimeoutExpired=timeout_type, CREATE_NO_WINDOW=0))
+    return reader, fixture, calls, behavior
+
+
+def test_windows_reader_uses_fixed_noprofile_literal_json_and_scrubbed_environment(monkeypatch):
+    reader, fixture, calls, _ = reader_process_fixture(monkeypatch)
+    for name in ["GH_TOKEN", "PPDS_CLIENT_SECRET", "PPDS_PROFILE", "PPDS_FORMS_LIVE_CONFIRM", "PSModulePath"]:
+        monkeypatch.setenv(name, "synthetic-not-a-credential")
+    paths = [fixture.path("C:/Users/runneradmin/AppData/Local")]
+
+    result = reader(paths)
+
+    assert result["complete"] is True and len(calls) == 1
+    command, kwargs = calls[0]
+    assert PureWindowsPath(command[0]) == PureWindowsPath("C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
+    assert command[1:5] == ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"]
+    assert json.loads(kwargs["input"]) == {"paths": [str(path) for path in paths]}
+    assert not kwargs.get("shell", False) and kwargs["timeout"] == 15
+    assert all(name not in kwargs["env"] for name in ["GH_TOKEN", "PPDS_CLIENT_SECRET", "PPDS_PROFILE", "PPDS_FORMS_LIVE_CONFIRM", "PSModulePath"])
+    assert "Get-Acl -LiteralPath" in command[-1]
+    assert "[BitConverter]::ToUInt32" in command[-1]
+    assert all(token not in command[-1] for token in ["Set-Acl", "SetAccessRule", "SetNamedSecurityInfo", ".Translate(", "Get-AD", "CreateDirectory", "icacls", "takeown"])
+    assert "-ExecutionPolicy" not in command
+
+
+@pytest.mark.parametrize("failure", ["timeout", "oserror", "malformed", "encoding", "shape", "stdout-bound", "stderr-bound", "nonzero", "stderr"])
+def test_windows_reader_failures_return_incomplete_without_echoing_output(monkeypatch, failure):
+    reader, fixture, calls, behavior = reader_process_fixture(monkeypatch)
+    behavior["failure"] = failure
+
+    result = reader([fixture.path("C:/Users/runneradmin/AppData/Local")])
+
+    assert len(calls) == 1 and result["complete"] is False
+    assert "synthetic-unreported-reader-message" not in json.dumps(gate.security_evidence_metadata(result))
+
+
+@pytest.mark.parametrize("path", ["D:/a/_temp", "C:/Users/runneradmin/../Other", "//server/share", "relative"])
+def test_windows_reader_refuses_noncanonical_input_before_process(monkeypatch, path):
+    reader, fixture, calls, _ = reader_process_fixture(monkeypatch)
+
+    with pytest.raises(ValueError): reader([fixture.path(path)])
+
+    assert calls == []
+
+
+def test_windows_reader_unsigned_generic_mask_is_retained_and_checked(monkeypatch):
+    reader, fixture, calls, _ = reader_process_fixture(monkeypatch)
+    result = reader([fixture.path("C:/Users/runneradmin/AppData/Local")])
+    row = result["rows"][0]
+    row["aces"][0].update({"sid": "S-1-1-0", "mask": 0x80000000})
+
+    assert gate.windows_descriptor_policy(row, SYNTHETIC_USER, False)["accepted"] is True
+    row["aces"][0]["mask"] = -2147483648
+    assert gate.windows_descriptor_policy(row, SYNTHETIC_USER, False)["accepted"] is False
+    assert "[BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$rawAce.AccessMask), 0)" in calls[0][0][-1]
+
+
+@pytest.mark.parametrize("field,value", [("controlFlags", True), ("controlFlags", None), ("controlFlags", -1),
+                                         ("descriptorBytes", True), ("descriptorBytes", None),
+                                         ("ace-type", True), ("ace-type", None), ("ace-qualifier", True),
+                                         ("ace-callback", None)])
+def test_windows_security_invalid_typed_fields_fail_closed(monkeypatch, field, value):
+    fixture, requested = windows_environment_fixture(monkeypatch)
+    bad = synthetic_descriptor()
+    if field.startswith("ace-"): bad["aces"][0][field[4:]] = value
+    else: bad[field] = value
+    target = str(PureWindowsPath("C:/Users/runneradmin/AppData/Local/ppds-native-ci-" + "a" * 32))
+    fixture.forced_security[target] = bad
+
+    with pytest.raises(ValueError): gate.private_environment(requested)
+
+    assert len(fixture.created) == 8 and all(mode == 0o777 for _, mode in fixture.created)
+    assert all(path in fixture.nodes for path, _ in fixture.created)
+    assert fixture.saved[-1][1]["accepted"] is False
+
+
+def test_windows_security_checks_parents_before_creation_and_all_private_nodes_after(monkeypatch):
+    fixture, requested = windows_environment_fixture(monkeypatch)
+    events = []
+
+    def inspect(paths):
+        events.append((len(fixture.created), [str(path) for path in paths]))
+        return fixture.read_security(paths)
+
+    monkeypatch.setattr(gate, "read_windows_security", inspect)
+    gate.private_environment(requested)
+
+    assert len(events) == 2 and events[0][0] == 0 and events[1][0] == 8
+    assert len(events[0][1]) <= 8 and len(events[1][1]) == 8
+    assert len(fixture.saved) == 2 and all(value["accepted"] for _, value in fixture.saved)
+
+
+def test_windows_security_rejection_retains_owner_rights_metadata_without_repair(monkeypatch):
+    fixture, requested = windows_environment_fixture(monkeypatch)
+    target = str(PureWindowsPath("C:/Users/runneradmin/AppData/Local/ppds-native-ci-" + "a" * 32))
+    fixture.forced_security[target] = synthetic_descriptor(owner_rights=True)
+
+    with pytest.raises(ValueError): gate.private_environment(requested)
+
+    assert len(fixture.reader_requests) == 2 and len(fixture.created) == 8
+    assert all(path in fixture.nodes and mode == 0o777 for path, mode in fixture.created)
+    retained = fixture.saved[-1][1]
+    assert retained["accepted"] is False
+    assert any(item["sid"] == "S-1-3-4" and item["mask"] == 0x1f01ff
+               for policy in retained["policies"] for item in policy["allowMutation"])
+
+
+@pytest.mark.parametrize("phase", ["parent", "runtime"])
+def test_windows_security_refusal_in_actual_entrypoint_prevents_sdk_or_artifact_dispatch(monkeypatch, phase):
+    fixture, _ = windows_environment_fixture(monkeypatch)
+    base_factory = fixture.path
+
+    def full_path(value):
+        path = base_factory(value)
+        path.absolute = lambda: path
+        mkdir = path.mkdir
+        path.mkdir = lambda mode=0o777, parents=False: mkdir(mode=mode)
+        return path
+
+    fixture.path = full_path
+    monkeypatch.setattr(gate, "Path", full_path)
+    selected = "C:/Users/runneradmin/AppData/Local" if phase == "parent" else (
+        "C:/Users/runneradmin/AppData/Local/ppds-native-ci-" + "a" * 32)
+    fixture.forced_security[str(PureWindowsPath(selected))] = synthetic_descriptor(owner_rights=True)
+    monkeypatch.setattr(gate, "identity", lambda *_: {"rid": "win-x64"})
+    monkeypatch.setattr(gate, "retain_compiled_metadata", lambda *_: {})
+    monkeypatch.setattr(gate, "plain", lambda path: path)
+    monkeypatch.setattr(gate, "digest", lambda path: "a" * 64)
+    dispatched = []
+    monkeypatch.setattr(gate, "run", lambda *args, **kwargs: dispatched.append(args))
+    monkeypatch.setattr(gate, "heartbeat", lambda *args: dispatched.append(args))
+    monkeypatch.setattr(gate.sys, "argv", ["verify", "manifest", "--rid", "win-x64", "--source", "a" * 40,
+                                          "--binary", "C:/synthetic/ppds.exe", "--evidence", "D:/a/_temp/entrypoint-evidence"])
+
+    with pytest.raises(ValueError): gate.main()
+
+    assert dispatched == []
+    assert any(name.endswith("failure.json") and value["passed"] is False for name, value in fixture.saved)
