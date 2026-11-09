@@ -18,7 +18,9 @@ public static class EntityCommand
     /// <summary>
     /// Creates the 'entity' command with read lookup and authoring subcommands.
     /// </summary>
-    public static Command Create()
+    public static Command Create() => Create(null);
+
+    internal static Command Create(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var entityArgument = new Argument<string>("entity")
         {
@@ -52,13 +54,13 @@ public static class EntityCommand
             return await ExecuteAsync(entity!, profile, environment, include, globalOptions, cancellationToken);
         });
 
-        command.Subcommands.Add(CreateCreateCommand());
-        command.Subcommands.Add(CreateUpdateCommand());
-        command.Subcommands.Add(CreateDeleteCommand());
-        command.Subcommands.Add(CreateAddStatusReasonCommand());
+        command.Subcommands.Add(CreateCreateCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateUpdateCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateDeleteCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateAddStatusReasonCommand(serviceProviderFactory));
         command.Subcommands.Add(CreateListStatusReasonsCommand());
-        command.Subcommands.Add(CreateUpdateStatusReasonCommand());
-        command.Subcommands.Add(CreateRemoveStatusReasonCommand());
+        command.Subcommands.Add(CreateUpdateStatusReasonCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateRemoveStatusReasonCommand(serviceProviderFactory));
 
         return command;
     }
@@ -271,7 +273,9 @@ public static class EntityCommand
     // -------------------------------------------------------------------------
 
     /// <summary>Creates the 'entity create' subcommand.</summary>
-    public static Command CreateCreateCommand()
+    public static Command CreateCreateCommand() => CreateCreateCommand(null);
+
+    internal static Command CreateCreateCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -353,7 +357,7 @@ public static class EntityCommand
 
             return await ExecuteCreateAsync(
                 solution, name, displayName, pluralName, ownership, description, dryRun, publish,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -371,17 +375,20 @@ public static class EntityCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -409,13 +416,13 @@ public static class EntityCommand
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(result);
+                MetadataDryRunScope.Publisher.WriteSuccess(writer, dryRun, result);
             }
             else
             {
                 if (dryRun)
                 {
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                    MetadataDryRunScope.Publisher.WriteDiagnostic();
                 }
                 else
                 {
@@ -445,7 +452,9 @@ public static class EntityCommand
     }
 
     /// <summary>Creates the 'entity update' subcommand.</summary>
-    public static Command CreateUpdateCommand()
+    public static Command CreateUpdateCommand() => CreateUpdateCommand(null);
+
+    internal static Command CreateUpdateCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var entityArgument = CreateEntityArgument();
 
@@ -538,7 +547,7 @@ public static class EntityCommand
             return await ExecuteUpdateAsync(
                 solution, entity, displayName, pluralName, description,
                 iconSmall, iconMedium, iconVector, dryRun, publish,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -558,17 +567,20 @@ public static class EntityCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -600,7 +612,7 @@ public static class EntityCommand
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new
+                MetadataDryRunScope.Inputs.WriteSuccess(writer, dryRun, new
                 {
                     entity,
                     updated = true,
@@ -611,7 +623,7 @@ public static class EntityCommand
             }
             else if (dryRun)
             {
-                Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                MetadataDryRunScope.Inputs.WriteDiagnostic();
             }
             else if (publish)
             {
@@ -809,7 +821,9 @@ public static class EntityCommand
     // Status reason subcommands (Phase 4)
     // -------------------------------------------------------------------------
 
-    private static Command CreateAddStatusReasonCommand()
+    private static Command CreateAddStatusReasonCommand() => CreateAddStatusReasonCommand(null);
+
+    private static Command CreateAddStatusReasonCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var entityArgument = CreateEntityArgument();
         var entityOption = CreateEntityOption();
@@ -950,7 +964,7 @@ public static class EntityCommand
 
             return await ExecuteAddStatusReasonAsync(
                 entity, label, value, solution, resolvedStateCode, color, publish, dryRun,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -968,17 +982,20 @@ public static class EntityCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -1008,7 +1025,7 @@ public static class EntityCommand
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new
+                MetadataDryRunScope.DraftValue.WriteSuccess(writer, dryRun, new
                 {
                     entity,
                     label,
@@ -1022,7 +1039,7 @@ public static class EntityCommand
             {
                 if (dryRun)
                 {
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                    MetadataDryRunScope.DraftValue.WriteDiagnostic();
                 }
                 else
                 {
@@ -1142,7 +1159,9 @@ public static class EntityCommand
         }
     }
 
-    private static Command CreateUpdateStatusReasonCommand()
+    private static Command CreateUpdateStatusReasonCommand() => CreateUpdateStatusReasonCommand(null);
+
+    private static Command CreateUpdateStatusReasonCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var entityArgument = CreateEntityArgument();
         var entityOption = CreateEntityOption();
@@ -1232,7 +1251,7 @@ public static class EntityCommand
 
             return await ExecuteUpdateStatusReasonAsync(
                 entity, value, label, newLabel, color, solution, publish,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -1249,17 +1268,20 @@ public static class EntityCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -1316,7 +1338,9 @@ public static class EntityCommand
         }
     }
 
-    private static Command CreateRemoveStatusReasonCommand()
+    private static Command CreateRemoveStatusReasonCommand() => CreateRemoveStatusReasonCommand(null);
+
+    private static Command CreateRemoveStatusReasonCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var entityArgument = CreateEntityArgument();
         var entityOption = CreateEntityOption();
@@ -1400,7 +1424,7 @@ public static class EntityCommand
 
             return await ExecuteRemoveStatusReasonAsync(
                 entity, value, label, solution, force, publish,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -1416,17 +1440,20 @@ public static class EntityCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 

@@ -36,7 +36,7 @@ public static class DeployCommand
 
         var cleanOption = new Option<bool>("--clean")
         {
-            Description = "Also remove orphaned registrations not in config",
+            Description = "Version 1: legacy parent cleanup; version 2: prune owned images on configured steps",
             DefaultValueFactory = _ => false
         };
 
@@ -98,8 +98,7 @@ public static class DeployCommand
             var config = PluginRegistrationJson.Deserialize(configJson);
 
             if (config.Version == PluginRegistrationContract.ReconciliationVersion && clean)
-                throw new PpdsException(ErrorCodes.Validation.InvalidValue,
-                    "Version 2 reconciliation does not authorize parent cleanup. Image pruning and ownership require a separately adopted contract.");
+                PluginImagePruningService.ValidateAuthority(config.Assemblies, cancellationToken);
 
             var configuredCustomApiCount = (config?.CustomApis?.Count ?? 0)
                 + (config?.Assemblies?.Sum(assembly => assembly.CustomApis?.Count ?? 0) ?? 0);
@@ -142,6 +141,11 @@ public static class DeployCommand
             cancellationToken.ThrowIfCancellationRequested();
 
             var registrationService = serviceProvider.GetRequiredService<IPluginRegistrationService>();
+            PluginImagePruningPlan? imageCleanupPlan = null;
+            if (config.Version == PluginRegistrationContract.ReconciliationVersion && clean)
+                imageCleanupPlan = await PluginImagePruningService.PlanAsync(registrationService, config.Assemblies,
+                    deploymentPreflights.Where(p => p.PackageName is not null)
+                        .ToDictionary(p => p.Assembly.Name, p => p.PackageName!, StringComparer.OrdinalIgnoreCase), cancellationToken);
             await PluginRegistrationPlanningService.ValidateRunAsUsersAsync(registrationService, config.Assemblies ?? [], cancellationToken);
             var customApiService = serviceProvider.GetRequiredService<ICustomApiService>();
 
@@ -174,7 +178,8 @@ public static class DeployCommand
                         dryRun,
                         globalOptions,
                         cancellationToken,
-                        deploymentPreflight: deploymentPreflights[index]);
+                        deploymentPreflight: deploymentPreflights[index],
+                        imagePruningPlan: imageCleanupPlan?.ForAssembly(assemblyConfig.Name), deferImagePruning: true);
 
                     results.Add(result);
                 }
@@ -202,8 +207,16 @@ public static class DeployCommand
 
             cancellationToken.ThrowIfCancellationRequested();
 
+            // The full cleanup plan existed before all writes. Apply only after ordinary deployment succeeds.
+            if (imageCleanupPlan is not null && results.All(r => r.Success))
+            {
+                var cleanup = dryRun ? new PluginImagePruningResult(imageCleanupPlan) { Success = true, Status = "preview-only" }
+                    : await PluginImagePruningService.ApplyAsync(registrationService, imageCleanupPlan, cancellationToken);
+                foreach (var result in results) AttachImageCleanup(result, cleanup);
+            }
+
             // Opt-in reconciliation verifies stored nonsecret state after acknowledged writes.
-            // No pruning is inferred: extra registrations remain drift and produce non-success.
+            // Only an explicit v2 cleanup plan authorizes image deletions; remaining extras stay drift.
             PluginDiffResult? verification = null;
             if (config.Version == PluginRegistrationContract.ReconciliationVersion && dryRun)
                 foreach (var result in results) result.ReconciliationStatus = "preview-only";
@@ -235,7 +248,7 @@ public static class DeployCommand
 
                 Console.Error.WriteLine($"Deployment complete: {totalCreated} created, {totalUpdated} updated, {totalDeleted} deleted");
                 if (verification is not null)
-                    Console.Error.WriteLine($"Nonsecret reconciliation verification: {verification.Status}; no pruning or rollback was attempted.");
+                    Console.Error.WriteLine($"Nonsecret reconciliation verification: {verification.Status}; no rollback was attempted.");
                 if (results.Any(r => !r.Success)) WriteRetainedOutcomes(results);
             }
 
@@ -244,6 +257,8 @@ public static class DeployCommand
         catch (OperationCanceledException ex)
         {
             if (GetInterruptedResult(ex) is { } interrupted && !results.Contains(interrupted)) results.Add(interrupted);
+            if (PluginImagePruningService.InterruptedResult(ex) is { } cleanup)
+                foreach (var result in results) AttachImageCleanup(result, cleanup);
             if (!globalOptions.IsJsonMode) WriteRetainedOutcomes(results);
             writer.WriteResult(new CommandResult<List<DeploymentResult>>
             {
@@ -255,6 +270,8 @@ public static class DeployCommand
         }
         catch (Exception ex)
         {
+            if (PluginImagePruningService.InterruptedResult(ex) is { } cleanup)
+                foreach (var result in results) AttachImageCleanup(result, cleanup);
             if (!globalOptions.IsJsonMode) WriteRetainedOutcomes(results);
             var error = ExceptionMapper.Map(ex, context: "deploying plugins", debug: globalOptions.Debug);
             if (results.Count == 0) writer.WriteError(error);
@@ -365,7 +382,9 @@ public static class DeployCommand
         GlobalOptionValues globalOptions,
         CancellationToken cancellationToken,
         Func<string, CancellationToken, Task<byte[]>>? packageContentReader = null,
-        AssemblyDeploymentPreflight? deploymentPreflight = null)
+        AssemblyDeploymentPreflight? deploymentPreflight = null,
+        PluginImagePruningPlan? imagePruningPlan = null,
+        bool deferImagePruning = false)
     {
         var result = new DeploymentResult
         {
@@ -401,11 +420,18 @@ public static class DeployCommand
 
             cancellationToken.ThrowIfCancellationRequested();
 
+            if (clean && assemblyConfig.OperationIntent is not (RegistrationOperationIntent.Patch or RegistrationOperationIntent.Deploy or RegistrationOperationIntent.Reconcile))
+                throw new PpdsException(ErrorCodes.Validation.InvalidValue, "Unsupported cleanup registration contract.");
+            if (clean && assemblyConfig.OperationIntent == RegistrationOperationIntent.Reconcile)
+                imagePruningPlan ??= await PluginImagePruningService.PlanAsync(service, [assemblyConfig],
+                    deploymentPreflight.PackageName is null ? null : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    { [assemblyConfig.Name] = deploymentPreflight.PackageName }, cancellationToken);
+
             await PluginRegistrationPlanningService.ValidateRunAsUsersAsync(service, [assemblyConfig], cancellationToken);
 
             // Deploy assembly or package based on type
             Guid assemblyId;
-            if (assemblyConfig.Type == "Nuget")
+            if (string.Equals(assemblyConfig.Type, "Nuget", StringComparison.OrdinalIgnoreCase))
             {
                 // For NuGet packages, upload the entire .nupkg to pluginpackage entity
                 var packageBytes = deploymentPreflight.ArtifactBytes;
@@ -696,7 +722,7 @@ public static class DeployCommand
 
             // Handle orphan cleanup if requested. Orphans are the environment steps the matcher could
             // not pair to any configured step; delete exactly those rows by GUID.
-            if (clean)
+            if (clean && assemblyConfig.OperationIntent != RegistrationOperationIntent.Reconcile)
             {
                 var orphanedSteps = matches.Where(m => m.IsOrphaned).Select(m => m.Env!).ToList();
 
@@ -737,7 +763,7 @@ public static class DeployCommand
                         ", ",
                         orphanedSteps.Select(o => $"{o.Name} ({o.Stage}, {o.Mode})"));
                     var guidance = assemblyConfig.OperationIntent == RegistrationOperationIntent.Reconcile
-                        ? "They remain drift; removal requires separate explicit ownership/adoption and cleanup."
+                        ? "Version 2 --clean removes owned images only. Parent registrations remain drift; their removal requires separate explicit ownership/adoption."
                         : "Re-run with --clean to remove them.";
                     var warning =
                         $"{orphanedSteps.Count} step(s) in the environment no longer match the configuration and were " +
@@ -757,10 +783,17 @@ public static class DeployCommand
                 result.Success = false;
                 result.Error = string.Join("; ", stepErrors);
             }
+            if (clean && imagePruningPlan is not null && !deferImagePruning && result.Success)
+            {
+                var cleanup = dryRun ? new PluginImagePruningResult(imagePruningPlan) { Success = true, Status = "preview-only" }
+                    : await PluginImagePruningService.ApplyAsync(service, imagePruningPlan, cancellationToken);
+                AttachImageCleanup(result, cleanup);
+            }
             cancellationToken.ThrowIfCancellationRequested();
         }
         catch (OperationCanceledException ex)
         {
+            if (PluginImagePruningService.InterruptedResult(ex) is { } cleanup) AttachImageCleanup(result, cleanup);
             RetainFailedOutcomes(result, calls, ex);
             result.Status = "cancelled";
             result.ErrorCode = ErrorCodes.Operation.Cancelled;
@@ -770,6 +803,7 @@ public static class DeployCommand
         }
         catch (Exception ex)
         {
+            if (PluginImagePruningService.InterruptedResult(ex) is { } cleanup) AttachImageCleanup(result, cleanup);
             RetainFailedOutcomes(result, calls, ex);
             var failure = ex is PpdsException known ? known.UserMessage : "Plugin deployment operation failed; see retained acknowledged and unknown effects.";
             result.Error = string.Join("; ", stepErrors.Append(failure));
@@ -800,13 +834,27 @@ public static class DeployCommand
         Console.Error.WriteLine("Retained deployment effects (no rollback was attempted):");
         foreach (var result in results)
         {
-            Console.Error.WriteLine($"  {result.AssemblyName}: {result.Status}; steps {result.StepsCreated} created, {result.StepsUpdated} updated, {result.StepsDeleted} deleted; images {result.ImagesCreated} created, {result.ImagesUpdated} updated.");
+            Console.Error.WriteLine($"  {result.AssemblyName}: {result.Status}; steps {result.StepsCreated} created, {result.StepsUpdated} updated, {result.StepsDeleted} deleted; images {result.ImagesCreated} created, {result.ImagesUpdated} updated, {result.ImagesDeleted} deleted.");
             foreach (var outcome in result.Outcomes)
                 Console.Error.WriteLine($"    {outcome.Scope}/{outcome.Phase}: {outcome.Entity} {outcome.Operation} {outcome.RecordId} — {outcome.Outcome}");
         }
         Console.Error.WriteLine($"  Coverage: {results[0].OutcomeCoverage}");
     }
     internal static DeploymentResult? GetInterruptedResult(Exception exception) => exception.Data[InterruptedResultKey] as DeploymentResult;
+
+    private static void AttachImageCleanup(DeploymentResult result, PluginImagePruningResult cleanup)
+    {
+        var scoped = cleanup.ForAssembly(result.AssemblyName);
+        result.ImageCleanup = scoped;
+        result.ImagesDeleted = scoped.ImagesDeleted;
+        foreach (var outcome in scoped.Outcomes)
+            if (!result.Outcomes.Any(o => o.EventId == outcome.EventId)) result.Outcomes.Add(outcome);
+        if (!scoped.Success)
+        {
+            result.Success = false;
+            result.Status = scoped.Status;
+        }
+    }
 
     private static void RetainFailedOutcomes(DeploymentResult result, PluginMutationJournal calls, Exception exception)
     {
@@ -958,6 +1006,10 @@ public static class DeployCommand
 
     internal sealed class DeploymentResult
     {
+        [JsonPropertyName("imageCleanup")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public PluginImagePruningResult? ImageCleanup { get; set; }
+
         [JsonPropertyName("assemblyName")]
         public string AssemblyName { get; set; } = string.Empty;
 

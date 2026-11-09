@@ -17,7 +17,9 @@ public static class OptionSetCommand
     /// <summary>
     /// Creates the 'optionset' command with a positional read and write subcommands.
     /// </summary>
-    public static Command Create()
+    public static Command Create() => Create(null);
+
+    internal static Command Create(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var nameArgument = new Argument<string?>("name")
         {
@@ -34,12 +36,12 @@ public static class OptionSetCommand
 
         GlobalOptions.AddToCommand(command);
 
-        command.Subcommands.Add(CreateCreateCommand());
-        command.Subcommands.Add(CreateUpdateCommand());
-        command.Subcommands.Add(CreateDeleteCommand());
-        command.Subcommands.Add(CreateAddOptionCommand());
-        command.Subcommands.Add(CreateUpdateOptionCommand());
-        command.Subcommands.Add(CreateRemoveOptionCommand());
+        command.Subcommands.Add(CreateCreateCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateUpdateCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateDeleteCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateAddOptionCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateUpdateOptionCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateRemoveOptionCommand(serviceProviderFactory));
         command.Subcommands.Add(CreateReorderCommand());
 
         command.SetAction(async (parseResult, cancellationToken) =>
@@ -163,7 +165,9 @@ public static class OptionSetCommand
     /// <summary>
     /// Creates the 'create' subcommand for a new global option set.
     /// </summary>
-    public static Command CreateCreateCommand()
+    public static Command CreateCreateCommand() => CreateCreateCommand(null);
+
+    internal static Command CreateCreateCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -185,7 +189,7 @@ public static class OptionSetCommand
 
         var optionsOption = new Option<string>("--options")
         {
-            Description = "Option definitions: \"Label1=1,Label2=2\"",
+            Description = "Option definitions: \"Label1,Label2=718980001\"; omitted values derive from the solution publisher",
             Required = true
         };
 
@@ -228,7 +232,7 @@ public static class OptionSetCommand
 
             return await ExecuteCreateAsync(
                 solution, name, displayName, optionsRaw, description, dryRun,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -244,7 +248,8 @@ public static class OptionSetCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
@@ -252,11 +257,13 @@ public static class OptionSetCommand
         {
             var options = ParseOptionDefinitions(optionsRaw);
 
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -279,16 +286,19 @@ public static class OptionSetCommand
             };
 
             var result = await authoringService.CreateGlobalChoiceAsync(request, ct: cancellationToken);
+            var previewScope = dryRun && request.Options is { Length: > 0 }
+                && request.Options.Any(option => !option.HasExplicitValue)
+                    ? MetadataDryRunScope.PublisherProvisional : MetadataDryRunScope.Publisher;
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(result);
+                previewScope.WriteSuccess(writer, dryRun, result);
             }
             else
             {
                 if (dryRun)
                 {
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                    previewScope.WriteDiagnostic();
                 }
                 else
                 {
@@ -320,7 +330,9 @@ public static class OptionSetCommand
     /// <summary>
     /// Creates the 'update' subcommand for an existing global option set.
     /// </summary>
-    public static Command CreateUpdateCommand()
+    public static Command CreateUpdateCommand() => CreateUpdateCommand(null);
+
+    internal static Command CreateUpdateCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -376,7 +388,7 @@ public static class OptionSetCommand
 
             return await ExecuteUpdateAsync(
                 solution, name, displayName, description, dryRun,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -391,17 +403,20 @@ public static class OptionSetCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -429,7 +444,7 @@ public static class OptionSetCommand
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new
+                MetadataDryRunScope.Inputs.WriteSuccess(writer, dryRun, new
                 {
                     name,
                     updated = true,
@@ -440,7 +455,7 @@ public static class OptionSetCommand
             }
             else if (dryRun)
             {
-                Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                MetadataDryRunScope.Inputs.WriteDiagnostic();
             }
             else
             {
@@ -634,7 +649,9 @@ public static class OptionSetCommand
     /// <summary>
     /// Creates the 'add-option' subcommand.
     /// </summary>
-    public static Command CreateAddOptionCommand()
+    public static Command CreateAddOptionCommand() => CreateAddOptionCommand(null);
+
+    internal static Command CreateAddOptionCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -698,7 +715,7 @@ public static class OptionSetCommand
 
             return await ExecuteAddOptionAsync(
                 solution, name, label, value, color, dryRun,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -714,17 +731,20 @@ public static class OptionSetCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -752,11 +772,11 @@ public static class OptionSetCommand
             {
                 // On dry-run the SDK never assigns a value, so report the requested one
                 // (null = would be auto-assigned at execution time).
-                writer.WriteSuccess(new { optionSetName = name, label, value = dryRun ? value : assignedValue, dryRun });
+                MetadataDryRunScope.RequestedValue.WriteSuccess(writer, dryRun, new { optionSetName = name, label, value = dryRun ? value : assignedValue, dryRun });
             }
             else if (dryRun)
             {
-                Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                MetadataDryRunScope.RequestedValue.WriteDiagnostic();
             }
             else
             {
@@ -782,7 +802,9 @@ public static class OptionSetCommand
     /// <summary>
     /// Creates the 'update-option' subcommand.
     /// </summary>
-    public static Command CreateUpdateOptionCommand()
+    public static Command CreateUpdateOptionCommand() => CreateUpdateOptionCommand(null);
+
+    internal static Command CreateUpdateOptionCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -867,7 +889,7 @@ public static class OptionSetCommand
 
             return await ExecuteUpdateOptionAsync(
                 solution, name, value, label, newLabel, color, dryRun,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -884,17 +906,20 @@ public static class OptionSetCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -921,11 +946,11 @@ public static class OptionSetCommand
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { optionSetName = name, updated = true, dryRun });
+                MetadataDryRunScope.Option.WriteSuccess(writer, dryRun, new { optionSetName = name, updated = true, dryRun });
             }
             else if (dryRun)
             {
-                Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                MetadataDryRunScope.Option.WriteDiagnostic();
             }
             else
             {
@@ -1264,18 +1289,21 @@ public static class OptionSetCommand
     internal static OptionDefinition[] ParseOptionDefinitions(string raw)
     {
         var result = new List<OptionDefinition>();
-
         foreach (var pair in raw.Split(','))
         {
             var trimmed = pair.Trim();
-            // Split on the LAST '=' so labels can contain '=' characters
+            if (trimmed.Length == 0) continue;
             var lastEquals = trimmed.LastIndexOf('=');
-            if (lastEquals > 0 && int.TryParse(trimmed[(lastEquals + 1)..].Trim(), out var value))
+            if (lastEquals < 0)
             {
-                result.Add(new OptionDefinition { Label = trimmed[..lastEquals].Trim(), Value = value });
+                result.Add(new OptionDefinition { Label = trimmed });
+                continue;
             }
+            var label = trimmed[..lastEquals].Trim();
+            if (label.Length == 0 || !int.TryParse(trimmed[(lastEquals + 1)..].Trim(), out var value))
+                throw new FormatException($"Invalid option '{trimmed}': expected a label or Label=integer.");
+            result.Add(new OptionDefinition { Label = label, Value = value });
         }
-
         return result.ToArray();
     }
 

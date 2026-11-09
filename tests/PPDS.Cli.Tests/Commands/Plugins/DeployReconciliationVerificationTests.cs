@@ -155,9 +155,10 @@ public sealed class DeployReconciliationVerificationTests
         Assert.Contains("left in place", warning, StringComparison.OrdinalIgnoreCase);
         if (version == "2.0")
         {
-            Assert.DoesNotContain("--clean", warning);
+            Assert.Contains("Version 2 --clean removes owned images only", warning, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Re-run with --clean to remove them", warning, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("separate", warning, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("cleanup", warning, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Parent registrations remain drift", warning, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("adoption", warning, StringComparison.OrdinalIgnoreCase);
             Assert.Equal("drift", row.GetProperty("reconciliationStatus").GetString());
         }
@@ -172,9 +173,10 @@ public sealed class DeployReconciliationVerificationTests
             item.GetProperty("field").GetString() == field && item.GetProperty("intent").GetString() == intent);
 
     [Fact]
-    public async Task Version2_CleanIsRejectedBeforeConnectingOrMutating()
+    public async Task Version2_CleanOmittedImagesIsRejectedBeforeConnectingOrMutating()
     {
         using var fixture = new CommandFixture("2.0");
+        fixture.OmitImages();
 
         Assert.NotEqual(0, await fixture.RunAsync(clean: true));
 
@@ -183,6 +185,34 @@ public sealed class DeployReconciliationVerificationTests
         Assert.Equal("Validation.InvalidValue", json.RootElement.GetProperty("error").GetProperty("code").GetString());
         Assert.Equal(0, fixture.ProviderCalls);
         Assert.Empty(fixture.Service.Invocations);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Version2_CleanPlansBeforeWritesAndPrunesOnlyImages(bool dryRun)
+    {
+        using var fixture = new CommandFixture("2.0");
+        var extra = new PluginImageInfo { Id = Guid.NewGuid(), Name = "Extra", ImageType = "PreImage", StepId = fixture.StoredStep.Id };
+        fixture.StoredImages.Add(extra);
+
+        Assert.Equal(0, await fixture.RunAsync(dryRun: dryRun, clean: true));
+
+        using var json = JsonDocument.Parse(fixture.Output.ToString());
+        var row = SingleDeployment(json.RootElement);
+        var cleanup = row.GetProperty("imageCleanup");
+        Assert.Equal(extra.Id.ToString(), cleanup.GetProperty("plan").GetProperty("images")[0].GetProperty("imageId").GetString());
+        Assert.Equal(dryRun ? "preview-only" : "completed", cleanup.GetProperty("status").GetString());
+        Assert.Equal(dryRun ? 0 : 1, row.GetProperty("imagesDeleted").GetInt32());
+        Assert.Equal(0, row.GetProperty("stepsDeleted").GetInt32());
+        Assert.DoesNotContain(fixture.Service.Invocations, call => call.Method.Name is "DeleteStepAsync" or "DeletePluginTypeAsync");
+        if (dryRun) fixture.VerifyNoDeletes();
+        else
+        {
+            Assert.True(fixture.Events.IndexOf("cleanup-plan") < fixture.Events.IndexOf("write-assembly"));
+            Assert.True(fixture.Events.IndexOf("delete-image") > fixture.Events.IndexOf("write-step"));
+            Assert.Empty(fixture.StoredImages);
+        }
     }
 
     private static JsonElement SingleDeployment(JsonElement envelope)
@@ -216,6 +246,7 @@ public sealed class DeployReconciliationVerificationTests
 
         public CommandFixture(string version)
         {
+            StoredStep.PluginTypeId = _typeId;
             Directory.CreateDirectory(_directory);
             // Existing DeployPreviewTests uses this local artifact seam: bytes are buffered,
             // passed to the mock, and never loaded or uploaded by these tests.
@@ -234,6 +265,19 @@ public sealed class DeployReconciliationVerificationTests
                     Events.Add(options?.IncludeHidden == true ? "verify" : "inventory"))
                 .ReturnsAsync(() => [StoredStep, .. AdditionalStoredSteps]);
             Service.Setup(s => s.ListImagesForStepAsync(StoredStep.Id, CancellationToken.None)).ReturnsAsync(() => StoredImages);
+            Service.Setup(s => s.ListAssembliesAsync("LocalFixture", It.IsAny<PluginListOptions?>(), CancellationToken.None))
+                .Callback(() => Events.Add("cleanup-plan"))
+                .ReturnsAsync([new PluginAssemblyInfo { Id = _assemblyId, Name = "LocalFixture" }]);
+            Service.Setup(s => s.GetAssemblyByIdAsync(_assemblyId, CancellationToken.None))
+                .ReturnsAsync(new PluginAssemblyInfo { Id = _assemblyId, Name = "LocalFixture" });
+            Service.Setup(s => s.GetPluginTypeByNameOrIdAsync(_typeId.ToString("D"), CancellationToken.None))
+                .ReturnsAsync(new PluginTypeInfo { Id = _typeId, TypeName = "Contoso.Handler", AssemblyId = _assemblyId });
+            Service.Setup(s => s.GetStepByNameOrIdAsync(StoredStep.Id.ToString("D"), CancellationToken.None)).ReturnsAsync(() => StoredStep);
+            Service.Setup(s => s.GetImageByNameOrIdAsync(It.IsAny<string>(), CancellationToken.None))
+                .ReturnsAsync((string id, CancellationToken _) => StoredImages.SingleOrDefault(i => i.Id.ToString("D") == id));
+            Service.Setup(s => s.DeleteImageAsync(It.IsAny<Guid>(), CancellationToken.None))
+                .Callback<Guid, CancellationToken>((id, _) => { Events.Add("delete-image"); StoredImages.RemoveAll(i => i.Id == id); })
+                .Returns(Task.CompletedTask);
             Service.Setup(s => s.GetSdkMessageIdAsync("Update", CancellationToken.None)).ReturnsAsync(_messageId);
             Service.Setup(s => s.GetSdkMessageFilterIdAsync(_messageId, "account", null, CancellationToken.None)).ReturnsAsync(_filterId);
             Guid? callingUserId = null;
@@ -255,6 +299,14 @@ public sealed class DeployReconciliationVerificationTests
             step["unsecureConfiguration"] = ordinaryMarker;
             step["secureConfiguration"] = secureMarker;
             step["images"] = new JsonArray(new JsonObject { ["name"] = "Before", ["imageType"] = "PreImage" });
+            File.WriteAllText(path, config.ToJsonString());
+        }
+
+        public void OmitImages()
+        {
+            var path = Path.Combine(_directory, "registrations.json");
+            var config = JsonNode.Parse(File.ReadAllText(path))!;
+            config["assemblies"]![0]!["types"]![0]!["steps"]![0]!.AsObject().Remove("images");
             File.WriteAllText(path, config.ToJsonString());
         }
 

@@ -142,13 +142,15 @@ public class ChoiceOptionParsingTests
     }
 
     [Fact]
-    public void ParseOptionDefinitions_InvalidPairs_SkipsInvalid()
+    public void ParseOptionDefinitions_BareLabelsRemainInOrder()
     {
         var result = OptionSetCommand.ParseOptionDefinitions("Active=1,BadEntry,Inactive=2");
 
-        Assert.Equal(2, result.Length);
+        Assert.Equal(3, result.Length);
         Assert.Equal("Active", result[0].Label);
-        Assert.Equal("Inactive", result[1].Label);
+        Assert.Equal("BadEntry", result[1].Label);
+        Assert.False(result[1].HasExplicitValue);
+        Assert.Equal("Inactive", result[2].Label);
     }
 
     [Fact]

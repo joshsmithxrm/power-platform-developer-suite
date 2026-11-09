@@ -17,18 +17,22 @@ public static class KeyCommandGroup
     /// <summary>
     /// Creates the 'key' command group with subcommands.
     /// </summary>
-    public static Command Create()
+    public static Command Create() => Create(null);
+
+    internal static Command Create(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var command = new Command("key", "Create, delete, or reactivate alternate keys on Dataverse tables");
 
-        command.Subcommands.Add(CreateCreateCommand());
-        command.Subcommands.Add(CreateDeleteCommand());
+        command.Subcommands.Add(CreateCreateCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateDeleteCommand(serviceProviderFactory));
         command.Subcommands.Add(CreateReactivateCommand());
 
         return command;
     }
 
-    internal static Command CreateCreateCommand()
+    internal static Command CreateCreateCommand() => CreateCreateCommand(null);
+
+    internal static Command CreateCreateCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -94,7 +98,7 @@ public static class KeyCommandGroup
 
             return await ExecuteCreateAsync(
                 solution, entity, name, displayName, attributesRaw, dryRun,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -118,7 +122,8 @@ public static class KeyCommandGroup
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
@@ -126,11 +131,13 @@ public static class KeyCommandGroup
         {
             var attributes = ParseAttributes(attributesRaw);
 
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -158,13 +165,13 @@ public static class KeyCommandGroup
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(result);
+                MetadataDryRunScope.Publisher.WriteSuccess(writer, dryRun, result);
             }
             else
             {
                 if (dryRun)
                 {
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                    MetadataDryRunScope.Publisher.WriteDiagnostic();
                 }
                 else
                 {

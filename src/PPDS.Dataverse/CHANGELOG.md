@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Keep the public int OptionDefinition.Value accessors and add a read-only HasExplicitValue presence getter. System.Text.Json preserves omission versus explicit zero across roundtrips; omit Value to request allocation. This is an additive public API change (#1530).
+
+
 ## [1.4.0] - 2026-11-01
 
 ### Changed
