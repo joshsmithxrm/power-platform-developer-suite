@@ -490,7 +490,7 @@ public static class OptionSetCommand
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = MetadataDeletePreview.InputOnlyHelp,
+            Description = MetadataDeletePreview.DependenciesHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -556,29 +556,10 @@ public static class OptionSetCommand
                 Console.Error.WriteLine();
             }
 
-            // Validate required inputs only; target existence and dependencies are not queried.
-            var dryRunRequest = new DeleteGlobalChoiceRequest
-            {
-                SolutionUniqueName = solution,
-                Name = name,
-                DryRun = true
-            };
-
-            await authoringService.DeleteGlobalChoiceAsync(dryRunRequest, ct: cancellationToken);
-
-            if (dryRun)
-            {
-                if (globalOptions.IsJsonMode)
-                {
-                    writer.WriteSuccess(new { name, dryRun = true, preview = MetadataDeletePreview.InputOnly });
-                }
-                else
-                {
-                    MetadataDeletePreview.InputOnly.WriteDiagnostic();
-                }
-
-                return ExitCodes.Success;
-            }
+            var preview = await MetadataDeletePreview.InspectDependenciesAsync(authoringService,
+                new MetadataDeleteTarget(MetadataDeleteKind.GlobalChoice, solution, Name: name), cancellationToken);
+            if (dryRun || !preview.IsClear)
+                return MetadataDeletePreview.WriteDependencies(writer, new { name, dryRun, preview }, preview);
 
             // Confirmation prompt
             if (!force)

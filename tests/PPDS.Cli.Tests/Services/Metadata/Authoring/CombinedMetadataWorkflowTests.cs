@@ -12,6 +12,7 @@ using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Cli.Tests.Services.Shared;
 using PPDS.Cli.Tests.TestHelpers;
+using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Dataverse.Pooling;
 using Xunit;
@@ -28,6 +29,7 @@ public sealed class CombinedMetadataWorkflowTests : IDisposable
     private const string Local = "new_category";
     private const string Canonical = "new_ServiceType";
     private readonly CancellationTokenSource _cancellation = new();
+    private CancellationToken _operationToken;
     private readonly Queue<Func<OrganizationRequest, OrganizationResponse>> _replies = new();
     private readonly List<int> _sdkLeases = [];
     private int _checkouts;
@@ -36,8 +38,14 @@ public sealed class CombinedMetadataWorkflowTests : IDisposable
 
     public CombinedMetadataWorkflowTests()
     {
+        _operationToken = _cancellation.Token;
         var pool = new Mock<IDataverseConnectionPool>(MockBehavior.Strict);
-        pool.Setup(p => p.GetClientAsync(null, null, _cancellation.Token)).ReturnsAsync(CheckOut);
+        pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
+            .Returns<DataverseClientOptions?, string?, CancellationToken>((_, _, token) =>
+            {
+                Assert.Equal(_operationToken, token);
+                return Task.FromResult(CheckOut());
+            });
         _service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard());
     }
 
@@ -222,8 +230,38 @@ public sealed class CombinedMetadataWorkflowTests : IDisposable
     private async Task PreviewDeleteAsync()
     {
         var checkoutsBeforePreview = _checkouts;
-        var cmd = EntityCommand.CreateDeleteCommand(_ =>
-            Task.FromResult(new ServiceCollection().AddSingleton<IMetadataAuthoringService>(_service).BuildServiceProvider()));
+        var sdkOperationsBeforePreview = _sdkLeases.Count;
+        var previousToken = _operationToken;
+        var targetMetadataId = Guid.Parse("88888888-8888-8888-8888-888888888888");
+        var providerCalls = 0;
+        Expect<RetrieveEntityRequest>(r =>
+        {
+            Assert.Equal(Table, r.LogicalName);
+            Assert.Equal(EntityFilters.Entity, r.EntityFilters);
+            Assert.True(r.RetrieveAsIfPublished);
+            Assert.Equal(Guid.Empty, r.MetadataId);
+            return new RetrieveEntityResponse { Results = new ParameterCollection
+            {
+                ["EntityMetadata"] = new EntityMetadata { LogicalName = Table, MetadataId = targetMetadataId }
+            } };
+        });
+        Expect<RetrieveDependenciesForDeleteRequest>(r =>
+        {
+            Assert.Equal(targetMetadataId, r.ObjectId);
+            Assert.Equal(1, r.ComponentType);
+            return new RetrieveDependenciesForDeleteResponse { Results = new ParameterCollection
+            {
+                ["EntityCollection"] = new EntityCollection { MoreRecords = false, TotalRecordCount = 0, TotalRecordCountLimitExceeded = false }
+            } };
+        });
+        var cmd = EntityCommand.CreateDeleteCommand(token =>
+        {
+            Assert.Equal(0, providerCalls++);
+            Assert.Null(_activeLease);
+            Assert.Equal(_cancellation.Token, previousToken);
+            _operationToken = token;
+            return Task.FromResult(new ServiceCollection().AddSingleton<IMetadataAuthoringService>(_service).BuildServiceProvider());
+        });
         var parsed = cmd.Parse(["--solution", Solution, "--entity", Table, "--dry-run", "--output-format", "json"]);
         Assert.Empty(parsed.Errors);
         using var output = new StringWriter();
@@ -231,21 +269,32 @@ public sealed class CombinedMetadataWorkflowTests : IDisposable
         try
         {
             Console.SetOut(output);
-            Assert.Equal(ExitCodes.Success, await parsed.InvokeAsync());
+            Assert.Equal(ExitCodes.Success, await parsed.InvokeAsync(cancellationToken: _cancellation.Token));
         }
         finally
         {
             Console.SetOut(original);
+            _operationToken = previousToken;
         }
+        Assert.Equal(1, providerCalls);
+        Assert.Equal(_cancellation.Token, _operationToken);
         using var json = JsonDocument.Parse(output.ToString());
+        Assert.True(json.RootElement.GetProperty("success").GetBoolean());
         var data = json.RootElement.GetProperty("data");
         Assert.True(data.GetProperty("dryRun").GetBoolean());
         var preview = data.GetProperty("preview");
-        Assert.Equal("input-only", preview.GetProperty("validationScope").GetString());
-        Assert.False(preview.GetProperty("targetExistenceChecked").GetBoolean());
-        Assert.False(preview.GetProperty("dependenciesChecked").GetBoolean());
+        Assert.Equal("delete-dependencies", preview.GetProperty("validationScope").GetString());
+        Assert.True(preview.GetProperty("targetExistenceChecked").GetBoolean());
+        Assert.True(preview.GetProperty("dependenciesChecked").GetBoolean());
         Assert.False(preview.GetProperty("deletionFeasibilityChecked").GetBoolean());
-        Assert.Equal(checkoutsBeforePreview, _checkouts);
+        Assert.Equal("no-blocking-dependencies", preview.GetProperty("status").GetString());
+        Assert.Equal(targetMetadataId, preview.GetProperty("targetObjectId").GetGuid());
+        Assert.Equal(1, preview.GetProperty("targetComponentType").GetInt32());
+        Assert.Empty(preview.GetProperty("blockingComponents").EnumerateArray());
+        Assert.Equal(0, preview.GetProperty("dependencyRowCount").GetInt32());
+        Assert.Equal(0, preview.GetProperty("distinctComponentCount").GetInt32());
+        Assert.Equal(checkoutsBeforePreview + 2, _checkouts);
+        Assert.Equal(new[] { checkoutsBeforePreview + 1, checkoutsBeforePreview + 2 }, _sdkLeases.Skip(sdkOperationsBeforePreview));
         AssertReleased();
     }
 
@@ -261,9 +310,10 @@ public sealed class CombinedMetadataWorkflowTests : IDisposable
             _activeLease = null;
             return ValueTask.CompletedTask;
         });
-        client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), _cancellation.Token))
-            .Returns<QueryBase, CancellationToken>((query, _) =>
+        client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .Returns<QueryBase, CancellationToken>((query, token) =>
             {
+                Assert.Equal(_operationToken, token);
                 Assert.Equal(id, _activeLease);
                 var table = Assert.IsType<QueryExpression>(query).EntityName;
                 var row = new Entity(table);
@@ -276,9 +326,10 @@ public sealed class CombinedMetadataWorkflowTests : IDisposable
                 }
                 return Task.FromResult(new EntityCollection(new List<Entity> { row }));
             });
-        client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), _cancellation.Token))
-            .Returns<OrganizationRequest, CancellationToken>((request, _) =>
+        client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((request, token) =>
             {
+                Assert.Equal(_operationToken, token);
                 Assert.Equal(id, _activeLease);
                 _sdkLeases.Add(id);
                 return Task.FromResult(_replies.Dequeue()(request));
