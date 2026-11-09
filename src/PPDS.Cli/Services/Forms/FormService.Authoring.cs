@@ -42,8 +42,7 @@ public sealed partial class FormService
             var attribute = attributes.SingleOrDefault(a => a.LogicalName.Equals(request.FieldLogicalName, StringComparison.OrdinalIgnoreCase))
                 ?? throw new PpdsException(FormErrorCodes.ColumnNotFound, $"Column '{request.FieldLogicalName}' not found on '{request.EntityLogicalName}'.");
             var classId = ClassIdResolver.ResolveForField(attribute.AttributeType);
-            var present = section.Descendants("control").Any(c =>
-                string.Equals((string?)c.Attribute("datafieldname"), attribute.LogicalName, StringComparison.OrdinalIgnoreCase));
+            var present = FormXmlEditor.ContainsField(section, attribute.LogicalName);
             if (!present)
                 FormXmlEditor.AddField(doc, request.SectionId.ToString(), attribute.LogicalName, classId, attribute.DisplayName);
             FormXmlValidator.Validate(doc);

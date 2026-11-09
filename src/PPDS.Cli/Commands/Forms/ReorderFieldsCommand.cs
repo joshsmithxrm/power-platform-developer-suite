@@ -37,7 +37,7 @@ public static class ReorderFieldsCommand
 
         var fieldsOption = new Option<string>("--fields")
         {
-            Description = "Comma-separated ordered list of field logical names. Fields not in the list are removed.",
+            Description = "Comma-separated authoritative field order; unlisted fields are removed. New fields use metadata labels; fields in other sections are not copied.",
             Required = true
         };
 
@@ -105,6 +105,7 @@ public static class ReorderFieldsCommand
 
         try
         {
+            Console.Error.WriteLine("Warning: forms reorder-fields is deprecated. Use reorder-fields-strict, add-field or move-field for explicit operations. Removal is planned for CLI 2.0, no earlier than 90 days after the replacements' stable release.");
             var fieldNames = fields.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
             if (fieldNames.Length == 0)

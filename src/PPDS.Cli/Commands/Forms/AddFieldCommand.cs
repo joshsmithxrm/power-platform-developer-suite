@@ -37,7 +37,7 @@ public static class AddFieldCommand
 
         var fieldOption = new Option<string[]>("--field")
         {
-            Description = "Field logical name to add. Repeat for multiple fields.",
+            Description = "Field logical name to add. Repeat for multiple fields; existing bindings in this section are kept.",
             Arity = ArgumentArity.ZeroOrMore,
             AllowMultipleArgumentsPerToken = false
         };
@@ -133,15 +133,22 @@ public static class AddFieldCommand
             }
 
             var request = new AddFieldRequest(entity, form, section, fields, solution, publish);
-            await formService.AddFieldAsync(request, null, cancellationToken);
+            var result = await formService.AddFieldsWithResultAsync(request, null, cancellationToken);
+            var message = DescribeResult(section, result);
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { section, fields, message = $"Added {fields.Length} field(s)." });
+                writer.WriteSuccess(new { section, fields, message, outcomeKnown = result.CountsKnown,
+                    addedCount = result.CountsKnown ? result.AddedFields!.Count : (int?)null,
+                    alreadyPresentCount = result.CountsKnown ? result.AlreadyPresentFields!.Count : (int?)null,
+                    duplicateRequestCount = result.CountsKnown ? result.DuplicateRequests!.Count : (int?)null,
+                    addedFields = result.AddedFields, alreadyPresentFields = result.AlreadyPresentFields,
+                    duplicateRequests = result.DuplicateRequests, formXmlChanged = result.FormXmlChanged,
+                    solutionAssociationRequested = result.SolutionAssociationRequested, publicationRequested = result.PublicationRequested });
             }
             else
             {
-                Console.Error.WriteLine($"Added {fields.Length} field(s) to section '{section}'.");
+                Console.Error.WriteLine(message);
             }
 
             return ExitCodes.Success;
@@ -152,5 +159,20 @@ public static class AddFieldCommand
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);
         }
+    }
+
+    private static string DescribeResult(string section, AddFieldsResult result)
+    {
+        if (!result.CountsKnown) return "Field request completed; this service did not report addition counts.";
+        var messages = new List<string>();
+        if (result.AddedFields!.Count > 0)
+            messages.Add($"Added {result.AddedFields.Count} field(s) to section '{section}'.");
+        if (result.AlreadyPresentFields!.Count > 0)
+            messages.Add($"Already present in section '{section}': {string.Join(", ", result.AlreadyPresentFields)}.");
+        if (result.DuplicateRequests!.Count > 0)
+            messages.Add($"Ignored {result.DuplicateRequests.Count} duplicate field request(s): {string.Join(", ", result.DuplicateRequests)}.");
+        if (result.SolutionAssociationRequested) messages.Add("The explicit solution association request completed.");
+        if (result.PublicationRequested) messages.Add("The explicit publication request completed.");
+        return messages.Count == 0 ? "Field request completed." : string.Join(" ", messages);
     }
 }

@@ -20,6 +20,24 @@ public static class FormErrorCodes
     /// <summary>The specified column does not exist on the entity.</summary>
     public const string ColumnNotFound = "Forms.ColumnNotFound";
 
+    /// <summary>A reorder would silently copy a field that is only placed in another section.</summary>
+    public const string FieldInAnotherSection = "Forms.FieldInAnotherSection";
+
+    /// <summary>The order is incomplete, repeated, or has an invalid anchor.</summary>
+    public const string InvalidFieldOrder = "Forms.InvalidFieldOrder";
+
+    /// <summary>A selected section contains multiple controls for a field.</summary>
+    public const string AmbiguousField = "Forms.AmbiguousField";
+
+    /// <summary>The requested edit cannot safely preserve the authored layout.</summary>
+    public const string UnsupportedLayout = "Forms.UnsupportedLayout";
+
+    /// <summary>The source section has no selected field to move.</summary>
+    public const string FieldNotInSection = "Forms.FieldNotInSection";
+
+    /// <summary>A move would replace or duplicate an existing target control.</summary>
+    public const string FieldAlreadyInTarget = "Forms.FieldAlreadyInTarget";
+
     /// <summary>The column's attribute type is not supported for form controls (no classid mapping).</summary>
     public const string UnsupportedColumnType = "Forms.UnsupportedColumnType";
 
