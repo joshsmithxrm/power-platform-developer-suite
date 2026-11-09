@@ -263,9 +263,11 @@ def test_valid_framed_heartbeat_and_negative_response_controls():
 
 
 def test_container_command_is_offline_readonly_and_uses_synthetic_identity(tmp_path):
-    binary, fixture, script = tmp_path / "ppds", tmp_path / "fixture", tmp_path / "check.sh"
-    binary.write_bytes(b"not-executed"); fixture.mkdir(); script.write_text("not-executed")
+    binary, fixture = tmp_path / "ppds", tmp_path / "fixture"
+    script = gate.ROOT / "scripts/ci/check_native_glibc.sh"
+    binary.write_bytes(b"not-executed"); fixture.mkdir()
     command = gate.docker_command(binary, fixture, script)
+    assert f"type=bind,src={script.resolve(strict=True)},dst=/check.sh,readonly" in command
     for required in ["--network=none", "--read-only", "--user=10001:10001", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pull=never"]:
         assert required in command
     assert sum("readonly" in item for item in command) == 3
