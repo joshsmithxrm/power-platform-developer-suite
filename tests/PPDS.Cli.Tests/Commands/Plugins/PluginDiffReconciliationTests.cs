@@ -37,10 +37,11 @@ public sealed class PluginDiffReconciliationTests
             .ReturnsAsync([env]);
         service.Setup(s => s.ListImagesForStepAsync(env.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync([envImage]);
+        Guid? unresolvedId = null;
         service.Setup(s => s.GetSdkMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid?)null);
+            .ReturnsAsync(unresolvedId);
         service.Setup(s => s.ResolveRunAsUserAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid?)null);
+            .ReturnsAsync(unresolvedId);
         return (config, step, env, image, envImage, service);
     }
 

@@ -166,6 +166,10 @@ internal static class PluginRegistrationNormalizer
         throw Invalid($"Invalid {field}; supply a supported named or numeric value.");
     }
     private static string EnumValue(string? value, string field, string? defaultValue, params (string Name, string Number)[] values) =>
-        EnumValue(value, field, defaultValue, values.Select(v => (v.Name, v.Number, (string?)null)).ToArray());
+        EnumValue(value, field, defaultValue, values.Select(v =>
+        {
+            (string Name, string Number, string? Alias) entry = (v.Name, v.Number, null);
+            return entry;
+        }).ToArray());
     private static PpdsException Invalid(string message) => new(ErrorCodes.Validation.InvalidValue, message);
 }

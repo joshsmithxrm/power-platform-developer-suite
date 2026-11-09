@@ -236,7 +236,8 @@ public sealed class DeployReconciliationVerificationTests
             Service.Setup(s => s.ListImagesForStepAsync(StoredStep.Id, CancellationToken.None)).ReturnsAsync(() => StoredImages);
             Service.Setup(s => s.GetSdkMessageIdAsync("Update", CancellationToken.None)).ReturnsAsync(_messageId);
             Service.Setup(s => s.GetSdkMessageFilterIdAsync(_messageId, "account", null, CancellationToken.None)).ReturnsAsync(_filterId);
-            Service.Setup(s => s.ResolveRunAsUserAsync(null, CancellationToken.None)).ReturnsAsync((Guid?)null);
+            Guid? callingUserId = null;
+            Service.Setup(s => s.ResolveRunAsUserAsync(null, CancellationToken.None)).ReturnsAsync(callingUserId);
             Service.Setup(s => s.UpsertAssemblyAsync("LocalFixture", It.Is<byte[]>(b => b.SequenceEqual(new byte[] { 0x4d, 0x5a })), null, CancellationToken.None))
                 .Callback(() => Events.Add("write-assembly")).ReturnsAsync(_assemblyId);
             Service.Setup(s => s.UpsertPluginTypeAsync(_assemblyId, "Contoso.Handler", null, CancellationToken.None))

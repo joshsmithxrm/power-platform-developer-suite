@@ -11,20 +11,22 @@ internal static class PluginReconciliationPlanService
     {
         var result = new List<PluginRegistrationFieldPlan>();
         for (var typeIndex = 0; typeIndex < assembly.Types.Count; typeIndex++)
-        for (var stepIndex = 0; stepIndex < assembly.Types[typeIndex].Steps.Count; stepIndex++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var step = assembly.Types[typeIndex].Steps[stepIndex];
-            var path = $"types[{typeIndex}].steps[{stepIndex}]";
-            Add(path, step, PluginRegistrationNormalizer.NormalizeStep(step, RegistrationOperationIntent.Reconcile));
-            if (step.SecureConfiguration is not null)
-                result.Add(new(path, "secureConfiguration", "write-only; equality unknown"));
-            for (var imageIndex = 0; imageIndex < step.Images.Count; imageIndex++)
+            for (var stepIndex = 0; stepIndex < assembly.Types[typeIndex].Steps.Count; stepIndex++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var image = step.Images[imageIndex];
-                Add($"{path}.images[{imageIndex}]", image,
-                    PluginRegistrationNormalizer.NormalizeImage(image, step.Message, RegistrationOperationIntent.Reconcile));
+                var step = assembly.Types[typeIndex].Steps[stepIndex];
+                var path = $"types[{typeIndex}].steps[{stepIndex}]";
+                Add(path, step, PluginRegistrationNormalizer.NormalizeStep(step, RegistrationOperationIntent.Reconcile));
+                if (step.SecureConfiguration is not null)
+                    result.Add(new(path, "secureConfiguration", "write-only; equality unknown"));
+                for (var imageIndex = 0; imageIndex < step.Images.Count; imageIndex++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var image = step.Images[imageIndex];
+                    Add($"{path}.images[{imageIndex}]", image,
+                        PluginRegistrationNormalizer.NormalizeImage(image, step.Message, RegistrationOperationIntent.Reconcile));
+                }
             }
         }
         return result;
@@ -33,11 +35,13 @@ internal static class PluginReconciliationPlanService
         {
             foreach (var (field, value) in fields.OrderBy(p => p.Key, StringComparer.Ordinal))
             {
-                var intent = field == "attributes" && value is null ? "all attributes"
-                    : field == "filteringAttributes" && value is null ? "no filtering"
-                    : field == "runAsUser" && value is null ? "CallingUser"
-                    : value is null && field != "name" ? "clear"
-                    : !config.IsSpecified(field) ? "default" : "set";
+                string intent;
+                if (field == "attributes" && value is null) intent = "all attributes";
+                else if (field == "filteringAttributes" && value is null) intent = "no filtering";
+                else if (field == "runAsUser" && value is null) intent = "CallingUser";
+                else if (value is null && field != "name") intent = "clear";
+                else if (!config.IsSpecified(field)) intent = "default";
+                else intent = "set";
                 result.Add(new(path, field, intent));
             }
         }

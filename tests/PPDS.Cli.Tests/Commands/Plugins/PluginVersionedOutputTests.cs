@@ -65,8 +65,9 @@ public class PluginVersionedOutputTests
     {
         const string sentinel = "SYNTHETIC-SECRET-OUTPUT-BOUNDARY";
         var service = new Mock<IPluginRegistrationService>(MockBehavior.Strict);
+        PluginAssemblyInfo? missingAssembly = null;
         service.Setup(s => s.GetAssemblyByNameAsync("MissingFixture", It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PluginAssemblyInfo?)null);
+            .ReturnsAsync(missingAssembly);
         var step = new Dictionary<string, object?>
         {
             ["message"] = "Update", ["entity"] = "account", ["stage"] = "PostOperation"
