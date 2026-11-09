@@ -51,9 +51,24 @@ public interface IFormService
 
     Task AddFieldAsync(AddFieldRequest request, IProgressReporter? reporter = null, CancellationToken ct = default);
 
+    /// <summary>Adds fields with an explicit outcome when supported. Legacy implementations retain their old method.</summary>
+    async Task<AddFieldsResult> AddFieldsWithResultAsync(AddFieldRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
+    {
+        await AddFieldAsync(request, reporter, ct).ConfigureAwait(false);
+        return new(null, null, null, null, request.SolutionUniqueName is not null, request.Publish);
+    }
+
     Task RemoveFieldAsync(RemoveFieldRequest request, IProgressReporter? reporter = null, CancellationToken ct = default);
 
     Task ReorderFieldsAsync(ReorderFieldsRequest request, IProgressReporter? reporter = null, CancellationToken ct = default);
+
+    /// <summary>Reorders a complete permutation of existing fields without adding or removing cells.</summary>
+    Task ReorderFieldsStrictAsync(ReorderFieldsRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
+        => Task.FromException(new NotSupportedException("This service does not implement strict field reorder."));
+
+    /// <summary>Moves an existing field cell; legacy implementations never fall back to copying.</summary>
+    Task MoveFieldAsync(MoveFieldRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
+        => Task.FromException(new NotSupportedException("This service does not implement field movement."));
 
     // ── Sub-grid management ───────────────────────────────────────────────
 
@@ -63,6 +78,18 @@ public interface IFormService
 }
 
 // ── Result types ──────────────────────────────────────────────────────────────
+
+/// <summary>Null collections mean a legacy implementation did not report counts; they never mean zero.</summary>
+public sealed record AddFieldsResult(
+    IReadOnlyList<string>? AddedFields,
+    IReadOnlyList<string>? AlreadyPresentFields,
+    IReadOnlyList<string>? DuplicateRequests,
+    bool? FormXmlChanged,
+    bool SolutionAssociationRequested,
+    bool PublicationRequested)
+{
+    public bool CountsKnown => AddedFields is not null && AlreadyPresentFields is not null && DuplicateRequests is not null;
+}
 
 public sealed record FormInfo(
     Guid Id,
@@ -228,6 +255,16 @@ public sealed record ReorderFieldsRequest(
     string FormName,
     string SectionLabel,
     string[] FieldLogicalNames,
+    string? SolutionUniqueName = null,
+    bool Publish = false);
+
+public sealed record MoveFieldRequest(
+    string EntityLogicalName,
+    string FormName,
+    string FieldLogicalName,
+    string FromSection,
+    string ToSection,
+    string? BeforeField = null,
     string? SolutionUniqueName = null,
     bool Publish = false);
 
