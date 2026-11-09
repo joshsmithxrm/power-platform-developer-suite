@@ -59,8 +59,8 @@ internal sealed class ColumnLabelHarness : IDisposable
         { Set(Attribute, "AttributeType", AttributeTypeCode.Uniqueidentifier); Set(Attribute, "AttributeTypeName", AttributeTypeDisplayName.UniqueidentifierType); }
         if (shape is "party-list" or "calendar-rules" or "virtual" or "base-null-type")
         {
-            var type = shape switch { "party-list" => AttributeTypeCode.PartyList, "calendar-rules" => AttributeTypeCode.CalendarRules,
-                "virtual" => AttributeTypeCode.Virtual, _ => (AttributeTypeCode?)null };
+            AttributeTypeCode? type = shape switch { "party-list" => AttributeTypeCode.PartyList, "calendar-rules" => AttributeTypeCode.CalendarRules,
+                "virtual" => AttributeTypeCode.Virtual, _ => null };
             Set(Attribute, "AttributeType", type);
         }
         Attribute.DisplayName = new Label("Original English", 1033);
