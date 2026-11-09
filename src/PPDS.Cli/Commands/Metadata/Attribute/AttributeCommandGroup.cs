@@ -32,7 +32,9 @@ public static class AttributeCommandGroup
         return command;
     }
 
-    public static Command CreateCreateCommand()
+    public static Command CreateCreateCommand() => CreateCreateCommand(null);
+
+    internal static Command CreateCreateCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -258,7 +260,7 @@ public static class AttributeCommandGroup
                 requiredLevel, maxLength, minValue, maxValue, precision, format,
                 dateTimeBehavior, resolvedChoice, options, defaultValue,
                 trueLabel, falseLabel, maxSizeInKB, dryRun, publish,
-                profileVal, environmentVal, globalOptions, cancellationToken);
+                profileVal, environmentVal, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -382,17 +384,18 @@ public static class AttributeCommandGroup
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profile, environment,
-                globalOptions.Verbose, globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
+                    profile, environment, globalOptions.Verbose, globalOptions.Debug,
+                    ProfileServiceFactory.DefaultDeviceCodeCallback, cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 

@@ -75,11 +75,8 @@ public class CreateColumnTypeTests
         var response = new CreateAttributeResponse();
         response.Results["AttributeId"] = Guid.NewGuid();
 
-        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
-            .Callback<OrganizationRequest, CancellationToken>((req, _) =>
-            {
-                if (req is CreateAttributeRequest car) captured = car;
-            })
+        _client.Setup(c => c.ExecuteAsync(It.Is<OrganizationRequest>(r => r is CreateAttributeRequest), It.IsAny<CancellationToken>()))
+            .Callback<OrganizationRequest, CancellationToken>((req, _) => captured = (CreateAttributeRequest)req)
             .ReturnsAsync(response);
 
         await _service.CreateColumnAsync(request);
@@ -306,6 +303,10 @@ public class CreateColumnTypeTests
     {
         var request = MakeRequest(SchemaColumnType.Choice);
         request.OptionSetName = "new_globalstatus";
+        var catalog = new RetrieveAllOptionSetsResponse();
+        catalog.Results["OptionSetMetadata"] = new OptionSetMetadataBase[] { new OptionSetMetadata { Name = "new_globalstatus" } };
+        _client.Setup(c => c.ExecuteAsync(It.Is<OrganizationRequest>(r => r is RetrieveAllOptionSetsRequest), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(catalog);
 
         var sdkRequest = await CaptureCreateAttributeRequest(request);
 

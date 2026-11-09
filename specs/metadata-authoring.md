@@ -512,6 +512,12 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 - No UI-level business logic — all validation and orchestration in `IMetadataAuthoringService` (Constitution A1)
 - Extension webview forms must render Dataverse-sourced metadata (display names, descriptions) via `textContent` or proper escaping — never `innerHTML` (Constitution S1)
 
+### Connection lifetime and existing error contracts
+
+Generic option add/update, status-reason update/removal, and table creation return their mutation connection before optional color/publication or unrelated postprocessing. Global/local color helpers acquire separate connections for the metadata read and update. Publisher-prefix resolution acquires separate connections for its solution and publisher queries, retains only the publisher ID between them, and keeps the existing prefix cache and table dry-run metadata reads.
+
+This lifetime correction preserves existing SDK payloads, read modes, validation, guards, cache success stages and error contracts. SDK cancellation wrapping and raw acquisition-error propagation remain as currently implemented; their cancellation-classification and coded-service-error (D4) gaps require separate decisions. Adding a new color-write checkout does not place acquisition inside an SDK catch or normalize its errors. Multi-request authoring remains non-atomic: a later failure can follow a successful mutation, and no automatic retry or rollback is introduced.
+
 ---
 
 ## Acceptance Criteria
@@ -622,6 +628,30 @@ Build a fresh base attribute with the retrieved logical and schema names and onl
 | AC-75 | Reject unrelated base attributes, state/status attributes, misleading address IDs, and missing or inconsistent primary ID metadata before any update or publish. Only an eligible candidate triggers the table lookup. | `PrimaryIdLabelUpdateTests.UnsupportedShape_RemainsRejected`, `PrimaryIdLabelUpdateTests.UnconfirmedPrimaryId_RejectsBeforeWrite` | ✅ |
 | AC-76 | Require at least one supplied label. Reject every supplied incompatible field on an otherwise eligible primary ID with a clear validation error before the table lookup or any write. | `PrimaryIdLabelUpdateTests.IncompatibleSettings_RejectBeforeTableLookup`, `PrimaryIdLabelUpdateTests.NoLabels_RejectsBeforeTableLookup` | ✅ |
 | AC-77 | Preserve input-only dry-run, typed updates, mutation guard, SDK and cancellation routing. Both CLI command names accept both label flags. Table lookup failures and cancellation prevent update and publish. A failed operation releases its lease. A failed pool checkout propagates its original exception and skips subsequent work. Typed updates support publication with one pool slot. | `PrimaryIdLabelUpdateTests.DryRun_ValidatesInputsWithoutMetadata`, `PrimaryIdLabelUpdateTests.TypedUpdate_PreservesRequestShape`, `MetadataAuthoringServiceGuardTests.EveryMutationMethod_Blocks` (`UpdateColumnAsync`), `PrimaryIdLabelUpdateTests.UpdateFailure_SkipsPublishAndCacheInvalidation`, `PrimaryIdLabelUpdateTests.TableLookupFailure_StopsBeforeWrite`, `PrimaryIdLabelUpdateTests.CliUpdate_AcceptsBothLabelFlags`, `PrimaryIdLabelUpdateTests.SingleSlot_UpdatesAndPublishesInOrder`, `PrimaryIdLabelUpdateTests.SingleSlot_FailedOperationReturnsClient`, `PrimaryIdLabelUpdateTests.SingleSlot_CheckoutFailureLeavesSlotFree` | ✅ |
+
+### Global choice names on column creation (#1535)
+
+When creating a Choice or Choices column that references a global choice, resolve its stored name from the target environment after input validation and dry run. An exact ordinal match takes precedence. Otherwise one ordinal case-insensitive match supplies the canonical name. The column carries a minimal global reference using that name. Public metadata queries continue to return the published view. The authoring lookup includes unpublished choices and incurs one extra catalog read per global attachment.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-78 | Single- and multi-select global references use the stored metadata name verbatim. A unique exact name wins over other case variants. The canonical and deprecated command handlers pass the supplied spelling into the service DTO, and the service preserves the caller DTO. | `GlobalChoiceReferenceTests.Attach_UsesCanonicalName`, `ExactName_WinsOverCaseVariant`, `CliActions_PreserveSpellingAndAttachStoredName` | ✅ |
+| AC-79 | An absent or ambiguous global name or incompatible definition produces a validation error before column creation. Duplicate exact matches are ambiguous. | `GlobalChoiceReferenceTests.UnresolvableName_StopsBeforeCreate`, `IncompatibleChoice_StopsBeforeCreate` | ✅ |
+| AC-80 | The lookup uses fresh unpublished metadata from the caller's pool, releases its own lease before matching or obtaining a create lease, and skips create, publish and cache invalidation on failure. Raw transport and pool configuration or argument failures retain their mapped codes, exits and original causes in coded service exceptions, including the Dataverse reauthentication flag when present. Cancellation and already-coded errors retain their identities. | `GlobalChoiceReferenceTests.ConsecutiveCreates_ReadCurrentCatalog`, `LookupFailure_StopsBeforeCreate`, `InvalidCatalog_StopsBeforeCreate`, `CatalogLease_IsReturnedBeforeCreateCheckout`, `CatalogCheckoutFailure_IsCodedAndSkipsCreate` | ✅ |
+| AC-81 | Existing local, non-choice, validation, dry-run and safety-guard paths perform their established operations without a global-choice lookup. The create lease is returned before cache invalidation and any requested publication. | `GlobalChoiceReferenceTests.UnrelatedPath_SkipsCatalog`, `DryRunAndInputErrors_SkipCatalog`, `Guard_PrecedesAllLookups`, `Attach_UsesCanonicalName`, `Publish_ObtainsLeaseAfterCreateLeaseIsReturned` | ✅ |
+
+### Connection-lifetime acceptance criteria
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-82 | Generic option add/update with color, status update with color/publication and status removal with publication complete with one available connection; each mutation lease returns before another checkout | `MetadataLeaseLifetimeTests.SingleSlot_WorkflowsReturnEachLeaseBeforeNextOperation` | ✅ |
+| AC-83 | Table creation returns its lease before cache invalidation/publication, preserves result identity, skips later work after failed create and never replays create after publication failure | `MetadataLeaseLifetimeTests.SingleSlot_WorkflowsReturnEachLeaseBeforeNextOperation`, `FailureAtEachStep_ReturnsLeasesAndStopsLaterWork` | ✅ |
+| AC-84 | Each global/local color read/update uses one SDK operation per short lease; read failure/missing target prevents update and failed new write checkout returns all acquired leases | `MetadataLeaseLifetimeTests.SingleSlot_WorkflowsReturnEachLeaseBeforeNextOperation`, `FailureAtEachStep_ReturnsLeasesAndStopsLaterWork`, `ColorRead_MissingTarget_PreventsWriteAndPublication` | ✅ |
+| AC-87 | Covered faults and cancellation retain their existing stage-specific exception identity or SDK wrapping, codes, causes and CLI classification, with no retry or later work | `MetadataLeaseLifetimeTests.ColorSdkFaults_PreserveBaselineWrappingAndCliEnvelope`, `CheckoutFailures_PreserveRawIdentityAndCliClassification`, `FailureAtEachStep_ReturnsLeasesAndStopsLaterWork` | ✅ |
+| AC-88 | Payloads, read modes, target/value/label/solution/token and minimal local carriers stay unchanged; guards, validation and actual dry-run read behavior remain intact | `MetadataLeaseLifetimeTests.Payloads_ReadModesAndResultsRemainStable`, `PrefixLookup_UsesSeparateLeasesAndCachesAcrossDryRuns`, `MetadataAuthoringServiceGuardTests.EveryMutationMethod_Blocks`, `MetadataGlobalOptionServiceTests.AddOptionValue_DryRun_DoesNotCallSdk`, `UpdateOptionValue_DryRun_ValidatesTargetWithoutMutating` | ✅ |
+| AC-89 | Already-correct status-add and local-option add/update/remove outer scopes continue to complete with one available connection | `MetadataLeaseLifetimeTests.SingleSlot_WorkflowsReturnEachLeaseBeforeNextOperation` | ✅ |
+| AC-90 | The actual MCP option-add tool preserves raw pool exhaustion as internal error, coded SDK failures, raw cancellation identity, existing coded faults and one-time request forwarding; no transport cancellation response is implied | `MetadataAddOptionValueLeaseContractTests.RawPoolExhaustion_RemainsInternalAtMcpBoundary`, `WrappedSdkCancellation_RemainsCodedAndFaulted`, `RawCancellation_PropagatesOriginalAndCanceled`, `AlreadyCodedFault_PreservesCodeAndContext`, `SuccessfulInvocation_ForwardsRequestOnce` | ✅ |
+| AC-91 | Publisher-prefix lookup uses separate solution/publisher leases, retains cached/dry-run behavior and stops before create/publication after either checkout/query failure or cancellation | `MetadataLeaseLifetimeTests.PrefixLookup_UsesSeparateLeasesAndCachesAcrossDryRuns`, `FailureAtEachStep_ReturnsLeasesAndStopsLaterWork` | ✅ |
 
 ### Edge Cases
 
@@ -895,6 +925,7 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 | 2026-04-01 | Post-implementation cleanup: fixed CodeQL findings, completed TUI choice editing, replaced Extension webview stubs with VS Code input collection, updated AC statuses |
 | 2026-05-29 | Surface rationalization (#1159 — canonical `entity`/`attribute`/`optionset` nouns + `table`/`column`/`choice` deprecation shims), status reason management (#1160 — add/list/update/remove on `entity`), local Choice/OptionSet column fix + local option management (#1161 — `IsGlobal=false`), shared `OptionValueDeriver`. Added AC-37–AC-58. |
 | 2026-06-10 | `entity` authoring verbs accept positional `<entity>` alongside `--entity` (#1208) — amended the #1160 Form A decision (Form B accepted additively), rewrote the §"CLI Surface" rationale, added AC-61/AC-62. `attribute`/`key` unchanged. |
+| 2026-11-07 | Resolve global choice references during column creation using the target environment's stored name (#1535, AC-78 through AC-81). |
 | 2026-11-07 | #1534 added primary ID label updates with table-key verification and locale merging. Added AC-74–AC-77. |
 
 ---
