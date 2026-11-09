@@ -12,6 +12,15 @@ dotnet tool install --global PPDS.Cli
 ppds --help
 ```
 
+## Native downloads and runtime support
+
+GitHub release executables bundle .NET 10 for Windows x64/Arm64, macOS x64/Arm64
+and Linux x64. No separate runtime installation is needed. The NuGet tool keeps
+net8.0/net9.0/net10.0 assets; choose a supported runtime because .NET 8/9 servicing
+ends November 10, 2026. Linux native executables require glibc 2.27 or later;
+meeting that ABI floor does not establish vendor support for an old distro.
+See [distribution support and validation](../../docs/RELEASE.md#distributed-native-runtime).
+
 ## Quick Start
 
 ```bash

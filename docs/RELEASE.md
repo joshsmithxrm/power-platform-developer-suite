@@ -333,3 +333,46 @@ design.
 - CI workflow: `.github/workflows/publish-nuget.yml`
 - Public artifact verifier: `scripts/ci/verify_public_release.py`
 - Hook tests: `tests/test_snk_protect.py`
+
+## Distributed native runtime
+
+Native GitHub CLI executables and the four platform-specific VSIX payloads select
+net10.0, self-contained/single-file with compression. Libraries and CLI/MCP tool
+packages retain their existing 8/9/10 framework assets; Plugins retains net462.
+The runtime switch adds no separate runtime install requirement for native/VSIX
+users. .NET 8/9 servicing ends November 10, 2026; compatibility assets do not extend
+Microsoft support. [Lifecycle](https://devblogs.microsoft.com/dotnet/dotnet-8-9-end-of-support/).
+
+The Linux native ABI floor changes from glibc 2.23 to2.27. VS Code already requires
+2.28. An ABI-compatible system is not necessarily a supported distro. The current
+Microsoft 8/10 Windows/macOS support rows match; do not present macOS14's absence
+as a new migration-only drop. Debian12 differs between those tables, with an
+ambiguous future-dated out-of-support entry in .NET 10; confirm support before promising
+that distro. Existing linux-x64 artifacts are not musl/Alpine packages. Extension
+support intersects its four targets, the CLI runtime and VS Code requirements.
+[Runtime matrix](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md),
+[VS Code requirements](https://code.visualstudio.com/docs/supporting/requirements).
+
+PR/main Test checks build four candidate VSIX archives on matching native hosts,
+inspect the actual archived binary and execute local extraction plus a bounded
+private-stdio heartbeat. Five native CLI lanes verify the same runtime baseline;
+Linux also executes the actual payload in a network-disabled, read-only UBI8
+glibc 2.28 container with fixed synthetic identity/private tmpfs. The independent
+net8 cache probe and net462 fixtures remain accurately labeled. Candidate outputs
+are retained as CI artifacts; no publisher workflow or Marketplace token is used.
+
+Candidate evidence records actual compiled MinVer/source, RID, runtime pack,
+runtimeconfig/deps inputs and binary/VSIX hashes without forging a stable tag.
+The existing ppds.version.json schema identifies RID/version, not CLR version.
+Final immutable tags, signing, package/source/version guards and patched runtime
+pack review still apply before publication. A net10.0 TFM alone is not proof of
+the currently serviced patch or of every supported OS. Foreign-RID packaging is
+not native execution evidence.
+
+The harness alone invokes hidden `serve --quiet`: that explicit command/flag
+combination skips the entire startup diagnostics block before status-file,
+update-cache or background NuGet access. Default daemon launchers and other
+commands retain their behavior. Heartbeat calls only `_heartbeat`; lazy auth DI
+and the empty pool manager do not resolve profile/credential/Dataverse services.
+That zero-provider boundary is source-reviewed; passing runtime observations
+must be recorded separately. No real OS-profile/status-file fixture is required.

@@ -1,5 +1,6 @@
 using System.CommandLine;
 using PPDS.Cli.Commands.Serve;
+using PPDS.Cli.Infrastructure;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Serve;
@@ -33,10 +34,33 @@ public class ServeCommandTests
     }
 
     [Fact]
-    public void Create_HasNoOptions()
+    public void Create_OnlyHasHiddenQuietOption()
     {
-        // Currently serve has no options - it just starts the daemon
-        Assert.Empty(_command.Options);
+        var option = Assert.Single(_command.Options);
+        Assert.Equal("--quiet", option.Name);
+        Assert.Contains("-q", option.Aliases);
+        Assert.True(option.Hidden);
+    }
+
+    [Theory]
+    [InlineData("--quiet")]
+    [InlineData("-q")]
+    public void QuietDaemon_ParsesAndSelectsStartupIoSuppression(string flag)
+    {
+        var root = new RootCommand();
+        root.Subcommands.Add(_command);
+        var args = new[] { "serve", flag };
+        Assert.Empty(root.Parse(args).Errors);
+        Assert.True(StartupUpdateNotifier.IsQuietDaemon(args));
+    }
+
+    [Fact]
+    public void DefaultDaemon_StillParsesWithoutStartupSuppression()
+    {
+        var root = new RootCommand();
+        root.Subcommands.Add(_command);
+        Assert.Empty(root.Parse(new[] { "serve" }).Errors);
+        Assert.False(StartupUpdateNotifier.IsQuietDaemon(new[] { "serve" }));
     }
 
     [Fact]

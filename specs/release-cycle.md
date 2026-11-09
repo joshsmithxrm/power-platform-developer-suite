@@ -446,6 +446,29 @@ version-consistency tags rather than product changes.
 
 ---
 
+## Distributed runtime validation
+
+Distributed native/VSIX CLI payloads use self-contained net10.0; package/tool TFM
+matrices and net462 plugin compatibility are preserved. Candidate identity comes
+from actual generated metadata, never a release-version override. Validation is
+ordinary PR/main CI with contents: read only and no publisher credentials, OIDC or
+release event. The Test aggregate requires both native and VSIX matrix success.
+Only explicit hidden `serve --quiet/-q` skips the complete startup diagnostics
+block; the isolated harness uses private stdio, empty private profile/config and
+owned-child deadlines. Default launchers and other commands are unchanged.
+
+| AC | Requirement | Test | Status |
+| --- | --- | --- | --- |
+| AC-43 | Native publish/archive and bundle AssemblyInfo paths select .NET 10 together, with explicit existing SDK feature band | `test_distribution_inputs_are_coherent_and_candidate_route_is_no_publish`, `test_stale_or_unsafe_runtime_input_fails` | 🔲 |
+| AC-44 | Package/tool framework matrices, five native/four VSIX targets and independent net8/net462 fixtures remain | `test_package_targets_and_independent_fixtures_are_retained` | 🔲 |
+| AC-45 | Actual candidate metadata/archived binary source, runtime and bytes are verified without stable identity forgery | `test_wrong_runtime_or_source_is_rejected`, `test_actual_vsix_bytes_and_identity_are_verified_without_execution`; actual four-host VSIX matrix | 🔲 |
+| AC-46 | Selected VSIX matrix failure/cancel/skip/missing cannot pass the aggregate | `test_selected_vsix_matrix_must_succeed` | 🔲 |
+| AC-47 | Explicit quiet daemon parses and bypasses the complete startup I/O boundary while other command/default behavior stays | `QuietDaemon_ParsesAndSelectsStartupIoSuppression`, `QuietDaemon_RequiresExplicitCommandAndQuietFlag`, `test_quiet_daemon_guard_precedes_all_startup_status_cache_and_http_access` | 🔲 |
+| AC-48 | Runtime children drop credentials/opt-ins; bounded frames/container identity/network/mount controls are enforced | `test_private_environment_drops_credentials_profiles_and_opt_ins`, `test_invalid_or_truncated_frame_is_rejected`, `test_container_command_is_offline_readonly_and_uses_synthetic_identity`; actual native/container jobs | 🔲 |
+
+These rows remain unverified until the actual applicable gates/artifacts pass;
+source preparation and historical net8 evidence are not passing .NET 10 results.
+
 ## Related Specs
 
 - [docs-generation.md](./docs-generation.md) - Release tags trigger docs generation via `docs-release.yml`

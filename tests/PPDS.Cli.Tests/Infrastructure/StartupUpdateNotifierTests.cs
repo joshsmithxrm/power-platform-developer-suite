@@ -6,6 +6,24 @@ namespace PPDS.Cli.Tests.Infrastructure;
 
 public sealed class StartupUpdateNotifierTests
 {
+    [Theory]
+    [InlineData("serve", "--quiet", true)]
+    [InlineData("serve", "-q", true)]
+    [InlineData("serve", "--unrecognized", false)]
+    [InlineData("query", "--quiet", false)]
+    public void QuietDaemon_RequiresExplicitCommandAndQuietFlag(string command, string flag, bool expected)
+    {
+        Assert.Equal(expected, StartupUpdateNotifier.IsQuietDaemon(new[] { command, flag }));
+    }
+
+    [Fact]
+    public void QuietDaemon_DoesNotMatchServeInsideOtherArguments()
+    {
+        Assert.False(StartupUpdateNotifier.IsQuietDaemon(new[] { "query", "sql", "serve", "--quiet" }));
+        Assert.False(StartupUpdateNotifier.IsQuietDaemon(Array.Empty<string>()));
+        Assert.False(StartupUpdateNotifier.IsQuietDaemon(new[] { "serve" }));
+    }
+
     #region FormatNotification
 
     [Fact]

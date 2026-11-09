@@ -41,6 +41,12 @@ ppds data export --schema schema.xml --output data.zip
 | **VS Code Extension** | IDE Extension | [Marketplace](https://marketplace.visualstudio.com/items?itemName=JoshSmithXRM.power-platform-developer-suite) | VS Code 1.116+ |
 | **ppds-mcp-server** | MCP Server | `dotnet tool install -g PPDS.Mcp` | .NET 8.0+ |
 
+Native CLI downloads and the CLI bundled in platform-specific VSIX packages use
+self-contained .NET 10; they need no separately installed .NET runtime. NuGet
+libraries and CLI/MCP tool packages retain their net8.0/net9.0/net10.0 assets.
+.NET 8/9 runtime servicing ends November 10, 2026; use a supported runtime for
+framework-dependent tools. See [distribution support](docs/RELEASE.md#distributed-native-runtime).
+
 ### NuGet Libraries
 
 | Package | NuGet | Description |

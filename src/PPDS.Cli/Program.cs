@@ -64,8 +64,10 @@ public static class Program
             return InteractiveCommand.LaunchTui();
         }
 
-        // Write version header for diagnostic context (skip for help/version/interactive)
-        if (!args.Any(a => SkipVersionHeaderArgs.Contains(a)) && !IsInteractiveMode(args))
+        // Explicit quiet daemon validation also skips status/cache/background update I/O.
+        // Other commands retain their existing startup diagnostics behavior.
+        if (!args.Any(a => SkipVersionHeaderArgs.Contains(a)) && !IsInteractiveMode(args)
+            && !StartupUpdateNotifier.IsQuietDaemon(args))
         {
             ErrorOutput.WriteVersionHeader();
             ReadAndDeleteUpdateStatus();

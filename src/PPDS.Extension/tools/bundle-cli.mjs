@@ -22,6 +22,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXTENSION_DIR = join(__dirname, '..');
 const CLI_PROJECT = join(EXTENSION_DIR, '..', 'PPDS.Cli', 'PPDS.Cli.csproj');
 const BIN_DIR = join(EXTENSION_DIR, 'bin');
+const CLI_TARGET_FRAMEWORK = 'net10.0';
 
 function parseArgs() {
     const args = process.argv.slice(2);
@@ -60,7 +61,7 @@ function main() {
     const publishArgs = [
         'publish', CLI_PROJECT,
         '-c', 'Release',
-        '-f', 'net8.0',
+        '-f', CLI_TARGET_FRAMEWORK,
         '-r', rid,
         '--self-contained',
         '-p:PublishSingleFile=true',
@@ -86,7 +87,7 @@ function main() {
     if (expectedVersion) {
         const assemblyInfoPath = join(
             dirname(CLI_PROJECT),
-            'obj', 'Release', 'net8.0', rid, 'PPDS.Cli.AssemblyInfo.cs'
+            'obj', 'Release', CLI_TARGET_FRAMEWORK, rid, 'PPDS.Cli.AssemblyInfo.cs'
         );
         if (!existsSync(assemblyInfoPath)) {
             console.error(`Generated CLI assembly metadata not found at: ${assemblyInfoPath}`);
