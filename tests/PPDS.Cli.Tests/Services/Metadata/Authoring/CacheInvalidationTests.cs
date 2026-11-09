@@ -95,7 +95,7 @@ public class CacheInvalidationTests
     public async Task DeleteTable_InvalidatesEntityList()
     {
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new OrganizationResponse());
+            .Returns<OrganizationRequest, CancellationToken>((r, _) => Task.FromResult(MetadataDeleteTestResponses.For(r)));
 
         var request = new DeleteTableRequest
         {
@@ -191,7 +191,7 @@ public class CacheInvalidationTests
     public async Task DeleteGlobalChoice_InvalidatesGlobalOptionSets()
     {
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new OrganizationResponse());
+            .Returns<OrganizationRequest, CancellationToken>((r, _) => Task.FromResult(MetadataDeleteTestResponses.For(r)));
 
         var request = new DeleteGlobalChoiceRequest
         {

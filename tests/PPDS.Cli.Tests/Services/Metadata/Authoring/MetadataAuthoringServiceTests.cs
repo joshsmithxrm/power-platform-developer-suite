@@ -308,8 +308,10 @@ public class MetadataAuthoringServiceTests
     #region DeleteTableAsync
 
     [Fact]
-    public async Task DeleteTableAsync_DryRun_DoesNotCallSdk()
+    public async Task DeleteTableAsync_DryRun_OnlyReadsIdentityAndDependencies()
     {
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((r, _) => Task.FromResult(MetadataDeleteTestResponses.For(r)));
         var request = new DeleteTableRequest
         {
             SolutionUniqueName = "TestSolution",
@@ -319,7 +321,9 @@ public class MetadataAuthoringServiceTests
 
         await _service.DeleteTableAsync(request);
 
-        _client.Verify(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _client.Verify(c => c.ExecuteAsync(It.IsAny<RetrieveEntityRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        _client.Verify(c => c.ExecuteAsync(It.IsAny<Microsoft.Crm.Sdk.Messages.RetrieveDependenciesForDeleteRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        _client.Verify(c => c.ExecuteAsync(It.IsAny<DeleteEntityRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -332,7 +336,7 @@ public class MetadataAuthoringServiceTests
             {
                 if (req is DeleteEntityRequest del) capturedRequest = del;
             })
-            .ReturnsAsync(new OrganizationResponse());
+            .Returns<OrganizationRequest, CancellationToken>((r, _) => Task.FromResult(MetadataDeleteTestResponses.For(r)));
 
         var request = new DeleteTableRequest
         {

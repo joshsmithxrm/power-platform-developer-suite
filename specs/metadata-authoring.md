@@ -267,7 +267,7 @@ Task ReactivateKeyAsync(ReactivateKeyRequest request, CancellationToken ct = def
 
 ### Validation
 
-All authoring operations perform local validation before making SDK calls. In dry-run mode, mutation SDK calls are skipped; some operations still retrieve metadata for validation. Schema deletes validate required strings only, while global/local option removal resolves the target option.
+In dry-run mode, mutation SDK calls are skipped. Checks vary by operation: creates resolve publisher information and validate inputs; schema updates validate required strings; option update/removal resolves the option; status/local additions read options and derive a provisional value. Schema deletes resolve unpublished target metadata and read deletion dependencies. Other platform constraints are not simulated.
 
 | Rule | Applies To | Error |
 |------|-----------|-------|
@@ -325,7 +325,7 @@ The `PublishXml` payload for entities:
 Schema delete operations follow the truncate safety pattern:
 
 **CLI interactive mode (no `--force`):**
-1. Automatic dry-run executes first — validates required input strings only, without retrieving the target or its dependencies. This happens regardless of whether `--dry-run` was passed; the explicit flag reports this limited scope and exits without prompting. It does not establish whether deletion will succeed.
+1. Read-only preflight resolves the named target and deletion dependencies first. Blockers or incomplete inspection stop before confirmation. `--dry-run` reports the observation and exits without prompting or mutating; a complete empty result does not establish server deletion feasibility. The service rechecks dependencies immediately before an actual deletion after confirmation.
 2. Displays warning: "This will permanently delete {type} '{name}'. All data in this {type} will be lost. This operation cannot be undone."
 3. Prompts for exact confirmation text: `DELETE TABLE account` or `DELETE COLUMN account.statuscode`
 4. Exact case-sensitive string match required
@@ -452,7 +452,7 @@ ppds metadata key reactivate --solution <name> --entity <name> --name <name>
 ppds metadata publish <entity>... [--solution <name>]
 ```
 
-**Shared flags:** `--dry-run`, `--force` (delete/remove only), `--publish` (authoring verbs that change live metadata), `--profile`, `--environment`, `--json`
+**Shared flags where exposed by the verb:** `--dry-run`, `--force` (delete/remove only), `--publish` (authoring verbs that change live metadata), `--profile`, `--environment`, `--json`
 
 **Output:** Text mode writes status (including deprecation warnings) to stderr, structured results to stdout (Constitution I1). JSON mode returns full result objects on stdout.
 
@@ -534,7 +534,7 @@ This lifetime correction preserves existing SDK payloads, read modes, validation
 | AC-08 | `AddOptionValueAsync` adds a value to an existing global or local option set (local path is now load-bearing for #1161 — AC-55) | `MetadataAuthoringServiceTests.AddOptionValueAsync_GlobalAndLocal_InsertsViaInsertOptionValue` | ❌ |
 | AC-09 | `CreateKeyAsync` creates an alternate key with specified attributes | `SchemaValidatorTests.ValidateCreateKeyRequest_OneAttribute_DoesNotThrow` | ✅ |
 | AC-10 | `ReactivateKeyAsync` retries a failed key index creation | — | ❌ |
-| AC-11 | `DeleteTableAsync` with `DryRun=true` reports dependencies without deleting — **not implemented**; the existing no-SDK test proves input-only validation, not discovery | — | ❌ |
+| AC-11 | `DeleteTableAsync` with `DryRun=true` reads target identity and deletion dependencies without deleting | `MetadataDeleteDependencyTests.DryRun_ResolvesUnpublishedIdentityAndRequestsDependencies` | Combined277 focused passed; carrier1 normal/hosted pending |
 | AC-12 | Validation rejects invalid schema names (spaces, special chars, wrong prefix) | `SchemaValidatorTests.ValidateSchemaName_InvalidChars_Throws` | ✅ |
 | AC-13 | Validation rejects schema names that don't match solution publisher prefix | `SchemaValidatorTests.ValidateSchemaPrefix_WrongPrefix_Throws` | ✅ |
 | AC-14 | Successful authoring operations invalidate relevant `CachedMetadataProvider` entries | `CacheInvalidationTests.CreateColumn_InvalidatesEntityCache_Scoped` | ✅ |
@@ -592,16 +592,34 @@ This lifetime correction preserves existing SDK payloads, read modes, validation
 
 ### Delete preview scope (#1532)
 
-The current CLI schema-delete preview validates required input strings only. It does not retrieve the target, dependencies, managed-component restrictions, or server delete permissions. A successful preview is not assurance that deletion can succeed. Global and local option-removal previews additionally retrieve metadata and resolve the target option; they still do not check dependencies or deletion feasibility. No preview performs writes. Status-reason removal and the deprecated `choice remove-option` have no dry-run option; this change does not add one.
+Schema-delete previews resolve unpublished named metadata and call `RetrieveDependenciesForDelete` for component types 1 (table), 2 (column), 10 (relationship), 14 (key) and 9 (global choice). Every returned dependency edge is retained. Names are best effort; unknown numeric types, unavailable names and GUIDs remain visible blockers. The modern control-configuration code is used only after its environment metadata confirms the mapping. Partial/malformed identity or dependency results fail closed. No preview performs a mutation or invalidates caches.
 
-Successful previews retain their existing output envelope and fields and add `preview` with `validationScope` (`input-only` or `option-existence`), `targetExistenceChecked`, `dependenciesChecked: false`, and `deletionFeasibilityChecked: false`. Text diagnostics and help communicate the same limits. Successful canonical JSON previews keep stderr empty; deprecated aliases retain only their existing deprecation diagnostic. Real deletion behavior and confirmation are unchanged. Full dependency discovery remains unimplemented; the unused `DeleteDryRunResult`/`DependencyInfo` types are not evidence of discovery.
+The existing version-1 JSON envelope and `data.preview` nesting remain. The schema preview now reports `validationScope: delete-dependencies`, target/dependency check flags, status (`no-blocking-dependencies`, `blocked`, `incomplete`), complete returned rows, counts and safe name-lookup issues. Blocked output has success=false with data and a structured error, exit 10; incomplete output is nonzero (generic incomplete exit 2). A clear observation exits 0 while server permissions, customizability, feasibility and concurrent changes remain unchecked. Existing `--force` skips confirmation only; the actual service delete rechecks rather than trusting an earlier preview. Existing Task signatures and constructor remain; optional preview capability absence is an error, never a checked-success fallback.
+
+Other dry-run output is unchanged in this carrier. The wider scope descriptors and their 81 service/CLI cases arrive in the next carrier before release; existing no-dry-run wrappers keep their flags.
 
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
-| AC-66 | All five canonical schema-delete commands and three deprecated aliases describe input-only validation, unchecked target existence/dependencies/deletion feasibility in dry-run help and stderr; successful JSON retains existing envelope/fields and adds explicit unchecked preview scope | `MetadataDeletePreviewTests.SchemaDelete_ReportsInputOnlyScopeWithoutSdkCalls`, `PreviewHelp_StatesLimitations` | ✅ |
+| AC-66 | All five canonical schema-delete commands and three deprecated aliases report observed dependencies, nonzero blocked/incomplete status and unchecked server feasibility in help/text/JSON | `MetadataDeletePreviewTests.SchemaDelete_ReportsObservedDependencyScopeWithoutWrites`, `PreviewHelp_StatesLimitations` | Combined277 focused passed; carrier1 normal/hosted pending |
 | AC-67 | Global/local option-removal previews report resolved target existence, but never claim removability or checked dependencies; additive JSON scope and help agree; SDK calls remain read-only | `MetadataDeletePreviewTests.OptionRemoval_ReportsExistenceOnlyAndNeverWrites`, `PreviewHelp_StatesLimitations` | ✅ |
 | AC-68 | Real validation failures (including missing option) remain errors with existing exit/envelope contracts and never emit a successful preview; no preview writes | `MetadataDeletePreviewTests.MissingOption_RemainsValidationFailure`, `SchemaDelete_MissingInput_RemainsValidationFailure` | ✅ |
-| AC-69 | Preview changes preserve real forced-delete requests, result fields and confirmation behavior; canonical/deprecated paths share the execute implementation | `MetadataDeletePreviewTests.SchemaDelete_RealFlowRetainsDeleteResult`, `SchemaDelete_WithoutForceStillRequiresConfirmation` | ✅ |
+| AC-69 | Real forced-delete payloads/result fields and confirmation remain, with fresh inspection before the acknowledged mutation; canonical/deprecated paths share the execute implementation | `MetadataDeletePreviewTests.SchemaDelete_RealFlowRetainsDeleteResult`, `SchemaDelete_WithoutForceStillRequiresConfirmation` | Combined277 focused passed; carrier1 normal/hosted pending |
+
+
+### Dependency discovery acceptance (#1532)
+
+The common 101-case mock baseline has 10 passing safety/input controls and 91 added-contract assertion failures. A compile-corrected 20-case raw-read baseline has 12 passing controls and 8 classification failures; earlier compile failures are not test evidence. The combined fixed 277-case candidate passed. This carrier contains the 196 dependency cases; its own normal/hosted checks remain pending and the 81 wider-scope cases follow before release. Synthetic mocks do not establish live acceptance. The separate #1530 candidate is not composed here; normalized draft values must be described as provisional when adopted.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-114 | All five families resolve exact named unpublished identity, parent ownership, nonempty GUID and dependency type; both relationship shapes are supported | `MetadataDeleteDependencyTests.DryRun_ResolvesUnpublishedIdentityAndRequestsDependencies`, `MetadataDeleteDependencyDetailTests.ConflictingReturnedParent_FailsBeforeDependencyRead` | Combined277 focused passed; carrier1 normal/hosted pending |
+| AC-115 | Preview reads dependencies without writes and blocks on known/unknown components | `MetadataDeleteDependencyTests.Blockers_RejectWithoutDiscardingUnknownTypeOrObjectId`, `MetadataDeleteDependencyCommandTests.AllAliases_BlockedDryRunShowsComponentsAndNonzero` | Combined277 focused passed; carrier1 normal/hosted pending |
+| AC-116 | Keep every edge, exact type/GUID, visible duplicate counts and unresolved names; use typed metadata ID or minimal record-name queries, verifying modern mappings | `MetadataDeleteDependencyDetailTests.KnownComponentNames_UseExactTypedIdOrMinimalNameQuery`, `UnknownOrUnverifiedModernType_KeepsIdentityAndNeverQueriesGuessedTable`, `DuplicateDependencyEdges_AreRetainedButNamesReadOncePerIdentity`, `IncompleteNameResult_NeverClearsTheKnownBlocker` | Combined277 focused passed; carrier1 normal/hosted pending |
+| AC-117 | Invalid identity, missing/partial/malformed dependency results fail closed; never convert partial data into empty success | `MetadataDeleteDependencyTests.InvalidIdentity_FailsBeforeDependencyRead`, `IncompleteDependencies_CannotBecomeEmptySuccess`, `MetadataDeleteDependencyDetailTests.PartialCollection_RetainsKnownEdgesAndRemainsIncomplete` | Combined277 focused passed; carrier1 normal/hosted pending |
+| AC-118 | Exact cancellation/cause/token and coded classification survive each read; one SDK operation per returned lease; optional name failures never expose provider text | `MetadataDeleteDependencyTests.NewPreflightStageCancellation_PreservesTokenIdentityAndStops`, `DependencySdkFault_KeepsCauseAndFixedMessage`, `MetadataDeleteDependencyDetailTests.OptionalNameCancellation_PropagatesExactExceptionAndReturnsEveryLease`, `OptionalNameAuthFailure_PreservesClassificationAndCauseWithoutProviderText` | Combined277 focused passed; carrier1 normal/hosted pending |
+| AC-119 | Actual service deletion rechecks after preview; force cannot bypass dependencies; guards/required inputs precede checkout and cache invalidation follows only mutation | `MetadataDeleteDependencyTests.ActualDelete_ReadsBeforeExactlyOneOriginalDelete`, `PreviewThenActual_RechecksAndRefusesNewBlockers`, `ExistingInputAndSafetyRefusals_PrecedeAnyCheckout`, `MetadataDeleteDependencyCommandTests.Force_DoesNotBypassDependencyRefusal` | Combined277 focused passed; carrier1 normal/hosted pending |
+| AC-120 | All eight canonical/legacy routes retain version-1 data/preview while text/JSON reports blocked/incomplete nonzero and explicit unchecked feasibility | `MetadataDeleteDependencyCommandTests.AllAliases_BlockedDryRunShowsComponentsAndNonzero`, `AllAliases_EmptyCompleteObservationDoesNotClaimFeasibility`, `AllAliases_IncompleteDependencyResultIsNeverSuccess` | Combined277 focused passed; carrier1 normal/hosted pending |
+| AC-121 | Old five Task signatures/constructor and public command factories remain; missing optional preview capability fails closed | `MetadataDeleteDependencyTests.ExistingTaskDeleteContracts_RetainOptionalPreviewCapability`, `MetadataDryRunScopeCommandTests.ServiceWithoutOptionalCapability_FailsClosedBeforeAnyDeleteCall` | Contract cases passed in combined277; capability-absence case/gates follow in carrier2 |
 
 ### Draft-aware option allocation (#1531)
 
@@ -850,7 +868,7 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 ### Recovery Strategies
 
 - **Validation errors:** Fix input and retry — all validation errors include the specific field and constraint that failed
-- **Dependency conflicts:** Inspect and resolve dependencies separately before deletion. The current CLI delete dry-run does not discover them
+- **Dependency conflicts:** Inspect and resolve dependencies separately before deletion. Schema-delete previews discover them while retaining unresolved component identities; other server constraints remain unchecked
 - **Managed component errors:** Cannot modify managed components directly — create unmanaged customizations in the target solution
 
 ---
@@ -901,7 +919,7 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 
 **Context:** Schema deletes are destructive and irreversible. Need a confirmation mechanism.
 
-**Decision:** Follow the truncate pattern: `--dry-run` for the limited validation described above, interactive confirmation with exact typed text, `--force` to skip, `CONFIRMATION_REQUIRED` error in non-interactive mode.
+**Decision:** Follow the truncate pattern with dependency inspection before confirmation and again at the service delete boundary. `--dry-run` never mutates; `--force` skips confirmation only. `CONFIRMATION_REQUIRED` remains the non-interactive refusal without force.
 
 **Rationale:** Consistency — users who've used `ppds truncate` already understand this pattern. The typed confirmation text (e.g., `DELETE TABLE account`) forces acknowledgment of exactly what's being destroyed. MCP surfaces don't expose delete at all, matching the existing read-only + non-destructive MCP design.
 
@@ -973,6 +991,7 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 
 | Date | Change |
 |------|--------|
+| 2026-11-09 | Add strict dependency preview/recheck, raw-read recovery classification, compatible capability and AC-114–AC-121; combined277 focused candidate passed, carrier gates pending. |
 | 2026-11-09 | Bound sixteen SDK/catalog user-message paths to service-owned action/target text; retain diagnostic causes and classifications, verify synthetic MCP privacy and update the intentional CLI message contract (AC-103 through AC-105). |
 | 2026-11-08 | Preserve covered color cancellation and normalize the selected acquisition boundaries with unchanged CLI exits; protect authentication diagnostic details at the MCP error boundary (AC-97 through AC-102). |
 | 2026-11-03 | #1532: document actual delete-preview scope, remove CLI dependency/removability assurances, add additive JSON scope and AC-66–AC-69. Correct AC-11 to incomplete: dependency discovery is still unimplemented. |
