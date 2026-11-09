@@ -82,8 +82,12 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
     public static IEnumerable<object[]> Failures()
     {
         foreach (var boundary in new[] { "update-checkout", "update-sdk", "publish-checkout", "publish-sdk" })
-        foreach (var kind in new[] { "ordinary", "coded", "cancel", "timeout" })
-            yield return [boundary, kind];
+        {
+            foreach (var kind in new[] { "ordinary", "coded", "cancel", "timeout" })
+            {
+                yield return [boundary, kind];
+            }
+        }
         yield return ["update-checkout", "pool"];
         yield return ["publish-checkout", "pool"];
     }

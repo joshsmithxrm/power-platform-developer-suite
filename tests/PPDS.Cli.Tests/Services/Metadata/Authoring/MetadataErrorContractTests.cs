@@ -111,9 +111,9 @@ public sealed partial class MetadataLeaseLifetimeTests
     [Theory, MemberData(nameof(AcquisitionIdentityCases)), Trait("AC", "AC-98")]
     public async Task ErrorContract_AcquisitionIdentity_PropagatesWithoutWrapping(string route, string stage, string kind)
     {
-        var original = kind switch
+        Exception original = kind switch
         {
-            "cancel" => (Exception)new OperationCanceledException("SDK-owned acquisition cancellation"),
+            "cancel" => new OperationCanceledException("SDK-owned acquisition cancellation"),
             "coded" => new PpdsException("Synthetic.Coded", "Already coded",
                 new Dictionary<string, object> { ["scope"] = "fixture" }),
             _ => new MetadataValidationException(MetadataErrorCodes.InvalidConstraint, "Already validated")
