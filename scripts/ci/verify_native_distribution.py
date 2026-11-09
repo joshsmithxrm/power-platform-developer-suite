@@ -5,7 +5,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import queue
 import re
 import shutil
@@ -13,6 +13,7 @@ import stat
 import subprocess
 import sys
 import threading
+import uuid
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -104,8 +105,49 @@ def bundle_manifest(value):
             "informationalVersion": value["informationalVersion"]}
 
 
+def windows_runtime_root():
+    # Only metadata of trusted runner directories is inspected; no existing
+    # PPDS profile, reference cache or credential file is opened.
+    require(os.getenv("GITHUB_ACTIONS") == "true" and os.getenv("RUNNER_ENVIRONMENT") == "github-hosted",
+            "Windows private runtime requires an ephemeral GitHub-hosted job")
+    drive = os.environ.get("SYSTEMDRIVE", "").upper()
+    require(drive == "C:", "Windows private runtime requires the trusted C: system drive")
+
+    def local_path(key):
+        value = os.environ.get(key, "")
+        require(value and not value.startswith(("\\\\", "//")) and
+                not re.search(r'[\x00-\x1f<>"|?*]', value) and ":" not in value[2:] and
+                not any(p in {".", ".."} for p in re.split(r"[\\/]", value)),
+                "Invalid Windows runner profile path")
+        path = PureWindowsPath(value)
+        require(path.is_absolute() and path.drive.upper() == drive and path.root == "\\",
+                "Windows runner profile must be a local system-drive path")
+        return path
+
+    profile = local_path("USERPROFILE")
+    parent_path = local_path("LOCALAPPDATA")
+    require(len(profile.parts) >= 3 and parent_path != profile and parent_path.is_relative_to(profile),
+            "Windows private runtime requires LOCALAPPDATA beneath the runner profile")
+    parent = Path(str(parent_path))
+    for path in reversed([parent, *parent.parents]):
+        info = path.lstat()
+        require(stat.S_ISDIR(info.st_mode) and not path.is_symlink() and
+                not getattr(info, "st_file_attributes", 0) & 0x400 and path.resolve(strict=True) == path,
+                "Windows private runtime ancestor is not a canonical plain directory")
+    root = parent / ("ppds-native-ci-" + uuid.uuid4().hex)
+    require(root.parent == parent and root.resolve(strict=False).is_relative_to(parent),
+            "Windows private runtime escaped its profile parent")
+    try:
+        root.lstat()
+    except FileNotFoundError:
+        return root
+    raise ValueError("Refuse existing Windows private runtime child")
+
+
 def private_environment(root):
     require(not root.exists() and not root.is_symlink(), "Refuse existing runtime directory")
+    if sys.platform == "win32":
+        root = windows_runtime_root()
     root.mkdir(mode=0o700)
     names = ["home", "appdata", "localappdata", "config", "data", "temp", "docker"]
     for name in names:

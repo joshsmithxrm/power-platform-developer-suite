@@ -3,8 +3,10 @@ import copy
 import importlib.util
 import io
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+import stat
 import sys
+from types import SimpleNamespace
 import zipfile
 
 import pytest
@@ -74,12 +76,125 @@ def test_wrong_runtime_or_source_is_rejected(mutation):
 
 
 def test_private_environment_drops_credentials_profiles_and_opt_ins(monkeypatch, tmp_path):
+    monkeypatch.setattr(gate.sys, "platform", "linux")
     for name in ["GH_TOKEN", "VSCE_PAT", "AZURE_CLIENT_SECRET", "PPDS_CLIENT_SECRET", "PPDS_PROFILE", "PPDS_FORMS_LIVE_CONFIRM"]:
         monkeypatch.setenv(name, "synthetic-not-a-credential")
     env = gate.private_environment(tmp_path / "private")
     assert not any(name in env for name in ["GH_TOKEN", "VSCE_PAT", "AZURE_CLIENT_SECRET", "PPDS_CLIENT_SECRET", "PPDS_PROFILE", "PPDS_FORMS_LIVE_CONFIRM"])
     assert Path(env["PPDS_CONFIG_DIR"]).parent == tmp_path / "private"
     assert not list(Path(env["PPDS_CONFIG_DIR"]).iterdir())
+
+
+class WindowsDirectoryFixture:
+    """Metadata-only synthetic Windows filesystem; never reads a real profile."""
+    def __init__(self):
+        self.nodes = {}
+        self.created = []
+        for value in ["C:/", "C:/Users", "C:/Users/runneradmin", "C:/Users/runneradmin/AppData",
+                      "C:/Users/runneradmin/AppData/Local", "D:/", "D:/a", "D:/a/_temp", "D:/a/_temp/evidence"]:
+            self.nodes[str(PureWindowsPath(value))] = {"reparse": False, "symlink": False, "redirect": None}
+
+    def path(self, value):
+        fixture = self
+
+        class Directory:
+            def __init__(self, name): self.value = PureWindowsPath(name)
+            def __str__(self): return str(self.value)
+            def __eq__(self, other): return str(self) == str(other)
+            def __truediv__(self, other): return fixture.path(self.value / other)
+            @property
+            def parent(self): return fixture.path(self.value.parent)
+            @property
+            def parents(self): return tuple(fixture.path(p) for p in self.value.parents)
+            def exists(self): return str(self) in fixture.nodes
+            def is_symlink(self): return fixture.nodes.get(str(self), {}).get("symlink", False)
+            def is_relative_to(self, other): return self.value.is_relative_to(PureWindowsPath(str(other)))
+            def lstat(self):
+                if str(self) not in fixture.nodes: raise FileNotFoundError(str(self))
+                return SimpleNamespace(st_mode=stat.S_IFDIR | 0o700,
+                                       st_file_attributes=0x400 if fixture.nodes[str(self)]["reparse"] else 0)
+            def resolve(self, strict=False):
+                if strict and not self.exists(): raise FileNotFoundError(str(self))
+                redirect = fixture.nodes.get(str(self), {}).get("redirect")
+                return fixture.path(redirect) if redirect else self
+            def mkdir(self, mode=0o777):
+                if self.exists(): raise FileExistsError(str(self))
+                if not self.parent.exists(): raise FileNotFoundError(str(self.parent))
+                fixture.nodes[str(self)] = {"reparse": False, "symlink": False, "redirect": None}
+                fixture.created.append((str(self), mode))
+
+        return Directory(value)
+
+
+def windows_environment_fixture(monkeypatch):
+    fixture = WindowsDirectoryFixture()
+    monkeypatch.setattr(gate.sys, "platform", "win32")
+    monkeypatch.setattr(gate, "Path", fixture.path)
+    monkeypatch.setattr(gate, "uuid", SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="a" * 32)), raising=False)
+    for name, value in {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted", "SYSTEMDRIVE": "C:",
+                        "USERPROFILE": "C:/Users/runneradmin", "LOCALAPPDATA": "C:/Users/runneradmin/AppData/Local",
+                        "RUNNER_TEMP": "D:/a/_temp"}.items():
+        monkeypatch.setenv(name, value)
+    return fixture, fixture.path("D:/a/_temp/evidence/runtime")
+
+
+def test_windows_private_state_uses_fresh_system_profile_child_and_keeps_evidence_on_d(monkeypatch):
+    fixture, requested = windows_environment_fixture(monkeypatch)
+    for key in ["GH_TOKEN", "AZURE_CLIENT_SECRET", "PPDS_PROFILE", "PPDS_FORMS_LIVE_CONFIRM", "EXISTING_PROFILE_PATH"]:
+        monkeypatch.setenv(key, "synthetic-not-a-credential")
+
+    env = gate.private_environment(requested)
+
+    expected = PureWindowsPath("C:/Users/runneradmin/AppData/Local/ppds-native-ci-" + "a" * 32)
+    private_keys = ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+                    "PPDS_CONFIG_DIR", "TEMP", "TMP", "TMPDIR", "DOTNET_CLI_HOME", "DOCKER_CONFIG", "DOTNET_BUNDLE_EXTRACT_BASE_DIR"]
+    assert all(PureWindowsPath(env[k]).is_relative_to(expected) for k in private_keys)
+    assert PureWindowsPath(env["HOME"]) == expected / "home"
+    assert not requested.exists()
+    assert all(PureWindowsPath(path).is_relative_to(expected) and mode == 0o700 for path, mode in fixture.created)
+    assert not any(key in env for key in ["GH_TOKEN", "AZURE_CLIENT_SECRET", "PPDS_PROFILE", "PPDS_FORMS_LIVE_CONFIRM", "EXISTING_PROFILE_PATH", "RUNNER_TEMP"])
+    assert env["DOTNET_GENERATE_ASPNET_CERTIFICATE"] == "false"
+
+
+@pytest.mark.parametrize("key,value", [
+    ("SYSTEMDRIVE", "D:"), ("SYSTEMDRIVE", ""), ("USERPROFILE", "C:/"),
+    ("USERPROFILE", "//server/profile"), ("USERPROFILE", "D:/Users/runneradmin"),
+    ("USERPROFILE", "C:/Users/../runneradmin"), ("LOCALAPPDATA", "C:/"),
+    ("LOCALAPPDATA", "C:/Users/runneradmin"), ("LOCALAPPDATA", "C:/OtherProfile/Local"),
+    ("LOCALAPPDATA", "//server/cache"), ("LOCALAPPDATA", "D:/a/_temp"),
+    ("LOCALAPPDATA", "C:/Users/runneradmin/AppData/../Local"),
+    ("GITHUB_ACTIONS", "false"), ("RUNNER_ENVIRONMENT", "self-hosted")
+])
+def test_windows_invalid_or_nonhosted_parents_are_refused_before_mkdir(monkeypatch, key, value):
+    fixture, requested = windows_environment_fixture(monkeypatch)
+    monkeypatch.setenv(key, value)
+
+    with pytest.raises(ValueError): gate.private_environment(requested)
+
+    assert fixture.created == []
+
+
+@pytest.mark.parametrize("field", ["reparse", "symlink", "redirect", "missing"])
+def test_windows_profile_ancestors_must_be_present_canonical_plain_directories(monkeypatch, field):
+    fixture, requested = windows_environment_fixture(monkeypatch)
+    parent = str(PureWindowsPath("C:/Users/runneradmin/AppData"))
+    if field == "missing": del fixture.nodes[parent]
+    else: fixture.nodes[parent][field] = "D:/a/_temp" if field == "redirect" else True
+
+    with pytest.raises((ValueError, FileNotFoundError)): gate.private_environment(requested)
+
+    assert fixture.created == []
+
+
+def test_windows_existing_private_child_is_refused_without_overwriting(monkeypatch):
+    fixture, requested = windows_environment_fixture(monkeypatch)
+    target = str(PureWindowsPath("C:/Users/runneradmin/AppData/Local/ppds-native-ci-" + "a" * 32))
+    fixture.nodes[target] = {"reparse": False, "symlink": False, "redirect": None}
+    before = copy.deepcopy(fixture.nodes)
+
+    with pytest.raises(ValueError): gate.private_environment(requested)
+
+    assert fixture.nodes == before and fixture.created == []
 
 
 @pytest.mark.parametrize("wire", [b"", b"Content-Length: 999999\r\n\r\n", b"Content-Length: 2\r\n\r\n{", b"Content-Length: 2\r\nContent-Length: 2\r\n\r\n{}"])
