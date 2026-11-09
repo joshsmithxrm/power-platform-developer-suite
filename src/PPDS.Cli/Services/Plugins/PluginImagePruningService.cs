@@ -242,8 +242,8 @@ internal static class PluginImagePruningService
         catch (Exception ex)
         {
             result.Status = "failed";
-            var error = new PpdsException(ErrorCodes.Validation.InvalidValue,
-                "Image cleanup stopped. Retained acknowledgements and unknown effects do not imply rollback.", ex);
+            var error = NormalizeFailure(ex,
+                "Image cleanup stopped. Retained acknowledgements and unknown effects do not imply rollback.");
             Retain(error);
             throw error;
         }
@@ -354,9 +354,24 @@ internal static class PluginImagePruningService
         catch (PpdsException) { throw; }
         catch (Exception ex)
         {
-            throw new PpdsException(ErrorCodes.Validation.InvalidValue,
-                "Could not read a complete image-cleanup inventory or ownership record. No further cleanup was dispatched.", ex);
+            throw NormalizeFailure(ex,
+                "Could not read a complete image-cleanup inventory or ownership record. No further cleanup was dispatched.");
         }
+    }
+
+    private static PpdsException NormalizeFailure(Exception ex, string userMessage)
+    {
+        // Retain the mapper's classification, fixed public message and original cause.
+        // Provider message/target must not become public cleanup error details.
+        var (mapped, exitCode) = ExceptionMapper.MapWithExitCode(ex);
+        if (exitCode == ExitCodes.AuthError)
+            return new PpdsAuthException(mapped.Code, userMessage, ex)
+            {
+                RequiresReauthentication = ex is PPDS.Dataverse.Resilience.DataverseAuthenticationException { RequiresReauthentication: true }
+            };
+
+        var code = exitCode == ExitCodes.ConnectionError ? mapped.Code : ErrorCodes.Validation.InvalidValue;
+        return new PpdsException(code, userMessage, ex);
     }
 
     private static void Require(bool ok, string message)

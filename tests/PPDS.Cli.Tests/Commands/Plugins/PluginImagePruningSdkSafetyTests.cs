@@ -136,6 +136,65 @@ public sealed class PluginImagePruningSdkSafetyTests(ITestOutputHelper output)
         f.VerifyReads(); Proof(f, error, scope.Deletes); Assert.Equal(0, scope.Deletes); AssertProtectionError(error);
     }
 
+    [Theory]
+    [InlineData("plan", "auth")]
+    [InlineData("plan", "timeout")]
+    [InlineData("delete", "auth")]
+    [InlineData("delete", "timeout")]
+    [Trait("AC", "AC-103")]
+    public async Task RawSdkFailure_RetainsRecoveryClassification(string stage, string failure)
+    {
+        using var f = new SdkFixture("assembly");
+        var scope = new Scope(f);
+        const string marker = "SyntheticPruneRecoverySecret";
+        Exception raw = failure == "auth"
+            ? new PPDS.Dataverse.Resilience.DataverseAuthenticationException("ClientSecret=" + marker, true)
+            : new TimeoutException("ClientSecret=" + marker);
+        PluginImagePruningPlan? plan = null;
+        if (stage == "plan")
+            scope.Service.Setup(s => s.ListImagesForStepAsync(It.IsAny<Guid>(), f.Token)).ThrowsAsync(raw);
+        else
+        {
+            plan = await scope.Plan();
+            var imageId = Assert.Single(plan.Images).ImageId;
+            scope.Service.Setup(s => s.DeleteImageAsync(imageId, f.Token)).ThrowsAsync(raw);
+        }
+        Func<Task> run = stage == "plan" ? () => scope.Plan()
+            : () => PluginImagePruningService.ApplyAsync(scope.Service.Object, plan!, f.Token);
+        var error = Assert.IsAssignableFrom<PpdsException>(await Record.ExceptionAsync(run));
+        f.VerifyReads();
+        Assert.Same(raw, error.InnerException);
+        Assert.Equal(0, scope.Deletes);
+        var call = scope.Service.Invocations.Last();
+        Assert.Equal(stage == "plan" ? "ListImagesForStepAsync" : "DeleteImageAsync", call.Method.Name);
+        Assert.Equal(f.Token, Assert.IsType<CancellationToken>(call.Arguments[^1]));
+        var journal = PluginMutationJournal.Read(error);
+        var interrupted = PluginImagePruningService.InterruptedResult(error);
+        Assert.Equal(stage == "plan" ? 0 : 1, journal.Count);
+        if (stage == "plan") Assert.Null(interrupted);
+        else
+        {
+            var outcome = Assert.Single(journal);
+            Assert.Equal("unknown", outcome.Outcome);
+            Assert.Equal(Assert.Single(plan!.Images).ImageId, outcome.RecordId);
+            Assert.Equal(journal, Assert.IsType<PluginImagePruningResult>(interrupted).Outcomes);
+            Assert.Equal(0, interrupted!.ImagesDeleted);
+        }
+        var publicJson = JsonSerializer.Serialize(ExceptionMapper.Map(error)) + JsonSerializer.Serialize(interrupted);
+        Assert.DoesNotContain(marker, error.UserMessage + publicJson);
+        var expectedCode = failure == "auth" ? ErrorCodes.Auth.Expired : ErrorCodes.Connection.Timeout;
+        var expectedExit = failure == "auth" ? ExitCodes.AuthError : ExitCodes.ConnectionError;
+        Proof(f, error, scope.Deletes);
+        output.WriteLine("PPDS_PRUNE_RECOVERY_PROOF=" + JsonSerializer.Serialize(new
+        { stage, failure, reachedRawThrow = true, originalCausePreserved = true, method = call.Method.Name,
+            journal = journal.Select(o => o.Outcome), acknowledged = interrupted?.ImagesDeleted ?? 0,
+            actualCode = error.ErrorCode, actualExit = ExceptionMapper.ToExitCode(error), expectedCode, expectedExit,
+            requiresReauthentication = error is PpdsAuthException { RequiresReauthentication: true }, publicJson }));
+        Assert.Equal(expectedCode, error.ErrorCode);
+        Assert.Equal(expectedExit, ExceptionMapper.ToExitCode(error));
+        if (failure == "auth") Assert.True(Assert.IsType<PpdsAuthException>(error).RequiresReauthentication);
+    }
+
     private static void AssertProtectionError(Exception? error)
     {
         var coded = Assert.IsType<PpdsException>(error); Assert.Equal(ErrorCodes.Validation.InvalidValue, coded.ErrorCode);
