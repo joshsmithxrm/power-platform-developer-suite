@@ -34,7 +34,7 @@ public class FormsCommandGroupTests
     public void EveryMutation_ExposesExactEnvironmentAcknowledgement_SeparateFromPublication()
     {
         string[] writers = ["set-xml", "add-tab", "update-tab", "remove-tab", "add-section", "update-section", "remove-section",
-            "add-field", "remove-field", "reorder-fields", "add-subgrid", "remove-subgrid"];
+            "add-field", "remove-field", "reorder-fields", "reorder-fields-strict", "move-field", "add-subgrid", "remove-subgrid"];
         foreach (var name in writers)
         {
             var command = _command.Subcommands.Single(c => c.Name == name);
@@ -64,9 +64,11 @@ public class FormsCommandGroupTests
         subcommandNames.Should().Contain("add-field");
         subcommandNames.Should().Contain("remove-field");
         subcommandNames.Should().Contain("reorder-fields");
+        subcommandNames.Should().Contain("reorder-fields-strict");
+        subcommandNames.Should().Contain("move-field");
         subcommandNames.Should().Contain("add-subgrid");
         subcommandNames.Should().Contain("remove-subgrid");
-        subcommandNames.Should().HaveCount(16);
+        subcommandNames.Should().HaveCount(18);
     }
 
     /// <summary>AC-29: Every subcommand has a non-empty description.</summary>

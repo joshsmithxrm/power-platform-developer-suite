@@ -34,14 +34,11 @@ public sealed class FormFieldBindingTests
     }
 
     [Fact]
-    public async Task Add_DuplicatesRemainAllowed()
+    public async Task Add_ExistingCaseVariantsAreUnchanged()
     {
         var h = new FormFieldBindingHarness();
         await h.Service.AddFieldAsync(new("account", "Fixture", "General", ["NAME", "name"]));
-        var cells = h.WrittenDocument().Descendants("cell").Where(c => (string?)c.Element("control")?.Attribute("datafieldname") == "name").ToList();
-        Assert.Equal(3, cells.Count);
-        Assert.True(XNode.DeepEquals(XDocument.Parse(h.Original).Descendants("cell").First(), cells[0]));
-        Assert.All(cells.Skip(1), cell => Assert.Equal("name", (string?)cell.Element("control")!.Attribute("id")));
+        h.AssertNoWrites();
     }
 
     [Theory]
@@ -57,7 +54,7 @@ public sealed class FormFieldBindingTests
         var controls = doc.Descendants("control").ToList();
         Assert.Equal(new[] { FormFieldBindingHarness.Canonical, "name", null }, controls.Select(c => (string?)c.Attribute("datafieldname")));
         Assert.Equal(FormFieldBindingHarness.Canonical, (string?)controls[0].Attribute("id"));
-        Assert.Equal(requested, (string?)controls[0].Parent!.Element("labels")!.Element("label")!.Attribute("description"));
+        Assert.Equal("Canonical display label", (string?)controls[0].Parent!.Element("labels")!.Element("label")!.Attribute("description"));
         Assert.True(XNode.DeepEquals(original.Descendants("cell").First(), controls[1].Parent));
         Assert.True(XNode.DeepEquals(original.Descendants("control").Single(c => (string?)c.Attribute("id") == "notescontrol").Parent, controls[2].Parent));
         Assert.DoesNotContain(doc.Descendants("control"), c => (string?)c.Attribute("datafieldname") == "telephone1");
