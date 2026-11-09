@@ -66,7 +66,7 @@ public class SetFormXmlCommandTests
     public void Command_HelpTextDescribesSchemaValidation()
     {
         // AC-30: The command description must communicate that schema validation
-        // is applied and that GUIDs must use brace format and be unique.
+        // is applied; schema format and instance uniqueness are distinct from reusable type IDs.
         var description = _command.Description ?? string.Empty;
 
         description.Should().ContainAny(
@@ -76,13 +76,12 @@ public class SetFormXmlCommandTests
 
     [Fact]
     [Trait("Category", "Unit")]
-    public void Command_HelpTextMentionsBraceFormatGuids()
+    public void Command_HelpTextMentionsSchemaDefinedGuidFormat()
     {
         var description = _command.Description ?? string.Empty;
 
-        description.Should().ContainAny(
-            new[] { "brace", "GUID", "guid", "{", "}" },
-            because: "the description must document brace-format GUID requirement (AC-30)");
+        description.Should().Contain("GUID format is defined by the schema");
+        description.Should().NotContain("must use brace-format");
     }
 
     [Fact]
@@ -93,7 +92,7 @@ public class SetFormXmlCommandTests
 
         description.Should().ContainAny(
             new[] { "unique", "Unique" },
-            because: "the description must document that id/labelid values must be unique (AC-30)");
+            because: "the description must document instance GUID uniqueness (AC-30)");
     }
 
     [Fact]
