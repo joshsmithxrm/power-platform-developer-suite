@@ -15,13 +15,15 @@ public static class ColumnCommandGroup
     /// <summary>
     /// Creates the 'column' command group with subcommands (deprecated — use 'attribute').
     /// </summary>
-    public static Command Create()
+    public static Command Create() => Create(null);
+
+    internal static Command Create(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var command = new Command("column", "Create, update, or delete columns (deprecated — use 'attribute')");
 
-        command.Subcommands.Add(CreateCreateCommand());
-        command.Subcommands.Add(CreateUpdateCommand());
-        command.Subcommands.Add(CreateDeleteCommand());
+        command.Subcommands.Add(CreateCreateCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateUpdateCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateDeleteCommand(serviceProviderFactory));
 
         return command;
     }
@@ -202,7 +204,9 @@ public static class ColumnCommandGroup
         return command;
     }
 
-    internal static Command CreateUpdateCommand()
+    internal static Command CreateUpdateCommand() => CreateUpdateCommand(null);
+
+    internal static Command CreateUpdateCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -281,7 +285,7 @@ public static class ColumnCommandGroup
             DeprecationWarning.Write("ppds metadata column update", "ppds metadata attribute update");
             return await AttributeCommandGroup.ExecuteUpdateAsync(
                 solution, entity, column, displayName, description, requiredLevel, maxLength,
-                dryRun, publish: false, profileVal, environmentVal, globalOptions, cancellationToken);
+                dryRun, publish: false, profileVal, environmentVal, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
