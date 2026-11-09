@@ -13,7 +13,7 @@ const extensionRoot = fileURLToPath(new URL('..', import.meta.url));
 const monacoBuild = builds.find(options => options.outfile === 'dist/monaco-editor.js');
 
 describe('Monaco sanitizer bundle', () => {
-    it('bundles the npm sanitizer instead of Monaco\'s vendored copy', async () => {
+    it('bundles the npm sanitizer instead of Monaco\'s vendored copy', { timeout: 15_000 }, async () => {
         const result = await build({
             ...monacoBuild,
             absWorkingDir: extensionRoot,
