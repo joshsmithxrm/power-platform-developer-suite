@@ -223,7 +223,7 @@ public static class KeyCommandGroup
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = MetadataDeletePreview.InputOnlyHelp,
+            Description = MetadataDeletePreview.DependenciesHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -292,30 +292,10 @@ public static class KeyCommandGroup
                 Console.Error.WriteLine();
             }
 
-            // Validate required inputs only; target existence and dependencies are not queried.
-            var dryRunRequest = new DeleteKeyRequest
-            {
-                SolutionUniqueName = solution,
-                EntityLogicalName = entity,
-                KeyLogicalName = name,
-                DryRun = true
-            };
-
-            await authoringService.DeleteKeyAsync(dryRunRequest, ct: cancellationToken);
-
-            if (dryRun)
-            {
-                if (globalOptions.IsJsonMode)
-                {
-                    writer.WriteSuccess(new { entity, key = name, dryRun = true, preview = MetadataDeletePreview.InputOnly });
-                }
-                else
-                {
-                    MetadataDeletePreview.InputOnly.WriteDiagnostic();
-                }
-
-                return ExitCodes.Success;
-            }
+            var preview = await MetadataDeletePreview.InspectDependenciesAsync(authoringService,
+                new MetadataDeleteTarget(MetadataDeleteKind.Key, solution, entity, name), cancellationToken);
+            if (dryRun || !preview.IsClear)
+                return MetadataDeletePreview.WriteDependencies(writer, new { entity, key = name, dryRun, preview }, preview);
 
             // Confirmation prompt
             if (!force)

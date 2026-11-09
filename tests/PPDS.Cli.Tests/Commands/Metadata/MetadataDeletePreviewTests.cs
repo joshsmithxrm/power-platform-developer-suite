@@ -17,6 +17,7 @@ using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Cli.Tests.Services.Shared;
+using DependencyFixture = PPDS.Cli.Tests.Services.Metadata.Authoring.MetadataDeleteDependencyTests.Fixture;
 using PPDS.Cli.Tests.TestHelpers;
 using PPDS.Dataverse.Metadata.Authoring;
 using PPDS.Dataverse.Pooling;
@@ -35,20 +36,20 @@ public sealed class MetadataDeletePreviewTests
 
     [Theory]
     [MemberData(nameof(SchemaCases))]
-    public async Task SchemaDelete_ReportsInputOnlyScopeWithoutSdkCalls(string noun, bool json)
+    public async Task SchemaDelete_ReportsObservedDependencyScopeWithoutWrites(string noun, bool json)
     {
         using var fixture = new Fixture();
         var result = await fixture.RunAsync(noun, true, json);
         Assert.Equal(ExitCodes.Success, result.Exit);
-        fixture.Pool.VerifyNoOtherCalls(); // Even invented/nonexistent names cannot be checked locally.
-        fixture.Client.Verify(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(new[] { "Retrieve" + IdentityName(noun), "RetrieveDependenciesForDelete" }, fixture.Requests.Select(r => r.RequestName));
+        fixture.VerifySchemaReads();
         if (json)
         {
             using var document = JsonDocument.Parse(result.Out);
             Assert.True(document.RootElement.GetProperty("success").GetBoolean());
             var data = document.RootElement.GetProperty("data");
             Assert.True(data.GetProperty("dryRun").GetBoolean());
-            AssertScope(data.GetProperty("preview"), "input-only", false);
+            AssertScope(data.GetProperty("preview"), "delete-dependencies", true, dependencies: true);
             Assert.DoesNotContain("[Dry-Run]", result.Error);
             if (noun is "table" or "column" or "choice")
                 Assert.Contains("deprecated", result.Error);
@@ -58,11 +59,9 @@ public sealed class MetadataDeletePreviewTests
         else
         {
             Assert.Empty(result.Out);
-            Assert.Contains("Input validation only", result.Error);
-            Assert.Contains("target existence", result.Error, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("dependencies", result.Error, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("deletion feasibility", result.Error);
-            Assert.Contains("not checked", result.Error);
+            Assert.Contains("No blocking dependencies found", result.Error);
+            Assert.Contains("Other server constraints remain unchecked", result.Error);
+            Assert.Contains("No changes persisted", result.Error);
         }
     }
 
@@ -114,8 +113,8 @@ public sealed class MetadataDeletePreviewTests
         using var fixture = new Fixture();
         var help = fixture.Command(noun).Options.Single(o => o.Name == "--dry-run").Description!;
         Assert.Contains("dependencies", help, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("not checked", help);
-        Assert.DoesNotContain("Show dependencies", help);
+        if (noun is "global-option" or "local-option") Assert.Contains("not checked", help);
+        else { Assert.Contains("without deleting", help); Assert.Contains("incomplete", help); Assert.Contains("nonzero", help); }
     }
 
     [Theory]
@@ -143,7 +142,8 @@ public sealed class MetadataDeletePreviewTests
         using var document = JsonDocument.Parse(result.Out);
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
         Assert.Equal("MISSING_REQUIRED_FIELD", document.RootElement.GetProperty("error").GetProperty("code").GetString());
-        fixture.Pool.VerifyNoOtherCalls();
+        Assert.Empty(fixture.Requests);
+        fixture.VerifySchemaReads();
     }
 
     [Theory]
@@ -160,7 +160,9 @@ public sealed class MetadataDeletePreviewTests
         using var fixture = new Fixture();
         var result = await fixture.RunAsync(noun, false, true);
         Assert.Equal(ExitCodes.Success, result.Exit);
-        Assert.Equal(requestName, Assert.Single(fixture.Requests).RequestName);
+        Assert.Equal(new[] { "Retrieve" + IdentityName(noun), "RetrieveDependenciesForDelete", "Retrieve" + IdentityName(noun), "RetrieveDependenciesForDelete", requestName }, fixture.Requests.Select(r => r.RequestName));
+        Assert.Equal(requestName, Assert.Single(fixture.Requests.Where(r => r.RequestName.StartsWith("Delete", StringComparison.Ordinal))).RequestName);
+        fixture.VerifySchemaReturned();
         using var document = JsonDocument.Parse(result.Out);
         var data = document.RootElement.GetProperty("data");
         Assert.True(data.GetProperty("deleted").GetBoolean());
@@ -174,7 +176,8 @@ public sealed class MetadataDeletePreviewTests
         // The test runner has redirected stdin; if a runner supplies a terminal, reject the prompt.
         var result = await fixture.RunAsync("entity", false, true, force: false);
         Assert.Equal(Console.IsInputRedirected ? ExitCodes.ConfirmationRequired : ExitCodes.Success, result.Exit);
-        fixture.Pool.VerifyNoOtherCalls();
+        Assert.Equal(new[] { "RetrieveEntity", "RetrieveDependenciesForDelete" }, fixture.Requests.Select(r => r.RequestName));
+        fixture.VerifySchemaReads();
         if (Console.IsInputRedirected)
         {
             using var document = JsonDocument.Parse(result.Out);
@@ -182,23 +185,38 @@ public sealed class MetadataDeletePreviewTests
         }
     }
 
-    private static void AssertScope(JsonElement scope, string expected, bool existence)
+    private static void AssertScope(JsonElement scope, string expected, bool existence, bool dependencies = false)
     {
         Assert.Equal(expected, scope.GetProperty("validationScope").GetString());
         Assert.Equal(existence, scope.GetProperty("targetExistenceChecked").GetBoolean());
-        Assert.False(scope.GetProperty("dependenciesChecked").GetBoolean());
+        Assert.Equal(dependencies, scope.GetProperty("dependenciesChecked").GetBoolean());
         Assert.False(scope.GetProperty("deletionFeasibilityChecked").GetBoolean());
     }
+
+    private static string IdentityName(string noun) => noun switch { "entity" or "table" => "Entity", "attribute" or "column" => "Attribute", "relationship" => "Relationship", "key" => "EntityKey", _ => "OptionSet" };
 
     private sealed class Fixture : IDisposable
     {
         public Mock<IDataverseConnectionPool> Pool { get; } = new(MockBehavior.Strict);
         public Mock<IPooledClient> Client { get; } = new(MockBehavior.Loose);
-        public List<OrganizationRequest> Requests { get; } = [];
+        private readonly List<OrganizationRequest> _requests = [];
+        private DependencyFixture? _schema;
+        private string _noun = "";
+        public List<OrganizationRequest> Requests => _schema?.Requests ?? _requests;
+        public void VerifySchemaReads() => _schema!.AssertReadsAndReturned();
+        public void VerifySchemaReturned() { _schema!.AssertReturned(); _schema.AssertMutationCache(); }
         public bool IncludeOption { get; init; } = true;
 
         private Task<ServiceProvider> Provider(CancellationToken ct)
         {
+            if (_noun is not "global-option" and not "local-option")
+            {
+                var family = _noun switch { "entity" or "table" => "table", "attribute" or "column" => "column", "optionset" or "choice" => "choice", _ => _noun };
+                _schema = new DependencyFixture(family) { AllowDelete = true };
+                _schema.BindOperationToken(ct);
+                return Task.FromResult(new ServiceCollection().AddSingleton<IMetadataAuthoringService>(_schema.Service)
+                    .AddSingleton(new ResolvedConnectionInfo { Profile = new AuthProfile { Name = "synthetic-only" }, EnvironmentUrl = "https://fixture.example.test" }).BuildServiceProvider());
+            }
             Pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>())).ReturnsAsync(Client.Object);
             Client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
                 .Returns<OrganizationRequest, CancellationToken>((request, token) =>
@@ -237,10 +255,11 @@ public sealed class MetadataDeletePreviewTests
 
         public async Task<(int Exit, string Out, string Error)> RunAsync(string noun, bool dryRun, bool json, bool blankSolution = false, bool force = true)
         {
-            var args = new List<string> { "--solution", blankSolution ? " " : "UnverifiedSolution" };
-            if (noun is "entity" or "table" or "attribute" or "column" or "key" or "local-option") args.AddRange(["--entity", "unverified_entity"]);
-            if (noun is "attribute" or "column" or "local-option") args.AddRange(["--column", "unverified_column"]);
-            if (noun is "relationship" or "optionset" or "choice" or "key" or "global-option") args.AddRange(["--name", "unverified_name"]);
+            _noun = noun;
+            var args = new List<string> { "--solution", blankSolution ? " " : "SyntheticSolution" };
+            if (noun is "entity" or "table" or "attribute" or "column" or "key" or "local-option") args.AddRange(["--entity", "new_table"]);
+            if (noun is "attribute" or "column" or "local-option") args.AddRange(["--column", "new_column"]);
+            if (noun is "relationship" or "optionset" or "choice" or "key" or "global-option") args.AddRange(["--name", "new_name"]);
             if (noun is "global-option" or "local-option") args.AddRange(["--value", "42"]);
             if (dryRun) args.Add("--dry-run");
             else if (force) args.Add("--force");
@@ -260,6 +279,6 @@ public sealed class MetadataDeletePreviewTests
             finally { Console.SetOut(oldOut); Console.SetError(oldError); Console.SetIn(oldIn); }
         }
 
-        public void Dispose() { }
+        public void Dispose() => _schema?.Dispose();
     }
 }
