@@ -31,7 +31,7 @@ namespace PPDS.Cli.Services.Metadata.Authoring;
 /// Dataverse implementation of <see cref="IMetadataAuthoringService"/>.
 /// Provides schema CRUD operations against Dataverse via the SDK.
 /// </summary>
-public partial class DataverseMetadataAuthoringService : IMetadataAuthoringService
+public partial class DataverseMetadataAuthoringService : IMetadataAuthoringService, IMetadataDeletePreviewService
 {
     private readonly IDataverseConnectionPool _connectionPool;
     private readonly SchemaValidator _validator;
@@ -258,6 +258,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _validator.ValidateRequiredString(request.SolutionUniqueName, "SolutionUniqueName");
         _validator.ValidateRequiredString(request.EntityLogicalName, "EntityLogicalName");
 
+        await EnsureDeleteAllowedAsync(new MetadataDeleteTarget(MetadataDeleteKind.Table, request.SolutionUniqueName, request.EntityLogicalName), ct).ConfigureAwait(false);
+
         if (request.DryRun)
         {
             _logger?.LogInformation("Dry-run: DeleteTable {Entity} validated", request.EntityLogicalName);
@@ -466,6 +468,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _validator.ValidateRequiredString(request.SolutionUniqueName, "SolutionUniqueName");
         _validator.ValidateRequiredString(request.EntityLogicalName, "EntityLogicalName");
         _validator.ValidateRequiredString(request.ColumnLogicalName, "ColumnLogicalName");
+
+        await EnsureDeleteAllowedAsync(new MetadataDeleteTarget(MetadataDeleteKind.Column, request.SolutionUniqueName, request.EntityLogicalName, request.ColumnLogicalName), ct).ConfigureAwait(false);
 
         if (request.DryRun)
         {
@@ -711,6 +715,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _validator.ValidateRequiredString(request.SolutionUniqueName, "SolutionUniqueName");
         _validator.ValidateRequiredString(request.SchemaName, "SchemaName");
 
+        await EnsureDeleteAllowedAsync(new MetadataDeleteTarget(MetadataDeleteKind.Relationship, request.SolutionUniqueName, Name: request.SchemaName), ct).ConfigureAwait(false);
+
         if (request.DryRun)
         {
             _logger?.LogInformation("Dry-run: DeleteRelationship {SchemaName} validated", request.SchemaName);
@@ -869,6 +875,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         reporter?.ReportPhase("Validating");
         _validator.ValidateRequiredString(request.SolutionUniqueName, "SolutionUniqueName");
         _validator.ValidateRequiredString(request.Name, "Name");
+
+        await EnsureDeleteAllowedAsync(new MetadataDeleteTarget(MetadataDeleteKind.GlobalChoice, request.SolutionUniqueName, Name: request.Name), ct).ConfigureAwait(false);
 
         if (request.DryRun)
         {
@@ -1252,6 +1260,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _validator.ValidateRequiredString(request.SolutionUniqueName, "SolutionUniqueName");
         _validator.ValidateRequiredString(request.EntityLogicalName, "EntityLogicalName");
         _validator.ValidateRequiredString(request.KeyLogicalName, "KeyLogicalName");
+
+        await EnsureDeleteAllowedAsync(new MetadataDeleteTarget(MetadataDeleteKind.Key, request.SolutionUniqueName, request.EntityLogicalName, request.KeyLogicalName), ct).ConfigureAwait(false);
 
         if (request.DryRun)
         {

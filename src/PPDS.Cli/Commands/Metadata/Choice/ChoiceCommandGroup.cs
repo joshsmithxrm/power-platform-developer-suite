@@ -186,7 +186,7 @@ public static class ChoiceCommandGroup
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = MetadataDeletePreview.InputOnlyHelp,
+            Description = MetadataDeletePreview.DependenciesHelp,
             DefaultValueFactory = _ => false
         };
 

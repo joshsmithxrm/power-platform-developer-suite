@@ -237,7 +237,7 @@ public static class TableCommandGroup
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = MetadataDeletePreview.InputOnlyHelp,
+            Description = MetadataDeletePreview.DependenciesHelp,
             DefaultValueFactory = _ => false
         };
 
