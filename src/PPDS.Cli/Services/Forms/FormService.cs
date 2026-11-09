@@ -405,6 +405,11 @@ public sealed partial class FormService : IFormService
 
     public async Task AddFieldAsync(AddFieldRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
     {
+        await AddFieldsWithResultAsync(request, reporter, ct).ConfigureAwait(false);
+    }
+
+    public async Task<AddFieldsResult> AddFieldsWithResultAsync(AddFieldRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
+    {
         await _confirmation.EnsureConfirmedAsync("forms mutation", cancellationToken: ct).ConfigureAwait(false);
         if (request.FieldLogicalNames.Length == 0)
             throw new PpdsValidationException("FieldLogicalNames", "At least one field is required.");
@@ -416,9 +421,15 @@ public sealed partial class FormService : IFormService
                 await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct, requireCustomizable: true);
 
             var attributes = await _metadataService.GetAttributesAsync(entityLogicalName, cancellationToken: ct);
+            ct.ThrowIfCancellationRequested();
             var attrByName = attributes.ToDictionary(a => a.LogicalName, StringComparer.OrdinalIgnoreCase);
 
             var doc = XDocument.Parse(formXmlStr!);
+            var section = FormXmlEditor.RequireSection(doc, request.SectionLabel);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var added = new List<string>();
+            var alreadyPresent = new List<string>();
+            var duplicateRequests = new List<string>();
 
             foreach (var field in request.FieldLogicalNames)
             {
@@ -426,12 +437,38 @@ public sealed partial class FormService : IFormService
                     throw new PpdsException(FormErrorCodes.ColumnNotFound,
                         $"Column '{field}' not found on entity '{entityLogicalName}'.");
 
+                if (!seen.Add(attr.LogicalName))
+                {
+                    duplicateRequests.Add(field);
+                    continue;
+                }
+                if (FormXmlEditor.ContainsField(section, attr.LogicalName))
+                {
+                    alreadyPresent.Add(attr.LogicalName);
+                    continue;
+                }
                 var classId = ClassIdResolver.ResolveForField(attr.AttributeType);
-                FormXmlEditor.AddField(doc, request.SectionLabel, attr.LogicalName, classId, attr.DisplayName);
+                FormXmlEditor.AddField(doc, request.SectionLabel, attr.LogicalName, classId,
+                    string.IsNullOrWhiteSpace(attr.DisplayName) ? attr.LogicalName : attr.DisplayName);
+                added.Add(attr.LogicalName);
             }
 
-            reporter?.ReportPhase("Writing", $"Adding {request.FieldLogicalNames.Length} field(s) to section '{request.SectionLabel}'");
-            await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
+            if (added.Count > 0)
+            {
+                reporter?.ReportPhase("Writing", $"Adding {added.Count} field(s) to section '{request.SectionLabel}'");
+                ct.ThrowIfCancellationRequested();
+                await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
+            }
+            else
+            {
+                FormXmlValidator.Validate(doc);
+                reporter?.ReportPhase("Unchanged", $"Requested fields are already present in section '{request.SectionLabel}'.");
+                ct.ThrowIfCancellationRequested();
+                // Explicit solution/publication requests keep their established effects, without an XML update.
+                await ApplySideEffectsAsync(formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
+            }
+            return new(added.ToArray(), alreadyPresent.ToArray(), duplicateRequests.ToArray(), added.Count > 0,
+                request.SolutionUniqueName is not null, request.Publish);
         }
         catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
@@ -480,12 +517,13 @@ public sealed partial class FormService : IFormService
 
             var attributes = await _metadataService.GetAttributesAsync(entityLogicalName, cancellationToken: ct);
             var attributesByName = attributes.ToDictionary(a => a.LogicalName, StringComparer.OrdinalIgnoreCase);
-            (string LogicalName, string ClassId) ResolveNewField(string field)
+            (string LogicalName, string ClassId, string DisplayName) ResolveNewField(string field)
             {
                 if (!attributesByName.TryGetValue(field, out var attribute))
                     throw new PpdsException(FormErrorCodes.ColumnNotFound,
                         $"Column '{field}' not found on entity '{entityLogicalName}'.");
-                return (attribute.LogicalName, ClassIdResolver.ResolveForField(attribute.AttributeType));
+                return (attribute.LogicalName, ClassIdResolver.ResolveForField(attribute.AttributeType),
+                    string.IsNullOrWhiteSpace(attribute.DisplayName) ? attribute.LogicalName : attribute.DisplayName);
             }
 
             var doc = XDocument.Parse(formXmlStr!);

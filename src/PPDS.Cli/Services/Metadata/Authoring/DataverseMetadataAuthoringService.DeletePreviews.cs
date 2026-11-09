@@ -46,15 +46,16 @@ public partial class DataverseMetadataAuthoringService
     private async Task<MetadataDeletePreviewResult> InspectDeleteAsync(MetadataDeleteTarget target, CancellationToken ct)
     {
         var result = new MetadataDeletePreviewResult();
-        (OrganizationRequest request, string key, int type) = target.Kind switch
+        (OrganizationRequest request, string key, int type) requestInfo = target.Kind switch
         {
-            MetadataDeleteKind.Table => ((OrganizationRequest)new RetrieveEntityRequest { LogicalName = target.EntityLogicalName, EntityFilters = EntityFilters.Entity, RetrieveAsIfPublished = true }, "EntityMetadata", 1),
-            MetadataDeleteKind.Column => ((OrganizationRequest)new RetrieveAttributeRequest { EntityLogicalName = target.EntityLogicalName, LogicalName = target.Name, RetrieveAsIfPublished = true }, "AttributeMetadata", 2),
-            MetadataDeleteKind.Relationship => ((OrganizationRequest)new RetrieveRelationshipRequest { Name = target.Name, RetrieveAsIfPublished = true }, "RelationshipMetadata", 10),
-            MetadataDeleteKind.Key => ((OrganizationRequest)new RetrieveEntityKeyRequest { EntityLogicalName = target.EntityLogicalName, LogicalName = target.Name, RetrieveAsIfPublished = true }, "EntityKeyMetadata", 14),
-            MetadataDeleteKind.GlobalChoice => ((OrganizationRequest)new RetrieveOptionSetRequest { Name = target.Name, RetrieveAsIfPublished = true }, "OptionSetMetadata", 9),
+            MetadataDeleteKind.Table => (new RetrieveEntityRequest { LogicalName = target.EntityLogicalName, EntityFilters = EntityFilters.Entity, RetrieveAsIfPublished = true }, "EntityMetadata", 1),
+            MetadataDeleteKind.Column => (new RetrieveAttributeRequest { EntityLogicalName = target.EntityLogicalName, LogicalName = target.Name, RetrieveAsIfPublished = true }, "AttributeMetadata", 2),
+            MetadataDeleteKind.Relationship => (new RetrieveRelationshipRequest { Name = target.Name, RetrieveAsIfPublished = true }, "RelationshipMetadata", 10),
+            MetadataDeleteKind.Key => (new RetrieveEntityKeyRequest { EntityLogicalName = target.EntityLogicalName, LogicalName = target.Name, RetrieveAsIfPublished = true }, "EntityKeyMetadata", 14),
+            MetadataDeleteKind.GlobalChoice => (new RetrieveOptionSetRequest { Name = target.Name, RetrieveAsIfPublished = true }, "OptionSetMetadata", 9),
             _ => throw new ArgumentOutOfRangeException(nameof(target))
         };
+        var (request, key, type) = requestInfo;
         var response = await ExecuteDeleteReadAsync(request, ct).ConfigureAwait(false);
         var expectedResponse = target.Kind switch
         {

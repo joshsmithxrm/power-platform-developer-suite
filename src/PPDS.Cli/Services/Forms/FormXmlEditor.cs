@@ -15,7 +15,7 @@ namespace PPDS.Cli.Services.Forms;
 /// GUIDs use brace format; <c>labelid</c> is an attribute (not a child element);
 /// the phone-visibility attribute is <c>availableforphone</c> (lowercase).
 /// </remarks>
-internal static class FormXmlEditor
+internal static partial class FormXmlEditor
 {
     private const string DefaultLanguageCode = "1033";
 
@@ -169,6 +169,10 @@ internal static class FormXmlEditor
 
     // ── Fields ────────────────────────────────────────────────────────────
 
+    internal static bool ContainsField(XElement section, string fieldLogicalName)
+        => section.Descendants("control").Any(control => string.Equals(
+            (string?)control.Attribute("datafieldname"), fieldLogicalName, StringComparison.OrdinalIgnoreCase));
+
     internal static XDocument AddField(XDocument formXml, string sectionLabel, string fieldLogicalName, string classId, string displayName)
     {
         var section = RequireSection(formXml, sectionLabel);
@@ -205,9 +209,11 @@ internal static class FormXmlEditor
     }
 
     internal static XDocument ReorderFields(XDocument formXml, string sectionLabel, IReadOnlyList<string> orderedFields,
-        Func<string, (string LogicalName, string ClassId)> resolveNewField)
+        Func<string, (string LogicalName, string ClassId, string DisplayName)> resolveNewField)
     {
         var section = RequireSection(formXml, sectionLabel);
+        if (orderedFields.Distinct(StringComparer.OrdinalIgnoreCase).Count() != orderedFields.Count)
+            throw new PpdsException(FormErrorCodes.InvalidFieldOrder, "A reorder cannot repeat a field name.");
         var rows = section.Element("rows");
         if (rows is null)
         {
@@ -227,8 +233,8 @@ internal static class FormXmlEditor
             var dfn = (string?)cell.Element("control")?.Attribute("datafieldname");
             if (!string.IsNullOrEmpty(dfn))
             {
-                if (!existingCells.ContainsKey(dfn))
-                    existingCells[dfn] = cell;
+                if (!existingCells.TryAdd(dfn, cell))
+                    throw new PpdsException(FormErrorCodes.AmbiguousField, $"Column '{dfn}' has multiple controls in the selected section.");
             }
             else
             {
@@ -236,8 +242,7 @@ internal static class FormXmlEditor
             }
         }
 
-        rows.RemoveAll();
-
+        var orderedCells = new List<XElement>();
         foreach (var fieldName in orderedFields)
         {
             XElement cell;
@@ -247,14 +252,21 @@ internal static class FormXmlEditor
             }
             else
             {
-                // Resolve only new cells; existing IDs/bindings and caller-based label fallback stay intact.
+                // Resolve only new cells. A reorder must not silently copy a control from another section.
                 var metadata = resolveNewField(fieldName);
-                cell = BuildFieldCell(metadata.LogicalName, metadata.ClassId, fieldName);
+                if (formXml.Descendants("section").Where(other => other != section)
+                    .Any(other => ContainsField(other, metadata.LogicalName)))
+                    throw new PpdsException(FormErrorCodes.FieldInAnotherSection,
+                        $"Column '{metadata.LogicalName}' is already placed in another section. Reorder does not copy or move that control.");
+                cell = BuildFieldCell(metadata.LogicalName, metadata.ClassId, metadata.DisplayName);
             }
-
-            rows.Add(new XElement("row", cell));
+            orderedCells.Add(cell);
         }
 
+        // Finish validation/planning before mutating the caller's selected rows.
+        rows.RemoveAll();
+        foreach (var cell in orderedCells)
+            rows.Add(new XElement("row", cell));
         foreach (var cell in nonFieldCells)
             rows.Add(new XElement("row", cell));
 

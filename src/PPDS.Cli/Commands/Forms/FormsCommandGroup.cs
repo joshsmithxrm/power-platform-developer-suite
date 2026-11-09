@@ -53,6 +53,8 @@ public static class FormsCommandGroup
         command.Subcommands.Add(AddFieldCommand.Create());
         command.Subcommands.Add(RemoveFieldCommand.Create());
         command.Subcommands.Add(ReorderFieldsCommand.Create());
+        command.Subcommands.Add(ReorderFieldsStrictCommand.Create());
+        command.Subcommands.Add(MoveFieldCommand.Create());
         command.Subcommands.Add(AddSubgridCommand.Create());
         command.Subcommands.Add(RemoveSubgridCommand.Create());
 
