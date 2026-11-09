@@ -31,7 +31,7 @@ namespace PPDS.Cli.Services.Metadata.Authoring;
 /// Dataverse implementation of <see cref="IMetadataAuthoringService"/>.
 /// Provides schema CRUD operations against Dataverse via the SDK.
 /// </summary>
-public class DataverseMetadataAuthoringService : IMetadataAuthoringService
+public partial class DataverseMetadataAuthoringService : IMetadataAuthoringService
 {
     private readonly IDataverseConnectionPool _connectionPool;
     private readonly SchemaValidator _validator;
@@ -363,11 +363,13 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
     {
         ArgumentNullException.ThrowIfNull(request);
         _guard.EnsureCanMutate("metadata.column.update");
+        ct.ThrowIfCancellationRequested();
 
         reporter?.ReportPhase("Validating");
         _validator.ValidateRequiredString(request.SolutionUniqueName, "SolutionUniqueName");
         _validator.ValidateRequiredString(request.EntityLogicalName, "EntityLogicalName");
         _validator.ValidateRequiredString(request.ColumnLogicalName, "ColumnLogicalName");
+        ct.ThrowIfCancellationRequested();
 
         if (request.DryRun)
         {
@@ -383,11 +385,15 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             EntityLogicalName = request.EntityLogicalName,
             LogicalName = request.ColumnLogicalName
         };
-        AttributeMetadata existingAttr;
-        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        var existingAttr = await ReadColumnForUpdateAsync(retrieveRequest, ct).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+
+        // Keep the existing typed and exact-base primary-ID contracts separate from
+        // the finite, identity-checked State/Status/GUID label-only transition.
+        if (IsFiniteLabelOnlyColumn(existingAttr))
         {
-            var response = (RetrieveAttributeResponse)await client.ExecuteAsync(retrieveRequest, ct).ConfigureAwait(false);
-            existingAttr = response.AttributeMetadata;
+            await UpdateFiniteColumnLabelsAsync(request, existingAttr, reporter, ct).ConfigureAwait(false);
+            return;
         }
 
         var primaryIdLabels = existingAttr.GetType() == typeof(AttributeMetadata)
