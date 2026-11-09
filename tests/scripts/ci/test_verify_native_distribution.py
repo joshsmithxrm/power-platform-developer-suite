@@ -263,9 +263,11 @@ def test_valid_framed_heartbeat_and_negative_response_controls():
 
 
 def test_container_command_is_offline_readonly_and_uses_synthetic_identity(tmp_path):
-    binary, fixture, script = tmp_path / "ppds", tmp_path / "fixture", tmp_path / "check.sh"
-    binary.write_bytes(b"not-executed"); fixture.mkdir(); script.write_text("not-executed")
+    binary, fixture = tmp_path / "ppds", tmp_path / "fixture"
+    script = gate.ROOT / "scripts/ci/check_native_glibc.sh"
+    binary.write_bytes(b"not-executed"); fixture.mkdir()
     command = gate.docker_command(binary, fixture, script)
+    assert f"type=bind,src={script.resolve(strict=True)},dst=/check.sh,readonly" in command
     for required in ["--network=none", "--read-only", "--user=10001:10001", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pull=never"]:
         assert required in command
     assert sum("readonly" in item for item in command) == 3
@@ -438,6 +440,66 @@ def test_posix_private_directories_keep700(monkeypatch, platform):
 
 
 # Additional reader/ordering tests are separate from the immutable common66 block.
+
+def diagnostic_trace(count):
+    phases = ["script_entered", "request_read_started", "request_read_completed", "request_validated", "identity_started", "identity_completed"]
+    phases += [f"acl_{stage}:{index}" for index in range(count) for stage in ["started", "completed"]]
+    phases += ["serialization_started", "serialization_completed", "snapshot_written"]
+    return [("PPDS_SECURITY_PHASE_V1:" + phase + "\r\n").encode("ascii") for phase in phases]
+
+
+@pytest.mark.parametrize("prefix", [0, 1, 2, 6, 7, 8, 11])
+def test_windows_reader_diagnostic_timeout_preserves_only_observed_phases(monkeypatch, prefix):
+    reader, fixture, _, _ = reader_process_fixture(monkeypatch)
+    trace = diagnostic_trace(1); original = gate.subprocess.run
+    def timed(command, **kwargs):
+        result = original(command, **kwargs)
+        raise gate.subprocess.TimeoutExpired(command, 15, output=result.stdout, stderr=b"".join(trace[:prefix]))
+    monkeypatch.setattr(gate.subprocess, "run", timed)
+    result = reader([fixture.path("C:/Users/runneradmin/AppData/Local")])
+    assert result["complete"] is False and result["observedCount"] == 0
+    metadata = gate.security_evidence_metadata(result)
+    assert "readerDiagnostics" in metadata
+    saved = metadata["readerDiagnostics"]
+    assert saved["eventCount"] == prefix and saved["lastObservedPhase"] == (trace[prefix - 1].decode().strip().split(":", 1)[1] if prefix else "not_observed")
+    assert saved["timeoutSeconds"] == 15 and saved["stdoutBytes"] > 0
+
+
+@pytest.mark.parametrize("variant", ["complete", "truncated", "unknown", "reordered", "duplicate", "wrong-index", "boolean-index", "oversize", "sensitive"])
+def test_windows_reader_diagnostic_protocol_is_bounded_and_never_grants_trust(monkeypatch, variant):
+    reader, fixture, _, _ = reader_process_fixture(monkeypatch)
+    trace = diagnostic_trace(1); original = gate.subprocess.run
+    if variant == "truncated": trace[-1] = trace[-1][:-4]
+    if variant == "unknown": trace[1] = b"PPDS_SECURITY_PHASE_V1:unknown\n"
+    if variant == "reordered": trace[1], trace[2] = trace[2], trace[1]
+    if variant == "duplicate": trace.insert(2, trace[1])
+    if variant == "wrong-index": trace[6] = b"PPDS_SECURITY_PHASE_V1:acl_started:1\n"
+    if variant == "boolean-index": trace[6] = b"PPDS_SECURITY_PHASE_V1:acl_started:True\n"
+    if variant == "oversize": trace = [b"x" * 16385]
+    if variant == "sensitive": trace[2] = b"synthetic-private-marker\n"
+    def completed(command, **kwargs):
+        result = original(command, **kwargs); result.stderr = b"".join(trace); return result
+    monkeypatch.setattr(gate.subprocess, "run", completed)
+    result = reader([fixture.path("C:/Users/runneradmin/AppData/Local")])
+    assert result["complete"] is (variant == "complete")
+    saved = gate.security_evidence_metadata(result)
+    assert "synthetic-private-marker" not in json.dumps(saved)
+    assert "readerDiagnostics" in saved
+    assert saved["readerDiagnostics"]["status"] == ("complete" if variant == "complete" else "invalid")
+
+
+def test_windows_reader_diagnostic_partial_timeout_tail_does_not_advance_phase(monkeypatch):
+    reader, fixture, _, _ = reader_process_fixture(monkeypatch)
+    trace = diagnostic_trace(1)
+    def timed(command, **kwargs):
+        raise gate.subprocess.TimeoutExpired(command, 15, output=b"synthetic-private-marker", stderr=b"".join(trace[:2]) + trace[2][:-2])
+    monkeypatch.setattr(gate.subprocess, "run", timed)
+    result = reader([fixture.path("C:/Users/runneradmin/AppData/Local")])
+    saved = gate.security_evidence_metadata(result)
+    assert result["complete"] is False and "synthetic-private-marker" not in json.dumps(saved)
+    assert "readerDiagnostics" in saved
+    assert saved["readerDiagnostics"]["eventCount"] == 2 and saved["readerDiagnostics"]["incompleteTail"] is True
+    assert saved["readerDiagnostics"]["lastObservedPhase"] == "request_read_started"
 def reader_process_fixture(monkeypatch):
     reader = gate.read_windows_security
     timeout_type = gate.subprocess.TimeoutExpired
@@ -457,7 +519,7 @@ def reader_process_fixture(monkeypatch):
         if behavior["failure"] == "timeout": raise timeout_type(command, 15)
         if behavior["failure"] == "oserror": raise OSError("synthetic-unreported-reader-message")
         output = json.dumps(payload).encode()
-        stderr, code = b"", 0
+        stderr, code = b"".join(diagnostic_trace(len(paths))), 0
         if behavior["failure"] == "malformed": output = b"{"
         if behavior["failure"] == "encoding": output = b"\xff"
         if behavior["failure"] == "shape": output = b"[]"

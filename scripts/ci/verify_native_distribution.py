@@ -145,6 +145,11 @@ def windows_runtime_root():
 
 
 WINDOWS_SECURITY_SCRIPT = r"""
+function Write-SecurityPhase([string]$phase) {
+    [Console]::Error.WriteLine('PPDS_SECURITY_PHASE_V1:' + $phase)
+    [Console]::Error.Flush()
+}
+Write-SecurityPhase 'script_entered'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $observedRows = [System.Collections.Generic.List[object]]::new()
@@ -153,7 +158,9 @@ $currentUserSidText = $null
 $snapshotComplete = $false
 $snapshotErrorType = $null
 try {
+    Write-SecurityPhase 'request_read_started'
     $requestText = [Console]::In.ReadToEnd()
+    Write-SecurityPhase 'request_read_completed'
     if ([Text.Encoding]::UTF8.GetByteCount($requestText) -gt 16384) { throw 'request_bound' }
     $requestObject = ConvertFrom-Json -InputObject $requestText
     if ($requestObject.paths -isnot [System.Array]) { throw 'path_array_required' }
@@ -165,11 +172,16 @@ try {
             $securityPathText -notmatch '^C:\\' -or $securityPathText -match '(^|[\\/])\.\.?([\\/]|$)' -or
             -not $uniquePaths.Add($securityPathText)) { throw 'invalid_literal_path' }
     }
+    Write-SecurityPhase 'request_validated'
+    Write-SecurityPhase 'identity_started'
     $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
     try { $currentUserSidText = $currentIdentity.User.Value }
     finally { $currentIdentity.Dispose() }
     if ([string]::IsNullOrWhiteSpace($currentUserSidText)) { throw 'current_user_sid_unavailable' }
+    Write-SecurityPhase 'identity_completed'
+    $pathIndex = 0
     foreach ($securityPathText in $requestedPaths) {
+        Write-SecurityPhase ('acl_started:' + $pathIndex)
         $securityObject = Get-Acl -LiteralPath $securityPathText -ErrorAction Stop
         $descriptorBytes = $securityObject.GetSecurityDescriptorBinaryForm()
         if ($descriptorBytes.Length -lt 1 -or $descriptorBytes.Length -gt 65536) { throw 'descriptor_bound' }
@@ -213,10 +225,13 @@ try {
             descriptorBytes = $descriptorBytes.Length
             aces = $acesValue
         })
+        Write-SecurityPhase ('acl_completed:' + $pathIndex)
+        $pathIndex++
     }
     $snapshotComplete = $true
 }
 catch { $snapshotErrorType = $_.Exception.GetType().FullName }
+if ($snapshotComplete) { Write-SecurityPhase 'serialization_started' }
 $snapshotPayload = [ordered]@{
     complete = $snapshotComplete
     currentUserSid = $currentUserSidText
@@ -238,7 +253,10 @@ if ([Text.Encoding]::UTF8.GetByteCount($snapshotJson) -gt 131072) {
     }) -Compress
 }
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+if ($snapshotComplete) { Write-SecurityPhase 'serialization_completed' }
 [Console]::Out.Write($snapshotJson)
+[Console]::Out.Flush()
+if ($snapshotComplete) { Write-SecurityPhase 'snapshot_written' }
 if ($snapshotComplete) { exit 0 }
 exit 1
 """
@@ -256,9 +274,33 @@ def valid_windows_sid(value):
     return isinstance(value, str) and len(value) <= 184 and WINDOWS_SID.fullmatch(value) is not None
 
 
-def security_reader_failure(paths, kind):
-    return {"complete": False, "requestedCount": len(paths), "observedCount": 0,
-            "currentUserSid": None, "rows": [], "errorType": kind}
+def security_reader_failure(paths, kind, diagnostics=None):
+    value = {"complete": False, "requestedCount": len(paths), "observedCount": 0,
+             "currentUserSid": None, "rows": [], "errorType": kind}
+    if diagnostics is not None:
+        value["readerDiagnostics"] = diagnostics
+    return value
+
+
+def security_reader_diagnostics(stderr, stdout, count, *, timed_out=False):
+    """Finite ordered ASCII phases only; partial output never establishes trust."""
+    phases = ["script_entered", "request_read_started", "request_read_completed", "request_validated", "identity_started", "identity_completed"]
+    phases += [f"acl_{stage}:{index}" for index in range(count) for stage in ["started", "completed"]]
+    phases += ["serialization_started", "serialization_completed", "snapshot_written"]
+    data = stderr if isinstance(stderr, bytes) else b""
+    lines = data.splitlines(keepends=True) if len(data) <= 16384 else []
+    tail = bool(lines and not lines[-1].endswith(b"\n"))
+    records = lines[:-1] if tail else lines
+    expected = [("PPDS_SECURITY_PHASE_V1:" + phase).encode("ascii") for phase in phases]
+    valid = (len(data) <= 16384 and len(records) <= len(expected) and
+             all(line in {expected[index] + b"\n", expected[index] + b"\r\n"} for index, line in enumerate(records)) and
+             (not tail or timed_out and len(lines[-1]) <= 128))
+    observed = len(records) if valid else 0
+    status = "invalid" if not valid or tail and not timed_out else (
+        "complete" if observed == len(expected) and not tail else "partial" if observed or tail else "not_observed")
+    return {"status": status, "eventCount": observed, "lastObservedPhase": phases[observed - 1] if observed else "not_observed",
+            "incompleteTail": tail, "timedOut": timed_out, "timeoutSeconds": 15,
+            "stderrBytes": min(len(data), 16385), "stdoutBytes": min(len(stdout), 131073) if isinstance(stdout, bytes) else 0}
 
 
 def read_windows_security(paths):
@@ -280,18 +322,22 @@ def read_windows_security(paths):
         result = subprocess.run(command, input=json.dumps({"paths": names}, ensure_ascii=True).encode("ascii"),
                                 env=env, stdin=None, capture_output=True, timeout=15, check=False,
                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except (OSError, subprocess.TimeoutExpired) as error:
-        return security_reader_failure(paths, type(error).__name__)
+    except subprocess.TimeoutExpired as error:
+        return security_reader_failure(paths, "TimeoutExpired", security_reader_diagnostics(error.stderr, error.output, len(paths), timed_out=True))
+    except OSError:
+        return security_reader_failure(paths, "OSError", security_reader_diagnostics(b"", b"", len(paths)))
+    diagnostics = security_reader_diagnostics(result.stderr, result.stdout, len(paths))
     if len(result.stdout) > 131072 or len(result.stderr) > 16384:
-        return security_reader_failure(paths, "SecurityMetadataOutputBound")
+        return security_reader_failure(paths, "SecurityMetadataOutputBound", diagnostics)
     try:
         value = json.loads(result.stdout.decode("utf-8-sig"))
     except (UnicodeDecodeError, json.JSONDecodeError):
-        return security_reader_failure(paths, "InvalidSecurityMetadataJson")
+        return security_reader_failure(paths, "InvalidSecurityMetadataJson", diagnostics)
     if not isinstance(value, dict):
-        return security_reader_failure(paths, "InvalidSecurityMetadataShape")
-    if result.returncode != 0 or result.stderr:
+        return security_reader_failure(paths, "InvalidSecurityMetadataShape", diagnostics)
+    if result.returncode != 0 or diagnostics["status"] != "complete":
         value["complete"] = False
+    value["readerDiagnostics"] = diagnostics
     return value
 
 
@@ -349,6 +395,17 @@ def security_evidence_metadata(snapshot):
         result["errorType"] = error_type
     if snapshot.get("metadataDroppedForSize") is True:
         result["metadataDroppedForSize"] = True
+    diagnostics = snapshot.get("readerDiagnostics")
+    if isinstance(diagnostics, dict):
+        safe = {key: diagnostics.get(key) if type(diagnostics.get(key)) is bool else None for key in ["incompleteTail", "timedOut"]}
+        for key, maximum in [("eventCount", 41), ("timeoutSeconds", 15), ("stderrBytes", 16385), ("stdoutBytes", 131073)]:
+            value = diagnostics.get(key)
+            safe[key] = value if type(value) is int and 0 <= value <= maximum else None
+        status, phase = diagnostics.get("status"), diagnostics.get("lastObservedPhase")
+        safe["status"] = status if isinstance(status, str) and status in {"invalid", "complete", "partial", "not_observed"} else "invalid"
+        safe["lastObservedPhase"] = phase if isinstance(phase, str) and re.fullmatch(
+            r"(?:not_observed|script_entered|request_read_(?:started|completed)|request_validated|identity_(?:started|completed)|acl_(?:started|completed):(?:[0-9]|1[0-5])|serialization_(?:started|completed)|snapshot_written)", phase) else "not_observed"
+        result["readerDiagnostics"] = safe
     result["rows"] = []
     if not isinstance(snapshot.get("rows"), list) or len(snapshot["rows"]) > 16:
         result["metadataIncomplete"] = True
@@ -389,7 +446,7 @@ def inspect_windows_paths(paths, destination, *, ancestor):
     if not isinstance(snapshot, dict) or snapshot.get("complete") is not True:
         reasons.append("incomplete_security_read")
     else:
-        allowed = {"complete", "currentUserSid", "requestedCount", "observedCount", "rows", "errorType"}
+        allowed = {"complete", "currentUserSid", "requestedCount", "observedCount", "rows", "errorType", "readerDiagnostics"}
         current = snapshot.get("currentUserSid")
         rows = snapshot.get("rows")
         if (set(snapshot) - allowed or not valid_windows_sid(current) or current.startswith(("S-1-3-", "S-1-1-")) or
