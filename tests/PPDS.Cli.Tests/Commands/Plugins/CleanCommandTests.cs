@@ -49,7 +49,8 @@ public class CleanCommandTests : IDisposable
     [Fact]
     public void Create_ReturnsCommandWithDescription()
     {
-        Assert.Contains("Remove", _command.Description);
+        Assert.Contains("Version 1: legacy parent cleanup", _command.Description);
+        Assert.Contains("version 2: prune owned images on configured steps", _command.Description);
     }
 
     [Fact]

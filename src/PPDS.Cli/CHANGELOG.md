@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Version 2 image-only cleanup also refuses present-null step/image protection metadata during planning and fresh pre-dispatch checks. Public DTO bool values/signatures remain; the checks do not make deletion atomic.
+
+- Plugin image cleanup refuses incomplete parent protection metadata and hidden assemblies; explicit `IncludeHidden` inventories include hidden rows. Malformed protection fields in the selected SDK Get responses now return a fixed coded error instead of implying an unmanaged component.
+
+- Registration version 2.0 `plugins clean` and `plugins deploy --clean` now use an explicit image-only plan on uniquely owned configured steps. Every configured step must supply `images` (including `[]` to clear); omitted/duplicate lists cannot grant delete authority. Plans retain exact parent/image IDs, inventory counts and acknowledged/unknown outcomes; new/unplanned images and all parent registrations remain. Version 1 keeps its established legacy parent cleanup. Ownership rechecks do not provide atomic conditional deletion or imply rollback (#1519).
 - Plugin deploy preview reads existing image inventory and distinguishes reused types (#1517). Registration version 2.0 explicitly opts into supported nonsecret desired-state defaults and read-only post-write verification; missing/version 1.0 retains legacy optional preservation. Established Update empty-string clears are preserved (#1519).
 - Plugin diff compares managed execution/image settings and reports incomplete coverage with exit 2. Existing JSON `data[]` remains; additive `metadata` contains status/coverage. Secure values are unverifiable and excluded; unsecure configuration differences are redacted (#1520).
 - Registration preflight validates configured user identities before artifact upload. Scoped configuration/output codecs preserve generic model intent and write-only inputs; extraction supports explicit --registration-version. Version 2 fresh defaults take precedence over legacy overlays. Original update-record constructors/deconstruction and positional RPC targets remain compatible.
