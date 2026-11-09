@@ -8,6 +8,7 @@ using PPDS.Cli.Commands.Metadata;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Cli.Services.Metadata.Authoring;
+using PPDS.Cli.Tests.TestHelpers;
 using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Authoring;
@@ -19,6 +20,7 @@ namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 
 // Actual CLI handler -> actual service, with a recording interface seam and strictly synthetic SDK/pool.
 [Trait("Category", "Unit")]
+[Collection(nameof(ConsoleCaptureCollection))]
 public sealed class MetadataCreatePreviewCompositionTests(ITestOutputHelper output)
 {
     public static IEnumerable<object[]> Cases()
