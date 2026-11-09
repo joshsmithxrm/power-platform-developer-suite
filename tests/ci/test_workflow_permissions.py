@@ -39,6 +39,8 @@ WRITE_PERMISSION_REASONS = {
         "Preserve the existing documentation release write grant.",
     ("docs-release.yml", "release", "pull-requests"):
         "Preserve the existing documentation release PR write grant.",
+    ("publish-nuget.yml", "publish", "id-token"):
+        "Exchange the reviewed component-tag publisher identity for a temporary NuGet key.",
     ("milestone-release-check.yml", "check-milestone-completion", "issues"):
         "Create or update milestone release tracking issues.",
     ("post-merge-release-check.yml", "patch-release-detection", "issues"):

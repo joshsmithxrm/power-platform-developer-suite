@@ -43,13 +43,22 @@ an update to the test allowlist and this table.
 | `codeql.yml` / `analyze` | `security-events: write` | Upload CodeQL results; retain its existing read scopes. |
 | `dependabot-label.yml` / `label-major-updates` | `issues: write`, `pull-requests: write` | Apply labels to Dependabot PRs using trusted base automation. |
 | `docs-release.yml` / `release` | `contents: write`, `pull-requests: write` | Push the primary repository's baseline rollover branch and create its PR. |
+| `publish-nuget.yml` / `publish` | `id-token: write` | Proposed trusted publishing for canonical repository component-tag pushes; activation requires the reviewed NuGet policy and confirmed individual creator configuration. |
 | `milestone-release-check.yml` / `check-milestone-completion` | `issues: write` | Maintain release-tracking issues. |
 | `post-merge-release-check.yml` / `patch-release-detection`, `extension-corelease-detection` | `issues: write` | Maintain release-tracking issues. |
 | `release-cadence-check.yml` / `cadence-check` | `issues: write` | Maintain release-tracking issues. |
 | `release-cli.yml` / `release` | `contents: write` | Publish the CLI GitHub release and its assets. |
 
-Package publication, Marketplace publication, the docs companion PR, and audit
-capture use their existing separate credentials. A `GITHUB_TOKEN` permission
+NuGet publication exchanges the publishing job's OIDC identity for a temporary
+scoped key. The public verification job has no OIDC grant. The grant is available
+throughout the publishing job, including restore/build/pack; placing login after
+validation shortens key lifetime but does not isolate earlier build code from
+token issuance. This proposal trusts the reviewed tagged source and its build
+inputs for that whole job. An upload-only job would need a separately reviewed
+artifact handoff and repeated integrity checks before granting OIDC.
+
+Marketplace publication, the docs companion PR, and audit capture retain their
+existing separate credentials. A `GITHUB_TOKEN` permission
 map does not limit those credentials. Do not broaden the docs App installation:
 its token remains scoped to `ppds-docs`.
 
