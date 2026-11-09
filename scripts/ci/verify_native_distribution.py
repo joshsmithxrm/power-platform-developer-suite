@@ -152,6 +152,7 @@ function Write-SecurityPhase([string]$phase) {
 Write-SecurityPhase 'script_entered'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+$env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
 $observedRows = [System.Collections.Generic.List[object]]::new()
 $requestedPaths = @()
 $currentUserSidText = $null
@@ -164,7 +165,7 @@ try {
     if ([Text.Encoding]::UTF8.GetByteCount($requestText) -gt 16384) { throw 'request_bound' }
     Write-SecurityPhase 'request_bytes_validated'
     Write-SecurityPhase 'request_json_started'
-    $requestObject = ConvertFrom-Json -InputObject $requestText
+    $requestObject = Microsoft.PowerShell.Utility\ConvertFrom-Json -InputObject $requestText
     Write-SecurityPhase 'request_json_completed'
     if ($requestObject.paths -isnot [System.Array]) { throw 'path_array_required' }
     $requestedPaths = @($requestObject.paths)
@@ -187,7 +188,7 @@ try {
     $pathIndex = 0
     foreach ($securityPathText in $requestedPaths) {
         Write-SecurityPhase ('acl_started:' + $pathIndex)
-        $securityObject = Get-Acl -LiteralPath $securityPathText -ErrorAction Stop
+        $securityObject = Microsoft.PowerShell.Security\Get-Acl -LiteralPath $securityPathText -ErrorAction Stop
         $descriptorBytes = $securityObject.GetSecurityDescriptorBinaryForm()
         if ($descriptorBytes.Length -lt 1 -or $descriptorBytes.Length -gt 65536) { throw 'descriptor_bound' }
         $rawDescriptor = [Security.AccessControl.RawSecurityDescriptor]::new($descriptorBytes, 0)
@@ -249,10 +250,10 @@ $snapshotPayload = [ordered]@{
     rows = @($observedRows.ToArray())
 }
 if (-not $snapshotComplete) { Write-SecurityPhase 'failure_serialization_started' }
-$snapshotJson = ConvertTo-Json -InputObject $snapshotPayload -Depth 8 -Compress
+$snapshotJson = Microsoft.PowerShell.Utility\ConvertTo-Json -InputObject $snapshotPayload -Depth 8 -Compress
 if ([Text.Encoding]::UTF8.GetByteCount($snapshotJson) -gt 131072) {
     $snapshotComplete = $false
-    $snapshotJson = ConvertTo-Json -InputObject ([ordered]@{
+    $snapshotJson = Microsoft.PowerShell.Utility\ConvertTo-Json -InputObject ([ordered]@{
         complete = $false
         currentUserSid = $currentUserSidText
         requestedCount = $requestedPaths.Count

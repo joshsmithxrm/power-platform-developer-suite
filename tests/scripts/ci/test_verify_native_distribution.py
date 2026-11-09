@@ -782,3 +782,53 @@ def test_windows_request_and_failure_markers_bound_actual_script_operations_with
     assert script.index("'failure_serialization_completed'") < script.index("[Console]::Out.Write($snapshotJson)")
     assert script.index("'failure_snapshot_written'") > script.index("[Console]::Out.Flush()")
     assert "Set-Acl" not in script and "icacls" not in script
+
+
+@pytest.mark.parametrize("qualified_line,unqualified_line", [
+    (r"$requestObject = Microsoft.PowerShell.Utility\ConvertFrom-Json -InputObject $requestText",
+     "$requestObject = ConvertFrom-Json -InputObject $requestText"),
+    (r"$securityObject = Microsoft.PowerShell.Security\Get-Acl -LiteralPath $securityPathText -ErrorAction Stop",
+     "$securityObject = Get-Acl -LiteralPath $securityPathText -ErrorAction Stop"),
+    (r"$snapshotJson = Microsoft.PowerShell.Utility\ConvertTo-Json -InputObject $snapshotPayload -Depth 8 -Compress",
+     "$snapshotJson = ConvertTo-Json -InputObject $snapshotPayload -Depth 8 -Compress"),
+    (r"$snapshotJson = Microsoft.PowerShell.Utility\ConvertTo-Json -InputObject ([ordered]@{",
+     "$snapshotJson = ConvertTo-Json -InputObject ([ordered]@{")
+])
+def test_windows_reader_qualifies_each_os_cmdlet_site(qualified_line, unqualified_line):
+    # Contract of the generated child script, not execution of PowerShell or a module.
+    lines = [line.strip() for line in gate.WINDOWS_SECURITY_SCRIPT.splitlines()]
+    assert lines.count(qualified_line) == 1
+    assert unqualified_line not in lines
+
+
+def test_windows_reader_searches_only_engine_modules_inside_its_child(monkeypatch):
+    reader, fixture, calls, _ = reader_process_fixture(monkeypatch)
+    monkeypatch.setenv("PSModulePath", r"\\synthetic-untrusted\modules")
+
+    result = reader([fixture.path("C:/Users/runneradmin/AppData/Local")])
+
+    assert result["complete"] is True and len(calls) == 1
+    command, kwargs = calls[0]
+    script = command[-1]
+    policy = "$env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')"
+    assert script.count(policy) == 1
+    assert script.index(policy) < script.index("Write-SecurityPhase 'request_read_started'")
+    assert [line.strip() for line in script.splitlines() if "PSModulePath" in line] == [policy]
+    assert "PSModuleAutoLoadingPreference" not in script
+    assert "SetEnvironmentVariable" not in script and "Set-Item" not in script and "Import-Module" not in script
+    assert not any(name.upper() == "PSMODULEPATH" for name in kwargs["env"])
+    assert kwargs["timeout"] == 15 and command[1:5] == ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"]
+
+
+def test_windows_reader_module_isolation_does_not_mutate_parent_environment(monkeypatch):
+    reader, fixture, calls, _ = reader_process_fixture(monkeypatch)
+    monkeypatch.setenv("PSModulePath", "synthetic-parent-module-list")
+    monkeypatch.setenv("PSModuleAnalysisCachePath", "synthetic-parent-cache-path")
+    before = dict(gate.os.environ)
+
+    result = reader([fixture.path("C:/Users/runneradmin/AppData/Local")])
+
+    assert result["complete"] is True and len(calls) == 1
+    assert dict(gate.os.environ) == before
+    assert calls[0][1]["env"] == {key: value for key, value in before.items() if key.upper() in gate.OS_KEYS}
+    assert all(name not in calls[0][1]["env"] for name in ["PSModulePath", "PSModuleAnalysisCachePath"])
