@@ -516,7 +516,7 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 
 Generic option add/update, status-reason update/removal, and table creation return their mutation connection before optional color/publication or unrelated postprocessing. Global/local color helpers acquire separate connections for the metadata read and update. Publisher-prefix resolution acquires separate connections for its solution and publisher queries, retains only the publisher ID between them, and keeps the existing prefix cache and table dry-run metadata reads.
 
-This lifetime correction preserves existing SDK payloads, read modes, validation, guards, cache success stages and error contracts. The scoped cancellation/acquisition correction below changes only its named boundaries; other SDK/read contracts remain as implemented. Acquisition normalization is separate from SDK fault handling. Multi-request authoring remains non-atomic: a later failure can follow a successful mutation, and no automatic retry or rollback is introduced.
+This lifetime correction preserves existing SDK payloads, read modes, validation, guards, cache success stages and error contracts. The scoped cancellation/acquisition and diagnostic-message corrections below change only their named boundaries; other SDK/read behavior remains as implemented. Acquisition normalization is separate from SDK fault handling. Multi-request authoring remains non-atomic: a later failure can follow a successful mutation, and no automatic retry or rollback is introduced.
 
 ---
 
@@ -607,14 +607,14 @@ Successful previews retain their existing output envelope and fields and add `pr
 
 Status-reason and local choice-option allocation must include unpublished metadata when collecting existing values, including explicit-value collision checks and dry-run allocation. Public status/local-option lists remain published reads. Update/remove target resolution retains its current published-read behavior. The private local color readback includes unpublished metadata so a just-inserted option and other draft options survive the existing minimal color update. This helper is shared by local/status add and update and the existing local-target option-value path. Global option-set helpers and public query APIs are unchanged.
 
-The add-statusreason service wrapper includes the SDK message and the CLI maps its user message into the error envelope. Allocation and local color reads propagate their cancellation token and cancellation exceptions. Publication remains explicit.
+The add-statusreason service wrapper emits fixed action/target text, retains the original SDK cause and existing code/CLI exit, and the CLI places that user message in the error envelope. SDK diagnostic text is omitted from that user message. Allocation and local color reads propagate their cancellation token and cancellation exceptions. Publication remains explicit.
 
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
 | AC-70 | Status-reason and local Choice/Choices allocation reads include draft values, derive past draft collisions, preserve explicit values, reject explicit draft collisions, and keep dry-run free of mutation | `MetadataDraftOptionReadTests.Allocation_UsesDraftValues`, `ExplicitDraftCollision_RejectsBeforeInsert`, `ExplicitUnusedValue_IsPreserved` | ✅ |
 | AC-71 | Local and status color readback sees newly inserted draft options and preserves other draft options and labels in the existing minimal update. The shared update and local option-value callers use that same readback. | `MetadataDraftOptionReadTests.AddWithColor_ReadsDraftAndPreservesOtherOptions`, `UpdateColor_PreservesDraftOptions`, `GenericLocalOptionAdd_ColorReadsDraft` | ✅ |
 | AC-72 | Public status/local-option lists and existing update/remove target resolution remain published reads, without changing public APIs or environment routing | `MetadataDraftOptionReadTests.PublicList_RemainsPublished`, `UpdateAndRemove_TargetResolutionRemainsPublished` | ✅ |
-| AC-73 | Draft allocation and local color reads propagate the token and preserve cancellation exception identity. The CLI error mapper and JSON writer preserve the add-statusreason SDK message. | `MetadataDraftOptionReadTests.AllocationCancellation_Propagates`, `ColorReadCancellation_Propagates`, `AddStatusSdkFailure_RemainsVisibleInCliEnvelope` | ✅ |
+| AC-73 | Draft allocation and local color reads propagate the token and preserve cancellation exception identity. The CLI error mapper and JSON writer retain the fixed add-statusreason action/target message, code, original cause and exit classification; SDK diagnostic text is excluded from that user message. | `MetadataDraftOptionReadTests.AllocationCancellation_Propagates`, `ColorReadCancellation_Propagates`, `AddStatusSdkFailure_UsesFixedMessageInCliEnvelope` | ✅ |
 
 ### Primary ID column labels (#1534)
 
@@ -676,8 +676,36 @@ OCE, existing coded PPDS errors and metadata validation errors keep their identi
 | AC-98 | Every selected acquisition boundary returns a coded timeout with its identical cause and unchanged CLI exit4, stops later work, and preserves OCE/already-coded/metadata-validation identities; all acquired leases return | `MetadataLeaseLifetimeTests.ErrorContract_PoolBoundary_IsCodedAndStopsLaterWork`, `ErrorContract_AcquisitionIdentity_PropagatesWithoutWrapping` | ✅ |
 | AC-99 | Other acquisition failures retain the exact mapper code/numeric exit and inner cause, including auth/reauthentication, configuration/arguments, not-found and ordinary errors; no arbitrary message is exposed as the new service user message | `MetadataLeaseLifetimeTests.ErrorContract_AcquisitionMapping_PreservesCodeExitAndCause` | ✅ |
 | AC-100 | Actual MCP option-add invocation routed into the real service reports Connection.Timeout for pool exhaustion and propagates original color SDK cancellation at the tool boundary; unrelated generic-helper controls remain | `MetadataAddOptionValueLeaseContractTests.ActualServicePoolTimeout_IsConnectionTimeoutAtMcpBoundary`, `ActualColorCancellation_PropagatesOriginalAtMcpBoundary` | ✅ |
-| AC-101 | Table-update checkout normalization and the shared publication helper preserve prior CLI exits, acknowledged progress and cleanup; column direct/catalog contracts and ordinary SDK behavior retain their controls | `TableUpdateLeaseTests.ErrorContract_Acquisition_PreservesMappingCauseAndPartialProgress`, `MetadataLeaseLifetimeTests.ErrorContract_PoolBoundary_IsCodedAndStopsLaterWork`, `PrimaryIdLabelUpdateTests.SingleSlot_CheckoutFailureLeavesSlotFree`, `GlobalChoiceReferenceTests.CatalogCheckoutFailure_IsCodedAndSkipsCreate` | ✅ |
-| AC-102 | Raw authentication/provider diagnostic details remain only in the original inner cause and never enter the structured MCP user message; auth code/CLI exit and reauthentication flag remain | `MetadataAcquisitionPrivacyTests.RawAuthDetail_StaysInCauseAndOutOfMcpPayload` | ✅ |
+| AC-101 | Table-update checkout normalization and the shared publication helper preserve prior CLI exits, acknowledged progress and cleanup; column direct/catalog acquisition classifications and ordinary SDK execution behavior retain their controls, subject to the bounded user-message changes below | `TableUpdateLeaseTests.ErrorContract_Acquisition_PreservesMappingCauseAndPartialProgress`, `MetadataLeaseLifetimeTests.ErrorContract_PoolBoundary_IsCodedAndStopsLaterWork`, `PrimaryIdLabelUpdateTests.SingleSlot_CheckoutFailureLeavesSlotFree`, `GlobalChoiceReferenceTests.CatalogCheckoutFailure_IsCodedAndSkipsCreate` | ✅ |
+| AC-102 | At the covered connection-acquisition boundary, raw authentication/provider diagnostic details remain only in the original inner cause and never enter the structured MCP user message; auth code/CLI exit and reauthentication flag remain | `MetadataAcquisitionPrivacyTests.RawAuthDetail_StaysInCauseAndOutOfMcpPayload` | ✅ |
+
+### Bounded SDK diagnostic messages
+
+The following sixteen existing SDK/catalog error boundaries use service-owned action text and caller-owned target identifiers or labels. Provider/SDK diagnostic text is no longer appended to their user messages. Original inner exceptions, error codes, exception types, auth/reauthentication flags, CLI exit mappings, catch filters, cancellation behavior, request payloads and connection scopes remain unchanged. Existing partial-operation limits remain: an earlier mutation can succeed before a later failure.
+
+| Method | Changed error boundary |
+|--------|------------------------|
+| `ResolveGlobalOptionAsync` | Option-set retrieval |
+| `AddStatusReasonAsync` | Status-reason insertion |
+| `ReadStatusReasonsAsync` | Status-attribute retrieval |
+| `UpdateStatusReasonAsync` | Status-reason update |
+| `RemoveStatusReasonAsync` | Status-reason removal |
+| `ReadColumnOptionsAsync` | Local option-attribute retrieval |
+| `AddColumnOptionAsync` | Local option insertion |
+| `UpdateColumnOptionAsync` | Local option update |
+| `RemoveColumnOptionAsync` | Local option removal |
+| `ResolveGlobalChoiceNameAsync` | Catalog authentication and other mapped failures (two boundaries) |
+| `ApplyGlobalOptionColorAsync` | Color metadata read and update (two boundaries) |
+| `ApplyLocalOptionColorAsync` | Color metadata read and update (two boundaries) |
+| `ValidatePrimaryIdLabelUpdateAsync` | Primary-ID table lookup |
+
+The synthetic global-color read/write cases verify the real service -> MCP tool -> structured JSON path with fake ClientSecret= and Bearer sentinels. The initial-insert generic fallback, covered acquisition privacy, coded/raw cancellation and existing helper controls remain separate. This is a bounded message change, not repository-wide secret redaction, a log-privacy guarantee, a real-provider incident or a new MCP transport/RPC test. The other inventoried boundaries are included by exact source substitution; no new dynamic case for each of those boundaries is claimed.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-103 | Global-color read/update failures retain their SDK failure code and original cause while fake ClientSecret/Bearer details are absent from the actual MCP user message and emitted exception JSON (four cases) | `MetadataSdkDiagnosticPrivacyProbeTests.ActualServiceColorFailure_UntrustedDetailMustNotReachMcp` | ✅ |
+| AC-104 | Add-statusreason failures use the fixed action/target message in the CLI error envelope, omit the synthetic SDK diagnostic and retain SDK failure code, original cause, success=false and CLI exit2 | `MetadataDraftOptionReadTests.AddStatusSdkFailure_UsesFixedMessageInCliEnvelope` | ✅ |
+| AC-105 | The covered synthetic SDK route preserves tokens, one request per returned lease, request order and original causes; initial raw SDK faults remain generic, covered auth details stay private and existing timeout/cancellation/helper controls remain | `MetadataSdkDiagnosticPrivacyProbeTests.InitialInsertRawFailure_UsesGenericMcpError`, `ActualColorWrapper_CliMapperRemovesKnownSecretKey`, `DirectMapperCharacterization_DoesNotClaimBearerRedaction`, `MetadataAcquisitionPrivacyTests.RawAuthDetail_StaysInCauseAndOutOfMcpPayload`, `MetadataAddOptionValueLeaseContractTests.ActualServicePoolTimeout_IsConnectionTimeoutAtMcpBoundary`, `ActualColorCancellation_PropagatesOriginalAtMcpBoundary`, `McpToolErrorHelperTests.ThrowStructuredError_GenericException_DoesNotLeakInnerMessage` | ✅ |
 
 ### Edge Cases
 
@@ -945,6 +973,7 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 
 | Date | Change |
 |------|--------|
+| 2026-11-09 | Bound sixteen SDK/catalog user-message paths to service-owned action/target text; retain diagnostic causes and classifications, verify synthetic MCP privacy and update the intentional CLI message contract (AC-103 through AC-105). |
 | 2026-11-08 | Preserve covered color cancellation and normalize the selected acquisition boundaries with unchanged CLI exits; protect authentication diagnostic details at the MCP error boundary (AC-97 through AC-102). |
 | 2026-11-03 | #1532: document actual delete-preview scope, remove CLI dependency/removability assurances, add additive JSON scope and AC-66–AC-69. Correct AC-11 to incomplete: dependency discovery is still unimplemented. |
 | 2026-11-03 | #1531: draft-aware status/local option allocation and local color readback, published public lists retained. Added AC-70–AC-73. |

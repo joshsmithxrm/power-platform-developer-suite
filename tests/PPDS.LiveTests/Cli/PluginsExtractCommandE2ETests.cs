@@ -76,6 +76,7 @@ public class PluginsExtractCommandE2ETests : CliE2ETestBase
         try
         {
             var outputPath = Path.Combine(customDir, "custom-output.json");
+            TrackOwnedFile(outputPath); // Retain the custom directory location if the command is interrupted.
 
             var result = await RunCliAsync(
                 "plugins", "extract",
@@ -87,8 +88,11 @@ public class PluginsExtractCommandE2ETests : CliE2ETestBase
         }
         finally
         {
-            if (Directory.Exists(customDir))
-                Directory.Delete(customDir, recursive: true);
+            await RunCleanupIfSafeAsync(() =>
+            {
+                if (Directory.Exists(customDir)) Directory.Delete(customDir, recursive: true);
+                return Task.CompletedTask;
+            });
         }
     }
 

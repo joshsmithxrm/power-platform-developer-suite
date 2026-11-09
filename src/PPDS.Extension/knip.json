@@ -11,7 +11,10 @@
     "src/panels/webview/metadata-browser-panel.ts",
     "src/panels/webview/plugin-traces-panel.ts",
     "src/panels/webview/web-resources-panel.ts",
-    "src/panels/webview/shared/vscode-api.ts"
+    "src/panels/webview/shared/vscode-api.ts",
+    "e2e/notebook-host.ts",
+    "e2e/notebook-live.ts",
+    "tools/run-notebook-live-tests.mjs"
   ],
   "ignore": [
     "esbuild.js",
@@ -24,6 +27,11 @@
   ],
   "ignoreBinaries": [
     "code",
-    "vite"
-  ]
+    "vite",
+    "pwsh"
+  ],
+  "ignoreExportsUsedInFile": {
+    "interface": true,
+    "type": true
+  }
 }

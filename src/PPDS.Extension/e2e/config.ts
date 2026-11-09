@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 
-export const DEFAULT_VSCODE_E2E_VERSION = 'stable';
+const DEFAULT_VSCODE_E2E_VERSION = 'stable';
 
 interface ExtensionManifest {
     engines?: {

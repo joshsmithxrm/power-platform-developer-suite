@@ -9,7 +9,8 @@ internal sealed class PluginFixtureCleanup(
     string configPath,
     string profile,
     string environment,
-    Action<string> report)
+    Action<string> report,
+    Func<bool>? requiresManualReview = null)
 {
     internal const string AssemblyName = "PPDS.LiveTests.Fixtures";
     internal const string EmptyConfigJson = """
@@ -60,6 +61,8 @@ internal sealed class PluginFixtureCleanup(
 
     internal async Task CleanupAsync(CancellationToken cancellationToken = default)
     {
+        if (requiresManualReview?.Invoke() == true)
+            throw new InvalidOperationException("CLI fixture was interrupted; automatic plugin cleanup skipped. Inspect retained evidence before manual recovery.");
         if (_unverifiedCleanup)
             throw new InvalidOperationException("A prior fixture cleanup did not verify; refusing another mutation. Inspect retained evidence.");
         ArgumentException.ThrowIfNullOrWhiteSpace(profile);

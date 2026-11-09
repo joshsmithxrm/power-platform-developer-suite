@@ -104,7 +104,7 @@ public class PluginsDiffCommandE2ETests(ITestOutputHelper output) : CliE2ETestBa
         await RunCliAsync("auth", "select", "--name", profileName);
 
         var fixture = new PluginFixtureCleanup(RunCliWithCancellationAsync, GenerateTempFilePath(".json"),
-            profileName, Configuration.DataverseUrl!, output.WriteLine);
+            profileName, Configuration.DataverseUrl!, output.WriteLine, () => RequiresManualReview);
         await fixture.RunAsync(async () =>
         {
             // Deploy the plugin first

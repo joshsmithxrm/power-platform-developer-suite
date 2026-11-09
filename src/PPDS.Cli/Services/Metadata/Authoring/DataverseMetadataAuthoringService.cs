@@ -1059,7 +1059,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         catch (Exception ex)
         {
             throw new PpdsException(MetadataErrorCodes.EntityNotFound,
-                $"Could not retrieve option set '{optionSetName}': {ex.Message}", ex);
+                $"Could not retrieve option set '{optionSetName}'.", ex);
         }
 
         if (retrieveResponse.OptionSetMetadata is not OptionSetMetadata optionSet || optionSet.Options == null)
@@ -1349,7 +1349,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         {
             throw new PpdsException(
                 MetadataErrorCodes.SdkOperationFailed,
-                $"Failed to add status reason '{request.Label}' to '{request.EntityLogicalName}': {ex.Message}",
+                $"Failed to add status reason '{request.Label}' to '{request.EntityLogicalName}'.",
                 ex);
         }
 
@@ -1396,7 +1396,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         }
         catch (Exception ex)
         {
-            throw new PpdsException(MetadataErrorCodes.EntityNotFound, $"Could not retrieve statuscode attribute for '{entityLogicalName}': {ex.Message}", ex);
+            throw new PpdsException(MetadataErrorCodes.EntityNotFound, $"Could not retrieve statuscode attribute for '{entityLogicalName}'.", ex);
         }
 
         if (retrieveResponse is not RetrieveAttributeResponse retrieveAttrResponse
@@ -1504,7 +1504,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             {
                 throw new PpdsException(
                     MetadataErrorCodes.SdkOperationFailed,
-                    $"Failed to update status reason (value {targetValue}) on '{request.EntityLogicalName}': {ex.Message}",
+                    $"Failed to update status reason (value {targetValue}) on '{request.EntityLogicalName}'.",
                     ex);
             }
         }
@@ -1589,7 +1589,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             {
                 throw new PpdsException(
                     MetadataErrorCodes.SdkOperationFailed,
-                    $"Failed to remove status reason (value {targetValue}) from '{request.EntityLogicalName}': {ex.Message}",
+                    $"Failed to remove status reason (value {targetValue}) from '{request.EntityLogicalName}'.",
                     ex);
             }
         }
@@ -1636,7 +1636,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         catch (Exception ex)
         {
             throw new PpdsException(MetadataErrorCodes.EntityNotFound,
-                $"Could not retrieve attribute '{columnLogicalName}' on '{entityLogicalName}': {ex.Message}", ex);
+                $"Could not retrieve attribute '{columnLogicalName}' on '{entityLogicalName}'.", ex);
         }
 
         var optionSet = (retrieveResponse as RetrieveAttributeResponse)?.AttributeMetadata switch
@@ -1713,7 +1713,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
         {
             throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                $"Failed to add option '{request.Label}' to '{request.EntityLogicalName}.{request.ColumnLogicalName}': {ex.Message}", ex);
+                $"Failed to add option '{request.Label}' to '{request.EntityLogicalName}.{request.ColumnLogicalName}'.", ex);
         }
 
         if (!string.IsNullOrEmpty(request.Color))
@@ -1766,7 +1766,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
         {
             throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                $"Failed to update option {target.Value} on '{request.EntityLogicalName}.{request.ColumnLogicalName}': {ex.Message}", ex);
+                $"Failed to update option {target.Value} on '{request.EntityLogicalName}.{request.ColumnLogicalName}'.", ex);
         }
 
         if (!string.IsNullOrEmpty(request.Color))
@@ -1817,7 +1817,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
         {
             throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                $"Failed to remove option {target.Value} from '{request.EntityLogicalName}.{request.ColumnLogicalName}': {ex.Message}", ex);
+                $"Failed to remove option {target.Value} from '{request.EntityLogicalName}.{request.ColumnLogicalName}'.", ex);
         }
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
@@ -2070,7 +2070,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
         {
             var (error, exitCode) = ExceptionMapper.MapWithExitCode(ex);
             if (exitCode == ExitCodes.AuthError)
-                throw new PpdsAuthException(error.Code, error.Message, ex)
+                throw new PpdsAuthException(error.Code, $"Could not retrieve the global choices to resolve '{name}'.", ex)
                 {
                     RequiresReauthentication = ex is DataverseAuthenticationException { RequiresReauthentication: true }
                 };
@@ -2078,7 +2078,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             var code = exitCode is ExitCodes.ConnectionError or ExitCodes.InvalidArguments
                 ? error.Code
                 : MetadataErrorCodes.SdkOperationFailed;
-            throw new PpdsException(code, $"Could not retrieve the global choices: {error.Message}", ex);
+            throw new PpdsException(code, $"Could not retrieve the global choices to resolve '{name}'.", ex);
         }
 
         var matches = definitions.Where(d => string.Equals(d?.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
@@ -2211,7 +2211,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
             {
                 throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                    $"Failed to retrieve global choice '{optionSetName}' to apply color: {ex.Message}", ex);
+                    $"Failed to retrieve global choice '{optionSetName}' to apply color.", ex);
             }
         }
 
@@ -2234,7 +2234,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
             {
                 throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                    $"Failed to apply color to option {value} in global choice '{optionSetName}': {ex.Message}", ex);
+                    $"Failed to apply color to option {value} in global choice '{optionSetName}'.", ex);
             }
         }
 
@@ -2268,7 +2268,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
             {
                 throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                    $"Failed to retrieve attribute '{attributeLogicalName}' on '{entityLogicalName}' to apply color: {ex.Message}", ex);
+                    $"Failed to retrieve attribute '{attributeLogicalName}' on '{entityLogicalName}' to apply color.", ex);
             }
         }
 
@@ -2306,7 +2306,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
             {
                 throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                    $"Failed to apply color to option {value} on '{entityLogicalName}.{attributeLogicalName}': {ex.Message}", ex);
+                    $"Failed to apply color to option {value} on '{entityLogicalName}.{attributeLogicalName}'.", ex);
             }
         }
 
@@ -2410,7 +2410,7 @@ public class DataverseMetadataAuthoringService : IMetadataAuthoringService
             catch (Exception ex) when (ex is not OperationCanceledException and not PpdsException and not MetadataValidationException)
             {
                 throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                    $"Could not retrieve the primary ID of '{request.EntityLogicalName}': {ex.Message}", ex);
+                    $"Could not retrieve the primary ID of '{request.EntityLogicalName}'.", ex);
             }
         }
 

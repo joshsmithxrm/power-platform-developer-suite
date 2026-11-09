@@ -181,14 +181,15 @@ public sealed class MetadataDraftOptionReadTests
     }
 
     [Fact]
-    public async Task AddStatusSdkFailure_RemainsVisibleInCliEnvelope()
+    public async Task AddStatusSdkFailure_UsesFixedMessageInCliEnvelope()
     {
         const string sdkMessage = "Synthetic SDK fault: this status value is not allowed.";
         using var f = new Fixture("status") { InsertFailure = new InvalidOperationException(sdkMessage) };
         var ex = await Assert.ThrowsAsync<PpdsException>(() => f.AddAsync(value: 77));
         Assert.Same(f.InsertFailure, ex.InnerException);
         Assert.Equal(MetadataErrorCodes.SdkOperationFailed, ex.ErrorCode);
-        Assert.Contains(sdkMessage, ex.UserMessage);
+        Assert.Equal("Failed to add status reason 'New' to 'new_table'.", ex.UserMessage);
+        Assert.DoesNotContain(sdkMessage, ex.UserMessage);
         // EntityCommand.ExecuteAddStatusReasonAsync uses these exact mapper/writer contracts.
         // Source trace is recorded with the evidence; no auth-dependent CLI seam is required.
         var error = ExceptionMapper.Map(ex, context: "adding status reason to 'new_table'");
@@ -197,7 +198,8 @@ public sealed class MetadataDraftOptionReadTests
         using var json = JsonDocument.Parse(output.ToString());
         Assert.False(json.RootElement.GetProperty("success").GetBoolean());
         Assert.Equal(MetadataErrorCodes.SdkOperationFailed, json.RootElement.GetProperty("error").GetProperty("code").GetString());
-        Assert.Contains(sdkMessage, json.RootElement.GetProperty("error").GetProperty("message").GetString());
+        Assert.Equal(ex.UserMessage, json.RootElement.GetProperty("error").GetProperty("message").GetString());
+        Assert.DoesNotContain(sdkMessage, output.ToString());
         Assert.Equal(ExitCodes.Failure, ExceptionMapper.ToExitCode(ex));
     }
 

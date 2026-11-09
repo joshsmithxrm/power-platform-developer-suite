@@ -7,4 +7,5 @@
 
 export const DOCS_URL = 'https://joshsmithxrm.github.io/ppds-docs/';
 
+/** Intentional consumed name for the canonical documentation URL. @alias */
 export const PLUGIN_REGISTRATION_DOCS_URL = DOCS_URL;
