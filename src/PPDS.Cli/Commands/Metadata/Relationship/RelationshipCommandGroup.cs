@@ -17,18 +17,22 @@ public static class RelationshipCommandGroup
     /// <summary>
     /// Creates the 'relationship' command group with subcommands.
     /// </summary>
-    public static Command Create()
+    public static Command Create() => Create(null);
+
+    internal static Command Create(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var command = new Command("relationship", "Create, update, or delete Dataverse relationships");
 
-        command.Subcommands.Add(CreateCreateCommand());
-        command.Subcommands.Add(CreateUpdateCommand());
-        command.Subcommands.Add(CreateDeleteCommand());
+        command.Subcommands.Add(CreateCreateCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateUpdateCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateDeleteCommand(serviceProviderFactory));
 
         return command;
     }
 
-    internal static Command CreateCreateCommand()
+    internal static Command CreateCreateCommand() => CreateCreateCommand(null);
+
+    internal static Command CreateCreateCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -132,7 +136,7 @@ public static class RelationshipCommandGroup
                 solution, from, to, type, name,
                 lookupName, lookupDisplayName, intersectEntity,
                 cascadeDelete, cascadeAssign, dryRun,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -153,17 +157,20 @@ public static class RelationshipCommandGroup
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -234,13 +241,13 @@ public static class RelationshipCommandGroup
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(result);
+                MetadataDryRunScope.Publisher.WriteSuccess(writer, dryRun, result);
             }
             else
             {
                 if (dryRun)
                 {
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                    MetadataDryRunScope.Publisher.WriteDiagnostic();
                 }
                 else
                 {
@@ -269,7 +276,9 @@ public static class RelationshipCommandGroup
         }
     }
 
-    internal static Command CreateUpdateCommand()
+    internal static Command CreateUpdateCommand() => CreateUpdateCommand(null);
+
+    internal static Command CreateUpdateCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -355,7 +364,7 @@ public static class RelationshipCommandGroup
                 solution, name,
                 cascadeDelete, cascadeAssign, cascadeMerge,
                 cascadeReparent, cascadeShare, cascadeUnshare,
-                dryRun, profile, environment, globalOptions, cancellationToken);
+                dryRun, profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -374,17 +383,20 @@ public static class RelationshipCommandGroup
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -426,7 +438,7 @@ public static class RelationshipCommandGroup
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new
+                MetadataDryRunScope.Inputs.WriteSuccess(writer, dryRun, new
                 {
                     name,
                     updated = true,
@@ -437,7 +449,7 @@ public static class RelationshipCommandGroup
             }
             else if (dryRun)
             {
-                Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                MetadataDryRunScope.Inputs.WriteDiagnostic();
             }
             else
             {
