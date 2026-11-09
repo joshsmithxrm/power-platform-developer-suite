@@ -8,6 +8,7 @@ internal sealed record MetadataDryRunScope(string ValidationScope, bool Publishe
 {
     internal static MetadataDryRunScope Inputs { get; } = new("required-inputs", false, false, "not-performed");
     internal static MetadataDryRunScope Publisher { get; } = new("input-and-publisher", true, false, "not-performed");
+    internal static MetadataDryRunScope PublisherProvisional { get; } = new("input-and-publisher", true, false, "provisional");
     internal static MetadataDryRunScope Option { get; } = new("option-existence", false, true, "not-performed");
     internal static MetadataDryRunScope DraftValue { get; } = new("option-data-and-draft-value", false, false, "provisional");
     internal static MetadataDryRunScope RequestedValue { get; } = new("required-inputs", false, false, "requested-only; SDK assignment occurs on write");

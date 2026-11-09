@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserve explicit zero while allocating only omitted local/global choice values, without mutating caller options. Global --options accepts bare labels; explicit values outside the publisher range warn and remain unchanged (#1530). For automatic allocation, omit Value rather than setting it to zero. Initial create previews mark derived values as provisional without claiming target-option reads or persisted numeric output.
+
+
 - `forms move-field` refuses source-row removal and target-row insertion across active row spans, and refuses shifting a later spanning sibling. Safe mixed rows, expired spans and unchanged-position retries remain supported.
 - Repeating `forms add-field` in the same section preserves existing controls/custom labels and skips redundant XML updates. Casing and batch duplicates report accurate already-present and duplicate-input outcomes; intentional placements in other sections remain supported (#1528).
 - New cells created by legacy form reorder use metadata display labels and canonical bindings; existing custom labels are retained. The additive result API keeps the original Task-based add-field signature and reports unknown counts truthfully for legacy implementations (#1529).
