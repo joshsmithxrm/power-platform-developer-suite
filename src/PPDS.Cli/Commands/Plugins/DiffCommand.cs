@@ -1,550 +1,141 @@
 using System.CommandLine;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
+using PPDS.Cli.Services.Plugins;
 
 namespace PPDS.Cli.Commands.Plugins;
 
-/// <summary>
-/// Compare plugin configuration against Dataverse environment state.
-/// </summary>
+/// <summary>Compares the managed plugin registration subset without mutating Dataverse.</summary>
 public static class DiffCommand
 {
-    private static readonly JsonSerializerOptions JsonReadOptions = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
 
-    private static readonly JsonSerializerOptions JsonWriteOptions = new()
-    {
-        WriteIndented = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
+    public static Command Create() => CreateCore(null, null, null);
 
-    public static Command Create()
+    // The real parse/action/output pipeline, with only connection creation replaced for offline tests.
+    internal static Command CreateForTesting(IPluginRegistrationService service, TextWriter output, TextWriter error) =>
+        CreateCore(service, output, error);
+
+    private static Command CreateCore(IPluginRegistrationService? service, TextWriter? output, TextWriter? error)
     {
         var configOption = new Option<FileInfo>("--config", "-c")
         {
-            Description = "Path to registrations.json",
-            Required = true
+            Description = "Path to registrations.json", Required = true
         }.AcceptExistingOnly();
-
-        var command = new Command("diff", "Compare configuration against environment state")
+        var hiddenOption = new Option<bool>("--include-hidden")
         {
-            configOption,
-            PluginsCommandGroup.ProfileOption,
-            PluginsCommandGroup.EnvironmentOption
+            Description = "Include hidden registration steps in this read-only comparison"
         };
-
-        // Add global options including output format
-        GlobalOptions.AddToCommand(command);
-
-        command.SetAction(async (parseResult, cancellationToken) =>
+        var command = new Command("diff", "Compare managed registration fields against environment state")
         {
-            var config = parseResult.GetValue(configOption)!;
-            var profile = parseResult.GetValue(PluginsCommandGroup.ProfileOption);
-            var environment = parseResult.GetValue(PluginsCommandGroup.EnvironmentOption);
-            var globalOptions = GlobalOptions.GetValues(parseResult);
-
-            return await ExecuteAsync(config, profile, environment, globalOptions, cancellationToken);
-        });
-
+            configOption, hiddenOption, PluginsCommandGroup.ProfileOption, PluginsCommandGroup.EnvironmentOption
+        };
+        GlobalOptions.AddToCommand(command);
+        command.SetAction(async (parse, ct) => await ExecuteAsync(
+            parse.GetValue(configOption)!, parse.GetValue(PluginsCommandGroup.ProfileOption),
+            parse.GetValue(PluginsCommandGroup.EnvironmentOption), GlobalOptions.GetValues(parse),
+            parse.GetValue(hiddenOption), service, output, error ?? Console.Error, ct));
         return command;
     }
 
-    private static async Task<int> ExecuteAsync(
-        FileInfo configFile,
-        string? profile,
-        string? environment,
-        GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+    private static async Task<int> ExecuteAsync(FileInfo file, string? profile, string? environment,
+        GlobalOptionValues options, bool includeHidden, IPluginRegistrationService? service,
+        TextWriter? output, TextWriter error, CancellationToken ct)
     {
-        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
-
+        var jsonWriter = options.IsJsonMode ? new JsonOutputWriter(output, options.Debug) : null;
+        IOutputWriter writer = jsonWriter ?? ServiceFactory.CreateOutputWriter(options);
+        ServiceProvider? provider = null;
         try
         {
-            // Load configuration
-            var configJson = await File.ReadAllTextAsync(configFile.FullName, cancellationToken);
-            var config = JsonSerializer.Deserialize<PluginRegistrationConfig>(configJson, JsonReadOptions);
-
-            if (config?.Assemblies == null || config.Assemblies.Count == 0)
+            var json = await File.ReadAllTextAsync(file.FullName, ct);
+            var config = PluginRegistrationJson.Deserialize(json);
+            if (config?.Assemblies is null || config.Assemblies.Count == 0)
             {
-                writer.WriteError(new StructuredError(
-                    ErrorCodes.Validation.InvalidValue,
-                    "No assemblies found in configuration file.",
-                    Target: configFile.Name));
+                writer.WriteError(new StructuredError(ErrorCodes.Validation.InvalidValue,
+                    "No assemblies found in configuration file.", Target: file.Name));
                 return ExitCodes.InvalidArguments;
             }
-
-            // Validate configuration
             config.Validate();
-
-            // Connect to Dataverse
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profile,
-                environment,
-                globalOptions.Verbose,
-                globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
-
-            var registrationService = serviceProvider.GetRequiredService<IPluginRegistrationService>();
-
-            if (!globalOptions.IsJsonMode)
+            if (service is null)
             {
-                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-                ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.Error.WriteLine();
+                provider = await ProfileServiceFactory.CreateFromProfilesAsync(profile, environment,
+                    options.Verbose, options.Debug, ProfileServiceFactory.DefaultDeviceCodeCallback, ct);
+                service = provider.GetRequiredService<IPluginRegistrationService>();
+                if (!options.IsJsonMode)
+                    ConsoleHeader.WriteConnectedAs(provider.GetRequiredService<ResolvedConnectionInfo>());
             }
 
-            var allDrifts = new List<AssemblyDrift>();
-            var hasDrift = false;
-
-            foreach (var assemblyConfig in config.Assemblies)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var drift = await ComputeDriftAsync(registrationService, assemblyConfig, cancellationToken);
-                allDrifts.Add(drift);
-
-                if (drift.HasDrift)
-                    hasDrift = true;
-            }
-
-            if (globalOptions.IsJsonMode)
-            {
-                writer.WriteSuccess(allDrifts);
-            }
+            var result = await new PluginDiffService(service).CompareAsync(config, includeHidden, cancellationToken: ct);
+            if (jsonWriter is not null)
+                jsonWriter.WriteComparison(result.Assemblies, new
+                {
+                    result.Status, result.IsComplete, result.HasDrift, result.Coverage
+                }, result.IsComplete);
             else
-            {
-                var hasWarnings = allDrifts.Any(d => d.Warnings.Count > 0);
-
-                if (!hasDrift && !hasWarnings)
-                {
-                    Console.Error.WriteLine("No drift detected. Environment matches configuration.");
-                    return ExitCodes.Success;
-                }
-
-                foreach (var drift in allDrifts)
-                {
-                    if (!drift.HasDrift && drift.Warnings.Count == 0)
-                        continue;
-
-                    Console.Error.WriteLine($"Assembly: {drift.AssemblyName}");
-
-                    foreach (var warning in drift.Warnings)
-                        Console.Error.WriteLine($"  [!] Warning: {warning}");
-
-                    if (drift.AssemblyMissing)
-                    {
-                        Console.Error.WriteLine("  [MISSING] Assembly not registered in environment");
-                        continue;
-                    }
-
-                    foreach (var missing in drift.MissingSteps)
-                    {
-                        Console.Error.WriteLine($"  [+] Missing step: {missing.StepName}");
-                        Console.Error.WriteLine($"      {missing.Message} on {missing.Entity} ({missing.Stage}, {missing.Mode})");
-                    }
-
-                    foreach (var orphan in drift.OrphanedSteps)
-                    {
-                        Console.Error.WriteLine($"  [-] Orphaned step: {orphan.StepName}");
-                        Console.Error.WriteLine($"      {orphan.Message} on {orphan.Entity} ({orphan.Stage}, {orphan.Mode})");
-                    }
-
-                    foreach (var modified in drift.ModifiedSteps)
-                    {
-                        Console.Error.WriteLine($"  [~] Modified step: {modified.StepName}");
-                        foreach (var change in modified.Changes)
-                        {
-                            Console.Error.WriteLine($"      {change.Property}: {change.Expected} -> {change.Actual}");
-                        }
-                    }
-
-                    foreach (var missingImage in drift.MissingImages)
-                    {
-                        Console.Error.WriteLine($"  [+] Missing image: {missingImage.ImageName} on step {missingImage.StepName}");
-                    }
-
-                    foreach (var orphanImage in drift.OrphanedImages)
-                    {
-                        Console.Error.WriteLine($"  [-] Orphaned image: {orphanImage.ImageName} on step {orphanImage.StepName}");
-                    }
-
-                    foreach (var modifiedImage in drift.ModifiedImages)
-                    {
-                        Console.Error.WriteLine($"  [~] Modified image: {modifiedImage.ImageName} on step {modifiedImage.StepName}");
-                        foreach (var change in modifiedImage.Changes)
-                        {
-                            Console.Error.WriteLine($"      {change.Property}: {change.Expected} -> {change.Actual}");
-                        }
-                    }
-
-                    Console.Error.WriteLine();
-                }
-            }
-
-            return hasDrift ? 1 : ExitCodes.Success; // Return 1 if drift detected (useful for CI)
+                Render(result, error);
+            return result.ExitCode;
         }
         catch (Exception ex)
         {
-            var error = ExceptionMapper.Map(ex, context: "comparing plugins", debug: globalOptions.Debug);
-            writer.WriteError(error);
+            writer.WriteError(ExceptionMapper.Map(ex, context: "comparing plugins", debug: options.Debug));
             return ExceptionMapper.ToExitCode(ex);
         }
-    }
-
-    /// <summary>
-    /// Computes drift between the configured assembly and its environment state, matching steps by
-    /// functional identity (<see cref="PluginStepMatcher"/>) rather than by mutable display name so an
-    /// environment holding two same-named steps no longer aborts the diff.
-    /// </summary>
-    /// <remarks><c>internal</c> for direct unit-test access (InternalsVisibleTo PPDS.Cli.Tests).</remarks>
-    internal static async Task<AssemblyDrift> ComputeDriftAsync(
-        IPluginRegistrationService service,
-        PluginAssemblyConfig config,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var drift = new AssemblyDrift
+        finally
         {
-            AssemblyName = config.Name
-        };
-
-        // Check if assembly exists
-        var assembly = await service.GetAssemblyByNameAsync(config.Name, cancellationToken);
-        if (assembly == null)
-        {
-            drift.AssemblyMissing = true;
-            return drift;
-        }
-
-        // Get all types for this assembly
-        cancellationToken.ThrowIfCancellationRequested();
-        var existingTypes = await service.ListTypesForAssemblyAsync(assembly.Id, cancellationToken);
-
-        // Configured (type, step) pairs. Config-side duplicate resolved names are already blocked by
-        // PluginRegistrationConfig.Validate() (per-type name uniqueness); the matcher's zip semantics
-        // handle any residual identity collision without collapsing entries.
-        var configured = new List<(PluginTypeConfig Type, PluginStepConfig Step)>();
-        foreach (var typeConfig in config.Types)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            foreach (var stepConfig in typeConfig.Steps)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                configured.Add((typeConfig, stepConfig));
-            }
-        }
-
-        // Existing (type, step) pairs. The owning type name comes from the enclosing loop so identity
-        // is attributed to the correct type. Duplicate names in the environment no longer throw.
-        var existing = new List<(PluginTypeInfo Type, PluginStepInfo Step)>();
-        foreach (var existingType in existingTypes)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var steps = await service.ListStepsForTypeAsync(existingType.Id, cancellationToken: cancellationToken);
-            foreach (var step in steps)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                existing.Add((existingType, step));
-            }
-        }
-
-        var matches = PluginStepMatcher.Match(
-            configured,
-            existing,
-            onResidualCollision: (id, configCount, envCount) =>
-                drift.Warnings.Add(PluginStepMatcher.DescribeResidualCollision(id, configCount, envCount)));
-
-        foreach (var match in matches)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (match.IsMissing)
-            {
-                var typeConfig = match.TypeConfig!;
-                var stepConfig = match.Config!;
-                var missingName = PluginStepMatcher.ResolveConfigName(typeConfig, stepConfig);
-                drift.MissingSteps.Add(new StepDrift
-                {
-                    TypeName = typeConfig.TypeName,
-                    StepName = missingName,
-                    Message = stepConfig.Message,
-                    Entity = stepConfig.Entity,
-                    Stage = stepConfig.Stage,
-                    Mode = stepConfig.Mode
-                });
-
-                // Same lookup deploy performs before creating a step: a specified entity with no SDK
-                // message filter can never be deployed (#1332). Warn so "[+] Missing step" is not read
-                // as "deploy will create it".
-                if (PluginStepIdentity.IsEntitySpecified(stepConfig.Entity) ||
-                    PluginStepIdentity.IsEntitySpecified(stepConfig.SecondaryEntity))
-                {
-                    var messageId = await service.GetSdkMessageIdAsync(stepConfig.Message, cancellationToken);
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (messageId != null &&
-                        await service.GetSdkMessageFilterIdAsync(messageId.Value, stepConfig.Entity, stepConfig.SecondaryEntity, cancellationToken) == null)
-                    {
-                        drift.Warnings.Add(
-                            $"Missing step '{missingName}' cannot be created by deploy: " +
-                            PluginRegistrationService.DescribeMissingMessageFilter(
-                                stepConfig.Message, stepConfig.Entity, stepConfig.SecondaryEntity));
-                    }
-                }
-            }
-            else if (match.IsOrphaned)
-            {
-                var typeInfo = match.EnvType!;
-                var stepInfo = match.Env!;
-                drift.OrphanedSteps.Add(new StepDrift
-                {
-                    TypeName = typeInfo.TypeName,
-                    StepName = stepInfo.Name,
-                    Message = stepInfo.Message,
-                    Entity = stepInfo.PrimaryEntity,
-                    Stage = stepInfo.Stage,
-                    Mode = stepInfo.Mode
-                });
-            }
-            else
-            {
-                var typeConfig = match.TypeConfig!;
-                var stepConfig = match.Config!;
-                var stepInfo = match.Env!;
-                var resolvedName = PluginStepMatcher.ResolveConfigName(typeConfig, stepConfig);
-
-                // Compare step properties. Stage and mode are part of the identity now — a paired step
-                // shares them by construction, so they can never differ here and are no longer compared.
-                var changes = new List<PropertyChange>();
-
-                // Name is no longer identity: a rename leaves behavior intact but should still surface,
-                // and a deploy would converge the environment name to the configured one.
-                if (!string.Equals(resolvedName, stepInfo.Name, StringComparison.Ordinal))
-                    changes.Add(new PropertyChange("name", resolvedName, stepInfo.Name));
-
-                if (stepConfig.ExecutionOrder != stepInfo.ExecutionOrder)
-                    changes.Add(new PropertyChange("executionOrder", stepConfig.ExecutionOrder.ToString(), stepInfo.ExecutionOrder.ToString()));
-
-                var configFiltering = NormalizeAttributes(stepConfig.FilteringAttributes);
-                var envFiltering = NormalizeAttributes(stepInfo.FilteringAttributes);
-                if (!string.Equals(configFiltering, envFiltering, StringComparison.OrdinalIgnoreCase))
-                    changes.Add(new PropertyChange("filteringAttributes", configFiltering ?? "(none)", envFiltering ?? "(none)"));
-
-                if (changes.Count > 0)
-                {
-                    drift.ModifiedSteps.Add(new ModifiedStepDrift
-                    {
-                        TypeName = typeConfig.TypeName,
-                        StepName = resolvedName,
-                        Changes = changes
-                    });
-                }
-
-                // Compare images
-                var existingImages = await service.ListImagesForStepAsync(stepInfo.Id, cancellationToken);
-                var existingImageMap = existingImages.ToDictionary(i => i.Name, i => i);
-                var configImageMap = stepConfig.Images.ToDictionary(i => i.Name, i => i);
-
-                // Missing images
-                foreach (var imageConfig in stepConfig.Images)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (!existingImageMap.ContainsKey(imageConfig.Name))
-                    {
-                        drift.MissingImages.Add(new ImageDrift
-                        {
-                            StepName = resolvedName,
-                            ImageName = imageConfig.Name
-                        });
-                    }
-                }
-
-                // Orphaned images
-                foreach (var imageInfo in existingImages)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (!configImageMap.ContainsKey(imageInfo.Name))
-                    {
-                        drift.OrphanedImages.Add(new ImageDrift
-                        {
-                            StepName = resolvedName,
-                            ImageName = imageInfo.Name
-                        });
-                    }
-                }
-
-                // Modified images
-                foreach (var imageConfig in stepConfig.Images)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (!existingImageMap.TryGetValue(imageConfig.Name, out var imageInfo))
-                        continue;
-
-                    var imageChanges = new List<PropertyChange>();
-
-                    if (!string.Equals(imageConfig.ImageType, imageInfo.ImageType, StringComparison.OrdinalIgnoreCase))
-                        imageChanges.Add(new PropertyChange("imageType", imageConfig.ImageType, imageInfo.ImageType));
-
-                    var configAttrs = NormalizeAttributes(imageConfig.Attributes);
-                    var envAttrs = NormalizeAttributes(imageInfo.Attributes);
-                    if (!string.Equals(configAttrs, envAttrs, StringComparison.OrdinalIgnoreCase))
-                        imageChanges.Add(new PropertyChange("attributes", configAttrs ?? "(all)", envAttrs ?? "(all)"));
-
-                    if (imageChanges.Count > 0)
-                    {
-                        drift.ModifiedImages.Add(new ModifiedImageDrift
-                        {
-                            StepName = resolvedName,
-                            ImageName = imageConfig.Name,
-                            Changes = imageChanges
-                        });
-                    }
-                }
-            }
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
-        return drift;
-    }
-
-    private static string? NormalizeAttributes(string? attributes)
-    {
-        if (string.IsNullOrWhiteSpace(attributes))
-            return null;
-
-        // Sort attributes for consistent comparison
-        var sorted = attributes.Split(',')
-            .Select(a => a.Trim().ToLowerInvariant())
-            .Where(a => !string.IsNullOrEmpty(a))
-            .OrderBy(a => a)
-            .ToArray();
-
-        return sorted.Length > 0 ? string.Join(",", sorted) : null;
-    }
-
-    #region Drift Models
-
-    internal sealed class AssemblyDrift
-    {
-        [JsonPropertyName("assemblyName")]
-        public string AssemblyName { get; set; } = string.Empty;
-
-        [JsonPropertyName("assemblyMissing")]
-        public bool AssemblyMissing { get; set; }
-
-        [JsonPropertyName("missingSteps")]
-        public List<StepDrift> MissingSteps { get; set; } = [];
-
-        [JsonPropertyName("orphanedSteps")]
-        public List<StepDrift> OrphanedSteps { get; set; } = [];
-
-        [JsonPropertyName("modifiedSteps")]
-        public List<ModifiedStepDrift> ModifiedSteps { get; set; } = [];
-
-        [JsonPropertyName("missingImages")]
-        public List<ImageDrift> MissingImages { get; set; } = [];
-
-        [JsonPropertyName("orphanedImages")]
-        public List<ImageDrift> OrphanedImages { get; set; } = [];
-
-        [JsonPropertyName("modifiedImages")]
-        public List<ModifiedImageDrift> ModifiedImages { get; set; } = [];
-
-        /// <summary>
-        /// Advisory messages (e.g., residual functional-identity collisions where multiple steps
-        /// share an identity). Warnings do not by themselves constitute drift.
-        /// </summary>
-        [JsonPropertyName("warnings")]
-        public List<string> Warnings { get; set; } = [];
-
-        [JsonIgnore]
-        public bool HasDrift => AssemblyMissing ||
-                                MissingSteps.Count > 0 ||
-                                OrphanedSteps.Count > 0 ||
-                                ModifiedSteps.Count > 0 ||
-                                MissingImages.Count > 0 ||
-                                OrphanedImages.Count > 0 ||
-                                ModifiedImages.Count > 0;
-    }
-
-    internal sealed class StepDrift
-    {
-        [JsonPropertyName("typeName")]
-        public string TypeName { get; set; } = string.Empty;
-
-        [JsonPropertyName("stepName")]
-        public string StepName { get; set; } = string.Empty;
-
-        [JsonPropertyName("message")]
-        public string Message { get; set; } = string.Empty;
-
-        [JsonPropertyName("entity")]
-        public string Entity { get; set; } = string.Empty;
-
-        [JsonPropertyName("stage")]
-        public string Stage { get; set; } = string.Empty;
-
-        [JsonPropertyName("mode")]
-        public string Mode { get; set; } = string.Empty;
-    }
-
-    internal sealed class ModifiedStepDrift
-    {
-        [JsonPropertyName("typeName")]
-        public string TypeName { get; set; } = string.Empty;
-
-        [JsonPropertyName("stepName")]
-        public string StepName { get; set; } = string.Empty;
-
-        [JsonPropertyName("changes")]
-        public List<PropertyChange> Changes { get; set; } = [];
-    }
-
-    internal sealed class ImageDrift
-    {
-        [JsonPropertyName("stepName")]
-        public string StepName { get; set; } = string.Empty;
-
-        [JsonPropertyName("imageName")]
-        public string ImageName { get; set; } = string.Empty;
-    }
-
-    internal sealed class ModifiedImageDrift
-    {
-        [JsonPropertyName("stepName")]
-        public string StepName { get; set; } = string.Empty;
-
-        [JsonPropertyName("imageName")]
-        public string ImageName { get; set; } = string.Empty;
-
-        [JsonPropertyName("changes")]
-        public List<PropertyChange> Changes { get; set; } = [];
-    }
-
-    internal sealed class PropertyChange
-    {
-        [JsonPropertyName("property")]
-        public string Property { get; set; }
-
-        [JsonPropertyName("expected")]
-        public string Expected { get; set; }
-
-        [JsonPropertyName("actual")]
-        public string Actual { get; set; }
-
-        public PropertyChange(string property, string expected, string actual)
-        {
-            Property = property;
-            Expected = expected;
-            Actual = actual;
+            if (provider is not null)
+                await provider.DisposeAsync();
         }
     }
 
-    #endregion
+    private static void Render(PluginDiffResult result, TextWriter error)
+    {
+        error.WriteLine(result.Status switch
+        {
+            "match" => "Compared managed registration fields match.",
+            "drift" => "Managed registration drift detected.",
+            _ => "Registration comparison incomplete."
+        });
+        foreach (var assembly in result.Assemblies)
+        {
+            error.WriteLine($"Assembly: {assembly.AssemblyName}");
+            if (assembly.AssemblyMissing) error.WriteLine("  [MISSING] Assembly not registered in environment");
+            foreach (var item in assembly.MissingSteps) error.WriteLine($"  [+] Missing step: {item.StepName}");
+            foreach (var item in assembly.OrphanedSteps) error.WriteLine($"  [-] Orphaned step: {item.StepName}");
+            foreach (var item in assembly.ModifiedSteps)
+            {
+                error.WriteLine($"  [~] Modified step: {item.StepName}");
+                foreach (var change in item.Changes) error.WriteLine($"      {change.Property}: {change.Expected} -> {change.Actual}");
+            }
+            foreach (var item in assembly.MissingImages) error.WriteLine($"  [+] Missing image: {item.ImageName} on step {item.StepName}");
+            foreach (var item in assembly.OrphanedImages) error.WriteLine($"  [-] Orphaned image: {item.ImageName} on step {item.StepName}");
+            foreach (var item in assembly.ModifiedImages)
+            {
+                error.WriteLine($"  [~] Modified image: {item.ImageName} on step {item.StepName}");
+                foreach (var change in item.Changes) error.WriteLine($"      {change.Property}: {change.Expected} -> {change.Actual}");
+            }
+            foreach (var warning in assembly.Warnings) error.WriteLine($"  [!] {warning}");
+            RenderCoverage(assembly.Coverage, error);
+        }
+        RenderCoverage(result.Coverage, error);
+    }
+
+    private static void RenderCoverage(ComparisonCoverage coverage, TextWriter error)
+    {
+        error.WriteLine($"  Coverage: {coverage.Checked.Count} checked, {coverage.Unmanaged.Count} unmanaged, " +
+            $"{coverage.Unsupported.Count} unsupported/unverifiable; {coverage.ComparedSteps} of {coverage.TotalSteps} steps compared, " +
+            $"{coverage.HiddenSteps} hidden, {coverage.ExcludedHiddenSteps} hidden steps excluded, " +
+            $"{coverage.UnknownHiddenStatusSteps} unknown hidden status.");
+        foreach (var item in coverage.Unmanaged) error.WriteLine($"    Unmanaged: {item.Path}: {item.Field}");
+        foreach (var item in coverage.Unsupported) error.WriteLine($"    Unknown: {item.Path}: {item.Field}");
+        foreach (var item in coverage.Excluded) error.WriteLine($"    Excluded: {item.Path}: {item.Field}");
+    }
+
+    // Compatibility seam for existing unit callers; all business logic is in the service.
+    internal static Task<AssemblyDrift> ComputeDriftAsync(IPluginRegistrationService service,
+        PluginAssemblyConfig config, CancellationToken cancellationToken = default) =>
+        new PluginDiffService(service).CompareAssemblyAsync(config, cancellationToken: cancellationToken);
 }

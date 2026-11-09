@@ -235,6 +235,16 @@ public interface IPluginRegistrationService
 
     #endregion
 
+    /// <summary>Resolves a run-as selector uniquely without reading secure configuration.</summary>
+    Task<Guid?> ResolveRunAsUserAsync(string? selector, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(selector) || selector.Equals("CallingUser", StringComparison.OrdinalIgnoreCase))
+            return Task.FromResult<Guid?>(null);
+        return Task.FromException<Guid?>(new PpdsException(ErrorCodes.Validation.InvalidValue,
+            "This registration provider cannot verify the requested user identity."));
+    }
+
     #region Create/Update Operations
 
     /// <summary>
@@ -496,7 +506,16 @@ public record StepUpdateRequest(
     bool? CanBeBypassed = null,
     bool? CanUseReadOnlyConnection = null,
     string? InvocationSource = null
-);
+)
+{
+    // Additional fields do not replace the established eight-argument constructor/Deconstruct.
+    public string? UnsecureConfiguration { get; init; }
+    public string? RunAsUser { get; init; }
+    public bool? AsyncAutoDelete { get; init; }
+    public IReadOnlyList<string>? ResetFields { get; init; }
+    public string? Name { get; init; }
+    public string? Deployment { get; init; }
+}
 
 /// <summary>
 /// Request for updating a step image.
@@ -506,7 +525,15 @@ public record StepUpdateRequest(
 public record ImageUpdateRequest(
     string? Attributes = null,
     string? Name = null
-);
+)
+{
+    // Preserve the established two-argument constructor/Deconstruct.
+    public string? Description { get; init; }
+    public string? EntityAlias { get; init; }
+    public string? MessagePropertyName { get; init; }
+    public IReadOnlyList<string>? ResetFields { get; init; }
+    public string? ImageType { get; init; }
+}
 
 /// <summary>
 /// Attribute metadata for an entity field.

@@ -1847,27 +1847,21 @@ public sealed class AssemblyExtractor : IDisposable
                 case "Deployment":
                     // Only write non-default value (default is ServerOnly = 0)
                     var deploymentStr = MapDeploymentValue(value);
-                    if (deploymentStr != "ServerOnly")
-                        step.Deployment = deploymentStr;
+                    step.Deployment = deploymentStr;
                     break;
                 case "RunAsUser":
                     step.RunAsUser = value?.ToString();
                     break;
                 case "CanBeBypassed":
-                    // Default is true — only write when false (non-default)
-                    if (value is false)
-                        step.CanBeBypassed = false;
+                    step.CanBeBypassed = value is true;
                     break;
                 case "CanUseReadOnlyConnection":
-                    // Default is false — only write when true (non-default)
-                    if (value is true)
-                        step.CanUseReadOnlyConnection = true;
+                    step.CanUseReadOnlyConnection = value is true;
                     break;
                 case "InvocationSource":
                     // Default is Parent = 0 — only write when Child (non-default)
                     var invocationStr = MapInvocationSourceValue(value);
-                    if (invocationStr != "Parent")
-                        step.InvocationSource = invocationStr;
+                    step.InvocationSource = invocationStr;
                     break;
             }
         }

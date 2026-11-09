@@ -18,10 +18,7 @@ namespace PPDS.Cli.Commands.Plugins;
 /// </summary>
 public static class DeployCommand
 {
-    private static readonly JsonSerializerOptions JsonReadOptions = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
+    private const string InterruptedResultKey = "PPDS.InterruptedPluginDeployment";
 
     private static readonly JsonSerializerOptions JsonWriteOptions = new()
     {
@@ -88,15 +85,21 @@ public static class DeployCommand
         GlobalOptionValues globalOptions,
         CancellationToken cancellationToken,
         Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null,
-        Func<string, CancellationToken, Task<byte[]>>? preflightPackageContentReader = null)
+        Func<string, CancellationToken, Task<byte[]>>? preflightPackageContentReader = null,
+        IOutputWriter? outputWriter = null)
     {
-        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+        var writer = outputWriter ?? ServiceFactory.CreateOutputWriter(globalOptions);
+        var results = new List<DeploymentResult>();
 
         try
         {
             // Load configuration
             var configJson = await File.ReadAllTextAsync(configFile.FullName, cancellationToken);
-            var config = JsonSerializer.Deserialize<PluginRegistrationConfig>(configJson, JsonReadOptions);
+            var config = PluginRegistrationJson.Deserialize(configJson);
+
+            if (config.Version == PluginRegistrationContract.ReconciliationVersion && clean)
+                throw new PpdsException(ErrorCodes.Validation.InvalidValue,
+                    "Version 2 reconciliation does not authorize parent cleanup. Image pruning and ownership require a separately adopted contract.");
 
             var configuredCustomApiCount = (config?.CustomApis?.Count ?? 0)
                 + (config?.Assemblies?.Sum(assembly => assembly.CustomApis?.Count ?? 0) ?? 0);
@@ -139,6 +142,7 @@ public static class DeployCommand
             cancellationToken.ThrowIfCancellationRequested();
 
             var registrationService = serviceProvider.GetRequiredService<IPluginRegistrationService>();
+            await PluginRegistrationPlanningService.ValidateRunAsUsersAsync(registrationService, config.Assemblies ?? [], cancellationToken);
             var customApiService = serviceProvider.GetRequiredService<ICustomApiService>();
 
             if (!globalOptions.IsJsonMode)
@@ -154,7 +158,6 @@ public static class DeployCommand
                 }
             }
 
-            var results = new List<DeploymentResult>();
 
             if (config.Assemblies != null)
             {
@@ -199,30 +202,63 @@ public static class DeployCommand
 
             cancellationToken.ThrowIfCancellationRequested();
 
+            // Opt-in reconciliation verifies stored nonsecret state after acknowledged writes.
+            // No pruning is inferred: extra registrations remain drift and produce non-success.
+            PluginDiffResult? verification = null;
+            if (config.Version == PluginRegistrationContract.ReconciliationVersion && dryRun)
+                foreach (var result in results) result.ReconciliationStatus = "preview-only";
+            if (config.Version == PluginRegistrationContract.ReconciliationVersion && !dryRun && results.All(r => r.Success))
+            {
+                verification = await new PluginDiffService(registrationService).CompareAsync(
+                    config, includeHidden: true, cancellationToken: cancellationToken);
+                for (var index = 0; index < results.Count; index++)
+                {
+                    results[index].ReconciliationStatus = verification.Status;
+                    results[index].Verification = verification.Assemblies[index];
+                    results[index].VerificationScope = verification.Coverage;
+                }
+            }
+            var completed = results.All(r => r.Success) && (verification is null || verification.IsComplete && !verification.HasDrift);
+
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(results);
+                writer.WriteResult(new CommandResult<List<DeploymentResult>> { Success = completed, Data = results });
             }
             else
             {
                 Console.Error.WriteLine();
+                foreach (var plan in results.Where(r => r.ReconciliationPlan is not null).SelectMany(r => r.ReconciliationPlan!))
+                    Console.Error.WriteLine($"  Reconciliation plan {plan.Path}: {plan.Field} -> {plan.Intent}");
                 var totalCreated = results.Sum(r => r.StepsCreated + r.ImagesCreated);
                 var totalUpdated = results.Sum(r => r.StepsUpdated + r.ImagesUpdated);
                 var totalDeleted = results.Sum(r => r.StepsDeleted + r.ImagesDeleted);
 
                 Console.Error.WriteLine($"Deployment complete: {totalCreated} created, {totalUpdated} updated, {totalDeleted} deleted");
+                if (verification is not null)
+                    Console.Error.WriteLine($"Nonsecret reconciliation verification: {verification.Status}; no pruning or rollback was attempted.");
+                if (results.Any(r => !r.Success)) WriteRetainedOutcomes(results);
             }
 
-            return results.Any(r => !r.Success) ? ExitCodes.Failure : ExitCodes.Success;
+            return results.Any(r => !r.Success) ? ExitCodes.Failure : verification?.ExitCode ?? ExitCodes.Success;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
-            throw;
+            if (GetInterruptedResult(ex) is { } interrupted && !results.Contains(interrupted)) results.Add(interrupted);
+            if (!globalOptions.IsJsonMode) WriteRetainedOutcomes(results);
+            writer.WriteResult(new CommandResult<List<DeploymentResult>>
+            {
+                Success = false, Data = results,
+                Error = new StructuredError(ErrorCodes.Operation.Cancelled,
+                    "Deployment cancelled. Acknowledged and unknown registration effects are retained; no rollback was attempted.")
+            });
+            return ExitCodes.Failure;
         }
         catch (Exception ex)
         {
+            if (!globalOptions.IsJsonMode) WriteRetainedOutcomes(results);
             var error = ExceptionMapper.Map(ex, context: "deploying plugins", debug: globalOptions.Debug);
-            writer.WriteError(error);
+            if (results.Count == 0) writer.WriteError(error);
+            else writer.WriteResult(new CommandResult<List<DeploymentResult>> { Success = false, Data = results, Error = error });
             return ExceptionMapper.ToExitCode(ex);
         }
     }
@@ -249,6 +285,7 @@ public static class DeployCommand
         foreach (var assembly in assemblies)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            PluginRegistrationPlanningService.ValidateAssembly(assembly, cancellationToken);
             var assemblyPath = ResolveAssemblyPath(assembly, configDir);
             if (assemblyPath == null || !File.Exists(assemblyPath))
             {
@@ -333,9 +370,14 @@ public static class DeployCommand
         var result = new DeploymentResult
         {
             AssemblyName = assemblyConfig.Name,
+            DryRun = dryRun,
             Success = true
         };
 
+        if (assemblyConfig.OperationIntent == RegistrationOperationIntent.Reconcile)
+            result.ReconciliationPlan = PluginReconciliationPlanService.Describe(assemblyConfig, cancellationToken);
+
+        var calls = new PluginMutationJournal("call");
         var solution = solutionOverride ?? assemblyConfig.Solution;
         // Keep earlier per-step diagnostics even if a later operation also fails.
         var stepErrors = new List<string>();
@@ -359,6 +401,8 @@ public static class DeployCommand
 
             cancellationToken.ThrowIfCancellationRequested();
 
+            await PluginRegistrationPlanningService.ValidateRunAsUsersAsync(service, [assemblyConfig], cancellationToken);
+
             // Deploy assembly or package based on type
             Guid assemblyId;
             if (assemblyConfig.Type == "Nuget")
@@ -380,7 +424,7 @@ public static class DeployCommand
                 else
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    packageId = await service.UpsertPackageAsync(packageName, packageBytes, solution, cancellationToken);
+                    packageId = await calls.RunAsync("pluginpackage", "upsert", "package", null, () => service.UpsertPackageAsync(packageName, packageBytes, solution, cancellationToken), cancellationToken);
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  Package registered: {packageId}");
                 }
@@ -432,11 +476,8 @@ public static class DeployCommand
                 else
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    assemblyId = await service.UpsertAssemblyAsync(
-                        assemblyConfig.Name,
-                        assemblyBytes,
-                        solution,
-                        cancellationToken);
+                    assemblyId = await calls.RunAsync("pluginassembly", "upsert", "assembly", null,
+                        () => service.UpsertAssemblyAsync(assemblyConfig.Name, assemblyBytes, solution, cancellationToken), cancellationToken);
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  Assembly registered: {assemblyId}");
                 }
@@ -526,20 +567,18 @@ public static class DeployCommand
                 Guid typeId;
                 if (dryRun)
                 {
-                    typeId = existingTypeMap.TryGetValue(typeConfig.TypeName, out var existing)
-                        ? existing.Id
+                    var typeExists = existingTypeMap.TryGetValue(typeConfig.TypeName, out var existing);
+                    typeId = typeExists
+                        ? existing!.Id
                         : Guid.NewGuid();
                     if (!globalOptions.IsJsonMode)
-                        Console.Error.WriteLine($"  [Dry-Run] Would register type: {typeConfig.TypeName}");
+                        Console.Error.WriteLine($"  [Dry-Run] Would {(typeExists ? "reuse" : "register")} type: {typeConfig.TypeName}");
                 }
                 else
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    typeId = await service.UpsertPluginTypeAsync(
-                        assemblyId,
-                        typeConfig.TypeName,
-                        solution,
-                        cancellationToken);
+                    typeId = await calls.RunAsync("plugintype", "upsert", "type", null,
+                        () => service.UpsertPluginTypeAsync(assemblyId, typeConfig.TypeName, solution, cancellationToken), cancellationToken);
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  Type registered: {typeConfig.TypeName}");
                 }
@@ -611,7 +650,7 @@ public static class DeployCommand
                     else
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        stepId = await service.UpsertStepAsync(typeId, "pluginType", stepConfig, messageId.Value, filterId, solution, resolution, cancellationToken);
+                        stepId = await calls.RunAsync("sdkmessageprocessingstep", "upsert", "step", matchedEnvStep?.Id, () => service.UpsertStepAsync(typeId, "pluginType", stepConfig, messageId.Value, filterId, solution, resolution, cancellationToken), cancellationToken);
                         if (!globalOptions.IsJsonMode)
                             Console.Error.WriteLine($"    Step {(isNew ? "created" : "updated")}: {stepName}");
 
@@ -619,9 +658,10 @@ public static class DeployCommand
                         else result.StepsUpdated++;
                     }
 
-                    // Deploy images (skip query in dry-run mode or for new steps since stepId doesn't exist)
+                    // Existing steps have real IDs in both modes. Read their image inventory so
+                    // preview counts match deployment; only new steps lack a queryable ID.
                     cancellationToken.ThrowIfCancellationRequested();
-                    var existingImages = dryRun || isNew
+                    var existingImages = isNew
                         ? []
                         : await service.ListImagesForStepAsync(stepId, cancellationToken);
                     var existingImageNames = existingImages.Select(i => i.Name).ToHashSet();
@@ -642,11 +682,8 @@ public static class DeployCommand
                         else
                         {
                             cancellationToken.ThrowIfCancellationRequested();
-                            await service.UpsertImageAsync(
-                                stepId,
-                                imageConfig,
-                                stepConfig.Message,
-                                cancellationToken);
+                            await calls.RunAsync("sdkmessageprocessingstepimage", "upsert", "image", null,
+                                () => service.UpsertImageAsync(stepId, imageConfig, stepConfig.Message, cancellationToken), cancellationToken);
                             if (!globalOptions.IsJsonMode)
                                 Console.Error.WriteLine($"      Image {(imageIsNew ? "created" : "updated")}: {imageConfig.Name}");
 
@@ -679,7 +716,7 @@ public static class DeployCommand
                         else
                         {
                             cancellationToken.ThrowIfCancellationRequested();
-                            await service.DeleteStepAsync(orphanStep.Id, cancellationToken);
+                            await calls.RunAsync("sdkmessageprocessingstep", "delete", "stepCleanup", orphanStep.Id, () => service.DeleteStepAsync(orphanStep.Id, cancellationToken), cancellationToken);
                             if (!globalOptions.IsJsonMode)
                                 Console.Error.WriteLine($"    Deleted step: {orphanStep.Name}");
                             result.StepsDeleted++;
@@ -699,9 +736,12 @@ public static class DeployCommand
                     var descriptions = string.Join(
                         ", ",
                         orphanedSteps.Select(o => $"{o.Name} ({o.Stage}, {o.Mode})"));
+                    var guidance = assemblyConfig.OperationIntent == RegistrationOperationIntent.Reconcile
+                        ? "They remain drift; removal requires separate explicit ownership/adoption and cleanup."
+                        : "Re-run with --clean to remove them.";
                     var warning =
                         $"{orphanedSteps.Count} step(s) in the environment no longer match the configuration and were " +
-                        $"left in place (they remain active): {descriptions}. Re-run with --clean to remove them.";
+                        $"left in place (they remain active): {descriptions}. {guidance}";
 
                     result.Warnings.Add(warning);
 
@@ -717,15 +757,22 @@ public static class DeployCommand
                 result.Success = false;
                 result.Error = string.Join("; ", stepErrors);
             }
+            cancellationToken.ThrowIfCancellationRequested();
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            RetainFailedOutcomes(result, calls, ex);
+            result.Status = "cancelled";
+            result.ErrorCode = ErrorCodes.Operation.Cancelled;
+            result.Error = "Deployment cancelled; no rollback was attempted.";
+            ex.Data[InterruptedResultKey] = result;
             throw;
         }
         catch (Exception ex)
         {
-            result.Success = false;
-            result.Error = string.Join("; ", stepErrors.Append(ex.Message));
+            RetainFailedOutcomes(result, calls, ex);
+            var failure = ex is PpdsException known ? known.UserMessage : "Plugin deployment operation failed; see retained acknowledged and unknown effects.";
+            result.Error = string.Join("; ", stepErrors.Append(failure));
             if (ex is PpdsException ppdsException)
             {
                 result.ErrorCode = ppdsException.ErrorCode;
@@ -735,14 +782,53 @@ public static class DeployCommand
 
             if (!globalOptions.IsJsonMode)
             {
-                Console.Error.WriteLine($"  Error: {ex.Message}");
+                Console.Error.WriteLine($"  Error: {result.Error}");
                 if (!string.IsNullOrWhiteSpace(result.RecoveryGuidance))
                     Console.Error.WriteLine($"  Recovery: {result.RecoveryGuidance}");
             }
         }
 
-        cancellationToken.ThrowIfCancellationRequested();
+        foreach (var outcome in calls.Outcomes)
+            if (!result.Outcomes.Any(o => o.EventId == outcome.EventId)) result.Outcomes.Add(outcome);
+        result.Status = result.Success ? "completed" : "failed";
         return result;
+    }
+
+    private static void WriteRetainedOutcomes(IReadOnlyList<DeploymentResult> results)
+    {
+        if (results.Count == 0) return;
+        Console.Error.WriteLine("Retained deployment effects (no rollback was attempted):");
+        foreach (var result in results)
+        {
+            Console.Error.WriteLine($"  {result.AssemblyName}: {result.Status}; steps {result.StepsCreated} created, {result.StepsUpdated} updated, {result.StepsDeleted} deleted; images {result.ImagesCreated} created, {result.ImagesUpdated} updated.");
+            foreach (var outcome in result.Outcomes)
+                Console.Error.WriteLine($"    {outcome.Scope}/{outcome.Phase}: {outcome.Entity} {outcome.Operation} {outcome.RecordId} — {outcome.Outcome}");
+        }
+        Console.Error.WriteLine($"  Coverage: {results[0].OutcomeCoverage}");
+    }
+    internal static DeploymentResult? GetInterruptedResult(Exception exception) => exception.Data[InterruptedResultKey] as DeploymentResult;
+
+    private static void RetainFailedOutcomes(DeploymentResult result, PluginMutationJournal calls, Exception exception)
+    {
+        result.Success = false;
+        result.Status = "failed";
+        calls.Attach(exception);
+        foreach (var outcome in PluginMutationJournal.Read(exception))
+        {
+            if (result.Outcomes.Any(o => o.EventId == outcome.EventId)) continue;
+            result.Outcomes.Add(outcome);
+            if (outcome.Scope != "mutation" || outcome.Outcome != "acknowledged" || outcome.Phase != "row") continue;
+            if (outcome.Entity == "sdkmessageprocessingstep")
+            {
+                if (outcome.Operation == "create") result.StepsCreated++;
+                if (outcome.Operation == "update") result.StepsUpdated++;
+            }
+            if (outcome.Entity == "sdkmessageprocessingstepimage")
+            {
+                if (outcome.Operation == "create") result.ImagesCreated++;
+                if (outcome.Operation == "update") result.ImagesUpdated++;
+            }
+        }
     }
 
     /// <summary>
@@ -888,6 +974,37 @@ public static class DeployCommand
         [JsonPropertyName("recoveryGuidance")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? RecoveryGuidance { get; set; }
+
+        [JsonPropertyName("status")]
+        public string Status { get; set; } = "completed";
+
+        [JsonPropertyName("dryRun")]
+        public bool DryRun { get; set; }
+
+        [JsonPropertyName("reconciliationStatus")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ReconciliationStatus { get; set; }
+
+        [JsonPropertyName("reconciliationPlan")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public IReadOnlyList<PluginRegistrationFieldPlan>? ReconciliationPlan { get; set; }
+
+        [JsonPropertyName("verification")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public AssemblyDrift? Verification { get; set; }
+
+        [JsonPropertyName("verificationScope")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public ComparisonCoverage? VerificationScope { get; set; }
+
+        [JsonPropertyName("partial")]
+        public bool Partial => !DryRun && !Success && (Outcomes.Any(o => o.Outcome == "acknowledged") || StepsCreated + StepsUpdated + StepsDeleted + ImagesCreated + ImagesUpdated + ImagesDeleted > 0);
+
+        [JsonPropertyName("outcomes")]
+        public List<PluginMutationOutcome> Outcomes { get; } = [];
+
+        [JsonPropertyName("outcomeCoverage")]
+        public string OutcomeCoverage => "Call-level registration outcomes; detailed step/image rows, secure configuration, solution and state phases when an upsert fails. Other internal suboperations and Custom APIs are not individually journaled.";
 
         [JsonPropertyName("stepsCreated")]
         public int StepsCreated { get; set; }

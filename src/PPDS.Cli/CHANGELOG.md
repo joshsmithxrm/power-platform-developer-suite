@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Plugin deploy preview reads existing image inventory and distinguishes reused types (#1517). Registration version 2.0 explicitly opts into supported nonsecret desired-state defaults and read-only post-write verification; missing/version 1.0 retains legacy optional preservation. Established Update empty-string clears are preserved (#1519).
+- Plugin diff compares managed execution/image settings and reports incomplete coverage with exit 2. Existing JSON `data[]` remains; additive `metadata` contains status/coverage. Secure values are unverifiable and excluded; unsecure configuration differences are redacted (#1520).
+- Registration preflight validates configured user identities before artifact upload. Scoped configuration/output codecs preserve generic model intent and write-only inputs; extraction supports explicit --registration-version. Version 2 fresh defaults take precedence over legacy overlays. Original update-record constructors/deconstruction and positional RPC targets remain compatible.
 - `views reorder-columns` now requires every existing column exactly once and rejects empty, partial, unknown or duplicate names before writing. Reordering preserves cell metadata and other layout content; use `views remove-column` for removal (#1533).
 - Form `add-field` and newly created `reorder-fields` controls use the resolved metadata logical name for bindings and control IDs regardless of input casing. Existing controls and label behavior are preserved; invalid new-field requests are rejected before writes even for sections without rows (#1527).
 - Form XML raw get/set roundtrips accept repeated reusable `customControl` type IDs at their schema-defined path. Instance GUID uniqueness and schema validation remain enforced; set-xml help now distinguishes instance IDs from reusable type IDs (#1541).

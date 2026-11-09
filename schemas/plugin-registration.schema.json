@@ -11,8 +11,12 @@
     },
     "version": {
       "type": "string",
-      "description": "Schema version for forward compatibility.",
-      "default": "1.0"
+      "description": "Enforced contract: missing/1.0 legacy optional preservation; 2.0 explicitly opts into full supported nonsecret desired fields. Unknown versions are rejected before connection.",
+      "default": "1.0",
+      "enum": [
+        "1.0",
+        "2.0"
+      ]
     },
     "generatedAt": {
       "type": "string",
@@ -25,9 +29,21 @@
       "items": {
         "$ref": "#/$defs/assembly"
       }
+    },
+    "customApis": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object"
+      },
+      "description": "Existing Custom API authoring input; excluded from nonsecret step/image equality verification."
     }
   },
-  "required": ["assemblies"],
+  "required": [
+    "assemblies"
+  ],
   "additionalProperties": true,
   "$defs": {
     "assembly": {
@@ -40,7 +56,10 @@
         },
         "type": {
           "type": "string",
-          "enum": ["Assembly", "Nuget"],
+          "enum": [
+            "Assembly",
+            "Nuget"
+          ],
           "description": "Assembly type: 'Assembly' for classic DLL, 'Nuget' for NuGet package.",
           "default": "Assembly"
         },
@@ -74,9 +93,22 @@
           "items": {
             "$ref": "#/$defs/pluginType"
           }
+        },
+        "customApis": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object"
+          },
+          "description": "Existing Custom API authoring input; excluded from nonsecret step/image equality verification."
         }
       },
-      "required": ["name", "types"],
+      "required": [
+        "name",
+        "types"
+      ],
       "additionalProperties": true
     },
     "pluginType": {
@@ -95,7 +127,10 @@
           }
         }
       },
-      "required": ["typeName", "steps"],
+      "required": [
+        "typeName",
+        "steps"
+      ],
       "additionalProperties": true
     },
     "step": {
@@ -120,12 +155,20 @@
         },
         "stage": {
           "type": "string",
-          "enum": ["PreValidation", "PreOperation", "MainOperation", "PostOperation"],
+          "enum": [
+            "PreValidation",
+            "PreOperation",
+            "MainOperation",
+            "PostOperation"
+          ],
           "description": "Pipeline stage. MainOperation is for Custom API plugins."
         },
         "mode": {
           "type": "string",
-          "enum": ["Synchronous", "Asynchronous"],
+          "enum": [
+            "Synchronous",
+            "Asynchronous"
+          ],
           "description": "Execution mode.",
           "default": "Synchronous"
         },
@@ -135,30 +178,53 @@
           "default": 1
         },
         "filteringAttributes": {
-          "type": "string",
-          "description": "Comma-separated list of attributes that trigger this step (Update message only)."
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Version 1: omitted/null/empty preserves. Version 2: omitted/null/empty clears; nonempty ordinary text is supplied state. Partial Update empty-string clears remain distinct from register placeholders."
         },
         "unsecureConfiguration": {
-          "type": "string",
-          "description": "Unsecure configuration string passed to plugin constructor. Safe for source control."
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Version 1: omitted/null/empty preserves. Version 2: omitted/null/empty clears; nonempty ordinary text is supplied state. Partial Update empty-string clears remain distinct from register placeholders."
         },
         "deployment": {
-          "type": "string",
-          "enum": ["ServerOnly", "Offline", "Both"],
-          "description": "Deployment target.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "ServerOnly",
+            "Offline",
+            "Both",
+            null
+          ],
+          "description": "Always managed in file deployment: omitted/null defaults ServerOnly for both versions.",
           "default": "ServerOnly"
         },
         "runAsUser": {
-          "type": "string",
-          "description": "User context to run the plugin as. Use 'CallingUser' (default), 'System', or a systemuser GUID."
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Version 1 omission/null/empty preserves; explicit CallingUser clears. Version 2 omitted/null/empty defaults CallingUser. GUID/domain/email selects one valid user. System is not a registration selector."
         },
         "description": {
-          "type": "string",
-          "description": "Description of what this step does."
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Version 1: omitted/null/empty preserves. Version 2: omitted/null/empty clears; nonempty ordinary text is supplied state. Partial Update empty-string clears remain distinct from register placeholders."
         },
         "asyncAutoDelete": {
-          "type": "boolean",
-          "description": "For async steps, whether to delete the async job on successful completion.",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Version 1 omission/null preserves, supplied false/true writes for async. Version 2 omitted/null defaults false for async. True is invalid for synchronous mode.",
           "default": false
         },
         "stepId": {
@@ -167,13 +233,78 @@
         },
         "images": {
           "type": "array",
-          "description": "Entity images registered for this step.",
+          "description": "Configured image registrations. Omission/empty never authorizes independent image deletion. Extra images remain drift; pruning requires a separately adopted ownership contract.",
           "items": {
             "$ref": "#/$defs/image"
           }
+        },
+        "canBeBypassed": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Version 1 omission/null preserves. Version 2 omission/null uses explicit PPDS default true; supplied booleans write.",
+          "default": true
+        },
+        "canUseReadOnlyConnection": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Version 1 omission/null preserves. Version 2 omission/null uses explicit PPDS default false; supplied booleans write.",
+          "default": false
+        },
+        "invocationSource": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "Parent",
+            "Child",
+            "Internal",
+            "0",
+            "1",
+            "-1",
+            null
+          ],
+          "description": "Always managed; null/omitted defaults Parent."
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "secureConfiguration": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "writeOnly": true,
+          "description": "Write-only input in both versions: null/omission preserves, non-null including empty requests a write. Not emitted by extraction/output, never a generic reset, and supplied equality remains unknown/incomplete."
+        },
+        "resetFields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "filteringAttributes",
+              "unsecureConfiguration",
+              "description",
+              "runAsUser",
+              "asyncAutoDelete",
+              "canBeBypassed",
+              "canUseReadOnlyConnection"
+            ]
+          },
+          "uniqueItems": true,
+          "description": "Explicit reset intent, primarily for partial APIs. Cannot accompany a value for the same field. Secure configuration is excluded."
         }
       },
-      "required": ["message", "entity", "stage"],
+      "required": [
+        "message",
+        "entity",
+        "stage"
+      ],
       "additionalProperties": true
     },
     "image": {
@@ -185,21 +316,437 @@
           "description": "Name used to access the image in plugin context."
         },
         "entityAlias": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Entity alias for the image. Defaults to 'name' if not specified."
         },
         "imageType": {
           "type": "string",
-          "enum": ["PreImage", "PostImage", "Both"],
+          "enum": [
+            "PreImage",
+            "PostImage",
+            "Both"
+          ],
           "description": "Image type."
         },
         "attributes": {
-          "type": "string",
-          "description": "Comma-separated list of attributes to include. Null means all attributes (not recommended for performance)."
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Version 1 omission/null/empty preserves. Version 2 omission/null/empty means all attributes. Established partial Update empty-string clear remains supported."
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Version 1 omission/null/empty preserves. Version 2 omission/null/empty clears; supplied text is exact."
+        },
+        "messagePropertyName": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Omitted/null infers message-specific default in deploy; empty is invalid."
+        },
+        "resetFields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "attributes",
+              "description"
+            ]
+          },
+          "uniqueItems": true
         }
       },
-      "required": ["name", "imageType"],
+      "required": [
+        "name",
+        "imageType"
+      ],
       "additionalProperties": true
+    },
+    "v2Image": {
+      "type": "object",
+      "description": "Configuration for a plugin step image (pre-image or post-image).",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name used to access the image in plugin context."
+        },
+        "entityAlias": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Entity alias for the image. Defaults to 'name' if not specified."
+        },
+        "imageType": {
+          "type": "string",
+          "enum": [
+            "PreImage",
+            "PostImage",
+            "Both"
+          ],
+          "description": "Image type."
+        },
+        "attributes": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Version 1 omission/null/empty preserves. Version 2 omission/null/empty means all attributes. Established partial Update empty-string clear remains supported."
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Version 1 omission/null/empty preserves. Version 2 omission/null/empty clears; supplied text is exact."
+        },
+        "messagePropertyName": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Omitted/null infers message-specific default in deploy; empty is invalid."
+        },
+        "resetFields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "attributes",
+              "description"
+            ]
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "name",
+        "imageType"
+      ],
+      "additionalProperties": false
+    },
+    "v2Step": {
+      "type": "object",
+      "description": "Configuration for a single plugin step registration.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name for the step. Auto-generated if not specified: '{TypeName}: {Message} of {Entity}'."
+        },
+        "message": {
+          "type": "string",
+          "description": "SDK message name (Create, Update, Delete, Retrieve, etc.)."
+        },
+        "entity": {
+          "type": "string",
+          "description": "Primary entity logical name. Use 'none' for global messages."
+        },
+        "secondaryEntity": {
+          "type": "string",
+          "description": "Secondary entity logical name for relationship messages (Associate, etc.)."
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "PreValidation",
+            "PreOperation",
+            "MainOperation",
+            "PostOperation"
+          ],
+          "description": "Pipeline stage. MainOperation is for Custom API plugins."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "Synchronous",
+            "Asynchronous"
+          ],
+          "description": "Execution mode.",
+          "default": "Synchronous"
+        },
+        "executionOrder": {
+          "type": "integer",
+          "description": "Execution order when multiple plugins handle the same event.",
+          "default": 1
+        },
+        "filteringAttributes": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Version 1: omitted/null/empty preserves. Version 2: omitted/null/empty clears; nonempty ordinary text is supplied state. Partial Update empty-string clears remain distinct from register placeholders."
+        },
+        "unsecureConfiguration": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Version 1: omitted/null/empty preserves. Version 2: omitted/null/empty clears; nonempty ordinary text is supplied state. Partial Update empty-string clears remain distinct from register placeholders."
+        },
+        "deployment": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "ServerOnly",
+            "Offline",
+            "Both",
+            null
+          ],
+          "description": "Always managed in file deployment: omitted/null defaults ServerOnly for both versions.",
+          "default": "ServerOnly"
+        },
+        "runAsUser": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Version 1 omission/null/empty preserves; explicit CallingUser clears. Version 2 omitted/null/empty defaults CallingUser. GUID/domain/email selects one valid user. System is not a registration selector."
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Version 1: omitted/null/empty preserves. Version 2: omitted/null/empty clears; nonempty ordinary text is supplied state. Partial Update empty-string clears remain distinct from register placeholders."
+        },
+        "asyncAutoDelete": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Version 1 omission/null preserves, supplied false/true writes for async. Version 2 omitted/null defaults false for async. True is invalid for synchronous mode.",
+          "default": false
+        },
+        "stepId": {
+          "type": "string",
+          "description": "Step identifier for associating images with specific steps on multi-step plugins."
+        },
+        "images": {
+          "type": "array",
+          "description": "Configured image registrations. Omission/empty never authorizes independent image deletion. Extra images remain drift; pruning requires a separately adopted ownership contract.",
+          "items": {
+            "$ref": "#/$defs/v2Image"
+          }
+        },
+        "canBeBypassed": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Version 1 omission/null preserves. Version 2 omission/null uses explicit PPDS default true; supplied booleans write.",
+          "default": true
+        },
+        "canUseReadOnlyConnection": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Version 1 omission/null preserves. Version 2 omission/null uses explicit PPDS default false; supplied booleans write.",
+          "default": false
+        },
+        "invocationSource": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "Parent",
+            "Child",
+            "Internal",
+            "0",
+            "1",
+            "-1",
+            null
+          ],
+          "description": "Always managed; null/omitted defaults Parent."
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "secureConfiguration": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "writeOnly": true,
+          "description": "Write-only input in both versions: null/omission preserves, non-null including empty requests a write. Not emitted by extraction/output, never a generic reset, and supplied equality remains unknown/incomplete."
+        },
+        "resetFields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "filteringAttributes",
+              "unsecureConfiguration",
+              "description",
+              "runAsUser",
+              "asyncAutoDelete",
+              "canBeBypassed",
+              "canUseReadOnlyConnection"
+            ]
+          },
+          "uniqueItems": true,
+          "description": "Explicit reset intent, primarily for partial APIs. Cannot accompany a value for the same field. Secure configuration is excluded."
+        }
+      },
+      "required": [
+        "message",
+        "entity",
+        "stage"
+      ],
+      "additionalProperties": false
+    },
+    "v2PluginType": {
+      "type": "object",
+      "description": "Configuration for a single plugin type (class).",
+      "properties": {
+        "typeName": {
+          "type": "string",
+          "description": "Fully qualified type name (namespace.classname)."
+        },
+        "steps": {
+          "type": "array",
+          "description": "Step registrations for this plugin type.",
+          "items": {
+            "$ref": "#/$defs/v2Step"
+          }
+        }
+      },
+      "required": [
+        "typeName",
+        "steps"
+      ],
+      "additionalProperties": false
+    },
+    "v2Assembly": {
+      "type": "object",
+      "description": "Configuration for a single plugin assembly.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Assembly name (without extension)."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "Assembly",
+            "Nuget"
+          ],
+          "description": "Assembly type: 'Assembly' for classic DLL, 'Nuget' for NuGet package.",
+          "default": "Assembly"
+        },
+        "path": {
+          "type": "string",
+          "description": "Relative path to the assembly DLL (from the config file location). Use forward slashes for cross-platform compatibility."
+        },
+        "packagePath": {
+          "type": "string",
+          "description": "Relative path to the NuGet package (for Nuget type only)."
+        },
+        "packageContentSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$",
+          "description": "SHA-256 of the NuGet package snapshot used to extract this configuration."
+        },
+        "solution": {
+          "type": "string",
+          "description": "Solution unique name to add components to."
+        },
+        "allTypeNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Concrete runtime IPlugin implementations and PPDS-annotated plugin type names in this assembly (for orphan detection), including runtime types with no configured steps."
+        },
+        "types": {
+          "type": "array",
+          "description": "Plugin types with their step registrations.",
+          "items": {
+            "$ref": "#/$defs/v2PluginType"
+          }
+        },
+        "customApis": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object"
+          },
+          "description": "Existing Custom API authoring input; excluded from nonsecret step/image equality verification."
+        }
+      },
+      "required": [
+        "name",
+        "types"
+      ],
+      "additionalProperties": false
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "version"
+        ],
+        "properties": {
+          "version": {
+            "const": "2.0"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "$schema": {
+            "type": "string",
+            "description": "JSON schema reference for validation."
+          },
+          "version": {
+            "type": "string",
+            "description": "Enforced contract: missing/1.0 legacy optional preservation; 2.0 explicitly opts into full supported nonsecret desired fields. Unknown versions are rejected before connection.",
+            "default": "1.0",
+            "enum": [
+              "1.0",
+              "2.0"
+            ]
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Timestamp when the configuration was generated (Zulu time format)."
+          },
+          "assemblies": {
+            "type": "array",
+            "description": "List of plugin assemblies in this configuration.",
+            "items": {
+              "$ref": "#/$defs/v2Assembly"
+            }
+          },
+          "customApis": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "Existing Custom API authoring input; excluded from nonsecret step/image equality verification."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  ]
 }

@@ -1,12 +1,11 @@
 using System.CommandLine;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Plugins.Extraction;
 using PPDS.Cli.Plugins.Models;
+using PPDS.Cli.Services.Plugins;
 
 namespace PPDS.Cli.Commands.Plugins;
 
@@ -15,13 +14,6 @@ namespace PPDS.Cli.Commands.Plugins;
 /// </summary>
 public static class ExtractCommand
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
-
     public static Command Create()
     {
         var inputOption = new Option<FileInfo>("--input", "-i")
@@ -45,6 +37,11 @@ public static class ExtractCommand
             Description = "Overwrite existing file without merging"
         };
 
+        var registrationVersionOption = new Option<string?>("--registration-version")
+        {
+            Description = "Registration contract: 1.0 (legacy) or 2.0 (nonsecret reconciliation); defaults to the existing file version or 1.0"
+        };
+
         var referenceDirOption = new Option<DirectoryInfo[]>("--reference-dir")
         {
             Description = "Additional directory to search for referenced assemblies (repeatable). " +
@@ -63,7 +60,8 @@ public static class ExtractCommand
             outputOption,
             solutionOption,
             forceOption,
-            referenceDirOption
+            referenceDirOption,
+            registrationVersionOption
         };
 
         // Add global options including output format
@@ -80,7 +78,8 @@ public static class ExtractCommand
                 .ToArray();
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(input, output, solution, force, referenceDirs, globalOptions, cancellationToken);
+            return await ExecuteWithVersionAsync(input, output, solution, force, referenceDirs, globalOptions, cancellationToken,
+                parseResult.GetValue(registrationVersionOption));
         });
 
         return command;
@@ -93,12 +92,20 @@ public static class ExtractCommand
         bool force,
         IReadOnlyList<string>? referenceDirs,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        ExecuteWithVersionAsync(input, output, solution, force, referenceDirs, globalOptions, cancellationToken, null);
+
+    private static Task<int> ExecuteWithVersionAsync(
+        FileInfo input, FileInfo? output, string? solution, bool force,
+        IReadOnlyList<string>? referenceDirs, GlobalOptionValues globalOptions,
+        CancellationToken cancellationToken, string? registrationVersion)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (registrationVersion != null) PluginRegistrationContract.ResolveVersion(registrationVersion);
             var extension = input.Extension.ToLowerInvariant();
             PluginAssemblyConfig assemblyConfig;
 
@@ -153,6 +160,7 @@ public static class ExtractCommand
 
             // Check for existing file and merge if not forced
             PluginRegistrationConfig config;
+            var excludedSecrets = 0;
             var existingFile = new FileInfo(outputPath);
 
             if (existingFile.Exists && !force && !globalOptions.IsJsonMode)
@@ -160,18 +168,19 @@ public static class ExtractCommand
                 Console.Error.WriteLine("Merging with existing configuration...");
 
                 var existingContent = File.ReadAllText(outputPath);
-                var existingConfig = JsonSerializer.Deserialize<PluginRegistrationConfig>(existingContent, JsonOptions);
+                var existingConfig = PluginRegistrationJson.Deserialize(existingContent);
+                excludedSecrets += PluginRegistrationJson.CountExcludedSecrets(existingConfig);
 
                 if (existingConfig != null)
                 {
                     // Merge: preserve deployment settings from existing, update code-derived values from fresh
-                    MergeAssemblyConfig(assemblyConfig, existingConfig);
+                    PluginExtractionMergeService.MergeAssemblyConfig(assemblyConfig, existingConfig, registrationVersion);
                 }
 
                 config = new PluginRegistrationConfig
                 {
                     Schema = "https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/main/schemas/plugin-registration.schema.json",
-                    Version = existingConfig?.Version ?? "1.0",
+                    Version = registrationVersion ?? existingConfig?.Version ?? "1.0",
                     GeneratedAt = DateTimeOffset.UtcNow,
                     Assemblies = [assemblyConfig],
                     ExtensionData = existingConfig?.ExtensionData
@@ -182,21 +191,26 @@ public static class ExtractCommand
                 config = new PluginRegistrationConfig
                 {
                     Schema = "https://raw.githubusercontent.com/joshsmithxrm/power-platform-developer-suite/main/schemas/plugin-registration.schema.json",
-                    Version = "1.0",
+                    Version = registrationVersion ?? "1.0",
                     GeneratedAt = DateTimeOffset.UtcNow,
                     Assemblies = [assemblyConfig]
                 };
             }
 
-            var jsonContent = JsonSerializer.Serialize(config, JsonOptions);
+            excludedSecrets += PluginRegistrationJson.CountExcludedSecrets(config);
+            var jsonContent = PluginRegistrationJson.SerializeForOutput(config);
 
             if (globalOptions.IsJsonMode)
             {
                 // Output to stdout for tool integration
-                writer.WriteSuccess(config);
+                if (writer is JsonOutputWriter jsonWriter)
+                    jsonWriter.WriteSuccess(PluginRegistrationJson.ToOutputElement(config), new { excludedSecrets });
+                else
+                    writer.WriteSuccess(PluginRegistrationJson.ToOutputElement(config));
             }
             else
             {
+                if (excludedSecrets > 0) Console.Error.WriteLine($"{excludedSecrets} secure configuration value(s) excluded from output.");
                 // Write to file
                 File.WriteAllText(outputPath, jsonContent);
                 Console.Error.WriteLine();
@@ -218,66 +232,6 @@ public static class ExtractCommand
     /// Merges deployment settings from existing config into fresh extracted config.
     /// Preserves: solution, runAsUser, description, deployment, asyncAutoDelete, and any unknown fields.
     /// </summary>
-    private static void MergeAssemblyConfig(PluginAssemblyConfig fresh, PluginRegistrationConfig existing)
-    {
-        var existingAssembly = existing.Assemblies.FirstOrDefault(a =>
-            a.Name.Equals(fresh.Name, StringComparison.OrdinalIgnoreCase));
-
-        if (existingAssembly == null)
-            return;
-
-        // Preserve assembly-level deployment settings (only if not set via CLI)
-        if (string.IsNullOrEmpty(fresh.Solution))
-            fresh.Solution = existingAssembly.Solution;
-
-        // Preserve unknown fields at assembly level
-        fresh.ExtensionData = existingAssembly.ExtensionData;
-
-        // Merge types
-        foreach (var freshType in fresh.Types)
-        {
-            var existingType = existingAssembly.Types.FirstOrDefault(t =>
-                t.TypeName.Equals(freshType.TypeName, StringComparison.OrdinalIgnoreCase));
-
-            if (existingType == null)
-                continue;
-
-            // Preserve unknown fields at type level
-            freshType.ExtensionData = existingType.ExtensionData;
-
-            // Merge steps - match by message + entity + stage (functional identity)
-            foreach (var freshStep in freshType.Steps)
-            {
-                var existingStep = existingType.Steps.FirstOrDefault(s =>
-                    s.Message.Equals(freshStep.Message, StringComparison.OrdinalIgnoreCase) &&
-                    s.Entity.Equals(freshStep.Entity, StringComparison.OrdinalIgnoreCase) &&
-                    s.Stage.Equals(freshStep.Stage, StringComparison.OrdinalIgnoreCase));
-
-                if (existingStep == null)
-                    continue;
-
-                // Preserve deployment settings from existing step
-                freshStep.Deployment ??= existingStep.Deployment;
-                freshStep.RunAsUser ??= existingStep.RunAsUser;
-                freshStep.Description ??= existingStep.Description;
-                freshStep.AsyncAutoDelete ??= existingStep.AsyncAutoDelete;
-
-                // Preserve unknown fields at step level
-                freshStep.ExtensionData = existingStep.ExtensionData;
-
-                // Merge images - match by name
-                foreach (var freshImage in freshStep.Images)
-                {
-                    var existingImage = existingStep.Images.FirstOrDefault(i =>
-                        i.Name.Equals(freshImage.Name, StringComparison.OrdinalIgnoreCase));
-
-                    if (existingImage == null)
-                        continue;
-
-                    // Preserve unknown fields at image level
-                    freshImage.ExtensionData = existingImage.ExtensionData;
-                }
-            }
-        }
-    }
+    private static void MergeAssemblyConfig(PluginAssemblyConfig fresh, PluginRegistrationConfig existing) =>
+        PluginExtractionMergeService.MergeAssemblyConfig(fresh, existing);
 }
