@@ -101,6 +101,17 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    private static bool RequireProtectionFlag(Entity entity, string field, bool managedProperty = false)
+    {
+        if (entity.Attributes.TryGetValue(field, out var value))
+        {
+            if (managedProperty && value is BooleanManagedProperty managed) return managed.Value;
+            if (!managedProperty && value is bool flag) return flag;
+        }
+        throw new PpdsException(ErrorCodes.Validation.InvalidValue,
+            "Incomplete plugin protection metadata; the requested protection state could not be verified.");
+    }
+
     #region Query Operations
 
     /// <summary>
@@ -126,16 +137,13 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 PluginAssembly.Fields.IsolationMode,
                 PluginAssembly.Fields.SourceType,
                 PluginAssembly.Fields.IsManaged),
-            Criteria = new FilterExpression
-            {
-                Conditions =
-                {
-                    // Exclude system assemblies
-                    new ConditionExpression(PluginAssembly.Fields.IsHidden, ConditionOperator.Equal, false)
-                }
-            },
+            Criteria = new FilterExpression(),
             Orders = { new OrderExpression(PluginAssembly.Fields.Name, OrderType.Ascending) }
         };
+
+        // Preserve the default filter; explicit inventories must include hidden assemblies.
+        if (!options.IncludeHidden)
+            query.Criteria.AddCondition(PluginAssembly.Fields.IsHidden, ConditionOperator.Equal, false);
 
         if (!string.IsNullOrEmpty(assemblyNameFilter))
         {
@@ -636,6 +644,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 PluginAssembly.Fields.IsolationMode,
                 PluginAssembly.Fields.SourceType,
                 PluginAssembly.Fields.IsManaged,
+                PluginAssembly.Fields.IsHidden,
                 PluginAssembly.Fields.PackageId,
                 PluginAssembly.Fields.CreatedOn,
                 PluginAssembly.Fields.ModifiedOn),
@@ -662,7 +671,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             PublicKeyToken = entity.GetAttributeValue<string>(PluginAssembly.Fields.PublicKeyToken),
             IsolationMode = entity.GetAttributeValue<OptionSetValue>(PluginAssembly.Fields.IsolationMode)?.Value ?? (int)pluginassembly_isolationmode.Sandbox,
             SourceType = entity.GetAttributeValue<OptionSetValue>(PluginAssembly.Fields.SourceType)?.Value ?? (int)pluginassembly_sourcetype.Database,
-            IsManaged = entity.GetAttributeValue<bool?>(PluginAssembly.Fields.IsManaged) ?? false,
+            IsManaged = RequireProtectionFlag(entity, PluginAssembly.Fields.IsManaged),
+            IsHidden = RequireProtectionFlag(entity, PluginAssembly.Fields.IsHidden, managedProperty: true),
             PackageId = entity.GetAttributeValue<EntityReference>(PluginAssembly.Fields.PackageId)?.Id,
             CreatedOn = entity.GetAttributeValue<DateTime?>(PluginAssembly.Fields.CreatedOn),
             ModifiedOn = entity.GetAttributeValue<DateTime?>(PluginAssembly.Fields.ModifiedOn)
@@ -708,7 +718,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             Name = entity.GetAttributeValue<string>(PluginPackage.Fields.Name) ?? string.Empty,
             UniqueName = entity.GetAttributeValue<string>(PluginPackage.Fields.UniqueName),
             Version = entity.GetAttributeValue<string>(PluginPackage.Fields.Version),
-            IsManaged = entity.GetAttributeValue<bool?>(PluginPackage.Fields.IsManaged) ?? false,
+            IsManaged = RequireProtectionFlag(entity, PluginPackage.Fields.IsManaged),
             CreatedOn = entity.GetAttributeValue<DateTime?>(PluginPackage.Fields.CreatedOn),
             ModifiedOn = entity.GetAttributeValue<DateTime?>(PluginPackage.Fields.ModifiedOn)
         };
@@ -730,6 +740,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 PluginType.Fields.FriendlyName,
                 PluginType.Fields.Name,
                 PluginType.Fields.PluginAssemblyId,
+                PluginType.Fields.IsManaged,
                 PluginType.Fields.CreatedOn,
                 PluginType.Fields.ModifiedOn),
             LinkEntities =
@@ -764,6 +775,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             FriendlyName = entity.GetAttributeValue<string>(PluginType.Fields.FriendlyName),
             AssemblyId = entity.GetAttributeValue<EntityReference>(PluginType.Fields.PluginAssemblyId)?.Id,
             AssemblyName = entity.GetAttributeValue<AliasedValue>($"assembly.{PluginAssembly.Fields.Name}")?.Value?.ToString(),
+            IsManaged = RequireProtectionFlag(entity, PluginType.Fields.IsManaged),
             CreatedOn = entity.GetAttributeValue<DateTime?>(PluginType.Fields.CreatedOn),
             ModifiedOn = entity.GetAttributeValue<DateTime?>(PluginType.Fields.ModifiedOn)
         };
@@ -793,6 +805,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 SdkMessageProcessingStep.Fields.ImpersonatingUserId,
                 SdkMessageProcessingStep.Fields.AsyncAutoDelete,
                 SdkMessageProcessingStep.Fields.EventHandler,
+                SdkMessageProcessingStep.Fields.IsHidden,
                 SdkMessageProcessingStep.Fields.IsManaged,
                 SdkMessageProcessingStep.Fields.IsCustomizable,
                 SdkMessageProcessingStep.Fields.CreatedOn,
@@ -861,6 +874,16 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             AsyncAutoDelete = entity.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.AsyncAutoDelete) ?? false,
             PluginTypeId = entity.GetAttributeValue<EntityReference>(SdkMessageProcessingStep.Fields.EventHandler)?.Id,
             PluginTypeName = entity.GetAttributeValue<AliasedValue>($"plugintype.{PluginType.Fields.TypeName}")?.Value?.ToString(),
+            IsHidden = entity.GetAttributeValue<BooleanManagedProperty>(SdkMessageProcessingStep.Fields.IsHidden)?.Value ?? false,
+            UnavailableProperties = new[]
+            {
+                ("message", $"message.{SdkMessage.Fields.Name}"),
+                ("stage", SdkMessageProcessingStep.Fields.Stage),
+                ("mode", SdkMessageProcessingStep.Fields.Mode),
+                ("isHidden", SdkMessageProcessingStep.Fields.IsHidden),
+                ("isManaged", SdkMessageProcessingStep.Fields.IsManaged),
+                ("isCustomizable", SdkMessageProcessingStep.Fields.IsCustomizable)
+            }.Where(p => !entity.Contains(p.Item2) || entity[p.Item2] is null).Select(p => p.Item1).ToHashSet(StringComparer.OrdinalIgnoreCase),
             IsManaged = entity.GetAttributeValue<bool?>(SdkMessageProcessingStep.Fields.IsManaged) ?? false,
             IsCustomizable = GetBooleanManagedProperty(entity, SdkMessageProcessingStep.Fields.IsCustomizable),
             CreatedOn = entity.GetAttributeValue<DateTime?>(SdkMessageProcessingStep.Fields.CreatedOn),
@@ -925,6 +948,13 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             MessagePropertyName = entity.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.MessagePropertyName),
             StepId = entity.GetAttributeValue<EntityReference>(SdkMessageProcessingStepImage.Fields.SdkMessageProcessingStepId)?.Id,
             StepName = entity.GetAttributeValue<AliasedValue>($"step.{SdkMessageProcessingStep.Fields.Name}")?.Value?.ToString(),
+            UnavailableProperties = new[]
+            {
+                ("name", SdkMessageProcessingStepImage.Fields.Name),
+                ("imageType", SdkMessageProcessingStepImage.Fields.ImageType),
+                ("isManaged", SdkMessageProcessingStepImage.Fields.IsManaged),
+                ("isCustomizable", SdkMessageProcessingStepImage.Fields.IsCustomizable)
+            }.Where(p => !entity.Contains(p.Item2) || entity[p.Item2] is null).Select(p => p.Item1).ToHashSet(StringComparer.OrdinalIgnoreCase),
             IsManaged = entity.GetAttributeValue<bool?>(SdkMessageProcessingStepImage.Fields.IsManaged) ?? false,
             IsCustomizable = GetBooleanManagedProperty(entity, SdkMessageProcessingStepImage.Fields.IsCustomizable),
             CreatedOn = entity.GetAttributeValue<DateTime?>(SdkMessageProcessingStepImage.Fields.CreatedOn),
@@ -2675,6 +2705,7 @@ public sealed class PluginAssemblyInfo
     public int IsolationMode { get; set; }
     public int SourceType { get; set; }
     public bool IsManaged { get; set; }
+    internal bool IsHidden { get; set; }
     public Guid? PackageId { get; set; }
     public DateTime? CreatedOn { get; set; }
     public DateTime? ModifiedOn { get; set; }

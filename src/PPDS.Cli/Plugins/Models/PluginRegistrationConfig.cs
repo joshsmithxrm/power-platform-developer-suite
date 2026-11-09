@@ -249,6 +249,7 @@ public sealed class PluginTypeConfig
 /// <summary>
 /// Configuration for a single plugin step registration.
 /// </summary>
+[JsonConverter(typeof(PPDS.Cli.Services.Plugins.PluginStepConfigJsonConverter))]
 public sealed class PluginStepConfig : PluginConfigurationPresence
 {
     private string? _name;

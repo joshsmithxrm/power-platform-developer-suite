@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Version 2 image-only cleanup also refuses present-null step/image protection metadata during planning and fresh pre-dispatch checks. Public DTO bool values/signatures remain; the checks do not make deletion atomic.
+
+- Plugin image cleanup refuses incomplete parent protection metadata and hidden assemblies; explicit `IncludeHidden` inventories include hidden rows. Malformed protection fields in the selected SDK Get responses now return a fixed coded error instead of implying an unmanaged component.
+
+- Registration version 2.0 `plugins clean` and `plugins deploy --clean` now use an explicit image-only plan on uniquely owned configured steps. Every configured step must supply `images` (including `[]` to clear); omitted/duplicate lists cannot grant delete authority. Plans retain exact parent/image IDs, inventory counts and acknowledged/unknown outcomes; new/unplanned images and all parent registrations remain. Version 1 keeps its established legacy parent cleanup. Ownership rechecks do not provide atomic conditional deletion or imply rollback (#1519).
 - Preserve explicit zero while allocating only omitted local/global choice values, without mutating caller options. Global --options accepts bare labels; explicit values outside the publisher range warn and remain unchanged (#1530). For automatic allocation, omit Value rather than setting it to zero. Initial create previews mark derived values as provisional without claiming target-option reads or persisted numeric output.
 
 

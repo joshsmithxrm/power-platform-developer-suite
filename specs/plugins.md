@@ -1546,8 +1546,10 @@ Ordinary model deserialization does not select deployment intent. Command/servic
 entry points apply the validated root contract explicitly. Generic input model
 round trips preserve legacy values; extract/output serialization separately excludes
 secure configuration. Secure omission/null preserves existing state; secret equality
-is never inferred. Version 2 reconciles declared supported nonsecret fields only,
-with no independent image pruning or wider --clean behavior.
+is never inferred. Ordinary version 2 deployment reconciles declared supported
+nonsecret fields without independent pruning. Explicit version 2 `--clean` and
+standalone `plugins clean` use the image-only cleanup contract below; no parent
+registration deletion is authorized by that contract.
 
 Established Update operations retain non-null empty description/filtering attributes
 and image attributes as clears; null/absence preserves. Register/upsert legacy empty
@@ -1573,5 +1575,70 @@ claims secret equality, whole-environment equality, ownership receipts or rollba
 | AC-92 | Version 2 extraction uses fresh source/default intent without sticky legacy overrides; v1 retains its established overlay behavior. | `ExtractionVersion_ControlsLegacyOverlayAndResetInheritance`, `ExtractionExplicitVersion_CanOptIntoFreshDefaultsWithoutRewritingInput`, `UnsupportedExistingVersion_CannotBeBypassedWithExtractionOverride`, `ExtractionUpgrade_RejectsUnknownEvenInUnmatchedSourceBeforeMerge` | ✅ |
 | AC-93 | Machine-readable comparison keeps existing data[] shape, reports truthful complete/drift/incomplete status and never presents unknown coverage as verified equality. | `ActualDiff_RetainsArrayAndMakesIncompleteVerificationUnsuccessful`, `RealCommand_JsonAndExitCode_ReportTruthfulStatus`, `RealCommand_TextMatch_DoesNotClaimWholeEnvironmentEquality` | ✅ |
 | AC-94 | Secret input/output/equality boundaries remain explicit, unknown fields/capabilities fail closed for requested reconciliation, and messages contain no configuration secrets. | `Version2_UnknownFieldsRejectBeforeConnectionOrDefaultClears`, `DirectReconcileUnknownFields_RejectsBeforeClientCheckout`, `UnknownFields_VersionTwoRejectsAllScopesWithoutStamping_LegacyPreserves`, `SecureConfiguration_UnknownWhenSupplied_AlwaysExcluded`, `UnavailableManagedField_IsIncompleteRatherThanEqualDefault`, `RealCommand_UnsecureChange_RedactsAllOutput` | ✅ |
-| AC-95 | Reconciliation introduces no independent image deletion or parent cleanup expansion; v2 rejects --clean before connection and gives separate ownership/adoption guidance. Publisher/trust and automatic live workflow changes are outside this implementation. | `Version2_ExtraStoredImageIsDriftWithoutIndependentDeletion`, `Version2_CleanIsRejectedBeforeConnectingOrMutating`, `OrphanStepWarning_UsesCleanupGuidanceForTheSelectedFileVersion`, `ExtraImages_AreDriftWithoutIndependentDeletion` | ✅ |
+| AC-95 | Ordinary reconciliation never independently prunes images; v2 cleanup requires explicit image-list authority and never expands parent deletion. Missing authority is rejected before connection; parent orphans remain visible drift. | `Version2_ExtraStoredImageIsDriftWithoutIndependentDeletion`, `Version2_CleanOmittedImagesIsRejectedBeforeConnectingOrMutating`, `OrphanStepWarning_UsesCleanupGuidanceForTheSelectedFileVersion`, `ExtraImages_AreDriftWithoutIndependentDeletion` | Pending updated focused validation |
 | AC-96 | Failures/cancellation preserve acknowledged/unknown nonsecret outcomes without implying ownership, persisted convergence, rollback or successful cleanup. | `FailedFollowOn_RetainsAcknowledgedRowAndUnknownPhase`, `SecureWriteThenRowFailure_RetainsSecureAcknowledgementWithoutPlaintextOrFalseRowCount`, `StateCancellation_PreservesOriginalExceptionAndAcknowledgedRow`, `DeployFollowOnFailure_CountsAcknowledgedRow_AndCancellationRetainsPreviousAssembly`, `Plan_CancellationStopsBeforeReadingFieldValues` | ✅ |
+
+### Explicit version 2 image cleanup
+
+| File contract / invocation | Authority |
+|---|---|
+| Missing version or 1.0, ordinary deploy | Legacy writes; no independent image pruning |
+| Version 1.0, deploy --clean | Existing legacy orphan-step cleanup |
+| Version 1.0, plugins clean | Existing legacy orphan-step and empty-type cleanup |
+| Version 2.0, ordinary deploy | Nonsecret reconciliation; no independent deletion |
+| Version 2.0, deploy --clean / plugins clean | Same image-only planner on configured, uniquely owned steps; all parent registrations retained |
+
+Version 2 cleanup requires an explicitly supplied complete `images` list on every
+configured step. `images: []` authorizes clearing that step's owned images; omission
+or duplicate/case-variant list properties cannot silently become clear authority.
+Generic model JSON preserves this distinction and input secrets; explicit output
+still redacts secrets. Nonempty imperative image lists remain serializable.
+
+The complete plan for every configured scope precedes mutation. Package authority
+requires validated local nupkg identity, an exact selected package ID and a matching
+assembly parent. Names, filters and solution membership alone do not establish
+ownership. Scoped list inventories select unique candidates; by-ID reads verify
+the assembly/type/functional-step/image chain. Hidden, managed, noncustomizable,
+unavailable or ambiguous targets fail visibly rather than disappearing from a plan.
+Unconfigured parent counts and observed scoped counts remain visible.
+
+Deploy buffers its artifacts and completes all ordinary supported writes before
+applying the frozen whole plan; standalone clean plans all assemblies before any
+delete. Dry-run reports exact IDs without writes. Only planned image IDs can be
+deleted, after ownership is rechecked; new/unplanned images remain. Current
+DeleteImageAsync exposes no conditional-rowversion/transaction contract, so a
+change after the final read remains possible. Acknowledged and dispatched-unknown
+effects are retained; cancellation/failure stops later calls and never implies
+rollback or whole-environment equality. Post-deploy diff keeps its existing scoped
+nonsecret coverage and non-success for remaining drift/incomplete reads.
+
+These cases are prepared offline mock/command tests; execution is pending. They do
+not establish live Dataverse deploy-to-diff convergence or exhaust server constraints.
+
+| ID | Criterion | Test | Status |
+|---|---|---|---|
+| AC-97 | Explicit empty/list authority prunes only unlisted images on configured steps; omitted/duplicate image-list authority is refused. | `ExplicitEmptyImages_DeletesOnlyImagesOnConfiguredStep`; `ExplicitKeepList_RetainsNamedImageAndDeletesOnlyExtraId`; `OmittedImages_RejectsBeforeAnyMutation`; `DuplicateImageLists_AreRejectedInsteadOfSelectingDeleteAuthority` | Pending |
+| AC-98 | Generic step/config and explicit output preserve omitted versus empty authority without changing the public List API or discarding generic secure input. | `JsonRoundTrip_PreservesEmptyVersusOmittedImageAuthority`; `GenericJson_NonemptyImperativeImageListAndInputSecretRemain` | Pending |
+| AC-99 | v1 cleanup remains legacy-compatible and v2 never deletes parent registrations, including empty configured-type scopes. | `Version1_CleanupRetainsLegacyParentDeletionWithoutIndependentImagePruning`; `EmptyConfiguredTypes_NeverDeletesUnconfiguredParents` | Pending |
+| AC-100 | All requested scopes are validated/planned before the first write; duplicates, incomplete identity/ownership and later inventory failures stop cleanup. | `AmbiguousInventory_RejectsWholePlanBeforeMutations`; `UnavailableOrForeignOwnership_RejectsBeforeMutations`; `LaterStepInventoryFailure_DoesNotPartiallyDeleteEarlierImages`; `Authority_IsValidatedAcrossAllAssembliesBeforeReading`; `LaterAssemblyAmbiguity_CannotPartiallyApplyAnEarlierPlan` | Pending |
+| AC-101 | Rechecks refuse changed assembly/package/type/step/image ownership, identity or protection before deletion; unplanned images remain and counts are visible. | `ChangedOwnershipOrIdentity_RejectsBeforeAnyDelete`; `NewUnplannedImage_RemainsAndIsVisibleInCounts` | Pending |
+| AC-102 | Preview reports exact image/parent IDs; actual deletion dispatches only the planned image logical name/ID/token through the existing guard and a returned lease. | `DryRun_ReportsExactImageAndParentIdsWithoutMutations`; `ActualRegistrationDelete_DispatchesOneImageIdWithGuardTokenAndReturnedLease` | Pending |
+| AC-103 | SDK failures and cancellation retain acknowledged/unknown effects, original cancellation token and safe public diagnostics, stopping later dispatches. | `DeleteFailure_RetainsAcknowledgementAndUnknownDispatchWithoutDiagnostics`; `CancellationAfterAcknowledgement_StopsBeforeAnotherDispatch`; `RawInventoryFailure_IsCodedAndKeepsPrivateDiagnosticsOutOfTheMessage` | Pending |
+| AC-104 | Both actual CLI handlers use the shared v2 image-only service and truthful JSON/status; deploy planning precedes writes, cleanup follows ordinary writes, then scoped verification runs. | `ActualCleanCommand_UsesTheSharedImageOnlyPlanAndJson`; `Version2_CleanPlansBeforeWritesAndPrunesOnlyImages` | Pending |
+
+Actual parent by-ID reads require a returned bool `ismanaged`; assembly reads also request a typed `BooleanManagedProperty` `ishidden`. Missing/null/wrong-type protection fields now produce a fixed coded protection-metadata error, including read-only Get callers. Public bool/signature contracts remain unchanged. Hidden assembly state is internal and v2 image-only planning/rechecks refuse it; `IncludeHidden:true` inventories include hidden rows while the default filter remains.
+
+| ID | Criterion | Test | Status |
+|---|---|---|---|
+| AC-105 | Actual parent readers reject incomplete protection values; fresh missing/null managed-state rechecks stop all deletes while known bools survive. | `PluginImagePruningSdkSafetyTests.MalformedManagedMetadata_NeverBecomesUnmanaged`; `KnownManagedBoolean_IsPreserved`; `MissingManagedStateAtRecheck_StopsBeforeAnyDelete` | Pending focused validation |
+| AC-106 | Actual assembly reader requests typed hidden metadata and rejects unknown state; hidden inventory/parents cannot become empty-success cleanup, with default filters preserved. | `MalformedAssemblyHiddenMetadata_FailsClosed`; `AssemblyReader_RequestsHiddenManagedProperty`; `AssemblyInventory_HonorsIncludeHiddenWithoutChangingDefault`; `HiddenAssembly_CannotBecomeAnEmptySuccessfulPlan`; `HiddenAssemblyRecheck_StopsBeforeAnyImageDelete` | Pending focused validation |
+| AC-107 | Parent SDK faults/cancellation keep original identity/token and every strict mock query uses its exact scope with one request per returned lease. | `ReaderSdkFaultAndCancellation_PreserveOriginalCauseAndToken`; `ParentSdkQuery_UsesExactDeclaredScope` | Pending focused validation |
+
+Step/image by-ID readers retain their public bool values and SDK type decoding. Their
+existing mandatory-field availability sets now mark present-null attributes unavailable,
+as well as absent attributes. V2 image-only planning and fresh pre-dispatch rechecks
+refuse that unknown protection state; this does not provide an atomic conditional delete.
+
+| ID | Criterion | Test | Status |
+|---|---|---|---|
+| AC-108 | Actual step/image readers distinguish missing/null protection from known typed values; initial planning and first/final fresh rechecks refuse unknown protection before any delete dispatch, preserving exact ID/token/lease checks and existing public bool signatures. | `ActualReader_TracksProtectionAvailabilityAndTypedValue`; `Plan_RejectsUnavailableActualProtectionBeforeAnyDelete`; `Apply_RejectsNewNullProtectionAtActualFreshRead`; `ParentSdkQuery_UsesExactDeclaredScope` | Pending focused fixed validation |

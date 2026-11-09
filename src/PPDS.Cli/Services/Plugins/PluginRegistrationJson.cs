@@ -96,6 +96,8 @@ internal static class PluginRegistrationJson
             foreach (var (name, property) in Properties)
             {
                 if (name == "secureConfiguration") continue;
+                if (name == "images" && !value.IsSpecified(name) &&
+                    property.GetValue(value) is System.Collections.ICollection { Count: 0 }) continue;
                 if (OptionalFields.Contains(name) && !value.IsSpecified(name)) continue;
                 if (name == "resetFields" && value.ResetFields.Count == 0) continue;
                 var propertyValue = property.GetValue(value);
@@ -106,6 +108,7 @@ internal static class PluginRegistrationJson
             if (ExtensionData.GetValue(value) is Dictionary<string, JsonElement> extension)
                 foreach (var (name, element) in extension)
                 {
+                    if (Properties.ContainsKey("images") && string.Equals(name, "images", StringComparison.OrdinalIgnoreCase)) throw InvalidJson();
                     if (Properties.ContainsKey(name) || string.Equals(name, "secureConfiguration", StringComparison.OrdinalIgnoreCase)) continue;
                     writer.WritePropertyName(name);
                     element.WriteTo(writer);

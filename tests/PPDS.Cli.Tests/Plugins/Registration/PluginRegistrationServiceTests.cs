@@ -2183,6 +2183,7 @@ public class PluginRegistrationServiceTests
             IsolationMode = pluginassembly_isolationmode.Sandbox
         };
         assembly[PluginAssembly.Fields.IsManaged] = false;
+        assembly[PluginAssembly.Fields.IsHidden] = new BooleanManagedProperty(false);
         entities.Entities.Add(assembly);
 
         // GetAssemblyByIdAsync returns the assembly, then ListTypesForAssemblyAsync returns empty
@@ -2236,6 +2237,7 @@ public class PluginRegistrationServiceTests
             PackageId = new EntityReference(PluginPackage.EntityLogicalName, packageId)
         };
         assembly[PluginAssembly.Fields.IsManaged] = false;
+        assembly[PluginAssembly.Fields.IsHidden] = new BooleanManagedProperty(false);
 
         _retrieveMultipleResult = new EntityCollection([assembly]);
 
@@ -2315,6 +2317,7 @@ public class PluginRegistrationServiceTests
             IsolationMode = pluginassembly_isolationmode.Sandbox
         };
         assembly[PluginAssembly.Fields.IsManaged] = false;
+        assembly[PluginAssembly.Fields.IsHidden] = new BooleanManagedProperty(false);
 
         var packageEntities = new EntityCollection([package]);
         var assemblyEntities = new EntityCollection([assembly]);
@@ -2589,6 +2592,7 @@ public class PluginRegistrationServiceTests
             IsolationMode = pluginassembly_isolationmode.Sandbox
         };
         assembly[PluginAssembly.Fields.IsManaged] = true;
+        assembly[PluginAssembly.Fields.IsHidden] = new BooleanManagedProperty(false);
         entities.Entities.Add(assembly);
 
         // GetAssemblyByIdAsync returns the assembly, then ListTypesForAssemblyAsync returns empty
@@ -2857,8 +2861,10 @@ public class PluginRegistrationServiceTests
             Id = assemblyId,
             Name = "MyPlugin",
             Version = "2.0.0.0",
-            IsolationMode = pluginassembly_isolationmode.Sandbox
+            IsolationMode = pluginassembly_isolationmode.Sandbox,
+            IsHidden = new BooleanManagedProperty(false)
         };
+        assembly[PluginAssembly.Fields.IsManaged] = false;
         entities.Entities.Add(assembly);
         _retrieveMultipleResult = entities;
 
@@ -2937,8 +2943,9 @@ public class PluginRegistrationServiceTests
             Id = packageId,
             Name = "MyPackage",
             UniqueName = "MyPackage",
-            Version = "3.0.0.0"
+            Version = "3.0.0.0",
         };
+        package[PluginPackage.Fields.IsManaged] = false;
         entities.Entities.Add(package);
         _retrieveMultipleResult = entities;
 

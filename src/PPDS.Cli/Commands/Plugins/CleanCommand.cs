@@ -1,5 +1,4 @@
 using System.CommandLine;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
@@ -7,6 +6,7 @@ using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
+using PPDS.Cli.Services.Plugins;
 
 namespace PPDS.Cli.Commands.Plugins;
 
@@ -15,18 +15,10 @@ namespace PPDS.Cli.Commands.Plugins;
 /// </summary>
 public static class CleanCommand
 {
-    private static readonly JsonSerializerOptions JsonReadOptions = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
+    public static Command Create() => Create(null);
 
-    private static readonly JsonSerializerOptions JsonWriteOptions = new()
-    {
-        WriteIndented = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
-
-    public static Command Create()
+    internal static Command Create(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory,
+        Func<string, CancellationToken, Task<byte[]>>? packageContentReader = null, IOutputWriter? outputWriter = null)
     {
         var configOption = new Option<FileInfo>("--config", "-c")
         {
@@ -40,7 +32,7 @@ public static class CleanCommand
             DefaultValueFactory = _ => false
         };
 
-        var command = new Command("clean", "Remove orphaned registrations not in configuration")
+        var command = new Command("clean", "Version 1: legacy parent cleanup; version 2: prune owned images on configured steps")
         {
             configOption,
             PluginsCommandGroup.ProfileOption,
@@ -59,27 +51,32 @@ public static class CleanCommand
             var dryRun = parseResult.GetValue(dryRunOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(config, profile, environment, dryRun, globalOptions, cancellationToken);
+            return await ExecuteAsync(config, profile, environment, dryRun, globalOptions, cancellationToken,
+                serviceProviderFactory, packageContentReader, outputWriter);
         });
 
         return command;
     }
 
-    private static async Task<int> ExecuteAsync(
+    internal static async Task<int> ExecuteAsync(
         FileInfo configFile,
         string? profile,
         string? environment,
         bool dryRun,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null,
+        Func<string, CancellationToken, Task<byte[]>>? packageContentReader = null,
+        IOutputWriter? outputWriter = null)
     {
-        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+        var writer = outputWriter ?? ServiceFactory.CreateOutputWriter(globalOptions);
+        var results = new List<CleanResult>();
 
         try
         {
             // Load configuration
             var configJson = await File.ReadAllTextAsync(configFile.FullName, cancellationToken);
-            var config = JsonSerializer.Deserialize<PluginRegistrationConfig>(configJson, JsonReadOptions);
+            var config = PluginRegistrationJson.Deserialize(configJson);
 
             if (config?.Assemblies == null || config.Assemblies.Count == 0)
             {
@@ -93,14 +90,25 @@ public static class CleanCommand
             // Validate configuration
             config.Validate();
 
+            var imageOnly = config.Version == PluginRegistrationContract.ReconciliationVersion;
+            Dictionary<string, string>? packageNames = null;
+            if (imageOnly)
+            {
+                PluginImagePruningService.ValidateAuthority(config.Assemblies, cancellationToken);
+                var packages = config.Assemblies.Where(a => string.Equals(a.Type, "Nuget", StringComparison.OrdinalIgnoreCase)).ToArray();
+                var preflights = await DeployCommand.PreflightAssembliesAsync(packages, configFile.DirectoryName ?? ".",
+                    cancellationToken, packageContentReader);
+                packageNames = preflights.ToDictionary(p => p.Assembly.Name, p => p.PackageName!, StringComparer.OrdinalIgnoreCase);
+            }
+
             // Connect to Dataverse
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile,
                 environment,
                 globalOptions.Verbose,
                 globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken) : await serviceProviderFactory(cancellationToken);
 
             var registrationService = serviceProvider.GetRequiredService<IPluginRegistrationService>();
 
@@ -117,20 +125,20 @@ public static class CleanCommand
                 }
             }
 
-            var results = new List<CleanResult>();
-
-            foreach (var assemblyConfig in config.Assemblies)
+            if (imageOnly)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var result = await CleanAssemblyAsync(
-                    registrationService,
-                    assemblyConfig,
-                    dryRun,
-                    globalOptions,
-                    cancellationToken);
-
-                results.Add(result);
+                var plan = await PluginImagePruningService.PlanAsync(registrationService, config.Assemblies, packageNames, cancellationToken);
+                var cleanup = dryRun ? new PluginImagePruningResult(plan) { Success = true, Status = "preview-only" }
+                    : await PluginImagePruningService.ApplyAsync(registrationService, plan, cancellationToken);
+                results.AddRange(config.Assemblies.Select(a => ImageResult(cleanup.ForAssembly(a.Name))));
+            }
+            else
+            {
+                foreach (var assemblyConfig in config.Assemblies)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    results.Add(await CleanAssemblyAsync(registrationService, assemblyConfig, dryRun, globalOptions, cancellationToken));
+                }
             }
 
             if (globalOptions.IsJsonMode)
@@ -144,7 +152,13 @@ public static class CleanCommand
                 var totalDeleted = results.Sum(r => r.StepsDeleted);
                 var totalTypesDeleted = results.Sum(r => r.TypesDeleted);
 
-                if (totalOrphans == 0)
+                if (imageOnly)
+                {
+                    var count = results.Sum(r => r.ImageCleanup!.Plan.Images.Count);
+                    Console.Error.WriteLine(dryRun ? $"Would delete {count} owned image(s); parent registrations are retained."
+                        : $"Deleted {results.Sum(r => r.ImageCleanup!.ImagesDeleted)} planned owned image(s); parent registrations are retained.");
+                }
+                else if (totalOrphans == 0)
                 {
                     Console.Error.WriteLine("No orphaned registrations found.");
                 }
@@ -162,8 +176,14 @@ public static class CleanCommand
         }
         catch (Exception ex)
         {
+            if (PluginImagePruningService.InterruptedResult(ex) is { } interrupted)
+            {
+                results.AddRange(interrupted.Plan.Inventories.Select(i => i.AssemblyName).Distinct()
+                    .Select(name => ImageResult(interrupted.ForAssembly(name))));
+            }
             var error = ExceptionMapper.Map(ex, context: "cleaning plugins", debug: globalOptions.Debug);
-            writer.WriteError(error);
+            if (results.Count == 0) writer.WriteError(error);
+            else writer.WriteResult(new CommandResult<List<CleanResult>> { Success = false, Data = results, Error = error });
             return ExceptionMapper.ToExitCode(ex);
         }
     }
@@ -181,6 +201,16 @@ public static class CleanCommand
         GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (assemblyConfig.OperationIntent == RegistrationOperationIntent.Reconcile)
+        {
+            var plan = await PluginImagePruningService.PlanAsync(service, [assemblyConfig], null, cancellationToken);
+            var cleanup = dryRun ? new PluginImagePruningResult(plan) { Success = true, Status = "preview-only" }
+                : await PluginImagePruningService.ApplyAsync(service, plan, cancellationToken);
+            return ImageResult(cleanup);
+        }
+        if (assemblyConfig.OperationIntent is not (RegistrationOperationIntent.Patch or RegistrationOperationIntent.Deploy))
+            throw new PpdsException(ErrorCodes.Validation.InvalidValue, "Unsupported cleanup registration contract.");
         var result = new CleanResult
         {
             AssemblyName = assemblyConfig.Name
@@ -312,8 +342,18 @@ public static class CleanCommand
 
     #region Result Models
 
+    private static CleanResult ImageResult(PluginImagePruningResult cleanup) => new()
+    {
+        AssemblyName = cleanup.Plan.Inventories.First().AssemblyName,
+        ImageCleanup = cleanup
+    };
+
     internal sealed class CleanResult
     {
+        [JsonPropertyName("imageCleanup")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public PluginImagePruningResult? ImageCleanup { get; set; }
+
         [JsonPropertyName("assemblyName")]
         public string AssemblyName { get; set; } = string.Empty;
 
