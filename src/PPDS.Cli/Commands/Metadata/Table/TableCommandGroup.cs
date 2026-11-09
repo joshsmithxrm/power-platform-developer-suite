@@ -13,18 +13,22 @@ public static class TableCommandGroup
     /// <summary>
     /// Creates the 'table' command group with subcommands (deprecated — use 'entity').
     /// </summary>
-    public static Command Create()
+    public static Command Create() => Create(null);
+
+    internal static Command Create(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var command = new Command("table", "Create, update, or delete Dataverse tables (deprecated — use 'entity')");
 
-        command.Subcommands.Add(CreateCreateCommand());
-        command.Subcommands.Add(CreateUpdateCommand());
-        command.Subcommands.Add(CreateDeleteCommand());
+        command.Subcommands.Add(CreateCreateCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateUpdateCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateDeleteCommand(serviceProviderFactory));
 
         return command;
     }
 
-    internal static Command CreateCreateCommand()
+    internal static Command CreateCreateCommand() => CreateCreateCommand(null);
+
+    internal static Command CreateCreateCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -107,13 +111,15 @@ public static class TableCommandGroup
             DeprecationWarning.Write("ppds metadata table create", "ppds metadata entity create");
             return await Metadata.EntityCommand.ExecuteCreateAsync(
                 solution, name, displayName, pluralName, ownership, description, dryRun, publish,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
     }
 
-    internal static Command CreateUpdateCommand()
+    internal static Command CreateUpdateCommand() => CreateUpdateCommand(null);
+
+    internal static Command CreateUpdateCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -207,7 +213,7 @@ public static class TableCommandGroup
             return await Metadata.EntityCommand.ExecuteUpdateAsync(
                 solution, entity, displayName, pluralName, description,
                 iconSmall, iconMedium, iconVector, dryRun, publish,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;

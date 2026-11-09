@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using System.CommandLine;
 using PPDS.Cli.Commands.Metadata.Attribute;
 using PPDS.Cli.Commands.Metadata.Choice;
@@ -32,24 +33,26 @@ public static class MetadataCommandGroup
     /// <summary>
     /// Creates the 'metadata' command group with all subcommands.
     /// </summary>
-    public static Command Create()
+    public static Command Create() => Create(null);
+
+    internal static Command Create(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var command = new Command("metadata", "Browse Dataverse entity metadata: entities, attributes, relationships, option sets");
 
         command.Subcommands.Add(EntitiesCommand.Create());
-        command.Subcommands.Add(EntityCommand.Create());
-        command.Subcommands.Add(AttributeCommandGroup.Create());
+        command.Subcommands.Add(EntityCommand.Create(serviceProviderFactory));
+        command.Subcommands.Add(AttributeCommandGroup.Create(serviceProviderFactory));
         command.Subcommands.Add(AttributesCommand.Create());
         command.Subcommands.Add(RelationshipsCommand.Create());
         command.Subcommands.Add(KeysCommand.Create());
         command.Subcommands.Add(OptionSetsCommand.Create());
-        command.Subcommands.Add(OptionSetCommand.Create());
+        command.Subcommands.Add(OptionSetCommand.Create(serviceProviderFactory));
         command.Subcommands.Add(PublishAliasCommand.Create());
-        command.Subcommands.Add(TableCommandGroup.Create());
-        command.Subcommands.Add(ColumnCommandGroup.Create());
-        command.Subcommands.Add(RelationshipCommandGroup.Create());
-        command.Subcommands.Add(ChoiceCommandGroup.Create());
-        command.Subcommands.Add(KeyCommandGroup.Create());
+        command.Subcommands.Add(TableCommandGroup.Create(serviceProviderFactory));
+        command.Subcommands.Add(ColumnCommandGroup.Create(serviceProviderFactory));
+        command.Subcommands.Add(RelationshipCommandGroup.Create(serviceProviderFactory));
+        command.Subcommands.Add(ChoiceCommandGroup.Create(serviceProviderFactory));
+        command.Subcommands.Add(KeyCommandGroup.Create(serviceProviderFactory));
 
         return command;
     }
