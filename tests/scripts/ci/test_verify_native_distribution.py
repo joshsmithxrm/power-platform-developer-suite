@@ -442,7 +442,9 @@ def test_posix_private_directories_keep700(monkeypatch, platform):
 # Additional reader/ordering tests are separate from the immutable common66 block.
 
 def diagnostic_trace(count):
-    phases = ["script_entered", "request_read_started", "request_read_completed", "request_validated", "identity_started", "identity_completed"]
+    phases = ["script_entered", "request_read_started", "request_read_completed", "request_bytes_validated",
+              "request_json_started", "request_json_completed", "request_shape_validated", "request_set_created",
+              "request_validated", "identity_started", "identity_completed"]
     phases += [f"acl_{stage}:{index}" for index in range(count) for stage in ["started", "completed"]]
     phases += ["serialization_started", "serialization_completed", "snapshot_written"]
     return [("PPDS_SECURITY_PHASE_V1:" + phase + "\r\n").encode("ascii") for phase in phases]
@@ -473,8 +475,9 @@ def test_windows_reader_diagnostic_protocol_is_bounded_and_never_grants_trust(mo
     if variant == "unknown": trace[1] = b"PPDS_SECURITY_PHASE_V1:unknown\n"
     if variant == "reordered": trace[1], trace[2] = trace[2], trace[1]
     if variant == "duplicate": trace.insert(2, trace[1])
-    if variant == "wrong-index": trace[6] = b"PPDS_SECURITY_PHASE_V1:acl_started:1\n"
-    if variant == "boolean-index": trace[6] = b"PPDS_SECURITY_PHASE_V1:acl_started:True\n"
+    acl_start = trace.index(b"PPDS_SECURITY_PHASE_V1:acl_started:0\r\n")
+    if variant == "wrong-index": trace[acl_start] = b"PPDS_SECURITY_PHASE_V1:acl_started:1\n"
+    if variant == "boolean-index": trace[acl_start] = b"PPDS_SECURITY_PHASE_V1:acl_started:True\n"
     if variant == "oversize": trace = [b"x" * 16385]
     if variant == "sensitive": trace[2] = b"synthetic-private-marker\n"
     def completed(command, **kwargs):
@@ -667,3 +670,115 @@ def test_windows_security_refusal_in_actual_entrypoint_prevents_sdk_or_artifact_
 
     assert dispatched == []
     assert any(name.endswith("failure.json") and value["passed"] is False for name, value in fixture.saved)
+
+
+# Diagnostic-only request/failure branch controls; all processes remain synthetic.
+@pytest.mark.parametrize("milestone", ["request_bytes_validated", "request_json_started", "request_json_completed",
+                                        "request_shape_validated", "request_set_created", "request_validated"])
+def test_windows_request_milestone_timeout_is_precise_and_never_a_security_measurement(monkeypatch, milestone):
+    reader, fixture, calls, _ = reader_process_fixture(monkeypatch)
+    trace = diagnostic_trace(1)
+    marker = ("PPDS_SECURITY_PHASE_V1:" + milestone + "\r\n").encode("ascii")
+    prefix = trace[:trace.index(marker) + 1]
+    def timed(command, **kwargs):
+        calls.append((command, kwargs))
+        raise gate.subprocess.TimeoutExpired(command, 15, output=b"synthetic-private-marker", stderr=b"".join(prefix))
+    monkeypatch.setattr(gate.subprocess, "run", timed)
+
+    result = reader([fixture.path("C:/Users/runneradmin/AppData/Local")])
+
+    assert len(calls) == 1 and calls[0][1]["timeout"] == 15
+    assert result["complete"] is False and result["currentUserSid"] is None and result["rows"] == []
+    saved = gate.security_evidence_metadata(result)
+    assert saved["readerDiagnostics"]["lastObservedPhase"] == milestone
+    assert saved["readerDiagnostics"]["eventCount"] == len(prefix)
+    assert saved["readerDiagnostics"]["status"] == "partial" and saved["readerDiagnostics"]["failureCaught"] is False
+    assert "synthetic-private-marker" not in json.dumps(saved)
+
+
+def failure_trace(prefix_count=5):
+    failures = ["failure_caught", "failure_serialization_started", "failure_serialization_completed", "failure_snapshot_written"]
+    return diagnostic_trace(1)[:prefix_count], [("PPDS_SECURITY_PHASE_V1:" + phase + "\r\n").encode("ascii") for phase in failures]
+
+
+@pytest.mark.parametrize("failure_prefix", [0, 1, 2, 3, 4])
+def test_windows_json_entry_and_caught_failure_serialization_are_distinct_but_incomplete(monkeypatch, failure_prefix):
+    reader, fixture, _, _ = reader_process_fixture(monkeypatch)
+    success, failure = failure_trace()
+    def timed(command, **kwargs):
+        raise gate.subprocess.TimeoutExpired(command, 15, output=b"synthetic-private-marker", stderr=b"".join(success + failure[:failure_prefix]))
+    monkeypatch.setattr(gate.subprocess, "run", timed)
+
+    result = reader([fixture.path("C:/Users/runneradmin/AppData/Local")])
+    saved = gate.security_evidence_metadata(result)
+
+    assert result["complete"] is False and result["rows"] == [] and result["currentUserSid"] is None
+    diagnostic = saved["readerDiagnostics"]
+    assert diagnostic["failureCaught"] is bool(failure_prefix)
+    assert diagnostic["eventCount"] == len(success) + failure_prefix
+    assert diagnostic["lastObservedPhase"] == ((failure[:failure_prefix] or success)[-1].decode().strip().split(":", 1)[1])
+    assert diagnostic["status"] == ("failed" if failure_prefix == 4 else "partial")
+    assert "synthetic-private-marker" not in json.dumps(saved)
+
+
+@pytest.mark.parametrize("variant", ["failure-before-script", "failure-after-success", "duplicate-catch",
+                                      "reordered-failure", "success-after-catch", "provider-detail"])
+def test_windows_failure_branch_order_and_privacy_are_strict(monkeypatch, variant):
+    reader, fixture, _, _ = reader_process_fixture(monkeypatch)
+    success, failure = failure_trace(); trace = success + failure
+    if variant == "failure-before-script": trace = failure
+    if variant == "failure-after-success": trace = diagnostic_trace(1) + failure
+    if variant == "duplicate-catch": trace.insert(len(success) + 1, failure[0])
+    if variant == "reordered-failure": trace[-2], trace[-1] = trace[-1], trace[-2]
+    if variant == "success-after-catch": trace = success + failure[:1] + diagnostic_trace(1)[len(success):]
+    if variant == "provider-detail": trace[-1] = b"PPDS_SECURITY_PHASE_V1:failure_synthetic-private-marker\n"
+    original = gate.subprocess.run
+    def completed(command, **kwargs):
+        result = original(command, **kwargs); result.stderr = b"".join(trace); return result
+    monkeypatch.setattr(gate.subprocess, "run", completed)
+
+    result = reader([fixture.path("C:/Users/runneradmin/AppData/Local")])
+    saved = gate.security_evidence_metadata(result)
+
+    assert result["complete"] is False and saved["readerDiagnostics"]["status"] == "invalid"
+    assert saved["readerDiagnostics"]["eventCount"] == 0 and saved["readerDiagnostics"]["failureCaught"] is False
+    assert "synthetic-private-marker" not in json.dumps(saved)
+
+
+def test_windows_completed_failure_branch_never_validates_even_a_zero_exit_complete_payload(monkeypatch):
+    reader, fixture, _, _ = reader_process_fixture(monkeypatch)
+    success, failure = failure_trace(); original = gate.subprocess.run
+    def completed(command, **kwargs):
+        result = original(command, **kwargs); result.stderr = b"".join(success + failure); return result
+    monkeypatch.setattr(gate.subprocess, "run", completed)
+
+    result = reader([fixture.path("C:/Users/runneradmin/AppData/Local")])
+
+    assert result["complete"] is False and result["readerDiagnostics"]["status"] == "failed"
+    assert result["readerDiagnostics"]["failureCaught"] is True
+
+
+def test_windows_finite_diagnostic_maximum_does_not_accept_extra_events_or_grant_trust():
+    trace = diagnostic_trace(16)
+    _, failure = failure_trace()
+    assert len(trace) == 46
+    maximum_failure = trace[:-3] + failure
+    assert len(maximum_failure) == 47
+    result = gate.security_reader_diagnostics(b"".join(maximum_failure), b"", 16)
+    assert result["status"] == "failed" and result["eventCount"] == 47
+    assert gate.security_reader_diagnostics(b"".join(maximum_failure + failure[-1:]), b"", 16)["status"] == "invalid"
+
+
+def test_windows_request_and_failure_markers_bound_actual_script_operations_without_policy_changes():
+    script = gate.WINDOWS_SECURITY_SCRIPT
+    ordered = ["'request_read_completed'", "GetByteCount($requestText)", "'request_bytes_validated'", "'request_json_started'",
+               "ConvertFrom-Json -InputObject $requestText", "'request_json_completed'", "throw 'path_count_bound'",
+               "'request_shape_validated'", "HashSet[string]]::new", "'request_set_created'", "throw 'invalid_literal_path'",
+               "'request_validated'", "'identity_started'", "Get-Acl -LiteralPath"]
+    positions = [script.index(value) for value in ordered]
+    assert positions == sorted(positions)
+    assert script.index("'failure_caught'") < script.index("$snapshotErrorType = $_.Exception.GetType().FullName")
+    assert script.index("'failure_serialization_started'") < script.index("ConvertTo-Json -InputObject $snapshotPayload")
+    assert script.index("'failure_serialization_completed'") < script.index("[Console]::Out.Write($snapshotJson)")
+    assert script.index("'failure_snapshot_written'") > script.index("[Console]::Out.Flush()")
+    assert "Set-Acl" not in script and "icacls" not in script

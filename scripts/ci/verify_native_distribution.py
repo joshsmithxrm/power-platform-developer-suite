@@ -162,11 +162,16 @@ try {
     $requestText = [Console]::In.ReadToEnd()
     Write-SecurityPhase 'request_read_completed'
     if ([Text.Encoding]::UTF8.GetByteCount($requestText) -gt 16384) { throw 'request_bound' }
+    Write-SecurityPhase 'request_bytes_validated'
+    Write-SecurityPhase 'request_json_started'
     $requestObject = ConvertFrom-Json -InputObject $requestText
+    Write-SecurityPhase 'request_json_completed'
     if ($requestObject.paths -isnot [System.Array]) { throw 'path_array_required' }
     $requestedPaths = @($requestObject.paths)
     if ($requestedPaths.Count -lt 1 -or $requestedPaths.Count -gt 16) { throw 'path_count_bound' }
+    Write-SecurityPhase 'request_shape_validated'
     $uniquePaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    Write-SecurityPhase 'request_set_created'
     foreach ($securityPathText in $requestedPaths) {
         if ($securityPathText -isnot [string] -or $securityPathText.Length -gt 512 -or
             $securityPathText -notmatch '^C:\\' -or $securityPathText -match '(^|[\\/])\.\.?([\\/]|$)' -or
@@ -230,7 +235,10 @@ try {
     }
     $snapshotComplete = $true
 }
-catch { $snapshotErrorType = $_.Exception.GetType().FullName }
+catch {
+    Write-SecurityPhase 'failure_caught'
+    $snapshotErrorType = $_.Exception.GetType().FullName
+}
 if ($snapshotComplete) { Write-SecurityPhase 'serialization_started' }
 $snapshotPayload = [ordered]@{
     complete = $snapshotComplete
@@ -240,6 +248,7 @@ $snapshotPayload = [ordered]@{
     errorType = $snapshotErrorType
     rows = @($observedRows.ToArray())
 }
+if (-not $snapshotComplete) { Write-SecurityPhase 'failure_serialization_started' }
 $snapshotJson = ConvertTo-Json -InputObject $snapshotPayload -Depth 8 -Compress
 if ([Text.Encoding]::UTF8.GetByteCount($snapshotJson) -gt 131072) {
     $snapshotComplete = $false
@@ -254,9 +263,11 @@ if ([Text.Encoding]::UTF8.GetByteCount($snapshotJson) -gt 131072) {
 }
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 if ($snapshotComplete) { Write-SecurityPhase 'serialization_completed' }
+else { Write-SecurityPhase 'failure_serialization_completed' }
 [Console]::Out.Write($snapshotJson)
 [Console]::Out.Flush()
 if ($snapshotComplete) { Write-SecurityPhase 'snapshot_written' }
+else { Write-SecurityPhase 'failure_snapshot_written' }
 if ($snapshotComplete) { exit 0 }
 exit 1
 """
@@ -283,23 +294,42 @@ def security_reader_failure(paths, kind, diagnostics=None):
 
 
 def security_reader_diagnostics(stderr, stdout, count, *, timed_out=False):
-    """Finite ordered ASCII phases only; partial output never establishes trust."""
-    phases = ["script_entered", "request_read_started", "request_read_completed", "request_validated", "identity_started", "identity_completed"]
+    """Finite success prefix or terminal failure branch; neither partial nor failure grants trust."""
+    phases = ["script_entered", "request_read_started", "request_read_completed", "request_bytes_validated",
+              "request_json_started", "request_json_completed", "request_shape_validated", "request_set_created",
+              "request_validated", "identity_started", "identity_completed"]
     phases += [f"acl_{stage}:{index}" for index in range(count) for stage in ["started", "completed"]]
     phases += ["serialization_started", "serialization_completed", "snapshot_written"]
+    failures = ["failure_caught", "failure_serialization_started", "failure_serialization_completed", "failure_snapshot_written"]
     data = stderr if isinstance(stderr, bytes) else b""
     lines = data.splitlines(keepends=True) if len(data) <= 16384 else []
     tail = bool(lines and not lines[-1].endswith(b"\n"))
     records = lines[:-1] if tail else lines
-    expected = [("PPDS_SECURITY_PHASE_V1:" + phase).encode("ascii") for phase in phases]
-    valid = (len(data) <= 16384 and len(records) <= len(expected) and
-             all(line in {expected[index] + b"\n", expected[index] + b"\r\n"} for index, line in enumerate(records)) and
+    valid = (len(data) <= 16384 and len(records) <= len(phases) + 1 and
              (not tail or timed_out and len(lines[-1]) <= 128))
-    observed = len(records) if valid else 0
-    status = "invalid" if not valid or tail and not timed_out else (
-        "complete" if observed == len(expected) and not tail else "partial" if observed or tail else "not_observed")
-    return {"status": status, "eventCount": observed, "lastObservedPhase": phases[observed - 1] if observed else "not_observed",
-            "incompleteTail": tail, "timedOut": timed_out, "timeoutSeconds": 15,
+    observed, success_count, failure_count = [], 0, 0
+    def matches(line, phase):
+        prefix = ("PPDS_SECURITY_PHASE_V1:" + phase).encode("ascii")
+        return line in {prefix + b"\n", prefix + b"\r\n"}
+    if valid:
+        for line in records:
+            if failure_count:
+                if failure_count >= len(failures) or not matches(line, failures[failure_count]):
+                    valid = False; break
+                observed.append(failures[failure_count]); failure_count += 1
+            elif success_count < len(phases) and matches(line, phases[success_count]):
+                observed.append(phases[success_count]); success_count += 1
+            elif 0 < success_count <= len(phases) - 3 and matches(line, failures[0]):
+                observed.append(failures[0]); failure_count = 1
+            else:
+                valid = False; break
+    if not valid:
+        observed, failure_count = [], 0
+    status = ("invalid" if not valid else "failed" if failure_count == len(failures) and not tail else
+              "complete" if success_count == len(phases) and not failure_count and not tail else
+              "partial" if observed or tail else "not_observed")
+    return {"status": status, "eventCount": len(observed), "lastObservedPhase": observed[-1] if observed else "not_observed",
+            "failureCaught": bool(failure_count), "incompleteTail": tail, "timedOut": timed_out, "timeoutSeconds": 15,
             "stderrBytes": min(len(data), 16385), "stdoutBytes": min(len(stdout), 131073) if isinstance(stdout, bytes) else 0}
 
 
@@ -397,14 +427,14 @@ def security_evidence_metadata(snapshot):
         result["metadataDroppedForSize"] = True
     diagnostics = snapshot.get("readerDiagnostics")
     if isinstance(diagnostics, dict):
-        safe = {key: diagnostics.get(key) if type(diagnostics.get(key)) is bool else None for key in ["incompleteTail", "timedOut"]}
-        for key, maximum in [("eventCount", 41), ("timeoutSeconds", 15), ("stderrBytes", 16385), ("stdoutBytes", 131073)]:
+        safe = {key: diagnostics.get(key) if type(diagnostics.get(key)) is bool else None for key in ["incompleteTail", "timedOut", "failureCaught"]}
+        for key, maximum in [("eventCount", 47), ("timeoutSeconds", 15), ("stderrBytes", 16385), ("stdoutBytes", 131073)]:
             value = diagnostics.get(key)
             safe[key] = value if type(value) is int and 0 <= value <= maximum else None
         status, phase = diagnostics.get("status"), diagnostics.get("lastObservedPhase")
-        safe["status"] = status if isinstance(status, str) and status in {"invalid", "complete", "partial", "not_observed"} else "invalid"
+        safe["status"] = status if isinstance(status, str) and status in {"invalid", "complete", "partial", "not_observed", "failed"} else "invalid"
         safe["lastObservedPhase"] = phase if isinstance(phase, str) and re.fullmatch(
-            r"(?:not_observed|script_entered|request_read_(?:started|completed)|request_validated|identity_(?:started|completed)|acl_(?:started|completed):(?:[0-9]|1[0-5])|serialization_(?:started|completed)|snapshot_written)", phase) else "not_observed"
+            r"(?:not_observed|script_entered|request_read_(?:started|completed)|request_bytes_validated|request_json_(?:started|completed)|request_shape_validated|request_set_created|request_validated|identity_(?:started|completed)|acl_(?:started|completed):(?:[0-9]|1[0-5])|serialization_(?:started|completed)|snapshot_written|failure_(?:caught|serialization_started|serialization_completed|snapshot_written))", phase) else "not_observed"
         result["readerDiagnostics"] = safe
     result["rows"] = []
     if not isinstance(snapshot.get("rows"), list) or len(snapshot["rows"]) > 16:
