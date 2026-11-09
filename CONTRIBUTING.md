@@ -67,6 +67,11 @@ git checkout -b feat/your-feature-name
 
 ### Making Changes
 
+Maintainers follow the shared [contributor lifecycle](docs/CONTRIBUTOR-LIFECYCLE.md)
+when choosing where work lands, verifying actual squash credit, and assigning
+post-landing communication and source-PR disposition. This policy applies with
+any tool; the local provenance check does not require an AI client.
+
 1. Make your changes in small, focused commits
 2. Follow existing code patterns and conventions
 3. Add or update tests for your changes

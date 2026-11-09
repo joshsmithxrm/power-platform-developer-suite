@@ -449,9 +449,11 @@ def test_publish_workflows_run_verification_in_follow_on_jobs() -> None:
     )
     assert "verify_public_release.py nuget" in nuget_job["steps"][-1]["run"]
     assert nuget["jobs"]["publish"]["outputs"] == {
-        "tag": "${{ steps.package.outputs.tag }}",
-        "package": "${{ steps.package.outputs.package }}",
+        "tag": "${{ steps.verify-handoff.outputs.tag }}",
+        "package": "${{ steps.verify-handoff.outputs.package }}",
     }
+    checkout = next(step for step in nuget_job["steps"] if str(step.get("uses", "")).startswith("actions/checkout@"))
+    assert checkout["with"]["ref"] == "${{ github.sha }}"
     assert "NUGET_API_KEY" not in json.dumps(nuget_job)
 
     cli = load_workflow("release-cli.yml")

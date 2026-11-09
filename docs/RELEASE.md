@@ -4,7 +4,65 @@ Tool-neutral reference for release scope analysis, release operations,
 strong-name rotation, key custody, and incident response. Automation may advise
 what should be released, but a maintainer must approve every tag and publish.
 
+NuGet restore, build, Plugins signing/pack and full release-input validation run in
+`build-package` with `contents: read` and no OIDC permission. A fresh `publish`
+job downloads only that run's package-data artifact. Before login, an isolated
+standard-library verifier checks the immutable event source, successful producer
+job/attempt, artifact service identity/digest, raw manifest/package hashes,
+package identity, current tag target and public version vacancy. It never loads
+assemblies or invokes MSBuild. Only then may the pinned login and NuGet pushes run.
+An individual publisher-job rerun cannot reuse an earlier attempt's build artifact;
+this intentionally fails closed rather than mixing attempts.
+
+This separation removes OIDC authority from dependency build code. It does not
+protect the existing Plugins private signing key from MSBuild/package targets in
+the signing job, or prove that a compromised build produced trustworthy binaries.
+Those signing/build risks remain separate release-review requirements.
+
 ## Release Scope Analysis
+
+### NuGet trusted publishing preparation
+
+The proposed publisher uses pinned official NuGet/login and a temporary key for
+both package and symbol uploads. The login user is **JoshSmithMSFT**, confirmed
+by Josh as the **individual policy creator** profile. The step-local nonsecret
+`NUGET_PUBLISH_USER` guard uses that same identity; no repository variable is needed.
+NuGet's token service searches policies by their creator; a package owner may
+be an organization and is not necessarily the login user. Missing or malformed
+identity fails before login. There is no stored-key fallback.
+
+On November 2, 2026 Josh supplied **user-reported** evidence of an active
+`PPDS-GitHub-Actions` policy with package owner **JoshSmithMSFT**, new-version-only
+push scope, and these exact package IDs: PPDS.Auth, PPDS.Cli, PPDS.Dataverse,
+PPDS.Mcp, PPDS.Migration, PPDS.Plugins and PPDS.Query. Its GitHub tuple is
+`joshsmithxrm/power-platform-developer-suite`, workflow `publish-nuget.yml`.
+This is not an independent policy inspection or a tested token exchange.
+Josh subsequently confirmed the individual creator username as JoshSmithMSFT.
+Earlier public package-owner metadata named joshsmithxrm; that does not establish
+the newer policy owner's package authorization. That ownership/authorization
+discrepancy and actual login/upload remain unverified; an Active policy with
+matching subjects alone is not proof it can publish these packages. Keep the
+exact seven IDs; do not broaden them.
+
+The workflow currently has no GitHub environment. Keep the matching policy's
+environment blank unless a separately reviewed coordinated environment change
+is approved. Only the publishing job requests `id-token: write`; public
+verification remains read-only. The permission is available to every step in
+that job, including restore/build/pack. Late login is not build-code isolation:
+the reviewed tag and build inputs remain trusted. Splitting an upload-only job
+requires a reviewed artifact-integrity handoff and is outside this minimal patch.
+
+Keep source/dependency/signing/vacancy/public-artifact gates and sequential
+publication verification. New source must contain this workflow; retrying an old
+immutable tag still executes its historical secret-based publisher. Actual
+token exchange and package/symbol uploads are untested by offline checks and
+require separate authorization. Trust/identity settings and final publication
+approval remain separate from preparing this change. Do not remove old secrets,
+create trust settings or invoke login as part of local validation.
+
+Primary references: [NuGet trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing),
+[individual creator binding](https://github.com/NuGet/NuGetGallery/blob/main/src/NuGetGallery.Services/Authentication/Federated/FederatedCredentialService.cs#L396),
+and [official login action](https://github.com/NuGet/login).
 
 Before preparing CHANGELOGs or choosing versions, generate an explained scope
 advisory from the exact commit range:

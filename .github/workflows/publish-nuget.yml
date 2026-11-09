@@ -15,16 +15,34 @@ permissions:
   contents: read
 
 jobs:
-  publish:
+  build-package:
+    name: Build and validate NuGet package
+    if: >-
+      github.repository == 'joshsmithxrm/power-platform-developer-suite' &&
+      github.event_name == 'push' && github.ref_type == 'tag' &&
+      (startsWith(github.ref, 'refs/tags/Plugins-v') ||
+       startsWith(github.ref, 'refs/tags/Dataverse-v') ||
+       startsWith(github.ref, 'refs/tags/Migration-v') ||
+       startsWith(github.ref, 'refs/tags/Auth-v') ||
+       startsWith(github.ref, 'refs/tags/Cli-v') ||
+       startsWith(github.ref, 'refs/tags/Query-v') ||
+       startsWith(github.ref, 'refs/tags/Mcp-v'))
     runs-on: windows-latest
+    permissions:
+      contents: read
     outputs:
       tag: ${{ steps.package.outputs.tag }}
       package: ${{ steps.package.outputs.package }}
+      artifact-id: ${{ steps.package-artifact.outputs.artifact-id }}
+      artifact-digest: ${{ steps.package-artifact.outputs.artifact-digest }}
+      manifest-sha256: ${{ steps.handoff.outputs.manifest-sha256 }}
 
     steps:
     - uses: actions/checkout@v6
       with:
+        ref: ${{ github.sha }}
         fetch-depth: 0  # Required for MinVer to read git history
+        persist-credentials: false
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v6
@@ -139,23 +157,119 @@ jobs:
       shell: bash
       run: ls -la ./nupkgs/
 
-    - name: Push packages to NuGet
+    - name: Bind validated packages to this source, run and build job
+      id: handoff
+      shell: bash
+      run: >-
+        python -I scripts/ci/verify_nuget_handoff.py create --directory ./nupkgs
+        --tag "$GITHUB_REF_NAME" --source "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+        --attempt "$GITHUB_RUN_ATTEMPT"
+
+    - name: Retain only validated package data
+      id: package-artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: nuget-package-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+        path: |
+          nupkgs/*.nupkg
+          nupkgs/*.snupkg
+          nupkgs/nuget-handoff.json
+        if-no-files-found: error
+        retention-days: 1
+
+  publish:
+    needs: build-package
+    if: >-
+      github.repository == 'joshsmithxrm/power-platform-developer-suite' &&
+      github.event_name == 'push' && github.ref_type == 'tag' &&
+      (startsWith(github.ref, 'refs/tags/Plugins-v') ||
+       startsWith(github.ref, 'refs/tags/Dataverse-v') ||
+       startsWith(github.ref, 'refs/tags/Migration-v') ||
+       startsWith(github.ref, 'refs/tags/Auth-v') ||
+       startsWith(github.ref, 'refs/tags/Cli-v') ||
+       startsWith(github.ref, 'refs/tags/Query-v') ||
+       startsWith(github.ref, 'refs/tags/Mcp-v'))
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    outputs:
+      tag: ${{ steps.verify-handoff.outputs.tag }}
+      package: ${{ steps.verify-handoff.outputs.package }}
+    steps:
+    - name: Checkout only the source-pinned data verifier
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+        sparse-checkout: scripts/ci/verify_nuget_handoff.py
+        sparse-checkout-cone-mode: false
+    - name: Setup NuGet upload CLI
+      uses: actions/setup-dotnet@v6
+      with:
+        dotnet-version: '8.0.x'
+    - name: Setup data verifier
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.11'
+    - name: Download this run's exact package artifact
+      uses: actions/download-artifact@v8
+      with:
+        artifact-ids: ${{ needs.build-package.outputs.artifact-id }}
+        path: ${{ runner.temp }}/nuget-publish
+        merge-multiple: true
+    - name: Verify source, producer job, package hashes, tag and vacancy without MSBuild
+      id: verify-handoff
       shell: bash
       env:
-        NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        GH_TOKEN: ${{ github.token }}
+        HANDOFF_ARTIFACT_ID: ${{ needs.build-package.outputs.artifact-id }}
+        HANDOFF_ARTIFACT_DIGEST: ${{ needs.build-package.outputs.artifact-digest }}
+        HANDOFF_MANIFEST_SHA256: ${{ needs.build-package.outputs.manifest-sha256 }}
+      run: >-
+        python -I scripts/ci/verify_nuget_handoff.py verify --directory "$RUNNER_TEMP/nuget-publish"
+        --tag "$GITHUB_REF_NAME" --source "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+        --attempt "$GITHUB_RUN_ATTEMPT" --artifact-id "$HANDOFF_ARTIFACT_ID"
+        --artifact-digest "$HANDOFF_ARTIFACT_DIGEST" --manifest-sha "$HANDOFF_MANIFEST_SHA256"
+        --output "$RUNNER_TEMP/verified-nuget-handoff.json"
+
+    - name: Validate trusted publishing identity
+      shell: bash
+      env:
+        NUGET_PUBLISH_USER: JoshSmithMSFT
       run: |
-        for package in ./nupkgs/*.nupkg; do
+        # This must be the individual policy creator, not its package owner.
+        if [[ -z "${NUGET_PUBLISH_USER:-}" || ! "$NUGET_PUBLISH_USER" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+          echo "::error::The publishing identity must be the confirmed individual NuGet policy creator."
+          exit 1
+        fi
+
+    - name: NuGet login
+      id: nuget-login
+      uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+      with:
+        user: JoshSmithMSFT
+
+    - name: Push packages to NuGet
+      working-directory: ${{ runner.temp }}
+      shell: bash
+      env:
+        NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+      run: |
+        for package in "$RUNNER_TEMP"/nuget-publish/*.nupkg; do
           echo "Pushing $package"
           dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --no-symbols
         done
 
     - name: Push symbols to NuGet
+      working-directory: ${{ runner.temp }}
       shell: bash
       env:
-        NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
       run: |
         shopt -s nullglob
-        for package in ./nupkgs/*.snupkg; do
+        for package in "$RUNNER_TEMP"/nuget-publish/*.snupkg; do
           echo "Pushing $package"
           dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json
         done
@@ -171,7 +285,7 @@ jobs:
     - name: Checkout release verifier
       uses: actions/checkout@v6
       with:
-        ref: ${{ github.ref }}
+        ref: ${{ github.sha }}
         persist-credentials: false
 
     - name: Setup .NET
