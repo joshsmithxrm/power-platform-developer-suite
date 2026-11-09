@@ -8,7 +8,8 @@ internal sealed class FixtureProcessInterruption(TimeProvider? timeProvider = nu
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(30);
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
-    public bool RequiresManualReview { get; private set; }
+    private int _requiresManualReview;
+    public bool RequiresManualReview => Volatile.Read(ref _requiresManualReview) != 0;
     public FixtureProcessStopEvidence? Evidence { get; private set; }
 
     public Task<T> ObserveAsync<T>(Process process, Func<Task<T>> operation) =>
@@ -24,7 +25,7 @@ internal sealed class FixtureProcessInterruption(TimeProvider? timeProvider = nu
         {
             // Set the cleanup prohibition before attempting any termination work. Even an
             // exited client can have left an in-flight Dataverse request with an unknown outcome.
-            RequiresManualReview = true;
+            Interlocked.Exchange(ref _requiresManualReview, 1);
             await StopAsync(process);
             throw;
         }
@@ -68,7 +69,7 @@ internal sealed class FixtureProcessInterruption(TimeProvider? timeProvider = nu
         Evidence = new(exitConfirmed, "unknown", errors.ToArray());
     }
 
-    private sealed class NativeFixtureProcess(Process process) : IFixtureProcess
+    internal sealed class NativeFixtureProcess(Process process) : IFixtureProcess
     {
         public bool HasExited => process.HasExited;
         public void Kill() => process.Kill(entireProcessTree: true);

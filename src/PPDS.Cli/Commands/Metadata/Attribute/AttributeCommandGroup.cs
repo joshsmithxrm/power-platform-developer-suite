@@ -32,7 +32,9 @@ public static class AttributeCommandGroup
         return command;
     }
 
-    public static Command CreateCreateCommand()
+    public static Command CreateCreateCommand() => CreateCreateCommand(null);
+
+    internal static Command CreateCreateCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -258,7 +260,7 @@ public static class AttributeCommandGroup
                 requiredLevel, maxLength, minValue, maxValue, precision, format,
                 dateTimeBehavior, resolvedChoice, options, defaultValue,
                 trueLabel, falseLabel, maxSizeInKB, dryRun, publish,
-                profileVal, environmentVal, globalOptions, cancellationToken);
+                profileVal, environmentVal, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -382,17 +384,18 @@ public static class AttributeCommandGroup
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profile, environment,
-                globalOptions.Verbose, globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
+                    profile, environment, globalOptions.Verbose, globalOptions.Debug,
+                    ProfileServiceFactory.DefaultDeviceCodeCallback, cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -653,7 +656,9 @@ public static class AttributeCommandGroup
         }
     }
 
-    public static Command CreateDeleteCommand()
+    public static Command CreateDeleteCommand() => CreateDeleteCommand(null);
+
+    internal static Command CreateDeleteCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -681,7 +686,7 @@ public static class AttributeCommandGroup
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Show dependencies without deleting",
+            Description = MetadataDeletePreview.InputOnlyHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -711,7 +716,7 @@ public static class AttributeCommandGroup
 
             return await ExecuteDeleteAsync(
                 solution, entity, column, force, dryRun,
-                profileVal, environmentVal, globalOptions, cancellationToken);
+                profileVal, environmentVal, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -726,17 +731,20 @@ public static class AttributeCommandGroup
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -747,7 +755,7 @@ public static class AttributeCommandGroup
                 Console.Error.WriteLine();
             }
 
-            // Dry-run first
+            // Validate required inputs only; target existence and dependencies are not queried.
             var dryRunRequest = new DeleteColumnRequest
             {
                 SolutionUniqueName = solution,
@@ -762,11 +770,11 @@ public static class AttributeCommandGroup
             {
                 if (globalOptions.IsJsonMode)
                 {
-                    writer.WriteSuccess(new { entity, column, dryRun = true });
+                    writer.WriteSuccess(new { entity, column, dryRun = true, preview = MetadataDeletePreview.InputOnly });
                 }
                 else
                 {
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                    MetadataDeletePreview.InputOnly.WriteDiagnostic();
                 }
 
                 return ExitCodes.Success;
@@ -1056,7 +1064,9 @@ public static class AttributeCommandGroup
         return command;
     }
 
-    internal static Command CreateRemoveOptionCommand()
+    internal static Command CreateRemoveOptionCommand() => CreateRemoveOptionCommand(null);
+
+    internal static Command CreateRemoveOptionCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string?>("--solution", "-s") { Description = "Solution unique name" };
         var entityOption = new Option<string>("--entity", "-e") { Description = "Logical name of the entity", Required = true };
@@ -1065,7 +1075,7 @@ public static class AttributeCommandGroup
         var labelOption = new Option<string?>("--label") { Description = "Target option by label (mutually exclusive with --value)" };
         var forceOption = new Option<bool>("--force") { Description = "Skip confirmation prompt", DefaultValueFactory = _ => false };
         var publishOption = new Option<bool>("--publish") { Description = "Publish the entity after the change", DefaultValueFactory = _ => false };
-        var dryRunOption = new Option<bool>("--dry-run") { Description = "Validate that the target option exists, without removing it", DefaultValueFactory = _ => false };
+        var dryRunOption = new Option<bool>("--dry-run") { Description = MetadataDeletePreview.OptionExistenceHelp, DefaultValueFactory = _ => false };
 
         var command = new Command("remove-option", "Remove an option from a column's local option set")
         {
@@ -1126,9 +1136,11 @@ public static class AttributeCommandGroup
 
             try
             {
-                await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+                await using var serviceProvider = serviceProviderFactory is null
+                    ? await ProfileServiceFactory.CreateFromProfilesAsync(
                     profile, environment, globalOptions.Verbose, globalOptions.Debug,
-                    ProfileServiceFactory.DefaultDeviceCodeCallback, cancellationToken);
+                    ProfileServiceFactory.DefaultDeviceCodeCallback, cancellationToken)
+                    : await serviceProviderFactory(cancellationToken);
                 var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
                 if (!globalOptions.IsJsonMode)
@@ -1149,11 +1161,10 @@ public static class AttributeCommandGroup
                     DryRun = dryRun
                 }, cancellationToken);
 
+                if (dryRun && !globalOptions.IsJsonMode) MetadataDeletePreview.OptionExistence.WriteDiagnostic();
                 if (globalOptions.IsJsonMode)
-                    writer.WriteSuccess(new { entity, column, removed = !dryRun, dryRun });
-                else if (dryRun)
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. Option exists and can be removed.");
-                else
+                    writer.WriteSuccess(new { entity, column, removed = !dryRun, dryRun, preview = dryRun ? MetadataDeletePreview.OptionExistence : null });
+                else if (!dryRun)
                     Console.Error.WriteLine($"Option ({target}) removed from '{entity}.{column}'.");
 
                 return ExitCodes.Success;

@@ -1,7 +1,7 @@
 # Metadata Authoring
 
 **Status:** Implemented (extending — #1159/#1160/#1161 ratified, in implementation; AC-37–AC-60 reach ✅ as their tests land; #1208 positional `<entity>` shipped, AC-61/AC-62)
-**Last Updated:** 2026-06-10
+**Last Updated:** 2026-11-08
 **Code:** [src/PPDS.Dataverse/Metadata/](../src/PPDS.Dataverse/Metadata/) | [src/PPDS.Cli/Commands/Metadata/](../src/PPDS.Cli/Commands/Metadata/) | [src/PPDS.Cli/Services/Metadata/](../src/PPDS.Cli/Services/Metadata/) | [src/PPDS.Mcp/Tools/](../src/PPDS.Mcp/Tools/) | [src/PPDS.Cli/Tui/Screens/](../src/PPDS.Cli/Tui/Screens/) | [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
 **Surfaces:** CLI, TUI, Extension, MCP
 
@@ -267,7 +267,7 @@ Task ReactivateKeyAsync(ReactivateKeyRequest request, CancellationToken ct = def
 
 ### Validation
 
-All authoring operations perform local validation before making SDK calls. In dry-run mode, validation runs but the SDK call is skipped.
+All authoring operations perform local validation before making SDK calls. In dry-run mode, mutation SDK calls are skipped; some operations still retrieve metadata for validation. Schema deletes validate required strings only, while global/local option removal resolves the target option.
 
 | Rule | Applies To | Error |
 |------|-----------|-------|
@@ -325,7 +325,7 @@ The `PublishXml` payload for entities:
 Schema delete operations follow the truncate safety pattern:
 
 **CLI interactive mode (no `--force`):**
-1. Automatic dry-run executes first — reports dependencies (relationships, keys, columns that will cascade). This happens regardless of whether `--dry-run` was passed; the explicit `--dry-run` flag gives the same report and then exits without prompting.
+1. Automatic dry-run executes first — validates required input strings only, without retrieving the target or its dependencies. This happens regardless of whether `--dry-run` was passed; the explicit flag reports this limited scope and exits without prompting. It does not establish whether deletion will succeed.
 2. Displays warning: "This will permanently delete {type} '{name}'. All data in this {type} will be lost. This operation cannot be undone."
 3. Prompts for exact confirmation text: `DELETE TABLE account` or `DELETE COLUMN account.statuscode`
 4. Exact case-sensitive string match required
@@ -512,6 +512,12 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 - No UI-level business logic — all validation and orchestration in `IMetadataAuthoringService` (Constitution A1)
 - Extension webview forms must render Dataverse-sourced metadata (display names, descriptions) via `textContent` or proper escaping — never `innerHTML` (Constitution S1)
 
+### Connection lifetime and existing error contracts
+
+Generic option add/update, status-reason update/removal, and table creation return their mutation connection before optional color/publication or unrelated postprocessing. Global/local color helpers acquire separate connections for the metadata read and update. Publisher-prefix resolution acquires separate connections for its solution and publisher queries, retains only the publisher ID between them, and keeps the existing prefix cache and table dry-run metadata reads.
+
+This lifetime correction preserves existing SDK payloads, read modes, validation, guards, cache success stages and error contracts. The scoped cancellation/acquisition and diagnostic-message corrections below change only their named boundaries; other SDK/read behavior remains as implemented. Acquisition normalization is separate from SDK fault handling. Multi-request authoring remains non-atomic: a later failure can follow a successful mutation, and no automatic retry or rollback is introduced.
+
 ---
 
 ## Acceptance Criteria
@@ -528,7 +534,7 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 | AC-08 | `AddOptionValueAsync` adds a value to an existing global or local option set (local path is now load-bearing for #1161 — AC-55) | `MetadataAuthoringServiceTests.AddOptionValueAsync_GlobalAndLocal_InsertsViaInsertOptionValue` | ❌ |
 | AC-09 | `CreateKeyAsync` creates an alternate key with specified attributes | `SchemaValidatorTests.ValidateCreateKeyRequest_OneAttribute_DoesNotThrow` | ✅ |
 | AC-10 | `ReactivateKeyAsync` retries a failed key index creation | — | ❌ |
-| AC-11 | `DeleteTableAsync` with `DryRun=true` reports dependencies without deleting | `MetadataAuthoringServiceTests.DeleteTableAsync_DryRun_DoesNotCallSdk` | ✅ |
+| AC-11 | `DeleteTableAsync` with `DryRun=true` reports dependencies without deleting — **not implemented**; the existing no-SDK test proves input-only validation, not discovery | — | ❌ |
 | AC-12 | Validation rejects invalid schema names (spaces, special chars, wrong prefix) | `SchemaValidatorTests.ValidateSchemaName_InvalidChars_Throws` | ✅ |
 | AC-13 | Validation rejects schema names that don't match solution publisher prefix | `SchemaValidatorTests.ValidateSchemaPrefix_WrongPrefix_Throws` | ✅ |
 | AC-14 | Successful authoring operations invalidate relevant `CachedMetadataProvider` entries | `CacheInvalidationTests.CreateColumn_InvalidatesEntityCache_Scoped` | ✅ |
@@ -584,12 +590,129 @@ All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScop
 | AC-64 | `optionset update-option` matches the `attribute update-option` shape: (`--value` \| `--label`) selector, `--new-label` for the new label, optional `--color`; the current label is preserved on color-only updates | `MetadataGlobalOptionServiceTests.UpdateOptionValue_ByLabel_AppliesNewLabel`, `UpdateOptionValue_ColorOnly_PreservesCurrentLabelAndForwardsColor` | ✅ |
 | AC-65 | `optionset add-option`/`update-option`/`remove-option` honor `--dry-run` with a service-layer early exit; update/remove still validate the target exists, and `remove-option --dry-run` skips the confirmation prompt | `MetadataGlobalOptionServiceTests.AddOptionValue_DryRun_DoesNotCallSdk`, `UpdateOptionValue_DryRun_ValidatesTargetWithoutMutating`, `DeleteOptionValue_DryRun_ValidatesTargetWithoutMutating`, `DeleteOptionValue_DryRun_TargetNotFound_StillThrows` | ✅ |
 
+### Delete preview scope (#1532)
+
+The current CLI schema-delete preview validates required input strings only. It does not retrieve the target, dependencies, managed-component restrictions, or server delete permissions. A successful preview is not assurance that deletion can succeed. Global and local option-removal previews additionally retrieve metadata and resolve the target option; they still do not check dependencies or deletion feasibility. No preview performs writes. Status-reason removal and the deprecated `choice remove-option` have no dry-run option; this change does not add one.
+
+Successful previews retain their existing output envelope and fields and add `preview` with `validationScope` (`input-only` or `option-existence`), `targetExistenceChecked`, `dependenciesChecked: false`, and `deletionFeasibilityChecked: false`. Text diagnostics and help communicate the same limits. Successful canonical JSON previews keep stderr empty; deprecated aliases retain only their existing deprecation diagnostic. Real deletion behavior and confirmation are unchanged. Full dependency discovery remains unimplemented; the unused `DeleteDryRunResult`/`DependencyInfo` types are not evidence of discovery.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-66 | All five canonical schema-delete commands and three deprecated aliases describe input-only validation, unchecked target existence/dependencies/deletion feasibility in dry-run help and stderr; successful JSON retains existing envelope/fields and adds explicit unchecked preview scope | `MetadataDeletePreviewTests.SchemaDelete_ReportsInputOnlyScopeWithoutSdkCalls`, `PreviewHelp_StatesLimitations` | ✅ |
+| AC-67 | Global/local option-removal previews report resolved target existence, but never claim removability or checked dependencies; additive JSON scope and help agree; SDK calls remain read-only | `MetadataDeletePreviewTests.OptionRemoval_ReportsExistenceOnlyAndNeverWrites`, `PreviewHelp_StatesLimitations` | ✅ |
+| AC-68 | Real validation failures (including missing option) remain errors with existing exit/envelope contracts and never emit a successful preview; no preview writes | `MetadataDeletePreviewTests.MissingOption_RemainsValidationFailure`, `SchemaDelete_MissingInput_RemainsValidationFailure` | ✅ |
+| AC-69 | Preview changes preserve real forced-delete requests, result fields and confirmation behavior; canonical/deprecated paths share the execute implementation | `MetadataDeletePreviewTests.SchemaDelete_RealFlowRetainsDeleteResult`, `SchemaDelete_WithoutForceStillRequiresConfirmation` | ✅ |
+
+### Draft-aware option allocation (#1531)
+
+Status-reason and local choice-option allocation must include unpublished metadata when collecting existing values, including explicit-value collision checks and dry-run allocation. Public status/local-option lists remain published reads. Update/remove target resolution retains its current published-read behavior. The private local color readback includes unpublished metadata so a just-inserted option and other draft options survive the existing minimal color update. This helper is shared by local/status add and update and the existing local-target option-value path. Global option-set helpers and public query APIs are unchanged.
+
+The add-statusreason service wrapper emits fixed action/target text, retains the original SDK cause and existing code/CLI exit, and the CLI places that user message in the error envelope. SDK diagnostic text is omitted from that user message. Allocation and local color reads propagate their cancellation token and cancellation exceptions. Publication remains explicit.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-70 | Status-reason and local Choice/Choices allocation reads include draft values, derive past draft collisions, preserve explicit values, reject explicit draft collisions, and keep dry-run free of mutation | `MetadataDraftOptionReadTests.Allocation_UsesDraftValues`, `ExplicitDraftCollision_RejectsBeforeInsert`, `ExplicitUnusedValue_IsPreserved` | ✅ |
+| AC-71 | Local and status color readback sees newly inserted draft options and preserves other draft options and labels in the existing minimal update. The shared update and local option-value callers use that same readback. | `MetadataDraftOptionReadTests.AddWithColor_ReadsDraftAndPreservesOtherOptions`, `UpdateColor_PreservesDraftOptions`, `GenericLocalOptionAdd_ColorReadsDraft` | ✅ |
+| AC-72 | Public status/local-option lists and existing update/remove target resolution remain published reads, without changing public APIs or environment routing | `MetadataDraftOptionReadTests.PublicList_RemainsPublished`, `UpdateAndRemove_TargetResolutionRemainsPublished` | ✅ |
+| AC-73 | Draft allocation and local color reads propagate the token and preserve cancellation exception identity. The CLI error mapper and JSON writer retain the fixed add-statusreason action/target message, code, original cause and exit classification; SDK diagnostic text is excluded from that user message. | `MetadataDraftOptionReadTests.AllocationCancellation_Propagates`, `ColorReadCancellation_Propagates`, `AddStatusSdkFailure_UsesFixedMessageInCliEnvelope` | ✅ |
+
+### Primary ID column labels (#1534)
+
+A real column update can change the display name, description, or both on a table's primary ID. Some tables have multiple GUID columns with `IsPrimaryId` set, including address IDs. When an existing column has runtime type exactly `AttributeMetadata`, `AttributeType == Uniqueidentifier`, and `IsPrimaryId == true`, validate the requested changes and retrieve just the table definition (`EntityFilters.Entity`). Its `PrimaryIdAttribute` must match both the requested column and the retrieved attribute logical name, ignoring case. The SDK enforces the table's managed customization rules.
+
+Build a fresh base attribute with the retrieved logical and schema names and only the requested LCID 1033 labels. Set `UpdateAttributeRequest.MergeLabels` to true for this path so Dataverse retains translations in other languages. Required level, length, range, precision, format, audit, security, Advanced Find and auto-number settings are incompatible even when explicitly set to false, zero or an empty string. A dry run continues to validate the required input identifiers before any metadata retrieval.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-74 | Display name, description, or both on the verified primary ID generate one targeted update with a fresh minimal base attribute and merged labels. Other language labels survive through the SDK's merge contract. Attribute retrieval, table-key verification and update each return their own client after one SDK request. Cache invalidation and optional publish follow the successful update after its lease is returned. | `PrimaryIdLabelUpdateTests.VerifiedPrimaryId_SendsOnlyRequestedLabels`, `PrimaryIdLabelUpdateTests.SingleSlot_UpdatesAndPublishesInOrder` | ✅ |
+| AC-75 | Reject unrelated base attributes, state/status attributes, misleading address IDs, and missing or inconsistent primary ID metadata before any update or publish. Only an eligible candidate triggers the table lookup. | `PrimaryIdLabelUpdateTests.UnsupportedShape_RemainsRejected`, `PrimaryIdLabelUpdateTests.UnconfirmedPrimaryId_RejectsBeforeWrite` | ✅ |
+| AC-76 | Require at least one supplied label. Reject every supplied incompatible field on an otherwise eligible primary ID with a clear validation error before the table lookup or any write. | `PrimaryIdLabelUpdateTests.IncompatibleSettings_RejectBeforeTableLookup`, `PrimaryIdLabelUpdateTests.NoLabels_RejectsBeforeTableLookup` | ✅ |
+| AC-77 | Preserve input-only dry-run, typed updates, mutation guard, SDK and cancellation routing. Both CLI command names accept both label flags. Table lookup failures and cancellation prevent update and publish. A failed operation releases its lease. A failed pool checkout propagates its original exception and skips subsequent work. Typed updates support publication with one pool slot. | `PrimaryIdLabelUpdateTests.DryRun_ValidatesInputsWithoutMetadata`, `PrimaryIdLabelUpdateTests.TypedUpdate_PreservesRequestShape`, `MetadataAuthoringServiceGuardTests.EveryMutationMethod_Blocks` (`UpdateColumnAsync`), `PrimaryIdLabelUpdateTests.UpdateFailure_SkipsPublishAndCacheInvalidation`, `PrimaryIdLabelUpdateTests.TableLookupFailure_StopsBeforeWrite`, `PrimaryIdLabelUpdateTests.CliUpdate_AcceptsBothLabelFlags`, `PrimaryIdLabelUpdateTests.SingleSlot_UpdatesAndPublishesInOrder`, `PrimaryIdLabelUpdateTests.SingleSlot_FailedOperationReturnsClient`, `PrimaryIdLabelUpdateTests.SingleSlot_CheckoutFailureLeavesSlotFree` | ✅ |
+
+### Global choice names on column creation (#1535)
+
+When creating a Choice or Choices column that references a global choice, resolve its stored name from the target environment after input validation and dry run. An exact ordinal match takes precedence. Otherwise one ordinal case-insensitive match supplies the canonical name. The column carries a minimal global reference using that name. Public metadata queries continue to return the published view. The authoring lookup includes unpublished choices and incurs one extra catalog read per global attachment.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-78 | Single- and multi-select global references use the stored metadata name verbatim. A unique exact name wins over other case variants. The canonical and deprecated command handlers pass the supplied spelling into the service DTO, and the service preserves the caller DTO. | `GlobalChoiceReferenceTests.Attach_UsesCanonicalName`, `ExactName_WinsOverCaseVariant`, `CliActions_PreserveSpellingAndAttachStoredName` | ✅ |
+| AC-79 | An absent or ambiguous global name or incompatible definition produces a validation error before column creation. Duplicate exact matches are ambiguous. | `GlobalChoiceReferenceTests.UnresolvableName_StopsBeforeCreate`, `IncompatibleChoice_StopsBeforeCreate` | ✅ |
+| AC-80 | The lookup uses fresh unpublished metadata from the caller's pool, releases its own lease before matching or obtaining a create lease, and skips create, publish and cache invalidation on failure. Raw transport and pool configuration or argument failures retain their mapped codes, exits and original causes in coded service exceptions, including the Dataverse reauthentication flag when present. Cancellation and already-coded errors retain their identities. | `GlobalChoiceReferenceTests.ConsecutiveCreates_ReadCurrentCatalog`, `LookupFailure_StopsBeforeCreate`, `InvalidCatalog_StopsBeforeCreate`, `CatalogLease_IsReturnedBeforeCreateCheckout`, `CatalogCheckoutFailure_IsCodedAndSkipsCreate` | ✅ |
+| AC-81 | Existing local, non-choice, validation, dry-run and safety-guard paths perform their established operations without a global-choice lookup. The create lease is returned before cache invalidation and any requested publication. | `GlobalChoiceReferenceTests.UnrelatedPath_SkipsCatalog`, `DryRunAndInputErrors_SkipCatalog`, `Guard_PrecedesAllLookups`, `Attach_UsesCanonicalName`, `Publish_ObtainsLeaseAfterCreateLeaseIsReturned` | ✅ |
+
+### Connection-lifetime acceptance criteria
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-82 | Generic option add/update with color, status update with color/publication and status removal with publication complete with one available connection; each mutation lease returns before another checkout | `MetadataLeaseLifetimeTests.SingleSlot_WorkflowsReturnEachLeaseBeforeNextOperation` | ✅ |
+| AC-83 | Table creation returns its lease before cache invalidation/publication, preserves result identity, skips later work after failed create and never replays create after publication failure | `MetadataLeaseLifetimeTests.SingleSlot_WorkflowsReturnEachLeaseBeforeNextOperation`, `FailureAtEachStep_ReturnsLeasesAndStopsLaterWork` | ✅ |
+| AC-84 | Each global/local color read/update uses one SDK operation per short lease; read failure/missing target prevents update and failed new write checkout returns all acquired leases | `MetadataLeaseLifetimeTests.SingleSlot_WorkflowsReturnEachLeaseBeforeNextOperation`, `FailureAtEachStep_ReturnsLeasesAndStopsLaterWork`, `ColorRead_MissingTarget_PreventsWriteAndPublication` | ✅ |
+| AC-87 | Covered SDK faults retain their stage-specific wrapping; color cancellation and selected acquisitions follow AC-97 through AC-101, preserving CLI exits and original causes, with no retry or later work | `MetadataLeaseLifetimeTests.ColorSdkFaults_PreserveSdkFaultAndCancellationCliEnvelope`, `CheckoutFailures_PreserveCodedCauseAndCliClassification`, `FailureAtEachStep_ReturnsLeasesAndStopsLaterWork` | ✅ |
+| AC-88 | Payloads, read modes, target/value/label/solution/token and minimal local carriers stay unchanged; guards, validation and actual dry-run read behavior remain intact | `MetadataLeaseLifetimeTests.Payloads_ReadModesAndResultsRemainStable`, `PrefixLookup_UsesSeparateLeasesAndCachesAcrossDryRuns`, `MetadataAuthoringServiceGuardTests.EveryMutationMethod_Blocks`, `MetadataGlobalOptionServiceTests.AddOptionValue_DryRun_DoesNotCallSdk`, `UpdateOptionValue_DryRun_ValidatesTargetWithoutMutating` | ✅ |
+| AC-89 | Already-correct status-add and local-option add/update/remove outer scopes continue to complete with one available connection | `MetadataLeaseLifetimeTests.SingleSlot_WorkflowsReturnEachLeaseBeforeNextOperation` | ✅ |
+| AC-90 | The MCP option-add tool retains generic fallback for raw exceptions from unnormalized mocked services, coded SDK failures, raw cancellation identity, existing coded faults and one-time request forwarding; the real service acquisition route follows AC-100. No transport cancellation response is implied | `MetadataAddOptionValueLeaseContractTests.RawPoolExhaustion_RemainsInternalAtMcpBoundary`, `WrappedSdkCancellation_RemainsCodedAndFaulted`, `RawCancellation_PropagatesOriginalAndCanceled`, `AlreadyCodedFault_PreservesCodeAndContext`, `SuccessfulInvocation_ForwardsRequestOnce` | ✅ |
+| AC-91 | Publisher-prefix lookup uses separate solution/publisher leases, retains cached/dry-run behavior and stops before create/publication after either checkout/query failure or cancellation | `MetadataLeaseLifetimeTests.PrefixLookup_UsesSeparateLeasesAndCachesAcrossDryRuns`, `FailureAtEachStep_ReturnsLeasesAndStopsLaterWork` | ✅ |
+
+### Table-update connection lifetime
+
+Table updates return their mutation connection before cache invalidation, optional publication and success reporting. Publication remains an explicit follow-up request; a later failure can leave an acknowledged update without publication. SDK/already-coded exception and cancellation contracts are preserved. Checkout failures follow the scoped acquisition correction below. There is no retry, rollback or atomicity guarantee, and broader D4/cancellation gaps outside that scope remain.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-93 | Updating a table with optional publication completes with one available connection; the update lease returns before cache/publication/success, and no-publish uses only one SDK operation | `TableUpdateLeaseTests.SingleSlot_UpdateAndPublish_ReturnsMutationLeaseBeforeFollowup`, `UpdateWithoutPublish_ReturnsLeaseBeforeCacheAndSuccess`, `TwoSlotControl_CompletesSameUpdateAndPublication` | ✅ |
+| AC-94 | Covered update/publication SDK failures and cancellation retain original identity or existing coded error; checkouts follow AC-101 while preserving task state and CLI classification. Leases return, caches follow the acknowledged update stage, no mutation is replayed and later publication stops | `TableUpdateLeaseTests.FailureAtEachBoundary_PreservesStageContractAndStopsLaterWork`, `CacheFailure_AfterReturnedMutationLease_PreservesCauseAndStopsPublication` | ✅ |
+| AC-95 | Existing guard/required-input validation and input-only dry run, including Publish=true, perform no checkout, mutation, cache invalidation or publication | `TableUpdateLeaseTests.DryRunValidationAndGuard_DoNotAcquire` | ✅ |
+| AC-96 | Table update retains request identity/solution/token, metadata labels, explicit false/empty/omitted fields/icons, cache order and existing success reporting | `TableUpdateLeaseTests.PayloadAndSuccessMessages_RemainUnchanged` | ✅ |
+
+### Cancellation and connection-acquisition errors
+
+The approved correction preserves cancellation at the three global color read/update and local color update catches, following the existing local-read behavior. Connection-acquisition normalization is limited to table create/update, generic option add/update, status update/remove, global/local color helpers and publisher-prefix resolution. `ResolvePublisherPrefixAsync` normalizes its two checkouts for its existing callers: `CreateTableAsync`, `CreateColumnAsync`, `CreateOneToManyAsync`, `CreateManyToManyAsync`, `CreateGlobalChoiceAsync` and `CreateKeyAsync`. The shared publication helper normalizes its own checkout, including publication requested by other metadata writers. Other direct column acquisitions, global-choice catalog reads and SDK operation contracts remain unchanged. There is no retry, rollback or atomicity promise. MCP tool-boundary checks do not establish wire-level cancellation responses.
+
+OCE, existing coded PPDS errors and metadata validation errors keep their identities. Other acquisition failures become coded service errors with the original mapped CLI code/exit and identical inner cause. Authentication retains its existing reauthentication flag. An internal implementation type stores the prior mapped exit because a validation-prefixed file-not-found code would otherwise change the CLI exit. No public DTO, pool-setting or generic error policy changes.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-97 | Immediate and delayed global color read/update and local color update cancellation preserve the exact exception/token and canceled task, stop later work, return leases, and map to Operation.Cancelled/CLI exit2; the existing local-read control stays valid | `MetadataLeaseLifetimeTests.ErrorContract_ColorCancellation_PreservesIdentityTaskAndCliEnvelope`, `ErrorContract_ColorCancellation_DoesNotRequireCallerTokenCancellation` | ✅ |
+| AC-98 | Every selected acquisition boundary returns a coded timeout with its identical cause and unchanged CLI exit4, stops later work, and preserves OCE/already-coded/metadata-validation identities; all acquired leases return | `MetadataLeaseLifetimeTests.ErrorContract_PoolBoundary_IsCodedAndStopsLaterWork`, `ErrorContract_AcquisitionIdentity_PropagatesWithoutWrapping` | ✅ |
+| AC-99 | Other acquisition failures retain the exact mapper code/numeric exit and inner cause, including auth/reauthentication, configuration/arguments, not-found and ordinary errors; no arbitrary message is exposed as the new service user message | `MetadataLeaseLifetimeTests.ErrorContract_AcquisitionMapping_PreservesCodeExitAndCause` | ✅ |
+| AC-100 | Actual MCP option-add invocation routed into the real service reports Connection.Timeout for pool exhaustion and propagates original color SDK cancellation at the tool boundary; unrelated generic-helper controls remain | `MetadataAddOptionValueLeaseContractTests.ActualServicePoolTimeout_IsConnectionTimeoutAtMcpBoundary`, `ActualColorCancellation_PropagatesOriginalAtMcpBoundary` | ✅ |
+| AC-101 | Table-update checkout normalization and the shared publication helper preserve prior CLI exits, acknowledged progress and cleanup; column direct/catalog acquisition classifications and ordinary SDK execution behavior retain their controls, subject to the bounded user-message changes below | `TableUpdateLeaseTests.ErrorContract_Acquisition_PreservesMappingCauseAndPartialProgress`, `MetadataLeaseLifetimeTests.ErrorContract_PoolBoundary_IsCodedAndStopsLaterWork`, `PrimaryIdLabelUpdateTests.SingleSlot_CheckoutFailureLeavesSlotFree`, `GlobalChoiceReferenceTests.CatalogCheckoutFailure_IsCodedAndSkipsCreate` | ✅ |
+| AC-102 | At the covered connection-acquisition boundary, raw authentication/provider diagnostic details remain only in the original inner cause and never enter the structured MCP user message; auth code/CLI exit and reauthentication flag remain | `MetadataAcquisitionPrivacyTests.RawAuthDetail_StaysInCauseAndOutOfMcpPayload` | ✅ |
+
+### Bounded SDK diagnostic messages
+
+The following sixteen existing SDK/catalog error boundaries use service-owned action text and caller-owned target identifiers or labels. Provider/SDK diagnostic text is no longer appended to their user messages. Original inner exceptions, error codes, exception types, auth/reauthentication flags, CLI exit mappings, catch filters, cancellation behavior, request payloads and connection scopes remain unchanged. Existing partial-operation limits remain: an earlier mutation can succeed before a later failure.
+
+| Method | Changed error boundary |
+|--------|------------------------|
+| `ResolveGlobalOptionAsync` | Option-set retrieval |
+| `AddStatusReasonAsync` | Status-reason insertion |
+| `ReadStatusReasonsAsync` | Status-attribute retrieval |
+| `UpdateStatusReasonAsync` | Status-reason update |
+| `RemoveStatusReasonAsync` | Status-reason removal |
+| `ReadColumnOptionsAsync` | Local option-attribute retrieval |
+| `AddColumnOptionAsync` | Local option insertion |
+| `UpdateColumnOptionAsync` | Local option update |
+| `RemoveColumnOptionAsync` | Local option removal |
+| `ResolveGlobalChoiceNameAsync` | Catalog authentication and other mapped failures (two boundaries) |
+| `ApplyGlobalOptionColorAsync` | Color metadata read and update (two boundaries) |
+| `ApplyLocalOptionColorAsync` | Color metadata read and update (two boundaries) |
+| `ValidatePrimaryIdLabelUpdateAsync` | Primary-ID table lookup |
+
+The synthetic global-color read/write cases verify the real service -> MCP tool -> structured JSON path with fake ClientSecret= and Bearer sentinels. The initial-insert generic fallback, covered acquisition privacy, coded/raw cancellation and existing helper controls remain separate. This is a bounded message change, not repository-wide secret redaction, a log-privacy guarantee, a real-provider incident or a new MCP transport/RPC test. The other inventoried boundaries are included by exact source substitution; no new dynamic case for each of those boundaries is claimed.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-103 | Global-color read/update failures retain their SDK failure code and original cause while fake ClientSecret/Bearer details are absent from the actual MCP user message and emitted exception JSON (four cases) | `MetadataSdkDiagnosticPrivacyProbeTests.ActualServiceColorFailure_UntrustedDetailMustNotReachMcp` | ✅ |
+| AC-104 | Add-statusreason failures use the fixed action/target message in the CLI error envelope, omit the synthetic SDK diagnostic and retain SDK failure code, original cause, success=false and CLI exit2 | `MetadataDraftOptionReadTests.AddStatusSdkFailure_UsesFixedMessageInCliEnvelope` | ✅ |
+| AC-105 | The covered synthetic SDK route preserves tokens, one request per returned lease, request order and original causes; initial raw SDK faults remain generic, covered auth details stay private and existing timeout/cancellation/helper controls remain | `MetadataSdkDiagnosticPrivacyProbeTests.InitialInsertRawFailure_UsesGenericMcpError`, `ActualColorWrapper_CliMapperRemovesKnownSecretKey`, `DirectMapperCharacterization_DoesNotClaimBearerRedaction`, `MetadataAcquisitionPrivacyTests.RawAuthDetail_StaysInCauseAndOutOfMcpPayload`, `MetadataAddOptionValueLeaseContractTests.ActualServicePoolTimeout_IsConnectionTimeoutAtMcpBoundary`, `ActualColorCancellation_PropagatesOriginalAtMcpBoundary`, `McpToolErrorHelperTests.ThrowStructuredError_GenericException_DoesNotLeakInnerMessage` | ✅ |
+
 ### Edge Cases
 
 | Scenario | Input | Expected Output |
 |----------|-------|-----------------|
 | Create table with duplicate schema name | `SchemaName` already exists | `PpdsException` with `DUPLICATE_SCHEMA_NAME` |
-| Delete table with dependent relationships | Table has 1:N relationships | Dry-run reports dependencies; delete cascades |
+| Delete table with dependent relationships | Table has 1:N relationships | Dry-run validates input only; the server decides whether a real delete succeeds |
 | Create column on non-existent entity | `EntityLogicalName` not found | `PpdsException` with `ENTITY_NOT_FOUND` |
 | Create key exceeding 10-key limit | Entity already has 10 keys | `PpdsException` with `KEY_LIMIT_EXCEEDED` |
 | Create key with invalid column type | Key attribute is Image type | `PpdsException` with `INVALID_KEY_ATTRIBUTE` |
@@ -727,7 +850,7 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 ### Recovery Strategies
 
 - **Validation errors:** Fix input and retry — all validation errors include the specific field and constraint that failed
-- **Dependency conflicts:** Use `--dry-run` first to discover dependencies, then resolve or accept cascade behavior
+- **Dependency conflicts:** Inspect and resolve dependencies separately before deletion. The current CLI delete dry-run does not discover them
 - **Managed component errors:** Cannot modify managed components directly — create unmanaged customizations in the target solution
 
 ---
@@ -778,7 +901,7 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 
 **Context:** Schema deletes are destructive and irreversible. Need a confirmation mechanism.
 
-**Decision:** Follow the truncate pattern: `--dry-run` for impact preview, interactive confirmation with exact typed text, `--force` to skip, `CONFIRMATION_REQUIRED` error in non-interactive mode.
+**Decision:** Follow the truncate pattern: `--dry-run` for the limited validation described above, interactive confirmation with exact typed text, `--force` to skip, `CONFIRMATION_REQUIRED` error in non-interactive mode.
 
 **Rationale:** Consistency — users who've used `ppds truncate` already understand this pattern. The typed confirmation text (e.g., `DELETE TABLE account`) forces acknowledgment of exactly what's being destroyed. MCP surfaces don't expose delete at all, matching the existing read-only + non-destructive MCP design.
 
@@ -850,10 +973,16 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 
 | Date | Change |
 |------|--------|
+| 2026-11-09 | Bound sixteen SDK/catalog user-message paths to service-owned action/target text; retain diagnostic causes and classifications, verify synthetic MCP privacy and update the intentional CLI message contract (AC-103 through AC-105). |
+| 2026-11-08 | Preserve covered color cancellation and normalize the selected acquisition boundaries with unchanged CLI exits; protect authentication diagnostic details at the MCP error boundary (AC-97 through AC-102). |
+| 2026-11-03 | #1532: document actual delete-preview scope, remove CLI dependency/removability assurances, add additive JSON scope and AC-66–AC-69. Correct AC-11 to incomplete: dependency discovery is still unimplemented. |
+| 2026-11-03 | #1531: draft-aware status/local option allocation and local color readback, published public lists retained. Added AC-70–AC-73. |
 | 2026-03-31 | Initial spec |
 | 2026-04-01 | Post-implementation cleanup: fixed CodeQL findings, completed TUI choice editing, replaced Extension webview stubs with VS Code input collection, updated AC statuses |
 | 2026-05-29 | Surface rationalization (#1159 — canonical `entity`/`attribute`/`optionset` nouns + `table`/`column`/`choice` deprecation shims), status reason management (#1160 — add/list/update/remove on `entity`), local Choice/OptionSet column fix + local option management (#1161 — `IsGlobal=false`), shared `OptionValueDeriver`. Added AC-37–AC-58. |
 | 2026-06-10 | `entity` authoring verbs accept positional `<entity>` alongside `--entity` (#1208) — amended the #1160 Form A decision (Form B accepted additively), rewrote the §"CLI Surface" rationale, added AC-61/AC-62. `attribute`/`key` unchanged. |
+| 2026-11-07 | Resolve global choice references during column creation using the target environment's stored name (#1535, AC-78 through AC-81). |
+| 2026-11-07 | #1534 added primary ID label updates with table-key verification and locale merging. Added AC-74–AC-77. |
 
 ---
 

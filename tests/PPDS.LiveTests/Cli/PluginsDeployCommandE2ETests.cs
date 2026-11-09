@@ -135,7 +135,7 @@ public class PluginsDeployCommandE2ETests(ITestOutputHelper output) : CliE2ETest
         await RunCliAsync("auth", "select", "--name", profileName);
 
         var fixture = new PluginFixtureCleanup(RunCliWithCancellationAsync, GenerateTempFilePath(".json"),
-            profileName, Configuration.DataverseUrl!, output.WriteLine);
+            profileName, Configuration.DataverseUrl!, output.WriteLine, () => RequiresManualReview);
         await fixture.RunAsync(async () =>
         {
             // Actually deploy the plugin
@@ -172,7 +172,7 @@ public class PluginsDeployCommandE2ETests(ITestOutputHelper output) : CliE2ETest
         await RunCliAsync("auth", "select", "--name", profileName);
 
         var fixture = new PluginFixtureCleanup(RunCliWithCancellationAsync, GenerateTempFilePath(".json"),
-            profileName, Configuration.DataverseUrl!, output.WriteLine);
+            profileName, Configuration.DataverseUrl!, output.WriteLine, () => RequiresManualReview);
         await fixture.RunAsync(async () =>
         {
             // Deploy the plugin

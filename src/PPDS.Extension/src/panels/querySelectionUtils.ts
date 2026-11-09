@@ -3,7 +3,17 @@
  * Kept as a stable import path for host-side tests.
  */
 export { getSelectionRect, isSingleCell } from './webview/shared/selection-utils.js';
-export type { SelectionRect, CellCoord } from './webview/shared/selection-utils.js';
+/**
+ * Named rectangle type retained at the stable host-test import path.
+ * @public
+ */
+export type { SelectionRect } from './webview/shared/selection-utils.js';
+
+/**
+ * Named cell coordinates retained at the stable host-test import path.
+ * @public
+ */
+export type { CellCoord } from './webview/shared/selection-utils.js';
 
 // sanitizeValue is also defined in dom-utils.ts (webview) — kept inline here to
 // avoid pulling a browser-only dependency (CSS.escape) into the host tsconfig.

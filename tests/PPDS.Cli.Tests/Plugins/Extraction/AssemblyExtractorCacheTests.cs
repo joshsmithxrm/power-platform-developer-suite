@@ -152,33 +152,31 @@ public sealed class AssemblyExtractorCacheTests : IDisposable
     [Fact]
     [Trait("Category", "Unit")]
     [Trait("AC", "AC-54")]
-    public async Task GetNet462ReferenceAssemblyDirectory_StaleCacheMiss_PreservesConcurrentWinner()
+    public void GetNet462ReferenceAssemblyDirectory_StaleCacheMiss_PreservesConcurrentWinner()
     {
         var cache = AssemblyExtractor.GetNet462ReferenceAssemblyDirectory(_baseDir);
         Assert.NotNull(cache);
         File.Delete(Path.Combine(cache, "System.Runtime.dll"));
-        using var missDetected = new ManualResetEventSlim();
-        using var resume = new ManualResetEventSlim();
+        var missDetected = false;
+        string? winner = null;
+        var marker = Path.Combine(cache, "winner-marker.txt");
 
-        var delayed = Task.Run(() => AssemblyExtractor.GetNet462ReferenceAssemblyDirectory(_baseDir, () =>
+        var delayed = AssemblyExtractor.GetNet462ReferenceAssemblyDirectory(_baseDir, () =>
         {
-            missDetected.Set();
-            Assert.True(resume.Wait(TimeSpan.FromSeconds(10)), "Competing recovery did not finish.");
-        }));
+            // The callback runs after the first caller releases the inspection lock.
+            // Publish the winner here to force the stale-miss interleaving without
+            // requiring a competing task to finish within a scheduling deadline.
+            missDetected = true;
+            winner = AssemblyExtractor.GetNet462ReferenceAssemblyDirectory(_baseDir);
+            if (winner != null)
+                File.WriteAllText(marker, "preserve the concurrent winner");
+        });
 
-        try
-        {
-            Assert.True(missDetected.Wait(TimeSpan.FromSeconds(10)), "Expected the delayed caller to observe a cache miss.");
-            Assert.Equal(cache, AssemblyExtractor.GetNet462ReferenceAssemblyDirectory(_baseDir));
-            File.WriteAllText(Path.Combine(cache, "winner-marker.txt"), "preserve the concurrent winner");
-        }
-        finally
-        {
-            resume.Set();
-            Assert.Equal(cache, await delayed);
-        }
-
-        Assert.Equal("preserve the concurrent winner", File.ReadAllText(Path.Combine(cache, "winner-marker.txt")));
+        // Assertions stay outside the extractor's exception-to-null fallback boundary.
+        Assert.True(missDetected, "Expected the delayed caller to observe a cache miss.");
+        Assert.Equal(cache, winner);
+        Assert.Equal(cache, delayed);
+        Assert.Equal("preserve the concurrent winner", File.ReadAllText(marker));
         Assert.True(File.Exists(Path.Combine(cache, "System.Runtime.dll")));
         Assert.Empty(Directory.EnumerateDirectories(_baseDir, ".staging-*"));
     }

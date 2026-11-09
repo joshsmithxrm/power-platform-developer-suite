@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Sixteen metadata SDK/catalog failure paths now report fixed action and target context without appending provider diagnostics. CLI error codes, exit codes and original inner causes are preserved; scripts should use error codes rather than SDK message text. This is bounded to the named authoring paths, with no general log-redaction guarantee.
+
+### Changed
+
+- All nine existing `views` writers now enforce the shared target-confirmation policy. Scripts targeting protected environments must pass `--confirm-env <resolved-url>`; read-only sessions reject writes, including no-op edits. `views list` and `views get` remain acknowledgement-free. The original four-argument `ViewService` constructor remains available for readers, but direct writers must supply a resolved confirmation service (#1015, partial).
+
+### Fixed
+
+- Plugin deploy preview reads existing image inventory and distinguishes reused types (#1517). Registration version 2.0 explicitly opts into supported nonsecret desired-state defaults and read-only post-write verification; missing/version 1.0 retains legacy optional preservation. Established Update empty-string clears are preserved (#1519).
+- Plugin diff compares managed execution/image settings and reports incomplete coverage with exit 2. Existing JSON `data[]` remains; additive `metadata` contains status/coverage. Secure values are unverifiable and excluded; unsecure configuration differences are redacted (#1520).
+- Registration preflight validates configured user identities before artifact upload. Scoped configuration/output codecs preserve generic model intent and write-only inputs; extraction supports explicit --registration-version. Version 2 fresh defaults take precedence over legacy overlays. Original update-record constructors/deconstruction and positional RPC targets remain compatible.
+- `views reorder-columns` now requires every existing column exactly once and rejects empty, partial, unknown or duplicate names before writing. Reordering preserves cell metadata and other layout content; use `views remove-column` for removal (#1533).
+- Form `add-field` and newly created `reorder-fields` controls use the resolved metadata logical name for bindings and control IDs regardless of input casing. Existing controls and label behavior are preserved; invalid new-field requests are rejected before writes even for sections without rows (#1527).
+- Form XML raw get/set roundtrips accept repeated reusable `customControl` type IDs at their schema-defined path. Instance GUID uniqueness and schema validation remain enforced; set-xml help now distinguishes instance IDs from reusable type IDs (#1541).
+- Preserve cancellation identity and report Operation.Cancelled for the covered option-color operations (CLI exit 2 remains). Normalize connection checkout failures in the bounded metadata workflows and shared prefix/publication helpers with their original mapped CLI exits and causes. Prefix checkout normalization also applies to existing table, column, one-to-many/many-to-many relationship, global choice and key creation callers. MCP option-add now reports Connection.Timeout for pool exhaustion (CLI exit 4 remains). Other direct column acquisitions, catalog read behavior, SDK execution contracts and partial-operation limits remain; the bounded diagnostic-message change is documented below.
+- Return the table-update connection before cache invalidation and optional publication, allowing an update followed by publication with one available pooled connection. Existing payload, dry-run and SDK contracts remain; scoped checkout normalization is listed above. Separate requests can still complete partially after a later failure.
+- Return metadata authoring connections before option-color or publication follow-ups, and use separate connections for color read/update and publisher-prefix queries. This lets the covered option/status/table-create workflows complete with one available pooled connection. The scoped cancellation and acquisition changes are listed above; separate requests can still complete partially if a later operation fails.
+
 ## [1.5.0] - 2026-11-01
 
 ### Added
@@ -21,9 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Plugin deploy preview reads existing image inventory and distinguishes reused types (#1517). Registration version 2.0 explicitly opts into supported nonsecret desired-state defaults and read-only post-write verification; missing/version 1.0 retains legacy optional preservation. Established Update empty-string clears are preserved (#1519).
-- Plugin diff compares managed execution/image settings and reports incomplete coverage with exit 2. Existing JSON `data[]` remains; additive `metadata` contains status/coverage. Secure values are unverifiable and excluded; unsecure configuration differences are redacted (#1520).
-- Registration preflight validates configured user identities before artifact upload. Scoped configuration/output codecs preserve generic model intent and write-only inputs; extraction supports explicit --registration-version. Version 2 fresh defaults take precedence over legacy overlays. Original update-record constructors/deconstruction and positional RPC targets remain compatible.
 - Plugin deployment retains earlier step errors when a later operation fails, and secondary-only message-filter diagnostics identify the actual secondary-entity requirement (#1360).
 - Plugin diff propagates cancellation through every drift-collection and comparison stage (#1317).
 - Web-resource creation reports missing or mismatched publisher-prefix warnings in structured results and stderr without renaming the resource. Missing-resource update guidance uses the literal `<file>` placeholder (#1236).

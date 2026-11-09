@@ -193,7 +193,9 @@ public static class KeyCommandGroup
         }
     }
 
-    internal static Command CreateDeleteCommand()
+    internal static Command CreateDeleteCommand() => CreateDeleteCommand(null);
+
+    internal static Command CreateDeleteCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -221,7 +223,7 @@ public static class KeyCommandGroup
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Show dependencies without deleting",
+            Description = MetadataDeletePreview.InputOnlyHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -251,7 +253,7 @@ public static class KeyCommandGroup
 
             return await ExecuteDeleteAsync(
                 solution, entity, name, force, dryRun,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -266,17 +268,20 @@ public static class KeyCommandGroup
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -287,7 +292,7 @@ public static class KeyCommandGroup
                 Console.Error.WriteLine();
             }
 
-            // Dry-run first
+            // Validate required inputs only; target existence and dependencies are not queried.
             var dryRunRequest = new DeleteKeyRequest
             {
                 SolutionUniqueName = solution,
@@ -302,11 +307,11 @@ public static class KeyCommandGroup
             {
                 if (globalOptions.IsJsonMode)
                 {
-                    writer.WriteSuccess(new { entity, key = name, dryRun = true });
+                    writer.WriteSuccess(new { entity, key = name, dryRun = true, preview = MetadataDeletePreview.InputOnly });
                 }
                 else
                 {
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                    MetadataDeletePreview.InputOnly.WriteDiagnostic();
                 }
 
                 return ExitCodes.Success;
