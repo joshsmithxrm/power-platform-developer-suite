@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Metadata option-color failures keep their existing error code while structured MCP errors omit SDK diagnostic text from the bounded service-owned messages. Synthetic read/write checks cover fake ClientSecret and Bearer details; initial raw-failure fallback and covered cancellation/acquisition behavior remain. No repository-wide or log-privacy guarantee is implied.
+
+### Fixed
+
+- Metadata option-add reports Connection.Timeout for normalized pool acquisition timeouts and preserves cancellation from covered option-color SDK operations. CLI timeout/cancellation exits remain 4/2; raw service errors outside normalization retain their existing generic fallback.
+
 ## [1.3.0] - 2026-11-01
 
 ### Added

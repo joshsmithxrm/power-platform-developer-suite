@@ -204,11 +204,17 @@ internal static class FormXmlEditor
         return formXml;
     }
 
-    internal static XDocument ReorderFields(XDocument formXml, string sectionLabel, IReadOnlyList<string> orderedFields, IDictionary<string, string> classIdsByField)
+    internal static XDocument ReorderFields(XDocument formXml, string sectionLabel, IReadOnlyList<string> orderedFields,
+        Func<string, (string LogicalName, string ClassId)> resolveNewField)
     {
         var section = RequireSection(formXml, sectionLabel);
         var rows = section.Element("rows");
-        if (rows is null) return formXml;
+        if (rows is null)
+        {
+            // Preserve the established rowless no-op, but reject invalid requests before writing.
+            foreach (var field in orderedFields) resolveNewField(field);
+            return formXml;
+        }
 
         // Index existing field cells by logical name so we can preserve their
         // generated GUIDs and any authored attributes when reordering. Cells that
@@ -234,12 +240,17 @@ internal static class FormXmlEditor
 
         foreach (var fieldName in orderedFields)
         {
-            var cell = existingCells.TryGetValue(fieldName, out var existing)
-                ? existing
-                : BuildFieldCell(
-                    fieldName,
-                    classIdsByField.TryGetValue(fieldName, out var cid) ? cid : string.Empty,
-                    fieldName);
+            XElement cell;
+            if (existingCells.TryGetValue(fieldName, out var existing))
+            {
+                cell = existing;
+            }
+            else
+            {
+                // Resolve only new cells; existing IDs/bindings and caller-based label fallback stay intact.
+                var metadata = resolveNewField(fieldName);
+                cell = BuildFieldCell(metadata.LogicalName, metadata.ClassId, fieldName);
+            }
 
             rows.Add(new XElement("row", cell));
         }

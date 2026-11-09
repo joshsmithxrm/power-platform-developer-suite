@@ -12,6 +12,7 @@ using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Infrastructure.Safety;
+using PPDS.Cli.Services.Environment;
 using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Models;
@@ -28,17 +29,30 @@ public class ViewService : IViewService
     private readonly ICachedMetadataProvider _cachedMetadata;
     private readonly IShakedownGuard _guard;
     private readonly ILogger<ViewService> _logger;
+    private readonly IEnvironmentConfirmationService _confirmation;
 
     public ViewService(
         IDataverseConnectionPool pool,
         ICachedMetadataProvider cachedMetadata,
         IShakedownGuard guard,
         ILogger<ViewService> logger)
+        : this(pool, cachedMetadata, guard, logger, MissingEnvironmentConfirmationService.Instance)
+    {
+    }
+
+    /// <summary>Creates a view service with session-owned target acknowledgement for writes.</summary>
+    public ViewService(
+        IDataverseConnectionPool pool,
+        ICachedMetadataProvider cachedMetadata,
+        IShakedownGuard guard,
+        ILogger<ViewService> logger,
+        IEnvironmentConfirmationService confirmation)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
         _cachedMetadata = cachedMetadata ?? throw new ArgumentNullException(nameof(cachedMetadata));
         _guard = guard ?? throw new ArgumentNullException(nameof(guard));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _confirmation = confirmation ?? throw new ArgumentNullException(nameof(confirmation));
     }
 
     // ─── Read path ─────────────────────────────────────────────────────────────
@@ -184,6 +198,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.add-column");
+        await _confirmation.EnsureConfirmedAsync("views.add-column", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
@@ -249,6 +265,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.remove-column");
+        await _confirmation.EnsureConfirmedAsync("views.remove-column", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
@@ -280,6 +298,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.update-column");
+        await _confirmation.EnsureConfirmedAsync("views.update-column", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
@@ -311,6 +331,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.reorder-columns");
+        await _confirmation.EnsureConfirmedAsync("views.reorder-columns", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
@@ -344,6 +366,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.set-sort");
+        await _confirmation.EnsureConfirmedAsync("views.set-sort", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
@@ -372,6 +396,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.clear-sort");
+        await _confirmation.EnsureConfirmedAsync("views.clear-sort", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
@@ -403,6 +429,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.set-filter");
+        await _confirmation.EnsureConfirmedAsync("views.set-filter", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var filterElement = XElement.Parse(filterXmlFragment);
         if (filterElement.Name.LocalName != "filter")
@@ -436,6 +464,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.clear-filter");
+        await _confirmation.EnsureConfirmedAsync("views.clear-filter", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var (savedQueryId, entity) = await FetchViewRecordAsync(
@@ -465,6 +495,8 @@ public class ViewService : IViewService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("views.set-fetchxml");
+        await _confirmation.EnsureConfirmedAsync("views.set-fetchxml", cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var fetchDoc = XDocument.Parse(fetchXml);
         if (fetchDoc.Root?.Name.LocalName != "fetch")
@@ -910,19 +942,54 @@ public class ViewService : IViewService
 
     internal static XDocument ReorderCells(XDocument layout, IReadOnlyList<string> orderedAttributes)
     {
-        var row = layout.Descendants("row").FirstOrDefault();
-        if (row == null) return layout;
+        var ordered = ValidateColumnOrder(orderedAttributes);
+        var rows = layout.Descendants("row").ToList();
+        if (rows.Count != 1)
+            throw new PpdsException(ErrorCodes.Validation.SchemaInvalid,
+                "Reordering requires a layout with exactly one row.");
 
-        var existingCells = row.Elements("cell").ToList();
-        var reordered = orderedAttributes
-            .Select(attr => existingCells.FirstOrDefault(c => string.Equals((string?)c.Attribute("name"), attr, StringComparison.OrdinalIgnoreCase)))
-            .Where(c => c != null)
-            .ToList();
+        var existingCells = rows[0].Elements("cell").ToList();
+        var cellsByName = new Dictionary<string, XElement>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cell in existingCells)
+        {
+            var name = (string?)cell.Attribute("name");
+            if (string.IsNullOrWhiteSpace(name) || name != name.Trim() || !cellsByName.TryAdd(name, cell))
+                throw new PpdsException(ErrorCodes.Validation.SchemaInvalid,
+                    "Reordering requires nonempty, unique column names in the layout.");
+        }
+        if (existingCells.Count == 0)
+            throw new PpdsException(ErrorCodes.Validation.SchemaInvalid,
+                "Reordering requires a layout containing columns.");
 
-        foreach (var cell in existingCells) cell.Remove();
-        foreach (var cell in reordered) row.Add(cell!);
+        if (ordered.Count != existingCells.Count || ordered.Any(name => !cellsByName.ContainsKey(name)))
+            throw new PpdsException(ErrorCodes.Validation.InvalidValue,
+                "Column order must contain every existing column exactly once. Use remove-column to remove a column.");
+
+        // Validate the entire permutation before changing the document. Replace only cell slots,
+        // retaining comments, other child nodes, and each cell's original name and metadata.
+        var reordered = ordered.Select(name => new XElement(cellsByName[name])).ToList();
+        for (var i = 0; i < existingCells.Count; i++)
+            existingCells[i].ReplaceWith(reordered[i]);
 
         return layout;
+    }
+
+    internal static IReadOnlyList<string> ValidateColumnOrder(IReadOnlyList<string> orderedAttributes)
+    {
+        if (orderedAttributes == null || orderedAttributes.Count == 0)
+            throw new PpdsException(ErrorCodes.Validation.InvalidValue,
+                "Column order must contain every existing column exactly once.");
+
+        var ordered = new List<string>(orderedAttributes.Count);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var attribute in orderedAttributes)
+        {
+            if (string.IsNullOrWhiteSpace(attribute) || !names.Add(attribute.Trim()))
+                throw new PpdsException(ErrorCodes.Validation.InvalidValue,
+                    "Column order cannot contain empty or duplicate names.");
+            ordered.Add(attribute.Trim());
+        }
+        return ordered;
     }
 
     internal static XDocument SetOrderElements(XDocument fetch, IReadOnlyList<ViewSortOrder> sorts)

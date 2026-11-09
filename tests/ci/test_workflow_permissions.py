@@ -39,8 +39,6 @@ WRITE_PERMISSION_REASONS = {
         "Preserve the existing documentation release write grant.",
     ("docs-release.yml", "release", "pull-requests"):
         "Preserve the existing documentation release PR write grant.",
-    ("integration-tests.yml", "integration-tests", "id-token"):
-        "Request OIDC tokens for the configured test environment.",
     ("milestone-release-check.yml", "check-milestone-completion", "issues"):
         "Create or update milestone release tracking issues.",
     ("post-merge-release-check.yml", "patch-release-detection", "issues"):
@@ -149,12 +147,11 @@ def test_write_permissions_match_documented_exceptions() -> None:
     )
 
 
-def test_integration_status_has_no_token_scopes() -> None:
+def test_integration_hold_has_no_token_scopes_or_elevated_exception() -> None:
     workflow = _load_workflow("integration-tests.yml")
     assert workflow["permissions"] == {}
-    assert _effective_permissions(
-        workflow, workflow["jobs"]["integration-tests-status"]
-    ) == {}
-    assert _effective_permissions(
-        workflow, workflow["jobs"]["integration-tests"]
-    ) == {"contents": "read", "id-token": "write"}
+    assert set(workflow["jobs"]) == {"integration-tests-hold"}
+    job = workflow["jobs"]["integration-tests-hold"]
+    assert job["permissions"] == {}
+    assert _effective_permissions(workflow, job) == {}
+    assert not any(name == "integration-tests.yml" for name, _, _ in WRITE_PERMISSION_REASONS)

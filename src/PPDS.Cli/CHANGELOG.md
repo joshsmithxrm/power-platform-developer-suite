@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Sixteen metadata SDK/catalog failure paths now report fixed action and target context without appending provider diagnostics. CLI error codes, exit codes and original inner causes are preserved; scripts should use error codes rather than SDK message text. This is bounded to the named authoring paths, with no general log-redaction guarantee.
+
+### Changed
+
+- All nine existing `views` writers now enforce the shared target-confirmation policy. Scripts targeting protected environments must pass `--confirm-env <resolved-url>`; read-only sessions reject writes, including no-op edits. `views list` and `views get` remain acknowledgement-free. The original four-argument `ViewService` constructor remains available for readers, but direct writers must supply a resolved confirmation service (#1015, partial).
+
+### Fixed
+
+- `views reorder-columns` now requires every existing column exactly once and rejects empty, partial, unknown or duplicate names before writing. Reordering preserves cell metadata and other layout content; use `views remove-column` for removal (#1533).
+- Form `add-field` and newly created `reorder-fields` controls use the resolved metadata logical name for bindings and control IDs regardless of input casing. Existing controls and label behavior are preserved; invalid new-field requests are rejected before writes even for sections without rows (#1527).
+- Form XML raw get/set roundtrips accept repeated reusable `customControl` type IDs at their schema-defined path. Instance GUID uniqueness and schema validation remain enforced; set-xml help now distinguishes instance IDs from reusable type IDs (#1541).
+- Preserve cancellation identity and report Operation.Cancelled for the covered option-color operations (CLI exit 2 remains). Normalize connection checkout failures in the bounded metadata workflows and shared prefix/publication helpers with their original mapped CLI exits and causes. Prefix checkout normalization also applies to existing table, column, one-to-many/many-to-many relationship, global choice and key creation callers. MCP option-add now reports Connection.Timeout for pool exhaustion (CLI exit 4 remains). Other direct column acquisitions, catalog read behavior, SDK execution contracts and partial-operation limits remain; the bounded diagnostic-message change is documented below.
+- Return the table-update connection before cache invalidation and optional publication, allowing an update followed by publication with one available pooled connection. Existing payload, dry-run and SDK contracts remain; scoped checkout normalization is listed above. Separate requests can still complete partially after a later failure.
+- Return metadata authoring connections before option-color or publication follow-ups, and use separate connections for color read/update and publisher-prefix queries. This lets the covered option/status/table-create workflows complete with one available pooled connection. The scoped cancellation and acquisition changes are listed above; separate requests can still complete partially if a later operation fails.
+
 ## [1.5.0] - 2026-11-01
 
 ### Added

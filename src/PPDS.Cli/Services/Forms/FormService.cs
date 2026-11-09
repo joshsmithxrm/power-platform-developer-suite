@@ -427,7 +427,7 @@ public sealed partial class FormService : IFormService
                         $"Column '{field}' not found on entity '{entityLogicalName}'.");
 
                 var classId = ClassIdResolver.ResolveForField(attr.AttributeType);
-                FormXmlEditor.AddField(doc, request.SectionLabel, field, classId, attr.DisplayName);
+                FormXmlEditor.AddField(doc, request.SectionLabel, attr.LogicalName, classId, attr.DisplayName);
             }
 
             reporter?.ReportPhase("Writing", $"Adding {request.FieldLogicalNames.Length} field(s) to section '{request.SectionLabel}'");
@@ -479,12 +479,17 @@ public sealed partial class FormService : IFormService
                 await FetchFormRecordAsync(request.EntityLogicalName, request.FormName, requireMainForm: true, ct, requireCustomizable: true);
 
             var attributes = await _metadataService.GetAttributesAsync(entityLogicalName, cancellationToken: ct);
-            var classIdsByField = attributes
-                .Where(a => ClassIdCanBeResolved(a.AttributeType))
-                .ToDictionary(a => a.LogicalName, a => ClassIdResolver.ResolveForField(a.AttributeType), StringComparer.OrdinalIgnoreCase);
+            var attributesByName = attributes.ToDictionary(a => a.LogicalName, StringComparer.OrdinalIgnoreCase);
+            (string LogicalName, string ClassId) ResolveNewField(string field)
+            {
+                if (!attributesByName.TryGetValue(field, out var attribute))
+                    throw new PpdsException(FormErrorCodes.ColumnNotFound,
+                        $"Column '{field}' not found on entity '{entityLogicalName}'.");
+                return (attribute.LogicalName, ClassIdResolver.ResolveForField(attribute.AttributeType));
+            }
 
             var doc = XDocument.Parse(formXmlStr!);
-            FormXmlEditor.ReorderFields(doc, request.SectionLabel, request.FieldLogicalNames, classIdsByField);
+            FormXmlEditor.ReorderFields(doc, request.SectionLabel, request.FieldLogicalNames, ResolveNewField);
 
             reporter?.ReportPhase("Writing", $"Reordering fields in section '{request.SectionLabel}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
@@ -772,12 +777,6 @@ public sealed partial class FormService : IFormService
         }
 
         return result;
-    }
-
-    private static bool ClassIdCanBeResolved(string attributeType)
-    {
-        try { ClassIdResolver.ResolveForField(attributeType); return true; }
-        catch { return false; }
     }
 
     private static string FormTypeName(int typeCode) => typeCode switch
