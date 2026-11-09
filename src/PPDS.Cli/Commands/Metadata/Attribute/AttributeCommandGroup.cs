@@ -18,16 +18,18 @@ public static class AttributeCommandGroup
     /// <summary>
     /// Creates the 'attribute' command group with subcommands.
     /// </summary>
-    public static Command Create()
+    public static Command Create() => Create(null);
+
+    internal static Command Create(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var command = new Command("attribute", "Create, update, or delete columns (attributes) on Dataverse tables");
 
-        command.Subcommands.Add(CreateCreateCommand());
-        command.Subcommands.Add(CreateUpdateCommand());
-        command.Subcommands.Add(CreateDeleteCommand());
-        command.Subcommands.Add(CreateAddOptionCommand());
-        command.Subcommands.Add(CreateUpdateOptionCommand());
-        command.Subcommands.Add(CreateRemoveOptionCommand());
+        command.Subcommands.Add(CreateCreateCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateUpdateCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateDeleteCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateAddOptionCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateUpdateOptionCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateRemoveOptionCommand(serviceProviderFactory));
 
         return command;
     }
@@ -344,11 +346,12 @@ public static class AttributeCommandGroup
         if (entries == null || entries.Count == 0)
             return null;
 
-        return entries.Select(e => new OptionDefinition
+        return entries.Select(e =>
         {
-            Label = e.Label ?? "",
-            Value = e.Value ?? 0,
-            Color = e.Color
+            var option = new OptionDefinition { Label = e.Label ?? "", Color = e.Color };
+            // The file grammar historically treats JSON null like omission.
+            if (e.Value.HasValue) option.Value = e.Value.Value;
+            return option;
         }).ToArray();
     }
 
@@ -433,16 +436,22 @@ public static class AttributeCommandGroup
             };
 
             var result = await authoringService.CreateColumnAsync(request, ct: cancellationToken);
+            var previewScope = dryRun
+                && (request.ColumnType is SchemaColumnType.Choice or SchemaColumnType.Choices)
+                && string.IsNullOrEmpty(request.OptionSetName)
+                && request.Options is { Length: > 0 }
+                && request.Options.Any(option => !option.HasExplicitValue)
+                    ? MetadataDryRunScope.PublisherProvisional : MetadataDryRunScope.Publisher;
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(result);
+                previewScope.WriteSuccess(writer, dryRun, result);
             }
             else
             {
                 if (dryRun)
                 {
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                    previewScope.WriteDiagnostic();
                 }
                 else
                 {
@@ -471,7 +480,9 @@ public static class AttributeCommandGroup
         }
     }
 
-    public static Command CreateUpdateCommand()
+    public static Command CreateUpdateCommand() => CreateUpdateCommand(null);
+
+    internal static Command CreateUpdateCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -557,7 +568,7 @@ public static class AttributeCommandGroup
 
             return await ExecuteUpdateAsync(
                 solution, entity, column, displayName, description, requiredLevel, maxLength,
-                dryRun, publish, profileVal, environmentVal, globalOptions, cancellationToken);
+                dryRun, publish, profileVal, environmentVal, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -576,17 +587,20 @@ public static class AttributeCommandGroup
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
                 globalOptions.Verbose, globalOptions.Debug,
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+                cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -617,7 +631,7 @@ public static class AttributeCommandGroup
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new
+                MetadataDryRunScope.Inputs.WriteSuccess(writer, dryRun, new
                 {
                     entity,
                     column,
@@ -629,7 +643,7 @@ public static class AttributeCommandGroup
             }
             else if (dryRun)
             {
-                Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                MetadataDryRunScope.Inputs.WriteDiagnostic();
             }
             else if (publish)
             {
@@ -853,7 +867,9 @@ public static class AttributeCommandGroup
         return (label, value, color);
     }
 
-    internal static Command CreateAddOptionCommand()
+    internal static Command CreateAddOptionCommand() => CreateAddOptionCommand(null);
+
+    internal static Command CreateAddOptionCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string?>("--solution", "-s") { Description = "Solution unique name (required for value derivation when --option has no explicit value)" };
         var entityOption = new Option<string>("--entity", "-e") { Description = "Logical name of the entity", Required = true };
@@ -899,9 +915,11 @@ public static class AttributeCommandGroup
 
             try
             {
-                await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+                await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                     profile, environment, globalOptions.Verbose, globalOptions.Debug,
-                    ProfileServiceFactory.DefaultDeviceCodeCallback, cancellationToken);
+                    ProfileServiceFactory.DefaultDeviceCodeCallback, cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
                 var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
                 if (!globalOptions.IsJsonMode)
@@ -924,9 +942,9 @@ public static class AttributeCommandGroup
                 }, cancellationToken);
 
                 if (globalOptions.IsJsonMode)
-                    writer.WriteSuccess(new { entity, column, label, value = assigned, dryRun });
+                    MetadataDryRunScope.DraftValue.WriteSuccess(writer, dryRun, new { entity, column, label, value = assigned, dryRun });
                 else if (dryRun)
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                    MetadataDryRunScope.DraftValue.WriteDiagnostic();
                 else
                     Console.Error.WriteLine($"Option '{label}' added to '{entity}.{column}' with value {assigned}.");
 
@@ -947,7 +965,9 @@ public static class AttributeCommandGroup
         return command;
     }
 
-    internal static Command CreateUpdateOptionCommand()
+    internal static Command CreateUpdateOptionCommand() => CreateUpdateOptionCommand(null);
+
+    internal static Command CreateUpdateOptionCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string?>("--solution", "-s") { Description = "Solution unique name" };
         var entityOption = new Option<string>("--entity", "-e") { Description = "Logical name of the entity", Required = true };
@@ -995,9 +1015,11 @@ public static class AttributeCommandGroup
 
             try
             {
-                await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+                await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
                     profile, environment, globalOptions.Verbose, globalOptions.Debug,
-                    ProfileServiceFactory.DefaultDeviceCodeCallback, cancellationToken);
+                    ProfileServiceFactory.DefaultDeviceCodeCallback, cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
                 var authoringService = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
                 if (!globalOptions.IsJsonMode)
@@ -1021,9 +1043,9 @@ public static class AttributeCommandGroup
                 }, cancellationToken);
 
                 if (globalOptions.IsJsonMode)
-                    writer.WriteSuccess(new { entity, column, updated = true, dryRun });
+                    MetadataDryRunScope.Option.WriteSuccess(writer, dryRun, new { entity, column, updated = true, dryRun });
                 else if (dryRun)
-                    Console.Error.WriteLine("[Dry-Run] Validation passed. No changes persisted.");
+                    MetadataDryRunScope.Option.WriteDiagnostic();
                 else
                     Console.Error.WriteLine($"Option on '{entity}.{column}' updated successfully.");
 

@@ -35,7 +35,7 @@ public sealed class MetadataCreateChoiceTool : McpToolBase
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Result containing the name and metadata ID of the created choice.</returns>
     [McpServerTool(Name = "ppds_metadata_create_choice")]
-    [Description("Creates a new global choice (option set) in the specified solution. Options are provided as a JSON array of {label, value} objects. Supports dry-run mode.")]
+    [Description("Creates a new global choice (option set) in the specified solution. Options are JSON {label, value} objects. Omit value to derive it from the solution publisher; explicit zero is preserved. Out-of-range explicit values produce warnings. Supports dry-run mode.")]
     public async Task<MetadataCreateChoiceResult> ExecuteAsync(
         [Description("Unique name of the solution to add the choice to.")] string solution,
         [Description("Schema name for the global choice.")] string schemaName,
@@ -88,7 +88,8 @@ public sealed class MetadataCreateChoiceTool : McpToolBase
             {
                 Name = result.Name,
                 MetadataId = result.MetadataId == Guid.Empty ? null : result.MetadataId.ToString(),
-                WasDryRun = result.WasDryRun
+                WasDryRun = result.WasDryRun,
+                ValidationMessages = result.ValidationMessages
             };
         }
         catch (PpdsException ex)
@@ -121,4 +122,8 @@ public sealed class MetadataCreateChoiceResult
     /// <summary>Whether the operation was a dry run.</summary>
     [JsonPropertyName("wasDryRun")]
     public bool WasDryRun { get; set; }
+
+    /// <summary>Warnings produced while preserving explicit values or validating the request.</summary>
+    [JsonPropertyName("validationMessages")]
+    public ValidationMessage[] ValidationMessages { get; set; } = [];
 }

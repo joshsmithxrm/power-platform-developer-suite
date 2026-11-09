@@ -302,6 +302,12 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         reporter?.ReportPhase("Validating");
         _validator.ValidateCreateColumnRequest(request, prefix);
 
+        var options = request.Options;
+        ValidationMessage[] warnings = [];
+        if ((request.ColumnType == SchemaColumnType.Choice || request.ColumnType == SchemaColumnType.Choices)
+            && string.IsNullOrEmpty(request.OptionSetName) && options is { Length: > 0 })
+            (options, warnings) = await PrepareCreateOptionValuesAsync(options, request.SolutionUniqueName, reporter, ct).ConfigureAwait(false);
+
         if (request.DryRun)
         {
             _logger?.LogInformation("Dry-run: CreateColumn {SchemaName} on {Entity} validated successfully",
@@ -310,14 +316,11 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             {
                 LogicalName = request.SchemaName.ToLowerInvariant(),
                 WasDryRun = true,
-                ValidationMessages = []
+                ValidationMessages = warnings
             };
         }
 
-        // #1161: derive values for local Choice options supplied as label-only (no explicit value).
-        await DeriveLocalOptionValuesAsync(request, ct).ConfigureAwait(false);
-
-        var attribute = BuildAttributeMetadata(request);
+        var attribute = BuildAttributeMetadata(request, options);
 
         var sdkRequest = new CreateAttributeRequest
         {
@@ -353,7 +356,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             LogicalName = request.SchemaName.ToLowerInvariant(),
             MetadataId = response.AttributeId,
             WasDryRun = false,
-            ValidationMessages = []
+            ValidationMessages = warnings
         };
     }
 
@@ -365,11 +368,13 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     {
         ArgumentNullException.ThrowIfNull(request);
         _guard.EnsureCanMutate("metadata.column.update");
+        ct.ThrowIfCancellationRequested();
 
         reporter?.ReportPhase("Validating");
         _validator.ValidateRequiredString(request.SolutionUniqueName, "SolutionUniqueName");
         _validator.ValidateRequiredString(request.EntityLogicalName, "EntityLogicalName");
         _validator.ValidateRequiredString(request.ColumnLogicalName, "ColumnLogicalName");
+        ct.ThrowIfCancellationRequested();
 
         if (request.DryRun)
         {
@@ -385,11 +390,15 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             EntityLogicalName = request.EntityLogicalName,
             LogicalName = request.ColumnLogicalName
         };
-        AttributeMetadata existingAttr;
-        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        var existingAttr = await ReadColumnForUpdateAsync(retrieveRequest, ct).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+
+        // Keep the existing typed and exact-base primary-ID contracts separate from
+        // the finite, identity-checked State/Status/GUID label-only transition.
+        if (IsFiniteLabelOnlyColumn(existingAttr))
         {
-            var response = (RetrieveAttributeResponse)await client.ExecuteAsync(retrieveRequest, ct).ConfigureAwait(false);
-            existingAttr = response.AttributeMetadata;
+            await UpdateFiniteColumnLabelsAsync(request, existingAttr, reporter, ct).ConfigureAwait(false);
+            return;
         }
 
         var primaryIdLabels = existingAttr.GetType() == typeof(AttributeMetadata)
@@ -753,6 +762,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         reporter?.ReportPhase("Validating");
         _validator.ValidateCreateGlobalChoiceRequest(request, prefix);
+        var (options, warnings) = await PrepareCreateOptionValuesAsync(request.Options ?? [], request.SolutionUniqueName, reporter, ct).ConfigureAwait(false);
 
         if (request.DryRun)
         {
@@ -761,7 +771,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             {
                 Name = request.SchemaName,
                 WasDryRun = true,
-                ValidationMessages = []
+                ValidationMessages = warnings
             };
         }
 
@@ -778,7 +788,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         if (request.Options != null)
         {
-            foreach (var opt in request.Options)
+            foreach (var opt in options)
             {
                 optionSet.Options.Add(new OptionMetadata(new Label(opt.Label, 1033), opt.Value));
             }
@@ -804,7 +814,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             Name = request.SchemaName,
             MetadataId = response.OptionSetId,
             WasDryRun = false,
-            ValidationMessages = []
+            ValidationMessages = warnings
         };
     }
 
@@ -1969,7 +1979,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         return prefix;
     }
 
-    private static AttributeMetadata BuildAttributeMetadata(CreateColumnRequest request)
+    private static AttributeMetadata BuildAttributeMetadata(CreateColumnRequest request, OptionDefinition[]? options)
     {
         var requiredLevel = ParseRequiredLevel(request.RequiredLevel);
 
@@ -2013,8 +2023,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             },
             SchemaColumnType.Boolean => BuildBooleanAttribute(request),
             SchemaColumnType.DateTime => BuildDateTimeAttribute(request),
-            SchemaColumnType.Choice => BuildChoiceAttribute(request),
-            SchemaColumnType.Choices => BuildMultiSelectChoiceAttribute(request),
+            SchemaColumnType.Choice => BuildChoiceAttribute(request, options),
+            SchemaColumnType.Choices => BuildMultiSelectChoiceAttribute(request, options),
             SchemaColumnType.Image => new ImageAttributeMetadata
             {
                 MaxSizeInKB = request.MaxSizeInKB,
@@ -2113,7 +2123,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         return selected.Name;
     }
 
-    private static PicklistAttributeMetadata BuildChoiceAttribute(CreateColumnRequest request)
+    private static PicklistAttributeMetadata BuildChoiceAttribute(CreateColumnRequest request, OptionDefinition[]? options)
     {
         var attr = new PicklistAttributeMetadata();
 
@@ -2122,9 +2132,9 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             // Use existing global option set
             attr.OptionSet = new OptionSetMetadata { IsGlobal = true, Name = request.OptionSetName };
         }
-        else if (request.Options != null && request.Options.Length > 0)
+        else if (options != null && options.Length > 0)
         {
-            attr.OptionSet = BuildLocalOptionSet(request.Options);
+            attr.OptionSet = BuildLocalOptionSet(options);
         }
 
         if (request.DefaultValue.HasValue)
@@ -2133,35 +2143,38 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         return attr;
     }
 
-    /// <summary>
-    /// Derives values for local Choice options supplied label-only (Value == 0) using the publisher
-    /// option-value prefix (#1161). No-op for global/option-set-name columns or when all values are explicit.
-    /// </summary>
-    private async Task DeriveLocalOptionValuesAsync(CreateColumnRequest request, CancellationToken ct)
+    /// <summary>Allocates only omitted create values, preserving every caller-owned option.</summary>
+    private async Task<(OptionDefinition[] Options, ValidationMessage[] Warnings)> PrepareCreateOptionValuesAsync(
+        OptionDefinition[] options, string solution, IMetadataAuthoringProgressReporter? reporter, CancellationToken ct)
     {
-        if ((request.ColumnType != SchemaColumnType.Choice && request.ColumnType != SchemaColumnType.Choices)
-            || request.Options is not { Length: > 0 }
-            || !string.IsNullOrEmpty(request.OptionSetName))
-            return;
+        if (options.Length == 0) return (options, []);
+        var prefix = await TryResolvePublisherOptionValuePrefixAsync(solution, ct).ConfigureAwait(false);
+        if (!prefix.HasValue && options.Any(o => !o.HasExplicitValue))
+            throw MissingPublisherOptionValuePrefix(solution);
 
-        if (!request.Options.Any(o => o.Value == 0))
-            return; // all explicit
-
-        if (string.IsNullOrWhiteSpace(request.SolutionUniqueName))
-            throw new MetadataValidationException(
-                MetadataErrorCodes.MissingRequiredField,
-                "Local Choice options supplied as label-only require --solution to derive option values.",
-                "Options");
-
-        var prefix = await ResolvePublisherOptionValuePrefixAsync(request.SolutionUniqueName, ct).ConfigureAwait(false);
-        var assigned = request.Options.Where(o => o.Value != 0).Select(o => o.Value).ToList();
-        foreach (var opt in request.Options)
+        var assigned = options.Where(o => o.HasExplicitValue).Select(o => o.Value).ToList();
+        var normalized = new OptionDefinition[options.Length];
+        var warnings = new List<ValidationMessage>();
+        if (!prefix.HasValue)
+            warnings.Add(new ValidationMessage { Field = "Options", Rule = "OptionValueRangeUnavailable",
+                Message = $"Publisher for solution '{solution}' has no option value prefix; explicit values are preserved, but their publisher range could not be checked." });
+        for (var i = 0; i < options.Length; i++)
         {
-            if (opt.Value != 0) continue;
-            var v = OptionValueDeriver.Derive(null, prefix, assigned);
-            opt.Value = v;
-            assigned.Add(v);
+            var option = options[i];
+            var value = option.HasExplicitValue ? option.Value : OptionValueDeriver.Derive(null, prefix, assigned);
+            if (!option.HasExplicitValue) assigned.Add(value);
+            normalized[i] = new OptionDefinition { Label = option.Label, Value = value, Description = option.Description, Color = option.Color };
+            if (option.HasExplicitValue && prefix.HasValue)
+            {
+                var first = (long)prefix.Value * 10_000;
+                var last = first + 9_999;
+                if (value < first || value > last)
+                    warnings.Add(new ValidationMessage { Field = "Options", Rule = "OptionValueOutsidePublisherRange",
+                        Message = $"Explicit option value {value} is outside publisher range {first}–{last} for solution '{solution}'; the explicit value is preserved." });
+            }
         }
+        foreach (var warning in warnings) reporter?.ReportInfo("Warning: " + warning.Message);
+        return (normalized, warnings.ToArray());
     }
 
     /// <summary>
@@ -2370,7 +2383,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         return optionSet;
     }
 
-    private static MultiSelectPicklistAttributeMetadata BuildMultiSelectChoiceAttribute(CreateColumnRequest request)
+    private static MultiSelectPicklistAttributeMetadata BuildMultiSelectChoiceAttribute(CreateColumnRequest request, OptionDefinition[]? options)
     {
         var attr = new MultiSelectPicklistAttributeMetadata();
 
@@ -2378,9 +2391,9 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         {
             attr.OptionSet = new OptionSetMetadata { IsGlobal = true, Name = request.OptionSetName };
         }
-        else if (request.Options != null && request.Options.Length > 0)
+        else if (options != null && options.Length > 0)
         {
-            attr.OptionSet = BuildLocalOptionSet(request.Options);
+            attr.OptionSet = BuildLocalOptionSet(options);
         }
 
         if (request.DefaultValue.HasValue)
@@ -2633,6 +2646,15 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     }
 
     private async Task<int> ResolvePublisherOptionValuePrefixAsync(string solutionUniqueName, CancellationToken ct)
+        => await TryResolvePublisherOptionValuePrefixAsync(solutionUniqueName, ct).ConfigureAwait(false)
+            ?? throw MissingPublisherOptionValuePrefix(solutionUniqueName);
+
+    private static MetadataValidationException MissingPublisherOptionValuePrefix(string solutionUniqueName)
+        => new(MetadataErrorCodes.MissingRequiredField,
+            $"Publisher for solution '{solutionUniqueName}' has no option value prefix configured; pass --value to assign the option value explicitly.",
+            "SolutionUniqueName");
+
+    private async Task<int?> TryResolvePublisherOptionValuePrefixAsync(string solutionUniqueName, CancellationToken ct)
     {
         if (_publisherOptionValuePrefixCache.TryGetValue(solutionUniqueName, out var cached))
             return cached;
@@ -2665,13 +2687,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             if (publisherResult.Entities.Count == 0)
                 throw new MetadataValidationException(MetadataErrorCodes.EntityNotFound, $"Publisher for solution '{solutionUniqueName}' not found.", "SolutionUniqueName");
             var prefix = publisherResult.Entities[0].GetAttributeValue<int?>("customizationoptionvalueprefix");
-            if (!prefix.HasValue)
-                throw new MetadataValidationException(
-                    MetadataErrorCodes.MissingRequiredField,
-                    $"Publisher for solution '{solutionUniqueName}' has no option value prefix configured; pass --value to assign the option value explicitly.",
-                    "SolutionUniqueName");
-            _publisherOptionValuePrefixCache[solutionUniqueName] = prefix.Value;
-            return prefix.Value;
+            if (prefix.HasValue) _publisherOptionValuePrefixCache[solutionUniqueName] = prefix.Value;
+            return prefix;
         }
     }
 

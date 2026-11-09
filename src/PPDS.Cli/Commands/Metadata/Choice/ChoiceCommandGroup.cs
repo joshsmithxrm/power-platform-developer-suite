@@ -12,22 +12,26 @@ public static class ChoiceCommandGroup
     /// <summary>
     /// Creates the 'choice' command group with subcommands (deprecated — use 'optionset').
     /// </summary>
-    public static Command Create()
+    public static Command Create() => Create(null);
+
+    internal static Command Create(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var command = new Command("choice", "Manage global choices/option sets (deprecated — use 'optionset')");
 
-        command.Subcommands.Add(CreateCreateCommand());
-        command.Subcommands.Add(CreateUpdateCommand());
-        command.Subcommands.Add(CreateDeleteCommand());
-        command.Subcommands.Add(CreateAddOptionCommand());
-        command.Subcommands.Add(CreateUpdateOptionCommand());
-        command.Subcommands.Add(CreateRemoveOptionCommand());
+        command.Subcommands.Add(CreateCreateCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateUpdateCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateDeleteCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateAddOptionCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateUpdateOptionCommand(serviceProviderFactory));
+        command.Subcommands.Add(CreateRemoveOptionCommand(serviceProviderFactory));
         command.Subcommands.Add(CreateReorderCommand());
 
         return command;
     }
 
-    internal static Command CreateCreateCommand()
+    internal static Command CreateCreateCommand() => CreateCreateCommand(null);
+
+    internal static Command CreateCreateCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -93,13 +97,15 @@ public static class ChoiceCommandGroup
             DeprecationWarning.Write("ppds metadata choice create", "ppds metadata optionset create");
             return await Metadata.OptionSetCommand.ExecuteCreateAsync(
                 solution, name, displayName, optionsRaw, description, dryRun,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
     }
 
-    internal static Command CreateUpdateCommand()
+    internal static Command CreateUpdateCommand() => CreateUpdateCommand(null);
+
+    internal static Command CreateUpdateCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -156,7 +162,7 @@ public static class ChoiceCommandGroup
             DeprecationWarning.Write("ppds metadata choice update", "ppds metadata optionset update");
             return await Metadata.OptionSetCommand.ExecuteUpdateAsync(
                 solution, name, displayName, description, dryRun,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -221,7 +227,9 @@ public static class ChoiceCommandGroup
         return command;
     }
 
-    internal static Command CreateAddOptionCommand()
+    internal static Command CreateAddOptionCommand() => CreateAddOptionCommand(null);
+
+    internal static Command CreateAddOptionCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -278,13 +286,15 @@ public static class ChoiceCommandGroup
             DeprecationWarning.Write("ppds metadata choice add-option", "ppds metadata optionset add-option");
             return await Metadata.OptionSetCommand.ExecuteAddOptionAsync(
                 solution, name, label, value, color, dryRun: false,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
     }
 
-    internal static Command CreateUpdateOptionCommand()
+    internal static Command CreateUpdateOptionCommand() => CreateUpdateOptionCommand(null);
+
+    internal static Command CreateUpdateOptionCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -343,13 +353,15 @@ public static class ChoiceCommandGroup
             // Legacy shape: --value selects the option, --label is the NEW label (#1170); --color sets color (#1233).
             return await Metadata.OptionSetCommand.ExecuteUpdateOptionAsync(
                 solution, name, value, label: null, newLabel: label, color: color, dryRun: false,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
     }
 
-    internal static Command CreateRemoveOptionCommand()
+    internal static Command CreateRemoveOptionCommand() => CreateRemoveOptionCommand(null);
+
+    internal static Command CreateRemoveOptionCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
         {
@@ -400,7 +412,7 @@ public static class ChoiceCommandGroup
             DeprecationWarning.Write("ppds metadata choice remove-option", "ppds metadata optionset remove-option");
             return await Metadata.OptionSetCommand.ExecuteRemoveOptionAsync(
                 solution, name, value, label: null, force, dryRun: false,
-                profile, environment, globalOptions, cancellationToken);
+                profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;

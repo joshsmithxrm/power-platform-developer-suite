@@ -50,11 +50,14 @@ public class CreateColumnTypeTests
 
         var publisherEntity = new Entity("publisher")
         {
-            ["customizationprefix"] = prefix
+            ["customizationprefix"] = prefix,
+            ["customizationoptionvalueprefix"] = 71898
         };
         var publisherCollection = new EntityCollection(new System.Collections.Generic.List<Entity> { publisherEntity });
 
         _client.SetupSequence(c => c.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(solutionCollection)
+            .ReturnsAsync(publisherCollection)
             .ReturnsAsync(solutionCollection)
             .ReturnsAsync(publisherCollection);
     }
