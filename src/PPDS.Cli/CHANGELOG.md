@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Native release executables use self-contained .NET 10, retaining all five platform targets. NuGet libraries and CLI/MCP tool framework assets remain unchanged. Linux native glibc minimum is 2.27; OS vendor support is a separate requirement. Native and VSIX candidate artifacts receive source/runtime/extraction checks before release.
+
+- Every existing `--environment` option also accepts `-env`. Existing `-e` meanings remain unchanged; entity/entity-list uses emit one value-free deprecation notice on stderr and help recommends `--entity`/`--entities`. A future CLI 2.0 reassignment waits at least 90 days after the first stable release with the complete replacement/deprecation guidance (#1536).
 - Schema-delete previews read unpublished target identity and deletion dependencies. Blockers and incomplete checks return nonzero with retained component identities; actual deletion rechecks after confirmation. Read failures retain safe auth/timeout recovery codes and original internal causes. Other metadata dry-runs state their completed checks and provisional/unallocated values while preserving existing JSON data fields. A clear preview does not establish server delete feasibility (#1532).
 - Legacy `forms reorder-fields` is deprecated, with a stderr-only warning and unchanged JSON shape. Removal is planned for CLI 2.0, no earlier than 90 days after stable replacements. It retains authoritative add/drop behavior but now rejects repeated inputs, ambiguous selected bindings and silent cross-section copying.
 - `forms reorder-fields-strict` permutes existing fields without additions/removals; `forms move-field` relocates an existing cell with preserved IDs, authored labels and nested content. Unsafe/ambiguous layouts fail before a final single XML update; explicit solution/publication remains separate.

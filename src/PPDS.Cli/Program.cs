@@ -64,8 +64,10 @@ public static class Program
             return InteractiveCommand.LaunchTui();
         }
 
-        // Write version header for diagnostic context (skip for help/version/interactive)
-        if (!args.Any(a => SkipVersionHeaderArgs.Contains(a)) && !IsInteractiveMode(args))
+        // Explicit quiet daemon validation also skips status/cache/background update I/O.
+        // Other commands retain their existing startup diagnostics behavior.
+        if (!args.Any(a => SkipVersionHeaderArgs.Contains(a)) && !IsInteractiveMode(args)
+            && !StartupUpdateNotifier.IsQuietDaemon(args))
         {
             ErrorOutput.WriteVersionHeader();
             ReadAndDeleteUpdateStatus();
@@ -86,6 +88,60 @@ public static class Program
             }
         }
 
+        var rootCommand = CreateRootCommand(Environment.GetEnvironmentVariable("PPDS_INTERNAL") == "1");
+
+        // Note: System.CommandLine handles Ctrl+C automatically and passes the
+        // CancellationToken to command handlers via SetAction's cancellationToken parameter.
+        // No manual CancelKeyPress handler is needed.
+
+        // ── Invoke / catch section ──────────────────────────────────────────────────────
+        // Parse is included in the try so that any unexpected exception during arg-binding
+        // (e.g. a type-converter that throws) is caught and rendered as a clean one-liner on
+        // stderr rather than a raw stack trace.  System.CommandLine validation errors (e.g.
+        // invalid GUID) are surfaced via parseResult.Errors and handled by InvokeAsync's
+        // built-in error renderer; we only catch exceptions that leak past that mechanism.
+        try
+        {
+            var parseResult = rootCommand.Parse(args);
+
+            // Deprecated command-name aliases (#1246, e.g. `plugintraces` -> `plugin-traces`)
+            // print a one-line warning to stderr. Runs for every invocation shape (subcommands,
+            // --help, parse errors) since it only inspects the matched command chain.
+            CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult);
+            EnvironmentAliasPolicy.WarnIfDeprecatedEntityAliasUsed(parseResult);
+
+            return await parseResult.InvokeAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            return ExitCodes.Success;
+        }
+        catch (Exception ex)
+        {
+            var debug = args.Any(a => a == "--debug");
+            var (error, exitCode) = ExceptionMapper.MapWithExitCode(ex, debug: debug);
+
+            // Never expose stack traces unless --debug is set.  The build-path in stack frames
+            // (e.g. D:\a\power-platform-developer-suite\...) leaks CI internals and confuses users.
+            if (debug)
+            {
+                Console.Error.WriteLine(ex.ToString());
+            }
+            else
+            {
+                Console.Error.WriteLine($"Error: {error.Message}");
+                if (error.Details != null)
+                    Console.Error.WriteLine(error.Details);
+            }
+
+            return exitCode;
+        }
+        // ────────────────────────────────────────────────────────────────────────────────
+    }
+
+    /// <summary>Constructs the command tree without invoking startup or command actions.</summary>
+    internal static RootCommand CreateRootCommand(bool includeInternal)
+    {
         var rootCommand = new RootCommand(
             "PPDS CLI - Power Platform Developer Suite command-line tool" + Environment.NewLine +
             Environment.NewLine +
@@ -127,60 +183,17 @@ public static class Program
         rootCommand.Subcommands.Add(InteractiveCommand.Create());
 
         // Internal/debug commands - only visible when PPDS_INTERNAL=1
-        if (Environment.GetEnvironmentVariable("PPDS_INTERNAL") == "1")
+        if (includeInternal)
         {
             rootCommand.Subcommands.Add(InternalCommandGroup.Create());
         }
 
+        EnvironmentAliasPolicy.Apply(rootCommand);
+
         // Prepend [Required] to required option descriptions for scannability
         HelpCustomization.ApplyRequiredOptionStyle(rootCommand);
 
-        // Note: System.CommandLine handles Ctrl+C automatically and passes the
-        // CancellationToken to command handlers via SetAction's cancellationToken parameter.
-        // No manual CancelKeyPress handler is needed.
-
-        // ── Invoke / catch section ──────────────────────────────────────────────────────
-        // Parse is included in the try so that any unexpected exception during arg-binding
-        // (e.g. a type-converter that throws) is caught and rendered as a clean one-liner on
-        // stderr rather than a raw stack trace.  System.CommandLine validation errors (e.g.
-        // invalid GUID) are surfaced via parseResult.Errors and handled by InvokeAsync's
-        // built-in error renderer; we only catch exceptions that leak past that mechanism.
-        try
-        {
-            var parseResult = rootCommand.Parse(args);
-
-            // Deprecated command-name aliases (#1246, e.g. `plugintraces` -> `plugin-traces`)
-            // print a one-line warning to stderr. Runs for every invocation shape (subcommands,
-            // --help, parse errors) since it only inspects the matched command chain.
-            CommandAliasDeprecation.WarnIfDeprecatedAliasUsed(parseResult);
-
-            return await parseResult.InvokeAsync();
-        }
-        catch (OperationCanceledException)
-        {
-            return ExitCodes.Success;
-        }
-        catch (Exception ex)
-        {
-            var debug = args.Any(a => a == "--debug");
-            var (error, exitCode) = ExceptionMapper.MapWithExitCode(ex, debug: debug);
-
-            // Never expose stack traces unless --debug is set.  The build-path in stack frames
-            // (e.g. D:\a\power-platform-developer-suite\...) leaks CI internals and confuses users.
-            if (debug)
-            {
-                Console.Error.WriteLine(ex.ToString());
-            }
-            else
-            {
-                Console.Error.WriteLine($"Error: {error.Message}");
-                if (error.Details != null)
-                    Console.Error.WriteLine(error.Details);
-            }
-
-            return exitCode;
-        }
-        // ────────────────────────────────────────────────────────────────────────────────
+        return rootCommand;
     }
 
     /// <summary>

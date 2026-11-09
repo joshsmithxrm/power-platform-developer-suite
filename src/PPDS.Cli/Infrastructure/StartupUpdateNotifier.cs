@@ -9,6 +9,13 @@ namespace PPDS.Cli.Infrastructure;
 /// </summary>
 public static class StartupUpdateNotifier
 {
+    // The artifact harness uses a command-first, explicitly quiet daemon. Guard the
+    // entire startup diagnostics block before status-file/cache/network access.
+    // A query argument containing "serve" must never select this special case.
+    internal static bool IsQuietDaemon(string[] args) =>
+        args.Length > 0 && string.Equals(args[0], "serve", StringComparison.OrdinalIgnoreCase)
+        && !ShouldShow(args);
+
     /// <summary>
     /// Formats a human-readable update notification from a cached result.
     /// Applies track-based filtering: stable users see only stable updates at startup;

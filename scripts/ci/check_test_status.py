@@ -5,7 +5,8 @@ import json
 import os
 import sys
 
-SUITES = {"code": "test", "extraction": "single-file-extraction", "python": "python-tests"}
+SUITES = (("code", "test"), ("extraction", "single-file-extraction"),
+          ("extraction", "vsix-artifacts"), ("python", "python-tests"))
 
 
 def failures(needs: dict) -> list[str]:
@@ -14,7 +15,7 @@ def failures(needs: dict) -> list[str]:
         return [f"Changes detection did not succeed: {changes.get('result', 'missing')}"]
     outputs = changes.get("outputs", {})
     errors = []
-    for flag, job in SUITES.items():
+    for flag, job in SUITES:
         selected = outputs.get(flag)
         result = needs.get(job, {}).get("result", "missing")
         if selected not in ("true", "false"):

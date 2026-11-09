@@ -16,6 +16,7 @@ def needs(selected="true", result="success"):
         "changes": {"result": "success", "outputs": {"code": "false", "extraction": "false", "python": selected}},
         "test": {"result": "skipped"},
         "single-file-extraction": {"result": "skipped"},
+        "vsix-artifacts": {"result": "skipped"},
         "python-tests": {"result": result},
     }
 
@@ -43,6 +44,15 @@ def test_needed_dotnet_cannot_unexpectedly_skip():
     payload = needs()
     payload["changes"]["outputs"]["code"] = "true"
     assert gate.failures(payload)
+
+
+@pytest.mark.parametrize("result", ["failure", "cancelled", "skipped", "missing"])
+def test_selected_vsix_matrix_must_succeed(result):
+    payload = needs()
+    payload["changes"]["outputs"]["extraction"] = "true"
+    payload["single-file-extraction"]["result"] = "success"
+    payload["vsix-artifacts"]["result"] = result
+    assert any("vsix-artifacts" in error for error in gate.failures(payload))
 
 
 def test_reusable_python_suite_feeds_always_reporting_gate():

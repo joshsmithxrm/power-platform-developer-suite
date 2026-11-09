@@ -52,7 +52,7 @@ jobs:
           dotnet publish src/PPDS.Cli/PPDS.Cli.csproj \
             -c Release \
             -r ${{ matrix.rid }} \
-            -f net8.0 \
+            -f net10.0 \
             -p:PublishSingleFile=true \
             --self-contained \
             -o ./publish
@@ -77,7 +77,7 @@ jobs:
             --binary "$binary" \
             --fixture tests/fixtures/SingleFilePlugin/bin/Release/net462 \
             --cache-probe tests/fixtures/ReferenceCacheProbe/bin/Release/net8.0/ReferenceCacheProbe.dll \
-            --reference-archive src/PPDS.Cli/obj/Release/net8.0/${{ matrix.rid }}/Net462ReferenceAssemblies.zip
+            --reference-archive src/PPDS.Cli/obj/Release/net10.0/${{ matrix.rid }}/Net462ReferenceAssemblies.zip
 
       - name: Rename binary (Unix)
         if: runner.os != 'Windows'

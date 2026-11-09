@@ -15,11 +15,13 @@ REFUSAL_SCRIPT = (
     'ownership/cleanup safety or an approved exclusive disposable environment lifecycle."\n'
     'exit 1\n'
 )
-# LF-normalized Git blob SHA256 at R 3b29a0f80fe97e71ba7ba78a21e35b7d1aa1c2c6.
+# LF-normalized reviewed automatic-workflow baselines.
+# Build stays at R 3b29a0f80fe97e71ba7ba78a21e35b7d1aa1c2c6.
+# Test includes the approved .NET 10/read-only native and VSIX validation body.
 # No Git calls or mutable refs are used by these tests.
-R_WORKFLOW_HASHES = {
+REVIEWED_WORKFLOW_HASHES = {
     "build.yml": "8c80da5301c14c0205be42898e106f5eb623c34df4a2cbe2d830075e96747eaf",
-    "test.yml": "a15cda4fe47a4f440d580401748ef05299201e7b54dded83120b6b1b9e4051f9",
+    "test.yml": "dcdad7b25fcaeed4f674952920603ea6d56966b441c42bc39d71a5f8a40d031f",
 }
 
 
@@ -130,8 +132,8 @@ def test_actual_refusal_bash_fails_and_reports_no_live_tests(workflow, tmp_path)
     )
 
 
-@pytest.mark.parametrize("name,expected_hash", R_WORKFLOW_HASHES.items())
-def test_automatic_build_and_test_git_contents_are_unchanged_from_r(name, expected_hash):
+@pytest.mark.parametrize("name,expected_hash", REVIEWED_WORKFLOW_HASHES.items())
+def test_automatic_build_and_test_git_contents_match_reviewed_baselines(name, expected_hash):
     content = (REPO_ROOT / ".github/workflows" / name).read_bytes().replace(b"\r\n", b"\n")
     assert hashlib.sha256(content).hexdigest() == expected_hash
 

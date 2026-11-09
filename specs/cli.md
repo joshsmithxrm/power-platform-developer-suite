@@ -2,7 +2,7 @@
 
 **Status:** Implemented
 **Last Updated:** 2026-01-23
-**Code:** src/PPDS.Cli/Commands/ | tests/PPDS.LiveTests/Cli/ | tests/PPDS.LiveTests/Infrastructure/FixtureProcessInterruption.cs
+**Code:** src/PPDS.Cli/Commands/ | src/PPDS.Cli/Infrastructure/EnvironmentAliasPolicy.cs | tests/PPDS.Cli.Tests/Infrastructure/ | tests/PPDS.LiveTests/Cli/ | tests/PPDS.LiveTests/Infrastructure/FixtureProcessInterruption.cs
 **Surfaces:** CLI
 
 ---
@@ -258,6 +258,43 @@ public static readonly Option<string?> EnvironmentOption = new("--environment", 
 ```
 
 Commands add these explicitly to maintain flexibility.
+
+### Compatible environment alias transition
+
+Existing `-e` meanings remain unchanged in this release: depending on the command,
+it can select an entity, an entity list, or an environment. Prefer `--entity`,
+`--entities`, and `--environment` in scripts. Every existing `--environment`
+option also accepts `-env`; this does not add `-e` where it was unsupported.
+
+An actual parsed `-e` option selecting an entity or entity list emits one fixed
+deprecation notice on stderr. Environment `-e`, literal values, unknown options,
+and values after `--` do not create an entity notice. Option values are never
+used to infer the meaning of an alias and are not printed in the notice. Help
+for the deprecated entity aliases identifies the replacement long option.
+
+The future CLI 2.0 transition will standardize `-e` for environments only after
+at least 90 days from the first stable release containing the complete replacement
+aliases and deprecation guidance. This release does not reassign or remove an
+alias, and no transition date is set here.
+
+`Program.CreateRootCommand(bool includeInternal)` constructs the complete command
+tree without running startup diagnostics, command actions, authentication, or
+profile access. Main passes the existing `PPDS_INTERNAL=1` condition, applies the
+policy before required-option help styling, and emits notices after parsing.
+The policy uses public parser results and typed options; it does not inspect
+nonpublic token members or use global string-based option lookup.
+
+| AC | Contract | Test | Status |
+|----|----------|------|--------|
+| AC-ALIAS-01 | Preserve every command path and existing `-e` role/value | CliEnvironmentAliasTests.LegacyInventory_IsCaptured, RealLegacyShortAlias_KeepsItsBoundValue; exact before/fixed inventory comparison | Pending validation |
+| AC-ALIAS-02 | Existing environment options accept `-env` and their long spelling | CliEnvironmentAliasTests.EveryEnvironmentOption_ExposesConsistentEnvAlias, RealEnvironmentSpellings_Agree | Pending validation |
+| AC-ALIAS-03 | Migration aliases have unique bindings throughout the real tree | CliEnvironmentAliasTests.CompleteTree_MigrationAliasesHaveUniqueBindings | Pending validation |
+| AC-ALIAS-04 | Actual entity `-e` tokens, including attached and repeated uses, warn once | CliEnvironmentAliasTests.ActualShortAlias_WarnsOnlyForEntityRoles, RepeatedMixedAliases_StillWarnOnce, AttachedShortAlias_Warns; EnvironmentAliasPolicyTests.RepeatedListAliases_WarnOnceInEitherOrder | Pending validation |
+| AC-ALIAS-05 | Values and environment aliases do not create entity notices | CliEnvironmentAliasTests.NonLegacyTokenShapes_DoNotWarn; EnvironmentAliasPolicyTests.RealEnvironmentValues_DoNotBecomeEntityRoles, OtherOptionLiteralValues_DoNotBecomeEntityOptionTokens, Terminator_KeepsLegacyLookingValuesAsArguments | Pending validation |
+| AC-ALIAS-06 | Notice writes only stderr and omits input values | CliEnvironmentAliasTests.ProductionWarningOverload_UsesOnlyStderr | Pending validation |
+| AC-ALIAS-07 | Pure construction preserves the optional internal group and all registrations | CliEnvironmentAliasTests.PureFactory_ExistsAndControlsInternalGroup; registration source comparison | Pending validation |
+| AC-ALIAS-08 | Help and guidance state replacements and the minimum stable transition window | CliEnvironmentAliasTests.HelpMigration_IsVisible; source review of this section | Pending validation |
+| AC-ALIAS-09 | Reapplying the policy preserves names, aliases, descriptions and unsupported short forms | EnvironmentAliasPolicyTests.Apply_IsIdempotentAndRetainsUnsupportedShortAlias | Pending validation |
 
 ---
 

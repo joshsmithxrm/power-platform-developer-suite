@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Bundle the self-contained .NET 10 CLI on the existing four VSIX targets. No separate runtime install is needed; native OS dependencies still apply. Candidate validation executes the actual archived CLI on matching native hosts without contacting Dataverse or publishing a package.
+
 ## [1.8.0] - 2026-11-01
 
 ### Added

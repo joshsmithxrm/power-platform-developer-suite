@@ -13,6 +13,11 @@
 
 Install from the Marketplace and you're done. The extension ships a platform-specific VSIX that bundles a self-contained, single-file `ppds` CLI daemon for your operating system. There is no separate download step, no global tool install, no .NET runtime to manage. The only thing you provide is a Dataverse authentication profile, and the sidebar walks you through creating one on first run. Stateless CI hosts can skip the profile entirely and authenticate through environment variables instead.
 
+The bundled daemon uses .NET 10. Native OS dependencies and Microsoft's supported
+OS versions still apply; Linux VS Code additionally requires glibc 2.28. The
+existing win32-x64, linux-x64, darwin-x64 and darwin-arm64 VSIX targets remain.
+See [distribution support](https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/docs/RELEASE.md#distributed-native-runtime).
+
 ## Features
 
 Nine connected panels, one notebook experience, and a shared authentication model that carries between them. Every panel talks to the bundled daemon over local JSON-RPC; no data leaves your machine unless you ship it out yourself.

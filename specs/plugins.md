@@ -114,6 +114,10 @@ The plugin system enables code-first registration of Dataverse plugins using dec
 
 ### Single-file extraction verification
 
+The distributed CLI selects net10.0; the independent cache-location probe stays
+net8.0 and plugin fixtures/reference assemblies stay net462. The runtime/source
+and no-publish VSIX contracts are specified in [release-cycle.md](./release-cycle.md).
+
 The PR test gate must run the published self-contained, single-file CLI on Windows,
 Linux, and macOS against a deterministic local net462 plug-in fixture. Copy only the
 executable into an isolated directory and give each scenario fresh temporary/config

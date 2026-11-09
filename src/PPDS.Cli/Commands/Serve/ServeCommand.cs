@@ -38,6 +38,9 @@ public static class ServeCommand
             Hidden = true // IDE-callable but not user-facing
         };
 
+        // Explicit opt-in for isolated artifact validation. Normal launchers are unchanged.
+        command.Options.Add(new Option<bool>("--quiet", "-q") { Hidden = true, Description = "Suppress startup update diagnostics." });
+
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             return await ExecuteAsync(cancellationToken);
