@@ -189,7 +189,7 @@ public static class OptionSetCommand
 
         var optionsOption = new Option<string>("--options")
         {
-            Description = "Option definitions: \"Label1=1,Label2=2\"",
+            Description = "Option definitions: \"Label1,Label2=718980001\"; omitted values derive from the solution publisher",
             Required = true
         };
 
@@ -286,16 +286,19 @@ public static class OptionSetCommand
             };
 
             var result = await authoringService.CreateGlobalChoiceAsync(request, ct: cancellationToken);
+            var previewScope = dryRun && request.Options is { Length: > 0 }
+                && request.Options.Any(option => !option.HasExplicitValue)
+                    ? MetadataDryRunScope.PublisherProvisional : MetadataDryRunScope.Publisher;
 
             if (globalOptions.IsJsonMode)
             {
-                MetadataDryRunScope.Publisher.WriteSuccess(writer, dryRun, result);
+                previewScope.WriteSuccess(writer, dryRun, result);
             }
             else
             {
                 if (dryRun)
                 {
-                    MetadataDryRunScope.Publisher.WriteDiagnostic();
+                    previewScope.WriteDiagnostic();
                 }
                 else
                 {
@@ -1286,18 +1289,21 @@ public static class OptionSetCommand
     internal static OptionDefinition[] ParseOptionDefinitions(string raw)
     {
         var result = new List<OptionDefinition>();
-
         foreach (var pair in raw.Split(','))
         {
             var trimmed = pair.Trim();
-            // Split on the LAST '=' so labels can contain '=' characters
+            if (trimmed.Length == 0) continue;
             var lastEquals = trimmed.LastIndexOf('=');
-            if (lastEquals > 0 && int.TryParse(trimmed[(lastEquals + 1)..].Trim(), out var value))
+            if (lastEquals < 0)
             {
-                result.Add(new OptionDefinition { Label = trimmed[..lastEquals].Trim(), Value = value });
+                result.Add(new OptionDefinition { Label = trimmed });
+                continue;
             }
+            var label = trimmed[..lastEquals].Trim();
+            if (label.Length == 0 || !int.TryParse(trimmed[(lastEquals + 1)..].Trim(), out var value))
+                throw new FormatException($"Invalid option '{trimmed}': expected a label or Label=integer.");
+            result.Add(new OptionDefinition { Label = label, Value = value });
         }
-
         return result.ToArray();
     }
 

@@ -156,6 +156,7 @@ public sealed class SchemaValidator
             request.Options != null)
         {
             var duplicateValues = request.Options
+                .Where(o => o.HasExplicitValue)
                 .GroupBy(o => o.Value)
                 .Where(g => g.Count() > 1)
                 .Select(g => g.Key)
@@ -251,6 +252,7 @@ public sealed class SchemaValidator
         if (request.Options != null)
         {
             var duplicateValues = request.Options
+                .Where(o => o.HasExplicitValue)
                 .GroupBy(o => o.Value)
                 .Where(g => g.Count() > 1)
                 .Select(g => g.Key)

@@ -31,7 +31,7 @@ Create, modify, and delete Dataverse schema objects — tables, columns, relatio
 - Solution management (covered by `specs/solutions.md`)
 - Data operations (covered by `specs/data-explorer.md`, `specs/query.md`)
 - **`statecode` (state) authoring** — creating/deleting the Active/Inactive states themselves is not exposed; only their child status reasons (`statuscode`) are managed (#1160). Renaming existing state labels remains available via `UpdateStateValueAsync`.
-- **Adopting publisher-prefix value derivation on `optionset add-option` (global)** — global option-set option values retain the existing SDK auto-assignment behavior in this iteration. The shared `OptionValueDeriver` is applied to status reasons (#1160) and local column options (#1161) only; extending it to global option sets is a follow-up (see Roadmap).
+- **Adopting publisher-prefix value derivation on `optionset add-option` (global)** — this existing add-option operation retains SDK auto-assignment. Initial global-choice creation now shares publisher-prefix derivation with local creation, status reasons and local column options; the global add-option extension remains a follow-up.
 - **Read-side noun renames** — query commands (`entities`, `attributes`, `relationships`, `keys`, `optionsets`, plus `entity <name>` / `optionset <name>` lookups) are unchanged except where a noun gains authoring subcommands.
 
 ---
@@ -214,7 +214,7 @@ Task UpdateStateValueAsync(UpdateStateValueRequest request, CancellationToken ct
 **CreateGlobalChoiceRequest properties:**
 - `SolutionUniqueName` (required)
 - `SchemaName`, `DisplayName`, `Description` (required)
-- `Options[]` — initial option values with `Label`, `Value` (int), `Description`, `Color`
+- `Options[]` — initial option values with `Label`, `Value` (int), `Description`, `Color`; omitted Value differs from explicit0 through the additive read-only `HasExplicitValue` getter
 - `IsMultiSelect` (bool) — creates OptionSetType.Picklist or OptionSetType.MultiSelectPicklist. Determines whether columns referencing this choice must use `ColumnType.Choice` or `ColumnType.Choices`
 - `DryRun` (bool)
 
@@ -417,7 +417,7 @@ ppds metadata attribute update-option --solution <s> --entity <e> --column <c> (
 ppds metadata attribute remove-option --solution <s> --entity <e> --column <c> (--value <int> | --label <l>) [--force] [--publish]
 ```
 
-- `--option` (repeatable) uses `Label[:Value][:#Color]` — label required, value/color optional; omitted values are derived (auto-assigned by the SDK at create time when no `--solution` derivation applies, matching today's local-create behavior). `--options-file` is a JSON array of `{ "label", "value"?, "color"? }`. `--options` (legacy `"Label1=1,Label2=2"` CSV) remains accepted as a synonym for `--option` and maps to the same local set.
+- `--option` (repeatable) uses `Label[:Value][:#Color]` — label required, value/color optional; omitted values derive from the required solution's publisher prefix, while an explicit0 remains0. `--options-file` is a JSON array of `{ "label", "value"?, "color"? }`. `--options` (legacy `"Label1=1,Label2=2"` CSV) remains accepted and maps to the same local set.
 - `--choice <name>` replaces and supersedes the legacy `--option-set-name` flag (kept as a hidden deprecated alias) for attaching to a global option set. `--choice` is mutually exclusive with `--option`/`--options`/`--options-file`; supplying both is a validation error.
 - `add-option` derives the new value via the shared `OptionValueDeriver` (explicit `--value` wins; else `--solution` prefix × 10,000 over the column's current local options; else SDK auto-assign). `update-option`/`remove-option` target by `--value` or `--label`.
 
@@ -726,6 +726,32 @@ The synthetic global-color read/write cases verify the real service -> MCP tool 
 | AC-104 | Add-statusreason failures use the fixed action/target message in the CLI error envelope, omit the synthetic SDK diagnostic and retain SDK failure code, original cause, success=false and CLI exit2 | `MetadataDraftOptionReadTests.AddStatusSdkFailure_UsesFixedMessageInCliEnvelope` | ✅ |
 | AC-105 | The covered synthetic SDK route preserves tokens, one request per returned lease, request order and original causes; initial raw SDK faults remain generic, covered auth details stay private and existing timeout/cancellation/helper controls remain | `MetadataSdkDiagnosticPrivacyProbeTests.InitialInsertRawFailure_UsesGenericMcpError`, `ActualColorWrapper_CliMapperRemovesKnownSecretKey`, `DirectMapperCharacterization_DoesNotClaimBearerRedaction`, `MetadataAcquisitionPrivacyTests.RawAuthDetail_StaysInCauseAndOutOfMcpPayload`, `MetadataAddOptionValueLeaseContractTests.ActualServicePoolTimeout_IsConnectionTimeoutAtMcpBoundary`, `ActualColorCancellation_PropagatesOriginalAtMcpBoundary`, `McpToolErrorHelperTests.ThrowStructuredError_GenericException_DoesNotLeakInnerMessage` | ✅ |
 
+### Create-option presence and publisher warnings
+
+Local Choice/Choices creation and global-choice creation distinguish an omitted numeric value from an explicitly supplied zero. The existing public `int OptionDefinition.Value` getter/setter and parameterless constructor remain; the additive read-only `[JsonIgnore] HasExplicitValue` property records whether the setter was used. Callers wanting allocation must omit the setter/property. `Value = 0` now deliberately means zero, rather than requesting allocation.
+
+System.Text.Json roundtrips omit only absent `Value` and retain explicit zero, including a default-value ignore policy. Existing Label/Description/Color fields, naming policy, case sensitivity, unknown-member and number handling remain. Direct model JSON `Value: null` remains invalid for the int property; the CLI options-file grammar retains its existing nullable-value-as-omission compatibility.
+
+Creation reserves all explicit values, rejects duplicate explicit values and allocates distinct omitted values through the existing publisher-prefix derivation helper. It normalizes copied options rather than mutating caller data. Global `--options` accepts comma-separated bare labels or `Label=integer`, splitting the last `=` for explicit values. Empty/trailing comma entries remain ignored; malformed nonempty explicit definitions fail instead of disappearing. Labels containing commas still require a different input surface; no CSV quoting grammar is added.
+
+Explicit values outside `[customizationoptionvalueprefix * 10000, prefix * 10000 + 9999]` remain unchanged and produce validation warnings. If numeric prefix metadata is absent, explicit-only creation remains permitted with a truthful range-unavailable warning; omitted values still require a prefix. Warnings appear in existing CLI results/text and the additive global-choice MCP `validationMessages` field. These checks do not establish server feasibility, persisted option values or whole-repository error normalization.
+
+Successful initial local Choice/Choices or global-choice dry-runs containing typed omitted values report `validationScope=input-and-publisher`, `publisherPrefixChecked=true` and `optionValueAllocation=provisional`. This describes completed copy-based derivation, never a reservation or platform-accepted numeric assignment. `targetOptionsRead`, `targetExistenceChecked`, `dependenciesChecked`, `serverFeasibilityChecked` and `changesPersisted` remain false. JSON and text use the same selected scope; neither exposes a normalized value list. Explicit-only values (including0), nonchoice columns, global-reference columns and empty option arrays retain `optionValueAllocation=not-performed`; missing numeric prefix with omission fails rather than returning a successful preview. Existing draft-value and global add-option semantics remain unchanged. `MetadataCreatePreviewCompositionTests.InitialCreate_ReportsOnlyCompletedProvisionalAllocation` covers the composed real-service CLI boundary; fresh combination validation is pending.
+
+Public API delta and migration: `OptionDefinition.HasExplicitValue` is an additive read-only ignored property; the public int Value accessors and parameterless constructor remain. `MetadataCreateChoiceResult.ValidationMessages` is a second additive public surface, serialized by MCP as `validationMessages`. Consumers should tolerate the extra warning field and must omit Value, rather than set Value=0, when requesting allocation. Release notes must identify both additive surfaces and the explicit-zero migration; the acceptance table below remains pending fresh combination validation.
+
+| AC | Contract | Test | Status |
+|---|---|---|---|
+| AC-106 | Local Choice/Choices and global create allocate only omission, reserve explicit0 and other values, and preserve caller options | `MetadataCreateOptionAllocationTests.OmittedValues_AreDistinctAndDoNotMutateCaller`, `ExplicitZero_IsPreservedAlongsideOmittedAndReservedValues` | Pending fixed validation |
+| AC-107 | Duplicate explicit values including0 reject before create; omitted values are not duplicate zero | `MetadataCreateOptionAllocationTests.DuplicateExplicitValues_RejectBeforeCreate` | Pending fixed validation |
+| AC-108 | Range warnings preserve explicit values, missing numeric prefix preserves explicit-only compatibility, and dry-run never creates | `MetadataCreateOptionAllocationTests.ExplicitRange_WarnsWithoutRejectingOrRewriting`, `DryRun_OmittedValuesValidateWithoutCreateOrCallerMutation`, `MetadataCreateMissingPrefixTests.ExplicitOnly_MissingNumericPrefixWarnsAndPreservesValue`, `Omission_MissingNumericPrefixRetainsValidationFailure` | Pending fixed validation |
+| AC-109 | SDK cancellation/cause/token behavior, per-request returned leases and immutable caller options are retained | `MetadataCreateOptionAllocationTests.CancellationAtEverySdkStage_PreservesIdentityAndCaller`, `CreateSdkFailure_PreservesExistingCauseWithoutMutatingCaller` | Pending fixed validation |
+| AC-110 | Actual pure CLI parsers preserve bare global labels/legacy explicit syntax and options-file omission versus0 | `MetadataCreateOptionAllocationTests.ActualCliParser_LabelOnlyAndZero_ReachRealService`, `OptionDefinitionPresenceTests.GlobalGrammar_PreservesValidLegacyAndAddsBareLabels`, `GlobalGrammar_MalformedNonemptyDefinitionsRejectInsteadOfDisappearing`, `OptionsFile_OmittedAndExistingNullCompatibilityAreDistinctFromExplicitZero` | Pending fixed validation |
+| AC-111 | Existing int accessor/constructor shape remains with an additive ignored readonly presence getter | `OptionDefinitionPresenceTests.ExistingIntAndConstructorContract_RemainsWithAdditiveReadOnlyPresence` | Pending fixed validation |
+| AC-112 | JSON omission/explicit0 roundtrip preserves existing field and serializer policies, including int-null rejection | `OptionDefinitionPresenceTests.RoundTrip_OmissionAndExplicitZeroRemainDifferent`, `ExplicitZero_SurvivesDefaultValueIgnorePolicy`, `Read_PreservesCaseSensitivityAndAllExistingFields`, `DirectModel_InvalidIntJsonRetainsRejection`, `Read_RespectsExplicitNumberHandling`, `UnknownMemberDisallow_RemainsEnforced` | Pending fixed validation |
+| AC-113 | Real global-choice MCP tool retains service warnings and parsed option presence in serialized output | `MetadataCreateChoiceWarningTests.ActualTool_PreservesServiceWarningsAndOptionPresence` | Pending fixed validation |
+
+
 ### Edge Cases
 
 | Scenario | Input | Expected Output |
@@ -798,7 +824,7 @@ public interface IMetadataAuthoringService
 
 **Code:** `src/PPDS.Dataverse/Metadata/Authoring/OptionValueDeriver.cs`
 
-Single, pure, unit-testable helper that both status-reason add and local-column option-add use to choose an option value. Owner-mandated single source of truth so both surfaces behave identically. Pure logic: prefix resolution and reading the current option values happen in the service; the deriver only chooses.
+Single, pure, unit-testable helper used by status-reason add, local-column option-add and initial local/global choice creation to choose an option value. Prefix resolution and reading/reserving option values happen in the service; the deriver only chooses.
 
 ```csharp
 public static class OptionValueDeriver

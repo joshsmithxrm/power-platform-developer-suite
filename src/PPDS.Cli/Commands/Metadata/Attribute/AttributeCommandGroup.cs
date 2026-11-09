@@ -346,11 +346,12 @@ public static class AttributeCommandGroup
         if (entries == null || entries.Count == 0)
             return null;
 
-        return entries.Select(e => new OptionDefinition
+        return entries.Select(e =>
         {
-            Label = e.Label ?? "",
-            Value = e.Value ?? 0,
-            Color = e.Color
+            var option = new OptionDefinition { Label = e.Label ?? "", Color = e.Color };
+            // The file grammar historically treats JSON null like omission.
+            if (e.Value.HasValue) option.Value = e.Value.Value;
+            return option;
         }).ToArray();
     }
 
@@ -435,16 +436,22 @@ public static class AttributeCommandGroup
             };
 
             var result = await authoringService.CreateColumnAsync(request, ct: cancellationToken);
+            var previewScope = dryRun
+                && (request.ColumnType is SchemaColumnType.Choice or SchemaColumnType.Choices)
+                && string.IsNullOrEmpty(request.OptionSetName)
+                && request.Options is { Length: > 0 }
+                && request.Options.Any(option => !option.HasExplicitValue)
+                    ? MetadataDryRunScope.PublisherProvisional : MetadataDryRunScope.Publisher;
 
             if (globalOptions.IsJsonMode)
             {
-                MetadataDryRunScope.Publisher.WriteSuccess(writer, dryRun, result);
+                previewScope.WriteSuccess(writer, dryRun, result);
             }
             else
             {
                 if (dryRun)
                 {
-                    MetadataDryRunScope.Publisher.WriteDiagnostic();
+                    previewScope.WriteDiagnostic();
                 }
                 else
                 {
