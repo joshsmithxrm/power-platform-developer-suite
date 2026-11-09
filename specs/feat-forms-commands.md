@@ -1,7 +1,7 @@
 # Form Management Commands
 
 **Status:** Draft
-**Last Updated:** 2026-11-08
+**Last Updated:** 2026-11-09
 **Code:** [src/PPDS.Cli/Commands/Forms/](../src/PPDS.Cli/Commands/Forms/) | [src/PPDS.Cli/Services/Forms/](../src/PPDS.Cli/Services/Forms/) | [src/PPDS.Cli/Resources/Schemas/](../src/PPDS.Cli/Resources/Schemas/)
 **Surfaces:** CLI
 
@@ -108,8 +108,11 @@ public interface IFormService
 
     // Field management (Main forms only)
     Task AddFieldAsync(AddFieldRequest request, IProgressReporter? reporter = null, CancellationToken ct = default);
+    Task<AddFieldsResult> AddFieldsWithResultAsync(AddFieldRequest request, IProgressReporter? reporter = null, CancellationToken ct = default);
     Task RemoveFieldAsync(RemoveFieldRequest request, IProgressReporter? reporter = null, CancellationToken ct = default);
     Task ReorderFieldsAsync(ReorderFieldsRequest request, IProgressReporter? reporter = null, CancellationToken ct = default);
+    Task ReorderFieldsStrictAsync(ReorderFieldsRequest request, IProgressReporter? reporter = null, CancellationToken ct = default);
+    Task MoveFieldAsync(MoveFieldRequest request, IProgressReporter? reporter = null, CancellationToken ct = default);
 
     // Sub-grid management (Main forms only)
     Task AddSubgridAsync(AddSubgridRequest request, IProgressReporter? reporter = null, CancellationToken ct = default);
@@ -145,7 +148,17 @@ Validation failure produces a `PpdsValidationException` with `FormErrorCodes.Inv
 
 ### classid Resolution for add-field
 
-Column lookup for `add-field` and newly created `reorder-fields` cells is case-insensitive. New controls use the resolved metadata `LogicalName` exactly for both `datafieldname` and control `id`. Existing cells retain their IDs, bindings, labels and properties when moved. Existing display label, duplicate, movement and omission rules still apply.
+Column lookup for `add-field` and newly created legacy `reorder-fields` cells is case-insensitive. New controls use the metadata `LogicalName` for bindings/IDs and the metadata display label. Existing cells retain authored labels, IDs and properties. Repeated additions to the same section are no-ops, including input case variants; a new intentional placement in another section is allowed. Duplicate input is reported separately from already-present fields.
+
+`AddFieldAsync` retains its original Task signature and parameter positions. The additive `AddFieldsWithResultAsync` shares the real implementation's single write path. Its default interface implementation calls a legacy implementation once and returns unknown counts (null collections, `outcomeKnown: false`), never fabricated zero additions. An all-existing request skips the XML update but still validates protections/XML and honors explicit solution/publication requests, reported separately.
+
+Legacy `reorder-fields` remains an authoritative add/reorder/drop list during transition. New cells receive metadata labels; fields only in another section are rejected rather than silently copied. Repeated field arguments and multiple controls for one selected-section binding are rejected before writing. It retains its historical row-flattening behavior and is deprecated in favor of the explicit operations below. The warning goes to stderr only, preserving the existing JSON data shape. Removal is planned for CLI 2.0, no earlier than 90 days after the replacement commands' stable release; no calendar removal date is set.
+
+`forms reorder-fields-strict --entity <table> --form <form> --section <section> --fields <complete-permutation>` only permutes existing unique bound cells. It cannot add/drop/copy fields. Bound-cell slots change; rows and their attributes, non-field cells, subgrids, Timeline and nested control content retain their positions. Missing, extra, duplicate and ambiguous bindings fail before writing. Changed field cells with non-unit spans are rejected instead of flattening them.
+
+`forms move-field --entity <table> --form <form> --field <field> --from-section <section> --to-section <section> [--before-field <field>]` relocates one unique existing cell. A standalone source row moves with its row attributes. A cell leaving a mixed row preserves that row's attributes/siblings and receives a new plain target row. Cross-section moves append by default; an anchor must identify one different target field in a standalone row, before which the moved row is inserted. Empty source rows containers remain valid; a rowless target gains rows. Non-unit spans and bound subgrid movement are rejected. Unaffected sections and complete cell/control/nested content are preserved.
+
+Same-section moves without a position and unambiguous source-absent/target-present retries are no-ops after confirmation, customization, metadata and structural checks. A retry reports completion without claiming provenance of a prior write. A source-present field with a target duplicate, duplicate controls or ambiguous section selectors is rejected. New layout APIs have default interface implementations that throw NotSupportedException; they never fall back to legacy destructive reorder. Both new operations finish validation before at most one final SDK XML update; explicit solution association/publication follows separately. Unchanged layouts skip that XML update, retaining explicit side effects. All commands retain target confirmation, cancellation and managed-lock checks.
 
 `FormService` resolves classid by calling `IMetadataQueryService.GetAttributesAsync(entityLogicalName)`, locating the attribute whose `LogicalName` matches the requested column, and reading its `AttributeType` (a `string`, e.g. `"String"`, `"Picklist"`). `AttributeMetadataDto.AttributeType` is a string — there is no `AttributeTypeCode` enum on the DTO — so `ClassIdResolver` keys off the string value. The mapping is:
 
@@ -241,6 +254,11 @@ For `add-subgrid`, classid is always `{E7A81278-8635-4d9e-8D4D-59480B391C5B}` �
 **ReorderFieldsRequest:**
 - `EntityLogicalName`, `FormName`, `SectionLabel` (required)
 - `FieldLogicalNames` (string[], required) — authoritative ordered list; fields not in list are removed
+- `SolutionUniqueName?`, `Publish` (bool)
+
+**MoveFieldRequest:**
+- `EntityLogicalName`, `FormName`, `FieldLogicalName`, `FromSection`, `ToSection` (required)
+- `BeforeField?` — unique target field in a standalone row
 - `SolutionUniqueName?`, `Publish` (bool)
 
 **AddSubgridRequest:**
@@ -650,8 +668,8 @@ This preserves typed checks on known parameters and structure elsewhere in the f
 
 | ID | Criterion | Test | Status |
 |---|---|---|---|
-| AC-48 | Case-insensitive add-field lookup emits the metadata LogicalName for new control ID and binding, retaining metadata display labels and duplicate additions. | FormFieldBindingTests.Add_UsesMetadataLogicalName, Add_DuplicatesRemainAllowed | ✅ |
-| AC-49 | Reorder creates missing cells with metadata LogicalName, preserves existing cells/IDs/properties and non-field controls, and retains omission, movement and label behavior. | FormFieldBindingTests.Reorder_CanonicalizesOnlyNewCells, Reorder_ExistingFieldNeedsNoSupportedMetadata | ✅ |
+| AC-48 | Case-insensitive add-field lookup emits the metadata LogicalName for new control ID and binding and metadata display labels. Existing same-section bindings remain unchanged. | FormFieldBindingTests.Add_UsesMetadataLogicalName, Add_ExistingCaseVariantsAreUnchanged | Pending revised regression run |
+| AC-49 | Legacy reorder creates new cells with metadata LogicalName/display label, preserves retained cells/IDs/properties and non-field controls, rejects cross-section copying and retains omission semantics. | FormFieldBindingTests.Reorder_CanonicalizesOnlyNewCells, Reorder_ExistingFieldNeedsNoSupportedMetadata | Pending revised regression run |
 | AC-50 | Unknown or unsupported new fields and empty requests fail without Update, solution association or publication, including rowless sections. A valid reorder of a rowless section leaves the section empty. | FormFieldBindingTests.InvalidFields_DoNotWrite, Reorder_RowlessInvalidField_DoesNotWrite, Reorder_RowlessValidField_PreservesNoNewCellBehavior | ✅ |
 | AC-51 | Normal CLI parsing and action invoke the common service and produce canonical new bindings. Existing MCP draft authoring uses the metadata logical name. | FormFieldBindingCommandTests.Command_UsesRealService, FormAuthoringTests.AddField_ManagedOrUnmanaged_PreservesTimelineAndPriorDraftWithoutPublishing | ✅ |
 
@@ -693,3 +711,18 @@ Results record each phase separately (write, association, verification, publicat
 | AC-47 | All existing and new form writers enforce read-only and protected-target acknowledgement. | FormConfirmationCoverageTests.EveryExistingWriter_FailsClosedWithoutContext_BeforeClientAcquisition; FormAuthoringTests.ReadOnly_DryRunPlansWithoutAcknowledgementOrAnyWrites_ActualNoOpRejected; FormsProtocolTests.ClientReceivesStructuredGuardError_AndInvalidInputNeverCallsService | ✅ |
 
 Fixture provenance, reserved resource names, generation/export/import sequence and cleanup proof are documented in [the live fixture guide](../tests/PPDS.LiveTests/Fixtures/Forms/README.md). The approved live run `4f9c2a71` passed on 2026-10-31 against candidate `c0394de1a` (product source `6932dcd52`), including unmanaged and managed edits/publication, locked-form rejection, and completed cleanup with no failures or unknown submissions. This does not claim Maker designer inspection. Legacy CLI GUID-valued names retain fallback when no stable ID matches; MCP section selectors require the actual ID. Duplicate selectors fail closed.
+
+## Contributor retries and explicit field layout (#1528, #1529)
+
+The 79 focused offline SDK-mock and injected-command cases passed on 2026-11-09. The common 37-case baseline had 14 assertion failures and 23 passing controls; four cancellation regression cases also failed before the fix. These checks validate mocked SDK requests and output, not live Dataverse behavior. Earlier live evidence above does not validate these changes.
+
+| ID | Criterion | Test | Status |
+|---|---|---|---|
+| AC-59 | Same-section retries/casing/batch duplicates preserve controls and authored labels, skip redundant XML updates and report accurate added/already-present/duplicate counts; other-section placements remain allowed. | FormContributorRegressionTests; FormContributorCommandRegressionTests; FormAddOutcomeContractTests | ✅ focused offline cases |
+| AC-60 | Legacy reorder uses metadata labels for new fields, preserves existing custom labels, rejects copying/ambiguous duplicate requests and retains authoritative drop-unlisted semantics. | FormContributorRegressionTests; FormFieldBindingTests | ✅ focused offline cases |
+| AC-61 | Strict reorder is a complete permutation with no field additions/removals; preserves mixed rows, row attributes, IDs, nested content and non-field positions; unchanged retry skips update. | FormExplicitLayoutTests.StrictPermutation_PreservesMixedRowsAttributesCellsAndNonfieldPositions_AndRetryIsNoop; StrictInvalidPlan_RejectsBeforeAllWrites | ✅ focused offline cases |
+| AC-62 | Explicit moves preserve whole cells, source siblings and row attributes, support safe anchors/empty targets, and reject ambiguous/unsupported layouts without writes. | FormExplicitLayoutTests.Move_PreservesEntireCellAndSourceSiblings_RowAttributes_AndRetryIsNoop; InvalidMove_RejectsBeforeXmlSolutionOrPublish | ✅ focused offline cases |
+| AC-63 | Synthetic applied-but-lost acknowledgement retries do not duplicate cells or perform a second XML update; no real transport behavior is claimed. | FormContributorRegressionTests.AppliedWriteWithLostAcknowledgement_RetryDoesNotAddControlsOrUpdateAgain; FormExplicitLayoutTests.Move_BeforeAnchor_MovesWholeStandaloneRow_AndLostAckRetryHasNoSecondUpdate | ✅ focused offline cases |
+| AC-64 | Confirmation, customization locks, metadata, structural checks and cancellation run before a final single update or protected no-op; explicit solution/publication effects remain separate. | FormConfirmationCoverageTests; FormExplicitLayoutTests.NewOperations_ConfirmationDenialAndManagedLocksCannotBeBypassed; NewOperations_CancellationPreservesIdentityAndReleasesFetchLease | ✅ focused offline cases |
+| AC-65 | Legacy reorder warns only on stderr without changing JSON shape; removal requires CLI 2.0 and at least 90 days after stable replacements. | FormExplicitLayoutCommandTests.LegacyReorder_DeprecatesOnlyOnStderr_AndPreservesJsonDataShape | ✅ focused offline cases |
+| AC-66 | Actual legacy-only interface implementations retain the old Task signature, get unknown addition counts and reject unsupported new layout operations without destructive fallback. | FormAddOutcomeContractTests; FormLegacyOutcomeCommandTests | ✅ focused offline cases |
