@@ -49,13 +49,13 @@ an update to the test allowlist and this table.
 | `release-cadence-check.yml` / `cadence-check` | `issues: write` | Maintain release-tracking issues. |
 | `release-cli.yml` / `release` | `contents: write` | Publish the CLI GitHub release and its assets. |
 
-NuGet publication exchanges the publishing job's OIDC identity for a temporary
-scoped key. The public verification job has no OIDC grant. The grant is available
-throughout the publishing job, including restore/build/pack; placing login after
-validation shortens key lifetime but does not isolate earlier build code from
-token issuance. This proposal trusts the reviewed tagged source and its build
-inputs for that whole job. An upload-only job would need a separately reviewed
-artifact handoff and repeated integrity checks before granting OIDC.
+NuGet publication exchanges the upload-only publishing job's OIDC identity for a
+temporary scoped key. The build/signing and public verification jobs have no OIDC
+grant. A fresh publisher checks the exact source/run/producer artifact, package
+hashes and current tag/vacancy as data before login; restore/build/pack and
+artifact-provided code never run with OIDC authority. The existing Plugins private
+signing key is still exposed to MSBuild/package targets in the separate build job;
+this separation does not resolve that signing-key or build-output trust risk.
 
 Marketplace publication, the docs companion PR, and audit capture retain their
 existing separate credentials. A `GITHUB_TOKEN` permission
@@ -93,3 +93,9 @@ Hosted PR checks verify the paths-filter API access and normal CI execution.
 References: [GitHub permission maps](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions),
 [the PR creation and approval setting](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#preventing-github-actions-from-creating-or-approving-pull-requests),
 and [paths-filter permissions](https://github.com/dorny/paths-filter#supported-workflows).
+
+NuGet isolation: `build-package` retains only `contents: read`; the upload-only
+`publish` job adds `actions: read` for exact artifact/producer metadata and the
+already reviewed `id-token: write`. It executes no restore/build/pack/signing or
+artifact-supplied code. The build job still holds the existing Plugins signing
+secret when required; OIDC isolation does not resolve that separate key risk.

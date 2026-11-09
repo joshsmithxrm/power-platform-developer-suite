@@ -38,7 +38,7 @@ def test_exact_component_tag_entry_points(workflow):
 
 def test_oidc_is_publishing_job_only(workflow):
     assert workflow['permissions'] == {'contents': 'read'}
-    assert publishing(workflow)['permissions'] == {'contents': 'read', 'id-token': 'write'}
+    assert publishing(workflow)['permissions'] == {'contents': 'read', 'actions': 'read', 'id-token': 'write'}
     for name, job in workflow['jobs'].items():
         if name != 'publish':
             assert job.get('permissions', workflow['permissions']) == {'contents': 'read'}
@@ -60,11 +60,14 @@ def test_login_follows_all_preflight_and_immediately_precedes_upload(workflow):
     steps = publishing(workflow)['steps']
     login = next(i for i,s in enumerate(steps) if s.get('id') == 'nuget-login')
     guard = next(i for i,s in enumerate(steps) if s.get('name') == 'Validate trusted publishing identity')
-    release = next(i for i,s in enumerate(steps) if 'verify_release_inputs.py nuget' in s.get('run', ''))
-    build = next(i for i,s in enumerate(steps) if 'dotnet build ' in s.get('run', ''))
-    pack = next(i for i,s in enumerate(steps) if s.get('name') == 'Pack specific projects')
+    release = next(i for i,s in enumerate(steps) if s.get('id') == 'verify-handoff')
+    build_steps = workflow['jobs']['build-package']['steps']
+    build = next(i for i,s in enumerate(build_steps) if 'dotnet build ' in s.get('run', ''))
+    pack = next(i for i,s in enumerate(build_steps) if s.get('name') == 'Pack specific projects')
+    build_release = next(i for i,s in enumerate(build_steps) if 'verify_release_inputs.py nuget' in s.get('run', ''))
     pushes = [i for i,s in enumerate(steps) if 'dotnet nuget push' in s.get('run', '')]
-    assert build < pack < release < guard < login
+    assert build < pack < build_release
+    assert publishing(workflow)['needs'] == 'build-package' and release < guard < login
     assert len(pushes) == 2 and pushes[0] == login + 1 and pushes[1] > pushes[0]
 
 
@@ -98,7 +101,7 @@ def test_identity_guard_executes_without_login(workflow, value, exit_code):
 
 
 def test_existing_signing_source_and_public_verification_are_retained(workflow):
-    steps = publishing(workflow)['steps']
+    steps = workflow['jobs']['build-package']['steps']
     signing = next(s for s in steps if s.get('name') == 'Decode Plugins signing key')
     assert signing['env'] == {'PLUGINS_SNK_BASE64': '${{ secrets.PLUGINS_SNK_BASE64 }}'}
     assert 'RUNNER_TEMP' in signing['run']

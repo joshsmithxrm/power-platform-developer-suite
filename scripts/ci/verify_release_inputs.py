@@ -18,6 +18,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.ci.release_model import ReleaseGraph
 from scripts.ci import verify_public_release as public
+from scripts.ci.verify_nuget_handoff import nuget_inventory_key, Error as HandoffError
 
 Error = public.VerificationError
 
@@ -188,9 +189,12 @@ def nuget_vacant(package: str, version: str, *, fetch=public.default_http_fetch)
     versions = data.get("versions")
     if not isinstance(versions, list) or not versions or not all(isinstance(item, str) for item in versions):
         raise Error("Incomplete NuGet version inventory")
-    for item in versions:
-        strict_version(item)
-    if any(public.versions_match(item, version) for item in versions):
+    try:
+        wanted = nuget_inventory_key(strict_version(version))
+        existing = {nuget_inventory_key(item) for item in versions}
+    except HandoffError:
+        raise Error("Invalid NuGet version inventory") from None
+    if wanted in existing:
         raise Error(f"NuGet version is already occupied: {package} {version}")
 
 

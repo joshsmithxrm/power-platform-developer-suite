@@ -4,6 +4,21 @@ Tool-neutral reference for release scope analysis, release operations,
 strong-name rotation, key custody, and incident response. Automation may advise
 what should be released, but a maintainer must approve every tag and publish.
 
+NuGet restore, build, Plugins signing/pack and full release-input validation run in
+`build-package` with `contents: read` and no OIDC permission. A fresh `publish`
+job downloads only that run's package-data artifact. Before login, an isolated
+standard-library verifier checks the immutable event source, successful producer
+job/attempt, artifact service identity/digest, raw manifest/package hashes,
+package identity, current tag target and public version vacancy. It never loads
+assemblies or invokes MSBuild. Only then may the pinned login and NuGet pushes run.
+An individual publisher-job rerun cannot reuse an earlier attempt's build artifact;
+this intentionally fails closed rather than mixing attempts.
+
+This separation removes OIDC authority from dependency build code. It does not
+protect the existing Plugins private signing key from MSBuild/package targets in
+the signing job, or prove that a compromised build produced trustworthy binaries.
+Those signing/build risks remain separate release-review requirements.
+
 ## Release Scope Analysis
 
 ### NuGet trusted publishing preparation
