@@ -25,7 +25,11 @@ permissions:
 
 concurrency:
   group: pre-merge-gate-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  # Draft readiness is not an input to either rule, so marking a PR ready
+  # need not cancel active evaluation. Keep cancellation for edits and source
+  # pushes: title/body/base changes can invalidate an in-flight rule result.
+  # The ready event still runs both rules through the default pending slot.
+  cancel-in-progress: ${{ github.event.action != 'ready_for_review' }}
 
 jobs:
   size:
