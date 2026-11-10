@@ -387,6 +387,29 @@ lookup failures stop for review; there is no automated rollback or repair.
 
 ---
 
+## Isolated Plugins signing
+
+Plugins release preparation builds and packs `net462` with the repository public
+key and delay signing. The build job has no private key. A fresh signer job admits
+the exact source/run/attempt-bound package before its one secret-bearing step;
+that step uses only the pinned Microsoft Strong Name tool. A separate keyless
+job verifies the signature and signature-only assembly change, reconstructs the
+package with every other member unchanged, and creates the upload handoff.
+Non-Plugins packages retain their existing producer and publishing path.
+
+The initial production policy is `UNSELECTED`. It blocks before secret exposure.
+Choosing producer assurance, recording an accepted hosted signer binary and real
+signing compatibility, and authorizing activation are separate release gates.
+Offline fixture/process-mock tests do not prove real signing compatibility.
+
+| AC | Criterion | Test | Status |
+|---|---|---|---|
+| AC-60 | Unselected policy or absent compatibility/tool identity refuses before a signing secret can be selected; build has no private-key reference | `tests/ci/test_plugin_signing.py::test_policy_defaults_fail_closed`, `test_workflow_secret_boundary` | PASS (offline fixtures/source contracts only) |
+| AC-61 | Plugins use keyless delay-sign build/pack, a minimal fresh signer, independent keyless verification, and no fallback to unsigned output; other packages preserve their route | `tests/ci/test_plugin_signing.py::test_workflow_secret_boundary` | PASS (offline fixtures/source contracts only) |
+| AC-62 | Source/run/attempt/job/artifact hashes and chronology bind the complete Plugins chain; publisher accepts only independently verified output | `tests/ci/test_plugin_signing.py::test_chain_rejects_wrong_binding`, `test_chain_requires_chronology` | PASS (offline fixtures/source contracts only) |
+| AC-63 | Repack changes only the exact net462 Plugins DLL; all other member bytes and the symbol package remain unchanged; unsafe/ambiguous archives and signature-tool failures refuse | `tests/ci/test_plugin_signing.py::test_repackage_preserves_other_members`, `test_repackage_rejects_tampering`, `test_tool_failure_refuses` | PASS (offline fixtures/source contracts only) |
+| AC-64 | A real representative delay-signed Plugins DLL is signed with the approved pinned tool, passes forced signature verification and signature-only comparison, and survives full package verification | Real Windows signing compatibility receipt required; no signing test executed during source preparation | pending |
+
 ## Design Decisions
 
 ### Why event-driven over calendar-driven?

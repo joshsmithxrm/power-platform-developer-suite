@@ -41,7 +41,8 @@ def test_oidc_is_publishing_job_only(workflow):
     assert publishing(workflow)['permissions'] == {'contents': 'read', 'actions': 'read', 'id-token': 'write'}
     for name, job in workflow['jobs'].items():
         if name != 'publish':
-            assert job.get('permissions', workflow['permissions']) == {'contents': 'read'}
+            expected = {'contents': 'read', 'actions': 'read'} if name in {'sign-plugins', 'verify-signed-plugins'} else {'contents': 'read'}
+            assert job.get('permissions', workflow['permissions']) == expected
     assert 'environment' not in publishing(workflow)
 
 
@@ -67,7 +68,15 @@ def test_login_follows_all_preflight_and_immediately_precedes_upload(workflow):
     build_release = next(i for i,s in enumerate(build_steps) if 'verify_release_inputs.py nuget' in s.get('run', ''))
     pushes = [i for i,s in enumerate(steps) if 'dotnet nuget push' in s.get('run', '')]
     assert build < pack < build_release
-    assert publishing(workflow)['needs'] == 'build-package' and release < guard < login
+    assert publishing(workflow)['needs'] == ['build-package', 'verify-signed-plugins']
+    assert release < guard < login
+    assert build_steps[build_release]['if'] == "${{ !startsWith(github.ref, 'refs/tags/Plugins-v') }}"
+    verified_steps = workflow['jobs']['verify-signed-plugins']['steps']
+    signed_check = next(i for i, s in enumerate(verified_steps) if 'verify_plugin_signing.py verify' in s.get('run', ''))
+    full_check = next(i for i, s in enumerate(verified_steps) if 'verify_release_inputs.py nuget' in s.get('run', ''))
+    final_handoff = next(i for i, s in enumerate(verified_steps) if s.get('id') == 'handoff')
+    assert signed_check < full_check < final_handoff
+    assert '--chain "$RUNNER_TEMP/plugins-chain.json"' in verified_steps[final_handoff]['run']
     assert len(pushes) == 2 and pushes[0] == login + 1 and pushes[1] > pushes[0]
 
 
@@ -100,11 +109,25 @@ def test_identity_guard_executes_without_login(workflow, value, exit_code):
     assert value == '' or value not in result.stdout + result.stderr
 
 
-def test_existing_signing_source_and_public_verification_are_retained(workflow):
-    steps = workflow['jobs']['build-package']['steps']
-    signing = next(s for s in steps if s.get('name') == 'Decode Plugins signing key')
+def test_signing_secret_is_one_admitted_step_and_public_verification_is_retained(workflow):
+    build = workflow['jobs']['build-package']
+    assert 'PLUGINS_SNK_BASE64' not in str(build) and 'secrets.' not in str(build)
+    steps = workflow['jobs']['sign-plugins']['steps']
+    signing = next(s for s in steps if s.get('name') == 'Sign only the admitted assembly')
     assert signing['env'] == {'PLUGINS_SNK_BASE64': '${{ secrets.PLUGINS_SNK_BASE64 }}'}
     assert 'RUNNER_TEMP' in signing['run']
+    assert './scripts/ci/sign_plugin_assembly.ps1' in signing['run']
+    policy = next(i for i, s in enumerate(steps) if 'verify_plugin_signing.py policy' in s.get('run', ''))
+    admission = next(i for i, s in enumerate(steps) if 'verify_plugin_signing.py admit' in s.get('run', ''))
+    assert policy < admission < steps.index(signing)
+    assert not steps[policy].get('continue-on-error', False)
+    assert not steps[admission].get('continue-on-error', False)
+    assert not signing.get('continue-on-error', False)
+    secret_steps = [(job_name, step) for job_name, job in workflow['jobs'].items()
+                    for step in job['steps'] if 'secrets.' in str(step)]
+    assert secret_steps == [('sign-plugins', signing)]
+    assert 'GITHUB_ENV' not in str(steps)
+    assert 'secrets.' not in str(workflow['jobs']['verify-signed-plugins'])
     verification = workflow['jobs']['verify-public-artifact']
     assert verification['needs'] == 'publish'
     assert any('verify_public_release.py' in s.get('run', '') for s in verification['steps'])

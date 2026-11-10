@@ -18,6 +18,7 @@ REPO = "joshsmithxrm/power-platform-developer-suite"
 REPO_ID = 1116020474
 PRODUCER = "build-package"
 JOB_NAME = "Build and validate NuGet package"
+PLUGIN_JOB = "Verify signed Plugins package"
 MANIFEST = "nuget-handoff.json"
 PACKAGES = {"Plugins": "PPDS.Plugins", "Dataverse": "PPDS.Dataverse", "Migration": "PPDS.Migration",
             "Auth": "PPDS.Auth", "Cli": "PPDS.Cli", "Query": "PPDS.Query", "Mcp": "PPDS.Mcp"}
@@ -118,11 +119,16 @@ def package_rows(directory, tag, source):
     require(len(rows) in {1, 2} and any(r["name"].endswith(".nupkg") for r in rows), "One package and optional symbols required")
     return rows
 
-def create(directory, tag, source, run_id, attempt):
+def create(directory, tag, source, run_id, attempt, *, chain=None):
     identity(tag, source, run_id, attempt)
-    result = {"schema": 1, "repository": REPO, "source": source, "tag": tag, "run_id": str(run_id),
-              "run_attempt": str(attempt), "producer_job": PRODUCER,
+    plugins = tag.startswith("Plugins-v")
+    require(plugins == (chain is not None), "Plugins require an independently verified signing chain")
+    result = {"schema": 2 if plugins else 1, "repository": REPO, "source": source, "tag": tag, "run_id": str(run_id),
+              "run_attempt": str(attempt), "producer_job": "verify-signed-plugins" if plugins else PRODUCER,
               "files": package_rows(directory, tag, source)}
+    if plugins:
+        validate_plugin_chain(chain)
+        result["signing_chain"] = chain
     raw = (json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n").encode()
     with (directory / MANIFEST).open("xb") as stream:
         stream.write(raw)
@@ -152,20 +158,12 @@ def fetch_json(url):
     except Exception:
         raise Error("Read-only source or registry lookup failed") from None
 
-def verify(directory, tag, source, run_id, attempt, artifact_id, artifact_digest, manifest_sha, *, fetch=fetch_json):
-    package, version = identity(tag, source, run_id, attempt)
-    require(re.fullmatch(r"[1-9][0-9]*", str(artifact_id)) and digest(artifact_digest) and digest(manifest_sha), "Exact artifact/hash binding required")
-    raw = regular_bytes(directory / MANIFEST, 2 * 1024 * 1024)
-    require(sha(raw) == manifest_sha, "Handoff manifest hash mismatch")
-    data = decode(raw)
-    require(set(data) == {"schema", "repository", "source", "tag", "run_id", "run_attempt", "producer_job", "files"}
-            and type(data["schema"]) is int and data["schema"] == 1 and data["repository"] == REPO and data["source"] == source and data["tag"] == tag
-            and data["run_id"] == str(run_id) and data["run_attempt"] == str(attempt) and data["producer_job"] == PRODUCER,
-            "Handoff source/run/job mismatch")
-    require(data["files"] == package_rows(directory, tag, source), "Package hashes or inventory changed after validation")
+def artifact_job(artifact_id, artifact_digest, source, run_id, attempt, prefix, job_name, *, fetch=fetch_json):
+    """Authenticate an artifact's producer; expected names come from caller policy, never the artifact."""
+    require(re.fullmatch(r"[1-9][0-9]*", str(artifact_id)) and digest(artifact_digest), "Exact artifact/hash binding required")
     base = "https://api.github.com/repos/" + REPO
     artifact = fetch(base + "/actions/artifacts/" + str(artifact_id))
-    require(artifact.get("id") == int(artifact_id) and artifact.get("name") == f"nuget-package-{run_id}-{attempt}-{source}"
+    require(artifact.get("id") == int(artifact_id) and artifact.get("name") == f"{prefix}-{run_id}-{attempt}-{source}"
             and artifact.get("digest") == "sha256:" + artifact_digest and artifact.get("expired") is False
             and type(artifact.get("size_in_bytes")) is int and 0 < artifact["size_in_bytes"] <= MAX_PACKAGE,
             "Artifact service identity/digest mismatch")
@@ -176,15 +174,87 @@ def verify(directory, tag, source, run_id, attempt, artifact_id, artifact_digest
     jobs = fetch(base + f"/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100&page=1")
     require(isinstance(jobs.get("jobs"), list) and jobs.get("total_count") == len(jobs["jobs"]) <= 100,
             "Incomplete producer job inventory")
-    matches = [j for j in jobs["jobs"] if j.get("name") == JOB_NAME]
+    matches = [j for j in jobs["jobs"] if j.get("name") == job_name]
     require(len(matches) == 1, "Producer job absent/ambiguous")
     job = matches[0]
     require(job.get("status") == "completed" and job.get("conclusion") == "success" and job.get("head_sha") == source
             and job.get("run_id") == int(run_id) and job.get("run_attempt") == int(attempt)
             and type(job.get("id")) is int and job["id"] > 0, "Producer job not successful for exact source/attempt")
-    timestamp = lambda value: datetime.fromisoformat(value.replace("Z", "+00:00"))
     require(timestamp(job["started_at"]) <= timestamp(artifact["created_at"]) <= timestamp(job["completed_at"]),
             "Artifact outside producer job interval")
+    return job
+
+
+def timestamp(value):
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def validate_plugin_chain(chain):
+    require(isinstance(chain, dict) and set(chain) == {"policy_sha256", "public_key_sha256", "signer_sha256",
+            "input_dll_sha256", "signed_dll_sha256", "build", "sign"}, "Malformed Plugins signing chain")
+    require(all(digest(chain[k]) for k in ("policy_sha256", "public_key_sha256", "signer_sha256", "input_dll_sha256", "signed_dll_sha256")),
+            "Missing Plugins signature binding")
+    for role in ("build", "sign"):
+        row = chain[role]
+        require(isinstance(row, dict) and set(row) == {"artifact_id", "artifact_digest", "manifest_sha256"}
+                and re.fullmatch(r"[1-9][0-9]*", str(row["artifact_id"]))
+                and digest(row["artifact_digest"]) and digest(row["manifest_sha256"]), "Malformed Plugins artifact binding")
+    require(str(chain["build"]["artifact_id"]) != str(chain["sign"]["artifact_id"]), "Plugins artifacts must be distinct")
+
+
+def signing_policy(path):
+    raw = regular_bytes(path, 65536)
+    policy = decode(raw)
+    require(type(policy.get("schema")) is int and policy["schema"] == 1
+            and policy.get("producer_assurance") == "REVIEWED_CONTROLLED_PRODUCER"
+            and policy.get("activation_approved") is True and policy.get("compatibility_verified") is True
+            and digest(policy.get("compatibility_receipt_sha256")), "Plugins signing policy is not activated")
+    signer = policy.get("signer", {})
+    require(digest(policy.get("public_key_sha256")) and digest(signer.get("sha256"))
+            and isinstance(signer.get("version"), str) and bool(signer["version"])
+            and isinstance(signer.get("path"), str) and re.fullmatch(r"[A-Za-z]:[/\\].*[/\\]sn\.exe", signer["path"]),
+            "Plugins signer identity is not pinned")
+    return policy, sha(raw)
+
+
+def verify_plugin_chain(chain, source, run_id, attempt, final_job=None, *, fetch=fetch_json):
+    validate_plugin_chain(chain)
+    jobs = []
+    for role, prefix, name in (("build", "nuget-keyless", JOB_NAME), ("sign", "plugins-signed", "Sign Plugins assembly")):
+        row = chain[role]
+        jobs.append(artifact_job(row["artifact_id"], row["artifact_digest"], source, run_id, attempt, prefix, name, fetch=fetch))
+    require(jobs[0]["id"] != jobs[1]["id"] and timestamp(jobs[0]["completed_at"]) <= timestamp(jobs[1]["started_at"]),
+            "Invalid Plugins build/sign chronology")
+    if final_job is not None:
+        require(final_job["id"] not in {j["id"] for j in jobs}
+                and timestamp(jobs[1]["completed_at"]) <= timestamp(final_job["started_at"]), "Invalid Plugins verify chronology")
+    return jobs
+
+
+def verify(directory, tag, source, run_id, attempt, artifact_id, artifact_digest, manifest_sha, *, fetch=fetch_json):
+    package, version = identity(tag, source, run_id, attempt)
+    require(re.fullmatch(r"[1-9][0-9]*", str(artifact_id)) and digest(artifact_digest) and digest(manifest_sha), "Exact artifact/hash binding required")
+    raw = regular_bytes(directory / MANIFEST, 2 * 1024 * 1024)
+    require(sha(raw) == manifest_sha, "Handoff manifest hash mismatch")
+    data = decode(raw)
+    plugins = tag.startswith("Plugins-v")
+    keys = {"schema", "repository", "source", "tag", "run_id", "run_attempt", "producer_job", "files"}
+    require(set(data) == keys | ({"signing_chain"} if plugins else set())
+            and type(data["schema"]) is int and data["schema"] == (2 if plugins else 1) and data["repository"] == REPO and data["source"] == source and data["tag"] == tag
+            and data["run_id"] == str(run_id) and data["run_attempt"] == str(attempt)
+            and data["producer_job"] == ("verify-signed-plugins" if plugins else PRODUCER),
+            "Handoff source/run/job mismatch")
+    require(data["files"] == package_rows(directory, tag, source), "Package hashes or inventory changed after validation")
+    base = "https://api.github.com/repos/" + REPO
+    job = artifact_job(artifact_id, artifact_digest, source, run_id, attempt, "nuget-package", PLUGIN_JOB if plugins else JOB_NAME, fetch=fetch)
+    if plugins:
+        validate_plugin_chain(data["signing_chain"])
+        policy, policy_sha = signing_policy(Path(__file__).with_name("plugin-signing-policy.json"))
+        require(data["signing_chain"].get("policy_sha256") == policy_sha
+                and data["signing_chain"].get("signer_sha256") == policy["signer"]["sha256"]
+                and data["signing_chain"].get("public_key_sha256") == policy["public_key_sha256"], "Plugins policy binding changed")
+        require(int(artifact_id) not in {int(data["signing_chain"][role]["artifact_id"]) for role in ("build", "sign")}, "Final Plugins artifact must be distinct")
+        verify_plugin_chain(data["signing_chain"], source, run_id, attempt, job, fetch=fetch)
     reference = fetch(base + "/git/ref/tags/" + urllib.parse.quote(tag, safe=""))
     require(reference.get("ref") == "refs/tags/" + tag, "Exact release tag reference required")
     obj, seen = reference.get("object", {}), set()
@@ -210,12 +280,13 @@ def main(argv=None):
     parser.add_argument("command", choices=["create", "verify"])
     for name in ["directory", "tag", "source", "run-id", "attempt"]:
         parser.add_argument("--" + name, required=True, type=Path if name == "directory" else str)
-    for name in ["artifact-id", "artifact-digest", "manifest-sha", "output"]:
+    for name in ["artifact-id", "artifact-digest", "manifest-sha", "output", "chain"]:
         parser.add_argument("--" + name)
     args = parser.parse_args(argv)
     try:
         if args.command == "create":
-            digest_value = create(args.directory, args.tag, args.source, args.run_id, args.attempt)
+            chain = decode(regular_bytes(Path(args.chain), 2 * 1024 * 1024)) if args.chain else None
+            digest_value = create(args.directory, args.tag, args.source, args.run_id, args.attempt, chain=chain)
             with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
                 stream.write("manifest-sha256=" + digest_value + "\n")
         else:
