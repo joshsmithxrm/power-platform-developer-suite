@@ -506,6 +506,16 @@ clear a preexisting gate merely because it introduced no new finding.
 | AC-51 | Reuse only passing, unexpired evidence with equal relevant-input/toolchain/definition/platform bindings; explain each invalidation | `test_ancestry_only_change_reuses_scoped_evidence_without_authorizing_head`, `test_reuse_reports_each_changed_input_dimension`, `test_expired_evidence_is_retained_but_cannot_clear_or_reuse` | ✅ |
 | AC-52 | Require complete review contracts and cleared prerequisites before a gate is marked clear | `test_review_contract_cannot_promote_delta_or_unresolved_blocker`, `test_prerequisites_cannot_be_skipped_or_cyclic` | ✅ |
 | AC-53 | Marking a PR ready for review preserves active pre-merge evaluation; source synchronization and policy-changing edits may cancel obsolete runs while all existing rule events and aggregate requirements remain | `test_ready_for_review_preserves_running_gate`, `test_required_events_and_rules_remain_enforced`, `test_aggregate_requires_success_from_both_rules` | ✅ |
+| AC-54 | Documentation-only release edits select Python contracts without native/VSIX builds; relevant input or workflow changes still select both matrices, and manual exact-ref qualification selects both matrices plus Python without a live executor | `test_release_documentation_selects_python_without_artifact_matrix`, `test_native_inputs_route_to_all_native_and_vsix_lanes`, `test_manual_artifact_qualification_is_exact_ref_read_only_and_bounded`, `test_docs_and_manual_routes_preserve_fail_closed_aggregate`, `test_manual_skipped_dotnet_cannot_replace_real_dependency_evidence` | ✅ |
+
+Ordinary documentation-only edits do not rebuild native payloads. Final-candidate
+qualification can run the read-only Test workflow manually on the selected ref
+to generate native/VSIX evidence and run Python contracts. This route does not
+claim a full .NET or Extension suite. Its concurrency group and aggregate check
+name (`Native candidate qualification`) are separate from automatic runs. The
+manual skipped .NET job cannot replace automatic dependency-test evidence.
+A prior binary retains its original Git and
+MinVer identity; unchanged input evidence never relabels it as a new artifact.
 
 ## Related Specs
 

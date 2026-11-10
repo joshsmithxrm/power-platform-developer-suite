@@ -73,6 +73,16 @@ Measure first-pass success, duplicate gate runs per source head, queue time and
 failed-job retry latency from actual workflow records; do not infer improvement
 from a green aggregate badge or from test counts alone.
 
+Release documentation edits select Python contracts without rebuilding native
+artifacts. Changes to actual native inputs or their workflows still select the
+complete five-native/four-VSIX matrix. For final artifact qualification, the
+read-only `Test` workflow accepts manual dispatch on the selected ref and binds
+checkout/provenance to its resolved commit. It also runs Python contracts; it
+does not establish full .NET or Extension-suite qualification. Its distinct
+`Native candidate qualification` check and concurrency group preserve automatic
+required checks and active runs. This prepares a route; it does not dispatch it.
+A reused artifact keeps its original compiled Git/MinVer identity.
+
 The pre-merge gate preserves an active evaluation when a draft becomes ready
 because readiness is not a rule input. Title/body/base edits and source
 synchronization still cancel obsolete evaluations. Every resulting run evaluates
