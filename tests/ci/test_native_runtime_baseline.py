@@ -135,8 +135,11 @@ def contract(sources):
     assert "'-f', CLI_TARGET_FRAMEWORK" in bundler
     assert "'obj', 'Release', CLI_TARGET_FRAMEWORK, rid" in bundler
     assert "net8.0" not in bundler
-    sdk = next(s for s in extension["jobs"]["publish"]["steps"] if s.get("name") == "Setup .NET")
-    assert sdk["with"]["dotnet-version"] == "10.0.114"
+    for job in [native, smoke, vsix, extension["jobs"]["publish"]]:
+        setup = [s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/setup-dotnet@")]
+        assert len(setup) == 1
+        versions = setup[0]["with"]["dotnet-version"].splitlines()
+        assert [v.strip() for v in versions if v.strip().startswith("10.")] == ["10.0.115"]
     target_map = {"win32-x64": "win-x64", "linux-x64": "linux-x64", "darwin-x64": "osx-x64", "darwin-arm64": "osx-arm64"}
     assert {r["target"]: r["rid"] for r in vsix["strategy"]["matrix"]["include"]} == target_map
     assert {r["target"]: r["rid"] for r in extension["jobs"]["publish"]["strategy"]["matrix"]["include"]} == target_map
@@ -172,7 +175,7 @@ def test_distribution_inputs_are_coherent_and_candidate_route_is_no_publish():
     (PATHS[0], "-f net10.0", "-f net8.0"),
     (PATHS[1], "obj/Release/net10.0/", "obj/Release/net8.0/"),
     (PATHS[3], "'obj', 'Release', CLI_TARGET_FRAMEWORK, rid", "'obj', 'Release', 'net8.0', rid"),
-    (PATHS[2], "dotnet-version: '10.0.114'", "dotnet-version: '8.0.x'"),
+    (PATHS[2], "dotnet-version: '10.0.115'", "dotnet-version: '8.0.x'"),
     (PATHS[1], "    permissions:\n      contents: read\n    runs-on: ${{ matrix.os }}", "    permissions:\n      contents: write\n    runs-on: ${{ matrix.os }}"),
     (PATHS[1], "needs: [changes, test, single-file-extraction, vsix-artifacts, python-tests]", "needs: [changes, test, single-file-extraction, python-tests]"),
 ])
@@ -180,6 +183,25 @@ def test_stale_or_unsafe_runtime_input_fails(path, old, new):
     value = sources()
     assert old in value[path]
     value[path] = value[path].replace(old, new, 1)
+    with pytest.raises(AssertionError):
+        contract(value)
+
+
+@pytest.mark.parametrize("path,job_name", [
+    (PATHS[0], "build"),
+    (PATHS[1], "single-file-extraction"),
+    (PATHS[1], "vsix-artifacts"),
+    (PATHS[2], "publish"),
+])
+@pytest.mark.parametrize("sdk_version", ["10.0.114", "10.0.404"])
+def test_each_distribution_job_rejects_stale_or_different_band_sdk(path, job_name, sdk_version):
+    value = sources()
+    workflow = yaml.safe_load(value[path])
+    setup = next(s for s in workflow["jobs"][job_name]["steps"]
+                 if str(s.get("uses", "")).startswith("actions/setup-dotnet@"))
+    assert "10.0.115" in setup["with"]["dotnet-version"]
+    setup["with"]["dotnet-version"] = setup["with"]["dotnet-version"].replace("10.0.115", sdk_version)
+    value[path] = yaml.safe_dump(workflow)
     with pytest.raises(AssertionError):
         contract(value)
 

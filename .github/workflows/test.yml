@@ -164,7 +164,7 @@ jobs:
           # Match global.json's 10.0.1xx feature band; pin around broken channel redirects.
           dotnet-version: |
             8.0.427
-            10.0.114
+            10.0.115
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
@@ -238,7 +238,7 @@ jobs:
         with:
           dotnet-version: |
             8.0.427
-            10.0.114
+            10.0.115
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'

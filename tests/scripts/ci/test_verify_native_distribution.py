@@ -24,9 +24,9 @@ SOURCE = "a" * 40
 
 def metadata():
     return (f'[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.5.0-alpha.0.1+{SOURCE}")]',
-            {"runtimeOptions": {"tfm": "net10.0", "includedFrameworks": [{"name": "Microsoft.NETCore.App", "version": "10.0.14"}]}},
+            {"runtimeOptions": {"tfm": "net10.0", "includedFrameworks": [{"name": "Microsoft.NETCore.App", "version": "10.0.15"}]}},
             {"runtimeTarget": {"name": ".NETCoreApp,Version=v10.0/linux-x64"},
-             "libraries": {"runtimepack.Microsoft.NETCore.App.Runtime.linux-x64/10.0.14": {}}})
+             "libraries": {"runtimepack.Microsoft.NETCore.App.Runtime.linux-x64/10.0.15": {}}})
 
 
 def test_actual_candidate_identity_keeps_prerelease_and_source():
@@ -36,16 +36,16 @@ def test_actual_candidate_identity_keeps_prerelease_and_source():
     assert gate.bundle_manifest(value)["informationalVersion"] == value["informationalVersion"]
 
 
-@pytest.mark.parametrize("runtime_version", ["10.0.0", "10.0.13"])
+@pytest.mark.parametrize("runtime_version", ["10.0.0", "10.0.13", "10.0.14"])
 def test_consistent_unpatched_runtime_pack_is_rejected(runtime_version):
     assembly, config, deps = copy.deepcopy(metadata())
     config["runtimeOptions"]["includedFrameworks"][0]["version"] = runtime_version
     deps["libraries"] = {f"runtimepack.Microsoft.NETCore.App.Runtime.linux-x64/{runtime_version}": {}}
-    with pytest.raises(ValueError, match="10.0.14 security baseline"):
+    with pytest.raises(ValueError, match="10.0.15 security baseline"):
         gate.compiled_identity(assembly, config, deps, SOURCE, "linux-x64")
 
 
-@pytest.mark.parametrize("runtime_version", ["10.0.14", "10.0.15", "10.0.100"])
+@pytest.mark.parametrize("runtime_version", ["10.0.15", "10.0.16", "10.0.100"])
 def test_consistent_patched_10_0_runtime_pack_is_accepted(runtime_version):
     assembly, config, deps = copy.deepcopy(metadata())
     config["runtimeOptions"]["includedFrameworks"][0]["version"] = runtime_version
@@ -54,7 +54,7 @@ def test_consistent_patched_10_0_runtime_pack_is_accepted(runtime_version):
     assert value["runtimePackVersion"] == runtime_version
 
 
-@pytest.mark.parametrize("runtime_version", ["10.0.14-preview.1", "10.1.14", "11.0.14"])
+@pytest.mark.parametrize("runtime_version", ["10.0.15-preview.1", "10.1.15", "11.0.15"])
 def test_runtime_security_floor_does_not_expand_stable_10_0_band(runtime_version):
     assembly, config, deps = copy.deepcopy(metadata())
     config["runtimeOptions"]["includedFrameworks"][0]["version"] = runtime_version
