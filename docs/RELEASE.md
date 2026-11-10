@@ -19,6 +19,66 @@ protect the existing Plugins private signing key from MSBuild/package targets in
 the signing job, or prove that a compromised build produced trustworthy binaries.
 Those signing/build risks remain separate release-review requirements.
 
+## Release closeout ledger
+
+Keep one current JSON ledger under the integration owner's control. Use
+[`release-ledger.example.json`](release-ledger.example.json) as the record shape;
+private approval messages and local evidence paths belong in the private release
+workspace, not in a public example. Freeze the candidate commit/tree and included
+scope before final qualification. Preserve earlier receipts rather than editing
+them to make a newer status look consistent.
+
+```bash
+python scripts/ci/release_ledger.py validate /path/to/release-ledger.json
+python scripts/ci/release_ledger.py status /path/to/release-ledger.json
+python scripts/ci/release_ledger.py reuse /path/to/evidence.json /path/to/target-binding.json
+```
+
+`validate` checks declared consistency. A valid ledger can contain blocked,
+unstarted, stale or unknown gates; exit zero is not release readiness. `status`
+generates the dated report from that same record. `reuse` compares one evidence
+record with the proposed source/input, toolchain, definition, platform and claim
+bindings. Exit 0 means the declared scoped evidence matches, 1 means it needs
+refreshing, and 2 means the input is invalid. The tool does not fetch sources,
+authenticate approvals, hash the actual inputs or prove that the declared input
+set is complete. The integration owner must verify those against the receipts.
+An unchanged relevant-input digest can preserve a product result across an
+ancestry change; exact-head merge checks remain separate.
+
+Each gate names its source, owner and next action and distinguishes a user hold,
+repository policy, technical blocker or recommendation. Keep the original
+approval's scope and source reference; a summary cannot broaden it. Any new gate
+must name the concrete failure, affected deliverable and smallest sufficient
+remedy. Classify new work as safe-delivery blocking, promised acceptance,
+separable maintenance or future enhancement before adding it to frozen scope.
+Mark `required_for_release` explicitly; optional work and denied out-of-scope
+actions must not silently become additional release prerequisites.
+For a companion repository, set that gate's optional `candidate` to its exact
+repository, commit and tree. Its evidence and review must match that target;
+core receipts cannot be relabeled as companion evidence.
+
+Parallel workers own bounded preparation lanes. One integration owner adopts
+their work, verifies source identity and updates the ledger. Independent reviews
+record their claims, source/tree, assumptions, findings, open prerequisites and
+nonclaims. A delta-only review cannot clear an older unresolved prerequisite.
+Offline plugin evidence does not establish persisted behavior; a synthetic
+signing model does not establish a production signer.
+
+During iteration, run focused checks for changed inputs. At integration, run the
+applicable regression checks; qualify the full applicable native matrix on the
+frozen candidate. Reuse unchanged receipts only for their original claims and
+record what invalidated evidence before repeating an expensive run. Retry only
+eligible failed jobs, keeping source, run, attempt and artifact identity together.
+Measure first-pass success, duplicate gate runs per source head, queue time and
+failed-job retry latency from actual workflow records; do not infer improvement
+from a green aggregate badge or from test counts alone.
+
+The pre-merge gate preserves an active evaluation when a draft becomes ready
+because readiness is not a rule input. Title/body/base edits and source
+synchronization still cancel obsolete evaluations. Every resulting run evaluates
+both rules; the default pending slot can coalesce events. This reduces one source
+of cancellation and does not cache or substitute a previous required check.
+
 ## Release Scope Analysis
 
 ### NuGet trusted publishing preparation
@@ -46,11 +106,11 @@ exact seven IDs; do not broaden them.
 
 The workflow currently has no GitHub environment. Keep the matching policy's
 environment blank unless a separately reviewed coordinated environment change
-is approved. Only the publishing job requests `id-token: write`; public
-verification remains read-only. The permission is available to every step in
-that job, including restore/build/pack. Late login is not build-code isolation:
-the reviewed tag and build inputs remain trusted. Splitting an upload-only job
-requires a reviewed artifact-integrity handoff and is outside this minimal patch.
+is approved. Only the upload-only `publish` job requests `id-token: write`;
+restore/build/pack run in the separate `build-package` job without OIDC. The
+artifact-integrity handoff described above checks the producer and its output
+before login. This separation does not isolate the Plugins private key from
+build targets or establish producer trust; those remain distinct review gates.
 
 Keep source/dependency/signing/vacancy/public-artifact gates and sequential
 publication verification. New source must contain this workflow; retrying an old

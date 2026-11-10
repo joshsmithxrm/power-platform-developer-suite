@@ -1,7 +1,7 @@
 # Release Cycle
 
 **Status:** Draft
-**Last Updated:** 2026-11-01
+**Last Updated:** 2026-11-10
 **Code:** [.claude/skills/release/](../.claude/skills/release/), [.github/workflows/](../.github/workflows/), [scripts/ci/](../scripts/ci/), [tests/ci/](../tests/ci/), [tests/test_release_skill_content.py](../tests/test_release_skill_content.py), [tests/ci/test_extension_publish_workflow.py](../tests/ci/test_extension_publish_workflow.py)
 **Surfaces:** All
 
@@ -476,6 +476,37 @@ owned-child deadlines. Default launchers and other commands are unchanged.
 These rows remain unverified until the actual applicable gates/artifacts pass;
 source preparation and historical net8 evidence are not passing .NET 10 results.
 
+## Release closeout record
+
+One integration owner maintains a release ledger for each frozen candidate. The
+ledger records included and excluded work, source-bound evidence, exact approval
+scope and its source, and each gate's owner and next action. A user hold, checked-in
+policy requirement, technical blocker and coordinator recommendation are distinct
+categories; a summary cannot silently promote one into another.
+
+New work is classified as a safe-delivery blocker, promised acceptance, separable
+maintenance or future enhancement. Changing the frozen scope requires a recorded
+disposition with the affected deliverable and smallest sufficient remedy. An
+offline preparation result cannot clear a live acceptance or publication gate.
+
+Evidence reuse requires identical declared relevant inputs, toolchain, test or
+review definition and platform, with current external-state evidence where
+applicable. An ancestry-only change does not itself invalidate that evidence.
+Failed, skipped, unknown or expired evidence never qualifies. Reuse does not
+replace exact-head checks or authorize a merge, tag, live operation or publication.
+
+Independent review records identify source/tree, assessed claims, assumptions,
+findings, open prerequisites and explicit nonclaims. A review of a delta cannot
+clear a preexisting gate merely because it introduced no new finding.
+
+| AC | Requirement | Test | Status |
+| --- | --- | --- | --- |
+| AC-49 | Validate candidate identity, frozen scope, approval provenance and gate owners/actions; reject missing or dangling evidence/source references | `test_rejects_missing_provenance_and_unknown_status`, `test_empty_provenance_or_gate_inventory_is_not_a_release_record` | ✅ |
+| AC-50 | Generate status retaining category, required/optional classification, next action and provenance without granting authority | `test_status_preserves_holds_and_observation_identity`, `test_optional_work_does_not_silently_become_a_release_blocker` | ✅ |
+| AC-51 | Reuse only passing, unexpired evidence with equal relevant-input/toolchain/definition/platform bindings; explain each invalidation | `test_ancestry_only_change_reuses_scoped_evidence_without_authorizing_head`, `test_reuse_reports_each_changed_input_dimension`, `test_expired_evidence_is_retained_but_cannot_clear_or_reuse` | ✅ |
+| AC-52 | Require complete review contracts and cleared prerequisites before a gate is marked clear | `test_review_contract_cannot_promote_delta_or_unresolved_blocker`, `test_prerequisites_cannot_be_skipped_or_cyclic` | ✅ |
+| AC-53 | Marking a PR ready for review preserves active pre-merge evaluation; source synchronization and policy-changing edits may cancel obsolete runs while all existing rule events and aggregate requirements remain | `test_ready_for_review_preserves_running_gate`, `test_required_events_and_rules_remain_enforced`, `test_aggregate_requires_success_from_both_rules` | ✅ |
+
 ## Related Specs
 
 - [docs-generation.md](./docs-generation.md) - Release tags trigger docs generation via `docs-release.yml`
@@ -486,6 +517,7 @@ source preparation and historical net8 evidence are not passing .NET 10 results.
 
 | Date | Change |
 |------|--------|
+| 2026-11-10 | Add source-bound closeout ledger, explicit required/optional gates, scoped evidence reuse and review contracts; preserve active pre-merge evaluation on ready-for-review events (AC-49 through AC-53) |
 | 2026-09-12 | Repair cadence UTC/strict-tag handling and make CLI/Extension alerts commit-co-location based, CLI-keyed, serialized, and self-reconciling for either tag order (AC-31 and AC-32) |
 | 2026-09-12 | Make patch release records late-label and fork aware, label-authenticated and permanently idempotent per PR, safe for untrusted event text, and backed by one reconciled release-label manifest; keep historical merge content data-only and stop swallowing milestone helper failures (AC-25 through AC-30) |
 | 2026-09-12 | Add bounded, read-only public artifact verification after NuGet, CLI GitHub Release, and four-target Marketplace publication (AC-17 through AC-20) |
