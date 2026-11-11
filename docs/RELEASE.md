@@ -471,6 +471,15 @@ The runtime switch adds no separate runtime install requirement for native/VSIX
 users. .NET 8/9 servicing ends November 10, 2026; compatibility assets do not extend
 Microsoft support. [Lifecycle](https://devblogs.microsoft.com/dotnet/dotnet-8-9-end-of-support/).
 
+Distribution builders pin SDK 10.0.115 in the existing feature band, and candidate
+validation requires runtime 10.0.15 or a later stable 10.0 patch. This addresses
+[CVE-2026-109475](https://github.com/dotnet/runtime/security/advisories/GHSA-3g4v-f5gv-c7xf),
+the Linux/macOS managed HttpListener denial of service. The
+[servicing release](https://github.com/dotnet/core/blob/main/release-notes/10.0/10.0.15/10.0.15.md)
+maps that SDK to runtime 10.0.15. Rebuild and verify the self-contained artifacts;
+updating a user's installed runtime does not update their bundled runtime.
+Earlier artifact results using 10.0.14 do not qualify the rebuilt candidates.
+
 The Linux native ABI floor changes from glibc 2.23 to2.27. VS Code already requires
 2.28. An ABI-compatible system is not necessarily a supported distro. The current
 Microsoft 8/10 Windows/macOS support rows match; do not present macOS14's absence
