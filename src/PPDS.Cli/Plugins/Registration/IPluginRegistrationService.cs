@@ -1,5 +1,6 @@
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Models;
+using PPDS.Cli.Services.Plugins;
 
 namespace PPDS.Cli.Plugins.Registration;
 
@@ -246,6 +247,22 @@ public interface IPluginRegistrationService
     }
 
     #region Create/Update Operations
+
+    /// <summary>
+    /// Read-only preflight for target-dependent step field capabilities. A null ID means create;
+    /// an existing ID must be checked against that exact row. Providers must not assume a field
+    /// is writable merely because its registration configuration supports it.
+    /// </summary>
+    Task ValidateStepFieldCapabilitiesAsync(PluginStepConfig config, Guid? existingStepId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var desired = PluginRegistrationNormalizer.NormalizeStep(config, config.OperationIntent);
+        return desired.ContainsKey("canUseReadOnlyConnection")
+            ? Task.FromException(new PpdsException(ErrorCodes.Plugin.FieldCapabilityUnknown,
+                "This registration provider cannot verify canUseReadOnlyConnection field capabilities."))
+            : Task.CompletedTask;
+    }
 
     /// <summary>
     /// Creates or updates a plugin assembly (for classic DLL assemblies only).

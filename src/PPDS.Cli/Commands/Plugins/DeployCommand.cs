@@ -147,6 +147,9 @@ public static class DeployCommand
                     deploymentPreflights.Where(p => p.PackageName is not null)
                         .ToDictionary(p => p.Assembly.Name, p => p.PackageName!, StringComparer.OrdinalIgnoreCase), cancellationToken);
             await PluginRegistrationPlanningService.ValidateRunAsUsersAsync(registrationService, config.Assemblies ?? [], cancellationToken);
+            await PluginRegistrationPlanningService.ValidateStepFieldCapabilitiesAsync(registrationService, config.Assemblies ?? [],
+                deploymentPreflights.Where(p => p.PackageName is not null)
+                    .ToDictionary(p => p.Assembly.Name, p => p.PackageName!, StringComparer.OrdinalIgnoreCase), cancellationToken);
             var customApiService = serviceProvider.GetRequiredService<ICustomApiService>();
 
             if (!globalOptions.IsJsonMode)
@@ -428,6 +431,9 @@ public static class DeployCommand
                     { [assemblyConfig.Name] = deploymentPreflight.PackageName }, cancellationToken);
 
             await PluginRegistrationPlanningService.ValidateRunAsUsersAsync(service, [assemblyConfig], cancellationToken);
+            await PluginRegistrationPlanningService.ValidateStepFieldCapabilitiesAsync(service, [assemblyConfig],
+                deploymentPreflight.PackageName is null ? null : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    { [assemblyConfig.Name] = deploymentPreflight.PackageName }, cancellationToken);
 
             // Deploy assembly or package based on type
             Guid assemblyId;

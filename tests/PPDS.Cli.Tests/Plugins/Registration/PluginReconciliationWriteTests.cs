@@ -36,6 +36,7 @@ public partial class PluginReconciliationWriteTests
         _client.Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => _writes.Add(e)).Returns(Task.CompletedTask);
         _service = new PluginRegistrationService(pool.Object, new InactiveFakeShakedownGuard(), Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginRegistrationService>.Instance);
+        PluginFieldCapabilityTestMetadata.AllowReadOnlyConnectionWrites(_client);
     }
 
     private static PluginStepConfig Step() => new()

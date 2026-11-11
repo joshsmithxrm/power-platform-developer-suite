@@ -100,6 +100,7 @@ public class PluginRegistrationServiceTests
             .ReturnsAsync(_mockPooledClient.Object);
 
         _sut = new PluginRegistrationService(_mockPool.Object, new InactiveFakeShakedownGuard(), _mockLogger.Object);
+        PluginFieldCapabilityTestMetadata.AllowReadOnlyConnectionWrites(_mockPooledClient);
     }
 
     #region Core Assembly Tests

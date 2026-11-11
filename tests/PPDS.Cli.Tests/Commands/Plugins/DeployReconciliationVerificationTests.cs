@@ -127,7 +127,8 @@ public sealed class DeployReconciliationVerificationTests
         Assert.DoesNotContain("verify", fixture.Events);
         Assert.All(fixture.Service.Invocations, call => Assert.True(
             call.Method.Name.StartsWith("Get", StringComparison.Ordinal) ||
-            call.Method.Name.StartsWith("List", StringComparison.Ordinal), call.Method.Name));
+            call.Method.Name.StartsWith("List", StringComparison.Ordinal) ||
+            call.Method.Name == nameof(IPluginRegistrationService.ValidateStepFieldCapabilitiesAsync), call.Method.Name));
     }
 
     [Theory]
@@ -282,6 +283,8 @@ public sealed class DeployReconciliationVerificationTests
             Service.Setup(s => s.GetSdkMessageFilterIdAsync(_messageId, "account", null, CancellationToken.None)).ReturnsAsync(_filterId);
             Guid? callingUserId = null;
             Service.Setup(s => s.ResolveRunAsUserAsync(null, CancellationToken.None)).ReturnsAsync(callingUserId);
+            Service.Setup(s => s.ValidateStepFieldCapabilitiesAsync(It.IsAny<PluginStepConfig>(),
+                    It.IsAny<Guid?>(), CancellationToken.None)).Returns(Task.CompletedTask);
             Service.Setup(s => s.UpsertAssemblyAsync("LocalFixture", It.Is<byte[]>(b => b.SequenceEqual(new byte[] { 0x4d, 0x5a })), null, CancellationToken.None))
                 .Callback(() => Events.Add("write-assembly")).ReturnsAsync(_assemblyId);
             Service.Setup(s => s.UpsertPluginTypeAsync(_assemblyId, "Contoso.Handler", null, CancellationToken.None))
