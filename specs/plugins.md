@@ -579,11 +579,23 @@ Explicit extraction/output serialization redacts secure values and reports exclu
 | filteringAttributes | Omission/null/empty preserves | Omission/null/empty clears; applicable Update/UpdateMultiple attribute sets are canonical |
 | unsecureConfiguration, step/image description | Omission/null/empty preserves | Omission/null/empty clears; supplied nonempty text remains exact |
 | asyncAutoDelete | Omission/null preserves; supplied false/true writes where applicable | Omission/null defaults false for async; true on synchronous is invalid |
-| canBeBypassed, canUseReadOnlyConnection | Omission/null preserves; supplied booleans write | Omission/null uses explicit PPDS true/false defaults |
+| canBeBypassed | Omission/null preserves; supplied booleans write | Omission/null uses the explicit PPDS true default |
+| canUseReadOnlyConnection | Omission/null preserves; supplied booleans require target Create/Update capability | Omission/null uses the explicit PPDS false desired default; target Create/Update capability governs writes |
 | image attributes | Omission/null/empty preserves | Omission/null/empty means all attributes; preview must make this broadening visible |
 | deployment, invocationSource, enabled, executionOrder | Existing defaults ServerOnly, Parent, true, 1 | Same explicit defaults |
 | image alias/message property | Existing image-name/message-specific defaults | Same explicit defaults |
 | secureConfiguration | Omitted/null preserves; non-null including empty is write-only input | Same write request; secure equality is unknown, never part of verified convergence |
+
+Proposed operation-specific capability behavior remains conditional on approval.
+For `canUseReadOnlyConnection`, Create requires explicit target create capability;
+Update requires explicit update capability, except that a non-updatable field is
+omitted from the SDK payload when its readable, explicitly returned Boolean already
+equals the desired value. For a non-updatable field, a differing value, including an
+implicit or explicit reset, fails before affected writes. Unknown capability or current value cannot establish
+an unchanged value. Desired defaults and Diff remain unchanged; no silent reset,
+step deletion/recreation, or persisted acceptance is inferred. Deploy preflights all
+configured steps before package/assembly writes and rechecks at the service write
+boundary; those observations are not an atomic reservation.
 
 Partial Update text empty strings retain their established exact SDK clear writes;
 null/absence preserves. Register/upsert empty placeholders are separate. Explicit
@@ -1647,3 +1659,4 @@ refuse that unknown protection state; this does not provide an atomic conditiona
 | ID | Criterion | Test | Status |
 |---|---|---|---|
 | AC-108 | Actual step/image readers distinguish missing/null protection from known typed values; initial planning and first/final fresh rechecks refuse unknown protection before any delete dispatch, preserving exact ID/token/lease checks and existing public bool signatures. | `ActualReader_TracksProtectionAvailabilityAndTypedValue`; `Plan_RejectsUnavailableActualProtectionBeforeAnyDelete`; `Apply_RejectsNewNullProtectionAtActualFreshRead`; `ParentSdkQuery_UsesExactDeclaredScope` | ✅ |
+| AC-109 | Conditional operation-specific field writes preserve readable equal create-only values, refuse changed/reset or unknown values before affected writes, and preflight later assemblies before earlier package effects. Progress and typed error/cancellation contracts remain intact. | `PluginStepFieldCapabilityTests` (33 cases); `PluginStepCapabilityPlanningTests` (10 cases), including `Reconcile_ImplicitResetOfTrueCreateOnlyField_RefusesBeforeSecureOrStepWrites`, `Reconcile_UnknownUpdateCapabilityEvenWhenEqual_DoesNotClaimSupportedNoOp`, and `Command_LaterAssemblyCapabilityRefusal_PreventsEarlierPackageWrites` | Conditional; offline tested, live acceptance open |
