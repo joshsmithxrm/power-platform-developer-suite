@@ -41,8 +41,8 @@ jobs:
         with:
           dotnet-version: |
             8.0.427
-            10.0.114
-      - uses: actions/setup-python@v6
+            10.0.115
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Native permissions, redirection, recovery and concurrency tests
