@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "mode": "OFFLINE_COMPARISON_ONLY",
+  "repository": "joshsmithxrm/power-platform-developer-suite",
+  "source": {"commit": null, "tree": null},
+  "version": null,
+  "nonce": null,
+  "not_before": null,
+  "expires": null,
+  "candidate": {"controller": null, "invocation": null},
+  "reference": {"controller": null, "invocation": null},
+  "inputs": {
+    "source_bundle": null,
+    "git_history": null,
+    "recipe": null,
+    "toolchain": null,
+    "dependencies": null,
+    "settings": null
+  },
+  "outputs": {"dll": "PPDS.Plugins.dll", "pdb": "PPDS.Plugins.pdb", "xml": "PPDS.Plugins.xml", "package": null, "symbols": null},
+  "signature_bytes": null
+}

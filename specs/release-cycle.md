@@ -587,6 +587,32 @@ change discovery. Manual artifact qualification retains its existing scope.
 A prior binary retains its original Git and
 MinVer identity; unchanged input evidence never relabels it as a new artifact.
 
+## Independent rebuild preparation
+
+The offline rebuild helper prepares pinned local inputs and compares the exact
+pre-signing DLL, PDB, XML, NuGet and symbols package outputs. It does not run a
+builder, authenticate a controller, change signing policy or admit a release.
+Different controller labels and caller-supplied hashes are consistency checks,
+not proof of separate administration. Every result retains false independence,
+signing-admission and release-admission claims.
+
+An actual independent reference build additionally needs a separately controlled
+builder, externally anchored source/input policy and authenticated results. An
+acceptance gate controlled by the producer administrator cannot enforce this
+boundary against that administrator. These infrastructure choices and actual
+reproduction remain outside the offline helper's completed scope.
+
+| AC | Requirement | Test | Status |
+| --- | --- | --- | --- |
+| AC-55 | Measure all six caller-pinned input files without claiming semantic source validation or independent execution | `test_prepare_measures_inputs_without_semantic_or_independence_claim`, `test_prepare_refuses_changed_input` | ✅ |
+| AC-56 | Compare the complete five-output inventory and package linkage byte for byte, without normalizing differences | `test_identical_bytes_never_grant_independence_or_signing`, `test_changed_code_with_consistent_receipt_remains_difference`, `test_same_members_different_zip_timestamps_are_not_normalized`, `test_missing_output_refused`, `test_extra_output_refused`, `test_package_and_standalone_mismatch_refused` | ✅ |
+| AC-57 | Reject substituted, stale, future or replayed receipts and unexpected trust fields while keeping all admission claims false | `test_receipt_input_substitution_refused`, `test_receipt_nonce_replay_refused`, `test_future_receipt_completion_refused`, `test_same_domain_case_insensitive_refused`, `test_unknown_receipt_field_cannot_enable_trust` | ✅ |
+| AC-58 | Refuse unsafe archives, DTD/entity declarations in all supported XML encodings, linked/unbounded inputs, aliased output directories and existing result files; retain ordinary UTF-16 nuspec compatibility | `test_duplicate_case_archive_member_refused`, `test_path_traversal_archive_member_refused`, `test_hardlinked_input_metadata_refused`, `test_same_directory_traversal_alias_refused`, `test_existing_result_not_overwritten`, `test_nuspec_declarations_refused_across_xml_encodings`, `test_declaration_free_utf16_nuspec_remains_compatible` | ✅ |
+
+See [independent rebuild comparison](../docs/INDEPENDENT_REBUILD.md) for usage and
+the limits of the source-only contract. Actual independent rebuild or signing
+acceptance cannot be inferred from these tests.
+
 ## Related Specs
 
 - [docs-generation.md](./docs-generation.md) - Release tags trigger docs generation via `docs-release.yml`
