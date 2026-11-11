@@ -390,6 +390,77 @@ representative delay-sign/sign/verify/package check passes. The initial tool
 identity and compatibility receipt are unset, and no production key is needed
 to prepare or review this source.
 
+### Opt-in candidate compatibility driver
+
+`tests/compatibility/plugin_signing_compatibility.py` prepares a candidate-only
+experiment for [AC-64](../specs/release-cycle.md#candidate-signing-compatibility-experiment-ac-64).
+It does not run during ordinary test discovery. Run `--help` to inspect its
+arguments; a missing explicit execution opt-in refuses before experiment input
+reads or tool execution. Do not run the experiment until its concrete source,
+public inputs, tool identities and disposable-key use have been separately
+authorized. No production key or signing-policy change belongs in this path.
+
+The stages are separate:
+
+| Stage | Inputs and result |
+|---|---|
+| `prepare` | Exact source and public experiment plan; build the actual net462 project with a test-public-key/version overlay in an owned copy, preserve delay-signed and public-signed controls, and produce a bound public handoff. No private-key argument is accepted. |
+| `sign` | The public handoff plus a later-authorized disposable key and owner approval reference; use only pinned `sn.exe`, remove the owned key copy, and retain the signed DLL and receipt. No restore, build, pack or source command runs. |
+| `verify` | The prepared and signed public handoffs; independently verify the signature and signature-only transform, run negative controls, repack, and apply the existing local package rules. No private key is accepted. |
+
+The JSON plan has exactly these fields:
+
+| Field | Required value |
+|---|---|
+| `schema`, `kind` | `1`, `ppds-signing-compatibility-plan` |
+| `experiment` | Owner-selected identifier, letters/digits/underscore/hyphen, at most 80 characters |
+| `source`, `tree` | The reviewed driver checkout's full Git commit and tree IDs |
+| `version` | Candidate SemVer without build metadata; no Git tag is created |
+| `public_key_sha256` | Accepted disposable public input's hash, distinct from production |
+| `windows_directory` | Explicit Windows installation directory, for example `C:/Windows` |
+| `tools` | Exactly `git`, `dotnet`, `pwsh`, `sn`, each with absolute `path`, SHA-256 `sha256`, and observed file product `version` |
+
+The accepted `sn` path is
+`C:/Program Files (x86)/Microsoft SDKs/Windows/v10.0A/bin/NETFX 4.8 Tools/sn.exe`.
+Do not guess missing hashes or versions. The representative test public input
+uses the existing 1024-bit RSA/strong-name algorithm shape; this experiment is
+not key rotation. Record the exact plan-file SHA-256 and pass it to every stage.
+The source checkout must be clean and must contain the reviewed driver and
+helpers. Output directories must be fresh absolute paths outside that checkout.
+
+After separate execution authorization, the invocation shape is:
+
+```powershell
+$Driver = 'tests/compatibility/plugin_signing_compatibility.py'
+python $Driver prepare --execute-candidate --plan $Plan --plan-sha256 $PlanSha --source-root $ReviewedCheckout --public-key $ApprovedPublicInput --output $Prepared
+# Run only in the separately accepted signing context with approved disposable-key use:
+python $Driver sign --execute-candidate --plan $Plan --plan-sha256 $PlanSha --prepared $Prepared --disposable-key $ApprovedDisposableKey --key-use-authorization $ApprovalReference --output $Signed
+# Use a fresh keyless verification context:
+python $Driver verify --execute-candidate --plan $Plan --plan-sha256 $PlanSha --source-root $ReviewedCheckout --prepared $Prepared --signed $Signed --output $Verified
+```
+
+There is no combined command or key generator. An execution flag and recorded
+approval reference do not grant permission. The operator must supply the
+accepted execution context; clearing a subprocess environment and separating
+local stages do not establish fresh-host or network isolation. The existing
+metadata inspector's fixed Windows SDK `sn.exe` must be the same accepted binary
+as the pinned experiment tool. Missing tools or mismatched identities fail;
+there is no installation, PATH fallback or verification-skipping remedy.
+
+Retain the full per-case receipt and its source, toolchain, public-input,
+DLL/package/member and PDB/debug bindings. All six actual cases must pass; a
+process mock, missing call, failed cleanup or incomplete receipt is insufficient.
+The raw ZIP container may differ after repack, but every unchanged member's
+uncompressed bytes and the complete symbol package must match. Microsoft's
+[Strong Name tool reference](https://learn.microsoft.com/en-us/dotnet/framework/tools/sn-exe-strong-name-tool)
+documents `-R`, forced `-vf`, and the `-D` signature-only comparison.
+
+The offline tests in `tests/ci/test_plugin_signing_compatibility.py` qualify
+driver guards and orchestration only. Real compatibility, accepted hosted tool
+identity, production producer assurance, key custody, activation and release
+authorization remain separate. The production entrypoint cannot bootstrap this
+experiment because it already requires the completed compatibility receipt.
+
 ## Manual Strong-Name Rotation (Incident Response Only)
 
 Rotate the keypair only when one of the following is true:
