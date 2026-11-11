@@ -56,6 +56,12 @@ NATIVE_INPUT_PROBES = {
 }
 ARTIFACT_ROUTING_PROBES = tuple(NATIVE_INPUT_PROBES.values()) + ("Directory.Build.props",)
 
+DOTNET_INPUT_PROBES = (
+    "global.json", "NuGet.config", "nuget.config", ".github/workflows/test.yml",
+    "Directory.Build.props", "Directory.Packages.props", "Directory.Custom.props",
+    "Directory.Build.targets", "src/PPDS.Cli/Build.props", "src/PPDS.Cli/Build.targets",
+)
+
 
 def classifications(workflow, changed_paths, event="pull_request"):
     changes = workflow["jobs"]["changes"]
@@ -85,6 +91,57 @@ def extraction_routes(workflow, changed_paths, event="pull_request"):
         assert job["if"] == "needs.changes.outputs.extraction == 'true'"
         routes[name] = len(job["strategy"]["matrix"]["include"]) if selected else 0
     return routes
+
+
+def dotnet_routing_contract(workflow, path, event):
+    flags = classifications(workflow, [path], event)
+    assert flags["code"], f"Full .NET routing missing for {path}"
+    test = workflow["jobs"]["test"]
+    assert test["needs"] == "changes"
+    assert test["if"] == "needs.changes.outputs.code == 'true'"
+    # Follow the selected flag into the real aggregate, rather than just checking
+    # that a glob string appears in the workflow.
+    module_spec = importlib.util.spec_from_file_location("dotnet_route_status", ROOT / "scripts/ci/check_test_status.py")
+    aggregate = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(aggregate)
+    needs = {"changes": {"result": "success", "outputs": {k: str(v).lower() for k, v in flags.items()}}}
+    for flag, job in aggregate.SUITES:
+        needs[job] = {"result": "success" if flags[flag] else "skipped"}
+    assert aggregate.failures(needs) == []
+    for result in ("skipped", "failure", "cancelled", "missing"):
+        needs["test"]["result"] = result
+        assert aggregate.failures(needs), (path, event, result)
+
+
+@pytest.mark.parametrize("event", ["push", "pull_request"])
+@pytest.mark.parametrize("path", DOTNET_INPUT_PROBES)
+def test_build_and_restore_inputs_require_full_dotnet_suite(path, event):
+    dotnet_routing_contract(yaml.safe_load(sources()[PATHS[1]]), path, event)
+
+
+@pytest.mark.parametrize("selector,path", [
+    ("global.json", "global.json"),
+    ("NuGet.config", "NuGet.config"),
+    ("**.props", "src/PPDS.Cli/Build.props"),
+    ("**.targets", "Directory.Build.targets"),
+    (".github/workflows/test.yml", ".github/workflows/test.yml"),
+])
+def test_omitting_dotnet_input_selector_reopens_coverage_gap(selector, path):
+    workflow = yaml.safe_load(sources()[PATHS[1]])
+    step = next(s for s in workflow["jobs"]["changes"]["steps"]
+                if str(s.get("uses", "")).startswith("dorny/paths-filter@"))
+    filters = yaml.safe_load(step["with"]["filters"])
+    filters["code"].remove(selector)
+    step["with"]["filters"] = yaml.safe_dump(filters)
+    with pytest.raises(AssertionError, match="Full .NET routing missing"):
+        dotnet_routing_contract(workflow, path, "pull_request")
+
+
+@pytest.mark.parametrize("path", ["src/PPDS.Extension/package.json", "src/PPDS.Extension/package-lock.json", "docs/RELEASE.md"])
+def test_extension_dependencies_and_docs_do_not_select_dotnet(path):
+    workflow = yaml.safe_load(sources()[PATHS[1]])
+    for event in ("push", "pull_request"):
+        assert classifications(workflow, [path], event)["code"] is False
 
 
 def publisher_artifact_routing_contract(workflow, changed_paths=PUBLISHER_CHANGE_PATHS):
