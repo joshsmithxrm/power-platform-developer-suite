@@ -1,0 +1,81 @@
+{
+  "schema": 1,
+  "kind": "inactive-keyless-reference-build-recipe-specification",
+  "executable_launcher": false,
+  "execution_authorized": false,
+  "repository": "joshsmithxrm/power-platform-developer-suite",
+  "source_commit": "3be21b1eccac401c231ae28f667979e63d2c491e",
+  "source_tree": "b6376bd148197645c16fdaa68f13d4f864c3b4bf",
+  "source_history_bundle_sha256": null,
+  "allowed_git_ref_map_sha256": null,
+  "tracked_source_inventory_sha256": null,
+  "materialized_checkout_inventory_sha256": null,
+  "git_attributes_filters_and_line_endings_sha256": null,
+  "untracked_build_inputs_allowed": false,
+  "expected_package_version": null,
+  "expected_informational_version": null,
+  "recipe_sha256_stored_outside_recipe": true,
+  "inputs": {
+    "windows_image_identity": null,
+    "windows_image_sha256": null,
+    "architecture": "x64",
+    "dotnet_sdk_version": null,
+    "dotnet_sdk_archive_sha256": null,
+    "runtime_and_compiler_inventory_sha256": null,
+    "git_version_and_binary_sha256": null,
+    "net462_reference_assemblies_inventory_sha256": null,
+    "dependency_nupkg_closure_sha256": null,
+    "restore_lock_sha256": null,
+    "evaluated_build_inputs_sha256": null,
+    "public_key_sha256": "3433c28fcbad31568819c43f91a890f4426d358fbf8aadef1ddef156478b4d01",
+    "private_key_allowed": false
+  },
+  "environment": {
+    "network_during_reference_build": "DENY",
+    "dependency_source": "DIGEST_VERIFIED_LOCAL_FEED_ONLY",
+    "fresh_package_cache_required": true,
+    "user_or_machine_nuget_sources_allowed": false,
+    "sdk_roll_forward_allowed": false,
+    "ambient_environment_allowlist_sha256": null,
+    "locale": null,
+    "timezone": null,
+    "encoding": null,
+    "canonical_source_root": null,
+    "path_map": null,
+    "generated_source_and_sourcelink_policy_sha256": null
+  },
+  "planned_steps": [
+    "Authenticate externally accepted request and verify all required inputs before sandbox creation",
+    "Materialize exact source/history/ref snapshot and verified local dependency feed",
+    "Restore only PPDS.Plugins in locked mode with approved feed and pinned SDK",
+    "Build PPDS.Plugins Release with no restore, PublicSign=false and DelaySign=true",
+    "Pack PPDS.Plugins Release with no build and the identical public-key/delay-sign properties",
+    "Collect exact required outputs through the trusted collector outside repository build control",
+    "Compare full output bytes and inventory outside the sandbox and emit no independence claim without real external authentication"
+  ],
+  "msbuild_properties_to_bind": {
+    "Configuration": "Release",
+    "TargetFramework": "net462",
+    "PublicSign": false,
+    "DelaySign": true,
+    "Deterministic": true,
+    "ContinuousIntegrationBuild": null,
+    "PathMap": null,
+    "DebugType": "portable",
+    "GenerateDocumentationFile": true,
+    "RestoreLockedMode": true
+  },
+  "required_output_roles": [
+    "delay_signed_plugins_dll",
+    "portable_pdb",
+    "xml_documentation",
+    "complete_nupkg",
+    "complete_snupkg"
+  ],
+  "failure_rules": [
+    "Any null required input means the recipe is not runnable.",
+    "Any undeclared tool, dependency, build input, output or reference mismatch refuses acceptance.",
+    "Archive or PDB differences remain failures; no normalization changes a failure into acceptance.",
+    "No key use, signing, provisioning, access change, live test, release or publication is included."
+  ]
+}

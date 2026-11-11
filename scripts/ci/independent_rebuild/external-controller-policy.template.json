@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "kind": "inactive-independent-rebuild-architecture-template",
+  "not_runtime_policy": true,
+  "activation_approved": false,
+  "independent_rebuild_verified": false,
+  "release_authorized": false,
+  "producer": {
+    "repository": "joshsmithxrm/power-platform-developer-suite",
+    "baseline_commit": "3be21b1eccac401c231ae28f667979e63d2c491e",
+    "baseline_tree": "b6376bd148197645c16fdaa68f13d4f864c3b4bf",
+    "control_domain": "existing-github-producer-administration"
+  },
+  "reference_controller": {
+    "id": null,
+    "operator": null,
+    "administrative_control_domain": null,
+    "policy_sha256": null,
+    "trusted_collector_sha256": null,
+    "build_sandbox_image_sha256": null,
+    "producer_can_change_controller": null,
+    "repository_build_can_access_controller_identity": null
+  },
+  "adjudicator": {
+    "id": null,
+    "administrative_control_domain": null,
+    "accepted_policy_sha256": null,
+    "verifier_sha256": null,
+    "external_result_transport": "DSSE_ENVELOPE_PROPOSED_NOT_IMPLEMENTED",
+    "payload_type": "application/vnd.ppds.reference-build-result.v1+json",
+    "accepted_public_trust_anchor_sha256": null,
+    "accepted_controller_identity": null,
+    "signature_verifier_implementation": null,
+    "signature_verifier_sha256": null,
+    "trust_policy_mutable_by_producer": null
+  },
+  "enforcement": {
+    "key_use_gate_owner": null,
+    "key_use_gate_control_domain": null,
+    "producer_can_bypass_acceptance": null,
+    "require_external_admission_before_key_use": true,
+    "existing_signing_compatibility_gate_still_required": true,
+    "existing_activation_and_publication_holds_still_required": true
+  },
+  "comparison": {
+    "mode": "EXACT_FILE_BYTES_AND_COMPLETE_INVENTORY",
+    "include_delay_signed_dll": true,
+    "include_portable_pdb": true,
+    "include_xml_documentation": true,
+    "include_complete_nupkg": true,
+    "include_complete_snupkg": true,
+    "package_member_linkage_required": true,
+    "normalization_or_ignored_differences": false,
+    "unknown_or_mismatch": "REFUSE",
+    "same_admin_second_job_counts_as_independent": false
+  },
+  "limitations": [
+    "Domain names and boolean declarations do not establish actual administrative separation.",
+    "A reference result or expected hash supplied by the producer does not authenticate independent control.",
+    "This file is an unselected design template, not authorization or a source of trust.",
+    "Exact matching outputs can share malicious source, dependencies or compiler behavior."
+  ]
+}
