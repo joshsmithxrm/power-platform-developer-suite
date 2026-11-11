@@ -4,7 +4,141 @@ Tool-neutral reference for release scope analysis, release operations,
 strong-name rotation, key custody, and incident response. Automation may advise
 what should be released, but a maintainer must approve every tag and publish.
 
+NuGet restore, build and pack run in `build-package` without private signing keys
+or OIDC permission. Non-Plugins packages continue directly to full release-input
+validation. Plugins packages are delay-signed with the public key, admitted to a
+fresh `sign-plugins` worker, and verified/repackaged by `verify-signed-plugins`
+without the key. A fresh `publish` job downloads only the selected final package
+artifact. Before login, an isolated
+standard-library verifier checks the immutable event source, successful producer
+job/attempt, artifact service identity/digest, raw manifest/package hashes,
+package identity, current tag target and public version vacancy. It never loads
+assemblies or invokes MSBuild. Only then may the pinned login and NuGet pushes run.
+An individual publisher-job rerun cannot reuse an earlier attempt's build artifact;
+this intentionally fails closed rather than mixing attempts.
+
+The Plugins production policy remains **UNSELECTED**. Its early gate fails before
+the secret-bearing step, and the publisher independently requires the accepted
+source policy. No private-key operation or real Windows signing compatibility is
+established by the offline fixture tests. Activation requires a reviewed producer
+assurance choice, accepted signer binary hash/version, real compatibility receipt,
+and separate authorization for key use and release. Signature validity does not
+prove that a compromised producer built trustworthy source.
+
+## Release closeout ledger
+
+Keep one current JSON ledger under the integration owner's control. Use
+[`release-ledger.example.json`](release-ledger.example.json) as the record shape;
+private approval messages and local evidence paths belong in the private release
+workspace, not in a public example. Freeze the candidate commit/tree and included
+scope before final qualification. Preserve earlier receipts rather than editing
+them to make a newer status look consistent.
+
+```bash
+python scripts/ci/release_ledger.py validate /path/to/release-ledger.json
+python scripts/ci/release_ledger.py status /path/to/release-ledger.json
+python scripts/ci/release_ledger.py reuse /path/to/evidence.json /path/to/target-binding.json
+```
+
+`validate` checks declared consistency. A valid ledger can contain blocked,
+unstarted, stale or unknown gates; exit zero is not release readiness. `status`
+generates the dated report from that same record. `reuse` compares one evidence
+record with the proposed source/input, toolchain, definition, platform and claim
+bindings. Exit 0 means the declared scoped evidence matches, 1 means it needs
+refreshing, and 2 means the input is invalid. The tool does not fetch sources,
+authenticate approvals, hash the actual inputs or prove that the declared input
+set is complete. The integration owner must verify those against the receipts.
+An unchanged relevant-input digest can preserve a product result across an
+ancestry change; exact-head merge checks remain separate.
+
+Each gate names its source, owner and next action and distinguishes a user hold,
+repository policy, technical blocker or recommendation. Keep the original
+approval's scope and source reference; a summary cannot broaden it. Any new gate
+must name the concrete failure, affected deliverable and smallest sufficient
+remedy. Classify new work as safe-delivery blocking, promised acceptance,
+separable maintenance or future enhancement before adding it to frozen scope.
+Mark `required_for_release` explicitly; optional work and denied out-of-scope
+actions must not silently become additional release prerequisites.
+For a companion repository, set that gate's optional `candidate` to its exact
+repository, commit and tree. Its evidence and review must match that target;
+core receipts cannot be relabeled as companion evidence.
+
+Parallel workers own bounded preparation lanes. One integration owner adopts
+their work, verifies source identity and updates the ledger. Independent reviews
+record their claims, source/tree, assumptions, findings, open prerequisites and
+nonclaims. A delta-only review cannot clear an older unresolved prerequisite.
+Offline plugin evidence does not establish persisted behavior; a synthetic
+signing model does not establish a production signer.
+
+During iteration, run focused checks for changed inputs. At integration, run the
+applicable regression checks; qualify the full applicable native matrix on the
+frozen candidate. Reuse unchanged receipts only for their original claims and
+record what invalidated evidence before repeating an expensive run. Retry only
+eligible failed jobs, keeping source, run, attempt and artifact identity together.
+Measure first-pass success, duplicate gate runs per source head, queue time and
+failed-job retry latency from actual workflow records; do not infer improvement
+from a green aggregate badge or from test counts alone.
+
+Release documentation edits select Python contracts without rebuilding native
+artifacts. Changes to actual native inputs or their workflows still select the
+complete five-native/four-VSIX matrix. For final artifact qualification, the
+read-only `Test` workflow accepts manual dispatch on the selected ref and binds
+checkout/provenance to its resolved commit. It also runs Python contracts; it
+does not establish full .NET or Extension-suite qualification. Its distinct
+`Native candidate qualification` check and concurrency group preserve automatic
+required checks and active runs. This prepares a route; it does not dispatch it.
+A reused artifact keeps its original compiled Git/MinVer identity.
+
+The pre-merge gate preserves an active evaluation when a draft becomes ready
+because readiness is not a rule input. Title/body/base edits and source
+synchronization still cancel obsolete evaluations. Every resulting run evaluates
+both rules; the default pending slot can coalesce events. This reduces one source
+of cancellation and does not cache or substitute a previous required check.
+
 ## Release Scope Analysis
+
+### NuGet trusted publishing preparation
+
+The proposed publisher uses pinned official NuGet/login and a temporary key for
+both package and symbol uploads. The login user is **JoshSmithMSFT**, confirmed
+by Josh as the **individual policy creator** profile. The step-local nonsecret
+`NUGET_PUBLISH_USER` guard uses that same identity; no repository variable is needed.
+NuGet's token service searches policies by their creator; a package owner may
+be an organization and is not necessarily the login user. Missing or malformed
+identity fails before login. There is no stored-key fallback.
+
+On November 2, 2026 Josh supplied **user-reported** evidence of an active
+`PPDS-GitHub-Actions` policy with package owner **JoshSmithMSFT**, new-version-only
+push scope, and these exact package IDs: PPDS.Auth, PPDS.Cli, PPDS.Dataverse,
+PPDS.Mcp, PPDS.Migration, PPDS.Plugins and PPDS.Query. Its GitHub tuple is
+`joshsmithxrm/power-platform-developer-suite`, workflow `publish-nuget.yml`.
+This is not an independent policy inspection or a tested token exchange.
+Josh subsequently confirmed the individual creator username as JoshSmithMSFT.
+Earlier public package-owner metadata named joshsmithxrm; that does not establish
+the newer policy owner's package authorization. That ownership/authorization
+discrepancy and actual login/upload remain unverified; an Active policy with
+matching subjects alone is not proof it can publish these packages. Keep the
+exact seven IDs; do not broaden them.
+
+The workflow currently has no GitHub environment. Keep the matching policy's
+environment blank unless a separately reviewed coordinated environment change
+is approved. Only the upload-only `publish` job requests `id-token: write`; public
+verification remains read-only. The permission is available to every step in
+that job, so it remains upload-only: no restore/build/pack or signing runs there.
+The artifact-integrity handoff checks the producer and its output before login.
+The reviewed tag, workflow, verifier, runner and build inputs remain trusted.
+
+Keep source/dependency/signing/vacancy/public-artifact gates and sequential
+publication verification. New source must contain this workflow; retrying an old
+immutable tag still executes its historical secret-based publisher. Actual
+token exchange and package/symbol uploads are untested by offline checks and
+require separate authorization. Trust/identity settings and final publication
+approval remain separate from preparing this change. Do not remove old secrets,
+create trust settings or invoke login as part of local validation.
+
+Primary references: [NuGet trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing),
+[individual creator binding](https://github.com/NuGet/NuGetGallery/blob/main/src/NuGetGallery.Services/Authentication/Federated/FederatedCredentialService.cs#L396),
+and [official login action](https://github.com/NuGet/login).
 
 Before preparing CHANGELOGs or choosing versions, generate an explained scope
 advisory from the exact commit range:
@@ -205,12 +339,13 @@ PPDS strong-names its assemblies. The key custody model is:
 |----------|----------------|-----------------|
 | `*.PublicKey` files (e.g. `src/PPDS.Plugins/PPDS.Plugins.PublicKey`) | Repo | Yes |
 | `*.snk` private keypair | GitHub Actions secret `PLUGINS_SNK_BASE64` | **No — never commit** |
-| `<DelaySign>true</DelaySign>` + `<PublicSign>true</PublicSign>` | csproj | Yes |
+| Public signing default; separate release delay-sign overrides | Project/workflow | Yes |
 
 **Public-only signing for local builds.** csproj files declare
 `<PublicSign>true</PublicSign>` so local `dotnet build` succeeds against the
-public key alone. CI overrides this at pack time with the real keypair to
-produce signed release assemblies.
+public key alone. Plugins release preparation selects `PublicSign=false` and
+`DelaySign=true` for both build and no-build pack. These modes are mutually
+exclusive. The private key is used only by the isolated post-build signer.
 
 ### Why the .snk is sacred
 
@@ -228,29 +363,103 @@ For this reason:
   writing or editing any `.snk` file. Bypassing it requires deliberate
   intent (delete the hook, or disable the matcher in `.claude/settings.json`).
 
-## CI-Automated Decode (Routine Release Flow)
+## Isolated Plugins signing preparation
 
-On every NuGet publish, `.github/workflows/publish-nuget.yml` decodes the
-`PLUGINS_SNK_BASE64` secret into a runner-temp file and points MSBuild at
-it for the pack step. No human action is required.
+`plugin-signing-policy.json` starts inactive. The workflow must not be activated
+by changing a boolean without the recorded acceptance and key-use authorization.
+The implemented assurance mode is a reviewed controlled producer; requiring an
+independent reference rebuild would need a real additional lane and its evidence.
 
-The flow is roughly:
+The signer checks the exact admitted source/run/attempt, public key and tool bytes.
+Only its signing step receives `PLUGINS_SNK_BASE64`; the value is never exported to
+`GITHUB_ENV`. It signs the already-built single-module net462 DLL with Microsoft's
+`sn.exe -R`, removes its fresh temporary key file, then checks `-vf` and `-D` before
+writing a receipt. No MSBuild, restore, pack or package code runs in that worker.
 
-```yaml
-# Excerpt from .github/workflows/publish-nuget.yml
-env:
-  PLUGINS_SNK_BASE64: ${{ secrets.PLUGINS_SNK_BASE64 }}
-run: |
-  SNK_PATH="$RUNNER_TEMP/PPDS.Plugins.snk"
-  echo "$PLUGINS_SNK_BASE64" | base64 -d > "$SNK_PATH"
-  echo "PLUGINS_SNK_PATH=$SNK_PATH" >> "$GITHUB_ENV"
+A separate worker verifies the actual signature again, checks the signature-only
+assembly change and full public key, and replaces only the nupkg's exact Plugins
+DLL member. Other member bytes and the snupkg remain unchanged. The original
+full release-input guard runs before a schema-2 handoff binds the build, signer
+and verifier artifacts/jobs, exact bytes and chronological ordering. Failed
+Plugins verification cannot fall back to publishing the keyless build artifact.
 
-# Then pack invokes MSBuild with:
-#   /p:AssemblyOriginatorKeyFile="$PLUGINS_SNK_PATH"
+Offline tests exercise real ZIP and PE-header handling with controlled byte
+fixtures and mocked metadata/tool calls. They are not real cryptographic or
+hosted runner evidence. AC-64 remains pending until a separately authorized
+representative delay-sign/sign/verify/package check passes. The initial tool
+identity and compatibility receipt are unset, and no production key is needed
+to prepare or review this source.
+
+### Opt-in candidate compatibility driver
+
+`tests/compatibility/plugin_signing_compatibility.py` prepares a candidate-only
+experiment for [AC-64](../specs/release-cycle.md#candidate-signing-compatibility-experiment-ac-64).
+It does not run during ordinary test discovery. Run `--help` to inspect its
+arguments; a missing explicit execution opt-in refuses before experiment input
+reads or tool execution. Do not run the experiment until its concrete source,
+public inputs, tool identities and disposable-key use have been separately
+authorized. No production key or signing-policy change belongs in this path.
+
+The stages are separate:
+
+| Stage | Inputs and result |
+|---|---|
+| `prepare` | Exact source and public experiment plan; build the actual net462 project with a test-public-key/version overlay in an owned copy, preserve delay-signed and public-signed controls, and produce a bound public handoff. No private-key argument is accepted. |
+| `sign` | The public handoff plus a later-authorized disposable key and owner approval reference; use only pinned `sn.exe`, remove the owned key copy, and retain the signed DLL and receipt. No restore, build, pack or source command runs. |
+| `verify` | The prepared and signed public handoffs; independently verify the signature and signature-only transform, run negative controls, repack, and apply the existing local package rules. No private key is accepted. |
+
+The JSON plan has exactly these fields:
+
+| Field | Required value |
+|---|---|
+| `schema`, `kind` | `1`, `ppds-signing-compatibility-plan` |
+| `experiment` | Owner-selected identifier, letters/digits/underscore/hyphen, at most 80 characters |
+| `source`, `tree` | The reviewed driver checkout's full Git commit and tree IDs |
+| `version` | Candidate SemVer without build metadata; no Git tag is created |
+| `public_key_sha256` | Accepted disposable public input's hash, distinct from production |
+| `windows_directory` | Explicit Windows installation directory, for example `C:/Windows` |
+| `tools` | Exactly `git`, `dotnet`, `pwsh`, `sn`, each with absolute `path`, SHA-256 `sha256`, and observed file product `version` |
+
+The accepted `sn` path is
+`C:/Program Files (x86)/Microsoft SDKs/Windows/v10.0A/bin/NETFX 4.8 Tools/sn.exe`.
+Do not guess missing hashes or versions. The representative test public input
+uses the existing 1024-bit RSA/strong-name algorithm shape; this experiment is
+not key rotation. Record the exact plan-file SHA-256 and pass it to every stage.
+The source checkout must be clean and must contain the reviewed driver and
+helpers. Output directories must be fresh absolute paths outside that checkout.
+
+After separate execution authorization, the invocation shape is:
+
+```powershell
+$Driver = 'tests/compatibility/plugin_signing_compatibility.py'
+python $Driver prepare --execute-candidate --plan $Plan --plan-sha256 $PlanSha --source-root $ReviewedCheckout --public-key $ApprovedPublicInput --output $Prepared
+# Run only in the separately accepted signing context with approved disposable-key use:
+python $Driver sign --execute-candidate --plan $Plan --plan-sha256 $PlanSha --prepared $Prepared --disposable-key $ApprovedDisposableKey --key-use-authorization $ApprovalReference --output $Signed
+# Use a fresh keyless verification context:
+python $Driver verify --execute-candidate --plan $Plan --plan-sha256 $PlanSha --source-root $ReviewedCheckout --prepared $Prepared --signed $Signed --output $Verified
 ```
 
-The temp file lives in the runner sandbox and disappears at job end. There
-is no persistence to the runner image, the artifact bundle, or any cache.
+There is no combined command or key generator. An execution flag and recorded
+approval reference do not grant permission. The operator must supply the
+accepted execution context; clearing a subprocess environment and separating
+local stages do not establish fresh-host or network isolation. The existing
+metadata inspector's fixed Windows SDK `sn.exe` must be the same accepted binary
+as the pinned experiment tool. Missing tools or mismatched identities fail;
+there is no installation, PATH fallback or verification-skipping remedy.
+
+Retain the full per-case receipt and its source, toolchain, public-input,
+DLL/package/member and PDB/debug bindings. All six actual cases must pass; a
+process mock, missing call, failed cleanup or incomplete receipt is insufficient.
+The raw ZIP container may differ after repack, but every unchanged member's
+uncompressed bytes and the complete symbol package must match. Microsoft's
+[Strong Name tool reference](https://learn.microsoft.com/en-us/dotnet/framework/tools/sn-exe-strong-name-tool)
+documents `-R`, forced `-vf`, and the `-D` signature-only comparison.
+
+The offline tests in `tests/ci/test_plugin_signing_compatibility.py` qualify
+driver guards and orchestration only. Real compatibility, accepted hosted tool
+identity, production producer assurance, key custody, activation and release
+authorization remain separate. The production entrypoint cannot bootstrap this
+experiment because it already requires the completed compatibility receipt.
 
 ## Manual Strong-Name Rotation (Incident Response Only)
 
@@ -342,6 +551,15 @@ packages retain their existing 8/9/10 framework assets; Plugins retains net462.
 The runtime switch adds no separate runtime install requirement for native/VSIX
 users. .NET 8/9 servicing ends November 10, 2026; compatibility assets do not extend
 Microsoft support. [Lifecycle](https://devblogs.microsoft.com/dotnet/dotnet-8-9-end-of-support/).
+
+Distribution builders pin SDK 10.0.115 in the existing feature band, and candidate
+validation requires runtime 10.0.15 or a later stable 10.0 patch. This addresses
+[CVE-2026-109475](https://github.com/dotnet/runtime/security/advisories/GHSA-3g4v-f5gv-c7xf),
+the Linux/macOS managed HttpListener denial of service. The
+[servicing release](https://github.com/dotnet/core/blob/main/release-notes/10.0/10.0.15/10.0.15.md)
+maps that SDK to runtime 10.0.15. Rebuild and verify the self-contained artifacts;
+updating a user's installed runtime does not update their bundled runtime.
+Earlier artifact results using 10.0.14 do not qualify the rebuilt candidates.
 
 The Linux native ABI floor changes from glibc 2.23 to2.27. VS Code already requires
 2.28. An ABI-compatible system is not necessarily a supported distro. The current

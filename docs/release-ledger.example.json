@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "updated_utc": "2026-01-01T00:00:00Z",
+  "owner": "Example integration owner; replace all illustrative records",
+  "candidate": {
+    "repository": "example/ppds",
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "tree": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "scope": {
+    "frozen": true,
+    "included": ["Illustrative offline correction"],
+    "excluded": ["Unrelated maintenance"]
+  },
+  "sources": [
+    {
+      "id": "example-instruction",
+      "locator": "https://example.invalid/replace-with-trusted-instruction",
+      "observed_utc": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "authorizations": [
+    {
+      "id": "publication-held",
+      "source_refs": ["example-instruction"],
+      "status": "held",
+      "actions": ["publication"],
+      "scope": "No publishing, tags, signing, live tests or deployment authorized by this example"
+    }
+  ],
+  "evidence": [],
+  "reviews": [],
+  "gates": [
+    {
+      "id": "publication",
+      "category": "user_hold",
+      "state": "blocked",
+      "required_for_release": true,
+      "claims": ["Exact reviewed candidate has publication approval"],
+      "source_refs": ["example-instruction"],
+      "evidence_refs": [],
+      "review_refs": [],
+      "authorization_refs": ["publication-held"],
+      "prerequisites": [],
+      "owner": "Example maintainer",
+      "next_action": "Replace illustrative data with source-bound records before operational use"
+    }
+  ]
+}

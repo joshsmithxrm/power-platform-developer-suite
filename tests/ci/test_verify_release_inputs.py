@@ -384,7 +384,11 @@ class TestPublisherOrdering:
 
     def test_nuget_guards_precede_every_push_without_duplicate_bypass(self):
         steps = self.workflow("publish-nuget.yml")["jobs"]["publish"]["steps"]
-        gate = next(i for i,s in enumerate(steps) if "verify_release_inputs.py nuget" in s.get("run",""))
+        gate = next(i for i,s in enumerate(steps) if s.get("id") == "verify-handoff")
+        build = self.workflow("publish-nuget.yml")["jobs"]["build-package"]["steps"]
+        build_gate = next(i for i,s in enumerate(build) if "verify_release_inputs.py nuget" in s.get("run",""))
+        upload = next(i for i,s in enumerate(build) if str(s.get("uses","")).startswith("actions/upload-artifact@"))
+        assert build_gate < upload
         pushes = [i for i,s in enumerate(steps) if "dotnet nuget push" in s.get("run","")]
         assert pushes and all(gate < i for i in pushes)
         assert "--skip-duplicate" not in json.dumps(steps)

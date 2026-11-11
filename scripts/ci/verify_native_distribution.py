@@ -61,7 +61,7 @@ def compiled_identity(assembly_info, runtime_config, deps, source, rid):
     require(options.get("tfm") == "net10.0" and len(frameworks) == 1, "Not a self-contained net10 runtime")
     runtime_version = frameworks[0].get("version", "")
     require(re.fullmatch(r"10\.0\.[0-9]+", runtime_version), "Unexpected runtime pack version")
-    require(int(runtime_version.rsplit(".", 1)[1]) >= 14, "Runtime pack must meet the 10.0.14 security baseline")
+    require(int(runtime_version.rsplit(".", 1)[1]) >= 15, "Runtime pack must meet the 10.0.15 security baseline")
     require(deps.get("runtimeTarget", {}).get("name") == f".NETCoreApp,Version=v10.0/{rid}", "Wrong runtime target")
     pack = f"runtimepack.Microsoft.NETCore.App.Runtime.{rid}/{runtime_version}"
     require(pack in deps.get("libraries", {}), "Runtime pack provenance missing")

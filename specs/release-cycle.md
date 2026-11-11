@@ -1,8 +1,8 @@
 # Release Cycle
 
 **Status:** Draft
-**Last Updated:** 2026-11-01
-**Code:** [.claude/skills/release/](../.claude/skills/release/), [.github/workflows/](../.github/workflows/), [scripts/ci/](../scripts/ci/), [tests/ci/](../tests/ci/), [tests/test_release_skill_content.py](../tests/test_release_skill_content.py), [tests/ci/test_extension_publish_workflow.py](../tests/ci/test_extension_publish_workflow.py)
+**Last Updated:** 2026-11-11
+**Code:** [.claude/skills/release/](../.claude/skills/release/), [.github/workflows/](../.github/workflows/), [scripts/ci/](../scripts/ci/), [tests/ci/](../tests/ci/), [tests/compatibility/](../tests/compatibility/), [tests/test_release_skill_content.py](../tests/test_release_skill_content.py), [tests/ci/test_extension_publish_workflow.py](../tests/ci/test_extension_publish_workflow.py)
 **Surfaces:** All
 
 ---
@@ -345,6 +345,13 @@ lookup failures stop for review; there is no automated rollback or repair.
 | AC-36 | Publishing fails closed on occupied NuGet/Marketplace versions, malformed or incomplete registry responses, and lookup errors. Marketplace checks the entire version before starting its matrix and the exact target before upload; it never treats network failure as vacancy | `tests/ci/test_verify_release_inputs.py::TestVacancy` | ✅ |
 | AC-37 | CLI notes come from one nonempty exact-version CHANGELOG section. Only a draft with the same source/run, notes, channel and matching existing asset digests may resume missing uploads without clobbering; re-read and require complete matching assets before publication | `tests/ci/test_verify_release_inputs.py::TestCliReleasePlan` | ✅ |
 | AC-38 | All publisher guards precede external uploads, native CLI binaries report the exact tagged version and source before artifact upload, and guard failures never invoke publication or automated rollback | `tests/ci/test_verify_release_inputs.py::TestPublisherOrdering` | ✅ |
+| AC-39 | NuGet OIDC issuance is confined to the canonical repository's component-tag push upload-only publishing job; restore/build/pack/sign run separately without OIDC; workflow-wide and public verification permissions remain read-only and PR/manual/reusable entry points are absent | `tests/ci/test_nuget_trusted_publishing.py` | ✅ |
+| AC-40 | A pinned official NuGet/login exchanges only after the separate build succeeds and a fresh data-only source/run/job/hash/tag/vacancy handoff check, immediately before uploads; missing/invalid individual policy-creator configuration fails before exchange without secret fallback | `tests/ci/test_nuget_trusted_publishing.py` | ✅ |
+| AC-41 | Package and symbol pushes both use only the masked temporary login output through step environment, retain NuGet v3 and package-before-symbol order, and preserve signing/source/public-verification guards | `tests/ci/test_nuget_trusted_publishing.py` | ✅ |
+| AC-42 | NuGet trusted-publishing guidance distinguishes policy creator, package owner and GitHub identity; records user-reported policy evidence separately from verified exchange; and requires separate review/approval for nonsecret identity configuration and activation | `tests/ci/test_nuget_trusted_publishing.py` | ✅ |
+| AC-43 | No restored package/MSBuild code, local action or container runs in the OIDC-enabled NuGet upload job; exact event-source checkout and only reviewed actions precede login | `test_oidc_publisher_has_no_build_or_package_execution`, `test_fresh_publisher_checkout_download_and_login_order_is_source_pinned` | ✅ |
+| AC-44 | NuGet handoff refuses wrong/missing source/run/job/attempt/hash, incomplete or failed producer, mutable tag, unsafe package paths/identity and occupied/unknown version inventory without invoking MSBuild or OIDC | `tests/ci/test_verify_nuget_handoff.py` | ✅ |
+
 
 ### Edge Cases
 
@@ -379,6 +386,69 @@ lookup failures stop for review; there is no automated rollback or repair.
 | One public target, checksum, or version differs | Fail immediately and preserve every published artifact for investigation |
 
 ---
+
+## Isolated Plugins signing
+
+Plugins release preparation builds and packs `net462` with the repository public
+key and delay signing. The build job has no private key. A fresh signer job admits
+the exact source/run/attempt-bound package before its one secret-bearing step;
+that step uses only the pinned Microsoft Strong Name tool. A separate keyless
+job verifies the signature and signature-only assembly change, reconstructs the
+package with every other member unchanged, and creates the upload handoff.
+Non-Plugins packages retain their existing producer and publishing path.
+
+The initial production policy is `UNSELECTED`. It blocks before secret exposure.
+Choosing producer assurance, recording an accepted hosted signer binary and real
+signing compatibility, and authorizing activation are separate release gates.
+Offline fixture/process-mock tests do not prove real signing compatibility.
+
+| AC | Criterion | Test | Status |
+|---|---|---|---|
+| AC-60 | Unselected policy or absent compatibility/tool identity refuses before a signing secret can be selected; build has no private-key reference | `tests/ci/test_plugin_signing.py::test_policy_defaults_fail_closed`, `test_workflow_secret_boundary` | PASS (offline fixtures/source contracts only) |
+| AC-61 | Plugins use keyless delay-sign build/pack, a minimal fresh signer, independent keyless verification, and no fallback to unsigned output; other packages preserve their route | `tests/ci/test_plugin_signing.py::test_workflow_secret_boundary` | PASS (offline fixtures/source contracts only) |
+| AC-62 | Source/run/attempt/job/artifact hashes and chronology bind the complete Plugins chain; publisher accepts only independently verified output | `tests/ci/test_plugin_signing.py::test_chain_rejects_wrong_binding`, `test_chain_requires_chronology` | PASS (offline fixtures/source contracts only) |
+| AC-63 | Repack changes only the exact net462 Plugins DLL; all other member bytes and the symbol package remain unchanged; unsafe/ambiguous archives and signature-tool failures refuse | `tests/ci/test_plugin_signing.py::test_repackage_preserves_other_members`, `test_repackage_rejects_tampering`, `test_tool_failure_refuses` | PASS (offline fixtures/source contracts only) |
+| AC-64 | A real representative delay-signed Plugins DLL is signed with the approved pinned tool, passes forced signature verification and signature-only comparison, and survives full package verification | Explicit `tests/compatibility/plugin_signing_compatibility.py` experiment, COMPAT-01 through COMPAT-06 below; real Windows receipt required | pending (source preparation is not real signing evidence) |
+
+### Candidate signing compatibility experiment (AC-64)
+
+The opt-in driver has separate `prepare`, `sign` and `verify` stages and is not
+part of ordinary test discovery. Default invocation refuses before reading
+experiment inputs or starting tools. Every stage requires `--execute-candidate`;
+`sign` additionally requires a separately authorized disposable-key input and an
+owner approval reference. Flags and references record the operator's choice;
+they do not grant authorization. There is no combined stage or key generator.
+
+The public plan binds the source commit/tree, candidate version, distinct test
+public-key identity and accepted absolute tool paths/hashes/versions. `prepare`
+builds the actual Plugins project with a recorded public-input overlay in an
+owned copy, with no private-key argument. `sign` receives only the prepared
+public handoff and later-authorized disposable key, invokes the pinned strong-
+name tool, and removes its owned key copy on success or failure. `verify` has no
+key argument and independently checks actual signed bytes. No stage changes
+production policy, invokes the release entrypoint, invents GitHub receipts,
+creates tags or publishes. Local stages are not proof of fresh-host isolation.
+
+| Case | Actual evidence required for PASS |
+|---|---|
+| COMPAT-01 | Actual Release/net462 delay-signed assembly has the expected source/version/full public key, one IL-only module and zero signature reservation; real forced verification rejects it. |
+| COMPAT-02 | Real pinned `sn -R`, `sn -vf` and `sn -D` succeed; source/version/identity/full public key/MVID/framework and PDB/debug identity remain bound. |
+| COMPAT-03 | The actual `PublicSign=true` control is rejected by the delay-sign input check before signing. |
+| COMPAT-04 | A recorded signature-region corruption fails actual forced verification. |
+| COMPAT-05 | A recorded valid non-signature IL/metadata change fails actual signature-only comparison; malformed-file failure alone is insufficient. |
+| COMPAT-06 | Repack changes only `lib/net462/PPDS.Plugins.dll`; every other uncompressed member and the complete symbol package remain unchanged; the extracted signed DLL passes real verification and existing local NuGet package rules. |
+
+The receipt records each case separately, exact source/tool/public-input/package
+bindings, actual process outcomes and key-copy cleanup. Missing, mocked, skipped
+or failed cryptographic operations cannot produce a compatibility PASS. The
+fixed SDK tool used by the existing metadata inspector must match the accepted
+signer identity. Production lifecycle, key custody, producer trust and release
+authorization are outside this candidate experiment's claim.
+
+`tests/ci/test_plugin_signing_compatibility.py` exercises default refusal, stage
+and receipt binding, process failure, cleanup and byte/package controls with
+synthetic fixtures and process doubles. These tests qualify driver source only;
+AC-64 remains pending until the separately authorized real experiment passes.
 
 ## Design Decisions
 
@@ -459,15 +529,56 @@ owned-child deadlines. Default launchers and other commands are unchanged.
 
 | AC | Requirement | Test | Status |
 | --- | --- | --- | --- |
-| AC-43 | Native publish/archive and bundle AssemblyInfo paths select .NET 10 together, with explicit existing SDK feature band | `test_distribution_inputs_are_coherent_and_candidate_route_is_no_publish`, `test_stale_or_unsafe_runtime_input_fails` | 🔲 |
+| AC-43 | Native publish/archive and bundle AssemblyInfo paths select .NET 10 together; all candidate/publisher distribution jobs pin SDK 10.0.115 in the existing feature band | `test_distribution_inputs_are_coherent_and_candidate_route_is_no_publish`, `test_stale_or_unsafe_runtime_input_fails`, `test_each_distribution_job_rejects_stale_or_different_band_sdk` | 🔲 |
 | AC-44 | Package/tool framework matrices, five native/four VSIX targets and independent net8/net462 fixtures remain | `test_package_targets_and_independent_fixtures_are_retained` | 🔲 |
-| AC-45 | Actual candidate metadata/archived binary source, runtime and bytes are verified without stable identity forgery | `test_wrong_runtime_or_source_is_rejected`, `test_actual_vsix_bytes_and_identity_are_verified_without_execution`; actual four-host VSIX matrix | 🔲 |
+| AC-45 | Actual candidate metadata/archived binary source, runtime and bytes are verified without stable identity forgery; consistent runtimes below 10.0.15 fail while serviced stable 10.0 patches remain accepted | `test_wrong_runtime_or_source_is_rejected`, `test_actual_vsix_bytes_and_identity_are_verified_without_execution`, `test_consistent_unpatched_runtime_pack_is_rejected`, `test_consistent_patched_10_0_runtime_pack_is_accepted`, `test_runtime_security_floor_does_not_expand_stable_10_0_band`; actual four-host VSIX matrix | 🔲 |
 | AC-46 | Selected VSIX matrix failure/cancel/skip/missing cannot pass the aggregate | `test_selected_vsix_matrix_must_succeed` | 🔲 |
 | AC-47 | Explicit quiet daemon parses and bypasses the complete startup I/O boundary while other command/default behavior stays | `QuietDaemon_ParsesAndSelectsStartupIoSuppression`, `QuietDaemon_RequiresExplicitCommandAndQuietFlag`, `test_quiet_daemon_guard_precedes_all_startup_status_cache_and_http_access` | 🔲 |
 | AC-48 | Runtime children drop credentials/opt-ins; bounded frames/container identity/network/mount controls are enforced | `test_private_environment_drops_credentials_profiles_and_opt_ins`, `test_invalid_or_truncated_frame_is_rejected`, `test_container_command_is_offline_readonly_and_uses_synthetic_identity`; actual native/container jobs | 🔲 |
 
 These rows remain unverified until the actual applicable gates/artifacts pass;
 source preparation and historical net8 evidence are not passing .NET 10 results.
+
+## Release closeout record
+
+One integration owner maintains a release ledger for each frozen candidate. The
+ledger records included and excluded work, source-bound evidence, exact approval
+scope and its source, and each gate's owner and next action. A user hold, checked-in
+policy requirement, technical blocker and coordinator recommendation are distinct
+categories; a summary cannot silently promote one into another.
+
+New work is classified as a safe-delivery blocker, promised acceptance, separable
+maintenance or future enhancement. Changing the frozen scope requires a recorded
+disposition with the affected deliverable and smallest sufficient remedy. An
+offline preparation result cannot clear a live acceptance or publication gate.
+
+Evidence reuse requires identical declared relevant inputs, toolchain, test or
+review definition and platform, with current external-state evidence where
+applicable. An ancestry-only change does not itself invalidate that evidence.
+Failed, skipped, unknown or expired evidence never qualifies. Reuse does not
+replace exact-head checks or authorize a merge, tag, live operation or publication.
+
+Independent review records identify source/tree, assessed claims, assumptions,
+findings, open prerequisites and explicit nonclaims. A review of a delta cannot
+clear a preexisting gate merely because it introduced no new finding.
+
+| AC | Requirement | Test | Status |
+| --- | --- | --- | --- |
+| AC-49 | Validate candidate identity, frozen scope, approval provenance and gate owners/actions; reject missing or dangling evidence/source references | `test_rejects_missing_provenance_and_unknown_status`, `test_empty_provenance_or_gate_inventory_is_not_a_release_record` | ✅ |
+| AC-50 | Generate status retaining category, required/optional classification, next action and provenance without granting authority | `test_status_preserves_holds_and_observation_identity`, `test_optional_work_does_not_silently_become_a_release_blocker` | ✅ |
+| AC-51 | Reuse only passing, unexpired evidence with equal relevant-input/toolchain/definition/platform bindings; explain each invalidation | `test_ancestry_only_change_reuses_scoped_evidence_without_authorizing_head`, `test_reuse_reports_each_changed_input_dimension`, `test_expired_evidence_is_retained_but_cannot_clear_or_reuse` | ✅ |
+| AC-52 | Require complete review contracts and cleared prerequisites before a gate is marked clear | `test_review_contract_cannot_promote_delta_or_unresolved_blocker`, `test_prerequisites_cannot_be_skipped_or_cyclic` | ✅ |
+| AC-53 | Marking a PR ready for review preserves active pre-merge evaluation; source synchronization and policy-changing edits may cancel obsolete runs while all existing rule events and aggregate requirements remain | `test_ready_for_review_preserves_running_gate`, `test_required_events_and_rules_remain_enforced`, `test_aggregate_requires_success_from_both_rules` | ✅ |
+| AC-54 | Documentation-only release edits select Python contracts without native/VSIX builds; relevant input or workflow changes still select both matrices, and manual exact-ref qualification selects both matrices plus Python without a live executor | `test_release_documentation_selects_python_without_artifact_matrix`, `test_native_inputs_route_to_all_native_and_vsix_lanes`, `test_manual_artifact_qualification_is_exact_ref_read_only_and_bounded`, `test_docs_and_manual_routes_preserve_fail_closed_aggregate`, `test_manual_skipped_dotnet_cannot_replace_real_dependency_evidence` | ✅ |
+
+Ordinary documentation-only edits do not rebuild native payloads. Final-candidate
+qualification can run the read-only Test workflow manually on the selected ref
+to generate native/VSIX evidence and run Python contracts. This route does not
+claim a full .NET or Extension suite. Its concurrency group and aggregate check
+name (`Native candidate qualification`) are separate from automatic runs. The
+manual skipped .NET job cannot replace automatic dependency-test evidence.
+A prior binary retains its original Git and
+MinVer identity; unchanged input evidence never relabels it as a new artifact.
 
 ## Related Specs
 
@@ -479,6 +590,7 @@ source preparation and historical net8 evidence are not passing .NET 10 results.
 
 | Date | Change |
 |------|--------|
+| 2026-11-10 | Add source-bound closeout ledger, explicit required/optional gates, scoped evidence reuse and review contracts; preserve active pre-merge evaluation on ready-for-review events (AC-49 through AC-53) |
 | 2026-09-12 | Repair cadence UTC/strict-tag handling and make CLI/Extension alerts commit-co-location based, CLI-keyed, serialized, and self-reconciling for either tag order (AC-31 and AC-32) |
 | 2026-09-12 | Make patch release records late-label and fork aware, label-authenticated and permanently idempotent per PR, safe for untrusted event text, and backed by one reconciled release-label manifest; keep historical merge content data-only and stop swallowing milestone helper failures (AC-25 through AC-30) |
 | 2026-09-12 | Add bounded, read-only public artifact verification after NuGet, CLI GitHub Release, and four-target Marketplace publication (AC-17 through AC-20) |

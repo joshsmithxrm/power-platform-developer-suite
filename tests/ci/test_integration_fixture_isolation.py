@@ -15,13 +15,14 @@ REFUSAL_SCRIPT = (
     'ownership/cleanup safety or an approved exclusive disposable environment lifecycle."\n'
     'exit 1\n'
 )
-# LF-normalized reviewed automatic-workflow baselines.
+# LF-normalized reviewed build/test workflow baselines.
 # Build stays at R 3b29a0f80fe97e71ba7ba78a21e35b7d1aa1c2c6.
-# Test includes the approved .NET 10/read-only native and VSIX validation body.
+# Test includes ec6c5881's read-only artifact route plus SDK 10.0.115 servicing;
+# the separate Integration Tests workflow remains a tokenless refusal.
 # No Git calls or mutable refs are used by these tests.
 REVIEWED_WORKFLOW_HASHES = {
     "build.yml": "8c80da5301c14c0205be42898e106f5eb623c34df4a2cbe2d830075e96747eaf",
-    "test.yml": "dcdad7b25fcaeed4f674952920603ea6d56966b441c42bc39d71a5f8a40d031f",
+    "test.yml": "40d4bba9f7a1d4967a5f1066e396a1291043719991a59939c4a5502c1ba2aa67",
 }
 
 
@@ -141,9 +142,14 @@ def test_automatic_build_and_test_git_contents_match_reviewed_baselines(name, ex
 @pytest.mark.parametrize("name,aggregate", [("build.yml", "build-status"), ("test.yml", "test-status")])
 def test_automatic_events_and_required_aggregate_names_are_preserved(name, aggregate):
     workflow = load_workflow(name)
-    assert workflow[event_key(workflow)] == {
+    expected_events = {
         "push": {"branches": ["main"]}, "pull_request": {"branches": ["main"]},
     }
+    expected_name = aggregate
+    if name == "test.yml":
+        expected_events["workflow_dispatch"] = {}
+        expected_name = "${{ github.event_name == 'workflow_dispatch' && 'Native candidate qualification' || 'test-status' }}"
+    assert workflow[event_key(workflow)] == expected_events
     job = workflow["jobs"][aggregate]
-    assert job.get("name", aggregate) == aggregate
+    assert job.get("name", aggregate) == expected_name
     assert job["if"] == "always()"

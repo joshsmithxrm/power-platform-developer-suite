@@ -43,13 +43,22 @@ an update to the test allowlist and this table.
 | `codeql.yml` / `analyze` | `security-events: write` | Upload CodeQL results; retain its existing read scopes. |
 | `dependabot-label.yml` / `label-major-updates` | `issues: write`, `pull-requests: write` | Apply labels to Dependabot PRs using trusted base automation. |
 | `docs-release.yml` / `release` | `contents: write`, `pull-requests: write` | Push the primary repository's baseline rollover branch and create its PR. |
+| `publish-nuget.yml` / `publish` | `id-token: write` | Proposed trusted publishing for canonical repository component-tag pushes; activation requires the reviewed NuGet policy and confirmed individual creator configuration. |
 | `milestone-release-check.yml` / `check-milestone-completion` | `issues: write` | Maintain release-tracking issues. |
 | `post-merge-release-check.yml` / `patch-release-detection`, `extension-corelease-detection` | `issues: write` | Maintain release-tracking issues. |
 | `release-cadence-check.yml` / `cadence-check` | `issues: write` | Maintain release-tracking issues. |
 | `release-cli.yml` / `release` | `contents: write` | Publish the CLI GitHub release and its assets. |
 
-Package publication, Marketplace publication, the docs companion PR, and audit
-capture use their existing separate credentials. A `GITHUB_TOKEN` permission
+NuGet publication exchanges the upload-only publishing job's OIDC identity for a
+temporary scoped key. The build/signing and public verification jobs have no OIDC
+grant. A fresh publisher checks the exact source/run/producer artifact, package
+hashes and current tag/vacancy as data before login; restore/build/pack and
+artifact-provided code never run with OIDC authority. The existing Plugins private
+signing key is still exposed to MSBuild/package targets in the separate build job;
+this separation does not resolve that signing-key or build-output trust risk.
+
+Marketplace publication, the docs companion PR, and audit capture retain their
+existing separate credentials. A `GITHUB_TOKEN` permission
 map does not limit those credentials. Do not broaden the docs App installation:
 its token remains scoped to `ppds-docs`.
 
@@ -84,3 +93,9 @@ Hosted PR checks verify the paths-filter API access and normal CI execution.
 References: [GitHub permission maps](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions),
 [the PR creation and approval setting](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#preventing-github-actions-from-creating-or-approving-pull-requests),
 and [paths-filter permissions](https://github.com/dorny/paths-filter#supported-workflows).
+
+NuGet isolation: `build-package` retains only `contents: read`; the upload-only
+`publish` job adds `actions: read` for exact artifact/producer metadata and the
+already reviewed `id-token: write`. It executes no restore/build/pack/signing or
+artifact-supplied code. The build job still holds the existing Plugins signing
+secret when required; OIDC isolation does not resolve that separate key risk.

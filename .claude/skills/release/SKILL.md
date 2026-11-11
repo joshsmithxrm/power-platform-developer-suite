@@ -41,6 +41,15 @@ Before starting:
 
 ## Process
 
+Follow the shared [contributor lifecycle](../../../docs/CONTRIBUTOR-LIFECYCLE.md)
+for every applicable included contribution. Verify actual landed author/trailers,
+prepare source/contributor release acknowledgement, then check the actual published
+notes after an authorized release. Keep communication and original-PR disposition
+with named owners. If sending/closure requires permission, bring the exact prepared
+reply and decision to the user; do not leave closeout silently unowned or mark it
+complete. Use the explicit no-contribution path when applicable. This grants no
+merge, publication or communication authority.
+
 ### 1. Register Phase and Create Release Worktree
 
 ```bash
