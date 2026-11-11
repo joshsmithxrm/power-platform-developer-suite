@@ -360,6 +360,35 @@ class RebuildTest(unittest.TestCase):
         with self.assertRaisesRegex(v.Error, "Package source/version"):
             self.compare()
 
+    def test_nuspec_declarations_refused_across_xml_encodings(self):
+        declarations = (
+            '<!DOCTYPE package [<!ENTITY packageId "PPDS.Plugins">]>',
+            '<!DOCTYPE package SYSTEM "https://uncontacted.example/forbidden.dtd">',
+        )
+        for encoding in ("utf-8", "utf-16", "utf-16-le", "utf-16-be"):
+            for declaration in declarations:
+                with self.subTest(encoding=encoding, declaration=declaration):
+                    xml_encoding = "UTF-8" if encoding == "utf-8" else "UTF-16"
+                    body = self.spec().decode()
+                    if "<!ENTITY" in declaration:
+                        body = body.replace("PPDS.Plugins", "&packageId;")
+                    spec = ('<?xml version="1.0" encoding="' + xml_encoding + '"?>' + declaration + body).encode(encoding)
+                    for directory in (self.left, self.right):
+                        path = directory / self.request["outputs"]["package"]
+                        members = v.archive(path.read_bytes())
+                        members["PPDS.Plugins.nuspec"] = spec
+                        path.write_bytes(zipped(list(members.items())))
+                    self.bind()
+                    with self.assertRaisesRegex(v.Error, "declaration-free"):
+                        self.compare()
+                    self.assertFalse(self.output.exists())
+
+    def test_declaration_free_utf16_nuspec_remains_compatible(self):
+        for encoding in ("utf-16", "utf-16-le", "utf-16-be"):
+            with self.subTest(encoding=encoding):
+                spec = ('<?xml version="1.0" encoding="UTF-16"?>' + self.spec().decode()).encode(encoding)
+                v.package_identity({"PPDS.Plugins.nuspec": spec}, self.request)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

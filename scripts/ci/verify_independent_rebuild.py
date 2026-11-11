@@ -237,12 +237,19 @@ def archive(raw):
         raise Error("Unreadable package") from exc
 
 
+class DeclarationFreeTreeBuilder(ET.TreeBuilder):
+    def doctype(self, name, pubid, system):
+        # Parse-level rejection covers supported XML encodings, including UTF-16.
+        # An ASCII byte scan alone cannot identify declarations in those inputs.
+        raise Error("One bounded declaration-free nuspec required")
+
+
 def package_identity(members, request):
     specs = [raw for name, raw in members.items() if name.endswith(".nuspec")]
     require(len(specs) == 1 and len(specs[0]) <= MAX_JSON and b"<!DOCTYPE" not in specs[0].upper()
             and b"<!ENTITY" not in specs[0].upper(), "One bounded declaration-free nuspec required")
     try:
-        root = ET.fromstring(specs[0])
+        root = ET.fromstring(specs[0], parser=ET.XMLParser(target=DeclarationFreeTreeBuilder()))
     except ET.ParseError as exc:
         raise Error("Invalid nuspec") from exc
     def one(name):
