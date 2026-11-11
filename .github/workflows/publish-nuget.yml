@@ -35,7 +35,7 @@ jobs:
       package: ${{ steps.package.outputs.package }}
       artifact-id: ${{ steps.package-artifact.outputs.artifact-id }}
       artifact-digest: ${{ steps.package-artifact.outputs.artifact-digest }}
-      manifest-sha256: ${{ steps.handoff.outputs.manifest-sha256 }}
+      manifest-sha256: ${{ steps.handoff.outputs.manifest-sha256 || steps.keyless.outputs.manifest-sha256 }}
 
     steps:
     - uses: actions/checkout@v6
@@ -96,34 +96,13 @@ jobs:
       run: dotnet restore
 
     - name: Build
-      run: dotnet build --configuration Release --no-restore
-
-    - name: Decode Plugins signing key
-      # Only for Plugins-v* releases — decode the real private key from the
-      # PLUGINS_SNK_BASE64 secret so pack can produce a signed assembly.
-      # Written to RUNNER_TEMP (outside the workspace) so the key cannot be
-      # captured by any actions/upload-artifact glob, gets wiped when the job
-      # ends, and is never near the repo tree where a stray `git add` could
-      # commit it. The real .snk is NEVER committed.
-      if: startsWith(github.ref, 'refs/tags/Plugins-v')
       shell: bash
-      env:
-        PLUGINS_SNK_BASE64: ${{ secrets.PLUGINS_SNK_BASE64 }}
       run: |
-        if [ -z "$PLUGINS_SNK_BASE64" ]; then
-          echo "::error::PLUGINS_SNK_BASE64 secret is not set — cannot sign Plugins release"
-          exit 1
+        if [[ "$GITHUB_REF" == refs/tags/Plugins-v* ]]; then
+          dotnet build src/PPDS.Plugins/PPDS.Plugins.csproj --configuration Release --no-restore -p:PublicSign=false -p:DelaySign=true
+        else
+          dotnet build --configuration Release --no-restore
         fi
-        SNK_PATH="$RUNNER_TEMP/PPDS.Plugins.snk"
-        echo "$PLUGINS_SNK_BASE64" | base64 -d > "$SNK_PATH"
-        size=$(stat -c%s "$SNK_PATH")
-        echo "::notice::Decoded Plugins signing key ($size bytes) to runner temp"
-        if [ "$size" -lt 500 ]; then
-          echo "::error::Decoded key is unexpectedly small — secret may be corrupted"
-          exit 1
-        fi
-        # Export the path for the pack step. RUNNER_TEMP differs per job/runner.
-        echo "PLUGINS_SNK_PATH=$SNK_PATH" >> "$GITHUB_ENV"
 
     - name: Pack specific projects
       shell: bash
@@ -132,13 +111,7 @@ jobs:
         for project in ${{ steps.package.outputs.projects }}; do
           echo "Packing $project"
           if [[ "$project" == *PPDS.Plugins* ]]; then
-            # Re-pack Plugins with PublicSign=false + real key so the published
-            # assembly carries a real strong-name signature, not just public.
-            # Key path comes from RUNNER_TEMP (set by the decode step) so the
-            # private key never enters the workspace tree.
-            dotnet pack "$project" --configuration Release --output ./nupkgs \
-              -p:PublicSign=false \
-              -p:AssemblyOriginatorKeyFile="$PLUGINS_SNK_PATH"
+            dotnet pack "$project" --configuration Release --no-build --output ./nupkgs -p:PublicSign=false -p:DelaySign=true
           else
             dotnet pack "$project" --configuration Release --no-build --output ./nupkgs
           fi
@@ -150,6 +123,7 @@ jobs:
         python-version: '3.11'
 
     - name: Validate packages and public version vacancy before upload
+      if: ${{ !startsWith(github.ref, 'refs/tags/Plugins-v') }}
       shell: bash
       run: python scripts/ci/verify_release_inputs.py nuget --tag "$GITHUB_REF_NAME" --directory ./nupkgs
 
@@ -158,6 +132,7 @@ jobs:
       run: ls -la ./nupkgs/
 
     - name: Bind validated packages to this source, run and build job
+      if: ${{ !startsWith(github.ref, 'refs/tags/Plugins-v') }}
       id: handoff
       shell: bash
       run: >-
@@ -165,11 +140,19 @@ jobs:
         --tag "$GITHUB_REF_NAME" --source "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
         --attempt "$GITHUB_RUN_ATTEMPT"
 
+    - name: Bind keyless Plugins input without release clearance
+      if: startsWith(github.ref, 'refs/tags/Plugins-v')
+      id: keyless
+      shell: bash
+      run: >-
+        python -I scripts/ci/verify_plugin_signing.py prepare --directory ./nupkgs
+        --tag "$GITHUB_REF_NAME" --source "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT"
+
     - name: Retain only validated package data
       id: package-artifact
       uses: actions/upload-artifact@v7
       with:
-        name: nuget-package-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+        name: ${{ startsWith(github.ref, 'refs/tags/Plugins-v') && 'nuget-keyless' || 'nuget-package' }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
         path: |
           nupkgs/*.nupkg
           nupkgs/*.snupkg
@@ -177,9 +160,160 @@ jobs:
         if-no-files-found: error
         retention-days: 1
 
-  publish:
+  sign-plugins:
+    name: Sign Plugins assembly
     needs: build-package
+    if: startsWith(github.ref, 'refs/tags/Plugins-v')
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      artifact-id: ${{ steps.signed-artifact.outputs.artifact-id }}
+      artifact-digest: ${{ steps.signed-artifact.outputs.artifact-digest }}
+      manifest-sha256: ${{ steps.receipt.outputs.manifest-sha256 }}
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+        sparse-checkout: |
+          scripts/ci/sign_plugin_assembly.ps1
+          scripts/ci/verify_plugin_signing.py
+          scripts/ci/verify_nuget_handoff.py
+          scripts/ci/inspect_release_assemblies.ps1
+          scripts/ci/plugin-signing-policy.json
+          src/PPDS.Plugins/PPDS.Plugins.PublicKey
+        sparse-checkout-cone-mode: false
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.11'
+    - name: Refuse unapproved signing policy before secret selection
+      shell: bash
+      run: python -I scripts/ci/verify_plugin_signing.py policy
+    - uses: actions/download-artifact@v8
+      with:
+        artifact-ids: ${{ needs.build-package.outputs.artifact-id }}
+        path: ${{ runner.temp }}/plugins-keyless
+        merge-multiple: true
+    - name: Admit exact keyless artifact
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        BUILD_ID: ${{ needs.build-package.outputs.artifact-id }}
+        BUILD_DIGEST: ${{ needs.build-package.outputs.artifact-digest }}
+        BUILD_MANIFEST: ${{ needs.build-package.outputs.manifest-sha256 }}
+      run: >-
+        python -I scripts/ci/verify_plugin_signing.py admit --directory "$RUNNER_TEMP/plugins-keyless"
+        --output "$RUNNER_TEMP/plugins-admitted" --tag "$GITHUB_REF_NAME" --source "$GITHUB_SHA"
+        --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --artifact-id "$BUILD_ID"
+        --artifact-digest "$BUILD_DIGEST" --manifest-sha "$BUILD_MANIFEST"
+    - name: Create fresh signed output directory
+      shell: pwsh
+      run: New-Item -ItemType Directory -Path "$env:RUNNER_TEMP/plugins-signed" -ErrorAction Stop | Out-Null
+    - name: Sign only the admitted assembly
+      shell: pwsh
+      env:
+        PLUGINS_SNK_BASE64: ${{ secrets.PLUGINS_SNK_BASE64 }}
+      run: >-
+        ./scripts/ci/sign_plugin_assembly.ps1
+        -InputDll "$env:RUNNER_TEMP/plugins-admitted/PPDS.Plugins.dll"
+        -OutputDll "$env:RUNNER_TEMP/plugins-signed/PPDS.Plugins.dll"
+        -Policy "$env:GITHUB_WORKSPACE/scripts/ci/plugin-signing-policy.json"
+        -Request "$env:RUNNER_TEMP/plugins-admitted/signing-request.json"
+        -PublicKey "$env:GITHUB_WORKSPACE/src/PPDS.Plugins/PPDS.Plugins.PublicKey"
+        -Receipt "$env:RUNNER_TEMP/plugins-signed/signing-receipt.json"
+    - name: Bind completed signing receipt after key cleanup
+      id: receipt
+      shell: pwsh
+      run: |
+        $receiptHash = (Get-FileHash -LiteralPath "$env:RUNNER_TEMP/plugins-signed/signing-receipt.json" -Algorithm SHA256).Hash.ToLowerInvariant()
+        "manifest-sha256=$receiptHash" >> $env:GITHUB_OUTPUT
+    - uses: actions/upload-artifact@v7
+      id: signed-artifact
+      with:
+        name: plugins-signed-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+        path: |
+          ${{ runner.temp }}/plugins-signed/PPDS.Plugins.dll
+          ${{ runner.temp }}/plugins-signed/signing-receipt.json
+        if-no-files-found: error
+        retention-days: 1
+
+  verify-signed-plugins:
+    name: Verify signed Plugins package
+    needs: [build-package, sign-plugins]
+    if: startsWith(github.ref, 'refs/tags/Plugins-v')
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      artifact-id: ${{ steps.package-artifact.outputs.artifact-id }}
+      artifact-digest: ${{ steps.package-artifact.outputs.artifact-digest }}
+      manifest-sha256: ${{ steps.handoff.outputs.manifest-sha256 }}
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@v8
+      with:
+        artifact-ids: ${{ needs.build-package.outputs.artifact-id }}
+        path: ${{ runner.temp }}/plugins-keyless
+        merge-multiple: true
+    - uses: actions/download-artifact@v8
+      with:
+        artifact-ids: ${{ needs.sign-plugins.outputs.artifact-id }}
+        path: ${{ runner.temp }}/plugins-signed
+        merge-multiple: true
+    - name: Independently verify signature and reconstruct package
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        BUILD_ID: ${{ needs.build-package.outputs.artifact-id }}
+        BUILD_DIGEST: ${{ needs.build-package.outputs.artifact-digest }}
+        BUILD_MANIFEST: ${{ needs.build-package.outputs.manifest-sha256 }}
+        SIGN_ID: ${{ needs.sign-plugins.outputs.artifact-id }}
+        SIGN_DIGEST: ${{ needs.sign-plugins.outputs.artifact-digest }}
+        SIGN_MANIFEST: ${{ needs.sign-plugins.outputs.manifest-sha256 }}
+      run: >-
+        python -I scripts/ci/verify_plugin_signing.py verify --directory "$RUNNER_TEMP/plugins-keyless"
+        --signed "$RUNNER_TEMP/plugins-signed" --output "$RUNNER_TEMP/plugins-final"
+        --chain-output "$RUNNER_TEMP/plugins-chain.json" --tag "$GITHUB_REF_NAME" --source "$GITHUB_SHA"
+        --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --artifact-id "$BUILD_ID"
+        --artifact-digest "$BUILD_DIGEST" --manifest-sha "$BUILD_MANIFEST"
+        --sign-artifact-id "$SIGN_ID" --sign-artifact-digest "$SIGN_DIGEST" --sign-manifest-sha "$SIGN_MANIFEST"
+    - name: Apply full release input and signature guard
+      shell: bash
+      run: python scripts/ci/verify_release_inputs.py nuget --tag "$GITHUB_REF_NAME" --directory "$RUNNER_TEMP/plugins-final"
+    - name: Bind independently verified Plugins output
+      id: handoff
+      shell: bash
+      run: >-
+        python -I scripts/ci/verify_nuget_handoff.py create --directory "$RUNNER_TEMP/plugins-final"
+        --tag "$GITHUB_REF_NAME" --source "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+        --attempt "$GITHUB_RUN_ATTEMPT" --chain "$RUNNER_TEMP/plugins-chain.json"
+    - uses: actions/upload-artifact@v7
+      id: package-artifact
+      with:
+        name: nuget-package-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+        path: |
+          ${{ runner.temp }}/plugins-final/*.nupkg
+          ${{ runner.temp }}/plugins-final/*.snupkg
+          ${{ runner.temp }}/plugins-final/nuget-handoff.json
+        if-no-files-found: error
+        retention-days: 1
+
+  publish:
+    needs: [build-package, verify-signed-plugins]
     if: >-
+      always() && needs.build-package.result == 'success' &&
+      ((startsWith(github.ref, 'refs/tags/Plugins-v') && needs.verify-signed-plugins.result == 'success' && needs.verify-signed-plugins.outputs.artifact-id != '') ||
+       (!startsWith(github.ref, 'refs/tags/Plugins-v') && needs.verify-signed-plugins.result == 'skipped' && needs.build-package.outputs.artifact-id != '')) &&
       github.repository == 'joshsmithxrm/power-platform-developer-suite' &&
       github.event_name == 'push' && github.ref_type == 'tag' &&
       (startsWith(github.ref, 'refs/tags/Plugins-v') ||
@@ -203,7 +337,9 @@ jobs:
       with:
         ref: ${{ github.sha }}
         persist-credentials: false
-        sparse-checkout: scripts/ci/verify_nuget_handoff.py
+        sparse-checkout: |
+          scripts/ci/verify_nuget_handoff.py
+          scripts/ci/plugin-signing-policy.json
         sparse-checkout-cone-mode: false
     - name: Setup NuGet upload CLI
       uses: actions/setup-dotnet@v6
@@ -216,7 +352,7 @@ jobs:
     - name: Download this run's exact package artifact
       uses: actions/download-artifact@v8
       with:
-        artifact-ids: ${{ needs.build-package.outputs.artifact-id }}
+        artifact-ids: ${{ startsWith(github.ref, 'refs/tags/Plugins-v') && needs.verify-signed-plugins.outputs.artifact-id || (!startsWith(github.ref, 'refs/tags/Plugins-v') && needs.build-package.outputs.artifact-id || '') }}
         path: ${{ runner.temp }}/nuget-publish
         merge-multiple: true
     - name: Verify source, producer job, package hashes, tag and vacancy without MSBuild
@@ -224,9 +360,9 @@ jobs:
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
-        HANDOFF_ARTIFACT_ID: ${{ needs.build-package.outputs.artifact-id }}
-        HANDOFF_ARTIFACT_DIGEST: ${{ needs.build-package.outputs.artifact-digest }}
-        HANDOFF_MANIFEST_SHA256: ${{ needs.build-package.outputs.manifest-sha256 }}
+        HANDOFF_ARTIFACT_ID: ${{ startsWith(github.ref, 'refs/tags/Plugins-v') && needs.verify-signed-plugins.outputs.artifact-id || (!startsWith(github.ref, 'refs/tags/Plugins-v') && needs.build-package.outputs.artifact-id || '') }}
+        HANDOFF_ARTIFACT_DIGEST: ${{ startsWith(github.ref, 'refs/tags/Plugins-v') && needs.verify-signed-plugins.outputs.artifact-digest || (!startsWith(github.ref, 'refs/tags/Plugins-v') && needs.build-package.outputs.artifact-digest || '') }}
+        HANDOFF_MANIFEST_SHA256: ${{ startsWith(github.ref, 'refs/tags/Plugins-v') && needs.verify-signed-plugins.outputs.manifest-sha256 || (!startsWith(github.ref, 'refs/tags/Plugins-v') && needs.build-package.outputs.manifest-sha256 || '') }}
       run: >-
         python -I scripts/ci/verify_nuget_handoff.py verify --directory "$RUNNER_TEMP/nuget-publish"
         --tag "$GITHUB_REF_NAME" --source "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"

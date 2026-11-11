@@ -4,9 +4,12 @@ Tool-neutral reference for release scope analysis, release operations,
 strong-name rotation, key custody, and incident response. Automation may advise
 what should be released, but a maintainer must approve every tag and publish.
 
-NuGet restore, build, Plugins signing/pack and full release-input validation run in
-`build-package` with `contents: read` and no OIDC permission. A fresh `publish`
-job downloads only that run's package-data artifact. Before login, an isolated
+NuGet restore, build and pack run in `build-package` without private signing keys
+or OIDC permission. Non-Plugins packages continue directly to full release-input
+validation. Plugins packages are delay-signed with the public key, admitted to a
+fresh `sign-plugins` worker, and verified/repackaged by `verify-signed-plugins`
+without the key. A fresh `publish` job downloads only the selected final package
+artifact. Before login, an isolated
 standard-library verifier checks the immutable event source, successful producer
 job/attempt, artifact service identity/digest, raw manifest/package hashes,
 package identity, current tag target and public version vacancy. It never loads
@@ -14,10 +17,13 @@ assemblies or invokes MSBuild. Only then may the pinned login and NuGet pushes r
 An individual publisher-job rerun cannot reuse an earlier attempt's build artifact;
 this intentionally fails closed rather than mixing attempts.
 
-This separation removes OIDC authority from dependency build code. It does not
-protect the existing Plugins private signing key from MSBuild/package targets in
-the signing job, or prove that a compromised build produced trustworthy binaries.
-Those signing/build risks remain separate release-review requirements.
+The Plugins production policy remains **UNSELECTED**. Its early gate fails before
+the secret-bearing step, and the publisher independently requires the accepted
+source policy. No private-key operation or real Windows signing compatibility is
+established by the offline fixture tests. Activation requires a reviewed producer
+assurance choice, accepted signer binary hash/version, real compatibility receipt,
+and separate authorization for key use and release. Signature validity does not
+prove that a compromised producer built trustworthy source.
 
 ## Release closeout ledger
 
@@ -116,11 +122,11 @@ exact seven IDs; do not broaden them.
 
 The workflow currently has no GitHub environment. Keep the matching policy's
 environment blank unless a separately reviewed coordinated environment change
-is approved. Only the upload-only `publish` job requests `id-token: write`;
-restore/build/pack run in the separate `build-package` job without OIDC. The
-artifact-integrity handoff described above checks the producer and its output
-before login. This separation does not isolate the Plugins private key from
-build targets or establish producer trust; those remain distinct review gates.
+is approved. Only the upload-only `publish` job requests `id-token: write`; public
+verification remains read-only. The permission is available to every step in
+that job, so it remains upload-only: no restore/build/pack or signing runs there.
+The artifact-integrity handoff checks the producer and its output before login.
+The reviewed tag, workflow, verifier, runner and build inputs remain trusted.
 
 Keep source/dependency/signing/vacancy/public-artifact gates and sequential
 publication verification. New source must contain this workflow; retrying an old
@@ -333,12 +339,13 @@ PPDS strong-names its assemblies. The key custody model is:
 |----------|----------------|-----------------|
 | `*.PublicKey` files (e.g. `src/PPDS.Plugins/PPDS.Plugins.PublicKey`) | Repo | Yes |
 | `*.snk` private keypair | GitHub Actions secret `PLUGINS_SNK_BASE64` | **No — never commit** |
-| `<DelaySign>true</DelaySign>` + `<PublicSign>true</PublicSign>` | csproj | Yes |
+| Public signing default; separate release delay-sign overrides | Project/workflow | Yes |
 
 **Public-only signing for local builds.** csproj files declare
 `<PublicSign>true</PublicSign>` so local `dotnet build` succeeds against the
-public key alone. CI overrides this at pack time with the real keypair to
-produce signed release assemblies.
+public key alone. Plugins release preparation selects `PublicSign=false` and
+`DelaySign=true` for both build and no-build pack. These modes are mutually
+exclusive. The private key is used only by the isolated post-build signer.
 
 ### Why the .snk is sacred
 
@@ -356,29 +363,32 @@ For this reason:
   writing or editing any `.snk` file. Bypassing it requires deliberate
   intent (delete the hook, or disable the matcher in `.claude/settings.json`).
 
-## CI-Automated Decode (Routine Release Flow)
+## Isolated Plugins signing preparation
 
-On every NuGet publish, `.github/workflows/publish-nuget.yml` decodes the
-`PLUGINS_SNK_BASE64` secret into a runner-temp file and points MSBuild at
-it for the pack step. No human action is required.
+`plugin-signing-policy.json` starts inactive. The workflow must not be activated
+by changing a boolean without the recorded acceptance and key-use authorization.
+The implemented assurance mode is a reviewed controlled producer; requiring an
+independent reference rebuild would need a real additional lane and its evidence.
 
-The flow is roughly:
+The signer checks the exact admitted source/run/attempt, public key and tool bytes.
+Only its signing step receives `PLUGINS_SNK_BASE64`; the value is never exported to
+`GITHUB_ENV`. It signs the already-built single-module net462 DLL with Microsoft's
+`sn.exe -R`, removes its fresh temporary key file, then checks `-vf` and `-D` before
+writing a receipt. No MSBuild, restore, pack or package code runs in that worker.
 
-```yaml
-# Excerpt from .github/workflows/publish-nuget.yml
-env:
-  PLUGINS_SNK_BASE64: ${{ secrets.PLUGINS_SNK_BASE64 }}
-run: |
-  SNK_PATH="$RUNNER_TEMP/PPDS.Plugins.snk"
-  echo "$PLUGINS_SNK_BASE64" | base64 -d > "$SNK_PATH"
-  echo "PLUGINS_SNK_PATH=$SNK_PATH" >> "$GITHUB_ENV"
+A separate worker verifies the actual signature again, checks the signature-only
+assembly change and full public key, and replaces only the nupkg's exact Plugins
+DLL member. Other member bytes and the snupkg remain unchanged. The original
+full release-input guard runs before a schema-2 handoff binds the build, signer
+and verifier artifacts/jobs, exact bytes and chronological ordering. Failed
+Plugins verification cannot fall back to publishing the keyless build artifact.
 
-# Then pack invokes MSBuild with:
-#   /p:AssemblyOriginatorKeyFile="$PLUGINS_SNK_PATH"
-```
-
-The temp file lives in the runner sandbox and disappears at job end. There
-is no persistence to the runner image, the artifact bundle, or any cache.
+Offline tests exercise real ZIP and PE-header handling with controlled byte
+fixtures and mocked metadata/tool calls. They are not real cryptographic or
+hosted runner evidence. AC-64 remains pending until a separately authorized
+representative delay-sign/sign/verify/package check passes. The initial tool
+identity and compatibility receipt are unset, and no production key is needed
+to prepare or review this source.
 
 ## Manual Strong-Name Rotation (Incident Response Only)
 

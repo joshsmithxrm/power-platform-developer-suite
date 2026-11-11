@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "producer_assurance": "UNSELECTED",
+  "activation_approved": false,
+  "compatibility_verified": false,
+  "compatibility_receipt_sha256": null,
+  "public_key_sha256": "3433c28fcbad31568819c43f91a890f4426d358fbf8aadef1ddef156478b4d01",
+  "signer": {
+    "path": "C:/Program Files (x86)/Microsoft SDKs/Windows/v10.0A/bin/NETFX 4.8 Tools/sn.exe",
+    "sha256": null,
+    "version": null
+  }
+}

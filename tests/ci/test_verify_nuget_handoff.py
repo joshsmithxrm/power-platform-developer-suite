@@ -8,7 +8,7 @@ import zipfile
 import pytest
 import yaml
 from scripts.ci import verify_nuget_handoff as h
-from tests.ci.test_nuget_oidc_build_isolation import assert_upload_only
+from tests.ci.test_nuget_oidc_build_isolation import assert_upload_only, assert_closed_publish_routing, artifact_selection
 
 ROOT=Path(__file__).resolve().parents[2]
 SOURCE='b'*40
@@ -129,6 +129,26 @@ def test_same_hash_manifest_cannot_be_clobbered(fixture):
 def test_all_seven_canonical_routes_preserved(tag):
     assert h.identity(tag,SOURCE,'17','1')==(h.PACKAGES[tag.split('-v')[0]],'1.2.1')
 
+
+@pytest.mark.parametrize('component',[name for name in h.PACKAGES if name != 'Plugins'])
+def test_nonplugins_keep_build_package_schema1_without_signing_chain(tmp_path,component):
+    package_id=h.PACKAGES[component]
+    tag=component+'-v1.2.1'
+    package(tmp_path/(package_id+'.1.2.1.nupkg'),package_id=package_id,
+            member='lib/net8.0/'+package_id+'.dll')
+    manifest_sha=h.create(tmp_path,tag,SOURCE,'17','1')
+    raw=(tmp_path/h.MANIFEST).read_bytes()
+    data=json.loads(raw)
+    assert manifest_sha==h.sha(raw)
+    assert data['schema']==1 and data['producer_job']=='build-package'
+    assert 'signing_chain' not in data
+
+
+def test_plugins_cannot_create_build_only_handoff(tmp_path):
+    with pytest.raises(h.Error,match='independently verified signing chain'):
+        h.create(tmp_path,'Plugins-v3.1.1',SOURCE,'17','1')
+    assert not (tmp_path/h.MANIFEST).exists()
+
 @pytest.mark.parametrize('command',['dotnet restore','dotnet build','dotnet pack','dotnet msbuild','dotnet tool restore'])
 def test_policy_refuses_build_execution_when_oidc_is_available(command):
     workflow=yaml.safe_load((ROOT/'.github/workflows/publish-nuget.yml').read_text())
@@ -146,10 +166,38 @@ def test_fresh_publisher_checkout_download_and_login_order_is_source_pinned():
     checkout=next(s for s in steps if s.get('uses','').startswith('actions/checkout@'))
     assert checkout['with']['ref']=='${{ github.sha }}' and checkout['with']['persist-credentials'] is False
     download=next(s for s in steps if s.get('uses','').startswith('actions/download-artifact@'))
-    assert download['with']['artifact-ids']=='${{ needs.build-package.outputs.artifact-id }}'
+    assert download['with']['artifact-ids']==artifact_selection('artifact-id')
+    assert_closed_publish_routing(workflow)
+    assert set(checkout['with']['sparse-checkout'].splitlines())=={
+        'scripts/ci/verify_nuget_handoff.py', 'scripts/ci/plugin-signing-policy.json'}
     gate=next(i for i,s in enumerate(steps) if s.get('id')=='verify-handoff');login=next(i for i,s in enumerate(steps) if s.get('id')=='nuget-login')
     assert gate<login and all('secrets.' not in str(s) for s in steps)
     assert 'python -I scripts/ci/verify_nuget_handoff.py verify' in steps[gate]['run']
+
+
+@pytest.mark.parametrize('field',['artifact-id','artifact-digest','manifest-sha256'])
+def test_plugins_output_cannot_fall_back_to_keyless_build(field):
+    workflow=yaml.safe_load((ROOT/'.github/workflows/publish-nuget.yml').read_text())
+    publisher=workflow['jobs']['publish']
+    guard=next(s for s in publisher['steps'] if s.get('id')=='verify-handoff')
+    variable={'artifact-id':'HANDOFF_ARTIFACT_ID','artifact-digest':'HANDOFF_ARTIFACT_DIGEST',
+              'manifest-sha256':'HANDOFF_MANIFEST_SHA256'}[field]
+    guard['env'][variable]="${{ needs.verify-signed-plugins.outputs."+field+" || needs.build-package.outputs."+field+" }}"
+    with pytest.raises(AssertionError):assert_closed_publish_routing(workflow)
+
+
+@pytest.mark.parametrize('weakening',[
+    "needs.build-package.result == 'success' && ",
+    "needs.verify-signed-plugins.result == 'success' && ",
+    "needs.verify-signed-plugins.result == 'skipped' && ",
+    "needs.verify-signed-plugins.outputs.artifact-id != ''",
+])
+def test_publisher_result_gate_cannot_accept_failed_or_missing_plugin_output(weakening):
+    workflow=yaml.safe_load((ROOT/'.github/workflows/publish-nuget.yml').read_text())
+    original=workflow['jobs']['publish']['if']
+    assert weakening in original
+    workflow['jobs']['publish']['if']=original.replace(weakening,'true' if weakening.endswith("!= ''") else '',1)
+    with pytest.raises(AssertionError):assert_closed_publish_routing(workflow)
 
 def assert_reviewed_publisher_actions(workflow):
     allowed={'actions/checkout@v6','actions/setup-dotnet@v6','actions/setup-python@v7',
