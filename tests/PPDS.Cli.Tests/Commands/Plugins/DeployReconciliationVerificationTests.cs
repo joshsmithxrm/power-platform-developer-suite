@@ -284,7 +284,7 @@ public sealed class DeployReconciliationVerificationTests
             Guid? callingUserId = null;
             Service.Setup(s => s.ResolveRunAsUserAsync(null, CancellationToken.None)).ReturnsAsync(callingUserId);
             Service.Setup(s => s.ValidateStepFieldCapabilitiesAsync(It.IsAny<PluginStepConfig>(),
-                    It.IsAny<Guid?>(), CancellationToken.None)).Returns(Task.CompletedTask);
+                    It.IsAny<Guid?>(), CancellationToken.None, null)).Returns(Task.CompletedTask);
             Service.Setup(s => s.UpsertAssemblyAsync("LocalFixture", It.Is<byte[]>(b => b.SequenceEqual(new byte[] { 0x4d, 0x5a })), null, CancellationToken.None))
                 .Callback(() => Events.Add("write-assembly")).ReturnsAsync(_assemblyId);
             Service.Setup(s => s.UpsertPluginTypeAsync(_assemblyId, "Contoso.Handler", null, CancellationToken.None))

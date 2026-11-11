@@ -1,4 +1,5 @@
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Services.Plugins;
 
@@ -254,7 +255,7 @@ public interface IPluginRegistrationService
     /// is writable merely because its registration configuration supports it.
     /// </summary>
     Task ValidateStepFieldCapabilitiesAsync(PluginStepConfig config, Guid? existingStepId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, IProgressReporter? progress = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var desired = PluginRegistrationNormalizer.NormalizeStep(config, config.OperationIntent);

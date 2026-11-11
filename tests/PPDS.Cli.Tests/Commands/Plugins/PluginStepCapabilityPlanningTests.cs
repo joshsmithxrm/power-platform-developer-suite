@@ -6,6 +6,7 @@ using PPDS.Cli.Commands.Plugins;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
+using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services;
@@ -18,6 +19,87 @@ namespace PPDS.Cli.Tests.Commands.Plugins;
 [Trait("Category", "Unit")]
 public sealed class PluginStepCapabilityPlanningTests
 {
+    [Fact]
+    public async Task Preflight_TargetLookupTimeout_MapsCodeAndPreservesCause()
+    {
+        var failure = new TimeoutException("synthetic-lookup-detail");
+        var service = new Mock<IPluginRegistrationService>(MockBehavior.Strict);
+        service.Setup(s => s.GetAssemblyByNameAsync("Existing", CancellationToken.None))
+            .ThrowsAsync(failure);
+
+        var error = await Assert.ThrowsAsync<PpdsException>(() =>
+            PluginRegistrationPlanningService.ValidateStepFieldCapabilitiesAsync(service.Object,
+                [Assembly("Existing", Step("step", "PostOperation"))], null, CancellationToken.None));
+
+        Assert.Equal(ExceptionMapper.Map(failure).Code, error.ErrorCode);
+        Assert.Same(failure, error.InnerException);
+        Assert.DoesNotContain("synthetic-lookup-detail", error.Message);
+        Assert.Single(service.Invocations);
+        AssertReadsOnly(service);
+    }
+
+    [Fact]
+    public async Task Preflight_TargetLookupCancellation_RemainsCancellation()
+    {
+        var failure = new OperationCanceledException("synthetic lookup cancellation");
+        var service = new Mock<IPluginRegistrationService>(MockBehavior.Strict);
+        service.Setup(s => s.GetAssemblyByNameAsync("Existing", CancellationToken.None))
+            .ThrowsAsync(failure);
+
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            PluginRegistrationPlanningService.ValidateStepFieldCapabilitiesAsync(service.Object,
+                [Assembly("Existing", Step("step", "PostOperation"))], null, CancellationToken.None));
+
+        Assert.Same(failure, error);
+        Assert.Single(service.Invocations);
+        AssertReadsOnly(service);
+    }
+
+    [Fact]
+    public async Task Preflight_TargetLookupPpdsException_IsNotWrapped()
+    {
+        var failure = new PpdsException(ErrorCodes.Plugin.FieldCapabilityUnknown, "already classified lookup");
+        var service = new Mock<IPluginRegistrationService>(MockBehavior.Strict);
+        service.Setup(s => s.GetAssemblyByNameAsync("Existing", CancellationToken.None))
+            .ThrowsAsync(failure);
+
+        var error = await Assert.ThrowsAsync<PpdsException>(() =>
+            PluginRegistrationPlanningService.ValidateStepFieldCapabilitiesAsync(service.Object,
+                [Assembly("Existing", Step("step", "PostOperation"))], null, CancellationToken.None));
+
+        Assert.Same(failure, error);
+        Assert.Single(service.Invocations);
+        AssertReadsOnly(service);
+    }
+
+    [Fact]
+    public async Task Preflight_ReportsPhaseBeforeTargetReads()
+    {
+        var service = new Mock<IPluginRegistrationService>(MockBehavior.Strict);
+        var progress = new Mock<IProgressReporter>(MockBehavior.Strict);
+        var events = new List<string>();
+        var step = Step("fresh step", "PostOperation");
+        progress.Setup(p => p.ReportPhase("Validating plugin step field capabilities", null))
+            .Callback(() => events.Add("phase"));
+        service.Setup(s => s.GetAssemblyByNameAsync("Fresh", CancellationToken.None))
+            .Callback(() =>
+            {
+                Assert.Equal(["phase"], events);
+                events.Add("target read");
+            })
+            .ReturnsAsync((PluginAssemblyInfo?)null);
+        service.Setup(s => s.ValidateStepFieldCapabilitiesAsync(step, null, CancellationToken.None, progress.Object))
+            .Callback(() => events.Add("capability read"))
+            .Returns(Task.CompletedTask);
+
+        await PluginRegistrationPlanningService.ValidateStepFieldCapabilitiesAsync(service.Object,
+            [Assembly("Fresh", step)], null, CancellationToken.None, progress.Object);
+
+        Assert.Equal(["phase", "target read", "capability read"], events);
+        progress.Verify(p => p.ReportPhase("Validating plugin step field capabilities", null), Times.Once);
+        AssertReadsOnly(service);
+    }
+
     [Fact]
     public async Task Preflight_UsesFunctionalStepIdentityAndPassesNullOnlyForNewStep()
     {
@@ -41,8 +123,8 @@ public sealed class PluginStepCapabilityPlanningTests
                 StoredStep(preId, "same mutable name", "PreOperation")
             ]);
         var checkedSteps = new List<(PluginStepConfig Config, Guid? ExistingId)>();
-        service.Setup(s => s.ValidateStepFieldCapabilitiesAsync(It.IsAny<PluginStepConfig>(), It.IsAny<Guid?>(), CancellationToken.None))
-            .Callback<PluginStepConfig, Guid?, CancellationToken>((config, id, _) => checkedSteps.Add((config, id)))
+        service.Setup(s => s.ValidateStepFieldCapabilitiesAsync(It.IsAny<PluginStepConfig>(), It.IsAny<Guid?>(), CancellationToken.None, null))
+            .Callback<PluginStepConfig, Guid?, CancellationToken, IProgressReporter?>((config, id, _, _) => checkedSteps.Add((config, id)))
             .Returns(Task.CompletedTask);
 
         await PluginRegistrationPlanningService.ValidateStepFieldCapabilitiesAsync(
@@ -99,8 +181,8 @@ public sealed class PluginStepCapabilityPlanningTests
             service.Setup(s => s.ListStepsForTypeAsync(typeId, null, CancellationToken.None))
                 .ReturnsAsync([StoredStep(existingStepId, "old second name", "PostOperation")]);
             var checkedNames = new List<string?>();
-            service.Setup(s => s.ValidateStepFieldCapabilitiesAsync(It.IsAny<PluginStepConfig>(), It.IsAny<Guid?>(), CancellationToken.None))
-                .Returns<PluginStepConfig, Guid?, CancellationToken>((step, existingId, _) =>
+            service.Setup(s => s.ValidateStepFieldCapabilitiesAsync(It.IsAny<PluginStepConfig>(), It.IsAny<Guid?>(), CancellationToken.None, null))
+                .Returns<PluginStepConfig, Guid?, CancellationToken, IProgressReporter?>((step, existingId, _, _) =>
                 {
                     checkedNames.Add(step.Name);
                     if (step.Name == "first")
@@ -150,14 +232,14 @@ public sealed class PluginStepCapabilityPlanningTests
             .ReturnsAsync(new PluginPackageInfo { Id = packageId, Name = "InspectedPackage" });
         service.Setup(s => s.GetAssemblyIdForPackageAsync(packageId, "ExpectedAssembly", CancellationToken.None))
             .ReturnsAsync((Guid?)null);
-        service.Setup(s => s.ValidateStepFieldCapabilitiesAsync(assembly.Types[0].Steps[0], null, CancellationToken.None))
+        service.Setup(s => s.ValidateStepFieldCapabilitiesAsync(assembly.Types[0].Steps[0], null, CancellationToken.None, null))
             .Returns(Task.CompletedTask);
 
         await PluginRegistrationPlanningService.ValidateStepFieldCapabilitiesAsync(service.Object, [assembly],
             new Dictionary<string, string> { ["ExpectedAssembly"] = "InspectedPackage" }, CancellationToken.None);
 
         service.Verify(s => s.ValidateStepFieldCapabilitiesAsync(assembly.Types[0].Steps[0], null,
-            CancellationToken.None), Times.Once);
+            CancellationToken.None, null), Times.Once);
         AssertReadsOnly(service);
     }
 

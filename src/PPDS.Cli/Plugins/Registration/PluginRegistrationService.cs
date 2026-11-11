@@ -8,6 +8,7 @@ using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Services.Plugins;
@@ -1337,20 +1338,32 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
 
     /// <summary>Checks target-dependent field writes without dispatching any mutation.</summary>
     public async Task ValidateStepFieldCapabilitiesAsync(PluginStepConfig config, Guid? existingStepId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, IProgressReporter? progress = null)
     {
-        var desired = PluginRegistrationNormalizer.NormalizeStep(config, config.OperationIntent);
-        if (!desired.TryGetValue("canUseReadOnlyConnection", out var value)) return;
-        Entity? existing = null;
-        if (existingStepId.HasValue)
+        try
         {
-            existing = await GetStepByIdWithManagedStateAsync(existingStepId.Value, cancellationToken);
-            if (existing is null || existing.Id != existingStepId.Value)
-                throw new PpdsException(ErrorCodes.Plugin.NotFound,
-                    $"Step '{existingStepId}' was not available for field capability validation.");
+            cancellationToken.ThrowIfCancellationRequested();
+            var desired = PluginRegistrationNormalizer.NormalizeStep(config, config.OperationIntent);
+            if (!desired.TryGetValue("canUseReadOnlyConnection", out var value)) return;
+            progress?.ReportPhase("Validating plugin step field capabilities");
+            Entity? existing = null;
+            if (existingStepId.HasValue)
+            {
+                existing = await GetStepByIdWithManagedStateAsync(existingStepId.Value, cancellationToken);
+                if (existing is null || existing.Id != existingStepId.Value)
+                    throw new PpdsException(ErrorCodes.Plugin.NotFound,
+                        $"Step '{existingStepId}' was not available for field capability validation.");
+            }
+            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            _ = await ShouldWriteReadOnlyConnectionAsync((bool)value!, existing, client, cancellationToken);
         }
-        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        _ = await ShouldWriteReadOnlyConnectionAsync((bool)value!, existing, client, cancellationToken);
+        catch (OperationCanceledException) { throw; }
+        catch (PpdsException) { throw; }
+        catch (Exception ex)
+        {
+            throw new PpdsException(ExceptionMapper.Map(ex).Code,
+                "Plugin step field capability validation could not be completed.", ex);
+        }
     }
 
     private static async Task<bool> ShouldWriteReadOnlyConnectionAsync(bool desired, Entity? existing,

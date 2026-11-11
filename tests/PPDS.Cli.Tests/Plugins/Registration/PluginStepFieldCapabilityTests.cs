@@ -5,6 +5,7 @@ using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Tests.Services.Shared;
@@ -288,6 +289,85 @@ public sealed class PluginStepFieldCapabilityTests
     }
 
     [Fact]
+    public async Task Preflight_ReportsPhaseBeforeAcquiringProvider()
+    {
+        var phaseReported = false;
+        var f = new Fixture(actual: false)
+        {
+            OnProviderRead = () => Assert.True(phaseReported)
+        };
+        var progress = new Mock<IProgressReporter>(MockBehavior.Strict);
+        progress.Setup(p => p.ReportPhase("Validating plugin step field capabilities", null))
+            .Callback(() => phaseReported = true);
+
+        await f.Service.ValidateStepFieldCapabilitiesAsync(Reconcile(), f.StepId,
+            CancellationToken.None, progress.Object);
+
+        progress.Verify(p => p.ReportPhase("Validating plugin step field capabilities", null), Times.Once);
+        Assert.NotEmpty(f.MetadataReads);
+        Assert.Empty(f.Mutations);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Preflight_UnexpectedTimeout_MapsCodeAndPreservesCause(bool providerFailure)
+    {
+        var failure = new TimeoutException("synthetic-provider-detail");
+        var f = new Fixture(actual: false)
+        {
+            ProviderFailure = providerFailure ? failure : null,
+            MetadataFailure = providerFailure ? null : failure
+        };
+
+        var error = await Assert.ThrowsAsync<PpdsException>(() =>
+            f.Service.ValidateStepFieldCapabilitiesAsync(Reconcile(), f.StepId));
+
+        Assert.Equal(ExceptionMapper.Map(failure).Code, error.ErrorCode);
+        Assert.Same(failure, error.InnerException);
+        Assert.DoesNotContain("synthetic-provider-detail", error.Message);
+        Assert.Empty(f.Mutations);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Preflight_ProviderOrMetadataCancellation_RemainsCancellation(bool providerFailure)
+    {
+        var failure = new OperationCanceledException("synthetic cancellation");
+        var f = new Fixture(actual: false)
+        {
+            ProviderFailure = providerFailure ? failure : null,
+            MetadataFailure = providerFailure ? null : failure
+        };
+
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            f.Service.ValidateStepFieldCapabilitiesAsync(Reconcile(), f.StepId));
+
+        Assert.Same(failure, error);
+        Assert.Empty(f.Mutations);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Preflight_ExistingPpdsException_IsNotWrapped(bool providerFailure)
+    {
+        var failure = new PpdsException(ErrorCodes.Plugin.FieldCapabilityUnknown, "already classified");
+        var f = new Fixture(actual: false)
+        {
+            ProviderFailure = providerFailure ? failure : null,
+            MetadataFailure = providerFailure ? null : failure
+        };
+
+        var error = await Assert.ThrowsAsync<PpdsException>(() =>
+            f.Service.ValidateStepFieldCapabilitiesAsync(Reconcile(), f.StepId));
+
+        Assert.Same(failure, error);
+        Assert.Empty(f.Mutations);
+    }
+
+    [Fact]
     public async Task LegacyPatch_OmittedField_DoesNotRequireMetadataOrWriteDefault()
     {
         var f = new Fixture(actual: true) { MetadataFailure = new InvalidOperationException("must not request metadata") };
@@ -338,6 +418,8 @@ public sealed class PluginStepFieldCapabilityTests
         public List<Entity> Updates { get; } = [];
         public List<object> Mutations { get; } = [];
         public Exception? MetadataFailure { get; init; }
+        public Exception? ProviderFailure { get; init; }
+        public Action? OnProviderRead { get; init; }
         public AttributeMetadata? MetadataOverride { get; init; }
         public PluginRegistrationService Service { get; }
 
@@ -380,7 +462,13 @@ public sealed class PluginStepFieldCapabilityTests
             _client.Setup(c => c.UpdateAsync(It.IsAny<Entity>())).Callback<Entity>(Update).Returns(Task.CompletedTask);
             _client.Setup(c => c.Update(It.IsAny<Entity>())).Callback<Entity>(Update);
             _pool.Setup(p => p.GetClientAsync(It.IsAny<DataverseClientOptions?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(_client.Object);
+                .Returns(() =>
+                {
+                    OnProviderRead?.Invoke();
+                    return ProviderFailure is null
+                        ? Task.FromResult(_client.Object)
+                        : Task.FromException<IPooledClient>(ProviderFailure);
+                });
             Service = new PluginRegistrationService(_pool.Object, new InactiveFakeShakedownGuard(),
                 NullLogger<PluginRegistrationService>.Instance);
         }
