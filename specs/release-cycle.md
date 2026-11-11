@@ -1,8 +1,8 @@
 # Release Cycle
 
 **Status:** Draft
-**Last Updated:** 2026-11-10
-**Code:** [.claude/skills/release/](../.claude/skills/release/), [.github/workflows/](../.github/workflows/), [scripts/ci/](../scripts/ci/), [tests/ci/](../tests/ci/), [tests/test_release_skill_content.py](../tests/test_release_skill_content.py), [tests/ci/test_extension_publish_workflow.py](../tests/ci/test_extension_publish_workflow.py)
+**Last Updated:** 2026-11-11
+**Code:** [.claude/skills/release/](../.claude/skills/release/), [.github/workflows/](../.github/workflows/), [scripts/ci/](../scripts/ci/), [tests/ci/](../tests/ci/), [tests/compatibility/](../tests/compatibility/), [tests/test_release_skill_content.py](../tests/test_release_skill_content.py), [tests/ci/test_extension_publish_workflow.py](../tests/ci/test_extension_publish_workflow.py)
 **Surfaces:** All
 
 ---
@@ -408,7 +408,47 @@ Offline fixture/process-mock tests do not prove real signing compatibility.
 | AC-61 | Plugins use keyless delay-sign build/pack, a minimal fresh signer, independent keyless verification, and no fallback to unsigned output; other packages preserve their route | `tests/ci/test_plugin_signing.py::test_workflow_secret_boundary` | PASS (offline fixtures/source contracts only) |
 | AC-62 | Source/run/attempt/job/artifact hashes and chronology bind the complete Plugins chain; publisher accepts only independently verified output | `tests/ci/test_plugin_signing.py::test_chain_rejects_wrong_binding`, `test_chain_requires_chronology` | PASS (offline fixtures/source contracts only) |
 | AC-63 | Repack changes only the exact net462 Plugins DLL; all other member bytes and the symbol package remain unchanged; unsafe/ambiguous archives and signature-tool failures refuse | `tests/ci/test_plugin_signing.py::test_repackage_preserves_other_members`, `test_repackage_rejects_tampering`, `test_tool_failure_refuses` | PASS (offline fixtures/source contracts only) |
-| AC-64 | A real representative delay-signed Plugins DLL is signed with the approved pinned tool, passes forced signature verification and signature-only comparison, and survives full package verification | Real Windows signing compatibility receipt required; no signing test executed during source preparation | pending |
+| AC-64 | A real representative delay-signed Plugins DLL is signed with the approved pinned tool, passes forced signature verification and signature-only comparison, and survives full package verification | Explicit `tests/compatibility/plugin_signing_compatibility.py` experiment, COMPAT-01 through COMPAT-06 below; real Windows receipt required | pending (source preparation is not real signing evidence) |
+
+### Candidate signing compatibility experiment (AC-64)
+
+The opt-in driver has separate `prepare`, `sign` and `verify` stages and is not
+part of ordinary test discovery. Default invocation refuses before reading
+experiment inputs or starting tools. Every stage requires `--execute-candidate`;
+`sign` additionally requires a separately authorized disposable-key input and an
+owner approval reference. Flags and references record the operator's choice;
+they do not grant authorization. There is no combined stage or key generator.
+
+The public plan binds the source commit/tree, candidate version, distinct test
+public-key identity and accepted absolute tool paths/hashes/versions. `prepare`
+builds the actual Plugins project with a recorded public-input overlay in an
+owned copy, with no private-key argument. `sign` receives only the prepared
+public handoff and later-authorized disposable key, invokes the pinned strong-
+name tool, and removes its owned key copy on success or failure. `verify` has no
+key argument and independently checks actual signed bytes. No stage changes
+production policy, invokes the release entrypoint, invents GitHub receipts,
+creates tags or publishes. Local stages are not proof of fresh-host isolation.
+
+| Case | Actual evidence required for PASS |
+|---|---|
+| COMPAT-01 | Actual Release/net462 delay-signed assembly has the expected source/version/full public key, one IL-only module and zero signature reservation; real forced verification rejects it. |
+| COMPAT-02 | Real pinned `sn -R`, `sn -vf` and `sn -D` succeed; source/version/identity/full public key/MVID/framework and PDB/debug identity remain bound. |
+| COMPAT-03 | The actual `PublicSign=true` control is rejected by the delay-sign input check before signing. |
+| COMPAT-04 | A recorded signature-region corruption fails actual forced verification. |
+| COMPAT-05 | A recorded valid non-signature IL/metadata change fails actual signature-only comparison; malformed-file failure alone is insufficient. |
+| COMPAT-06 | Repack changes only `lib/net462/PPDS.Plugins.dll`; every other uncompressed member and the complete symbol package remain unchanged; the extracted signed DLL passes real verification and existing local NuGet package rules. |
+
+The receipt records each case separately, exact source/tool/public-input/package
+bindings, actual process outcomes and key-copy cleanup. Missing, mocked, skipped
+or failed cryptographic operations cannot produce a compatibility PASS. The
+fixed SDK tool used by the existing metadata inspector must match the accepted
+signer identity. Production lifecycle, key custody, producer trust and release
+authorization are outside this candidate experiment's claim.
+
+`tests/ci/test_plugin_signing_compatibility.py` exercises default refusal, stage
+and receipt binding, process failure, cleanup and byte/package controls with
+synthetic fixtures and process doubles. These tests qualify driver source only;
+AC-64 remains pending until the separately authorized real experiment passes.
 
 ## Design Decisions
 
