@@ -64,6 +64,12 @@ DOTNET_INPUT_PROBES = (
 
 
 def classifications(workflow, changed_paths, event="pull_request"):
+    """Evaluate finite path probes, not a general Picomatch or event emulator.
+
+    fnmatchcase is sufficient for the literal paths/patterns exercised here.
+    These tests follow supplied changed paths into the workflow's job selection;
+    they do not reproduce dorny/paths-filter's GitHub PR/push change discovery.
+    """
     changes = workflow["jobs"]["changes"]
     steps = [s for s in changes["steps"] if str(s.get("uses", "")).startswith("dorny/paths-filter@")]
     assert len(steps) == 1
