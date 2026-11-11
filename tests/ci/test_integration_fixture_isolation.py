@@ -17,12 +17,13 @@ REFUSAL_SCRIPT = (
 )
 # LF-normalized reviewed build/test workflow baselines.
 # Build stays at R 3b29a0f80fe97e71ba7ba78a21e35b7d1aa1c2c6.
-# Test includes ec6c5881's read-only artifact route plus SDK 10.0.115 servicing;
+# Test includes ec6c5881's read-only artifact route, SDK 10.0.115 servicing,
+# and reviewed automatic full-.NET routing for SDK/config/props/targets/workflow inputs;
 # the separate Integration Tests workflow remains a tokenless refusal.
 # No Git calls or mutable refs are used by these tests.
 REVIEWED_WORKFLOW_HASHES = {
     "build.yml": "8c80da5301c14c0205be42898e106f5eb623c34df4a2cbe2d830075e96747eaf",
-    "test.yml": "40d4bba9f7a1d4967a5f1066e396a1291043719991a59939c4a5502c1ba2aa67",
+    "test.yml": "377dc6f975b6574fd3bc07257c7114babaee491c967e0f551f47a68e359b24ad",
 }
 
 

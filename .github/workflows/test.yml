@@ -42,6 +42,11 @@ jobs:
               - 'Directory.Build.props'
               - 'Directory.Packages.props'
               - 'nuget.config'
+              - '**.props'
+              - '**.targets'
+              - 'global.json'
+              - 'NuGet.config'
+              - '.github/workflows/test.yml'
             extraction:
               - 'src/**'
               - 'tests/PPDS.Cli.Tests/**'
