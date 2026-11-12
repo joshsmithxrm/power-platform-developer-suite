@@ -175,11 +175,13 @@ internal sealed class ControlTypeHarness
     internal Mock<IEnvironmentConfirmationService> Confirmation { get; } = new();
     internal FormService Service { get; }
 
-    internal ControlTypeHarness(string xml)
+    internal ControlTypeHarness(string xml, string? unpublishedXml = null)
     {
         Xml = xml;
-        var state = new Entity("systemform", FormId) { ["formid"] = FormId, ["name"] = "Fixture", ["type"] = new OptionSetValue(2),
-            ["formxml"] = xml, ["ismanaged"] = false, ["iscustomizable"] = new BooleanManagedProperty(true) };
+        static Entity CreateState(string formXml) => new("systemform", FormId) { ["formid"] = FormId, ["name"] = "Fixture", ["type"] = new OptionSetValue(2),
+            ["formxml"] = formXml, ["ismanaged"] = false, ["iscustomizable"] = new BooleanManagedProperty(true) };
+        var state = CreateState(xml);
+        var unpublishedState = CreateState(unpublishedXml ?? xml);
         var client = new Mock<IPooledClient>(MockBehavior.Strict);
         client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
         client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
@@ -189,7 +191,7 @@ internal sealed class ControlTypeHarness
                 if (request is RetrieveUnpublishedMultipleRequest retrieve)
                 {
                     Queries.Add((QueryExpression)retrieve.Query);
-                    return new RetrieveUnpublishedMultipleResponse { Results = new ParameterCollection { ["EntityCollection"] = new EntityCollection([state]) } };
+                    return new RetrieveUnpublishedMultipleResponse { Results = new ParameterCollection { ["EntityCollection"] = new EntityCollection([unpublishedState]) } };
                 }
                 return new OrganizationResponse();
             });

@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.Text.Json;
+using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using PPDS.Cli.Commands.Forms;
@@ -21,7 +22,13 @@ public sealed class FormControlTypeRoundTripCommandTests
     public async Task RawGetThenSet_PreservesExactPayload(bool unpublished, string? invalid)
     {
         var xml = invalid == null ? ControlTypeFixture.Xml() : ControlTypeFixture.InvalidXml(invalid);
-        var h = new ControlTypeHarness(xml);
+        // Both payloads are synthetic. Distinct comments make the selected read source
+        // observable without changing the repeated control-type IDs under test.
+        var publishedXml = xml + "<!-- published fixture source -->\r\n";
+        var unpublishedXml = xml + "<!-- unpublished fixture source -->\r\n";
+        Assert.NotEqual(publishedXml, unpublishedXml);
+        var expectedXml = unpublished ? unpublishedXml : publishedXml;
+        var h = new ControlTypeHarness(publishedXml, unpublishedXml);
         var providerCalls = 0;
         Task<ServiceProvider> Provider(string? profile, string? environment, GlobalOptionValues options, CancellationToken ct)
         {
@@ -45,7 +52,10 @@ public sealed class FormControlTypeRoundTripCommandTests
             Assert.Empty(get.Errors);
             Assert.Equal(0, await get.InvokeAsync());
             var captured = rawOut.ToString();
-            Assert.Equal(xml, captured); // The actual raw stdout, not a second copy of the fixture.
+            Assert.Equal(expectedXml, captured); // The actual raw stdout, not a second copy of the fixture.
+            // Check before set-xml performs its own draft lookup.
+            Assert.Single(h.Queries);
+            Assert.Equal(unpublished ? 1 : 0, h.Requests.OfType<RetrieveUnpublishedMultipleRequest>().Count());
             await File.WriteAllTextAsync(file, captured);
 
             using var setOut = new StringWriter();
