@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Xml.Linq;
 using PPDS.DocsGen.Common;
@@ -98,8 +99,13 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
         var inventory = allTypes.Select(type => new LibraryTypeInventory(
             type.FullName ?? type.Name, IsHidden(type),
             pages.GetValueOrDefault(type.FullName ?? type.Name))).ToArray();
+        // Resolve the framework type in this metadata context. Runtime Type
+        // objects belong to a different context, and a name-only comparison
+        // could accept an unrelated attribute with the same full name.
+        var targetFrameworkAttributeType = mlc.CoreAssembly!.GetType(
+            typeof(TargetFrameworkAttribute).FullName!, throwOnError: true)!;
         var targetFramework = assembly.GetCustomAttributesData()
-            .SingleOrDefault(attribute => attribute.AttributeType.FullName == "System.Runtime.Versioning.TargetFrameworkAttribute")
+            .SingleOrDefault(attribute => attribute.AttributeType == targetFrameworkAttributeType)
             ?.ConstructorArguments.Single().Value as string;
         return new LibraryGenerationResult(new GenerationResult(files, diagnostics),
             assembly.GetName().Name ?? string.Empty, targetFramework, inventory);
