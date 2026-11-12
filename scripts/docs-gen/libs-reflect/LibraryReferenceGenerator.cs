@@ -9,14 +9,18 @@ namespace PPDS.DocsGen.Libs;
 
 /// <summary>
 /// Reflects over a single PPDS library assembly and emits one markdown file
-/// per documented, customer-facing public type plus a per-package index.
+/// per customer-facing public type plus a per-package index. Missing summaries
+/// remain explicit fallback notes; they do not remove public types or members.
 /// See <c>specs/docs-generation.md</c> Surface-Specific §Libraries (AC-16, AC-19).
 /// </summary>
 public sealed class LibraryReferenceGenerator : IReferenceGenerator
 {
     private const string ToolName = "libs-reflect";
 
-    public Task<GenerationResult> GenerateAsync(GenerationInput input, CancellationToken ct)
+    public Task<GenerationResult> GenerateAsync(GenerationInput input, CancellationToken ct) =>
+        Task.FromResult(GenerateWithCoverage(input, ct).Generation);
+
+    public LibraryGenerationResult GenerateWithCoverage(GenerationInput input, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -37,11 +41,12 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
         var diagnostics = new List<string>();
         var indexEntries = new List<IndexEntry>();
 
-        var types = assembly.GetExportedTypes()
-            .Where(t => !IsHidden(t))
+        var allTypes = assembly.GetExportedTypes()
             .OrderBy(t => t.Namespace ?? string.Empty, StringComparer.Ordinal)
             .ThenBy(t => t.Name, StringComparer.Ordinal)
             .ToList();
+        var types = allTypes.Where(t => !IsHidden(t)).ToList();
+        var pages = new Dictionary<string, string>(StringComparer.Ordinal);
 
         foreach (var type in types)
         {
@@ -59,8 +64,8 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
                 else
                 {
                     diagnostics.Add(
-                        $"{packageName}: type '{type.FullName}' has no <summary> and is not marked [EditorBrowsable(Never)]; skipping.");
-                    continue;
+                        $"{packageName}: type '{type.FullName}' has no <summary>; rendering an explicit unavailable-summary note.");
+                    typeDoc = new TypeDoc("Documentation summary unavailable. This public type is included from assembly metadata.", null, Array.Empty<ParamDoc>());
                 }
             }
 
@@ -71,7 +76,8 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
 
             var (typeMd, memberDiagnostics) = RenderType(type, typeDoc, xmlDocs, packageName);
             diagnostics.AddRange(memberDiagnostics);
-            files.Add(new GeneratedFile(relPath.Replace('\\', '/'), typeMd));
+            files.Add(new GeneratedFile(relPath.Replace('\\', '/'), typeMd.TrimEnd('\r', '\n') + "\n"));
+            pages.Add(type.FullName ?? type.Name, relPath.Replace('\\', '/'));
 
             indexEntries.Add(new IndexEntry(
                 Name: FormatTypeRef(type),
@@ -82,10 +88,19 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
 
         files.Add(new GeneratedFile(
             $"{packageShort}/_index.md",
-            RenderIndex(packageShort, indexEntries)));
+            RenderIndex(packageShort, indexEntries).TrimEnd('\r', '\n') + "\n"));
 
         files.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
-        return Task.FromResult(new GenerationResult(files, diagnostics));
+        if (files.Select(file => file.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count() != files.Count)
+            throw new InvalidOperationException("Reflected type paths collide; refusing to overwrite a generated page.");
+        var inventory = allTypes.Select(type => new LibraryTypeInventory(
+            type.FullName ?? type.Name, IsHidden(type),
+            pages.GetValueOrDefault(type.FullName ?? type.Name))).ToArray();
+        var targetFramework = assembly.GetCustomAttributesData()
+            .SingleOrDefault(attribute => attribute.AttributeType.FullName == "System.Runtime.Versioning.TargetFrameworkAttribute")
+            ?.ConstructorArguments.Single().Value as string;
+        return new LibraryGenerationResult(new GenerationResult(files, diagnostics),
+            assembly.GetName().Name ?? string.Empty, targetFramework, inventory);
     }
 
     private static MetadataLoadContext CreateLoadContext(string assemblyPath)
@@ -506,8 +521,8 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
             diags.Add($"{type.FullName}: {kind} '{label}' uses <inheritdoc /> but base documentation is unresolvable (target: {pointer}); rendering fallback pointer.");
             return fallback;
         }
-        diags.Add($"{type.FullName}: {kind} '{label}' has no <summary>; skipping.");
-        return null;
+        diags.Add($"{type.FullName}: {kind} '{label}' has no <summary>; rendering an explicit unavailable-summary note.");
+        return "Documentation summary unavailable. This public member is included from assembly metadata.";
     }
 
     private static bool TryFallbackSummary(TypeDoc? doc, out string summary, out string pointer)

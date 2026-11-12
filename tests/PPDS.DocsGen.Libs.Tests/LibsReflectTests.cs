@@ -31,18 +31,18 @@ public sealed class LibsReflectTests
     }
 
     [Fact]
-    public async Task EmitsOnlyDocumentedCustomerFacingTypes()
+    public async Task EmitsCustomerFacingTypesIncludingUndocumentedFallbacks()
     {
         var outputRoot = Path.Combine(Path.GetTempPath(), "libs-reflect-test-" + Guid.NewGuid().ToString("N"));
         try
         {
             var result = await RunAsync(outputRoot);
 
-            // Assert: no file is emitted for the [EditorBrowsable(Never)] type or the undocumented type.
+            // Hidden types stay out of customer pages; undocumented public types remain visible.
             result.Files.Select(f => f.RelativePath)
                 .Should().NotContain(p => p.EndsWith("HiddenHelper.md"));
             result.Files.Select(f => f.RelativePath)
-                .Should().NotContain(p => p.EndsWith("UndocumentedThing.md"));
+                .Should().Contain(p => p.EndsWith("UndocumentedThing.md"));
 
             // Assert: files for the two documented customer-facing types ARE emitted.
             result.Files.Should().ContainSingle(f => f.RelativePath.EndsWith("/Widget.md"),
@@ -79,8 +79,8 @@ public sealed class LibsReflectTests
         {
             var result = await RunAsync(outputRoot);
 
-            result.Diagnostics.Should().Contain(d => d.Contains("UndocumentedThing") && d.Contains("skipping"));
-            result.Files.Should().NotContain(f => f.RelativePath.EndsWith("UndocumentedThing.md"));
+            result.Diagnostics.Should().Contain(d => d.Contains("UndocumentedThing") && d.Contains("unavailable-summary"));
+            result.Files.Should().Contain(f => f.RelativePath.EndsWith("UndocumentedThing.md") && f.Contents.Contains("Documentation summary unavailable"));
         }
         finally
         {

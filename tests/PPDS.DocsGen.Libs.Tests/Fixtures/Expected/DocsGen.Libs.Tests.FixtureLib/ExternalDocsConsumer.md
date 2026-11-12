@@ -15,6 +15,15 @@ emit a fallback pointer instead of silently dropping the member.
 
 ## Members
 
+### Constructors
+
+#### ExternalDocsConsumer()
+
+`ExternalDocsConsumer()`
+
+Documentation summary unavailable. This public member is included from assembly metadata.
+
+
 ### Methods
 
 #### DoExternalWork
@@ -22,4 +31,3 @@ emit a fallback pointer instead of silently dropping the member.
 `void DoExternalWork()`
 
 *(inherited from `External.Unresolvable.Api.SomeThing`)*
-

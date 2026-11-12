@@ -14,6 +14,7 @@
 |------|---------|
 | [ExternalDocsConsumer](./ExternalDocsConsumer.md) | Exercises the &lt;inheritdoc /&gt; fallback path: the type-level summary |
 | [GenericProcessor&lt;TRequest, TResponse&gt;](./GenericProcessor`2.md) | Generic processor that exercises MDX angle-bracket escaping in headings |
+| [UndocumentedThing](./UndocumentedThing.md) | Documentation summary unavailable. This public type is included from assembly metadata. |
 | [Widget](./Widget.md) | Simple widget implementation. Has a constructor and a couple of members. |
 
 ## Records
@@ -27,4 +28,3 @@
 | Type | Summary |
 |------|---------|
 | [WidgetState](./WidgetState.md) | Possible states for a fixture widget. |
-
