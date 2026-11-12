@@ -295,7 +295,8 @@ def environment(plan, temporary, *, build=False):
         result.update(DOTNET_CLI_HOME=str(temporary / "dotnet-home"),
                       NUGET_PACKAGES=str(temporary / "packages"),
                       DOTNET_CLI_TELEMETRY_OPTOUT="1", DOTNET_NOLOGO="1",
-                      DOTNET_SKIP_FIRST_TIME_EXPERIENCE="1")
+                      DOTNET_SKIP_FIRST_TIME_EXPERIENCE="1",
+                      DOTNET_GENERATE_ASPNET_CERTIFICATE="false")
         result["PATH"] = ";".join(dict.fromkeys(str(PureWindowsPath(tool["path"]).parent)
                                                 for tool in plan["tools"].values()))
     return result
