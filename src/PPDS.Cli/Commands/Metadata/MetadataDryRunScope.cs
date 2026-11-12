@@ -6,6 +6,12 @@ namespace PPDS.Cli.Commands.Metadata;
 internal sealed record MetadataDryRunScope(string ValidationScope, bool PublisherPrefixChecked,
     bool TargetExistenceChecked, string OptionValueAllocation)
 {
+    internal const string InputsHelp = "Validate required inputs only. Target existence, dependencies and server feasibility are not checked. No changes persisted.";
+    internal const string PublisherHelp = "Validate inputs and solution publisher information only. Target existence, dependencies and server feasibility are not checked. No changes persisted.";
+    internal const string OptionHelp = "Validate target option existence only. Dependencies and server feasibility are not checked. No changes persisted.";
+    internal const string DraftValueHelp = "Read option metadata and validate inputs; any derived option value is provisional. Dependencies and server feasibility are not checked. No changes persisted.";
+    internal const string RequestedValueHelp = "Validate required inputs only. Any supplied option value is requested; Dataverse assigns the final value only when changes are applied. Target existence, dependencies and server feasibility are not checked. No changes persisted.";
+
     internal static MetadataDryRunScope Inputs { get; } = new("required-inputs", false, false, "not-performed");
     internal static MetadataDryRunScope Publisher { get; } = new("input-and-publisher", true, false, "not-performed");
     internal static MetadataDryRunScope PublisherProvisional { get; } = new("input-and-publisher", true, false, "provisional");
