@@ -20,6 +20,15 @@ namespace PPDS.Migration.Export
         public int PageSize { get; set; } = 5000;
 
         /// <summary>
+        /// Gets or sets an optional positive cap on retained primary rows per entity.
+        /// Bounded export fails instead of truncating, disables counts and partitioning,
+        /// and rejects relationship and binary/file expansion. This does not bound server
+        /// response allocation, request duration or payload bytes. Default: null (unlimited).
+        /// Continuation requires a nonempty paging cookie; simple paging is not supported.
+        /// </summary>
+        public int? MaxRecordsPerEntity { get; set; }
+
+        /// <summary>
         /// Gets or sets the progress reporting interval in records.
         /// Default: 100
         /// </summary>
