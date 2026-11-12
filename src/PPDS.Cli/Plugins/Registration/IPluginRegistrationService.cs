@@ -1,4 +1,5 @@
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Plugins.Models;
 
 namespace PPDS.Cli.Plugins.Registration;
@@ -423,6 +424,17 @@ public interface IPluginRegistrationService
     Task<(byte[] Content, string FileName)> DownloadPackageAsync(
         Guid packageId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Downloads package content with optional byte progress.</summary>
+    /// <param name="packageId">The package ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="progress">Optional download progress reporter.</param>
+    /// <returns>The complete package and the established NuGet filename.</returns>
+    Task<(byte[] Content, string FileName)> DownloadPackageAsync(
+        Guid packageId,
+        CancellationToken cancellationToken,
+        IProgressReporter? progress)
+        => DownloadPackageAsync(packageId, cancellationToken);
 
     #endregion
 
