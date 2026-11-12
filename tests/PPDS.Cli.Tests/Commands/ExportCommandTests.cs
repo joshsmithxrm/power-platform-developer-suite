@@ -121,6 +121,27 @@ public class ExportCommandTests : IDisposable
 
     #region Argument Parsing Tests
 
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("1", true)]
+    [InlineData("3", true)]
+    [InlineData("0", false)]
+    [InlineData("-1", false)]
+    [InlineData("invalid", false)]
+    public void Parse_MaxRecordsPerEntity_ValidatesPositiveNullableCap(string? value, bool valid)
+    {
+        var args = new List<string> { "--schema", _tempSchemaFile, "--output", _tempOutputFile };
+        if (value != null) args.AddRange(["--max-records-per-entity", value]);
+        var result = _command.Parse(args.ToArray());
+        Assert.Equal(valid, result.Errors.Count == 0);
+        if (valid)
+        {
+            var option = (Option<int?>)_command.Options.Single(option => option.Name == "--max-records-per-entity");
+            int? expected = value == null ? null : int.Parse(value);
+            Assert.Equal(expected, result.GetValue(option));
+        }
+    }
+
     [Fact]
     public void Parse_WithAllRequiredOptions_Succeeds()
     {

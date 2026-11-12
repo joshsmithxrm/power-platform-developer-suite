@@ -74,7 +74,7 @@ jobs:
 
     - name: Run TUI E2E tests
       working-directory: tests/PPDS.Tui.E2eTests
-      run: npm run test:update
+      run: npm test
       env:
         PPDS_FORCE_TUI: '1'
 

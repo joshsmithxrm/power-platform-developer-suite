@@ -61,5 +61,11 @@ This enables Claude to verify TUI visual changes without human inspection.
 
 ## Snapshots
 
-Snapshots are stored in `__snapshots__/` and should be committed.
-When tests fail due to intentional changes, update with `npm run test:update`.
+Snapshots are stored in `tests/__snapshots__/` and should be committed.
+Every command creates its own empty profile directory and removes it when the
+runner exits. Real PPDS profiles, inherited credentials, and live-test options
+are not passed to the test process. The goldens describe the signed-out state.
+
+CI runs `npm test` to compare committed goldens; it does not regenerate them.
+Use `npm run test:update` only after reviewing an intentional UI change, then
+review every changed snapshot and rerun `npm test` before committing.

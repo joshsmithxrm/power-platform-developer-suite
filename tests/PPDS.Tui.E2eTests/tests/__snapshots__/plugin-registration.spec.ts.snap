@@ -4,8 +4,8 @@ exports[`Plugin Registration Keyboard Navigation › Tab cycles through controls
 ╭────────────────────────────────────────────────────────────────────────────────╮
 │┌ PPDS - Power Platform Developer Suite ───────────────────────────────────────┐│
 ││ File  Tools  Help                                                            ││
-││[ 1: Plugin Registration - PPDS Demo - Dev [DEV] ] [+]                        ││
-││┌ Plugin Registration - PPDS Demo - Dev ─────────────────────────────────────┐││
+││[ 1: Plugin Registration ] [+]                                                ││
+││┌ Plugin Registration ───────────────────────────────────────────────────────┐││
 │││┌ Registrations ────────────────────────────┐┌ Details ────────────────────┐│││
 ││││                                           ││Select a node to view details││││
 ││││                                           ││                             ││││
@@ -26,11 +26,11 @@ exports[`Plugin Registration Keyboard Navigation › Tab cycles through controls
 ││││                                           ││                             ││││
 ││││                                           ││                             ││││
 │││└───────────────────────────────────────────┘└─────────────────────────────┘│││
-│││Loading plugin registrations...                                             │││
+│││No environment selected. Use the status bar to connect.                     │││
 ││└────────────────────────────────────────────────────────────────────────────┘││
 ││                                                                              ││
 ││                                                                              ││
-││ Profile: PPDS (josh@powerplatformdev…    Environment: PPDS Demo - Dev [DEV] ▼││
+││ Profile: None ▼                                           Environment: None ▼││
 │└──────────────────────────────────────────────────────────────────────────────┘│
 ╰────────────────────────────────────────────────────────────────────────────────╯
 `;
@@ -39,8 +39,8 @@ exports[`Plugin Registration Screen › navigates to Plugin Registration via Too
 ╭────────────────────────────────────────────────────────────────────────────────╮
 │┌ PPDS - Power Platform Developer Suite ───────────────────────────────────────┐│
 ││ File  Tools  Help                                                            ││
-││[ 1: Plugin Registration - PPDS Demo - Dev [DEV] ] [+]                        ││
-││┌ Plugin Registration - PPDS Demo - Dev ─────────────────────────────────────┐││
+││[ 1: Plugin Registration ] [+]                                                ││
+││┌ Plugin Registration ───────────────────────────────────────────────────────┐││
 │││┌ Registrations ────────────────────────────┐┌ Details ────────────────────┐│││
 ││││                                           ││Select a node to view details││││
 ││││                                           ││                             ││││
@@ -61,11 +61,11 @@ exports[`Plugin Registration Screen › navigates to Plugin Registration via Too
 ││││                                           ││                             ││││
 ││││                                           ││                             ││││
 │││└───────────────────────────────────────────┘└─────────────────────────────┘│││
-│││Loading plugin registrations...                                             │││
+│││No environment selected. Use the status bar to connect.                     │││
 ││└────────────────────────────────────────────────────────────────────────────┘││
 ││                                                                              ││
 ││                                                                              ││
-││ Profile: PPDS (josh@powerplatformdev…    Environment: PPDS Demo - Dev [DEV] ▼││
+││ Profile: None ▼                                           Environment: None ▼││
 │└──────────────────────────────────────────────────────────────────────────────┘│
 ╰────────────────────────────────────────────────────────────────────────────────╯
 `;
