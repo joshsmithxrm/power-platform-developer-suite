@@ -13,7 +13,10 @@
 | Type | Summary |
 |------|---------|
 | [ExternalDocsConsumer](./ExternalDocsConsumer.md) | Exercises the &lt;inheritdoc /&gt; fallback path: the type-level summary |
-| [GenericProcessor&lt;TRequest, TResponse&gt;](./GenericProcessor`2.md) | Generic processor that exercises MDX angle-bracket escaping in headings |
+| [Fields](./Widget.Fields.md) | Field names declared specifically by Widget. |
+| [Fields](./ExternalDocsConsumer.Fields.md) | Field names declared specifically by ExternalDocsConsumer. |
+| [Fields&lt;TRequest, TResponse, TField&gt;](./GenericProcessor%602.Fields%601.md) | A nested generic field descriptor. |
+| [GenericProcessor&lt;TRequest, TResponse&gt;](./GenericProcessor%602.md) | Generic processor that exercises MDX angle-bracket escaping in headings |
 | [UndocumentedThing](./UndocumentedThing.md) | Documentation summary unavailable. This public type is included from assembly metadata. |
 | [Widget](./Widget.md) | Simple widget implementation. Has a constructor and a couple of members. |
 

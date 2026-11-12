@@ -25,6 +25,13 @@ public interface IWidget
 /// </summary>
 public sealed class Widget : IWidget
 {
+    /// <summary>Field names declared specifically by Widget.</summary>
+    public static class Fields
+    {
+        /// <summary>The widget name field.</summary>
+        public const string Name = "widget_name";
+    }
+
     /// <summary>
     /// Creates a new widget with the given display name.
     /// </summary>
@@ -78,6 +85,13 @@ public sealed record Measurement(int Id, string Label);
 /// </summary>
 public sealed class ExternalDocsConsumer
 {
+    /// <summary>Field names declared specifically by ExternalDocsConsumer.</summary>
+    public static class Fields
+    {
+        /// <summary>The consumer name field.</summary>
+        public const string Name = "consumer_name";
+    }
+
     /// <inheritdoc cref="T:External.Unresolvable.Api.SomeThing" />
     public void DoExternalWork() { }
 }
@@ -90,6 +104,14 @@ public sealed class ExternalDocsConsumer
 /// <typeparam name="TResponse">The response type.</typeparam>
 public sealed class GenericProcessor<TRequest, TResponse>
 {
+    /// <summary>A nested generic field descriptor.</summary>
+    /// <typeparam name="TField">The field value type.</typeparam>
+    public static class Fields<TField>
+    {
+        /// <summary>The generic processor field.</summary>
+        public const string Name = "processor_field";
+    }
+
     /// <summary>
     /// Creates a new processor with the given handler.
     /// </summary>

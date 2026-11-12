@@ -70,9 +70,10 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
             }
 
             var nsSubPath = NamespaceSubPath(type, packageName);
+            var typeFileName = TypeFileName(type);
             var relPath = string.IsNullOrEmpty(nsSubPath)
-                ? $"{packageShort}/{type.Name}.md"
-                : $"{packageShort}/{nsSubPath}/{type.Name}.md";
+                ? $"{packageShort}/{typeFileName}"
+                : $"{packageShort}/{nsSubPath}/{typeFileName}";
 
             var (typeMd, memberDiagnostics) = RenderType(type, typeDoc, xmlDocs, packageName);
             diagnostics.AddRange(memberDiagnostics);
@@ -83,7 +84,8 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
                 Name: FormatTypeRef(type),
                 Kind: TypeKind(type),
                 Summary: typeDoc.Summary!,
-                RelativeLink: string.IsNullOrEmpty(nsSubPath) ? $"./{type.Name}.md" : $"./{nsSubPath}/{type.Name}.md"));
+                RelativeLink: "./" + string.Join("/", relPath[(packageShort.Length + 1)..]
+                    .Split('/').Select(Uri.EscapeDataString))));
         }
 
         files.Add(new GeneratedFile(
@@ -301,6 +303,14 @@ public sealed class LibraryReferenceGenerator : IReferenceGenerator
             }
         }
         return false;
+    }
+
+    private static string TypeFileName(Type type)
+    {
+        var declaringNames = new Stack<string>();
+        for (Type? current = type; current is not null; current = current.DeclaringType)
+            declaringNames.Push(current.Name);
+        return string.Join(".", declaringNames) + ".md";
     }
 
     private static string NamespaceSubPath(Type type, string packageName)

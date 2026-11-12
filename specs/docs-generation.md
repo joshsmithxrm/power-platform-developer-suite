@@ -302,15 +302,17 @@ Test projects follow the convention `tests/PPDS.DocsGen.{Surface}.Tests/` for ge
 | AC-38 | Coverage inventory includes hidden exported types without customer pages, includes every visible fixture type with a page and explicit missing-summary fallback, and refuses a missing visible page. | `PPDS.DocsGen.Libs.Tests/LibraryCoverageTests.CompleteCoverageAndFailureBoundaries`; `PPDS.DocsGen.Libs.Tests/LibsReflectTests.EmitsDiagnosticForUndocumentedType` | ✅ |
 | AC-39 | A completed coverage receipt identifies source reflection, records all thirteen supplied pairs and hashes every emitted file consistently with its actual bytes. | `PPDS.DocsGen.Libs.Tests/LibraryCoverageTests.CompleteCoverageAndFailureBoundaries` | ✅ |
 | AC-40 | Every coverage Markdown page retains the standard generator banner as its first line, including canonical common-content pages; a generated input without the required banner is refused before output. | `PPDS.DocsGen.Libs.Tests/LibraryCoverageTests.CompleteCoverageAndFailureBoundaries` | ✅ |
+| AC-41 | Nested public types retain their complete declaring-type chain and generic arity in page filenames; shared leaf names produce distinct inventory pages and URI-safe index links, while unresolved path collisions still refuse output. | `PPDS.DocsGen.Libs.Tests/LibsReflectTests.NestedTypesWithSharedLeafNames_KeepDistinctPagesAndResolvableLinks` | ✅ |
+| AC-42 | Inherited documentation for overloaded indexers matches the index-parameter signature; an unmatched or ambiguous ancestor remains unresolved instead of borrowing another overload's summary. | `PPDS.DocsGen.Libs.Tests/XmlDocIndexInheritdocTests.ResolvesOverloadedIndexerByParameterSignature`; `UnmatchedIndexerDoesNotInheritAnotherOverloadsSummary` | ✅ |
 
 Status key: ✅ covered by passing test · ⚠️ test exists but failing · ❌ no test yet · 🔲 not yet implemented
 
-AC-16 and AC-34 through AC-40 are backed by passing library-generator fixture
+AC-16 and AC-34 through AC-42 are backed by passing library-generator fixture
 tests. The thirteen-input runner matrix uses synthetic bytes with injected
 metadata; actual reflection assertions use a compiled test fixture. These passing
 source-contract tests do not qualify thirteen real product TFMs, released package
 authenticity, complete resolver closure, final Docs composition or publication.
-The full-checkout generator run on 2026-11-12 passed all 15 tests, including the 26-check coverage fixture and its banner regressions. The broader domain stays Draft; unrelated historical AC statuses are not promoted.
+The full-checkout generator run on 2026-11-12 passed all 19 tests, including the 26-check coverage fixture, banner regressions, nested declaration paths/summaries and overloaded-indexer inheritance. The broader domain stays Draft; unrelated historical AC statuses are not promoted.
 
 ### Edge Cases
 

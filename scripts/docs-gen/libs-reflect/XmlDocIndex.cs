@@ -201,7 +201,18 @@ internal sealed class XmlDocIndex
                 return null;
 
             case PropertyInfo p:
-                return searchIn.GetProperty(p.Name, flags);
+                // Indexers share the CLR name Item. Match their parameter
+                // signature rather than asking reflection for a name-only
+                // property, which throws for interfaces such as IDataRecord.
+                var indexSignature = MethodParamPart(p.GetIndexParameters());
+                var properties = searchIn.GetProperties(flags)
+                    .Where(candidate => candidate.Name == p.Name
+                        && MethodParamPart(candidate.GetIndexParameters()) == indexSignature)
+                    .Take(2)
+                    .ToArray();
+                // Preserve an unresolved inheritdoc when metadata is still
+                // ambiguous instead of selecting an arbitrary ancestor.
+                return properties.Length == 1 ? properties[0] : null;
 
             case EventInfo e:
                 return searchIn.GetEvent(e.Name, flags);
@@ -328,6 +339,15 @@ internal sealed class XmlDocIndex
             return TypeDocIdForRef(type.GetElementType()!, closedGeneric) + suffix;
         }
         if (type.IsPointer) return TypeDocIdForRef(type.GetElementType()!, closedGeneric) + "*";
+
+        // Declaration IDs retain every enclosing type and each generic arity.
+        // Type.Name alone loses the parent (for example Widget.Fields), so
+        // otherwise a documented nested type looks undocumented to the index.
+        if (type.IsNested && !closedGeneric)
+        {
+            var declaration = type.IsGenericType ? type.GetGenericTypeDefinition() : type;
+            return declaration.FullName!.Replace('+', '.');
+        }
 
         var ns = type.Namespace;
         var name = type.Name;
