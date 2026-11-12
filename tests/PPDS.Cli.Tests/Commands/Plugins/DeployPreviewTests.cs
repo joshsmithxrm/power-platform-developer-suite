@@ -1,8 +1,10 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 using Moq;
 using PPDS.Cli.Commands;
 using PPDS.Cli.Commands.Plugins;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Tests.Plugins;
@@ -156,8 +158,16 @@ public sealed class DeployPreviewTests
                         }
                         """, ReferencesSdk: true));
                 var packageId = Guid.NewGuid();
-                Service.Setup(s => s.GetPackageByNameAsync("ppds_Preview", token))
-                    .ReturnsAsync(new PluginPackageInfo { Id = packageId, Name = "ppds_Preview" });
+                var bytes = File.ReadAllBytes(_artifact);
+                Service.Setup(s => s.ResolvePackageAsync(
+                        It.Is<byte[]>(candidate => candidate.SequenceEqual(bytes)), null, null, token, null))
+                    .ReturnsAsync(new PluginPackageResolution
+                    {
+                        ArtifactId = "ppds_Preview", ArtifactVersion = "1.0.0",
+                        ArtifactSha256 = Convert.ToHexString(SHA256.HashData(bytes)),
+                        ExistingPackageId = packageId, RegisteredName = "ppds_Preview",
+                        RegisteredUniqueName = "ppds_Preview", MatchKind = "Legacy"
+                    });
                 Service.Setup(s => s.GetAssemblyIdForPackageAsync(packageId, "Contoso.RuntimePlugins", token))
                     .ReturnsAsync(assemblyId);
             }
@@ -219,7 +229,12 @@ public sealed class DeployPreviewTests
         {
             Assert.All(Service.Invocations, call => Assert.True(
                 call.Method.Name.StartsWith("Get", StringComparison.Ordinal) ||
-                call.Method.Name.StartsWith("List", StringComparison.Ordinal), call.Method.Name));
+                call.Method.Name.StartsWith("List", StringComparison.Ordinal) ||
+                call.Method.Name == nameof(IPluginRegistrationService.ResolvePackageAsync), call.Method.Name));
+            if (_config.Type == "Nuget")
+                Service.Verify(s => s.ResolvePackageAsync(It.IsAny<byte[]>(), null, null, _token, null), Times.Once);
+            Service.Verify(s => s.VerifyUploadedPackageAsync(It.IsAny<PluginPackageResolution>(),
+                It.IsAny<Guid>(), It.IsAny<CancellationToken>(), It.IsAny<IProgressReporter?>()), Times.Never);
         }
 
         public void Dispose() => File.Delete(_artifact);

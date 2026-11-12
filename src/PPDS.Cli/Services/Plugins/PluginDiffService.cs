@@ -19,14 +19,19 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
         new(["message", "entity", "secondaryEntity", "stage", "mode"], StringComparer.Ordinal);
 
     internal async Task<PluginDiffResult> CompareAsync(PluginRegistrationConfig config,
-        bool includeHidden = false, IProgressReporter? progress = null, CancellationToken cancellationToken = default)
+        bool includeHidden = false, IProgressReporter? progress = null, CancellationToken cancellationToken = default,
+        IReadOnlyList<PluginAssemblyIdentity>? targets = null)
     {
         PluginRegistrationContract.Apply(config);
+        if (targets is not null && targets.Count != config.Assemblies.Count)
+            throw new PpdsException(ErrorCodes.Validation.InvalidValue,
+                "Comparison target bindings must align with the configured assemblies.");
         var result = new PluginDiffResult();
-        foreach (var assembly in config.Assemblies)
+        for (var index = 0; index < config.Assemblies.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            result.Assemblies.Add(await CompareAssemblyAsync(assembly, includeHidden, progress, cancellationToken));
+            result.Assemblies.Add(await CompareAssemblyAsync(config.Assemblies[index], includeHidden, progress,
+                cancellationToken, targets?[index]));
         }
         Unknown(config.ExtensionData, "configuration", result.Coverage);
         result.Coverage.Excluded.Add(new("scope", "assembly/package content, solution membership, Custom APIs and independent image deletion are outside this comparison"));
@@ -34,11 +39,12 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
     }
 
     internal async Task<AssemblyDrift> CompareAssemblyAsync(PluginAssemblyConfig config,
-        bool includeHidden = false, IProgressReporter? progress = null, CancellationToken cancellationToken = default)
+        bool includeHidden = false, IProgressReporter? progress = null, CancellationToken cancellationToken = default,
+        PluginAssemblyIdentity? target = null)
     {
         try
         {
-            return await CompareAssemblyCoreAsync(config, includeHidden, progress ?? NullProgressReporter.Instance, cancellationToken);
+            return await CompareAssemblyCoreAsync(config, includeHidden, progress ?? NullProgressReporter.Instance, cancellationToken, target);
         }
         catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
@@ -51,7 +57,7 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
     }
 
     private async Task<AssemblyDrift> CompareAssemblyCoreAsync(PluginAssemblyConfig config,
-        bool includeHidden, IProgressReporter progress, CancellationToken ct)
+        bool includeHidden, IProgressReporter progress, CancellationToken ct, PluginAssemblyIdentity? target)
     {
         ct.ThrowIfCancellationRequested();
         progress.ReportPhase("Comparing plugin registration", config.Name);
@@ -91,7 +97,14 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
             }
         }
 
-        var assembly = await registration.GetAssemblyByNameAsync(config.Name, ct);
+        var assembly = target is null
+            ? await registration.GetAssemblyByNameAsync(config.Name, ct)
+            : await registration.GetAssemblyByIdAsync(target.AssemblyId, ct);
+        if (target is not null && assembly is not null &&
+            (assembly.Id != target.AssemblyId || assembly.PackageId != target.PackageId ||
+             !string.Equals(assembly.Name, config.Name, StringComparison.OrdinalIgnoreCase)))
+            throw new PpdsException(ErrorCodes.Validation.InvalidValue,
+                "The deployed assembly identity or package ownership changed before verification.");
         if (assembly is null)
         {
             drift.AssemblyMissing = true;
@@ -396,3 +409,6 @@ internal sealed class ModifiedImageDrift
     public List<PropertyChange> Changes { get; set; } = [];
 }
 internal sealed record PropertyChange(string Property, string Expected, string Actual);
+
+/// <summary>Observed deployment target; comparison never falls back to a same-named assembly.</summary>
+internal sealed record PluginAssemblyIdentity(Guid AssemblyId, Guid? PackageId);

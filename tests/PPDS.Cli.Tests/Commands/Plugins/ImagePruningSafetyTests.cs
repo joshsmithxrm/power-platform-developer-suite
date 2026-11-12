@@ -10,6 +10,7 @@ using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services.Plugins;
+using PPDS.Cli.Tests.Services.Shared;
 using PPDS.Dataverse.Pooling;
 using Xunit;
 
@@ -125,20 +126,32 @@ public sealed class ImagePruningSafetyTests
 
     [Theory]
     [InlineData("verified")]
+    [InlineData("prefixed-sibling")]
     [InlineData("foreign-parent")]
     [InlineData("duplicate-package")]
     public async Task PackageScope_RequiresExactPackageIdentityAndAssemblyParent(string shape)
     {
-        var f = new Fixture(); var packageId = Guid.NewGuid(); const string packageName = "Fixture.Package";
+        var f = new Fixture(); var packageId = Guid.NewGuid(); const string artifactId = "Fixture.Package";
+        var packageName = shape == "prefixed-sibling" ? "ppds_" + artifactId : artifactId;
         f.Config.Type = "Nuget";
         f.Assembly.PackageId = shape == "foreign-parent" ? Guid.NewGuid() : packageId;
-        var packages = new List<PluginPackageInfo> { new() { Id = packageId, Name = packageName } };
+        var packages = new List<PluginPackageInfo> { new() { Id = packageId, Name = packageName, UniqueName = packageName } };
         if (shape == "duplicate-package") packages.Add(new() { Id = Guid.NewGuid(), Name = packageName });
         f.Service.Setup(s => s.ListPackagesAsync(packageName, It.IsAny<PluginListOptions?>(), It.IsAny<CancellationToken>())).ReturnsAsync(packages);
+        var resolution = PluginPackageResolutionTestFactory.Create(artifactId, packageId, packageName, packageName);
+        f.Service.Setup(s => s.ValidatePackageResolutionAsync(resolution, It.IsAny<CancellationToken>(), null))
+            .Returns(() => shape == "duplicate-package"
+                ? Task.FromException(new PpdsException(ErrorCodes.Operation.Duplicate, "Package identity became ambiguous."))
+                : Task.CompletedTask);
         f.Service.Setup(s => s.GetPackageByIdAsync(packageId, It.IsAny<CancellationToken>())).ReturnsAsync(packages[0]);
+        f.Service.Setup(s => s.GetAssemblyIdForPackageAsync(packageId, f.Config.Name, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(f.Assembly.Id);
+        if (shape == "prefixed-sibling")
+            f.Service.Setup(s => s.ListAssembliesAsync(f.Config.Name, It.IsAny<PluginListOptions?>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("A global same-name inventory must not select the sibling package."));
         Task<PluginImagePruningPlan> Run() => PluginImagePruningService.PlanAsync(f.Service.Object, [f.Config],
-            new Dictionary<string, string> { [f.Config.Name] = packageName }, CancellationToken.None);
-        if (shape == "verified")
+            new Dictionary<string, PluginPackageResolution> { [f.Config.Name] = resolution }, CancellationToken.None);
+        if (shape is "verified" or "prefixed-sibling")
         {
             var plan = await Run(); Assert.Equal(packageId, Assert.Single(plan.Images).Scope.PackageId);
             var result = await PluginImagePruningService.ApplyAsync(f.Service.Object, plan, CancellationToken.None);

@@ -196,6 +196,7 @@ public class PluginRegistrationServiceTests
         var packageBytes = CreatePackageBytes("ppds_TestPackage", "2.4.6");
         _retrieveMultipleResult = new EntityCollection();
         ConfigureCreateResponse(expectedId);
+        ConfigurePackageIdentityReads(packageBytes, expectedId);
 
         // Act
         var result = await _sut.UpsertPackageAsync(
@@ -207,7 +208,8 @@ public class PluginRegistrationServiceTests
         Assert.Equal(expectedId, result);
         var request = Assert.IsType<CreateRequest>(_executedRequest);
         var target = Assert.IsType<PluginPackage>(request.Target);
-        Assert.Equal("ppds_TestPackage", target.Name);
+        Assert.Equal("ppds_ppds_TestPackage", target.Name);
+        Assert.Equal("ppds_ppds_TestPackage", target.UniqueName);
         Assert.Equal("2.4.6", target.Version);
         Assert.Equal(Convert.ToBase64String(packageBytes), target.Content);
         Assert.Equal("PPDSDemo", request.Parameters["SolutionUniqueName"]);
@@ -228,6 +230,7 @@ public class PluginRegistrationServiceTests
                 Version = "1.0.0"
             }
         ]);
+        ConfigurePackageIdentityReads(packageBytes);
 
         // Act
         var result = await _sut.UpsertPackageAsync(
@@ -269,6 +272,7 @@ public class PluginRegistrationServiceTests
                 Version = "1.0.0"
             }
         ]);
+        ConfigurePackageIdentityReads(packageBytes);
 
         // Act
         var result = await _sut.UpsertPackageAsync("ppds_TestPackage", packageBytes);
@@ -366,6 +370,57 @@ public class PluginRegistrationServiceTests
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    private void ConfigurePackageIdentityReads(byte[] bytes, Guid? createdId = null)
+    {
+        var solutionId = Guid.NewGuid();
+        var publisherId = Guid.NewGuid();
+        foreach (var package in _retrieveMultipleResult.Entities)
+            package[PluginPackage.Fields.IsManaged] = false;
+        _mockPooledClient.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryBase query, CancellationToken _) =>
+            {
+                var typed = Assert.IsType<QueryExpression>(query);
+                if (typed.EntityName == Solution.EntityLogicalName)
+                    return new EntityCollection([new Entity(Solution.EntityLogicalName, solutionId)
+                    {
+                        [Solution.Fields.UniqueName] = "PPDSDemo", [Solution.Fields.IsManaged] = false,
+                        [Solution.Fields.PublisherId] = new EntityReference(Publisher.EntityLogicalName, publisherId)
+                    }]);
+                var idFilter = typed.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == PluginPackage.Fields.PluginPackageId);
+                return idFilter is null ? _retrieveMultipleResult :
+                    new EntityCollection(_retrieveMultipleResult.Entities.Where(p => p.Id == (Guid)idFilter.Values[0]).ToList());
+            });
+        _mockPooledClient.Setup(c => c.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ColumnSet>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, Guid id, ColumnSet columns, CancellationToken _) =>
+            {
+                if (table == Publisher.EntityLogicalName)
+                    return new Entity(table, id) { [Publisher.Fields.CustomizationPrefix] = "ppds" };
+                var package = _retrieveMultipleResult.Entities.Single(p => p.Id == id);
+                return new Entity(table, id)
+                {
+                    [PluginPackage.Fields.Name] = package.GetAttributeValue<string>(PluginPackage.Fields.Name),
+                    [PluginPackage.Fields.Version] = "1.0.0", [PluginPackage.Fields.Content] = Convert.ToBase64String(bytes)
+                };
+            });
+        _mockPooledClient.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((OrganizationRequest request, CancellationToken _) =>
+            {
+                _executedRequest = request;
+                _executedRequests.Add(request);
+                if (request is CreateRequest create)
+                {
+                    create.Target.Id = createdId!.Value;
+                    create.Target[PluginPackage.Fields.IsManaged] = false;
+                    _retrieveMultipleResult = new EntityCollection([create.Target]);
+                    var response = new CreateResponse();
+                    response.Results["id"] = createdId.Value;
+                    return response;
+                }
+                return new UpdateResponse();
+            });
     }
 
     private void ConfigureCreateResponse(Guid id)

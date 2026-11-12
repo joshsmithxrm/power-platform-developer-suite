@@ -209,24 +209,14 @@ public static class UpdateCommand
                 Console.Error.WriteLine();
             }
 
-            // Check if package exists
-            var existing = await registrationService.GetPackageByNameAsync(name, cancellationToken);
-            if (existing == null)
-            {
-                writer.WriteError(new StructuredError(
-                    ErrorCodes.Operation.NotFound,
-                    $"Package '{name}' not found.",
-                    Target: name));
-                return ExitCodes.NotFoundError;
-            }
-
-            // Read and upload package
+            // Resolve the explicit selector once and retain its exact GUID through upload.
             var content = await File.ReadAllBytesAsync(path.FullName, cancellationToken);
-            var packageId = await registrationService.UpsertPackageAsync(
-                GetRequiredPackageUniqueName(existing),
-                content,
-                solution,
-                cancellationToken);
+            var resolution = await registrationService.ResolvePackageAsync(content, solution, name,
+                cancellationToken, null);
+            var packageId = await registrationService.UpsertResolvedPackageAsync(resolution, content,
+                cancellationToken, null);
+            cancellationToken.ThrowIfCancellationRequested();
+            await registrationService.VerifyUploadedPackageAsync(resolution, packageId, cancellationToken, null);
 
             var result = new UpdateResult
             {

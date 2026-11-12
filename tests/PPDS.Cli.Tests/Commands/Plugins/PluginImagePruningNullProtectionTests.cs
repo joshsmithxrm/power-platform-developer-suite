@@ -207,7 +207,9 @@ public sealed class PluginImagePruningNullProtectionTests(ITestOutputHelper outp
             _config = new() { Name = assembly.Name, Type = "Nuget", OperationIntent = RegistrationOperationIntent.Reconcile,
                 Types = [new() { TypeName = type.TypeName, Steps = [new() { Message = step.Message, Entity = step.PrimaryEntity, Stage = step.Stage, Images = [] }] }] };
             Service.Setup(s => s.ListPackagesAsync(package.Name, It.IsAny<PluginListOptions?>(), f.Token)).ReturnsAsync([package]);
+            Service.Setup(s => s.ValidatePackageResolutionAsync(It.IsAny<PluginPackageResolution>(), f.Token, null)).Returns(Task.CompletedTask);
             Service.Setup(s => s.GetPackageByIdAsync(package.Id, f.Token)).ReturnsAsync(package);
+            Service.Setup(s => s.GetAssemblyIdForPackageAsync(package.Id, assembly.Name, f.Token)).ReturnsAsync(assembly.Id);
             Service.Setup(s => s.ListAssembliesAsync(assembly.Name, It.IsAny<PluginListOptions?>(), f.Token)).ReturnsAsync([assembly]);
             Service.Setup(s => s.GetAssemblyByIdAsync(assembly.Id, f.Token)).ReturnsAsync(assembly);
             Service.Setup(s => s.ListTypesForAssemblyAsync(f.AssemblyId, f.Token)).ReturnsAsync([type]);
@@ -218,6 +220,8 @@ public sealed class PluginImagePruningNullProtectionTests(ITestOutputHelper outp
             Service.Setup(s => s.GetImageByNameOrIdAsync(image.Id.ToString("D"), f.Token)).Returns(async () => f.Kind == "image" ? (PluginImageInfo?)await f.Read() : image);
             Service.Setup(s => s.DeleteImageAsync(image.Id, f.Token)).Callback(() => Deletes++).Returns(Task.CompletedTask);
         }
-        internal Task<PluginImagePruningPlan> Plan() => PluginImagePruningService.PlanAsync(Service.Object, [_config], new Dictionary<string, string> { [_config.Name] = "FixturePackage" }, _f.Token);
+        internal Task<PluginImagePruningPlan> Plan() => PluginImagePruningService.PlanAsync(Service.Object, [_config],
+            new Dictionary<string, PluginPackageResolution>
+            { [_config.Name] = PluginPackageResolutionTestFactory.Create("FixturePackage", _f.PackageId) }, _f.Token);
     }
 }

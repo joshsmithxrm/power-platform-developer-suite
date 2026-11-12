@@ -106,7 +106,7 @@ public sealed class PluginImagePruningSdkSafetyTests(ITestOutputHelper output)
     [Fact]
     public async Task HiddenAssembly_CannotBecomeAnEmptySuccessfulPlan()
     {
-        using var f = new SdkFixture("assembly") { HiddenState = "true" }; var scope = new Scope(f, realAssemblyInventory: true);
+        using var f = new SdkFixture("assembly") { HiddenState = "true" }; var scope = new Scope(f);
         var error = await Record.ExceptionAsync(scope.Plan); f.VerifyReads(); Proof(f, error, scope.Deletes);
         Assert.IsType<PpdsException>(error); Assert.Equal(0, scope.Deletes);
     }
@@ -114,7 +114,7 @@ public sealed class PluginImagePruningSdkSafetyTests(ITestOutputHelper output)
     [Fact]
     public async Task HiddenAssemblyRecheck_StopsBeforeAnyImageDelete()
     {
-        using var f = new SdkFixture("assembly"); var scope = new Scope(f, realAssemblyInventory: true);
+        using var f = new SdkFixture("assembly"); var scope = new Scope(f);
         var plan = await scope.Plan(); Assert.Single(plan.Images); f.HiddenState = "true";
         var error = await Record.ExceptionAsync(() => PluginImagePruningService.ApplyAsync(scope.Service.Object, plan, f.Token));
         f.VerifyReads(); Proof(f, error, scope.Deletes); Assert.IsType<PpdsException>(error); Assert.Equal(0, scope.Deletes);
@@ -278,7 +278,7 @@ public sealed class PluginImagePruningSdkSafetyTests(ITestOutputHelper output)
         internal int Deletes;
         private readonly SdkFixture _sdk;
         private readonly PluginAssemblyConfig _config;
-        internal Scope(SdkFixture sdk, bool realAssemblyInventory = false)
+        internal Scope(SdkFixture sdk)
         {
             _sdk = sdk;
             var assembly = new PluginAssemblyInfo { Id = sdk.AssemblyId, Name = "Fixture", PackageId = sdk.PackageId, IsManaged = false };
@@ -289,9 +289,9 @@ public sealed class PluginImagePruningSdkSafetyTests(ITestOutputHelper output)
             _config = new() { Name = assembly.Name, Type = "Nuget", OperationIntent = RegistrationOperationIntent.Reconcile,
                 Types = [new() { TypeName = type.TypeName, Steps = [new() { Message = step.Message, Entity = step.PrimaryEntity, Stage = step.Stage, Images = [] }] }] };
             Service.Setup(s => s.ListPackagesAsync(package.Name, It.IsAny<PluginListOptions?>(), sdk.Token)).ReturnsAsync([package]);
+            Service.Setup(s => s.ValidatePackageResolutionAsync(It.IsAny<PluginPackageResolution>(), sdk.Token, null)).Returns(Task.CompletedTask);
             Service.Setup(s => s.GetPackageByIdAsync(package.Id, sdk.Token)).Returns(async () => sdk.Kind == "package" ? (PluginPackageInfo?)await sdk.Read() : package);
-            Service.Setup(s => s.ListAssembliesAsync(assembly.Name, It.IsAny<PluginListOptions?>(), sdk.Token)).Returns((string? name, PluginListOptions? options, CancellationToken token) => realAssemblyInventory
-                ? sdk.Service.ListAssembliesAsync(name, options, token) : Task.FromResult(new List<PluginAssemblyInfo> { assembly }));
+            Service.Setup(s => s.GetAssemblyIdForPackageAsync(package.Id, assembly.Name, sdk.Token)).ReturnsAsync(assembly.Id);
             Service.Setup(s => s.GetAssemblyByIdAsync(assembly.Id, sdk.Token)).Returns(async () => sdk.Kind == "assembly" ? (PluginAssemblyInfo?)await sdk.Read() : assembly);
             Service.Setup(s => s.ListTypesForAssemblyAsync(assembly.Id, sdk.Token)).ReturnsAsync([type]);
             Service.Setup(s => s.GetPluginTypeByNameOrIdAsync(type.Id.ToString("D"), sdk.Token)).Returns(async () => sdk.Kind == "type" ? (PluginTypeInfo?)await sdk.Read() : type);
@@ -301,6 +301,8 @@ public sealed class PluginImagePruningSdkSafetyTests(ITestOutputHelper output)
             Service.Setup(s => s.GetImageByNameOrIdAsync(image.Id.ToString("D"), sdk.Token)).ReturnsAsync(image);
             Service.Setup(s => s.DeleteImageAsync(image.Id, sdk.Token)).Callback(() => Deletes++).Returns(Task.CompletedTask);
         }
-        internal Task<PluginImagePruningPlan> Plan() => PluginImagePruningService.PlanAsync(Service.Object, [_config], new Dictionary<string, string> { [_config.Name] = "FixturePackage" }, _sdk.Token);
+        internal Task<PluginImagePruningPlan> Plan() => PluginImagePruningService.PlanAsync(Service.Object, [_config],
+            new Dictionary<string, PluginPackageResolution>
+            { [_config.Name] = PluginPackageResolutionTestFactory.Create("FixturePackage", _sdk.PackageId) }, _sdk.Token);
     }
 }

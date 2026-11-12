@@ -12,6 +12,7 @@ using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services;
 using PPDS.Cli.Services.Plugins;
 using PPDS.Cli.Tests.Plugins;
+using PPDS.Cli.Tests.Services.Shared;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Plugins;
@@ -172,8 +173,8 @@ public sealed class PluginStepCapabilityPlanningTests
             var typeId = Guid.NewGuid();
             var existingStepId = Guid.NewGuid();
             var service = new Mock<IPluginRegistrationService>(MockBehavior.Strict);
-            service.Setup(s => s.GetPackageByNameAsync("ppds_CapabilityFirst", CancellationToken.None))
-                .ReturnsAsync((PluginPackageInfo?)null);
+            service.Setup(s => s.ResolvePackageAsync(It.IsAny<byte[]>(), null, null, CancellationToken.None, null))
+                .ReturnsAsync(PluginPackageResolutionTestFactory.Create("ppds_CapabilityFirst"));
             service.Setup(s => s.GetAssemblyByNameAsync("CapabilitySecond", CancellationToken.None))
                 .ReturnsAsync(new PluginAssemblyInfo { Id = assemblyId, Name = "CapabilitySecond" });
             service.Setup(s => s.ListTypesForAssemblyAsync(assemblyId, CancellationToken.None))
@@ -213,6 +214,8 @@ public sealed class PluginStepCapabilityPlanningTests
             AssertReadsOnly(service);
             service.Verify(s => s.UpsertPackageAsync(It.IsAny<string>(), It.IsAny<byte[]>(),
                 It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+            service.Verify(s => s.UpsertResolvedPackageAsync(It.IsAny<PluginPackageResolution>(), It.IsAny<byte[]>(),
+                It.IsAny<CancellationToken>(), null), Times.Never);
             Assert.True(File.Exists(package));
         }
         finally
@@ -228,15 +231,14 @@ public sealed class PluginStepCapabilityPlanningTests
         var packageId = Guid.NewGuid();
         var assembly = Assembly("ExpectedAssembly", Step("step", "PostOperation"));
         assembly.Type = "Nuget";
-        service.Setup(s => s.GetPackageByNameAsync("InspectedPackage", CancellationToken.None))
-            .ReturnsAsync(new PluginPackageInfo { Id = packageId, Name = "InspectedPackage" });
         service.Setup(s => s.GetAssemblyIdForPackageAsync(packageId, "ExpectedAssembly", CancellationToken.None))
             .ReturnsAsync((Guid?)null);
         service.Setup(s => s.ValidateStepFieldCapabilitiesAsync(assembly.Types[0].Steps[0], null, CancellationToken.None, null))
             .Returns(Task.CompletedTask);
 
         await PluginRegistrationPlanningService.ValidateStepFieldCapabilitiesAsync(service.Object, [assembly],
-            new Dictionary<string, string> { ["ExpectedAssembly"] = "InspectedPackage" }, CancellationToken.None);
+            new Dictionary<string, PluginPackageResolution>
+            { ["ExpectedAssembly"] = PluginPackageResolutionTestFactory.Create("InspectedPackage", packageId) }, CancellationToken.None);
 
         service.Verify(s => s.ValidateStepFieldCapabilitiesAsync(assembly.Types[0].Steps[0], null,
             CancellationToken.None, null), Times.Once);
@@ -293,6 +295,7 @@ public sealed class PluginStepCapabilityPlanningTests
         Assert.All(service.Invocations, invocation => Assert.True(
             invocation.Method.Name.StartsWith("Get", StringComparison.Ordinal) ||
             invocation.Method.Name.StartsWith("List", StringComparison.Ordinal) ||
-            invocation.Method.Name == nameof(IPluginRegistrationService.ValidateStepFieldCapabilitiesAsync),
+            invocation.Method.Name == nameof(IPluginRegistrationService.ValidateStepFieldCapabilitiesAsync) ||
+            invocation.Method.Name == nameof(IPluginRegistrationService.ResolvePackageAsync),
             invocation.Method.Name));
 }

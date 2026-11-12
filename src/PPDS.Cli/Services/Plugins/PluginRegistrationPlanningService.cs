@@ -57,7 +57,7 @@ internal static class PluginRegistrationPlanningService
     /// observation, not a reservation: the registration service checks again at the write boundary.
     /// </summary>
     internal static async Task ValidateStepFieldCapabilitiesAsync(IPluginRegistrationService registration,
-        IEnumerable<PluginAssemblyConfig> assemblies, IReadOnlyDictionary<string, string>? packageNames,
+        IEnumerable<PluginAssemblyConfig> assemblies, IReadOnlyDictionary<string, PluginPackageResolution>? packages,
         CancellationToken cancellationToken, IProgressReporter? progress = null)
     {
         try
@@ -74,12 +74,11 @@ internal static class PluginRegistrationPlanningService
                 Guid? assemblyId;
                 if (string.Equals(assembly.Type, "Nuget", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (packageNames is null || !packageNames.TryGetValue(assembly.Name, out var packageName))
+                    if (packages is null || !packages.TryGetValue(assembly.Name, out var package))
                         throw new PpdsException(ErrorCodes.Plugin.FieldCapabilityUnknown,
-                            "Step capability preflight requires the inspected package identity.");
-                    var package = await registration.GetPackageByNameAsync(packageName, cancellationToken);
-                    assemblyId = package is null ? null : await registration.GetAssemblyIdForPackageAsync(
-                        package.Id, assembly.Name, cancellationToken);
+                            "Step capability preflight requires the resolved package identity.");
+                    assemblyId = package.ExistingPackageId is not { } packageId ? null : await registration.GetAssemblyIdForPackageAsync(
+                        packageId, assembly.Name, cancellationToken);
                     // An existing package may gain a new assembly during upload. A completed
                     // scoped lookup with no match means its configured steps need create capability.
                     // Deployment rematches after upload and the service rechecks the actual row.

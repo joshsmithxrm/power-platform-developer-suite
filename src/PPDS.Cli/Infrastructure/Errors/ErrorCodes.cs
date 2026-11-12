@@ -331,6 +331,12 @@ public static class ErrorCodes
         /// <summary>Target field capability or the required current value could not be established.</summary>
         public const string FieldCapabilityUnknown = "Plugin.FieldCapabilityUnknown";
 
+        /// <summary>The selected package does not contain the expected artifact identity.</summary>
+        public const string PackageIdentityMismatch = "Plugin.PackageIdentityMismatch";
+
+        /// <summary>A package identity observation changed before the planned mutation.</summary>
+        public const string PackageIdentityChanged = "Plugin.PackageIdentityChanged";
+
         /// <summary>Assembly or package has no binary content.</summary>
         public const string NoContent = "Plugin.NoContent";
 

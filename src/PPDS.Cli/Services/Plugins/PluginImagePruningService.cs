@@ -51,10 +51,10 @@ internal static class PluginImagePruningService
     }
 
     internal static async Task<PluginImagePruningPlan> PlanAsync(IPluginRegistrationService service,
-        IReadOnlyList<PluginAssemblyConfig> assemblies, IReadOnlyDictionary<string, string>? packageNames,
+        IReadOnlyList<PluginAssemblyConfig> assemblies, IReadOnlyDictionary<string, PluginPackageResolution>? packages,
         CancellationToken ct, IProgressReporter? reporter = null)
     {
-        try { return await BuildPlanAsync(service, assemblies, packageNames, ct, reporter); }
+        try { return await BuildPlanAsync(service, assemblies, packages, ct, reporter); }
         catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
         catch (Exception ex)
@@ -65,7 +65,7 @@ internal static class PluginImagePruningService
     }
 
     private static async Task<PluginImagePruningPlan> BuildPlanAsync(IPluginRegistrationService service,
-        IReadOnlyList<PluginAssemblyConfig> assemblies, IReadOnlyDictionary<string, string>? packageNames,
+        IReadOnlyList<PluginAssemblyConfig> assemblies, IReadOnlyDictionary<string, PluginPackageResolution>? packages,
         CancellationToken ct, IProgressReporter? reporter)
     {
         ValidateAuthority(assemblies, ct);
@@ -78,35 +78,46 @@ internal static class PluginImagePruningService
             ct.ThrowIfCancellationRequested();
             string? packageName = null;
             Guid? packageId = null;
+            PluginPackageResolution? packageResolution = null;
             if (string.Equals(config.Type, "Nuget", StringComparison.OrdinalIgnoreCase))
             {
-                Require(packageNames is not null && packageNames.TryGetValue(config.Name, out packageName) && !string.IsNullOrWhiteSpace(packageName),
-                    "Package image cleanup requires locally validated configured package identity before connection.");
-                var packages = await ReadAsync(() => service.ListPackagesAsync(packageName, InventoryOptions, ct), ct);
-                UniqueIds(packages.Select(p => p.Id));
-                Require(packages.All(p => Names.Equals(p.Name, packageName)) && packages.Count <= 1,
-                    "Package image-cleanup inventory is missing a unique exact package identity.");
-                if (packages.Count == 0)
+                Require(packages is not null && packages.TryGetValue(config.Name, out packageResolution),
+                    "Package image cleanup requires a resolved registration identity.");
+                await ReadAsync(async () =>
+                {
+                    await service.ValidatePackageResolutionAsync(packageResolution!, ct, reporter);
+                    return true;
+                }, ct);
+                packageName = packageResolution!.RegisteredName;
+                if (packageResolution.ExistingPackageId is not { } selectedPackageId)
                 {
                     inventories.Add(new(config.Name, null, null, 0, 0, 0, 0, "no-existing-package-observed"));
                     continue;
                 }
-                var package = await ReadAsync(() => service.GetPackageByIdAsync(packages[0].Id, ct), ct);
-                Require(package is not null && package.Id == packages[0].Id && Names.Equals(package.Name, packageName) && !package.IsManaged,
+                var package = await ReadAsync(() => service.GetPackageByIdAsync(selectedPackageId, ct), ct);
+                Require(package is not null && package.Id == selectedPackageId && Names.Equals(package.Name, packageName) &&
+                    Names.Equals(package.UniqueName, packageResolution.RegisteredUniqueName) && !package.IsManaged,
                     "Image cleanup could not verify an unmanaged selected package by ID.");
                 packageId = package!.Id;
             }
-            var assembliesFound = await ReadAsync(() => service.ListAssembliesAsync(config.Name, InventoryOptions, ct), ct);
-            UniqueIds(assembliesFound.Select(a => a.Id));
-            Require(assembliesFound.All(a => Names.Equals(a.Name, config.Name)) && assembliesFound.Count <= 1,
-                "Image cleanup requires a unique exact assembly inventory.");
-            if (assembliesFound.Count == 0)
+            Guid? selectedAssemblyId;
+            if (packageId is { } selectedParentId)
+                selectedAssemblyId = await ReadAsync(() => service.GetAssemblyIdForPackageAsync(selectedParentId, config.Name, ct), ct);
+            else
+            {
+                var assembliesFound = await ReadAsync(() => service.ListAssembliesAsync(config.Name, InventoryOptions, ct), ct);
+                UniqueIds(assembliesFound.Select(a => a.Id));
+                Require(assembliesFound.All(a => Names.Equals(a.Name, config.Name)) && assembliesFound.Count <= 1,
+                    "Image cleanup requires a unique exact assembly inventory.");
+                selectedAssemblyId = assembliesFound.Count == 0 ? null : assembliesFound[0].Id;
+            }
+            if (selectedAssemblyId is null)
             {
                 inventories.Add(new(config.Name, null, packageId, 0, 0, 0, 0, "no-existing-assembly-observed"));
                 continue;
             }
-            var assembly = await ReadAsync(() => service.GetAssemblyByIdAsync(assembliesFound[0].Id, ct), ct);
-            Require(assembly is not null && assembly.Id == assembliesFound[0].Id && Names.Equals(assembly.Name, config.Name) &&
+            var assembly = await ReadAsync(() => service.GetAssemblyByIdAsync(selectedAssemblyId.Value, ct), ct);
+            Require(assembly is not null && assembly.Id == selectedAssemblyId && Names.Equals(assembly.Name, config.Name) &&
                 assembly.PackageId == packageId && !assembly.IsManaged && !assembly.IsHidden,
                 "Image cleanup cannot use a hidden or managed assembly or unverified package ownership.");
             var types = await ReadAsync(() => service.ListTypesForAssemblyAsync(assembly!.Id, ct), ct);
@@ -146,7 +157,7 @@ internal static class PluginImagePruningService
                         !listedStep.IsHidden && !step!.IsHidden && !step.IsManaged && step.IsCustomizable,
                         "Image cleanup cannot use a changed, hidden, managed or noncustomizable step.");
                     var scope = new PluginImagePruningScope(config.Name, assembly!.Id, packageId, packageName,
-                        type!.Id, type.TypeName, step!.Id, identity);
+                        type!.Id, type.TypeName, step!.Id, identity, packageResolution);
                     scopes.Add(scope);
                     var listedImages = await ReadAsync(() => service.ListImagesForStepAsync(step.Id, ct), ct);
                     ValidateImageInventory(listedImages);
@@ -263,16 +274,20 @@ internal static class PluginImagePruningService
 
     private static async Task VerifyUniquenessAsync(IPluginRegistrationService service, PluginImagePruningScope scope, CancellationToken ct)
     {
-        var assemblies = await ReadAsync(() => service.ListAssembliesAsync(scope.AssemblyName, InventoryOptions, ct), ct);
-        UniqueIds(assemblies.Select(a => a.Id));
-        Require(assemblies.Count == 1 && assemblies[0].Id == scope.AssemblyId && Names.Equals(assemblies[0].Name, scope.AssemblyName),
-            "Assembly selection became ambiguous before image cleanup.");
         if (scope.PackageId is { } packageId)
         {
-            var packages = await ReadAsync(() => service.ListPackagesAsync(scope.PackageName, InventoryOptions, ct), ct);
-            UniqueIds(packages.Select(p => p.Id));
-            Require(packages.Count == 1 && packages[0].Id == packageId && Names.Equals(packages[0].Name, scope.PackageName),
-                "Package selection became ambiguous before image cleanup.");
+            Require(scope.PackageResolution?.ExistingPackageId == packageId,
+                "Package cleanup lost its resolved ownership binding.");
+            await service.ValidatePackageResolutionAsync(scope.PackageResolution!, ct, null);
+            var assemblyId = await ReadAsync(() => service.GetAssemblyIdForPackageAsync(packageId, scope.AssemblyName, ct), ct);
+            Require(assemblyId == scope.AssemblyId, "Package-scoped assembly identity changed before image cleanup.");
+        }
+        else
+        {
+            var assemblies = await ReadAsync(() => service.ListAssembliesAsync(scope.AssemblyName, InventoryOptions, ct), ct);
+            UniqueIds(assemblies.Select(a => a.Id));
+            Require(assemblies.Count == 1 && assemblies[0].Id == scope.AssemblyId && Names.Equals(assemblies[0].Name, scope.AssemblyName),
+                "Assembly selection became ambiguous before image cleanup.");
         }
         var types = await ReadAsync(() => service.ListTypesForAssemblyAsync(scope.AssemblyId, ct), ct);
         UniqueIds(types.Select(t => t.Id));
@@ -295,7 +310,8 @@ internal static class PluginImagePruningService
         if (scope.PackageId is { } packageId)
         {
             var package = await ReadAsync(() => service.GetPackageByIdAsync(packageId, ct), ct);
-            Require(package is not null && package.Id == packageId && Names.Equals(package.Name, scope.PackageName) && !package.IsManaged,
+            Require(package is not null && package.Id == packageId && Names.Equals(package.Name, scope.PackageName) &&
+                Names.Equals(package.UniqueName, scope.PackageResolution?.RegisteredUniqueName) && !package.IsManaged,
                 "Selected package ownership changed before image cleanup.");
         }
         var type = await ReadAsync(() => service.GetPluginTypeByNameOrIdAsync(scope.TypeId.ToString("D"), ct), ct);
@@ -388,7 +404,8 @@ internal sealed record PluginImagePruningScope(
     [property: JsonPropertyName("typeId")] Guid TypeId,
     [property: JsonPropertyName("typeName")] string TypeName,
     [property: JsonPropertyName("stepId")] Guid StepId,
-    [property: JsonPropertyName("identity")] PluginStepIdentity Identity);
+    [property: JsonPropertyName("identity")] PluginStepIdentity Identity,
+    [property: JsonIgnore] PluginPackageResolution? PackageResolution = null);
 
 internal sealed record PluginImagePruningTarget(
     [property: JsonPropertyName("scope")] PluginImagePruningScope Scope,
@@ -413,6 +430,24 @@ internal sealed record PluginImagePruningPlan(
     [property: JsonPropertyName("images")] IReadOnlyList<PluginImagePruningTarget> Images,
     [property: JsonPropertyName("inventories")] IReadOnlyList<PluginImagePruningInventory> Inventories)
 {
+    internal PluginImagePruningPlan WithVerifiedPackages(IEnumerable<PluginPackageResolution> packages)
+    {
+        var byId = packages.Where(p => p.ExistingPackageId.HasValue)
+            .ToDictionary(p => p.ExistingPackageId!.Value);
+        var rebound = Scopes.ToDictionary(scope => scope, scope =>
+        {
+            if (scope.PackageId is not { } id || !byId.TryGetValue(id, out var verified)) return scope;
+            if (scope.PackageResolution is not { } original ||
+                original.ArtifactId != verified.ArtifactId || original.ArtifactSha256 != verified.ArtifactSha256 ||
+                original.RegisteredName != verified.RegisteredName || original.RegisteredUniqueName != verified.RegisteredUniqueName)
+                throw new PpdsException(ErrorCodes.Validation.InvalidValue,
+                    "A verified upload cannot change the package ownership of an image-cleanup plan.");
+            return scope with { PackageResolution = verified };
+        });
+        return new(Array.AsReadOnly(Scopes.Select(s => rebound[s]).ToArray()),
+            Array.AsReadOnly(Images.Select(i => i with { Scope = rebound[i.Scope] }).ToArray()), Inventories);
+    }
+
     internal PluginImagePruningPlan ForAssembly(string name) => new(
         Array.AsReadOnly(Scopes.Where(s => s.AssemblyName == name).ToArray()),
         Array.AsReadOnly(Images.Where(i => i.Scope.AssemblyName == name).ToArray()),

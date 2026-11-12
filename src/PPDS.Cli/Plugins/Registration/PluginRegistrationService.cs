@@ -27,7 +27,7 @@ namespace PPDS.Cli.Plugins.Registration;
 /// This service uses connection pooling to enable parallel Dataverse operations.
 /// Each method acquires its own client from the pool, enabling DOP-based parallelism.
 /// </remarks>
-public sealed class PluginRegistrationService : IPluginRegistrationService
+public sealed partial class PluginRegistrationService : IPluginRegistrationService
 {
     private readonly IDataverseConnectionPool _pool;
     private readonly IShakedownGuard _guard;
@@ -626,8 +626,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     {
         // Use IncludeMicrosoft: true to search all packages including Microsoft.* when looking up by exact name
         var packages = await ListPackagesAsync(name, new PluginListOptions(IncludeMicrosoft: true), cancellationToken);
-        return packages.FirstOrDefault(p => string.Equals(p.UniqueName, name, StringComparison.OrdinalIgnoreCase))
-            ?? packages.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+        return SelectExactPackage(packages, name);
     }
 
     /// <summary>
@@ -1123,38 +1122,11 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 $"Package name '{packageName}' does not match the root .nuspec ID '{metadata.Id}'.");
         }
 
-        // Dataverse extracts uniquename from the nupkg content, so the .nuspec ID is used for lookup.
-        var existing = await GetPackageByNameAsync(metadata.Id, cancellationToken);
-
-        if (existing != null)
-        {
-            // UPDATE: Only update content, use solution header for solution association
-            var updateEntity = new PluginPackage
-            {
-                Id = existing.Id,
-                Content = Convert.ToBase64String(nupkgContent)
-            };
-
-            var request = new UpdateRequest { Target = updateEntity };
-            if (!string.IsNullOrEmpty(solutionName))
-            {
-                request.Parameters["SolutionUniqueName"] = solutionName;
-            }
-            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-            await ExecuteAsync(request, client, cancellationToken);
-
-            return existing.Id;
-        }
-
-        // CREATE: Version is system-required. Dataverse extracts uniquename from the package content.
-        var entity = new PluginPackage
-        {
-            Name = metadata.Id,
-            Version = metadata.Version,
-            Content = Convert.ToBase64String(nupkgContent)
-        };
-
-        return await CreateWithSolutionHeaderAsync(entity, solutionName, cancellationToken);
+        var resolution = await ResolvePackageAsync(nupkgContent, solutionName,
+            cancellationToken: cancellationToken);
+        var id = await UpsertResolvedPackageAsync(resolution, nupkgContent, cancellationToken);
+        await VerifyUploadedPackageAsync(resolution, id, cancellationToken);
+        return id;
     }
 
     /// <summary>
@@ -1169,8 +1141,12 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         CancellationToken cancellationToken = default)
     {
         var assemblies = await ListAssembliesForPackageAsync(packageId, cancellationToken);
-        return assemblies.FirstOrDefault(a =>
-            string.Equals(a.Name, assemblyName, StringComparison.OrdinalIgnoreCase))?.Id;
+        var matches = assemblies.Where(a => string.Equals(a.Name, assemblyName, StringComparison.OrdinalIgnoreCase))
+            .Select(a => a.Id).Distinct().ToArray();
+        if (matches.Length > 1)
+            throw new PpdsException(ErrorCodes.Operation.Duplicate,
+                $"Package '{packageId}' has multiple assemblies named '{assemblyName}'.");
+        return matches.Length == 0 ? null : matches[0];
     }
 
     /// <summary>
@@ -1486,7 +1462,11 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             };
 
             var results = await RetrieveMultipleAsync(query, client, cancellationToken);
-            existing = results.Entities.FirstOrDefault();
+            if (results.Entities.Count != 1 || results.Entities[0].Id != existingStepId ||
+                results.Entities[0].LogicalName != SdkMessageProcessingStep.EntityLogicalName)
+                throw new PpdsException(results.Entities.Count > 1 ? ErrorCodes.Operation.Duplicate : ErrorCodes.Plugin.NotFound,
+                    $"Planned step '{existingStepId}' no longer resolves to exactly one matching row. PPDS will not recreate it or write secure configuration.");
+            existing = results.Entities[0];
         }
         else
         {

@@ -21,6 +21,35 @@ public sealed class PluginStepFieldCapabilityTests
     private const string StepTable = "sdkmessageprocessingstep";
     private const string Attribute = "canusereadonlyconnection";
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PlannedExistingStep_MissingOrWrongRow_NeverFallsBackToCreate(bool wrongRow)
+    {
+        var f = new Fixture(actual: false, exists: wrongRow);
+        var config = Reconcile();
+        config.SecureConfiguration = "synthetic fixture value";
+        await Assert.ThrowsAsync<PpdsException>(() => f.Service.UpsertStepAsync(
+            f.TypeId, "pluginType", config, f.MessageId, null,
+            identity: new StepIdentityResolution(Guid.NewGuid())));
+        Assert.Empty(f.Mutations);
+        Assert.Empty(f.MetadataReads);
+    }
+
+    [Fact]
+    public async Task PlannedExistingStep_AmbiguousRead_RefusesBeforeAnyMutation()
+    {
+        var f = new Fixture(actual: false) { DuplicateRows = true };
+        var config = Reconcile();
+        config.SecureConfiguration = "synthetic fixture value";
+        var error = await Assert.ThrowsAsync<PpdsException>(() => f.Service.UpsertStepAsync(
+            f.TypeId, "pluginType", config, f.MessageId, null,
+            identity: new StepIdentityResolution(f.StepId)));
+        Assert.Equal(ErrorCodes.Operation.Duplicate, error.ErrorCode);
+        Assert.Empty(f.Mutations);
+        Assert.Empty(f.MetadataReads);
+    }
+
     [Fact]
     public async Task Reconcile_AlreadyFalseCreateOnlyField_IsOmittedWhileOtherChangesApply()
     {
@@ -411,6 +440,7 @@ public sealed class PluginStepFieldCapabilityTests
         private readonly BooleanAttributeMetadata _metadata;
         public Guid StepId { get; } = Guid.NewGuid();
         public Guid TypeId { get; } = Guid.NewGuid();
+        public bool DuplicateRows { get; set; }
         public Guid MessageId { get; } = Guid.NewGuid();
         public List<QueryExpression> Reads { get; } = [];
         public List<RetrieveAttributeRequest> MetadataReads { get; } = [];
@@ -489,7 +519,7 @@ public sealed class PluginStepFieldCapabilityTests
             foreach (var pair in _existing.Attributes)
                 if (typed.ColumnSet.AllColumns || typed.ColumnSet.Columns.Contains(pair.Key) || pair.Key == "message.name")
                     projected[pair.Key] = pair.Value;
-            return new EntityCollection([projected]);
+            return new EntityCollection(DuplicateRows ? [projected, projected] : [projected]);
         }
 
         private OrganizationResponse Execute(OrganizationRequest request)
