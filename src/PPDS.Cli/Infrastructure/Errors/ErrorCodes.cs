@@ -328,6 +328,9 @@ public static class ErrorCodes
         /// <summary>Assembly or package has no binary content.</summary>
         public const string NoContent = "Plugin.NoContent";
 
+        /// <summary>Package download failed or returned incomplete binary data.</summary>
+        public const string DownloadFailed = "Plugin.DownloadFailed";
+
         /// <summary>Message does not support plugin images.</summary>
         public const string ImageNotSupported = "Plugin.ImageNotSupported";
 
