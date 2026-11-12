@@ -352,7 +352,7 @@ public static class UpdateCommand
         return command;
     }
 
-    private static async Task<int> ExecuteStepUpdateAsync(
+    internal static async Task<int> ExecuteStepUpdateAsync(
         string nameOrId,
         string? mode,
         string? stage,
@@ -365,13 +365,17 @@ public static class UpdateCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null,
+        IOutputWriter? outputWriter = null)
     {
-        var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+        var writer = outputWriter ?? ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
+            await using var serviceProvider = serviceProviderFactory is not null
+                ? await serviceProviderFactory(cancellationToken)
+                : await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile,
                 environment,
                 globalOptions.Verbose,
