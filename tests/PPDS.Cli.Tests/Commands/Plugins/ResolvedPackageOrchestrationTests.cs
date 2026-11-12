@@ -20,6 +20,150 @@ namespace PPDS.Cli.Tests.Commands.Plugins;
 public sealed class ResolvedPackageOrchestrationTests
 {
     [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task Execute_PackageCreateAliasConflictRefusesBeforeAnyWrites(bool reverseOrder, bool dryRun)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "ppds-package-alias-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            const string source = """
+                using System;
+                using Microsoft.Xrm.Sdk;
+                namespace Contoso {
+                    public sealed class Handler : IPlugin {
+                        public void Execute(IServiceProvider serviceProvider) { }
+                    }
+                }
+                """;
+            var firstPath = PluginPackageTestFixture.Create(directory, "first.nupkg", "Thing",
+                new TestPackageAssembly("FirstAssembly", "first.dll", source, ReferencesSdk: true));
+            var secondPath = PluginPackageTestFixture.Create(directory, "second.nupkg", "ppds_Thing",
+                new TestPackageAssembly("SecondAssembly", "second.dll", source, ReferencesSdk: true));
+            var solutionId = Guid.NewGuid();
+            var publisherId = Guid.NewGuid();
+            var service = new Mock<IPluginRegistrationService>(MockBehavior.Strict);
+            var writes = new List<string>();
+            foreach (var item in new[] { (firstPath, "Thing", "FirstAssembly"), (secondPath, "ppds_Thing", "SecondAssembly") })
+            {
+                var bytes = File.ReadAllBytes(item.Item1);
+                var canonical = "ppds_" + item.Item2;
+                var resolution = PluginPackageResolutionTestFactory.Create(item.Item2, registeredName: canonical,
+                    uniqueName: canonical, bytes: bytes) with
+                {
+                    SolutionName = "FixtureSolution", SolutionId = solutionId,
+                    PublisherId = publisherId, PublisherPrefix = "ppds"
+                };
+                var packageId = Guid.NewGuid();
+                var assemblyId = Guid.NewGuid();
+                service.Setup(s => s.ResolvePackageAsync(It.Is<byte[]>(b => b.SequenceEqual(bytes)), "FixtureSolution", null,
+                    CancellationToken.None, null)).ReturnsAsync(resolution);
+                // These acknowledged write stubs must be unreachable: the entire batch is unsafe
+                // even if the first package can be uploaded successfully in isolation.
+                service.Setup(s => s.UpsertResolvedPackageAsync(resolution, It.IsAny<byte[]>(), CancellationToken.None, null))
+                    .Callback(() => writes.Add(resolution.ArtifactId)).ReturnsAsync(packageId);
+                service.Setup(s => s.VerifyUploadedPackageAsync(resolution, packageId, CancellationToken.None, null))
+                    .ReturnsAsync(resolution with { ExistingPackageId = packageId, ExistingArtifactSha256 = resolution.ArtifactSha256 });
+                service.Setup(s => s.GetAssemblyIdForPackageAsync(It.IsAny<Guid>(), item.Item3, CancellationToken.None))
+                    .ReturnsAsync(assemblyId);
+                service.Setup(s => s.ListTypesForAssemblyAsync(assemblyId, CancellationToken.None))
+                    .ReturnsAsync([]);
+            }
+            var assemblies = new[]
+            {
+                new { name = "FirstAssembly", type = "Nuget", packagePath = "first.nupkg", solution = "FixtureSolution", types = Array.Empty<object>() },
+                new { name = "SecondAssembly", type = "Nuget", packagePath = "second.nupkg", solution = "FixtureSolution", types = Array.Empty<object>() }
+            };
+            if (reverseOrder) Array.Reverse(assemblies);
+            var configPath = Path.Combine(directory, "registrations.json");
+            File.WriteAllText(configPath, JsonSerializer.Serialize(new { version = "1.0", assemblies }));
+            using var output = new StringWriter();
+
+            var exit = await DeployCommand.ExecuteAsync(new FileInfo(configPath), null, null, null, false, dryRun,
+                new GlobalOptionValues { OutputFormat = OutputFormat.Json }, CancellationToken.None,
+                serviceProviderFactory: _ => Task.FromResult(new ServiceCollection()
+                    .AddSingleton(service.Object).AddSingleton(new Mock<ICustomApiService>(MockBehavior.Strict).Object)
+                    .BuildServiceProvider()), outputWriter: new JsonOutputWriter(output));
+
+            service.Verify(s => s.ResolvePackageAsync(It.IsAny<byte[]>(), "FixtureSolution", null,
+                CancellationToken.None, null), Times.Exactly(2));
+            Assert.Empty(writes);
+            Assert.NotEqual(0, exit);
+            using var json = JsonDocument.Parse(output.ToString());
+            Assert.Equal(ErrorCodes.Plugin.PackageIdentityMismatch, json.RootElement.GetProperty("error").GetProperty("code").GetString());
+            Assert.DoesNotContain(service.Invocations, i => i.Method.Name.StartsWith("Upsert", StringComparison.Ordinal)
+                || i.Method.Name.StartsWith("Delete", StringComparison.Ordinal)
+                || i.Method.Name == nameof(IPluginRegistrationService.ValidateStepFieldCapabilitiesAsync));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void PackageIdentityBatch_RefusesCreateAliasesForNewOrExistingPlans(bool otherAlreadyExists, bool reverseOrder)
+    {
+        var created = PackagePlan("Thing");
+        // Candidate matching must use the resolver's ordinal case-insensitive rules.
+        var other = PackagePlan("PPDS_thing", otherAlreadyExists);
+        var plans = new[] { created, other };
+        if (reverseOrder) Array.Reverse(plans);
+
+        var error = Assert.Throws<PpdsException>(() =>
+            PluginRegistrationPlanningService.ValidatePackageIdentityBatch(plans, CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.Plugin.PackageIdentityMismatch, error.ErrorCode);
+        Assert.Contains("'Thing' as 'ppds_Thing'", error.Message);
+        Assert.Contains("'PPDS_thing'", error.Message);
+        Assert.Contains("no changes were applied", error.Message);
+    }
+
+    [Fact]
+    public void PackageIdentityBatch_DistinctNewPackageCandidatesAreAllowed()
+    {
+        PluginRegistrationPlanningService.ValidatePackageIdentityBatch(
+            [PackagePlan("Thing"), PackagePlan("Other"), PackagePlan("ThingSuffix")], CancellationToken.None);
+    }
+
+    [Fact]
+    public void PackageIdentityBatch_ExistingUniqueNamesKeepPrecedenceOverDisplayNames()
+    {
+        // Both plans already resolved by their authoritative UniqueName. Their display
+        // names overlap the other plan's candidates, but updating cannot add an identity.
+        var first = PackagePlan("Thing", existing: true) with { RegisteredName = "ppds_Other" };
+        var second = PackagePlan("Other", existing: true) with { RegisteredName = "ppds_Thing" };
+
+        PluginRegistrationPlanningService.ValidatePackageIdentityBatch([first, second], CancellationToken.None);
+    }
+
+    [Fact]
+    public void PackageIdentityBatch_ExplicitExistingSelectorDoesNotGainAutomaticCandidates()
+    {
+        var created = PackagePlan("Thing");
+        var selected = PackagePlan("ppds_Thing", existing: true) with
+        {
+            RegisteredName = "UnrelatedRegisteredName", RegisteredUniqueName = "UnrelatedUniqueName"
+        };
+        selected = selected with { ExplicitSelector = selected.ExistingPackageId!.Value.ToString("D") };
+
+        PluginRegistrationPlanningService.ValidatePackageIdentityBatch([created, selected], CancellationToken.None);
+        PluginRegistrationPlanningService.ValidatePackageIdentityBatch([selected, created], CancellationToken.None);
+    }
+
+    private static PluginPackageResolution PackagePlan(string artifactId, bool existing = false) =>
+        PluginPackageResolutionTestFactory.Create(artifactId, existing ? Guid.NewGuid() : null,
+            "ppds_" + artifactId, "ppds_" + artifactId) with
+        {
+            SolutionName = "FixtureSolution", SolutionId = Guid.NewGuid(),
+            PublisherId = Guid.NewGuid(), PublisherPrefix = "ppds"
+        };
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task Execute_PrefixedExistingPackageResetRefusesBeforeAnyAssemblyWrites(bool dryRun)

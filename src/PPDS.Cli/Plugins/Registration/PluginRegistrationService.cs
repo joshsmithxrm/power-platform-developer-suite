@@ -1364,10 +1364,10 @@ public sealed partial class PluginRegistrationService : IPluginRegistrationServi
 
         var operation = existing is null ? "create" : "update";
         var allowed = existing is null ? metadata.IsValidForCreate : metadata.IsValidForUpdate;
-        if (allowed is true) return true;
-        if (allowed is null)
+        if (!allowed.HasValue)
             throw new PpdsException(ErrorCodes.Plugin.FieldCapabilityUnknown,
                 $"Target metadata does not establish whether {field} supports {operation}. No field mutation was dispatched.");
+        if (allowed.Value) return true;
 
         if (existing is not null)
         {

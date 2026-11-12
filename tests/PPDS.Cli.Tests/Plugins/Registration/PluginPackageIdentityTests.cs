@@ -407,6 +407,42 @@ public sealed class PluginPackageIdentityTests
         Assert.Single(_writes);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SequentialAliasCreation_InvalidatesOtherAutomaticResolution(bool secondAlreadyExists)
+    {
+        var firstBytes = Package("Thing");
+        var secondBytes = Package("ppds_Thing");
+        if (secondAlreadyExists)
+            AddPackage("Existing second package", "ppds_ppds_Thing", secondBytes);
+
+        // Both independent resolutions are valid before either artifact is uploaded.
+        var first = await _service.ResolvePackageAsync(firstBytes, "TestSolution");
+        var second = await _service.ResolvePackageAsync(secondBytes, "TestSolution");
+        Assert.True(first.IsCreate);
+        Assert.Equal(!secondAlreadyExists, second.IsCreate);
+        Assert.Equal("ppds_Thing", first.RegisteredUniqueName);
+        Assert.Equal("ppds_ppds_Thing", second.RegisteredUniqueName);
+        Assert.Empty(_writes);
+
+        var firstId = await _service.UpsertResolvedPackageAsync(first, firstBytes);
+        var verified = await _service.VerifyUploadedPackageAsync(first, firstId);
+        Assert.Equal(firstId, verified.ExistingPackageId);
+        Assert.IsType<CreateRequest>(Assert.Single(_writes));
+
+        // The first canonical identity is now the second artifact's legacy candidate.
+        // Without a batch-level guard this creates a partial deployment: one write
+        // succeeds, then the second plan can no longer safely select its original target.
+        var error = await Assert.ThrowsAsync<PpdsException>(() =>
+            _service.UpsertResolvedPackageAsync(second, secondBytes));
+        Assert.Equal(secondAlreadyExists ? ErrorCodes.Operation.Duplicate :
+            ErrorCodes.Plugin.PackageIdentityMismatch, error.ErrorCode);
+        if (!secondAlreadyExists)
+            Assert.Contains("contains artifact 'Thing', not 'ppds_Thing'", error.Message);
+        Assert.IsType<CreateRequest>(Assert.Single(_writes));
+    }
+
     [Fact]
     public async Task InterfaceDefaults_PreserveImplementorCompatibilityAndFailClosed()
     {

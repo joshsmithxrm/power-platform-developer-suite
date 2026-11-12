@@ -27,6 +27,41 @@ internal static class PluginRegistrationPlanningService
         }
     }
 
+    /// <summary>
+    /// A new package must not become an exact lookup candidate for another automatic
+    /// plan in the same run. Otherwise an earlier successful Create can invalidate
+    /// a later plan after mutations have already begun, even when both resolved safely.
+    /// </summary>
+    internal static void ValidatePackageIdentityBatch(IReadOnlyList<PluginPackageResolution> packages,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        for (var createdIndex = 0; createdIndex < packages.Count; createdIndex++)
+        {
+            var created = packages[createdIndex];
+            if (!created.IsCreate || created.ExplicitSelector is not null ||
+                created.RegisteredUniqueName is not { Length: > 0 } createdName) continue;
+
+            for (var otherIndex = 0; otherIndex < packages.Count; otherIndex++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (createdIndex == otherIndex) continue;
+                var other = packages[otherIndex];
+                if (other.ExplicitSelector is not null) continue;
+
+                var canonical = other.SolutionId.HasValue && other.PublisherId.HasValue &&
+                    !string.IsNullOrEmpty(other.PublisherPrefix)
+                    ? other.PublisherPrefix + "_" + other.ArtifactId : null;
+                if (string.Equals(createdName, other.ArtifactId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(createdName, canonical, StringComparison.OrdinalIgnoreCase))
+                    throw new PpdsException(ErrorCodes.Plugin.PackageIdentityMismatch,
+                        $"Creating package '{created.ArtifactId}' as '{createdName}' would change the exact " +
+                        $"package candidates for artifact '{other.ArtifactId}' in this deployment. " +
+                        "Resolve the conflicting package identities before deploying; no changes were applied.");
+            }
+        }
+    }
+
     internal static async Task ValidateRunAsUsersAsync(IPluginRegistrationService registration,
         IEnumerable<PluginAssemblyConfig> assemblies, CancellationToken cancellationToken,
         IProgressReporter? progress = null)

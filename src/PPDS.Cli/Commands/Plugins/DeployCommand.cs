@@ -393,6 +393,8 @@ public static class DeployCommand
                 solutionOverride ?? preflight.Assembly.Solution, null, cancellationToken, null);
             resolved.Add(preflight with { PackageResolution = resolution });
         }
+        PluginRegistrationPlanningService.ValidatePackageIdentityBatch(
+            resolved.Select(p => p.PackageResolution).OfType<PluginPackageResolution>().ToArray(), cancellationToken);
         return resolved;
     }
 

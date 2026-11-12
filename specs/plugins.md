@@ -140,7 +140,7 @@ explicit dependency resolution, and structured failure output without Dataverse 
 
 - The root `.nuspec` `<id>` and `<version>` elements are the authoritative package metadata.
 - A `lib/net462`, `lib/net471`, or `lib/net48` asset group is required and selected before extraction or registration; unsupported groups fail locally with retargeting guidance.
-- First-time registration creates `pluginpackage` with `name`, `version`, and base64 `content`; Dataverse derives `uniquename` from the package content.
+- First-time registration creates `pluginpackage` with the verified solution publisher prefix plus the complete nuspec ID as `name` and `uniquename`, the nuspec `version`, base64 `content`, and solution association.
 - Re-deployment updates only package content because Dataverse package name and version are immutable after creation.
 - Missing or inconsistent `.nuspec` metadata fails with a structured validation error before a Dataverse write is attempted.
 - PPDS inspects every supported-framework assembly and requires exactly one unambiguous primary plug-in assembly. A plausible primary contains a concrete runtime `IPlugin` implementation or PPDS registration metadata; ambiguous packages fail locally and list the candidate assembly names.
@@ -452,7 +452,12 @@ creation. Without a solution, PPDS can update a verified exact existing target b
 does not guess a publisher, search arbitrary suffixes or create a new package.
 
 All package resolution and configured-step capability checks complete before the
-first planned package or assembly mutation. Upload rechecks the resolved identity
+first planned package or assembly mutation. Batch preflight also refuses a planned
+creation whose unique name intersects another automatic plan's exact canonical or
+legacy lookup candidates, regardless of configuration order or whether that other
+plan selects an existing package. This prevents an earlier creation from invalidating
+a later plan. Existing unique-name precedence and explicit target selection remain
+unchanged. Upload rechecks the resolved identity
 and artifact, and cleanup retains its exact GUID, ownership, protection and complete
 inventory checks. A disappeared or changed target fails rather than being silently
 reselected. These observations reduce partial work but do not provide a transaction
@@ -475,6 +480,7 @@ not permission to create a replacement.
 | AC-119 | Cleanup consumes verified post-upload identity without rewriting the original ownership observation, and final Diff never falls back to a same-named sibling assembly. | `ResolvedPackageOrchestrationTests.Cleanup_UsesVerifiedSuccessorWithoutChangingOriginalOwnership`, `Verification_BoundAssemblyNeverFallsBackToSameNamedSibling` | Passed offline (net10.0) |
 | AC-120 | Incoming and stored packages require exactly one root nuspec; invalid canonical lengths and acknowledged-but-unchanged uploads fail before dependent writes. Verified successors preserve collision and selected-solution checks. | `PluginPackageIdentityTests.MultipleRootNuspecs_RejectIncomingAndStoredAmbiguity`, `CanonicalLength_IsCheckedBeforeAnyWrite`, `AcknowledgedButUnchangedUpload_DoesNotAdvanceObservation`, `VerifiedAutomaticSuccessor_StillRejectsNewIdentityCollision`, `ExplicitDisplaySelector_RetainsMembershipRequirementAfterUpload` | Passed offline (net10.0) |
 | AC-121 | Added interface operations remain non-abstract and fail closed for unsupported implementors; an ambiguous or missing planned step cannot become a creation. | `PluginPackageIdentityTests.InterfaceDefaults_PreserveImplementorCompatibilityAndFailClosed`, `PluginStepFieldCapabilityTests.PlannedExistingStep_AmbiguousRead_RefusesBeforeAnyMutation` | Passed offline (net10.0) |
+| AC-122 | Whole-config preflight rejects planned creations that alter another automatic plan's exact lookup candidates in either order, including an existing target; distinct packages, existing unique-name precedence and explicit targets remain valid. | `ResolvedPackageOrchestrationTests.Execute_PackageCreateAliasConflictRefusesBeforeAnyWrites`, `PackageIdentityBatch_RefusesCreateAliasesForNewOrExistingPlans`, `PackageIdentityBatch_DistinctNewPackageCandidatesAreAllowed`, `PackageIdentityBatch_ExistingUniqueNamesKeepPrecedenceOverDisplayNames`, `PackageIdentityBatch_ExplicitExistingSelectorDoesNotGainAutomaticCandidates`; `PluginPackageIdentityTests.SequentialAliasCreation_InvalidatesOtherAutomaticResolution` reproduces the underlying SDK sequence | Passed offline (net10.0) |
 
 ```csharp
 Task UpdateStepAsync(Guid stepId, StepUpdateRequest request, CancellationToken cancellationToken = default);
@@ -1507,7 +1513,7 @@ No host identities or account permissions are created or changed by these fixtur
 
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
-| AC-28 | First-time NuGet package registration sends the root `.nuspec` ID and version with package content and solution association | `UpsertPackageAsync_CreatesPackageWithNuspecVersion_WhenNotExists` | ✅ |
+| AC-28 | First-time NuGet package registration sends the verified publisher-prefixed literal root `.nuspec` ID, version, package content and solution association | `UpsertPackageAsync_CreatesPackageWithNuspecVersion_WhenNotExists` | ✅ |
 | AC-29 | Re-deploying an existing NuGet package updates content without attempting to change immutable name or version | `UpsertPackageAsync_UpdatesContentOnly_WhenPackageExists` | ✅ |
 | AC-30 | Missing or inconsistent root `.nuspec` metadata fails with a structured validation error before any Dataverse write | `UpsertPackageAsync_RejectsPackageWithoutVersion`, `UpsertPackageAsync_RejectsMismatchedPackageName` | ✅ |
 | AC-31 | A package with no supported framework group (e.g. only `lib/netstandard2.0`) fails locally with a structured error naming Dataverse's supported `lib/net462`, `lib/net471`, and `lib/net48` groups | `Extract_UnsupportedFrameworkPackage_ThrowsStructuredValidationError`, `UpsertPackageAsync_RejectsUnsupportedPackageFrameworkBeforeDataverseCall` | ✅ |

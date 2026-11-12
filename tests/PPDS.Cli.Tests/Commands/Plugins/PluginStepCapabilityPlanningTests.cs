@@ -232,7 +232,7 @@ public sealed class PluginStepCapabilityPlanningTests
         var assembly = Assembly("ExpectedAssembly", Step("step", "PostOperation"));
         assembly.Type = "Nuget";
         service.Setup(s => s.GetAssemblyIdForPackageAsync(packageId, "ExpectedAssembly", CancellationToken.None))
-            .ReturnsAsync((Guid?)null);
+            .ReturnsAsync(default(Guid?));
         service.Setup(s => s.ValidateStepFieldCapabilitiesAsync(assembly.Types[0].Steps[0], null, CancellationToken.None, null))
             .Returns(Task.CompletedTask);
 

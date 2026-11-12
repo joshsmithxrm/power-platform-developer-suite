@@ -2017,7 +2017,7 @@ public class DeployCommandTests : IDisposable
             var packageId = Guid.NewGuid();
             var assemblyId = Guid.NewGuid();
             var mock = new Mock<IPluginRegistrationService>();
-            var resolution = SetupPackageResolution(mock, File.ReadAllBytes(packagePath), packageId);
+            SetupPackageResolution(mock, File.ReadAllBytes(packagePath), packageId);
             mock.Setup(service => service.GetAssemblyIdForPackageAsync(
                     packageId,
                     "Contoso.RuntimePlugins",
