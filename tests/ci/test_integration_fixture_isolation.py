@@ -16,14 +16,15 @@ REFUSAL_SCRIPT = (
     'exit 1\n'
 )
 # LF-normalized reviewed build/test workflow baselines.
-# Build stays at R 3b29a0f80fe97e71ba7ba78a21e35b7d1aa1c2c6.
-# Test includes ec6c5881's read-only artifact route, SDK 10.0.115 servicing,
-# and reviewed automatic full-.NET routing for SDK/config/props/targets/workflow inputs;
-# the separate Integration Tests workflow remains a tokenless refusal.
+# Node 26 draft refresh: reviewed tooling selection and runtime-change routing,
+# plus a blocking Node 22 extension compatibility lane. Permissions and secret
+# references are unchanged. Test retains the read-only artifact route, SDK
+# servicing and automatic full-.NET routing for SDK/config/props/targets/workflow
+# inputs; the separate Integration Tests workflow remains a tokenless refusal.
 # No Git calls or mutable refs are used by these tests.
 REVIEWED_WORKFLOW_HASHES = {
-    "build.yml": "8c80da5301c14c0205be42898e106f5eb623c34df4a2cbe2d830075e96747eaf",
-    "test.yml": "377dc6f975b6574fd3bc07257c7114babaee491c967e0f551f47a68e359b24ad",
+    "build.yml": "ac1877f8c0b7d8070b59622b3e85af2db9098a9b2d253b37948d472db18b91d1",
+    "test.yml": "cbae345d66708f3f34f857858237428e840c2cc90308be8aa8c768dfe6a4c946",
 }
 
 
