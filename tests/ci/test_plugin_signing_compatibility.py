@@ -534,6 +534,39 @@ def signing_fixture(monkeypatch, tmp_path, plan):
     return SimpleNamespace(args=args, plan=plan, pins=pins)
 
 
+@pytest.mark.parametrize("operation", ["restore", "build", "pack"])
+@pytest.mark.parametrize("inherited_certificate_setting", [None, "true"])
+def test_build_invocation_suppresses_certificate_generation_without_inheriting_environment(
+        monkeypatch, tmp_path, plan, operation, inherited_certificate_setting):
+    calls = []
+
+    def capture(command, **options):
+        calls.append((command, options))
+        return SimpleNamespace(returncode=0, stdout="fixture-only", stderr="")
+
+    synthetic_environment = {"PATH": "untrusted-parent-path", "PLUGINS_SNK_BASE64": "synthetic-secret-marker"}
+    if inherited_certificate_setting is not None:
+        synthetic_environment["DOTNET_GENERATE_ASPNET_CERTIFICATE"] = inherited_certificate_setting
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "environ", synthetic_environment)
+        patch.setattr(d, "pin", lambda *args: None)
+        d.invoke(SimpleNamespace(run=capture), plan, "dotnet", [operation], tmp_path,
+                 "fixture-" + operation, build=True)
+
+    assert len(calls) == 1
+    command, options = calls[0]
+    assert command == [plan["tools"]["dotnet"]["path"], operation]
+    child = options["environment"]
+    assert child["DOTNET_GENERATE_ASPNET_CERTIFICATE"] == "false"
+    assert child["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] == "1"
+    assert "PLUGINS_SNK_BASE64" not in child
+    assert "untrusted-parent-path" not in child["PATH"]
+    assert set(child) == {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "ProgramFiles(x86)",
+                          "DOTNET_CLI_HOME", "NUGET_PACKAGES", "DOTNET_CLI_TELEMETRY_OPTOUT",
+                          "DOTNET_NOLOGO", "DOTNET_SKIP_FIRST_TIME_EXPERIENCE",
+                          "DOTNET_GENERATE_ASPNET_CERTIFICATE", "PATH"}
+
+
 def test_sign_launches_only_sn_and_does_not_claim_completed_metadata(signing_fixture):
     f = signing_fixture
     rt = SigningDouble()
