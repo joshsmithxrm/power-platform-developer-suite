@@ -2,15 +2,21 @@ using System.CommandLine;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using PPDS.Cli.Commands.Plugins;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
+using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services.Plugins;
+using PPDS.Cli.Tests.Plugins;
+using PPDS.Cli.Tests.Services.Shared;
 using PPDS.Dataverse.Pooling;
+using PPDS.Dataverse.Client;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Plugins;
@@ -125,20 +131,32 @@ public sealed class ImagePruningSafetyTests
 
     [Theory]
     [InlineData("verified")]
+    [InlineData("prefixed-sibling")]
     [InlineData("foreign-parent")]
     [InlineData("duplicate-package")]
     public async Task PackageScope_RequiresExactPackageIdentityAndAssemblyParent(string shape)
     {
-        var f = new Fixture(); var packageId = Guid.NewGuid(); const string packageName = "Fixture.Package";
+        var f = new Fixture(); var packageId = Guid.NewGuid(); const string artifactId = "Fixture.Package";
+        var packageName = shape == "prefixed-sibling" ? "ppds_" + artifactId : artifactId;
         f.Config.Type = "Nuget";
         f.Assembly.PackageId = shape == "foreign-parent" ? Guid.NewGuid() : packageId;
-        var packages = new List<PluginPackageInfo> { new() { Id = packageId, Name = packageName } };
+        var packages = new List<PluginPackageInfo> { new() { Id = packageId, Name = packageName, UniqueName = packageName } };
         if (shape == "duplicate-package") packages.Add(new() { Id = Guid.NewGuid(), Name = packageName });
         f.Service.Setup(s => s.ListPackagesAsync(packageName, It.IsAny<PluginListOptions?>(), It.IsAny<CancellationToken>())).ReturnsAsync(packages);
+        var resolution = PluginPackageResolutionTestFactory.Create(artifactId, packageId, packageName, packageName);
+        f.Service.Setup(s => s.ValidatePackageResolutionAsync(resolution, It.IsAny<CancellationToken>(), null))
+            .Returns(() => shape == "duplicate-package"
+                ? Task.FromException(new PpdsException(ErrorCodes.Operation.Duplicate, "Package identity became ambiguous."))
+                : Task.CompletedTask);
         f.Service.Setup(s => s.GetPackageByIdAsync(packageId, It.IsAny<CancellationToken>())).ReturnsAsync(packages[0]);
+        f.Service.Setup(s => s.GetAssemblyIdForPackageAsync(packageId, f.Config.Name, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(f.Assembly.Id);
+        if (shape == "prefixed-sibling")
+            f.Service.Setup(s => s.ListAssembliesAsync(f.Config.Name, It.IsAny<PluginListOptions?>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("A global same-name inventory must not select the sibling package."));
         Task<PluginImagePruningPlan> Run() => PluginImagePruningService.PlanAsync(f.Service.Object, [f.Config],
-            new Dictionary<string, string> { [f.Config.Name] = packageName }, CancellationToken.None);
-        if (shape == "verified")
+            new Dictionary<string, PluginPackageResolution> { [f.Config.Name] = resolution }, CancellationToken.None);
+        if (shape is "verified" or "prefixed-sibling")
         {
             var plan = await Run(); Assert.Equal(packageId, Assert.Single(plan.Images).Scope.PackageId);
             var result = await PluginImagePruningService.ApplyAsync(f.Service.Object, plan, CancellationToken.None);
@@ -176,6 +194,161 @@ public sealed class ImagePruningSafetyTests
             Assert.Equal(dryRun ? 0 : 1, cleanup.GetProperty("imagesDeleted").GetInt32());
             Assert.Equal(dryRun ? 0 : 1, f.Deletes.Count);
             Assert.DoesNotContain(f.Service.Invocations, call => call.Method.Name is "DeleteStepAsync" or "DeletePluginTypeAsync" or "UpsertStepAsync");
+        }
+        finally
+        {
+            Assert.StartsWith(Path.GetFullPath(Path.GetTempPath()), Path.GetFullPath(directory), StringComparison.OrdinalIgnoreCase);
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("1.0", false)]
+    [InlineData("1.0", true)]
+    [InlineData("2.0", false)]
+    [InlineData("2.0", true)]
+    public Task ActualCleanCommand_AbsentPackageWithoutSolutionDoesNotBlockExistingScope(string version, bool dryRun)
+        => AssertAbsentPackageCleanupAsync(version, dryRun, aliasPair: false);
+
+    [Theory]
+    [InlineData("1.0", false)]
+    [InlineData("1.0", true)]
+    [InlineData("2.0", false)]
+    [InlineData("2.0", true)]
+    public Task ActualCleanCommand_AbsentAliasPackagesDoNotInvokeDeploymentCreateGuard(string version, bool dryRun)
+        => AssertAbsentPackageCleanupAsync(version, dryRun, aliasPair: true);
+
+    private static async Task AssertAbsentPackageCleanupAsync(string version, bool dryRun, bool aliasPair)
+    {
+        var f = new Fixture();
+        var directory = Path.Combine(Path.GetTempPath(), "ppds-clean-absent-package-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string[] artifactIds = aliasPair ? ["Thing", "ppds_Thing"] : ["Absent.Package"];
+            string[] candidates = aliasPair ? ["Thing", "ppds_Thing", "ppds_ppds_Thing"] : ["Absent.Package"];
+            var absentConfigs = new List<PluginAssemblyConfig>();
+            for (var index = 0; index < artifactIds.Length; index++)
+            {
+                var assemblyName = "AbsentAssembly" + index;
+                var packagePath = PluginPackageTestFixture.Create(directory, $"absent{index}.nupkg", artifactIds[index],
+                    new TestPackageAssembly(assemblyName, "absent.dll", """
+                        using System;
+                        using Microsoft.Xrm.Sdk;
+                        namespace Absent {
+                            public sealed class Handler : IPlugin {
+                                public void Execute(IServiceProvider serviceProvider) { }
+                            }
+                        }
+                        """, ReferencesSdk: true));
+                absentConfigs.Add(new PluginAssemblyConfig
+                {
+                    Name = assemblyName, Type = "Nuget", PackagePath = Path.GetFileName(packagePath), Types = [],
+                    Solution = aliasPair ? "FixtureSolution" : null
+                });
+            }
+            var solutionId = Guid.NewGuid();
+            var publisherId = Guid.NewGuid();
+            var client = new Mock<IPooledClient>(MockBehavior.Strict);
+            var pool = new Mock<IDataverseConnectionPool>(MockBehavior.Strict);
+            client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
+            pool.Setup(p => p.GetClientAsync(It.IsAny<DataverseClientOptions?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(client.Object);
+            client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((QueryBase query, CancellationToken _) =>
+                {
+                    var exact = Assert.IsType<QueryExpression>(query);
+                    if (exact.EntityName == "solution")
+                    {
+                        Assert.True(aliasPair);
+                        Assert.Equal("FixtureSolution", Assert.Single(Assert.Single(exact.Criteria.Conditions).Values));
+                        return new EntityCollection([new Entity("solution", solutionId)
+                        {
+                            ["uniquename"] = "FixtureSolution", ["ismanaged"] = false,
+                            ["publisherid"] = new EntityReference("publisher", publisherId)
+                        }]);
+                    }
+                    Assert.Equal("pluginpackage", exact.EntityName);
+                    Assert.Equal(2, exact.Criteria.Conditions.Count);
+                    Assert.All(exact.Criteria.Conditions, condition =>
+                    {
+                        Assert.Equal(ConditionOperator.Equal, condition.Operator);
+                        Assert.Contains(Assert.IsType<string>(Assert.Single(condition.Values)), candidates);
+                    });
+                    return new EntityCollection();
+                });
+            client.Setup(c => c.RetrieveAsync("publisher", publisherId, It.IsAny<ColumnSet>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Entity("publisher", publisherId) { ["customizationprefix"] = "ppds" });
+            var identityService = new PluginRegistrationService(pool.Object, new InactiveFakeShakedownGuard(),
+                NullLogger<PluginRegistrationService>.Instance);
+            f.Service.Setup(s => s.ResolvePackageForCleanupAsync(It.IsAny<byte[]>(), It.IsAny<string?>(), null, It.IsAny<CancellationToken>(), null))
+                .Returns((byte[] bytes, string? solution, string? selector, CancellationToken ct, IProgressReporter? progress) =>
+                    identityService.ResolvePackageForCleanupAsync(bytes, solution, selector, ct, progress));
+            f.Service.Setup(s => s.ValidatePackageResolutionAsync(It.IsAny<PluginPackageResolution>(), It.IsAny<CancellationToken>(), null))
+                .Returns((PluginPackageResolution plan, CancellationToken ct, IProgressReporter? progress) =>
+                    identityService.ValidatePackageResolutionAsync(plan, ct, progress));
+
+            var deletedSteps = new List<Guid>();
+            var orphanId = Guid.NewGuid();
+            if (version == "1.0")
+            {
+                f.Service.Setup(s => s.GetAssemblyByNameAsync(f.Assembly.Name, It.IsAny<CancellationToken>())).ReturnsAsync(f.Assembly);
+                f.Service.Setup(s => s.ListStepsForTypeAsync(f.Type.Id, It.IsAny<PluginListOptions?>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync([f.Step, new PluginStepInfo
+                    {
+                        Id = orphanId, Name = "Owned orphan", PluginTypeId = f.Type.Id, Message = "Update",
+                        PrimaryEntity = "account", Stage = "PreOperation", Mode = "Synchronous"
+                    }]);
+                f.Service.Setup(s => s.DeleteStepAsync(orphanId, It.IsAny<CancellationToken>()))
+                    .Callback<Guid, CancellationToken>((id, _) => deletedSteps.Add(id)).Returns(Task.CompletedTask);
+            }
+            var configPath = Path.Combine(directory, "registrations.json");
+            File.WriteAllText(configPath, JsonSerializer.Serialize(new PluginRegistrationConfig
+            {
+                Version = version, Assemblies = [f.Config, .. absentConfigs]
+            }));
+            using var output = new StringWriter();
+            var command = CleanCommand.Create(_ => Task.FromResult(new ServiceCollection().AddSingleton(f.Service.Object).BuildServiceProvider()),
+                outputWriter: new JsonOutputWriter(output));
+            var arguments = new List<string> { "--config", configPath, "--output-format", "json" };
+            if (dryRun) arguments.Add("--dry-run");
+            var parsed = command.Parse(arguments.ToArray());
+            Assert.Empty(parsed.Errors);
+
+            var exit = await parsed.InvokeAsync();
+
+            Assert.True(exit == 0, output.ToString());
+            using var document = JsonDocument.Parse(output.ToString());
+            Assert.True(document.RootElement.GetProperty("success").GetBoolean());
+            var results = document.RootElement.GetProperty("data");
+            Assert.Equal(1 + absentConfigs.Count, results.GetArrayLength());
+            if (version == "2.0")
+            {
+                foreach (var row in results.EnumerateArray().Skip(1))
+                {
+                    var absent = row.GetProperty("imageCleanup");
+                    Assert.Equal("no-existing-package-observed", absent.GetProperty("plan").GetProperty("inventories")[0]
+                        .GetProperty("status").GetString());
+                }
+                Assert.Equal(dryRun ? 0 : 1, f.Deletes.Count);
+                if (!dryRun) Assert.Equal(f.Image.Id, Assert.Single(f.Deletes));
+                Assert.Empty(deletedSteps);
+            }
+            else
+            {
+                Assert.Equal(dryRun ? 0 : 1, deletedSteps.Count);
+                if (!dryRun) Assert.Equal(orphanId, Assert.Single(deletedSteps));
+                Assert.Empty(f.Deletes);
+                foreach (var row in results.EnumerateArray().Skip(1))
+                    Assert.Empty(row.GetProperty("orphanedSteps").EnumerateArray());
+            }
+            f.Service.Verify(s => s.ResolvePackageForCleanupAsync(It.IsAny<byte[]>(), It.IsAny<string?>(), null,
+                It.IsAny<CancellationToken>(), null), Times.Exactly(absentConfigs.Count));
+            f.Service.Verify(s => s.ResolvePackageAsync(It.IsAny<byte[]>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<CancellationToken>(), null), Times.Never);
+            Assert.DoesNotContain(f.Service.Invocations, call => call.Method.Name.StartsWith("Upsert", StringComparison.Ordinal)
+                || call.Method.Name == "DeletePluginTypeAsync");
+            Assert.DoesNotContain(client.Invocations, call => call.Method.Name is "ExecuteAsync" or "DeleteAsync" or "UpdateAsync" or "CreateAsync");
         }
         finally
         {

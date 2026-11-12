@@ -1,6 +1,7 @@
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Plugins.Models;
+using PPDS.Cli.Services.Plugins;
 
 namespace PPDS.Cli.Plugins.Registration;
 
@@ -249,6 +250,22 @@ public interface IPluginRegistrationService
     #region Create/Update Operations
 
     /// <summary>
+    /// Read-only preflight for target-dependent step field capabilities. A null ID means create;
+    /// an existing ID must be checked against that exact row. Providers must not assume a field
+    /// is writable merely because its registration configuration supports it.
+    /// </summary>
+    Task ValidateStepFieldCapabilitiesAsync(PluginStepConfig config, Guid? existingStepId,
+        CancellationToken cancellationToken = default, IProgressReporter? progress = null)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var desired = PluginRegistrationNormalizer.NormalizeStep(config, config.OperationIntent);
+        return desired.ContainsKey("canUseReadOnlyConnection")
+            ? Task.FromException(new PpdsException(ErrorCodes.Plugin.FieldCapabilityUnknown,
+                "This registration provider cannot verify canUseReadOnlyConnection field capabilities."))
+            : Task.CompletedTask;
+    }
+
+    /// <summary>
     /// Creates or updates a plugin assembly (for classic DLL assemblies only).
     /// For NuGet packages, use <see cref="UpsertPackageAsync"/> instead.
     /// </summary>
@@ -275,6 +292,59 @@ public interface IPluginRegistrationService
         byte[] nupkgContent,
         string? solutionName = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Resolves the inspected artifact to one existing package or a verified new identity without writes.</summary>
+    /// <param name="nupkgContent">Exact incoming package bytes.</param>
+    /// <param name="solutionName">Optional solution unique name; required for creation.</param>
+    /// <param name="existingSelector">Optional existing package GUID, unique name or unambiguous display name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="progress">Optional progress reporter.</param>
+    Task<PluginPackageResolution> ResolvePackageAsync(byte[] nupkgContent,
+        string? solutionName = null, string? existingSelector = null,
+        CancellationToken cancellationToken = default, IProgressReporter? progress = null)
+        => Task.FromException<PluginPackageResolution>(new PpdsException(ErrorCodes.Operation.NotSupported,
+            "This registration service does not support verified package identity resolution."));
+
+    /// <summary>Resolves existing package identity for cleanup; absence is not a plan to create a package.</summary>
+    /// <param name="nupkgContent">Exact package bytes identifying the cleanup scope.</param>
+    /// <param name="solutionName">Optional solution unique name; supplied solutions are verified.</param>
+    /// <param name="existingSelector">Optional existing package selector; an explicit missing selector remains an error.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="progress">Optional progress reporter.</param>
+    Task<PluginPackageResolution> ResolvePackageForCleanupAsync(byte[] nupkgContent,
+        string? solutionName = null, string? existingSelector = null,
+        CancellationToken cancellationToken = default, IProgressReporter? progress = null)
+        => Task.FromException<PluginPackageResolution>(new PpdsException(ErrorCodes.Operation.NotSupported,
+            "This registration service does not support verified package identity resolution for cleanup."));
+
+    /// <summary>Revalidates an observation without selecting a new target or switching create/update mode.</summary>
+    /// <param name="resolution">The original read-only identity observation.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="progress">Optional progress reporter.</param>
+    Task ValidatePackageResolutionAsync(PluginPackageResolution resolution,
+        CancellationToken cancellationToken = default, IProgressReporter? progress = null)
+        => Task.FromException(new PpdsException(ErrorCodes.Operation.NotSupported,
+            "This registration service does not support verified package identity revalidation."));
+
+    /// <summary>Uploads the exact inspected artifact after revalidating its bound target and operation.</summary>
+    /// <param name="resolution">The original read-only identity observation.</param>
+    /// <param name="nupkgContent">Exact package bytes bound to the observation.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="progress">Optional progress reporter.</param>
+    Task<Guid> UpsertResolvedPackageAsync(PluginPackageResolution resolution, byte[] nupkgContent,
+        CancellationToken cancellationToken = default, IProgressReporter? progress = null)
+        => Task.FromException<Guid>(new PpdsException(ErrorCodes.Operation.NotSupported,
+            "This registration service does not support uploads bound to a verified package identity."));
+
+    /// <summary>Verifies the acknowledged upload by exact ID and bytes, returning its immutable post-upload observation.</summary>
+    /// <param name="previous">The original pre-upload observation.</param>
+    /// <param name="uploadedId">The exact ID acknowledged by the upload.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="progress">Optional progress reporter.</param>
+    Task<PluginPackageResolution> VerifyUploadedPackageAsync(PluginPackageResolution previous, Guid uploadedId,
+        CancellationToken cancellationToken = default, IProgressReporter? progress = null)
+        => Task.FromException<PluginPackageResolution>(new PpdsException(ErrorCodes.Operation.NotSupported,
+            "This registration service does not support verification of an acknowledged package upload."));
 
     /// <summary>
     /// Creates or updates a plugin type.

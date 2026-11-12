@@ -91,15 +91,11 @@ public static class CleanCommand
             config.Validate();
 
             var imageOnly = config.Version == PluginRegistrationContract.ReconciliationVersion;
-            Dictionary<string, string>? packageNames = null;
             if (imageOnly)
-            {
                 PluginImagePruningService.ValidateAuthority(config.Assemblies, cancellationToken);
-                var packages = config.Assemblies.Where(a => string.Equals(a.Type, "Nuget", StringComparison.OrdinalIgnoreCase)).ToArray();
-                var preflights = await DeployCommand.PreflightAssembliesAsync(packages, configFile.DirectoryName ?? ".",
-                    cancellationToken, packageContentReader);
-                packageNames = preflights.ToDictionary(p => p.Assembly.Name, p => p.PackageName!, StringComparer.OrdinalIgnoreCase);
-            }
+            var packageConfigs = config.Assemblies.Where(a => string.Equals(a.Type, "Nuget", StringComparison.OrdinalIgnoreCase)).ToArray();
+            var preflights = await DeployCommand.PreflightAssembliesAsync(packageConfigs, configFile.DirectoryName ?? ".",
+                cancellationToken, packageContentReader);
 
             // Connect to Dataverse
             await using var serviceProvider = serviceProviderFactory is null ? await ProfileServiceFactory.CreateFromProfilesAsync(
@@ -111,6 +107,13 @@ public static class CleanCommand
                 cancellationToken) : await serviceProviderFactory(cancellationToken);
 
             var registrationService = serviceProvider.GetRequiredService<IPluginRegistrationService>();
+            var packages = new Dictionary<string, PluginPackageResolution>(StringComparer.OrdinalIgnoreCase);
+            foreach (var preflight in preflights)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                packages.Add(preflight.Assembly.Name, await registrationService.ResolvePackageForCleanupAsync(
+                    preflight.ArtifactBytes, preflight.Assembly.Solution, null, cancellationToken, null));
+            }
 
             if (!globalOptions.IsJsonMode)
             {
@@ -127,7 +130,7 @@ public static class CleanCommand
 
             if (imageOnly)
             {
-                var plan = await PluginImagePruningService.PlanAsync(registrationService, config.Assemblies, packageNames, cancellationToken);
+                var plan = await PluginImagePruningService.PlanAsync(registrationService, config.Assemblies, packages, cancellationToken);
                 var cleanup = dryRun ? new PluginImagePruningResult(plan) { Success = true, Status = "preview-only" }
                     : await PluginImagePruningService.ApplyAsync(registrationService, plan, cancellationToken);
                 results.AddRange(config.Assemblies.Select(a => ImageResult(cleanup.ForAssembly(a.Name))));
@@ -137,7 +140,8 @@ public static class CleanCommand
                 foreach (var assemblyConfig in config.Assemblies)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    results.Add(await CleanAssemblyAsync(registrationService, assemblyConfig, dryRun, globalOptions, cancellationToken));
+                    packages.TryGetValue(assemblyConfig.Name, out var package);
+                    results.Add(await CleanAssemblyAsync(registrationService, assemblyConfig, dryRun, globalOptions, cancellationToken, package));
                 }
             }
 
@@ -199,12 +203,14 @@ public static class CleanCommand
         PluginAssemblyConfig assemblyConfig,
         bool dryRun,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        PluginPackageResolution? packageResolution = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (assemblyConfig.OperationIntent == RegistrationOperationIntent.Reconcile)
         {
-            var plan = await PluginImagePruningService.PlanAsync(service, [assemblyConfig], null, cancellationToken);
+            var plan = await PluginImagePruningService.PlanAsync(service, [assemblyConfig], packageResolution is null ? null :
+                new Dictionary<string, PluginPackageResolution> { [assemblyConfig.Name] = packageResolution }, cancellationToken);
             var cleanup = dryRun ? new PluginImagePruningResult(plan) { Success = true, Status = "preview-only" }
                 : await PluginImagePruningService.ApplyAsync(service, plan, cancellationToken);
             return ImageResult(cleanup);
@@ -216,8 +222,22 @@ public static class CleanCommand
             AssemblyName = assemblyConfig.Name
         };
 
-        // Check if assembly exists
-        var assembly = await service.GetAssemblyByNameAsync(assemblyConfig.Name);
+        PluginAssemblyInfo? assembly;
+        if (string.Equals(assemblyConfig.Type, "Nuget", StringComparison.OrdinalIgnoreCase))
+        {
+            if (packageResolution is null)
+                throw new PpdsException(ErrorCodes.Validation.InvalidValue, "Package cleanup requires a resolved registration identity.");
+            await service.ValidatePackageResolutionAsync(packageResolution, cancellationToken, null);
+            var assemblyId = packageResolution.ExistingPackageId is { } packageId
+                ? await service.GetAssemblyIdForPackageAsync(packageId, assemblyConfig.Name, cancellationToken) : null;
+            assembly = assemblyId is { } id ? await service.GetAssemblyByIdAsync(id, cancellationToken) : null;
+            if (assemblyId is not null && (assembly is null || assembly.Id != assemblyId ||
+                assembly.PackageId != packageResolution.ExistingPackageId ||
+                !string.Equals(assembly.Name, assemblyConfig.Name, StringComparison.OrdinalIgnoreCase) ||
+                assembly.IsManaged || assembly.IsHidden))
+                throw new PpdsException(ErrorCodes.Validation.InvalidValue, "Selected package assembly ownership could not be verified.");
+        }
+        else assembly = await service.GetAssemblyByNameAsync(assemblyConfig.Name);
         if (assembly == null)
         {
             if (!globalOptions.IsJsonMode)
@@ -287,6 +307,8 @@ public static class CleanCommand
                 }
                 else
                 {
+                    if (packageResolution is not null)
+                        await service.ValidatePackageResolutionAsync(packageResolution, cancellationToken, null);
                     await service.DeleteStepAsync(step.Id, cancellationToken);
                     result.StepsDeleted++;
                     if (!globalOptions.IsJsonMode)
@@ -320,6 +342,8 @@ public static class CleanCommand
                     }
                     else
                     {
+                        if (packageResolution is not null)
+                            await service.ValidatePackageResolutionAsync(packageResolution, cancellationToken, null);
                         try
                         {
                             await service.DeletePluginTypeAsync(existingType.Id);

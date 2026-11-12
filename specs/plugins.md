@@ -140,7 +140,7 @@ explicit dependency resolution, and structured failure output without Dataverse 
 
 - The root `.nuspec` `<id>` and `<version>` elements are the authoritative package metadata.
 - A `lib/net462`, `lib/net471`, or `lib/net48` asset group is required and selected before extraction or registration; unsupported groups fail locally with retargeting guidance.
-- First-time registration creates `pluginpackage` with `name`, `version`, and base64 `content`; Dataverse derives `uniquename` from the package content.
+- First-time registration creates `pluginpackage` with the verified solution publisher prefix plus the complete nuspec ID as `name` and `uniquename`, the nuspec `version`, base64 `content`, and solution association.
 - Re-deployment updates only package content because Dataverse package name and version are immutable after creation.
 - Missing or inconsistent `.nuspec` metadata fails with a structured validation error before a Dataverse write is attempted.
 - PPDS inspects every supported-framework assembly and requires exactly one unambiguous primary plug-in assembly. A plausible primary contains a concrete runtime `IPlugin` implementation or PPDS registration metadata; ambiguous packages fail locally and list the candidate assembly names.
@@ -434,6 +434,65 @@ default implementation so existing service implementors remain compatible.
 
 #### Update Operations
 
+Package registration distinguishes the literal nuspec artifact ID from Dataverse's
+registered name and unique name. A new package uses the selected solution's verified
+publisher prefix followed by `_` and the complete nuspec ID. The artifact ID is
+never stripped or normalized: for prefix `ppds` and artifact `ppds_Widget`, a new
+registration is `ppds_ppds_Widget`. Existing verified legacy registrations retain
+their identities and receive content-only updates.
+
+Package resolution is read-only and shared by deployment, capability preflight,
+preview and cleanup. It binds the artifact ID and bytes to either an existing GUID
+and observed registered identity or an explicit planned creation. Automatic lookup
+uses only exact canonical and legacy identities. Exact unique-name matches take
+precedence over display-name fallback; competing GUIDs within the chosen tier are
+an error. Every selected existing package's stored nuspec ID must match the incoming
+artifact ID. Explicit update selectors bind one target and never fall through to
+creation. Without a solution, PPDS can update a verified exact existing target but
+does not guess a publisher, search arbitrary suffixes or create a new package.
+
+All package resolution and configured-step capability checks complete before the
+first planned package or assembly mutation. Batch preflight also refuses a planned
+creation whose unique name intersects another automatic plan's exact canonical or
+legacy lookup candidates, regardless of configuration order or whether that other
+plan selects an existing package. This prevents an earlier creation from invalidating
+a later plan. Existing unique-name precedence and explicit target selection remain
+unchanged. Upload rechecks the resolved identity
+and artifact, and cleanup retains its exact GUID, ownership, protection and complete
+inventory checks. A disappeared or changed target fails rather than being silently
+reselected. These observations reduce partial work but do not provide a transaction
+against concurrent Dataverse changes.
+
+Standalone cleanup uses a lookup-only package observation. An absent exact target
+is reported as `no-existing-package-observed` for version 2 and remains a no-op for
+legacy cleanup; it does not require a publisher for a creation that cleanup will
+never perform. Supplied solution information and existing targets retain their
+identity and protection checks. Revalidation preserves lookup-only intent and
+refuses a newly appeared or changed target. Cleanup observations cannot authorize
+an upload, and absent cleanup candidates do not participate in creation-alias
+checks. A lookup without a solution covers the exact literal artifact identity;
+it does not infer a publisher or establish absence across the whole environment.
+
+An upload acknowledgement alone does not advance the expected package content.
+Before subsequent step writes or cleanup, an exact-ID readback verifies the registered
+identity and downloaded bytes against the planned artifact, producing a new immutable
+resolution. The original observation remains unchanged. Post-deployment Diff uses
+the acknowledged assembly and package IDs, and does not substitute a same-named
+assembly from another package. A step selected for update that disappears is an error,
+not permission to create a replacement.
+
+| ID | Criterion | Test | Status |
+|---|---|---|---|
+| AC-115 | Canonical creation uses the verified publisher plus literal artifact ID; existing verified identities remain unchanged, and no solution or unknown publisher prevents new creation. | `PluginPackageIdentityTests.CanonicalCreate_BindsVerifiedPublisherAndLiteralArtifactId`, `ExistingPackage_VerifiesStoredArtifactAndPreservesNames`, `NoSolution_UpdatesExactLegacyButRefusesCreate`, `UnknownSolutionOrPublisher_RefusesBeforeWrites` | Passed offline (net10.0) |
+| AC-116 | Resolution rejects competing exact identities within the selected tier, verifies stored artifact identity, and requires selected-solution membership for display-name fallback. | `PluginPackageIdentityTests.CanonicalAndLegacyMatches_RefuseCompetingIdsBeforeDownload`, `UniqueName_OutranksDisplayNameCollision`, `DisplayFallback_RequiresSelectedSolutionMembership` | Passed offline (net10.0) |
+| AC-117 | Explicit updates remain bound to their GUID; changed artifact bytes or stale resolutions fail before mutation, and assembly-name ambiguity never chooses an arbitrary row. | `PluginPackageIdentityTests.ExplicitUpdate_PinsIdAndNeverCreates`, `StaleResolution_RefusesBeforeWrites`, `ChangedArtifactBytes_RefusesBeforeRequests`, `DuplicateAssemblyName_RefusesAmbiguousBinding` | Passed offline (net10.0) |
+| AC-118 | Whole-config preflight uses resolved package identities, so a later prefixed package's unsupported reset prevents earlier package/assembly writes; equal and genuinely new steps use their correct update/create capability. | `ResolvedPackageOrchestrationTests.Execute_PrefixedExistingPackageResetRefusesBeforeAnyAssemblyWrites`, `Preflight_EqualOrNewStepUsesTheResolvedPackageTarget` | Passed offline (net10.0) |
+| AC-119 | Cleanup consumes verified post-upload identity without rewriting the original ownership observation, and final Diff never falls back to a same-named sibling assembly. | `ResolvedPackageOrchestrationTests.Cleanup_UsesVerifiedSuccessorWithoutChangingOriginalOwnership`, `Verification_BoundAssemblyNeverFallsBackToSameNamedSibling` | Passed offline (net10.0) |
+| AC-120 | Incoming and stored packages require exactly one root nuspec; invalid canonical lengths and acknowledged-but-unchanged uploads fail before dependent writes. Verified successors preserve collision and selected-solution checks. | `PluginPackageIdentityTests.MultipleRootNuspecs_RejectIncomingAndStoredAmbiguity`, `CanonicalLength_IsCheckedBeforeAnyWrite`, `AcknowledgedButUnchangedUpload_DoesNotAdvanceObservation`, `VerifiedAutomaticSuccessor_StillRejectsNewIdentityCollision`, `ExplicitDisplaySelector_RetainsMembershipRequirementAfterUpload` | Passed offline (net10.0) |
+| AC-121 | Added interface operations remain non-abstract and fail closed for unsupported implementors; an ambiguous or missing planned step cannot become a creation. | `PluginPackageIdentityTests.InterfaceDefaults_PreserveImplementorCompatibilityAndFailClosed`, `PluginStepFieldCapabilityTests.PlannedExistingStep_AmbiguousRead_RefusesBeforeAnyMutation` | Passed offline (net10.0) |
+| AC-122 | Whole-config preflight rejects planned creations that alter another automatic plan's exact lookup candidates in either order, including an existing target; distinct packages, existing unique-name precedence and explicit targets remain valid. | `ResolvedPackageOrchestrationTests.Execute_PackageCreateAliasConflictRefusesBeforeAnyWrites`, `PackageIdentityBatch_RefusesCreateAliasesForNewOrExistingPlans`, `PackageIdentityBatch_DistinctNewPackageCandidatesAreAllowed`, `PackageIdentityBatch_ExistingUniqueNamesKeepPrecedenceOverDisplayNames`, `PackageIdentityBatch_ExplicitExistingSelectorDoesNotGainAutomaticCandidates`; `PluginPackageIdentityTests.SequentialAliasCreation_InvalidatesOtherAutomaticResolution` reproduces the underlying SDK sequence | Passed offline (net10.0) |
+| AC-123 | Standalone v1/v2 cleanup preserves no-op behavior for absent packages without a solution, permits other valid scopes to continue, and never treats lookup-only absence as creation authority; identity rechecks and deployment creation requirements remain intact. | `ImagePruningSafetyTests.ActualCleanCommand_AbsentPackageWithoutSolutionDoesNotBlockExistingScope`, `ActualCleanCommand_AbsentAliasPackagesDoNotInvokeDeploymentCreateGuard`, `PluginPackageIdentityTests.CleanupLookup_AbsenceIsNotCreationAndRevalidatesWithoutPublisherInference`, `CleanupLookup_PresenceChangesInvalidateTheOriginalObservation`, `CleanupLookup_CannotAuthorizeUploadOrAcknowledgeUpload`, `CleanupLookup_PreservesTargetAndSolutionErrors` | Passed offline (net10.0) |
+
 ```csharp
 Task UpdateStepAsync(Guid stepId, StepUpdateRequest request, CancellationToken cancellationToken = default);
 Task UpdateImageAsync(Guid imageId, ImageUpdateRequest request, CancellationToken cancellationToken = default);
@@ -602,11 +661,23 @@ Explicit extraction/output serialization redacts secure values and reports exclu
 | filteringAttributes | Omission/null/empty preserves | Omission/null/empty clears; applicable Update/UpdateMultiple attribute sets are canonical |
 | unsecureConfiguration, step/image description | Omission/null/empty preserves | Omission/null/empty clears; supplied nonempty text remains exact |
 | asyncAutoDelete | Omission/null preserves; supplied false/true writes where applicable | Omission/null defaults false for async; true on synchronous is invalid |
-| canBeBypassed, canUseReadOnlyConnection | Omission/null preserves; supplied booleans write | Omission/null uses explicit PPDS true/false defaults |
+| canBeBypassed | Omission/null preserves; supplied booleans write | Omission/null uses the explicit PPDS true default |
+| canUseReadOnlyConnection | Omission/null preserves; supplied booleans require target Create/Update capability | Omission/null uses the explicit PPDS false desired default; target Create/Update capability governs writes |
 | image attributes | Omission/null/empty preserves | Omission/null/empty means all attributes; preview must make this broadening visible |
 | deployment, invocationSource, enabled, executionOrder | Existing defaults ServerOnly, Parent, true, 1 | Same explicit defaults |
 | image alias/message property | Existing image-name/message-specific defaults | Same explicit defaults |
 | secureConfiguration | Omitted/null preserves; non-null including empty is write-only input | Same write request; secure equality is unknown, never part of verified convergence |
+
+Operation-specific capability checks govern the writes supported by the target.
+For `canUseReadOnlyConnection`, Create requires explicit target create capability;
+Update requires explicit update capability, except that a non-updatable field is
+omitted from the SDK payload when its readable, explicitly returned Boolean already
+equals the desired value. For a non-updatable field, a differing value, including an
+implicit or explicit reset, fails before affected writes. Unknown capability or current value cannot establish
+an unchanged value. Desired defaults and Diff remain unchanged; no silent reset,
+step deletion/recreation, or persisted acceptance is inferred. Deploy preflights all
+configured steps before package/assembly writes and rechecks at the service write
+boundary; those observations are not an atomic reservation.
 
 Partial Update text empty strings retain their established exact SDK clear writes;
 null/absence preserves. Register/upsert empty placeholders are separate. Explicit
@@ -1453,7 +1524,7 @@ No host identities or account permissions are created or changed by these fixtur
 
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
-| AC-28 | First-time NuGet package registration sends the root `.nuspec` ID and version with package content and solution association | `UpsertPackageAsync_CreatesPackageWithNuspecVersion_WhenNotExists` | ✅ |
+| AC-28 | First-time NuGet package registration sends the verified publisher-prefixed literal root `.nuspec` ID, version, package content and solution association | `UpsertPackageAsync_CreatesPackageWithNuspecVersion_WhenNotExists` | ✅ |
 | AC-29 | Re-deploying an existing NuGet package updates content without attempting to change immutable name or version | `UpsertPackageAsync_UpdatesContentOnly_WhenPackageExists` | ✅ |
 | AC-30 | Missing or inconsistent root `.nuspec` metadata fails with a structured validation error before any Dataverse write | `UpsertPackageAsync_RejectsPackageWithoutVersion`, `UpsertPackageAsync_RejectsMismatchedPackageName` | ✅ |
 | AC-31 | A package with no supported framework group (e.g. only `lib/netstandard2.0`) fails locally with a structured error naming Dataverse's supported `lib/net462`, `lib/net471`, and `lib/net48` groups | `Extract_UnsupportedFrameworkPackage_ThrowsStructuredValidationError`, `UpsertPackageAsync_RejectsUnsupportedPackageFrameworkBeforeDataverseCall` | ✅ |
@@ -1670,3 +1741,4 @@ refuse that unknown protection state; this does not provide an atomic conditiona
 | ID | Criterion | Test | Status |
 |---|---|---|---|
 | AC-108 | Actual step/image readers distinguish missing/null protection from known typed values; initial planning and first/final fresh rechecks refuse unknown protection before any delete dispatch, preserving exact ID/token/lease checks and existing public bool signatures. | `ActualReader_TracksProtectionAvailabilityAndTypedValue`; `Plan_RejectsUnavailableActualProtectionBeforeAnyDelete`; `Apply_RejectsNewNullProtectionAtActualFreshRead`; `ParentSdkQuery_UsesExactDeclaredScope` | ✅ |
+| AC-114 | Operation-specific field writes preserve readable equal create-only values, refuse changed/reset or unknown values before affected writes, and preflight later assemblies before earlier package effects. Progress and typed error/cancellation contracts remain intact. | `PluginStepFieldCapabilityTests`; `PluginStepCapabilityPlanningTests`, including `Reconcile_ImplicitResetOfTrueCreateOnlyField_RefusesBeforeSecureOrStepWrites`, `Reconcile_UnknownUpdateCapabilityEvenWhenEqual_DoesNotClaimSupportedNoOp`, and `Command_LaterAssemblyCapabilityRefusal_PreventsEarlierPackageWrites` | Passed offline (net10.0); original persisted acceptance remains open |

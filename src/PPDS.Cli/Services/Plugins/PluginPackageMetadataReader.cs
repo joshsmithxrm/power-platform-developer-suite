@@ -30,18 +30,23 @@ internal static class PluginPackageMetadataReader
             using var stream = new MemoryStream(nupkgContent, writable: false);
             using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
 
-            var nuspecEntry = archive.Entries.FirstOrDefault(entry =>
+            var nuspecEntries = archive.Entries.Where(entry =>
                 entry.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase)
                 && !entry.FullName.Contains('/')
-                && !entry.FullName.Contains('\\'));
+                && !entry.FullName.Contains('\\')).ToArray();
 
-            if (nuspecEntry == null)
+            if (nuspecEntries.Length == 0)
             {
                 throw new PpdsException(
                     ErrorCodes.Validation.RequiredField,
                     "Plugin package does not contain a root-level .nuspec file.");
             }
 
+            if (nuspecEntries.Length != 1)
+                throw new PpdsException(ErrorCodes.Validation.InvalidValue,
+                    "Plugin package contains multiple root-level .nuspec entries; its artifact identity is ambiguous.");
+
+            var nuspecEntry = nuspecEntries[0];
             using var nuspecStream = nuspecEntry.Open();
             var document = XDocument.Load(nuspecStream);
             var ns = document.Root?.GetDefaultNamespace() ?? XNamespace.None;

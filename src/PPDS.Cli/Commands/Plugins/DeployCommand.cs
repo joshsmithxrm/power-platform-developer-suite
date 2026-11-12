@@ -141,12 +141,16 @@ public static class DeployCommand
             cancellationToken.ThrowIfCancellationRequested();
 
             var registrationService = serviceProvider.GetRequiredService<IPluginRegistrationService>();
+            deploymentPreflights = await ResolvePackageIdentitiesAsync(registrationService,
+                deploymentPreflights, solutionOverride, cancellationToken);
+            var packageResolutions = PackageResolutions(deploymentPreflights);
             PluginImagePruningPlan? imageCleanupPlan = null;
             if (config.Version == PluginRegistrationContract.ReconciliationVersion && clean)
                 imageCleanupPlan = await PluginImagePruningService.PlanAsync(registrationService, config.Assemblies,
-                    deploymentPreflights.Where(p => p.PackageName is not null)
-                        .ToDictionary(p => p.Assembly.Name, p => p.PackageName!, StringComparer.OrdinalIgnoreCase), cancellationToken);
+                    packageResolutions, cancellationToken);
             await PluginRegistrationPlanningService.ValidateRunAsUsersAsync(registrationService, config.Assemblies ?? [], cancellationToken);
+            await PluginRegistrationPlanningService.ValidateStepFieldCapabilitiesAsync(registrationService, config.Assemblies ?? [],
+                packageResolutions, cancellationToken);
             var customApiService = serviceProvider.GetRequiredService<ICustomApiService>();
 
             if (!globalOptions.IsJsonMode)
@@ -210,6 +214,9 @@ public static class DeployCommand
             // The full cleanup plan existed before all writes. Apply only after ordinary deployment succeeds.
             if (imageCleanupPlan is not null && results.All(r => r.Success))
             {
+                if (!dryRun)
+                    imageCleanupPlan = imageCleanupPlan.WithVerifiedPackages(results
+                        .Select(r => r.PackageResolution).OfType<PluginPackageResolution>());
                 var cleanup = dryRun ? new PluginImagePruningResult(imageCleanupPlan) { Success = true, Status = "preview-only" }
                     : await PluginImagePruningService.ApplyAsync(registrationService, imageCleanupPlan, cancellationToken);
                 foreach (var result in results) AttachImageCleanup(result, cleanup);
@@ -223,7 +230,10 @@ public static class DeployCommand
             if (config.Version == PluginRegistrationContract.ReconciliationVersion && !dryRun && results.All(r => r.Success))
             {
                 verification = await new PluginDiffService(registrationService).CompareAsync(
-                    config, includeHidden: true, cancellationToken: cancellationToken);
+                    config, includeHidden: true, cancellationToken: cancellationToken,
+                    targets: results.Select(r => r.TargetIdentity
+                        ?? throw new PpdsException(ErrorCodes.Validation.InvalidValue,
+                            "Deployment completed without a bound assembly identity for verification.")).ToArray());
                 for (var index = 0; index < results.Count; index++)
                 {
                     results[index].ReconciliationStatus = verification.Status;
@@ -365,6 +375,34 @@ public static class DeployCommand
         return preflights;
     }
 
+    /// <summary>Bind every package before the first assembly, package, or Custom API write.</summary>
+    internal static async Task<IReadOnlyList<AssemblyDeploymentPreflight>> ResolvePackageIdentitiesAsync(
+        IPluginRegistrationService service, IReadOnlyList<AssemblyDeploymentPreflight> preflights,
+        string? solutionOverride, CancellationToken cancellationToken)
+    {
+        var resolved = new List<AssemblyDeploymentPreflight>(preflights.Count);
+        foreach (var preflight in preflights)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (preflight.PackageName is null || preflight.PackageResolution is not null)
+            {
+                resolved.Add(preflight);
+                continue;
+            }
+            var resolution = await service.ResolvePackageAsync(preflight.ArtifactBytes,
+                solutionOverride ?? preflight.Assembly.Solution, null, cancellationToken, null);
+            resolved.Add(preflight with { PackageResolution = resolution });
+        }
+        PluginRegistrationPlanningService.ValidatePackageIdentityBatch(
+            resolved.Select(p => p.PackageResolution).OfType<PluginPackageResolution>().ToArray(), cancellationToken);
+        return resolved;
+    }
+
+    private static IReadOnlyDictionary<string, PluginPackageResolution> PackageResolutions(
+        IEnumerable<AssemblyDeploymentPreflight> preflights) => preflights
+        .Where(p => p.PackageResolution is not null)
+        .ToDictionary(p => p.Assembly.Name, p => p.PackageResolution!, StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// Deploys a single assembly's types, steps, and images. Steps are matched to the environment by
     /// functional identity (<see cref="PluginStepMatcher"/>) rather than by mutable display name, so an
@@ -418,16 +456,21 @@ public static class DeployCommand
                     nameof(deploymentPreflight));
             }
 
+            deploymentPreflight = (await ResolvePackageIdentitiesAsync(service,
+                [deploymentPreflight], solutionOverride, cancellationToken))[0];
+            var packageResolutions = PackageResolutions([deploymentPreflight]);
+
             cancellationToken.ThrowIfCancellationRequested();
 
             if (clean && assemblyConfig.OperationIntent is not (RegistrationOperationIntent.Patch or RegistrationOperationIntent.Deploy or RegistrationOperationIntent.Reconcile))
                 throw new PpdsException(ErrorCodes.Validation.InvalidValue, "Unsupported cleanup registration contract.");
             if (clean && assemblyConfig.OperationIntent == RegistrationOperationIntent.Reconcile)
                 imagePruningPlan ??= await PluginImagePruningService.PlanAsync(service, [assemblyConfig],
-                    deploymentPreflight.PackageName is null ? null : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                    { [assemblyConfig.Name] = deploymentPreflight.PackageName }, cancellationToken);
+                    packageResolutions, cancellationToken);
 
             await PluginRegistrationPlanningService.ValidateRunAsUsersAsync(service, [assemblyConfig], cancellationToken);
+            await PluginRegistrationPlanningService.ValidateStepFieldCapabilitiesAsync(service, [assemblyConfig],
+                packageResolutions, cancellationToken);
 
             // Deploy assembly or package based on type
             Guid assemblyId;
@@ -437,20 +480,28 @@ public static class DeployCommand
                 var packageBytes = deploymentPreflight.ArtifactBytes;
                 var packageName = deploymentPreflight.PackageName!;
                 var packageAssemblyName = deploymentPreflight.PackageAssemblyName!;
+                var resolution = deploymentPreflight.PackageResolution
+                    ?? throw new PpdsException(ErrorCodes.Validation.InvalidValue,
+                        "Package deployment requires a resolved registration identity.");
 
                 Guid packageId;
                 if (dryRun)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var existingPkg = await service.GetPackageByNameAsync(packageName, cancellationToken);
-                    packageId = existingPkg?.Id ?? Guid.NewGuid();
+                    packageId = resolution.ExistingPackageId ?? Guid.NewGuid();
                     if (!globalOptions.IsJsonMode)
-                        Console.Error.WriteLine($"  [Dry-Run] Would {(existingPkg == null ? "create" : "update")} package: {packageName}");
+                        Console.Error.WriteLine($"  [Dry-Run] Would {(resolution.IsCreate ? "create" : "update")} package: {resolution.RegisteredName}");
                 }
                 else
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    packageId = await calls.RunAsync("pluginpackage", "upsert", "package", null, () => service.UpsertPackageAsync(packageName, packageBytes, solution, cancellationToken), cancellationToken);
+                    packageId = await calls.RunAsync("pluginpackage", "upsert", "package", resolution.ExistingPackageId,
+                        () => service.UpsertResolvedPackageAsync(resolution, packageBytes, cancellationToken, null), cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var verified = await service.VerifyUploadedPackageAsync(resolution, packageId, cancellationToken, null);
+                    result.PackageResolution = verified;
+                    if (imagePruningPlan is not null)
+                        imagePruningPlan = imagePruningPlan.WithVerifiedPackages([verified]);
                     if (!globalOptions.IsJsonMode)
                         Console.Error.WriteLine($"  Package registered: {packageId}");
                 }
@@ -466,8 +517,8 @@ public static class DeployCommand
                 {
                     var recoveryGuidance =
                         $"The uploaded package ID is {packageId}. Inspect it with " +
-                        $"'ppds plugins get package {packageName}'. " +
-                        $"Use 'ppds plugins list --package {packageName}' to inspect materialized assemblies. " +
+                        $"'ppds plugins get package {packageId:D}'. " +
+                        $"Use 'ppds plugins list --package {resolution.RegisteredUniqueName ?? resolution.RegisteredName}' to inspect materialized assemblies. " +
                         "If Dataverse has materialized the assembly, re-run deploy. If the package is incomplete " +
                         "and cleanup is appropriate, 'ppds plugins unregister package' is destructive and must " +
                         "be run separately with normal environment confirmation. PPDS did not attempt automatic cleanup.";
@@ -485,6 +536,7 @@ public static class DeployCommand
                 }
                 // In dry-run mode for new packages, the assembly won't exist yet - use a placeholder ID
                 assemblyId = pkgAssemblyId ?? Guid.NewGuid();
+                result.TargetIdentity = new PluginAssemblyIdentity(assemblyId, packageId);
             }
             else
             {
@@ -509,6 +561,7 @@ public static class DeployCommand
                 }
             }
 
+            result.TargetIdentity ??= new PluginAssemblyIdentity(assemblyId, null);
             // Get existing types and steps
             cancellationToken.ThrowIfCancellationRequested();
             var existingTypes = await service.ListTypesForAssemblyAsync(assemblyId, cancellationToken);
@@ -1002,10 +1055,14 @@ public static class DeployCommand
         string AssemblyPath,
         byte[] ArtifactBytes,
         string? PackageName = null,
-        string? PackageAssemblyName = null);
+        string? PackageAssemblyName = null,
+        PluginPackageResolution? PackageResolution = null);
 
     internal sealed class DeploymentResult
     {
+        internal PluginAssemblyIdentity? TargetIdentity { get; set; }
+        internal PluginPackageResolution? PackageResolution { get; set; }
+
         [JsonPropertyName("imageCleanup")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public PluginImagePruningResult? ImageCleanup { get; set; }

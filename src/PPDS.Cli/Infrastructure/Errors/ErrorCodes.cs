@@ -325,6 +325,18 @@ public static class ErrorCodes
         /// <summary>Plugin entity not found.</summary>
         public const string NotFound = "Plugin.NotFound";
 
+        /// <summary>Target metadata does not permit the requested plugin field mutation.</summary>
+        public const string FieldNotWritable = "Plugin.FieldNotWritable";
+
+        /// <summary>Target field capability or the required current value could not be established.</summary>
+        public const string FieldCapabilityUnknown = "Plugin.FieldCapabilityUnknown";
+
+        /// <summary>The selected package does not contain the expected artifact identity.</summary>
+        public const string PackageIdentityMismatch = "Plugin.PackageIdentityMismatch";
+
+        /// <summary>A package identity observation changed before the planned mutation.</summary>
+        public const string PackageIdentityChanged = "Plugin.PackageIdentityChanged";
+
         /// <summary>Assembly or package has no binary content.</summary>
         public const string NoContent = "Plugin.NoContent";
 

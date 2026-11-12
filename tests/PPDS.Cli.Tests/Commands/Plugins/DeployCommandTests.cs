@@ -1,15 +1,18 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using System.Security.Cryptography;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using PPDS.Cli.Commands;
 using PPDS.Cli.Commands.Plugins;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Plugins.Extraction;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services;
+using PPDS.Cli.Services.Plugins;
 using PPDS.Cli.Tests.Plugins;
 using Xunit;
 
@@ -227,14 +230,8 @@ public class DeployCommandTests : IDisposable
             Assert.Equal(ErrorCodes.Plugin.PackageAssemblyMismatch, result.ErrorCode);
             Assert.Contains("No package was uploaded", result.Error);
             Assert.Contains("Contoso.RuntimePlugins", result.Error);
-            mock.Verify(service => service.UpsertPackageAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Never);
-            mock.Verify(service => service.GetPackageByNameAsync(
-                It.IsAny<string>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+            AssertNoPackageWrites(mock);
+            AssertNoPackageResolution(mock);
         }
         finally
         {
@@ -296,11 +293,7 @@ public class DeployCommandTests : IDisposable
             Assert.Equal(ErrorCodes.Plugin.PackageAssemblyMismatch, result.ErrorCode);
             Assert.Contains("Contoso.BufferedPayload", result.Error);
             Assert.Contains("No package was uploaded", result.Error);
-            mock.Verify(service => service.UpsertPackageAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+            AssertNoPackageWrites(mock);
         }
         finally
         {
@@ -411,14 +404,8 @@ public class DeployCommandTests : IDisposable
             Assert.Contains("Contoso.FirstPlugins", result.Error);
             Assert.Contains("Contoso.SecondPlugins", result.Error);
             Assert.Contains("No package was uploaded", result.Error);
-            mock.Verify(service => service.GetPackageByNameAsync(
-                It.IsAny<string>(),
-                It.IsAny<CancellationToken>()), Times.Never);
-            mock.Verify(service => service.UpsertPackageAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+            AssertNoPackageResolution(mock);
+            AssertNoPackageWrites(mock);
         }
         finally
         {
@@ -501,14 +488,8 @@ public class DeployCommandTests : IDisposable
             Assert.Equal(ErrorCodes.Plugin.PackageAssemblyMismatch, result.ErrorCode);
             Assert.Contains("Contoso.Plugins.RemovedPlugin", result.Error);
             Assert.Contains("No package was uploaded", result.Error);
-            mock.Verify(service => service.GetPackageByNameAsync(
-                It.IsAny<string>(),
-                It.IsAny<CancellationToken>()), Times.Never);
-            mock.Verify(service => service.UpsertPackageAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+            AssertNoPackageResolution(mock);
+            AssertNoPackageWrites(mock);
         }
         finally
         {
@@ -547,16 +528,28 @@ public class DeployCommandTests : IDisposable
             var packageId = Guid.NewGuid();
             var assemblyId = Guid.NewGuid();
             var registration = new Mock<IPluginRegistrationService>();
-            registration.Setup(service => service.UpsertPackageAsync(
-                    "ppds_RuntimePackage",
+            var resolution = SetupPackageResolution(registration, retainedBytes, packageId);
+            var packageOperations = new List<string>();
+            var verifiedResolution = resolution with { ExistingArtifactSha256 = resolution.ArtifactSha256 };
+            registration.Setup(service => service.UpsertResolvedPackageAsync(
+                    resolution,
                     It.Is<byte[]>(bytes => bytes.SequenceEqual(retainedBytes)),
-                    It.IsAny<string?>(),
-                    It.IsAny<CancellationToken>()))
+                    It.IsAny<CancellationToken>(), null))
+                .Callback(() => packageOperations.Add("upload"))
                 .ReturnsAsync(packageId);
+            registration.Setup(service => service.VerifyUploadedPackageAsync(
+                    resolution, packageId, It.IsAny<CancellationToken>(), null))
+                .Callback(() => packageOperations.Add("verify"))
+                .ReturnsAsync(verifiedResolution);
             registration.Setup(service => service.GetAssemblyIdForPackageAsync(
                     packageId,
                     "Contoso.RuntimePlugins",
                     It.IsAny<CancellationToken>()))
+                .Callback(() =>
+                {
+                    Assert.Equal(new[] { "upload", "verify" }, packageOperations);
+                    packageOperations.Add("assembly");
+                })
                 .ReturnsAsync(assemblyId);
             registration.Setup(service => service.ListTypesForAssemblyAsync(
                     assemblyId,
@@ -589,11 +582,18 @@ public class DeployCommandTests : IDisposable
 
             Assert.Equal(ExitCodes.Success, exitCode);
             Assert.False(File.ReadAllBytes(packagePath).SequenceEqual(retainedBytes));
-            registration.Verify(service => service.UpsertPackageAsync(
-                "ppds_RuntimePackage",
+            registration.Verify(service => service.UpsertResolvedPackageAsync(
+                resolution,
                 It.Is<byte[]>(bytes => bytes.SequenceEqual(retainedBytes)),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<CancellationToken>(), null), Times.Once);
+            registration.Verify(service => service.ResolvePackageAsync(
+                It.Is<byte[]>(bytes => bytes.SequenceEqual(retainedBytes)), null, null,
+                It.IsAny<CancellationToken>(), null), Times.Once);
+            registration.Verify(service => service.VerifyUploadedPackageAsync(
+                resolution, packageId, It.IsAny<CancellationToken>(), null), Times.Once);
+            Assert.Equal(new[] { "upload", "verify", "assembly" }, packageOperations);
+            Assert.NotEqual(resolution.ArtifactSha256, resolution.ExistingArtifactSha256);
+            AssertNoLegacyPackageUpsert(registration);
         }
         finally
         {
@@ -699,14 +699,8 @@ public class DeployCommandTests : IDisposable
             Assert.Equal(ErrorCodes.Plugin.PackageAssemblyAmbiguous, result.ErrorCode);
             Assert.Contains("Contoso.FirstPlugins", result.Error);
             Assert.Contains("Contoso.SecondPlugins", result.Error);
-            mock.Verify(service => service.GetPackageByNameAsync(
-                It.IsAny<string>(),
-                It.IsAny<CancellationToken>()), Times.Never);
-            mock.Verify(service => service.UpsertPackageAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+            AssertNoPackageResolution(mock);
+            AssertNoPackageWrites(mock);
         }
         finally
         {
@@ -828,14 +822,8 @@ public class DeployCommandTests : IDisposable
             Assert.False(result.Success);
             Assert.Equal(ErrorCodes.Plugin.PackageAssemblyAmbiguous, result.ErrorCode);
             Assert.Contains("Contoso.SecondPlugins", result.Error);
-            mock.Verify(service => service.GetPackageByNameAsync(
-                It.IsAny<string>(),
-                It.IsAny<CancellationToken>()), Times.Never);
-            mock.Verify(service => service.UpsertPackageAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+            AssertNoPackageResolution(mock);
+            AssertNoPackageWrites(mock);
         }
         finally
         {
@@ -1197,11 +1185,11 @@ public class DeployCommandTests : IDisposable
         {
             var config = NupkgExtractor.Extract(packagePath);
             var mock = new Mock<IPluginRegistrationService>();
-            mock.Setup(service => service.UpsertPackageAsync(
-                    "ppds_RuntimePackage",
+            var resolution = SetupPackageResolution(mock, File.ReadAllBytes(packagePath), Guid.NewGuid());
+            mock.Setup(service => service.UpsertResolvedPackageAsync(
+                    resolution,
                     It.IsAny<byte[]>(),
-                    It.IsAny<string?>(),
-                    It.IsAny<CancellationToken>()))
+                    It.IsAny<CancellationToken>(), null))
                 .ThrowsAsync(new OperationCanceledException());
 
             await Assert.ThrowsAsync<OperationCanceledException>(() =>
@@ -1215,6 +1203,9 @@ public class DeployCommandTests : IDisposable
                     new GlobalOptionValues { OutputFormat = OutputFormat.Json },
                     CancellationToken.None));
 
+            mock.Verify(service => service.VerifyUploadedPackageAsync(
+                It.IsAny<PluginPackageResolution>(), It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>(), It.IsAny<IProgressReporter?>()), Times.Never);
             mock.Verify(service => service.GetAssemblyIdForPackageAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<string>(),
@@ -1411,14 +1402,8 @@ public class DeployCommandTests : IDisposable
             Assert.False(result.Success);
             Assert.Equal(ErrorCodes.Plugin.PackageAssemblyMismatch, result.ErrorCode);
             Assert.Contains("no longer public, concrete, closed runtime", result.Error);
-            mock.Verify(service => service.GetPackageByNameAsync(
-                It.IsAny<string>(),
-                It.IsAny<CancellationToken>()), Times.Never);
-            mock.Verify(service => service.UpsertPackageAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+            AssertNoPackageResolution(mock);
+            AssertNoPackageWrites(mock);
         }
         finally
         {
@@ -1514,14 +1499,8 @@ public class DeployCommandTests : IDisposable
 
             Assert.False(result.Success);
             Assert.Equal(ErrorCodes.Plugin.PackageAssemblyMismatch, result.ErrorCode);
-            mock.Verify(service => service.GetPackageByNameAsync(
-                It.IsAny<string>(),
-                It.IsAny<CancellationToken>()), Times.Never);
-            mock.Verify(service => service.UpsertPackageAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+            AssertNoPackageResolution(mock);
+            AssertNoPackageWrites(mock);
         }
         finally
         {
@@ -1580,14 +1559,8 @@ public class DeployCommandTests : IDisposable
             Assert.False(result.Success);
             Assert.Equal(ErrorCodes.Validation.InvalidValue, result.ErrorCode);
             Assert.Contains("cannot be proven to implement", result.Error);
-            mock.Verify(service => service.GetPackageByNameAsync(
-                It.IsAny<string>(),
-                It.IsAny<CancellationToken>()), Times.Never);
-            mock.Verify(service => service.UpsertPackageAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+            AssertNoPackageResolution(mock);
+            AssertNoPackageWrites(mock);
         }
         finally
         {
@@ -1641,14 +1614,8 @@ public class DeployCommandTests : IDisposable
             Assert.False(result.Success);
             Assert.Equal(ErrorCodes.Plugin.PackageAssemblyMismatch, result.ErrorCode);
             Assert.Contains("Contoso.RuntimePlugin", result.Error);
-            mock.Verify(service => service.GetPackageByNameAsync(
-                It.IsAny<string>(),
-                It.IsAny<CancellationToken>()), Times.Never);
-            mock.Verify(service => service.UpsertPackageAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+            AssertNoPackageResolution(mock);
+            AssertNoPackageWrites(mock);
         }
         finally
         {
@@ -1748,14 +1715,8 @@ public class DeployCommandTests : IDisposable
             Assert.False(result.Success);
             Assert.Equal(ErrorCodes.Validation.InvalidValue, result.ErrorCode);
             Assert.Contains("cannot be proven to implement", result.Error);
-            mock.Verify(service => service.GetPackageByNameAsync(
-                It.IsAny<string>(),
-                It.IsAny<CancellationToken>()), Times.Never);
-            mock.Verify(service => service.UpsertPackageAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+            AssertNoPackageResolution(mock);
+            AssertNoPackageWrites(mock);
         }
         finally
         {
@@ -1837,14 +1798,8 @@ public class DeployCommandTests : IDisposable
             Assert.False(result.Success);
             Assert.Equal(ErrorCodes.Plugin.PackageAssemblyMismatch, result.ErrorCode);
             Assert.Contains("Contoso.Plugins.ConfiguredPlugin", result.Error);
-            mock.Verify(service => service.GetPackageByNameAsync(
-                It.IsAny<string>(),
-                It.IsAny<CancellationToken>()), Times.Never);
-            mock.Verify(service => service.UpsertPackageAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+            AssertNoPackageResolution(mock);
+            AssertNoPackageWrites(mock);
         }
         finally
         {
@@ -1918,14 +1873,8 @@ public class DeployCommandTests : IDisposable
             Assert.False(result.Success);
             Assert.Equal(ErrorCodes.Plugin.PackageAssemblyAmbiguous, result.ErrorCode);
             Assert.Contains("Contoso.UnresolvedCandidate", result.Error);
-            mock.Verify(service => service.GetPackageByNameAsync(
-                It.IsAny<string>(),
-                It.IsAny<CancellationToken>()), Times.Never);
-            mock.Verify(service => service.UpsertPackageAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+            AssertNoPackageResolution(mock);
+            AssertNoPackageWrites(mock);
         }
         finally
         {
@@ -2003,14 +1952,8 @@ public class DeployCommandTests : IDisposable
             Assert.False(result.Success);
             Assert.Equal(ErrorCodes.Plugin.PackageAssemblyMismatch, result.ErrorCode);
             Assert.Empty(selected);
-            mock.Verify(service => service.GetPackageByNameAsync(
-                It.IsAny<string>(),
-                It.IsAny<CancellationToken>()), Times.Never);
-            mock.Verify(service => service.UpsertPackageAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+            AssertNoPackageResolution(mock);
+            AssertNoPackageWrites(mock);
         }
         finally
         {
@@ -2074,10 +2017,7 @@ public class DeployCommandTests : IDisposable
             var packageId = Guid.NewGuid();
             var assemblyId = Guid.NewGuid();
             var mock = new Mock<IPluginRegistrationService>();
-            mock.Setup(service => service.GetPackageByNameAsync(
-                    "ppds_ReferenceDirPackage",
-                    It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new PluginPackageInfo { Id = packageId, Name = "ppds_ReferenceDirPackage" });
+            SetupPackageResolution(mock, File.ReadAllBytes(packagePath), packageId);
             mock.Setup(service => service.GetAssemblyIdForPackageAsync(
                     packageId,
                     "Contoso.RuntimePlugins",
@@ -2100,11 +2040,7 @@ public class DeployCommandTests : IDisposable
 
             Assert.True(result.Success);
             Assert.Null(result.Error);
-            mock.Verify(service => service.UpsertPackageAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+            AssertNoPackageWrites(mock);
         }
         finally
         {
@@ -2112,8 +2048,10 @@ public class DeployCommandTests : IDisposable
         }
     }
 
-    [Fact]
-    public async Task DeployAssemblyAsync_PackageAssemblyNameComparison_IsCaseInsensitive()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DeployAssemblyAsync_PackageAssemblyNameComparison_IsCaseInsensitive(bool existingPackage)
     {
         var packagePath = CreateRuntimePluginPackage();
         try
@@ -2121,11 +2059,13 @@ public class DeployCommandTests : IDisposable
             var packageId = Guid.NewGuid();
             var assemblyId = Guid.NewGuid();
             var mock = new Mock<IPluginRegistrationService>();
-            mock.Setup(service => service.UpsertPackageAsync(
-                    "ppds_RuntimePackage",
+            var resolution = SetupPackageResolution(mock, File.ReadAllBytes(packagePath),
+                existingPackage ? packageId : null);
+            SetupUploadedPackageVerification(mock, resolution, packageId);
+            mock.Setup(service => service.UpsertResolvedPackageAsync(
+                    resolution,
                     It.IsAny<byte[]>(),
-                    It.IsAny<string?>(),
-                    It.IsAny<CancellationToken>()))
+                    It.IsAny<CancellationToken>(), null))
                 .ReturnsAsync(packageId);
             mock.Setup(service => service.GetAssemblyIdForPackageAsync(
                     packageId,
@@ -2141,7 +2081,8 @@ public class DeployCommandTests : IDisposable
             {
                 Name = "contoso.runtimeplugins",
                 Type = "Nuget",
-                PackagePath = packagePath
+                PackagePath = packagePath,
+                Solution = existingPackage ? null : "FixtureSolution"
             };
 
             var result = await DeployCommand.DeployAssemblyAsync(
@@ -2156,11 +2097,15 @@ public class DeployCommandTests : IDisposable
 
             Assert.True(result.Success);
             Assert.Null(result.Error);
-            mock.Verify(service => service.UpsertPackageAsync(
-                "ppds_RuntimePackage",
+            Assert.Equal(packageId, result.PackageResolution?.ExistingPackageId);
+            Assert.Equal(resolution.ArtifactSha256, result.PackageResolution?.ExistingArtifactSha256);
+            mock.Verify(service => service.UpsertResolvedPackageAsync(
+                resolution,
                 It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<CancellationToken>(), null), Times.Once);
+            mock.Verify(service => service.VerifyUploadedPackageAsync(
+                resolution, packageId, It.IsAny<CancellationToken>(), null), Times.Once);
+            AssertNoLegacyPackageUpsert(mock);
             mock.Verify(service => service.GetAssemblyIdForPackageAsync(
                 packageId,
                 "Contoso.RuntimePlugins",
@@ -2180,11 +2125,13 @@ public class DeployCommandTests : IDisposable
         {
             var packageId = Guid.NewGuid();
             var mock = new Mock<IPluginRegistrationService>();
-            mock.Setup(service => service.UpsertPackageAsync(
-                    "ppds_RuntimePackage",
+            const string registeredName = "publisher_ppds_RuntimePackage";
+            var resolution = SetupPackageResolution(mock, File.ReadAllBytes(packagePath), packageId, registeredName);
+            SetupUploadedPackageVerification(mock, resolution, packageId);
+            mock.Setup(service => service.UpsertResolvedPackageAsync(
+                    resolution,
                     It.IsAny<byte[]>(),
-                    It.IsAny<string?>(),
-                    It.IsAny<CancellationToken>()))
+                    It.IsAny<CancellationToken>(), null))
                 .ReturnsAsync(packageId);
             mock.Setup(service => service.GetAssemblyIdForPackageAsync(
                     packageId,
@@ -2213,17 +2160,21 @@ public class DeployCommandTests : IDisposable
             Assert.Equal(ErrorCodes.Plugin.PackageAssemblyUnavailableAfterUpload, result.ErrorCode);
             Assert.Contains("may now be partially deployed", result.Error);
             Assert.NotNull(result.RecoveryGuidance);
-            Assert.Contains("plugins get package ppds_RuntimePackage", result.RecoveryGuidance);
-            Assert.Contains("plugins list --package ppds_RuntimePackage", result.RecoveryGuidance);
+            Assert.Contains($"plugins get package {packageId:D}", result.RecoveryGuidance);
+            Assert.Contains($"plugins list --package {registeredName}", result.RecoveryGuidance);
+            Assert.DoesNotContain("plugins get package ppds_RuntimePackage", result.RecoveryGuidance);
+            Assert.DoesNotContain("plugins list --package ppds_RuntimePackage", result.RecoveryGuidance);
             Assert.Contains(packageId.ToString(), result.RecoveryGuidance);
             Assert.Contains("destructive", result.RecoveryGuidance, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("did not attempt automatic cleanup", result.RecoveryGuidance);
             Assert.DoesNotContain("preview", result.RecoveryGuidance, StringComparison.OrdinalIgnoreCase);
-            mock.Verify(service => service.UpsertPackageAsync(
-                It.IsAny<string>(),
+            mock.Verify(service => service.UpsertResolvedPackageAsync(
+                resolution,
                 It.IsAny<byte[]>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<CancellationToken>(), null), Times.Once);
+            mock.Verify(service => service.VerifyUploadedPackageAsync(
+                resolution, packageId, It.IsAny<CancellationToken>(), null), Times.Once);
+            AssertNoLegacyPackageUpsert(mock);
             mock.Verify(service => service.UnregisterPackageAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<bool>(),
@@ -2233,6 +2184,64 @@ public class DeployCommandTests : IDisposable
         {
             File.Delete(packagePath);
         }
+    }
+
+    private static PluginPackageResolution SetupPackageResolution(
+        Mock<IPluginRegistrationService> service, byte[] content, Guid? existingPackageId,
+        string? registeredName = null)
+    {
+        var metadata = PluginPackageMetadataReader.Read(content);
+        var resolution = new PluginPackageResolution
+        {
+            ArtifactId = metadata.Id,
+            ArtifactVersion = metadata.Version,
+            ArtifactSha256 = Convert.ToHexString(SHA256.HashData(content)),
+            ExistingPackageId = existingPackageId,
+            ExistingArtifactSha256 = existingPackageId.HasValue ? new string('A', 64) : null,
+            RegisteredName = registeredName ?? metadata.Id,
+            RegisteredUniqueName = registeredName ?? metadata.Id,
+            SolutionName = existingPackageId.HasValue ? null : "FixtureSolution",
+            SolutionId = existingPackageId.HasValue ? null : Guid.NewGuid(),
+            PublisherId = existingPackageId.HasValue ? null : Guid.NewGuid(),
+            PublisherPrefix = existingPackageId.HasValue ? null : "ppds",
+            MatchKind = existingPackageId.HasValue ? registeredName is null ? "Legacy" : "Canonical" : "Create"
+        };
+        service.Setup(s => s.ResolvePackageAsync(
+                It.Is<byte[]>(bytes => bytes.SequenceEqual(content)), It.IsAny<string?>(), null,
+                It.IsAny<CancellationToken>(), null))
+            .ReturnsAsync(resolution);
+        return resolution;
+    }
+
+    private static void SetupUploadedPackageVerification(Mock<IPluginRegistrationService> service,
+        PluginPackageResolution resolution, Guid uploadedPackageId) =>
+        service.Setup(s => s.VerifyUploadedPackageAsync(resolution, uploadedPackageId,
+                It.IsAny<CancellationToken>(), null))
+            .ReturnsAsync(resolution with
+            {
+                ExistingPackageId = uploadedPackageId,
+                ExistingArtifactSha256 = resolution.ArtifactSha256
+            });
+
+    private static void AssertNoLegacyPackageUpsert(Mock<IPluginRegistrationService> service) =>
+        service.Verify(s => s.UpsertPackageAsync(It.IsAny<string>(), It.IsAny<byte[]>(),
+            It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+
+    private static void AssertNoPackageWrites(Mock<IPluginRegistrationService> service)
+    {
+        AssertNoLegacyPackageUpsert(service);
+        service.Verify(s => s.UpsertResolvedPackageAsync(It.IsAny<PluginPackageResolution>(),
+            It.IsAny<byte[]>(), It.IsAny<CancellationToken>(), It.IsAny<IProgressReporter?>()), Times.Never);
+        service.Verify(s => s.VerifyUploadedPackageAsync(It.IsAny<PluginPackageResolution>(),
+            It.IsAny<Guid>(), It.IsAny<CancellationToken>(), It.IsAny<IProgressReporter?>()), Times.Never);
+    }
+
+    private static void AssertNoPackageResolution(Mock<IPluginRegistrationService> service)
+    {
+        service.Verify(s => s.GetPackageByNameAsync(It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        service.Verify(s => s.ResolvePackageAsync(It.IsAny<byte[]>(), It.IsAny<string?>(),
+            It.IsAny<string?>(), It.IsAny<CancellationToken>(), It.IsAny<IProgressReporter?>()), Times.Never);
     }
 
     private static string CreateRuntimePluginPackage()

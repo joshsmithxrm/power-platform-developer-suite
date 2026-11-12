@@ -27,7 +27,7 @@ namespace PPDS.Cli.Plugins.Registration;
 /// This service uses connection pooling to enable parallel Dataverse operations.
 /// Each method acquires its own client from the pool, enabling DOP-based parallelism.
 /// </remarks>
-public sealed class PluginRegistrationService : IPluginRegistrationService
+public sealed partial class PluginRegistrationService : IPluginRegistrationService
 {
     private readonly IDataverseConnectionPool _pool;
     private readonly IShakedownGuard _guard;
@@ -626,8 +626,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     {
         // Use IncludeMicrosoft: true to search all packages including Microsoft.* when looking up by exact name
         var packages = await ListPackagesAsync(name, new PluginListOptions(IncludeMicrosoft: true), cancellationToken);
-        return packages.FirstOrDefault(p => string.Equals(p.UniqueName, name, StringComparison.OrdinalIgnoreCase))
-            ?? packages.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+        return SelectExactPackage(packages, name);
     }
 
     /// <summary>
@@ -1123,38 +1122,11 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 $"Package name '{packageName}' does not match the root .nuspec ID '{metadata.Id}'.");
         }
 
-        // Dataverse extracts uniquename from the nupkg content, so the .nuspec ID is used for lookup.
-        var existing = await GetPackageByNameAsync(metadata.Id, cancellationToken);
-
-        if (existing != null)
-        {
-            // UPDATE: Only update content, use solution header for solution association
-            var updateEntity = new PluginPackage
-            {
-                Id = existing.Id,
-                Content = Convert.ToBase64String(nupkgContent)
-            };
-
-            var request = new UpdateRequest { Target = updateEntity };
-            if (!string.IsNullOrEmpty(solutionName))
-            {
-                request.Parameters["SolutionUniqueName"] = solutionName;
-            }
-            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-            await ExecuteAsync(request, client, cancellationToken);
-
-            return existing.Id;
-        }
-
-        // CREATE: Version is system-required. Dataverse extracts uniquename from the package content.
-        var entity = new PluginPackage
-        {
-            Name = metadata.Id,
-            Version = metadata.Version,
-            Content = Convert.ToBase64String(nupkgContent)
-        };
-
-        return await CreateWithSolutionHeaderAsync(entity, solutionName, cancellationToken);
+        var resolution = await ResolvePackageAsync(nupkgContent, solutionName,
+            cancellationToken: cancellationToken);
+        var id = await UpsertResolvedPackageAsync(resolution, nupkgContent, cancellationToken);
+        await VerifyUploadedPackageAsync(resolution, id, cancellationToken);
+        return id;
     }
 
     /// <summary>
@@ -1169,8 +1141,12 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         CancellationToken cancellationToken = default)
     {
         var assemblies = await ListAssembliesForPackageAsync(packageId, cancellationToken);
-        return assemblies.FirstOrDefault(a =>
-            string.Equals(a.Name, assemblyName, StringComparison.OrdinalIgnoreCase))?.Id;
+        var matches = assemblies.Where(a => string.Equals(a.Name, assemblyName, StringComparison.OrdinalIgnoreCase))
+            .Select(a => a.Id).Distinct().ToArray();
+        if (matches.Length > 1)
+            throw new PpdsException(ErrorCodes.Operation.Duplicate,
+                $"Package '{packageId}' has multiple assemblies named '{assemblyName}'.");
+        return matches.Length == 0 ? null : matches[0];
     }
 
     /// <summary>
@@ -1339,6 +1315,78 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         return await CreateWithSolutionAsync(entity, solutionName, client, cancellationToken);
     }
 
+    /// <summary>Checks target-dependent field writes without dispatching any mutation.</summary>
+    public async Task ValidateStepFieldCapabilitiesAsync(PluginStepConfig config, Guid? existingStepId,
+        CancellationToken cancellationToken = default, IProgressReporter? progress = null)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var desired = PluginRegistrationNormalizer.NormalizeStep(config, config.OperationIntent);
+            if (!desired.TryGetValue("canUseReadOnlyConnection", out var value)) return;
+            progress?.ReportPhase("Validating plugin step field capabilities");
+            Entity? existing = null;
+            if (existingStepId.HasValue)
+            {
+                existing = await GetStepByIdWithManagedStateAsync(existingStepId.Value, cancellationToken);
+                if (existing is null || existing.Id != existingStepId.Value)
+                    throw new PpdsException(ErrorCodes.Plugin.NotFound,
+                        $"Step '{existingStepId}' was not available for field capability validation.");
+            }
+            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            _ = await ShouldWriteReadOnlyConnectionAsync((bool)value!, existing, client, cancellationToken);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (PpdsException) { throw; }
+        catch (Exception ex)
+        {
+            throw new PpdsException(ExceptionMapper.Map(ex).Code,
+                "Plugin step field capability validation could not be completed.", ex);
+        }
+    }
+
+    private static async Task<bool> ShouldWriteReadOnlyConnectionAsync(bool desired, Entity? existing,
+        IOrganizationService client, CancellationToken cancellationToken)
+    {
+        const string attribute = SdkMessageProcessingStep.Fields.CanUseReadOnlyConnection;
+        const string field = "canUseReadOnlyConnection";
+        var response = await ExecuteAsync(new RetrieveAttributeRequest
+        {
+            EntityLogicalName = SdkMessageProcessingStep.EntityLogicalName,
+            LogicalName = attribute,
+            RetrieveAsIfPublished = true
+        }, client, cancellationToken);
+        if (response is not RetrieveAttributeResponse metadataResponse ||
+            metadataResponse.AttributeMetadata is not BooleanAttributeMetadata metadata ||
+            !string.Equals(metadata.LogicalName, attribute, StringComparison.Ordinal))
+            throw new PpdsException(ErrorCodes.Plugin.FieldCapabilityUnknown,
+                $"Target metadata for {field} is missing or incomplete. No field mutation was dispatched.");
+
+        var operation = existing is null ? "create" : "update";
+        var allowed = existing is null ? metadata.IsValidForCreate : metadata.IsValidForUpdate;
+        if (!allowed.HasValue)
+            throw new PpdsException(ErrorCodes.Plugin.FieldCapabilityUnknown,
+                $"Target metadata does not establish whether {field} supports {operation}. No field mutation was dispatched.");
+        if (allowed.Value) return true;
+
+        if (existing is not null)
+        {
+            // An absent SDK attribute is not a false value. Only a readable, explicitly
+            // observed Boolean can prove that omitting a non-updatable attribute is a no-op.
+            if (metadata.IsValidForRead is not true || !existing.Contains(attribute) ||
+                existing[attribute] is not bool actual)
+                throw new PpdsException(ErrorCodes.Plugin.FieldCapabilityUnknown,
+                    $"{field} cannot be updated and its current value could not be established for step '{existing.Id}'.");
+            if (actual == desired) return false;
+        }
+
+        throw new PpdsException(ErrorCodes.Plugin.FieldNotWritable,
+            $"Target metadata does not permit {operation} of {field}" +
+            (existing is null ? "." : $" on step '{existing.Id}'; the requested value differs from its current value.") +
+            " PPDS will not silently ignore the requested value or delete and recreate the step.",
+            new Dictionary<string, object> { ["field"] = field, ["attribute"] = attribute, ["operation"] = operation });
+    }
+
     /// <summary>
     /// Creates or updates a processing step.
     /// </summary>
@@ -1376,6 +1424,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId,
             SdkMessageProcessingStep.Fields.StateCode,
             SdkMessageProcessingStep.Fields.Mode,
+            SdkMessageProcessingStep.Fields.CanUseReadOnlyConnection,
             SdkMessageProcessingStep.Fields.SdkMessageProcessingStepSecureConfigId);
 
         Entity? existing;
@@ -1413,12 +1462,22 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             };
 
             var results = await RetrieveMultipleAsync(query, client, cancellationToken);
-            existing = results.Entities.FirstOrDefault();
+            if (results.Entities.Count != 1 || results.Entities[0].Id != existingStepId ||
+                results.Entities[0].LogicalName != SdkMessageProcessingStep.EntityLogicalName)
+                throw new PpdsException(results.Entities.Count > 1 ? ErrorCodes.Operation.Duplicate : ErrorCodes.Plugin.NotFound,
+                    $"Planned step '{existingStepId}' no longer resolves to exactly one matching row. PPDS will not recreate it or write secure configuration.");
+            existing = results.Entities[0];
         }
         else
         {
             existing = null;
         }
+
+        // Validate before secure-configuration creation/update or any step/solution/state write.
+        // Keep the desired plan intact for Diff; only the actual SDK payload may omit an
+        // already-equal value when metadata explicitly says it cannot be updated.
+        var writeReadOnlyConnection = !desired.TryGetValue("canUseReadOnlyConnection", out var readOnlyValue) ||
+            await ShouldWriteReadOnlyConnectionAsync((bool)readOnlyValue!, existing, client, cancellationToken);
 
         var entity = new SdkMessageProcessingStep
         {
@@ -1450,7 +1509,8 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
             ("description", "description"), ("canBeBypassed", "canbebypassed"),
             ("canUseReadOnlyConnection", "canusereadonlyconnection"), ("asyncAutoDelete", "asyncautodelete")
         })
-            if (desired.TryGetValue(configField, out var value)) entity[attribute] = value;
+            if (desired.TryGetValue(configField, out var value) &&
+                (configField != "canUseReadOnlyConnection" || writeReadOnlyConnection)) entity[attribute] = value;
         if (desired.ContainsKey("runAsUser"))
             entity[SdkMessageProcessingStep.Fields.ImpersonatingUserId] = impersonatingUserId.HasValue
                 ? new EntityReference(SystemUser.EntityLogicalName, impersonatingUserId.Value) : null;
@@ -1641,6 +1701,12 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         if (request.UnsecureConfiguration is not null) config.UnsecureConfiguration = request.UnsecureConfiguration;
         config.ResetFields = request.ResetFields?.ToList() ?? [];
         var desired = PluginRegistrationNormalizer.NormalizeStep(config, RegistrationOperationIntent.Update);
+        var writeReadOnlyConnection = true;
+        if (desired.TryGetValue("canUseReadOnlyConnection", out var readOnlyValue))
+        {
+            await using var capabilityClient = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            writeReadOnlyConnection = await ShouldWriteReadOnlyConnectionAsync((bool)readOnlyValue!, existingStep, capabilityClient, cancellationToken);
+        }
         var entity = new SdkMessageProcessingStep { Id = stepId };
         if (request.Name != null)
         {
@@ -1663,6 +1729,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
         })
         {
             if (!desired.TryGetValue(field, out var value)) continue;
+            if (field == "canUseReadOnlyConnection" && !writeReadOnlyConnection) continue;
             if (field == "asyncAutoDelete" && effectiveMode != "Asynchronous")
             {
                 if (value is true) throw new PpdsException(ErrorCodes.Validation.InvalidValue, "asyncAutoDelete=true requires Asynchronous mode.");
@@ -1720,6 +1787,7 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
                 SdkMessageProcessingStep.Fields.Name,
                 SdkMessageProcessingStep.Fields.Mode,
                 SdkMessageProcessingStep.Fields.Stage,
+                SdkMessageProcessingStep.Fields.CanUseReadOnlyConnection,
                 SdkMessageProcessingStep.Fields.IsManaged,
                 SdkMessageProcessingStep.Fields.IsCustomizable),
             LinkEntities =
