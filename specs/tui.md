@@ -5,6 +5,23 @@
 **Code:** [src/PPDS.Cli/Tui/](../src/PPDS.Cli/Tui/), [src/PPDS.Cli/Infrastructure/](../src/PPDS.Cli/Infrastructure/)
 **Surfaces:** TUI
 
+## Deterministic visual test fixtures
+
+The non-live terminal snapshot suite starts each invocation with a new empty
+`PPDS_CONFIG_DIR`. It passes only operating-system and runtime settings to the
+test process, not inherited PPDS selection, authentication, or live-test options.
+The fixture is removed after the runner exits, including a failed run. The
+committed snapshots describe the signed-out state: no profile, no environment,
+and no environment-dependent loading activity. They are compared in CI;
+snapshot updates remain an explicit developer command requiring diff review.
+
+| ID | Requirement | Test | Status |
+|----|-------------|------|--------|
+| AC-VIS-01 | Every test invocation owns a fresh empty profile directory and discards inherited credential and PPDS settings | `run-isolated-tests.test.mjs`: `only safe runtime settings reach the isolated runner`, `runner owns and removes its empty fixture on success and failure` | ✅ |
+| AC-VIS-02 | Fixture cleanup also occurs when the runner cannot launch | `run-isolated-tests.test.mjs`: `launch failures remove only the owned fixture` | ✅ |
+| AC-VIS-03 | CI compares committed snapshots and never updates them implicitly | `test_tui_e2e_workflow.py`: `test_ci_compares_committed_snapshots`, `test_all_tui_commands_use_the_isolated_runner` | ✅ |
+| AC-VIS-04 | All 36 TUI tests, including 14 exact golden comparisons, pass without a real profile or environment | `tests/PPDS.Tui.E2eTests/tests/*.spec.ts` | ✅ |
+
 ---
 
 ## Overview

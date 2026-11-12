@@ -4,7 +4,7 @@ exports[`Plugin Traces Keyboard Navigation › Tab cycles through controls | 1`]
 ╭────────────────────────────────────────────────────────────────────────────────╮
 │┌ PPDS - Power Platform Developer Suite ───────────────────────────────────────┐│
 ││ File  Tools  Help                                                            ││
-││[ 1: Plugin Traces [DEV] ] [+]                                                ││
+││[ 1: Plugin Traces ] [+]                                                      ││
 ││┌ Plugin Traces ─────────────────────────────────────────────────────────────┐││
 │││                                                                            │││
 │││                                                                            │││
@@ -26,11 +26,11 @@ exports[`Plugin Traces Keyboard Navigation › Tab cycles through controls | 1`]
 │││                                                                            │││
 │││                                                                            │││
 │││                                                                            │││
-│││Loading plugin traces...                                                    │││
+│││No environment selected. Use the status bar to connect.                     │││
 ││└────────────────────────────────────────────────────────────────────────────┘││
 ││                                                                              ││
 ││                                                                              ││
-││ Profile: PPDS (josh@powerplatformdev…    Environment: PPDS Demo - Dev [DEV] ▼││
+││ Profile: None ▼                                           Environment: None ▼││
 │└──────────────────────────────────────────────────────────────────────────────┘│
 ╰────────────────────────────────────────────────────────────────────────────────╯
 `;
@@ -39,7 +39,7 @@ exports[`Plugin Traces Screen › navigates to Plugin Traces via Tools menu | 1`
 ╭────────────────────────────────────────────────────────────────────────────────╮
 │┌ PPDS - Power Platform Developer Suite ───────────────────────────────────────┐│
 ││ File  Tools  Help                                                            ││
-││[ 1: Plugin Traces [DEV] ] [+]                                                ││
+││[ 1: Plugin Traces ] [+]                                                      ││
 ││┌ Plugin Traces ─────────────────────────────────────────────────────────────┐││
 │││                                                                            │││
 │││                                                                            │││
@@ -61,11 +61,11 @@ exports[`Plugin Traces Screen › navigates to Plugin Traces via Tools menu | 1`
 │││                                                                            │││
 │││                                                                            │││
 │││                                                                            │││
-│││Loading plugin traces...                                                    │││
+│││No environment selected. Use the status bar to connect.                     │││
 ││└────────────────────────────────────────────────────────────────────────────┘││
 ││                                                                              ││
 ││                                                                              ││
-││ Profile: PPDS (josh@powerplatformdev…    Environment: PPDS Demo - Dev [DEV] ▼││
+││ Profile: None ▼                                           Environment: None ▼││
 │└──────────────────────────────────────────────────────────────────────────────┘│
 ╰────────────────────────────────────────────────────────────────────────────────╯
 `;

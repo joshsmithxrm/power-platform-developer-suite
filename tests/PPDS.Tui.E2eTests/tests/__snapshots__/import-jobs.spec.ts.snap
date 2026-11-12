@@ -4,7 +4,7 @@ exports[`Import Jobs Keyboard Navigation › Tab cycles through controls | 1`] =
 ╭────────────────────────────────────────────────────────────────────────────────╮
 │┌ PPDS - Power Platform Developer Suite ───────────────────────────────────────┐│
 ││ File  Tools  Help                                                            ││
-││[ 1: Import Jobs [DEV] ] [+]                                                  ││
+││[ 1: Import Jobs ] [+]                                                        ││
 ││┌ Import Jobs ───────────────────────────────────────────────────────────────┐││
 │││                                                                            │││
 │││                                                                            │││
@@ -26,11 +26,11 @@ exports[`Import Jobs Keyboard Navigation › Tab cycles through controls | 1`] =
 │││                                                                            │││
 │││                                                                            │││
 │││                                                                            │││
-│││Loading import jobs...                                                      │││
+│││No environment selected. Use the status bar to connect.                     │││
 ││└────────────────────────────────────────────────────────────────────────────┘││
 ││                                                                              ││
 ││                                                                              ││
-││ Profile: PPDS (josh@powerplatformdev…    Environment: PPDS Demo - Dev [DEV] ▼││
+││ Profile: None ▼                                           Environment: None ▼││
 │└──────────────────────────────────────────────────────────────────────────────┘│
 ╰────────────────────────────────────────────────────────────────────────────────╯
 `;
@@ -39,7 +39,7 @@ exports[`Import Jobs Screen › navigates to Import Jobs via Tools menu | 1`] = 
 ╭────────────────────────────────────────────────────────────────────────────────╮
 │┌ PPDS - Power Platform Developer Suite ───────────────────────────────────────┐│
 ││ File  Tools  Help                                                            ││
-││[ 1: Import Jobs [DEV] ] [+]                                                  ││
+││[ 1: Import Jobs ] [+]                                                        ││
 ││┌ Import Jobs ───────────────────────────────────────────────────────────────┐││
 │││                                                                            │││
 │││                                                                            │││
@@ -61,11 +61,11 @@ exports[`Import Jobs Screen › navigates to Import Jobs via Tools menu | 1`] = 
 │││                                                                            │││
 │││                                                                            │││
 │││                                                                            │││
-│││Loading import jobs...                                                      │││
+│││No environment selected. Use the status bar to connect.                     │││
 ││└────────────────────────────────────────────────────────────────────────────┘││
 ││                                                                              ││
 ││                                                                              ││
-││ Profile: PPDS (josh@powerplatformdev…    Environment: PPDS Demo - Dev [DEV] ▼││
+││ Profile: None ▼                                           Environment: None ▼││
 │└──────────────────────────────────────────────────────────────────────────────┘│
 ╰────────────────────────────────────────────────────────────────────────────────╯
 `;
