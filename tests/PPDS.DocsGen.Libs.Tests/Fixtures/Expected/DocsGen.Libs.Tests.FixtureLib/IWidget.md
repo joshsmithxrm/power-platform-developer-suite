@@ -32,4 +32,3 @@ Activates the widget for the given count.
 `string Name { get; }`
 
 The widget's display name.
-

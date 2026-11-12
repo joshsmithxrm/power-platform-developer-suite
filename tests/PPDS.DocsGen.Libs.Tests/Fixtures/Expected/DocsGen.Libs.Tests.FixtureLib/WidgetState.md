@@ -32,4 +32,3 @@ The widget has been retired and will not respond.
 `WidgetState Uninitialized`
 
 The widget has not yet been initialized.
-

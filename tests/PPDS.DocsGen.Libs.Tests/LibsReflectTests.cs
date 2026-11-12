@@ -31,18 +31,18 @@ public sealed class LibsReflectTests
     }
 
     [Fact]
-    public async Task EmitsOnlyDocumentedCustomerFacingTypes()
+    public async Task EmitsCustomerFacingTypesIncludingUndocumentedFallbacks()
     {
         var outputRoot = Path.Combine(Path.GetTempPath(), "libs-reflect-test-" + Guid.NewGuid().ToString("N"));
         try
         {
             var result = await RunAsync(outputRoot);
 
-            // Assert: no file is emitted for the [EditorBrowsable(Never)] type or the undocumented type.
+            // Hidden types stay out of customer pages; undocumented public types remain visible.
             result.Files.Select(f => f.RelativePath)
                 .Should().NotContain(p => p.EndsWith("HiddenHelper.md"));
             result.Files.Select(f => f.RelativePath)
-                .Should().NotContain(p => p.EndsWith("UndocumentedThing.md"));
+                .Should().Contain(p => p.EndsWith("UndocumentedThing.md"));
 
             // Assert: files for the two documented customer-facing types ARE emitted.
             result.Files.Should().ContainSingle(f => f.RelativePath.EndsWith("/Widget.md"),
@@ -72,6 +72,38 @@ public sealed class LibsReflectTests
     }
 
     [Fact]
+    public void NestedTypesWithSharedLeafNames_KeepDistinctPagesAndResolvableLinks()
+    {
+        var result = new LibraryReferenceGenerator().GenerateWithCoverage(
+            new GenerationInput(FixtureAssemblyPath(), "unused-output"), CancellationToken.None);
+        var package = "DocsGen.Libs.Tests.FixtureLib";
+        var expected = new Dictionary<string, string>
+        {
+            ["Widget+Fields"] = "Widget.Fields.md",
+            ["ExternalDocsConsumer+Fields"] = "ExternalDocsConsumer.Fields.md",
+            ["GenericProcessor`2+Fields`1"] = "GenericProcessor`2.Fields`1.md"
+        };
+        var index = result.Generation.Files.Single(file => file.RelativePath == package + "/_index.md").Contents;
+        foreach (var (identity, fileName) in expected)
+        {
+            var entry = result.Types.Single(type => type.FullName == "PPDS." + package + "." + identity);
+            entry.PagePath.Should().Be(package + "/" + fileName);
+            result.Generation.Files.Should().ContainSingle(file => file.RelativePath == entry.PagePath);
+            index.Should().Contain("(./" + Uri.EscapeDataString(fileName) + ")");
+        }
+        result.Generation.Files.Select(file => file.RelativePath)
+            .Distinct(StringComparer.OrdinalIgnoreCase).Should().HaveCount(result.Generation.Files.Count);
+        result.Generation.Files.Single(file => file.RelativePath.EndsWith("/Widget.Fields.md"))
+            .Contents.Should().Contain("specifically by Widget");
+        result.Generation.Files.Single(file => file.RelativePath.EndsWith("/ExternalDocsConsumer.Fields.md"))
+            .Contents.Should().Contain("specifically by ExternalDocsConsumer");
+        result.Generation.Files.Single(file => file.RelativePath.EndsWith("/GenericProcessor`2.Fields`1.md"))
+            .Contents.Should().Contain("A nested generic field descriptor.");
+        foreach (Match link in Regex.Matches(index, @"\]\(\./([^)]*)\)"))
+            result.Generation.Files.Should().Contain(file => file.RelativePath == package + "/" + Uri.UnescapeDataString(link.Groups[1].Value));
+    }
+
+    [Fact]
     public async Task EmitsDiagnosticForUndocumentedType()
     {
         var outputRoot = Path.Combine(Path.GetTempPath(), "libs-reflect-diag-" + Guid.NewGuid().ToString("N"));
@@ -79,8 +111,8 @@ public sealed class LibsReflectTests
         {
             var result = await RunAsync(outputRoot);
 
-            result.Diagnostics.Should().Contain(d => d.Contains("UndocumentedThing") && d.Contains("skipping"));
-            result.Files.Should().NotContain(f => f.RelativePath.EndsWith("UndocumentedThing.md"));
+            result.Diagnostics.Should().Contain(d => d.Contains("UndocumentedThing") && d.Contains("unavailable-summary"));
+            result.Files.Should().Contain(f => f.RelativePath.EndsWith("UndocumentedThing.md") && f.Contents.Contains("Documentation summary unavailable"));
         }
         finally
         {
