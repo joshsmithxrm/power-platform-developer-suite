@@ -202,7 +202,11 @@ public sealed class DaemonTestFixture : IAsyncLifetime, IAsyncDisposable
                 }
             }
         }
-        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            // Fixture-owned cancellation completes the drain normally; other read faults propagate.
+            return;
+        }
         // No stderr content is accumulated, printed, or written to evidence.
     }
 

@@ -402,13 +402,16 @@ namespace PPDS.Migration.Export
                     }
 
                     if (options.MaxRecordsPerEntity.HasValue)
+                    {
                         cancellationToken.ThrowIfCancellationRequested();
-                    if (options.MaxRecordsPerEntity.HasValue &&
-                        (response.Entities.Count > remaining ||
-                         (response.MoreRecords && (response.Entities.Count == 0 || response.Entities.Count == remaining))))
-                        throw new InvalidOperationException("Bounded export exceeded its row budget or received an unsafe paging response; no rows were truncated.");
-                    if (options.MaxRecordsPerEntity.HasValue && response.MoreRecords && string.IsNullOrWhiteSpace(response.PagingCookie))
-                        throw new InvalidOperationException("Bounded export requires a nonempty paging cookie before continuation; simple paging is not supported.");
+                        var exceedsBudget = response.Entities.Count > remaining;
+                        var cannotContinue = response.MoreRecords &&
+                            (response.Entities.Count == 0 || response.Entities.Count == remaining);
+                        if (exceedsBudget || cannotContinue)
+                            throw new InvalidOperationException("Bounded export exceeded its row budget or received an unsafe paging response; no rows were truncated.");
+                        if (response.MoreRecords && string.IsNullOrWhiteSpace(response.PagingCookie))
+                            throw new InvalidOperationException("Bounded export requires a nonempty paging cookie before continuation; simple paging is not supported.");
+                    }
 
                     records.AddRange(response.Entities);
 

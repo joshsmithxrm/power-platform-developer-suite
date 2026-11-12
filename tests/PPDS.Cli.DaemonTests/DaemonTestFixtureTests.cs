@@ -337,7 +337,13 @@ public sealed class DaemonTestFixtureTests
         finally
         {
             reader.Stop(); // Only test teardown can end a broken implementation's endless fake.
-            try { await fixture.DisposeAsync().WaitAsync(TimeSpan.FromSeconds(10)); } catch (DaemonFixtureException) { }
+            try { await fixture.DisposeAsync().WaitAsync(TimeSpan.FromSeconds(10)); }
+            catch (DaemonFixtureException)
+            {
+                // Preserve a body failure while verifying teardown recorded its own failure.
+                Assert.True(fixture.RequiresManualReview);
+                Assert.NotNull(fixture.PrimaryCause);
+            }
             RemoveOwnedDirectory(fixture);
         }
     }
@@ -471,9 +477,13 @@ public sealed class DaemonTestFixtureTests
             }
             finally
             {
-                pendingExit.TrySetResult();
-                pendingReady.TrySetResult();
-                registration.Dispose();
+                // Capture the registration assigned by readiness, not its initial default value.
+                // Release the controlled operations before disposing it, as in the original order.
+                using (registration)
+                {
+                    pendingExit.TrySetResult();
+                    pendingReady.TrySetResult();
+                }
                 RemoveOwnedDirectory(fixture);
             }
         }).WaitAsync(TimeSpan.FromSeconds(15));
@@ -534,7 +544,13 @@ public sealed class DaemonTestFixtureTests
         }
         finally
         {
-            try { await fixture.DisposeAsync(); } catch (DaemonFixtureException) { }
+            try { await fixture.DisposeAsync(); }
+            catch (DaemonFixtureException)
+            {
+                // Preserve a body failure while verifying teardown recorded its own failure.
+                Assert.True(fixture.RequiresManualReview);
+                Assert.NotNull(fixture.PrimaryCause);
+            }
             if (fixture.StopEvidence?.ExitConfirmed == true) RemoveOwnedDirectory(fixture);
         }
     }
