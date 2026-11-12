@@ -110,7 +110,7 @@ public sealed class PluginDiffReconciliationTests
                 f.Step.RunAsUser = "operator@example.invalid";
                 f.Env.ImpersonatingUserId = Guid.Parse(actual);
                 f.Service.Setup(s => s.ResolveRunAsUserAsync(f.Step.RunAsUser, It.IsAny<CancellationToken>()))
-                    .ReturnsAsync((Guid?)Guid.Parse(expected));
+                    .ReturnsAsync(Guid.Parse(expected));
                 break;
             case "asyncAutoDelete":
                 f.Step.Mode = f.Env.Mode = "Asynchronous";
