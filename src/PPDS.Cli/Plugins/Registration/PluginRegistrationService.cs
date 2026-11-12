@@ -1743,7 +1743,7 @@ public sealed partial class PluginRegistrationService : IPluginRegistrationServi
             entity["impersonatinguserid"] = userId.HasValue ? new EntityReference(SystemUser.EntityLogicalName, userId.Value) : null;
         }
         if (!entity.Attributes.Keys.Any(key => key != SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId)) return;
-        if (!desired.ContainsKey("invocationSource"))
+        if (!desired.TryGetValue("invocationSource", out var expectedInvocationSource))
         {
             await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
             await UpdateAsync(entity, client, cancellationToken);
@@ -1760,7 +1760,7 @@ public sealed partial class PluginRegistrationService : IPluginRegistrationServi
                     () => UpdateAsync(entity, client, cancellationToken), cancellationToken);
             }
             await PluginStepUpdateVerificationService.VerifyInvocationSourceAsync(_pool, stepId,
-                (int)MapInvocationSourceToValue((string?)desired["invocationSource"]), cancellationToken);
+                (int)MapInvocationSourceToValue((string?)expectedInvocationSource), cancellationToken);
         }
         catch (Exception ex)
         {
