@@ -200,7 +200,7 @@ public static class OptionSetCommand
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Validate only, do not persist changes",
+            Description = MetadataDryRunScope.PublisherHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -358,7 +358,7 @@ public static class OptionSetCommand
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Validate only, do not persist changes",
+            Description = MetadataDryRunScope.InputsHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -683,7 +683,7 @@ public static class OptionSetCommand
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Validate only, do not persist changes",
+            Description = MetadataDryRunScope.RequestedValueHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -840,7 +840,7 @@ public static class OptionSetCommand
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Validate only, do not persist changes",
+            Description = MetadataDryRunScope.OptionHelp,
             DefaultValueFactory = _ => false
         };
 

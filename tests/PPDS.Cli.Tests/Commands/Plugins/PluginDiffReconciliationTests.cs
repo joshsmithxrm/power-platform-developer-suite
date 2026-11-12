@@ -68,6 +68,88 @@ public sealed class PluginDiffReconciliationTests
             .Concat(result.ModifiedImages.SelectMany(i => i.Changes)), c => c.Property == property);
     }
 
+    [Theory]
+    [InlineData("name", "new-handler", "handler")]
+    [InlineData("executionOrder", "7", "1")]
+    [InlineData("enabled", "false", "true")]
+    [InlineData("deployment", "Both", "ServerOnly")]
+    [InlineData("invocationSource", "Internal", "Parent")]
+    [InlineData("filteringAttributes", "name,telephone1", "oldattribute")]
+    [InlineData("unsecureConfiguration", "(redacted)", "(redacted)")]
+    [InlineData("description", "new description", "old description")]
+    [InlineData("runAsUser", "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222")]
+    [InlineData("asyncAutoDelete", "true", "false")]
+    [InlineData("canBeBypassed", "false", "true")]
+    [InlineData("canUseReadOnlyConnection", "true", "false")]
+    [InlineData("imageType", "PostImage", "PreImage")]
+    [InlineData("attributes", "telephone1", "name")]
+    [InlineData("entityAlias", "alias", "before")]
+    [InlineData("messagePropertyName", "Id", "Target")]
+    [InlineData("imageDescription", "new description", "old description")]
+    public async Task RealCommand_EachManagedFieldDifference_ReportsExpectedActualAndDriftExit(
+        string field, string expected, string actual)
+    {
+        var f = Fixture();
+        switch (field)
+        {
+            case "name": f.Step.Name = "new-handler"; break;
+            case "executionOrder": f.Step.ExecutionOrder = 7; break;
+            case "enabled": f.Step.Enabled = false; break;
+            case "deployment": f.Step.Deployment = "2"; break;
+            case "invocationSource": f.Step.InvocationSource = "-1"; break;
+            case "filteringAttributes":
+                f.Step.FilteringAttributes = " telephone1,NAME,name ";
+                f.Env.FilteringAttributes = "oldattribute";
+                break;
+            case "unsecureConfiguration":
+                f.Step.UnsecureConfiguration = "PRIVATE-EXPECTED";
+                f.Env.Configuration = "PRIVATE-ACTUAL";
+                break;
+            case "description": f.Step.Description = expected; f.Env.Description = actual; break;
+            case "runAsUser":
+                f.Step.RunAsUser = "operator@example.invalid";
+                f.Env.ImpersonatingUserId = Guid.Parse(actual);
+                f.Service.Setup(s => s.ResolveRunAsUserAsync(f.Step.RunAsUser, It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(Guid.Parse(expected));
+                break;
+            case "asyncAutoDelete":
+                f.Step.Mode = f.Env.Mode = "Asynchronous";
+                f.Step.AsyncAutoDelete = true;
+                f.Env.AsyncAutoDelete = false;
+                break;
+            case "canBeBypassed": f.Step.CanBeBypassed = false; break;
+            case "canUseReadOnlyConnection": f.Step.CanUseReadOnlyConnection = true; break;
+            case "imageType": f.Image.ImageType = "1"; break;
+            case "attributes": f.Image.Attributes = " TELEPHONE1,telephone1 "; break;
+            case "entityAlias": f.Image.EntityAlias = expected; break;
+            case "messagePropertyName": f.Image.MessagePropertyName = expected; break;
+            case "imageDescription": f.Image.Description = expected; f.EnvImage.Description = actual; break;
+        }
+
+        var input = JsonSerializer.Serialize(new PluginRegistrationConfig { Version = "2.0", Assemblies = [f.Config] });
+        var (exit, output, error) = await Invoke(f.Service.Object, input, json: true);
+        Assert.Equal(1, exit);
+        Assert.Empty(error);
+        Assert.DoesNotContain("PRIVATE-EXPECTED", output);
+        Assert.DoesNotContain("PRIVATE-ACTUAL", output);
+        using var document = JsonDocument.Parse(output);
+        var metadata = document.RootElement.GetProperty("metadata");
+        Assert.Equal("drift", metadata.GetProperty("status").GetString());
+        Assert.True(metadata.GetProperty("isComplete").GetBoolean());
+        Assert.True(metadata.GetProperty("hasDrift").GetBoolean());
+        var assembly = Assert.Single(document.RootElement.GetProperty("data").EnumerateArray());
+        Assert.Empty(assembly.GetProperty("missingSteps").EnumerateArray());
+        Assert.Empty(assembly.GetProperty("orphanedSteps").EnumerateArray());
+        Assert.Empty(assembly.GetProperty("missingImages").EnumerateArray());
+        Assert.Empty(assembly.GetProperty("orphanedImages").EnumerateArray());
+        var change = Assert.Single(assembly.GetProperty("modifiedSteps").EnumerateArray()
+            .Concat(assembly.GetProperty("modifiedImages").EnumerateArray())
+            .SelectMany(modified => modified.GetProperty("changes").EnumerateArray()));
+        Assert.Equal(field == "imageDescription" ? "description" : field, change.GetProperty("property").GetString());
+        Assert.Equal(expected, change.GetProperty("expected").GetString());
+        Assert.Equal(actual, change.GetProperty("actual").GetString());
+    }
+
     [Fact]
     public async Task OmittedOptionalFields_PreserveAndDoNotCompare()
     {

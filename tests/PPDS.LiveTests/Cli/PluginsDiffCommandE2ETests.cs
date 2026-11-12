@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using PPDS.LiveTests.Infrastructure;
 using Xunit;
@@ -118,7 +119,8 @@ public class PluginsDiffCommandE2ETests(ITestOutputHelper output) : CliE2ETestBa
             var maxWait = PropagationWait.TimeoutFromEnvironment(
                 Environment.GetEnvironmentVariable("PPDS_TEST_PROPAGATION_TIMEOUT_SECONDS"));
             var poll = await PropagationWait.UntilAsync(
-                token => RunCliWithCancellationAsync(token, "plugins", "diff", "--config", TestRegistrationsPath),
+                token => RunCliWithCancellationAsync(token, "plugins", "diff", "--config", TestRegistrationsPath,
+                    "--output-format", "json"),
                 result => result.ExitCode == 0,
                 maxWait, TimeSpan.FromSeconds(2));
             poll.Succeeded.Should().BeTrue(
@@ -127,7 +129,11 @@ public class PluginsDiffCommandE2ETests(ITestOutputHelper output) : CliE2ETestBa
                 $"last exit: {poll.Last?.ExitCode.ToString() ?? "(none)"}; error: {poll.LastError ?? "(none)"}; " +
                 $"stdout: {poll.Last?.StdOut ?? "(none)"}; stderr/drift: {poll.Last?.StdErr ?? "(none)"}");
             var diffResult = poll.Last!;
-            diffResult.StdErr.Should().Contain("No drift");
+            using var comparison = JsonDocument.Parse(diffResult.StdOut);
+            var metadata = comparison.RootElement.GetProperty("metadata");
+            metadata.GetProperty("status").GetString().Should().Be("match");
+            metadata.GetProperty("isComplete").GetBoolean().Should().BeTrue();
+            metadata.GetProperty("hasDrift").GetBoolean().Should().BeFalse();
         });
     }
 

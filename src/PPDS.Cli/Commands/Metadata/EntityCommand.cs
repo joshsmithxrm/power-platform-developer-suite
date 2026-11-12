@@ -315,7 +315,7 @@ public static class EntityCommand
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Validate only, do not persist changes",
+            Description = MetadataDryRunScope.PublisherHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -498,7 +498,7 @@ public static class EntityCommand
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Validate only, do not persist changes",
+            Description = MetadataDryRunScope.InputsHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -868,7 +868,7 @@ public static class EntityCommand
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Validate only, do not persist changes",
+            Description = MetadataDryRunScope.DraftValueHelp,
             DefaultValueFactory = _ => false
         };
 

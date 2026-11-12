@@ -1,7 +1,7 @@
 # Metadata Authoring
 
 **Status:** Implemented (extending — #1159/#1160/#1161 ratified, in implementation; AC-37–AC-60 reach ✅ as their tests land; #1208 positional `<entity>` shipped, AC-61/AC-62)
-**Last Updated:** 2026-11-08
+**Last Updated:** 2026-11-12
 **Code:** [src/PPDS.Dataverse/Metadata/](../src/PPDS.Dataverse/Metadata/) | [src/PPDS.Cli/Commands/Metadata/](../src/PPDS.Cli/Commands/Metadata/) | [src/PPDS.Cli/Services/Metadata/](../src/PPDS.Cli/Services/Metadata/) | [src/PPDS.Mcp/Tools/](../src/PPDS.Mcp/Tools/) | [src/PPDS.Cli/Tui/Screens/](../src/PPDS.Cli/Tui/Screens/) | [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
 **Surfaces:** CLI, TUI, Extension, MCP
 
@@ -598,6 +598,8 @@ The existing version-1 JSON envelope and `data.preview` nesting remain. The sche
 
 Other dry-run routes preserve existing data fields and add `metadata.preview` for completed input/publisher checks, resolved option existence, requested-only SDK allocation or provisional status/local option values. Existing global/local removal `data.preview` remains. No derived or placeholder value is described as persisted. Status update/removal and legacy choice add/update/removal still expose no dry-run flag. Their existing behavior is preserved. Canonical JSON diagnostics stay on stdout as data; text diagnostics and alias deprecation notices stay on stderr.
 
+Non-delete `--dry-run` help, including deprecated aliases, names the checks applicable to that route and explicitly leaves dependencies and server feasibility unchecked. Global option-add help states that supplied values are requested and Dataverse assigns the final value only when changes are applied; it does not imply publisher or target metadata reads. Status/local option-add help describes derived values as provisional. These help descriptions do not change execution or add metadata reads.
+
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
 | AC-66 | All five canonical schema-delete commands and three deprecated aliases report observed dependencies, nonzero blocked/incomplete status and unchecked server feasibility in help/text/JSON | `MetadataDeletePreviewTests.SchemaDelete_ReportsObservedDependencyScopeWithoutWrites`, `PreviewHelp_StatesLimitations` | ✅ |
@@ -622,7 +624,7 @@ The common 101-case mock baseline has 10 passing safety/input controls and 91 ad
 | AC-119 | Actual service deletion rechecks after preview; force cannot bypass dependencies; guards/required inputs precede checkout and cache invalidation follows only mutation | `MetadataDeleteDependencyTests.ActualDelete_ReadsBeforeExactlyOneOriginalDelete`, `PreviewThenActual_RechecksAndRefusesNewBlockers`, `ExistingInputAndSafetyRefusals_PrecedeAnyCheckout`, `MetadataDeleteDependencyCommandTests.Force_DoesNotBypassDependencyRefusal` | ✅ |
 | AC-120 | All eight canonical/legacy routes retain version-1 data/preview while text/JSON reports blocked/incomplete nonzero and explicit unchecked feasibility | `MetadataDeleteDependencyCommandTests.AllAliases_BlockedDryRunShowsComponentsAndNonzero`, `AllAliases_EmptyCompleteObservationDoesNotClaimFeasibility`, `AllAliases_IncompleteDependencyResultIsNeverSuccess` | ✅ |
 | AC-121 | Old five Task signatures/constructor and public command factories remain; missing optional preview capability fails closed | `MetadataDeleteDependencyTests.ExistingTaskDeleteContracts_RetainOptionalPreviewCapability`, `MetadataDryRunScopeCommandTests.ServiceWithoutOptionalCapability_FailsClosedBeforeAnyDeleteCall` | ✅ |
-| AC-122 | All 17 other explicit service branches perform only documented reads; 23 exposed canonical/alias dry-run routes report real scope in text/JSON, preserve existing data and exact linked token, and existing no-dry-run wrappers retain their flags | `MetadataOtherDryRunContractTests.EveryBranch_OnlyPerformsItsDocumentedReads_NoCacheOrWrite`, `ReadCancellation_PreservesExactCauseTokenAndReleasesLease`, `MetadataDryRunScopeCommandTests.RealHandlers_ReportOnlyCompletedChecksAndPreserveData`, `ExistingWrappersWithoutDryRun_KeepFlagsAndForwardActualToken` | ✅ |
+| AC-122 | All 17 other explicit service branches perform only documented reads; 23 canonical/alias dry-run handler cases across 22 command paths report real scope in help/text/JSON, preserve existing data and exact linked token, and existing no-dry-run wrappers retain their flags | `MetadataOtherDryRunContractTests.EveryBranch_OnlyPerformsItsDocumentedReads_NoCacheOrWrite`, `ReadCancellation_PreservesExactCauseTokenAndReleasesLease`, `MetadataDryRunScopeCommandTests.RealHandlers_ReportOnlyCompletedChecksAndPreserveData`, `DryRunHelp_StatesCompletedChecksAndUncheckedConstraints`, `ExistingWrappersWithoutDryRun_KeepFlagsAndForwardActualToken` | ✅ |
 
 ### Draft-aware option allocation (#1531)
 

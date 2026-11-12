@@ -156,7 +156,7 @@ public static class AttributeCommandGroup
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Validate only, do not persist changes",
+            Description = MetadataDryRunScope.PublisherHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -524,7 +524,7 @@ public static class AttributeCommandGroup
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = "Validate only, do not persist changes",
+            Description = MetadataDryRunScope.InputsHelp,
             DefaultValueFactory = _ => false
         };
 
@@ -876,7 +876,7 @@ public static class AttributeCommandGroup
         var columnOption = new Option<string>("--column", "-c") { Description = "Logical name of the Choice/Choices column", Required = true };
         var optionOption = new Option<string>("--option") { Description = "Option to add: \"Label[:Value][:#Color]\"", Required = true };
         var publishOption = new Option<bool>("--publish") { Description = "Publish the entity after the change", DefaultValueFactory = _ => false };
-        var dryRunOption = new Option<bool>("--dry-run") { Description = "Validate only, do not persist changes", DefaultValueFactory = _ => false };
+        var dryRunOption = new Option<bool>("--dry-run") { Description = MetadataDryRunScope.DraftValueHelp, DefaultValueFactory = _ => false };
 
         var command = new Command("add-option", "Add an option to a column's local option set")
         {
@@ -977,7 +977,7 @@ public static class AttributeCommandGroup
         var newLabelOption = new Option<string?>("--new-label") { Description = "New label to apply" };
         var colorOption = new Option<string?>("--color") { Description = "New hex color (e.g. #FF0000)" };
         var publishOption = new Option<bool>("--publish") { Description = "Publish the entity after the change", DefaultValueFactory = _ => false };
-        var dryRunOption = new Option<bool>("--dry-run") { Description = "Validate only, do not persist changes", DefaultValueFactory = _ => false };
+        var dryRunOption = new Option<bool>("--dry-run") { Description = MetadataDryRunScope.OptionHelp, DefaultValueFactory = _ => false };
 
         var command = new Command("update-option", "Update an option (label/color) on a column's local option set")
         {

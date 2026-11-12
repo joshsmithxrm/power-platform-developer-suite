@@ -50,6 +50,50 @@ public sealed class MetadataDryRunScopeCommandTests(ITestOutputHelper output)
             foreach (var json in new[] { false, true }) yield return [c.Route, c.Method, c.Scope, c.Extra, json];
     }
 
+    public static IEnumerable<object[]> HelpRoutes() => Routes()
+        .DistinctBy(row => (string)row[0])
+        .Select(row => new object[] { row[0], row[2] });
+
+    [Theory]
+    [MemberData(nameof(HelpRoutes))]
+    [Trait("AC", "AC-122")]
+    public void DryRunHelp_StatesCompletedChecksAndUncheckedConstraints(string route, string scope)
+    {
+        var command = MetadataCommandGroup.Create(_ => throw new InvalidOperationException("Help must not initialize a connection."));
+        foreach (var segment in route.Split(' '))
+            command = command.Subcommands.Single(child => child.Name == segment);
+        var help = command.Options.Single(option => option.Name == "--dry-run").Description!;
+
+        Assert.Contains("dependencies", help, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(route.EndsWith("remove-option", StringComparison.Ordinal) ? "deletion feasibility" : "server feasibility", help);
+        Assert.Contains("not checked", help);
+        Assert.Contains("No changes persisted", help);
+        Assert.DoesNotContain("Validation passed", help);
+        switch (scope)
+        {
+            case "input-and-publisher":
+                Assert.Contains("inputs and solution publisher information only", help);
+                Assert.Contains("Target existence", help);
+                break;
+            case "required-inputs":
+                Assert.Contains("required inputs only", help);
+                Assert.Contains("Target existence", help);
+                Assert.DoesNotContain("publisher", help);
+                if (route == "optionset add-option")
+                    Assert.Contains("Dataverse assigns the final value only when changes are applied", help);
+                break;
+            case "option-existence":
+                Assert.Contains("target option existence only", help);
+                break;
+            case "option-data-and-draft-value":
+                Assert.Contains("Read option metadata", help);
+                Assert.Contains("provisional", help);
+                break;
+            default:
+                throw new InvalidOperationException($"Unrecognized preview scope: {scope}");
+        }
+    }
+
     [Theory]
     [MemberData(nameof(Routes))]
     [Trait("AC", "AC-122")]

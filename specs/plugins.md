@@ -1,7 +1,7 @@
 # Plugin System
 
 **Status:** Draft
-**Last Updated:** 2026-11-02
+**Last Updated:** 2026-11-12
 **Code:** [src/PPDS.Plugins/](../src/PPDS.Plugins/) | [src/PPDS.Cli/Plugins/](../src/PPDS.Cli/Plugins/) | [src/PPDS.Extension/src/panels/](../src/PPDS.Extension/src/panels/)
 **Surfaces:** All
 
@@ -688,9 +688,11 @@ remain usable. Register mode/rank defaults and non-null result fields stay compa
 Functional identity includes type/message/primary+secondary entity/stage/mode.
 Version 2 extraction treats fresh source/default intent as authoritative rather than
 inheriting legacy optional overrides/reset lists; v1 retains its deployment overlay.
-Extra steps/images remain drift. Neither omission nor an empty image list authorizes
-independent image deletion. Version 2 rejects --clean before connection; v1 keeps
-its existing cleanup scope. No parent cascade/ownership/rollback guarantee is made.
+Extra steps/images remain drift during ordinary deployment. Version 2 `--clean`
+requires an explicit complete image list on every configured step; `images: []`
+authorizes clearing that step's owned images under the image-only cleanup contract
+below. Omission is rejected before connection. Version 1 keeps its existing cleanup
+scope; version 2 retains all parent registrations. No rollback guarantee is made.
 Assembly/package content, solutions and Custom APIs are outside nonsecret equality.
 
 Diff reads all pages and reports checked/unmanaged/unsupported/excluded coverage.
@@ -738,7 +740,7 @@ ppds plugins deploy registrations.json --clean --dry-run
 
 | Option | Description |
 |--------|-------------|
-| `--clean` | Remove orphaned steps; does not independently prune images on retained steps |
+| `--clean` | Version 1: legacy orphan-step cleanup. Version 2: prune unlisted owned images on configured steps with explicit complete image lists; retain parent registrations. |
 | `--dry-run` | Preview changes without applying |
 
 ### ppds plugins diff
@@ -1131,7 +1133,7 @@ The dialog accepts a configurable `impactSummary` string populated from `Unregis
 
 - **Assembly not found**: Use `ppds plugins list` to get valid IDs
 - **Cascade constraint**: Add `--force` to unregister children first
-- **Drift detected**: Review `plugins diff --config <file>` coverage and use the matching registration contract. Extra images are reported, not independently pruned; `--clean` is not a whole-registration sync guarantee.
+- **Drift detected**: Review `plugins diff --config <file>` coverage and use the matching registration contract. Ordinary deployment reports extra images without pruning them. Version 2 cleanup requires explicit complete image lists and prunes only owned images on configured steps; version 1 keeps legacy cleanup. `--clean` is not a whole-registration sync guarantee.
 
 ### Deployment diagnostics and cancellation
 
@@ -1150,7 +1152,7 @@ The dialog accepts a configurable `impactSummary` string populated from `Unregis
 | AC-76 | Partial CLI/register and RPC callers preserve omitted and legacy null/empty placeholders; established Update empty description/filtering/image attributes remain clears. Explicit resets are validated, supplied booleans retain false, and CallingUser clears identity without erasing unrelated unsupported fields. | `PartialUpsert_PreservesFlagsStateModeRankAndImageOverrides`, `PartialUpdate_ResetIntentClearsOnlyRequestedFields`, `RpcLegacyPositionalArray_PreservesExplicitTargetAndProfile`, `RpcUpdateStep_EmptyStageAndModePreservePreOperationWithoutWrites`, `Compatibility_UpdateStep_EmptyDescriptionWritesExactEmpty`, `Compatibility_UpdateImage_EmptyAttributesWritesExactEmpty` | ✅ |
 | AC-77 | Extraction, schema and explicit output serialization preserve versioned default/reset intent. V1 retains optional annotation overlays; v2 fresh source defaults are authoritative and do not inherit prior optional values/reset lists. | `Extraction_PreservesExplicitDefaultsAndResets_WithoutResurrectingMergedValues`, `ResetAndFreshValuePrecedence_SurvivesMerge`, `CanonicalIdentityAliases_MergeEquivalentSettings`, `MalformedExistingJson_ReturnsSafeValidationError`, `ExtractionVersion_ControlsLegacyOverlayAndResetInheritance` | ✅ |
 | AC-78 | Comparison reads every managed nonsecret step/image field with nullable capability-aware DTOs; unreadable or unsupported requested fields cannot default into a clean match. | `ListReads_AllManagedNonsecretColumns_MapsValuesAndPages`, `MissingNonnullableReadValues_AreUnavailable_NotAssumedDefaults`, `UnavailableManagedField_IsIncompleteRatherThanEqualDefault` | ✅ |
-| AC-79 | Application-service drift uses the shared managed-state normalizer and functional identity, compares all requested applicable nonsecret settings and retains cancellation; missing/orphaned rows remain visible. | `ManagedProperties_ReportDifferences`, `ManagedFieldEquality_IsCheckedAndComplete`, `IdentityAliases_UseSharedCanonicalState`, `DuplicateImageNames_RetainMissingOrphanedAndUniqueImageDrift` | ✅ |
+| AC-79 | Application-service drift uses the shared managed-state normalizer and functional identity, compares all requested applicable nonsecret settings and retains cancellation; missing/orphaned rows remain visible. | `ManagedProperties_ReportDifferences`, `ManagedFieldEquality_IsCheckedAndComplete`, `RealCommand_EachManagedFieldDifference_ReportsExpectedActualAndDriftExit`, `IdentityAliases_UseSharedCanonicalState`, `DuplicateImageNames_RetainMissingOrphanedAndUniqueImageDrift` | ✅ |
 | AC-80 | Comparison reports checked, intentionally unmanaged, unsupported/unverifiable fields and excluded records; unknown supplied registration properties cannot be silently verified, while documented metadata is outside server equality. | `KnownMetadataAndScope_DoNotInventServerEquality`, `UnavailableManagedField_IsIncompleteRatherThanEqualDefault`, `IdentityCollision_IsIncompleteEvenWhenPositionalPairsMatch` | ✅ |
 | AC-81 | Secure null/omission preserves and is visibly excluded; supplied secure values are unknown/incomplete rather than verified by reference presence; secret values/hashes and unsecure configuration contents are absent from comparison output. | `SecureConfig_NullPreserves_EmptyStringWritesWithoutRetrievingValue`, `SecureConfiguration_UnknownWhenSupplied_AlwaysExcluded`, `RealCommand_UnsecureChange_RedactsAllOutput` | ✅ |
 | AC-82 | Profile-free actual command JSON/text paths return 0 only for complete matching managed comparisons, 1 for completed drift and 2 for incomplete comparison including drift plus unknown coverage; existing specific errors retain their codes. | `RealCommand_JsonAndExitCode_ReportTruthfulStatus`, `RealCommand_TextMatch_DoesNotClaimWholeEnvironmentEquality`, `RealCommand_SpecificErrorsRetainPrecedence` | ✅ |
