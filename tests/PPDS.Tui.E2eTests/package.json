@@ -5,17 +5,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npx @microsoft/tui-test",
-    "test:update": "npx @microsoft/tui-test --updateSnapshot",
-    "test:headed": "npx @microsoft/tui-test"
+    "test": "node tools/run-isolated-tests.mjs",
+    "test:update": "node tools/run-isolated-tests.mjs --updateSnapshot",
+    "test:headed": "node tools/run-isolated-tests.mjs"
   },
   "devDependencies": {
     "@microsoft/tui-test": "^0.0.1-rc.5",
-    "@playwright/test": "^1.40.0",
+    "@playwright/test": "1.64.1",
     "@xterm/xterm": "^5.5.0"
   },
   "overrides": {
     "@microsoft/tui-test": {
+      "@homebridge/node-pty-prebuilt-multiarch": "0.14.1",
       "glob": "^14.0.2"
     }
   }

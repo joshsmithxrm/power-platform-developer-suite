@@ -38,7 +38,7 @@ def test_extension_e2e_matrix_is_blocking_and_keeps_its_supported_versions():
     assert e2e_step["env"]["VSCODE_E2E_VERSION"] == "${{ matrix.vscode-version }}"
     assert "xvfb-run" in e2e_step["run"]
     assert "npm run test:e2e" in e2e_step["run"]
-    assert _step(job, "Setup Node.js")["with"]["node-version"] == "22"
+    assert _step(job, "Setup Node.js")["with"]["node-version-file"] == ".nvmrc"
 
 
 def test_build_status_consumes_the_blocking_e2e_result():

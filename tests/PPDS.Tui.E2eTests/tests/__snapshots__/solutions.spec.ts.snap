@@ -4,7 +4,7 @@ exports[`Solutions Keyboard Navigation › Tab cycles through controls | 1`] = S
 ╭────────────────────────────────────────────────────────────────────────────────╮
 │┌ PPDS - Power Platform Developer Suite ───────────────────────────────────────┐│
 ││ File  Tools  Help                                                            ││
-││[ 1: Solutions [DEV] ] [+]                                                    ││
+││[ 1: Solutions ] [+]                                                          ││
 ││┌ Solutions ─────────────────────────────────────────────────────────────────┐││
 │││┌ Filter ──────────────────────────────────────────────────────────────────┐│││
 ││││                                                       √ Include Managed  ││││
@@ -26,11 +26,11 @@ exports[`Solutions Keyboard Navigation › Tab cycles through controls | 1`] = S
 │││                                                                            │││
 │││                                                                            │││
 │││                                                                            │││
-│││Loading solutions...                                                        │││
+│││No environment selected. Use the status bar to connect.                     │││
 ││└────────────────────────────────────────────────────────────────────────────┘││
 ││                                                                              ││
 ││                                                                              ││
-││ Profile: PPDS (josh@powerplatformdev…    Environment: PPDS Demo - Dev [DEV] ▼││
+││ Profile: None ▼                                           Environment: None ▼││
 │└──────────────────────────────────────────────────────────────────────────────┘│
 ╰────────────────────────────────────────────────────────────────────────────────╯
 `;
@@ -39,7 +39,7 @@ exports[`Solutions Screen › navigates to Solutions via Tools menu | 1`] = Stri
 ╭────────────────────────────────────────────────────────────────────────────────╮
 │┌ PPDS - Power Platform Developer Suite ───────────────────────────────────────┐│
 ││ File  Tools  Help                                                            ││
-││[ 1: Solutions [DEV] ] [+]                                                    ││
+││[ 1: Solutions ] [+]                                                          ││
 ││┌ Solutions ─────────────────────────────────────────────────────────────────┐││
 │││┌ Filter ──────────────────────────────────────────────────────────────────┐│││
 ││││                                                       √ Include Managed  ││││
@@ -61,11 +61,11 @@ exports[`Solutions Screen › navigates to Solutions via Tools menu | 1`] = Stri
 │││                                                                            │││
 │││                                                                            │││
 │││                                                                            │││
-│││Loading solutions...                                                        │││
+│││No environment selected. Use the status bar to connect.                     │││
 ││└────────────────────────────────────────────────────────────────────────────┘││
 ││                                                                              ││
 ││                                                                              ││
-││ Profile: PPDS (josh@powerplatformdev…    Environment: PPDS Demo - Dev [DEV] ▼││
+││ Profile: None ▼                                           Environment: None ▼││
 │└──────────────────────────────────────────────────────────────────────────────┘│
 ╰────────────────────────────────────────────────────────────────────────────────╯
 `;

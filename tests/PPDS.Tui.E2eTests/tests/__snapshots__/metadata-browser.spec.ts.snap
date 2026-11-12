@@ -4,7 +4,7 @@ exports[`Metadata Browser Keyboard Navigation › Tab cycles through controls | 
 ╭────────────────────────────────────────────────────────────────────────────────╮
 │┌ PPDS - Power Platform Developer Suite ───────────────────────────────────────┐│
 ││ File  Tools  Help                                                            ││
-││[ 1: Metadata [DEV] ] [+]                                                     ││
+││[ 1: Metadata ] [+]                                                           ││
 ││┌ Metadata ──────────────────────────────────────────────────────────────────┐││
 │││┌ Entities ──────────────┐┌ Details ───────────────────────────────────────┐│││
 ││││                        ││[ Attributes ] [ Relationships ] [ Keys ] [ Priv││││
@@ -26,11 +26,11 @@ exports[`Metadata Browser Keyboard Navigation › Tab cycles through controls | 
 ││││                        ││                                                ││││
 ││││                        ││                                                ││││
 │││└────────────────────────┘└────────────────────────────────────────────────┘│││
-│││Loading entities...                                                         │││
+│││No environment selected. Use the status bar to connect.                     │││
 ││└────────────────────────────────────────────────────────────────────────────┘││
 ││                                                                              ││
 ││                                                                              ││
-││ Profile: PPDS (josh@powerplatformdev…    Environment: PPDS Demo - Dev [DEV] ▼││
+││ Profile: None ▼                                           Environment: None ▼││
 │└──────────────────────────────────────────────────────────────────────────────┘│
 ╰────────────────────────────────────────────────────────────────────────────────╯
 `;
@@ -39,7 +39,7 @@ exports[`Metadata Browser Screen › navigates to Metadata Browser via Tools men
 ╭────────────────────────────────────────────────────────────────────────────────╮
 │┌ PPDS - Power Platform Developer Suite ───────────────────────────────────────┐│
 ││ File  Tools  Help                                                            ││
-││[ 1: Metadata [DEV] ] [+]                                                     ││
+││[ 1: Metadata ] [+]                                                           ││
 ││┌ Metadata ──────────────────────────────────────────────────────────────────┐││
 │││┌ Entities ──────────────┐┌ Details ───────────────────────────────────────┐│││
 ││││                        ││[ Attributes ] [ Relationships ] [ Keys ] [ Priv││││
@@ -61,11 +61,11 @@ exports[`Metadata Browser Screen › navigates to Metadata Browser via Tools men
 ││││                        ││                                                ││││
 ││││                        ││                                                ││││
 │││└────────────────────────┘└────────────────────────────────────────────────┘│││
-│││Loading entities...                                                         │││
+│││No environment selected. Use the status bar to connect.                     │││
 ││└────────────────────────────────────────────────────────────────────────────┘││
 ││                                                                              ││
 ││                                                                              ││
-││ Profile: PPDS (josh@powerplatformdev…    Environment: PPDS Demo - Dev [DEV] ▼││
+││ Profile: None ▼                                           Environment: None ▼││
 │└──────────────────────────────────────────────────────────────────────────────┘│
 ╰────────────────────────────────────────────────────────────────────────────────╯
 `;
