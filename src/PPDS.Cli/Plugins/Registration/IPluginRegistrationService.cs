@@ -305,6 +305,18 @@ public interface IPluginRegistrationService
         => Task.FromException<PluginPackageResolution>(new PpdsException(ErrorCodes.Operation.NotSupported,
             "This registration service does not support verified package identity resolution."));
 
+    /// <summary>Resolves existing package identity for cleanup; absence is not a plan to create a package.</summary>
+    /// <param name="nupkgContent">Exact package bytes identifying the cleanup scope.</param>
+    /// <param name="solutionName">Optional solution unique name; supplied solutions are verified.</param>
+    /// <param name="existingSelector">Optional existing package selector; an explicit missing selector remains an error.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="progress">Optional progress reporter.</param>
+    Task<PluginPackageResolution> ResolvePackageForCleanupAsync(byte[] nupkgContent,
+        string? solutionName = null, string? existingSelector = null,
+        CancellationToken cancellationToken = default, IProgressReporter? progress = null)
+        => Task.FromException<PluginPackageResolution>(new PpdsException(ErrorCodes.Operation.NotSupported,
+            "This registration service does not support verified package identity resolution for cleanup."));
+
     /// <summary>Revalidates an observation without selecting a new target or switching create/update mode.</summary>
     /// <param name="resolution">The original read-only identity observation.</param>
     /// <param name="cancellationToken">Cancellation token.</param>

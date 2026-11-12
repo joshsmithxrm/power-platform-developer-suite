@@ -443,6 +443,97 @@ public sealed class PluginPackageIdentityTests
         Assert.IsType<CreateRequest>(Assert.Single(_writes));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CleanupLookup_AbsenceIsNotCreationAndRevalidatesWithoutPublisherInference(bool withSolution)
+    {
+        var bytes = Package();
+        AddPackage("Unrelated sibling", "different_Example.Plugin", Package("Different.Artifact"));
+        var plan = await _service.ResolvePackageForCleanupAsync(bytes, withSolution ? "TestSolution" : null);
+        Assert.True(plan.IsCleanupLookup);
+        Assert.False(plan.IsCreate);
+        Assert.Null(plan.ExistingPackageId);
+        Assert.Equal("Absent", plan.MatchKind);
+        Assert.Equal("Example.Plugin", plan.RegisteredName);
+        Assert.Null(plan.RegisteredUniqueName);
+        Assert.Equal(withSolution ? _solutionId : (Guid?)null, plan.SolutionId);
+        await _service.ValidatePackageResolutionAsync(plan);
+        if (!withSolution)
+        {
+            Assert.Null(plan.PublisherPrefix);
+            Assert.Null(plan.PublisherId);
+            Assert.All(_queries, query => Assert.Equal("pluginpackage", query.EntityName));
+        }
+        Assert.Equal(0, _downloads);
+        Assert.Empty(_writes);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CleanupLookup_PresenceChangesInvalidateTheOriginalObservation(bool initiallyExists)
+    {
+        var bytes = Package();
+        if (initiallyExists) AddPackage("Friendly", "Example.Plugin", bytes);
+        var plan = await _service.ResolvePackageForCleanupAsync(bytes);
+        Assert.True(plan.IsCleanupLookup);
+        if (initiallyExists) _packages.Clear();
+        else AddPackage("New package", "Example.Plugin", bytes);
+        var error = await Assert.ThrowsAsync<PpdsException>(() => _service.ValidatePackageResolutionAsync(plan));
+        Assert.Equal(ErrorCodes.Plugin.PackageIdentityChanged, error.ErrorCode);
+        Assert.Empty(_writes);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CleanupLookup_CannotAuthorizeUploadOrAcknowledgeUpload(bool existing)
+    {
+        var bytes = Package();
+        if (existing) AddPackage("Friendly", "Example.Plugin", bytes);
+        var plan = await _service.ResolvePackageForCleanupAsync(bytes);
+        var clientCalls = _client.Invocations.Count;
+        var poolCalls = _pool.Invocations.Count;
+        // Invalid bytes would otherwise reach metadata validation. Intent refuses first.
+        var upload = await Assert.ThrowsAsync<PpdsException>(() => _service.UpsertResolvedPackageAsync(plan, []));
+        var verify = await Assert.ThrowsAsync<PpdsException>(() =>
+            _service.VerifyUploadedPackageAsync(plan, plan.ExistingPackageId ?? Guid.NewGuid()));
+        Assert.Equal(ErrorCodes.Plugin.PackageIdentityMismatch, upload.ErrorCode);
+        Assert.Equal(ErrorCodes.Plugin.PackageIdentityMismatch, verify.ErrorCode);
+        Assert.Equal(clientCalls, _client.Invocations.Count);
+        Assert.Equal(poolCalls, _pool.Invocations.Count);
+        Assert.Empty(_writes);
+    }
+
+    [Theory]
+    [InlineData("collision", ErrorCodes.Operation.Duplicate)]
+    [InlineData("stored-id", ErrorCodes.Plugin.PackageIdentityMismatch)]
+    [InlineData("unknown-solution", ErrorCodes.Validation.InvalidValue)]
+    [InlineData("managed", ErrorCodes.Validation.InvalidValue)]
+    [InlineData("missing-selector", ErrorCodes.Plugin.NotFound)]
+    public async Task CleanupLookup_PreservesTargetAndSolutionErrors(string scenario, string expectedCode)
+    {
+        var bytes = Package();
+        string? solution = null;
+        string? selector = null;
+        switch (scenario)
+        {
+            case "collision":
+                AddPackage("First", "Example.Plugin", bytes);
+                AddPackage("Second", "Example.Plugin", bytes);
+                break;
+            case "stored-id": AddPackage("Wrong artifact", "Example.Plugin", Package("Different.Artifact")); break;
+            case "unknown-solution": _solutionPresent = false; solution = "TestSolution"; break;
+            case "managed": AddPackage("Managed", "Example.Plugin", bytes, managed: true); break;
+            case "missing-selector": selector = "Missing explicit package"; break;
+        }
+        var error = await Assert.ThrowsAsync<PpdsException>(() =>
+            _service.ResolvePackageForCleanupAsync(bytes, solution, selector));
+        Assert.Equal(expectedCode, error.ErrorCode);
+        Assert.Empty(_writes);
+    }
+
     [Fact]
     public async Task InterfaceDefaults_PreserveImplementorCompatibilityAndFailClosed()
     {
@@ -457,10 +548,11 @@ public sealed class PluginPackageIdentityTests
             Assert.Equal(ErrorCodes.Operation.NotSupported, error.ErrorCode);
         }
         await Unsupported(() => mock.Object.ResolvePackageAsync([]));
+        await Unsupported(() => mock.Object.ResolvePackageForCleanupAsync([]));
         await Unsupported(() => mock.Object.ValidatePackageResolutionAsync(plan));
         await Unsupported(() => mock.Object.UpsertResolvedPackageAsync(plan, []));
         await Unsupported(() => mock.Object.VerifyUploadedPackageAsync(plan, Guid.NewGuid()));
-        foreach (var name in new[] { "ResolvePackageAsync", "ValidatePackageResolutionAsync", "UpsertResolvedPackageAsync", "VerifyUploadedPackageAsync" })
+        foreach (var name in new[] { "ResolvePackageAsync", "ResolvePackageForCleanupAsync", "ValidatePackageResolutionAsync", "UpsertResolvedPackageAsync", "VerifyUploadedPackageAsync" })
             Assert.False(typeof(IPluginRegistrationService).GetMethod(name)!.IsAbstract);
         mock.Verify(s => s.UpsertPackageAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<string?>(),
             It.IsAny<CancellationToken>()), Times.Never);

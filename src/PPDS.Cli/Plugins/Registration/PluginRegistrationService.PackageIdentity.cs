@@ -30,6 +30,24 @@ public sealed partial class PluginRegistrationService
     }
 
     /// <inheritdoc />
+    public async Task<PluginPackageResolution> ResolvePackageForCleanupAsync(byte[] nupkgContent,
+        string? solutionName = null, string? existingSelector = null,
+        CancellationToken cancellationToken = default, IProgressReporter? progress = null)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var metadata = PluginPackageMetadataReader.Read(nupkgContent);
+            return await ResolvePackageIdentityAsync(metadata.Id, metadata.Version,
+                Convert.ToHexString(SHA256.HashData(nupkgContent)), solutionName, existingSelector,
+                cancellationToken, progress, isCleanupLookup: true);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (PpdsException) { throw; }
+        catch (Exception ex) { throw PackageIdentityFailure("Package identity for cleanup could not be resolved.", ex); }
+    }
+
+    /// <inheritdoc />
     public async Task ValidatePackageResolutionAsync(PluginPackageResolution resolution,
         CancellationToken cancellationToken = default, IProgressReporter? progress = null)
     {
@@ -38,7 +56,7 @@ public sealed partial class PluginRegistrationService
             cancellationToken.ThrowIfCancellationRequested();
             var current = await ResolvePackageIdentityAsync(resolution.ArtifactId, resolution.ArtifactVersion,
                 resolution.ArtifactSha256, resolution.SolutionName, resolution.ExplicitSelector,
-                cancellationToken, progress);
+                cancellationToken, progress, resolution.IsCleanupLookup);
             // Re-observation is deliberately not a new plan. A disappeared target cannot become
             // Create, a newly appeared target cannot become Update, and names/publisher/content stay bound.
             if (current != resolution)
@@ -57,6 +75,7 @@ public sealed partial class PluginRegistrationService
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+            RejectCleanupUploadIntent(resolution);
             _guard.EnsureCanMutate("plugins.package.upsert");
             var metadata = PluginPackageMetadataReader.Read(nupkgContent);
             if (!string.Equals(metadata.Id, resolution.ArtifactId, StringComparison.OrdinalIgnoreCase) ||
@@ -102,6 +121,7 @@ public sealed partial class PluginRegistrationService
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+            RejectCleanupUploadIntent(previous);
             if (uploadedId == Guid.Empty || previous.ExistingPackageId is Guid existing && existing != uploadedId)
                 throw new PpdsException(ErrorCodes.Plugin.PackageIdentityMismatch,
                     "The upload acknowledgement does not identify the planned package.");
@@ -137,7 +157,7 @@ public sealed partial class PluginRegistrationService
 
     private async Task<PluginPackageResolution> ResolvePackageIdentityAsync(string artifactId, string artifactVersion,
         string artifactHash, string? solutionName, string? existingSelector, CancellationToken cancellationToken,
-        IProgressReporter? progress)
+        IProgressReporter? progress, bool isCleanupLookup = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
         progress?.ReportPhase("Resolving plugin package identity", artifactId);
@@ -183,6 +203,11 @@ public sealed partial class PluginRegistrationService
 
         if (selected is null)
         {
+            if (isCleanupLookup)
+            {
+                matchKind = "Absent";
+                return NewResolution(artifactId, null, null, null);
+            }
             if (solution is null)
                 throw new PpdsException(ErrorCodes.Validation.RequiredField,
                     "Creating a plugin package requires an explicit solution with a verified publisher. Specify --solution; no default publisher is inferred.");
@@ -224,8 +249,16 @@ public sealed partial class PluginRegistrationService
                 ExistingPackageId = id, RegisteredName = name, RegisteredUniqueName = uniqueName,
                 ExistingArtifactSha256 = storedHash, ExplicitSelector = existingSelector,
                 SolutionName = solution?.Name, SolutionId = solution?.Id,
-                PublisherId = solution?.PublisherId, PublisherPrefix = solution?.Prefix, MatchKind = matchKind
+                PublisherId = solution?.PublisherId, PublisherPrefix = solution?.Prefix, MatchKind = matchKind,
+                IsCleanupLookup = isCleanupLookup
             };
+    }
+
+    private static void RejectCleanupUploadIntent(PluginPackageResolution resolution)
+    {
+        if (resolution.IsCleanupLookup)
+            throw new PpdsException(ErrorCodes.Plugin.PackageIdentityMismatch,
+                "A cleanup-only package lookup cannot authorize an upload or verify an upload acknowledgement.");
     }
 
     private sealed record PackageSolution(Guid Id, string Name, Guid PublisherId, string Prefix);

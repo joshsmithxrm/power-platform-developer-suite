@@ -107,8 +107,13 @@ public static class CleanCommand
                 cancellationToken) : await serviceProviderFactory(cancellationToken);
 
             var registrationService = serviceProvider.GetRequiredService<IPluginRegistrationService>();
-            preflights = await DeployCommand.ResolvePackageIdentitiesAsync(registrationService, preflights, null, cancellationToken);
-            var packages = preflights.ToDictionary(p => p.Assembly.Name, p => p.PackageResolution!, StringComparer.OrdinalIgnoreCase);
+            var packages = new Dictionary<string, PluginPackageResolution>(StringComparer.OrdinalIgnoreCase);
+            foreach (var preflight in preflights)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                packages.Add(preflight.Assembly.Name, await registrationService.ResolvePackageForCleanupAsync(
+                    preflight.ArtifactBytes, preflight.Assembly.Solution, null, cancellationToken, null));
+            }
 
             if (!globalOptions.IsJsonMode)
             {

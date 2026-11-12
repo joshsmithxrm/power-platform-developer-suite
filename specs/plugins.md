@@ -463,6 +463,16 @@ inventory checks. A disappeared or changed target fails rather than being silent
 reselected. These observations reduce partial work but do not provide a transaction
 against concurrent Dataverse changes.
 
+Standalone cleanup uses a lookup-only package observation. An absent exact target
+is reported as `no-existing-package-observed` for version 2 and remains a no-op for
+legacy cleanup; it does not require a publisher for a creation that cleanup will
+never perform. Supplied solution information and existing targets retain their
+identity and protection checks. Revalidation preserves lookup-only intent and
+refuses a newly appeared or changed target. Cleanup observations cannot authorize
+an upload, and absent cleanup candidates do not participate in creation-alias
+checks. A lookup without a solution covers the exact literal artifact identity;
+it does not infer a publisher or establish absence across the whole environment.
+
 An upload acknowledgement alone does not advance the expected package content.
 Before subsequent step writes or cleanup, an exact-ID readback verifies the registered
 identity and downloaded bytes against the planned artifact, producing a new immutable
@@ -481,6 +491,7 @@ not permission to create a replacement.
 | AC-120 | Incoming and stored packages require exactly one root nuspec; invalid canonical lengths and acknowledged-but-unchanged uploads fail before dependent writes. Verified successors preserve collision and selected-solution checks. | `PluginPackageIdentityTests.MultipleRootNuspecs_RejectIncomingAndStoredAmbiguity`, `CanonicalLength_IsCheckedBeforeAnyWrite`, `AcknowledgedButUnchangedUpload_DoesNotAdvanceObservation`, `VerifiedAutomaticSuccessor_StillRejectsNewIdentityCollision`, `ExplicitDisplaySelector_RetainsMembershipRequirementAfterUpload` | Passed offline (net10.0) |
 | AC-121 | Added interface operations remain non-abstract and fail closed for unsupported implementors; an ambiguous or missing planned step cannot become a creation. | `PluginPackageIdentityTests.InterfaceDefaults_PreserveImplementorCompatibilityAndFailClosed`, `PluginStepFieldCapabilityTests.PlannedExistingStep_AmbiguousRead_RefusesBeforeAnyMutation` | Passed offline (net10.0) |
 | AC-122 | Whole-config preflight rejects planned creations that alter another automatic plan's exact lookup candidates in either order, including an existing target; distinct packages, existing unique-name precedence and explicit targets remain valid. | `ResolvedPackageOrchestrationTests.Execute_PackageCreateAliasConflictRefusesBeforeAnyWrites`, `PackageIdentityBatch_RefusesCreateAliasesForNewOrExistingPlans`, `PackageIdentityBatch_DistinctNewPackageCandidatesAreAllowed`, `PackageIdentityBatch_ExistingUniqueNamesKeepPrecedenceOverDisplayNames`, `PackageIdentityBatch_ExplicitExistingSelectorDoesNotGainAutomaticCandidates`; `PluginPackageIdentityTests.SequentialAliasCreation_InvalidatesOtherAutomaticResolution` reproduces the underlying SDK sequence | Passed offline (net10.0) |
+| AC-123 | Standalone v1/v2 cleanup preserves no-op behavior for absent packages without a solution, permits other valid scopes to continue, and never treats lookup-only absence as creation authority; identity rechecks and deployment creation requirements remain intact. | `ImagePruningSafetyTests.ActualCleanCommand_AbsentPackageWithoutSolutionDoesNotBlockExistingScope`, `ActualCleanCommand_AbsentAliasPackagesDoNotInvokeDeploymentCreateGuard`, `PluginPackageIdentityTests.CleanupLookup_AbsenceIsNotCreationAndRevalidatesWithoutPublisherInference`, `CleanupLookup_PresenceChangesInvalidateTheOriginalObservation`, `CleanupLookup_CannotAuthorizeUploadOrAcknowledgeUpload`, `CleanupLookup_PreservesTargetAndSolutionErrors` | Passed offline (net10.0) |
 
 ```csharp
 Task UpdateStepAsync(Guid stepId, StepUpdateRequest request, CancellationToken cancellationToken = default);

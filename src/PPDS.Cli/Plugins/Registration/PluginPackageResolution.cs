@@ -12,9 +12,9 @@ public sealed record PluginPackageResolution
     public required string ArtifactVersion { get; init; }
     /// <summary>SHA-256 of the exact incoming artifact bytes.</summary>
     public required string ArtifactSha256 { get; init; }
-    /// <summary>The existing target ID, or null for an explicitly planned creation.</summary>
+    /// <summary>The existing target ID, or null for planned creation or an absent cleanup lookup.</summary>
     public Guid? ExistingPackageId { get; init; }
-    /// <summary>The observed or planned registered display name.</summary>
+    /// <summary>The observed/planned display name, or literal artifact lookup ID for absent cleanup.</summary>
     public required string RegisteredName { get; init; }
     /// <summary>The observed or planned registered unique name.</summary>
     public string? RegisteredUniqueName { get; init; }
@@ -32,6 +32,8 @@ public sealed record PluginPackageResolution
     public string? PublisherPrefix { get; init; }
     /// <summary>How the target was selected; used for diagnostics and revalidation.</summary>
     public string MatchKind { get; init; } = "Create";
+    /// <summary>Whether this observation is only for cleanup and cannot authorize upload or creation.</summary>
+    public bool IsCleanupLookup { get; init; }
     /// <summary>Whether this observation plans a new package.</summary>
-    public bool IsCreate => !ExistingPackageId.HasValue;
+    public bool IsCreate => !IsCleanupLookup && !ExistingPackageId.HasValue;
 }
