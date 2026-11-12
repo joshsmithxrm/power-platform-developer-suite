@@ -31,6 +31,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\PPDS.Cli\PPDS.Cli.csproj" />
+    <!-- One stop implementation for CLI/live fixtures and daemon test lifecycle. -->
+    <Compile Include="..\PPDS.LiveTests\Infrastructure\FixtureProcessInterruption.cs"
+             Link="Infrastructure\FixtureProcessInterruption.cs" />
   </ItemGroup>
 
 </Project>

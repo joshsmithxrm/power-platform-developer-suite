@@ -157,6 +157,8 @@ The system achieves full parity with Microsoft's Configuration Migration Tool wh
 4. **Write output**: Create data.zip with data.xml, data_schema.xml, files/ directory, [Content_Types].xml
 5. **Record export timestamp**: Store `ExportedAt` in data.xml for date shifting calculations
 
+`ExportOptions.MaxRecordsPerEntity` (CLI `--max-records-per-entity`) optionally sets a positive cap on retained primary rows for each entity. The default is unlimited and preserves existing export behavior. Bounded export skips whole-table count queries and GUID partitioning, pages each entity sequentially, and requests no more than its remaining row budget. Continuation requires a nonempty paging cookie; bounded mode refuses unsupported simple paging before the next query because reducing the page size would change its offsets. An over-budget response, an empty page claiming more records, or a full budget with more records fails the export instead of truncating. Any bounded entity failure prevents all artifact writers from running. Relationship schemas and binary/file expansion are rejected before acquiring a pooled client. Every bounded schema's FetchXML fragment is also validated before any pool access: only nested `filter` (`type=and/or`), `condition` (`attribute`, `operator`, optional scalar `value`) and text-only child `value` elements are accepted. Projected attributes, joined entities and any other fragment structure or attributes are rejected. The cap does not control server response allocation, request duration or payload bytes; callers requiring a byte budget must validate artifacts separately.
+
 **Import Flow:**
 
 1. **Read data**: Load CMT ZIP via `ICmtDataReader.ReadAsync()` (includes file data if present)
@@ -478,6 +480,7 @@ The `MigrationScreen` provides an interactive Terminal.Gui interface for configu
 | AC-50 | Export progress shows "(filtered)" suffix when entity has FetchXmlFilter | `ConsoleProgressReporterTests.Report_ExportWithFilter_ShowsFilteredSuffix` | ✅ |
 | AC-51 | Export logs filter description on first progress report for filtered entity | `ConsoleProgressReporterTests.Report_ExportWithFilter_ShowsFilterDescription` | ✅ |
 | AC-52 | Empty `<filter>` element in schema produces warning via progress message | `ParallelExporterFilterFeedbackTests.SummarizeFilter_EmptyFilter_ReturnsNoConditionsMessage` | ✅ |
+| AC-53 | An opt-in positive per-entity export row cap skips count/partition reads, bounds each sequential request by remaining rows, requires a nonempty cookie before continuation, fails closed on row/paging overflow or any entity failure before artifact writing, and rejects declared relationship/binary expansion and fragment-based projection/join expansion before any pool access; CLI parsing preserves the unlimited default and rejects nonpositive caps. | `ParallelExporterBoundedTests.BoundedPagingHonorsRemainingBudget`, `BoundedContinuationWithoutCookieIsRefusedBeforeNextQuery`, `BoundedFilterExpansionRejectedBeforePoolAccess`, `BoundedFailureNeverWritesArtifact`, `OneBoundedEntityFailurePreventsAllWriting`, `BoundedFailureDoesNotInvokeJsonWriter`, `RowBudgetIsPerEntity`, `ExpansionRejectedBeforePoolAccess`; `ExportCommandTests.Parse_MaxRecordsPerEntity_ValidatesPositiveNullableCap` | ✅ |
 
 ### Edge Cases
 
@@ -1013,6 +1016,7 @@ private static readonly Dictionary<string, string> MatchFields = new()
 | `PageLevelParallelism` | int | No | 0 (auto) | GUID range partitions per entity (0=auto, 1=disabled) |
 | `PageLevelParallelismThreshold` | int | No | 5000 | Minimum records before page-level parallelism activates |
 | `IncludeFileData` | bool | No | false | Download and include file column binary data |
+| `MaxRecordsPerEntity` | int? | No | null (unlimited) | Positive primary-row cap per entity; fails closed instead of truncating and disables counts, partitioning and relationship/binary expansion |
 
 ### ImportOptions
 
