@@ -54,4 +54,3 @@ Processes a batch of requests and returns all responses.
 `Func<TRequest, TResponse> Handler { get; }`
 
 The handler function.
-

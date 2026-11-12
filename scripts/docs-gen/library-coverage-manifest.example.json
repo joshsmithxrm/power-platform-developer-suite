@@ -1,0 +1,96 @@
+{
+  "schema": 1,
+  "inputs": [
+    {
+      "package": "PPDS.Auth",
+      "tfm": "net8.0",
+      "assembly": "inputs/PPDS.Auth/net8.0/PPDS.Auth.dll",
+      "assemblySha256": "REPLACE_WITH_ACTUAL_DLL_SHA256",
+      "xmlSha256": "REPLACE_WITH_ACTUAL_ADJACENT_XML_SHA256"
+    },
+    {
+      "package": "PPDS.Auth",
+      "tfm": "net9.0",
+      "assembly": "inputs/PPDS.Auth/net9.0/PPDS.Auth.dll",
+      "assemblySha256": "REPLACE_WITH_ACTUAL_DLL_SHA256",
+      "xmlSha256": "REPLACE_WITH_ACTUAL_ADJACENT_XML_SHA256"
+    },
+    {
+      "package": "PPDS.Auth",
+      "tfm": "net10.0",
+      "assembly": "inputs/PPDS.Auth/net10.0/PPDS.Auth.dll",
+      "assemblySha256": "REPLACE_WITH_ACTUAL_DLL_SHA256",
+      "xmlSha256": "REPLACE_WITH_ACTUAL_ADJACENT_XML_SHA256"
+    },
+    {
+      "package": "PPDS.Dataverse",
+      "tfm": "net8.0",
+      "assembly": "inputs/PPDS.Dataverse/net8.0/PPDS.Dataverse.dll",
+      "assemblySha256": "REPLACE_WITH_ACTUAL_DLL_SHA256",
+      "xmlSha256": "REPLACE_WITH_ACTUAL_ADJACENT_XML_SHA256"
+    },
+    {
+      "package": "PPDS.Dataverse",
+      "tfm": "net9.0",
+      "assembly": "inputs/PPDS.Dataverse/net9.0/PPDS.Dataverse.dll",
+      "assemblySha256": "REPLACE_WITH_ACTUAL_DLL_SHA256",
+      "xmlSha256": "REPLACE_WITH_ACTUAL_ADJACENT_XML_SHA256"
+    },
+    {
+      "package": "PPDS.Dataverse",
+      "tfm": "net10.0",
+      "assembly": "inputs/PPDS.Dataverse/net10.0/PPDS.Dataverse.dll",
+      "assemblySha256": "REPLACE_WITH_ACTUAL_DLL_SHA256",
+      "xmlSha256": "REPLACE_WITH_ACTUAL_ADJACENT_XML_SHA256"
+    },
+    {
+      "package": "PPDS.Migration",
+      "tfm": "net8.0",
+      "assembly": "inputs/PPDS.Migration/net8.0/PPDS.Migration.dll",
+      "assemblySha256": "REPLACE_WITH_ACTUAL_DLL_SHA256",
+      "xmlSha256": "REPLACE_WITH_ACTUAL_ADJACENT_XML_SHA256"
+    },
+    {
+      "package": "PPDS.Migration",
+      "tfm": "net9.0",
+      "assembly": "inputs/PPDS.Migration/net9.0/PPDS.Migration.dll",
+      "assemblySha256": "REPLACE_WITH_ACTUAL_DLL_SHA256",
+      "xmlSha256": "REPLACE_WITH_ACTUAL_ADJACENT_XML_SHA256"
+    },
+    {
+      "package": "PPDS.Migration",
+      "tfm": "net10.0",
+      "assembly": "inputs/PPDS.Migration/net10.0/PPDS.Migration.dll",
+      "assemblySha256": "REPLACE_WITH_ACTUAL_DLL_SHA256",
+      "xmlSha256": "REPLACE_WITH_ACTUAL_ADJACENT_XML_SHA256"
+    },
+    {
+      "package": "PPDS.Plugins",
+      "tfm": "net462",
+      "assembly": "inputs/PPDS.Plugins/net462/PPDS.Plugins.dll",
+      "assemblySha256": "REPLACE_WITH_ACTUAL_DLL_SHA256",
+      "xmlSha256": "REPLACE_WITH_ACTUAL_ADJACENT_XML_SHA256"
+    },
+    {
+      "package": "PPDS.Query",
+      "tfm": "net8.0",
+      "assembly": "inputs/PPDS.Query/net8.0/PPDS.Query.dll",
+      "assemblySha256": "REPLACE_WITH_ACTUAL_DLL_SHA256",
+      "xmlSha256": "REPLACE_WITH_ACTUAL_ADJACENT_XML_SHA256"
+    },
+    {
+      "package": "PPDS.Query",
+      "tfm": "net9.0",
+      "assembly": "inputs/PPDS.Query/net9.0/PPDS.Query.dll",
+      "assemblySha256": "REPLACE_WITH_ACTUAL_DLL_SHA256",
+      "xmlSha256": "REPLACE_WITH_ACTUAL_ADJACENT_XML_SHA256"
+    },
+    {
+      "package": "PPDS.Query",
+      "tfm": "net10.0",
+      "assembly": "inputs/PPDS.Query/net10.0/PPDS.Query.dll",
+      "assemblySha256": "REPLACE_WITH_ACTUAL_DLL_SHA256",
+      "xmlSha256": "REPLACE_WITH_ACTUAL_ADJACENT_XML_SHA256"
+    }
+  ]
+}
