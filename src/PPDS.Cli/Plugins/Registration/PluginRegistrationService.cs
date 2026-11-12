@@ -7,6 +7,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.Xrm.Sdk.Query;
+using PPDS.Auth.Credentials;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Infrastructure.Safety;
@@ -14,6 +15,8 @@ using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Services.Plugins;
 using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Pooling;
+using PPDS.Dataverse.Resilience;
+using PPDS.Dataverse.Security;
 
 namespace PPDS.Cli.Plugins.Registration;
 
@@ -1990,39 +1993,146 @@ public sealed class PluginRegistrationService : IPluginRegistrationService
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Tuple containing the binary content and package name with .nupkg extension.</returns>
     /// <exception cref="PpdsException">Thrown when package has no content.</exception>
-    public async Task<(byte[] Content, string FileName)> DownloadPackageAsync(
+    public Task<(byte[] Content, string FileName)> DownloadPackageAsync(
         Guid packageId,
         CancellationToken cancellationToken = default)
+        => DownloadPackageAsync(packageId, cancellationToken, null);
+
+    /// <inheritdoc />
+    public async Task<(byte[] Content, string FileName)> DownloadPackageAsync(
+        Guid packageId,
+        CancellationToken cancellationToken,
+        IProgressReporter? progress)
     {
-        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-
-        var entity = await RetrieveAsync(
-            PluginPackage.EntityLogicalName,
-            packageId,
-            new ColumnSet(PluginPackage.Fields.Name, PluginPackage.Fields.Version, PluginPackage.Fields.Content),
-            client,
-            cancellationToken);
-
-        var name = entity.GetAttributeValue<string>(PluginPackage.Fields.Name) ?? "package";
-        var version = entity.GetAttributeValue<string>(PluginPackage.Fields.Version);
-        var content = entity.GetAttributeValue<string>(PluginPackage.Fields.Content);
-
-        if (string.IsNullOrEmpty(content))
+        try
         {
-            throw new PpdsException(
-                ErrorCodes.Plugin.NoContent,
-                $"Package '{name}' has no content.");
+            cancellationToken.ThrowIfCancellationRequested();
+            Entity entity;
+            await using (var client = await _pool.GetClientAsync(cancellationToken: cancellationToken))
+            {
+                // Keep legacy retrieval independent of file-column availability.
+                entity = await RetrieveAsync(PluginPackage.EntityLogicalName, packageId,
+                    new ColumnSet(PluginPackage.Fields.Name, PluginPackage.Fields.Version, PluginPackage.Fields.Content),
+                    client, cancellationToken);
+            }
+
+            var name = entity.GetAttributeValue<string>(PluginPackage.Fields.Name) ?? "package";
+            var version = entity.GetAttributeValue<string>(PluginPackage.Fields.Version);
+            var content = entity.GetAttributeValue<string>(PluginPackage.Fields.Content);
+            byte[] bytes;
+            if (!string.IsNullOrEmpty(content))
+            {
+                bytes = Convert.FromBase64String(content);
+            }
+            else
+            {
+                Entity files;
+                await using (var client = await _pool.GetClientAsync(cancellationToken: cancellationToken))
+                {
+                    files = await RetrieveAsync(PluginPackage.EntityLogicalName, packageId,
+                        new ColumnSet(PluginPackage.Fields.Package, PluginPackage.Fields.FileId), client, cancellationToken);
+                }
+                if (files.Id != packageId || files.LogicalName != PluginPackage.EntityLogicalName)
+                    throw PackageDownloadFailed("The package file lookup returned an unexpected record.");
+
+                var columns = new[] { PluginPackage.Fields.Package, PluginPackage.Fields.FileId };
+                var populated = new List<string>();
+                foreach (var column in columns)
+                {
+                    var fileId = files.GetAttributeValue<Guid?>(column);
+                    if (fileId == Guid.Empty)
+                        throw PackageDownloadFailed("The package has an invalid file identifier.");
+                    if (fileId.HasValue)
+                        populated.Add(column);
+                }
+                if (populated.Count == 0)
+                    throw new PpdsException(ErrorCodes.Plugin.NoContent, $"Package '{name}' has no content.");
+                if (populated.Count != 1)
+                    throw PackageDownloadFailed("The package has multiple populated file columns; a download cannot be selected unambiguously.");
+
+                progress?.ReportPhase("Downloading package", name);
+                bytes = await DownloadPackageFileAsync(packageId, populated[0], cancellationToken, progress);
+            }
+
+            // Preserve the established NuGet filename, independent of storage format.
+            var fileName = !string.IsNullOrEmpty(version) ? $"{name}.{version}.nupkg" : $"{name}.nupkg";
+            cancellationToken.ThrowIfCancellationRequested();
+            return (bytes, fileName);
         }
-
-        var bytes = Convert.FromBase64String(content);
-
-        // Format: PackageName.Version.nupkg (matching NuGet convention)
-        var fileName = !string.IsNullOrEmpty(version)
-            ? $"{name}.{version}.nupkg"
-            : $"{name}.nupkg";
-
-        return (bytes, fileName);
+        catch (OperationCanceledException) { throw; }
+        catch (PpdsException) { throw; }
+        catch (Exception ex)
+        {
+            // Provider diagnostics can contain continuation tokens; retain them privately.
+            const string message = "The package download failed.";
+            throw ex switch
+            {
+                DataverseAuthenticationException auth => new PpdsAuthException(
+                    auth.RequiresReauthentication ? ErrorCodes.Auth.Expired : ErrorCodes.Auth.InsufficientPermissions,
+                    message, auth) { RequiresReauthentication = auth.RequiresReauthentication },
+                AuthenticationException auth => new PpdsAuthException(
+                    auth.ErrorCode ?? ErrorCodes.Auth.InvalidCredentials, message, auth)
+                    { RequiresReauthentication = true },
+                DataverseConnectionException => new PpdsException(ErrorCodes.Connection.Failed, message, ex),
+                ServiceProtectionException => new PpdsException(ErrorCodes.Connection.Throttled, message, ex),
+                TimeoutException => new PpdsException(ErrorCodes.Connection.Timeout, message, ex),
+                _ => new PpdsException(ErrorCodes.Plugin.DownloadFailed, message, ex)
+            };
+        }
     }
+
+    private async Task<byte[]> DownloadPackageFileAsync(
+        Guid packageId, string column, CancellationToken cancellationToken, IProgressReporter? progress)
+    {
+        const int chunkSize = 4 * 1024 * 1024;
+        cancellationToken.ThrowIfCancellationRequested();
+        // D2 exception: one continuation-token transfer must not rotate pool principals.
+        // Token portability across application users is not a documented SDK guarantee.
+        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+        var initialize = new OrganizationRequest("InitializeFileBlocksDownload")
+        {
+            ["Target"] = new EntityReference(PluginPackage.EntityLogicalName, packageId),
+            ["FileAttributeName"] = column
+        };
+        var initialized = await ExecuteAsync(initialize, client, cancellationToken);
+        if (!initialized.Results.TryGetValue("FileContinuationToken", out var tokenValue) ||
+            tokenValue is not string token || string.IsNullOrWhiteSpace(token) ||
+            !initialized.Results.TryGetValue("FileSizeInBytes", out var sizeValue) ||
+            sizeValue is not long size || size <= 0 || size > Array.MaxLength ||
+            !initialized.Results.TryGetValue("IsChunkingSupported", out var chunkingValue) ||
+            chunkingValue is not bool chunking)
+            throw PackageDownloadFailed("The package download returned invalid file metadata.");
+
+        var content = new byte[(int)size];
+        long offset = 0;
+        while (offset < size)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var length = chunking ? Math.Min(chunkSize, size - offset) : size;
+            var request = new OrganizationRequest("DownloadBlock")
+            {
+                ["FileContinuationToken"] = token,
+                ["Offset"] = offset,
+                ["BlockLength"] = length
+            };
+            var downloaded = await ExecuteAsync(request, client, cancellationToken);
+            if (!downloaded.Results.TryGetValue("Data", out var data) ||
+                data is not byte[] block || block.LongLength != length)
+                throw PackageDownloadFailed("The package download returned an incomplete or oversized block.");
+            Buffer.BlockCopy(block, 0, content, (int)offset, block.Length);
+            offset += block.Length;
+            progress?.ReportProgress(new ProgressSnapshot
+            {
+                CurrentItem = (int)offset, TotalItems = (int)size,
+                StatusMessage = "Downloading package bytes"
+            });
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return content;
+    }
+
+    private static PpdsException PackageDownloadFailed(string message)
+        => new(ErrorCodes.Plugin.DownloadFailed, message);
 
     #endregion
 

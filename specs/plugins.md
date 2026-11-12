@@ -409,6 +409,29 @@ Task<(byte[] Content, string FileName)> DownloadPackageAsync(
     Guid packageId, CancellationToken cancellationToken = default);
 ```
 
+Package downloads preserve the legacy base64 `content` path and synthesized NuGet
+filename. If content is empty, the service reads the exact package's `package` and
+`fileid` file-column identifiers and downloads the sole populated column using
+`InitializeFileBlocksDownload` and `DownloadBlock`. It never chooses between two
+populated columns or mutates the package. Download responses must declare a valid
+size and chunking capability; each block must match the requested length. Errors
+return no partial file and do not expose the continuation token or SDK diagnostics.
+The initialization and all blocks share one pool lease to preserve the caller
+identity: token portability across different application users is undocumented.
+This coupled transfer is a D2 exception; the lease is disposed on every exit.
+
+A three-argument overload accepts `IProgressReporter` for byte progress. The existing
+two-argument method and filename remain unchanged; the interface overload has a
+default implementation so existing service implementors remain compatible.
+
+| ID | Criterion | Test | Status |
+|---|---|---|---|
+| AC-109 | Nonempty legacy content downloads without file-column queries and retains the existing filename; empty content uses only the exact requested package and sole populated file column, without writes. | `PackageDownloadTests.LegacyContent_PreservesFilenameWithoutFileRequests`, `FileColumn_UsesExactPackageAndObservedColumn` | Passed (net10.0) |
+| AC-110 | Missing file columns retain NoContent; ambiguous or invalid identifiers fail before initializing a download. | `PackageDownloadTests.MissingFileColumns_PreservesNoContent`, `AmbiguousOrInvalidFileColumns_StopBeforeDownload` | Passed (net10.0) |
+| AC-111 | Download honors IsChunkingSupported, validates declared size/token and exact block lengths, and never returns truncated or oversized data. | `PackageDownloadTests.ChunkedDownload_UsesRemainingLengthsAndOffsets`, `UnchunkedDownload_RequestsEntireFile`, `InvalidInitialization_StopsBeforeBlocks`, `InvalidBlock_StopsWithoutReturningPartialFile` | Passed (net10.0) |
+| AC-112 | Cancellation stops subsequent requests; SDK/format failures are coded with private inner diagnostics while auth/connection failures preserve recovery classification. One lease pins the transfer principal and all leases are disposed. | `PackageDownloadTests.CancellationAfterBlock_StopsNextRequest`, `SdkFailure_IsCodedWithoutTokenLeak`, `InvalidLegacyBase64_IsCoded`, `ConnectionFailure_PreservesRecoveryClassification` | Passed (net10.0) |
+| AC-113 | Optional byte progress is available without changing the established two-argument download contract or adding an abstract interface obligation. | `PackageDownloadTests.ProgressOverload_ReportsVerifiedByteCountsAndIsCompatible` | Passed (net10.0) |
+
 #### Update Operations
 
 ```csharp
