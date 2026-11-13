@@ -16,7 +16,8 @@ upstream support guarantee. Migrating to the newer TUI framework is separate wor
 A scoped override pins the runner's native PTY dependency to
 `@homebridge/node-pty-prebuilt-multiarch` 0.14.1. The previous 0.11.14 cannot install
 its Windows native binary on Node 26. The replacement declares support for Node
-20 through 26 and keeps the runner's PTY API. It is npm's `latest` release, though
+20 through 26 and keeps the runner's PTY API. The version is pinned independently
+of npm's mutable `latest` tag, and
 [GitHub marks 0.14.1 as prerelease](https://github.com/homebridge/node-pty-prebuilt-multiarch/releases/tag/v0.14.1).
 
 Playwright is pinned to 1.64.1, matching the current extension's locked release. The old

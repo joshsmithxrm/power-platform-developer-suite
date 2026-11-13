@@ -38,7 +38,9 @@ internal sealed class FixtureProcessInterruption(TimeProvider? timeProvider = nu
         return true;
     }
 
-    private async Task StopAsync(IFixtureProcess process)
+    // Also used by ordinary daemon fixture teardown; callers decide whether their
+    // lifecycle is interrupted. ObserveAsync always quarantines before calling this.
+    internal async Task StopAsync(IFixtureProcess process)
     {
         var errors = new List<string>();
         var exitConfirmed = false;

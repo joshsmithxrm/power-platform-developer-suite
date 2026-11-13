@@ -14,6 +14,7 @@ using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
+using PPDS.Cli.Services.Plugins;
 using PPDS.Cli.Services.Environment;
 using PPDS.Cli.Services.History;
 using PPDS.Cli.Services.Profile;
@@ -450,7 +451,18 @@ public partial class RpcMethodHandler
                 Deployment = deployment
             };
 
-            await registrationService.UpdateStepAsync(stepId, request, ct);
+            try
+            {
+                await registrationService.UpdateStepAsync(stepId, request, ct);
+            }
+            catch (PpdsException ex) when (ex.ErrorCode is ErrorCodes.Plugin.UpdateNotPersisted or ErrorCodes.Plugin.VerificationFailed)
+            {
+                // These service messages are safe and distinguish an acknowledged write
+                // from verified persistence; do not turn them into a generic success/error.
+                var mapped = MapPpdsToRpcException(ex);
+                PluginMutationJournal.Preserve(ex, mapped);
+                throw mapped;
+            }
 
             return new PluginsUpdateResponse { Id = id };
         }, cancellationToken);

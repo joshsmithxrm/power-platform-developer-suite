@@ -189,6 +189,7 @@ public sealed class CliProcessShutdownTests
     {
         using var fixture = new Harness();
         var config = fixture.OwnedFile();
+        await File.WriteAllTextAsync(config, "retained-before-preflight");
         var calls = 0;
         var messages = new List<string>();
         var primary = new IOException("original interrupted command");
@@ -199,18 +200,25 @@ public sealed class CliProcessShutdownTests
                 return await fixture.RunCommandAsync(() => new FakeProcess(), _ => ThrowOriginal(primary), default);
             return new CliResult { StdOut = """{"success":true,"data":{"assemblies":[],"packages":[]}}""" };
         }, config, "test-profile", "https://fixture.example.test", messages.Add, () => fixture.Unsafe);
-        var actual = await Assert.ThrowsAsync<IOException>(() => cleanup.RunAsync(async () =>
+        var actual = await Record.ExceptionAsync(() => cleanup.RunAsync(async () =>
         {
             await File.WriteAllTextAsync(config, "retained-at-interruption");
             await fixture.RunCommandAsync(() => new FakeProcess(), _ => ThrowOriginal(primary), default);
         }));
-        Assert.Same(primary, actual);
+        if (interruptPreflight)
+        {
+            Assert.IsType<InvalidOperationException>(actual);
+            Assert.Same(primary, cleanup.PreflightFailure);
+            Assert.DoesNotContain(primary.Message, actual.ToString());
+        }
+        else Assert.Same(primary, actual);
         Assert.Equal(1, calls);
         var retained = await File.ReadAllTextAsync(config);
         await Assert.ThrowsAsync<InvalidOperationException>(() => cleanup.CleanupAsync());
         Assert.Equal(retained, await File.ReadAllTextAsync(config));
         Assert.Equal(1, calls);
-        if (!interruptPreflight) Assert.Contains(messages, value => value.Contains("cleanup skipped", StringComparison.Ordinal));
+        if (!interruptPreflight) Assert.Contains("Fixture cleanup failed: InvalidOperationException", messages);
+        File.Delete(cleanup.PreflightEvidencePath);
     }
 
     [Fact]

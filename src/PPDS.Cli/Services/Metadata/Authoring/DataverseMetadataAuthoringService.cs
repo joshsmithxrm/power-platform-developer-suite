@@ -1369,7 +1369,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         {
             throw new PpdsException(
                 MetadataErrorCodes.SdkOperationFailed,
-                $"Failed to add status reason '{request.Label}' to '{request.EntityLogicalName}'.",
+                AppendDataverseFaultCode($"Failed to add status reason '{request.Label}' to '{request.EntityLogicalName}'.", ex),
                 ex);
         }
 
@@ -1733,7 +1733,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
         {
             throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                $"Failed to add option '{request.Label}' to '{request.EntityLogicalName}.{request.ColumnLogicalName}'.", ex);
+                AppendDataverseFaultCode($"Failed to add option '{request.Label}' to '{request.EntityLogicalName}.{request.ColumnLogicalName}'.", ex), ex);
         }
 
         if (!string.IsNullOrEmpty(request.Color))

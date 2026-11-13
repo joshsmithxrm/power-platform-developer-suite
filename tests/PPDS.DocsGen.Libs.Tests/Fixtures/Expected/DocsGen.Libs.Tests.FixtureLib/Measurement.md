@@ -39,4 +39,3 @@ Stable identifier for the measurement.
 `string Label { get; set; }`
 
 Human-readable label.
-

@@ -44,6 +44,13 @@ internal sealed class PluginMutationJournal(string scope = "mutation")
         exception.Data[ExceptionKey] = combined;
     }
 
+    /// <summary>Preserves only typed nonsecret mutation evidence across an exception boundary.</summary>
+    internal static void Preserve(Exception source, Exception target)
+    {
+        var combined = Read(target).Concat(Read(source)).DistinctBy(o => o.EventId).ToArray();
+        if (combined.Length > 0) target.Data[ExceptionKey] = combined;
+    }
+
     internal static IReadOnlyList<PluginMutationOutcome> Read(Exception exception) =>
         exception.Data[ExceptionKey] as PluginMutationOutcome[] ?? [];
 }

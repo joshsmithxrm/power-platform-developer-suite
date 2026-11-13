@@ -1743,8 +1743,30 @@ public sealed partial class PluginRegistrationService : IPluginRegistrationServi
             entity["impersonatinguserid"] = userId.HasValue ? new EntityReference(SystemUser.EntityLogicalName, userId.Value) : null;
         }
         if (!entity.Attributes.Keys.Any(key => key != SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId)) return;
-        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        await UpdateAsync(entity, client, cancellationToken);
+        if (!desired.TryGetValue("invocationSource", out var expectedInvocationSource))
+        {
+            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
+            await UpdateAsync(entity, client, cancellationToken);
+            return;
+        }
+
+        var mutations = new PluginMutationJournal();
+        try
+        {
+            // Release the write lease before the independent persisted-state read.
+            await using (var client = await _pool.GetClientAsync(cancellationToken: cancellationToken))
+            {
+                await mutations.RunAsync(SdkMessageProcessingStep.EntityLogicalName, "update", "row", stepId,
+                    () => UpdateAsync(entity, client, cancellationToken), cancellationToken);
+            }
+            await PluginStepUpdateVerificationService.VerifyInvocationSourceAsync(_pool, stepId,
+                (int)MapInvocationSourceToValue((string?)expectedInvocationSource), cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            mutations.Attach(ex);
+            throw;
+        }
     }
 
     /// <summary>Updates supplied image fields without clearing unrelated registration settings.</summary>

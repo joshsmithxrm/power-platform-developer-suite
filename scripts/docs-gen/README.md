@@ -54,6 +54,60 @@ node scripts/docs-gen/ext-reflect/generate.js \
 
 Each generator writes diagnostics to stderr and a deterministic file list to stdout (Constitution I1).
 
+### Complete library coverage for a companion refresh
+
+The ordinary `--assemblies` command reflects one directory. It includes Query in
+the default package list, but it does not establish coverage of every target
+framework. The existing `docs-release.yml` builds CLI/MCP at net10.0; its ordinary
+library output alone is not the five-library, thirteen-framework stable handoff.
+The workflow's activation and publishing behavior are unchanged by this route.
+
+For a complete refresh, prepare a schema-1 input manifest using
+[`library-coverage-manifest.example.json`](library-coverage-manifest.example.json).
+Supply all thirteen pairs: Auth, Dataverse, Migration and Query at net8.0/net9.0/net10.0,
+and Plugins at net462. Each entry names its package, TFM, relative DLL path,
+actual DLL SHA-256 and adjacent XML-doc SHA-256. Replace every example hash;
+examples are not execution evidence. Preserve the source/package provenance and
+resolver/toolchain closure separately. Input hashes alone do not authenticate
+public NuGet packages or establish that the supplied assemblies came from a
+reviewed release.
+
+After the actual bounded generation operation is authorized, invoke the reviewed
+generator against those inputs with a fresh output directory:
+
+```bash
+dotnet run --project scripts/docs-gen/libs-reflect -c Release -- \
+  --coverage-manifest /owned/staging/library-inputs.json \
+  --output /owned/staging/new-library-reference
+```
+
+The manifest mode refuses missing/duplicate pairs, hash or reflected identity/TFM
+mismatches, escaping/reparse input paths, incomplete type/page inventories and
+existing output directories. It validates every input before reflecting any and
+every reflected result before writing output. It never downloads packages,
+builds product projects, uses signing keys, or pushes source. Failures during
+output writing can leave partial staging files; there is no automatic cleanup or
+resume. Only the final receipt describes a completed generation.
+
+Each framework's pages remain under `by-framework/<tfm>/`. Canonical package/type
+paths retain identical content with an availability note; differing content gets
+explicit links to every framework variant, so one TFM cannot overwrite another.
+`coverage-evidence.json` binds all inputs, output hashes and exported-type
+inventories, including hidden types. Missing type/member summaries are explicit
+unavailable-summary notes, rather than omissions or invented documentation.
+Customer pages still omit EditorBrowsableNever types/members, accessor methods,
+and compiler-generated/record-synthesized members. This inventory is not a claim
+of complete CLR signature compatibility or actual CLI/MCP runtime capture.
+
+The integration owner must compose these files with the held authored Docs work,
+review old generated paths for removal/rename, and preserve candidate history.
+Adopt the coverage receipt under Docs `validation/` with the stable provenance
+record; the existing writing helper copies only reference files. Add immutable
+provenance links after the evidence-bearing commit exists. Validate the final
+composed routes, links, content and paired API rollover/no-op before separately
+approved companion publication. Do not reuse historical candidate counts as
+fixed expected totals for a changed source.
+
 ## Documentation style guide
 
 When annotating public types in the four libraries (Phase 0 curation), follow these rules:

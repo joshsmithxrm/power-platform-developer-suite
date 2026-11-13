@@ -38,10 +38,10 @@ the resulting extension in VS Code's own host.
 | AC-04 | The existing TUI runner can create and interact with its native PTY on the selected tooling runtime without replacing the framework | `tests/PPDS.Tui.E2eTests/tests/startup.spec.ts` | ✅ |
 | AC-05 | The extension's declared and resolved top-level Node typings remain on major 22 independently of the tooling runtime | `tests/ci/test_javascript_tooling.py::test_extension_node_typings_preserve_the_host_contract` | ✅ |
 
-The named acceptance tests passed locally on the current-main composition,
-including extension tests and TUI snapshot comparisons on Node 22 and Node 26.
-Fresh hosted qualification of this composed draft remains pending; the question
-marks above do not assert that the hosted migration gate has passed.
+Qualification is tied to the candidate head and base recorded in the PR. Before
+adoption, the named acceptance tests and applicable hosted lanes must pass on
+that composition. Results from an earlier head are retained evidence, not
+qualification of a changed integration tree.
 
 ## Native terminal dependency
 
@@ -54,8 +54,9 @@ package declares Node `>=20 <27` and supports the same PTY API used by the runne
 The framework itself still declares Node `>=16.6.0 <21.0.0`, which already
 excluded the previous Node 22 baseline. Do not suppress that engine warning or
 mistake our runtime tests for an upstream support promise. The native package's
-0.14.1 version is npm's `latest`, but its GitHub release is marked prerelease;
-maintainer review must account for that discrepancy before adoption.
+0.14.1 version is pinned independently of npm's mutable `latest` tag, and its
+GitHub release is marked prerelease. Maintainer review must account for that
+release status before adoption.
 
 The TUI project's Playwright installer is aligned to 1.64.1, the release already
 used by the extension. Its previous locked 1.57.0 release hangs extracting

@@ -7,6 +7,18 @@ using PPDS.DocsGen.Libs;
 var assembliesDir = GetArg(args, "--assemblies");
 var outputRoot = GetArg(args, "--output");
 var packagesCsv = GetArg(args, "--packages", required: false);
+var coverageManifest = GetArg(args, "--coverage-manifest", required: false);
+
+if (coverageManifest is not null)
+{
+    if (outputRoot is null || assembliesDir is not null || packagesCsv is not null)
+    {
+        Console.Error.WriteLine("Usage: libs-reflect --coverage-manifest <json> --output <new-dir> (no --assemblies/--packages)");
+        return 1;
+    }
+    try { LibraryCoverageRunner.Run(coverageManifest, outputRoot); return 0; }
+    catch (Exception error) { Console.Error.WriteLine("libs-reflect coverage: " + error.Message); return 1; }
+}
 
 if (assembliesDir is null || outputRoot is null)
 {
@@ -23,7 +35,7 @@ if (!Directory.Exists(assembliesDir))
     return 1;
 }
 
-var defaultPackages = new[] { "PPDS.Dataverse", "PPDS.Migration", "PPDS.Auth", "PPDS.Plugins" };
+var defaultPackages = new[] { "PPDS.Dataverse", "PPDS.Migration", "PPDS.Auth", "PPDS.Plugins", "PPDS.Query" };
 var packages = string.IsNullOrWhiteSpace(packagesCsv)
     ? defaultPackages
     : packagesCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
