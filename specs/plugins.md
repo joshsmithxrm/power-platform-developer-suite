@@ -711,6 +711,28 @@ Dry-run is explicitly preview-only. No server persistence or cleanup is inferred
 from a local plan, SDK acknowledgement, upsert ID or offline test. Error/cancellation
 retains acknowledged/unknown effects without rollback or automatic retry.
 
+Direct step Update with an explicitly supplied `invocationSource` performs one
+fresh read of that exact step after the update is acknowledged. Only a matching,
+typed stored value verifies that requested field. A mismatch returns
+`Plugin.UpdateNotPersisted`; a missing/wrong row, absent/malformed value or failed
+read returns `Plugin.VerificationFailed`. Cancellation preserves its token and
+acknowledgement journal on the service exception, and CLI output reports
+persistence as unverified. The RPC handler preserves that exception in process;
+the JSON-RPC wire response remains standard cancellation (`-32800`) without a
+mutation receipt. Remote callers must not infer that cancellation prevented the
+write. Coded RPC errors preserve the safe step/value message and the in-process
+typed journal, without copying arbitrary diagnostic data. No failure retries,
+rolls back or recreates the step. Other fields in the same update
+are acknowledged but are not thereby verified. Omitted invocation source, Upsert
+and v1 Deploy retain their existing behavior. This does not classify the field as
+globally non-updatable or change its default or Diff semantics.
+
+| ID | Criterion | Test | Status |
+|---|---|---|---|
+| AC-124 | Explicit direct invocation-source Update reports success only after a fresh exact-row typed match; a retained different value fails without retry, and CLI/RPC propagate the coded failure. | `ExplicitInvocationSource_PersistedValueSucceedsAfterFreshRead`, `ExplicitInvocationSource_RetainedValueFailsWithAcknowledgement`, `CliUpdateStep_VerificationFailureIsNonSuccess`, `RpcUpdateStep_VerificationFailureIsNonSuccess` | Passed offline (net10.0) |
+| AC-125 | Missing/malformed stored evidence, read failure and cancellation preserve acknowledged service effects and safe diagnostics; CLI shows the cancellation warning while RPC wire cancellation retains its standard response without a mutation receipt. Omission preserves established single-write behavior. | `ExplicitInvocationSource_InvalidReadbackIsUnverified`, `ExplicitInvocationSource_ReadFailureIsSafeAndRetainsAcknowledgement`, `ExplicitInvocationSource_CancellationRetainsTokenAndAcknowledgement`, `OmittedInvocationSource_DoesNotAddVerification`, `CliUpdateStep_CancelledVerificationReportsAcknowledgedUnverifiedFailure`, `RpcUpdateStep_CancelledVerificationPreservesExceptionTokenAndAcknowledgement`, `RpcUpdateStep_CancelledWireResponseDoesNotExposeMutationReceipt` | Passed offline (net10.0) |
+| AC-126 | Real v2 command orchestration treats acknowledged Parent write followed by stored Child as drift/non-success with its acknowledgement retained and no retry or deletion. | `Version2_AcknowledgedParentWriteRetainingChildIsDriftWithoutRetry` | Passed offline (net10.0) |
+
 ## CLI Commands
 
 ### ppds plugins extract

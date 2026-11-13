@@ -59,6 +59,40 @@ public sealed class DeployReconciliationVerificationTests
     }
 
     [Fact]
+    public async Task Version2_AcknowledgedParentWriteRetainingChildIsDriftWithoutRetry()
+    {
+        using var fixture = new CommandFixture("2.0");
+        fixture.StoredStep.InvocationSource = "Child";
+
+        Assert.Equal(1, await fixture.RunAsync());
+
+        using var json = JsonDocument.Parse(fixture.Output.ToString());
+        Assert.False(json.RootElement.GetProperty("success").GetBoolean());
+        var row = SingleDeployment(json.RootElement);
+        Assert.Equal("drift", row.GetProperty("reconciliationStatus").GetString());
+        var verification = row.GetProperty("verification");
+        Assert.True(verification.GetProperty("isComplete").GetBoolean());
+        Assert.True(verification.GetProperty("hasDrift").GetBoolean());
+        var change = Assert.Single(verification.GetProperty("modifiedSteps").EnumerateArray()
+            .SelectMany(step => step.GetProperty("changes").EnumerateArray()));
+        Assert.Equal("invocationSource", change.GetProperty("property").GetString());
+        Assert.Equal("Parent", change.GetProperty("expected").GetString());
+        Assert.Equal("Child", change.GetProperty("actual").GetString());
+        Assert.Equal(1, row.GetProperty("stepsUpdated").GetInt32());
+        var stepOutcome = Assert.Single(row.GetProperty("outcomes").EnumerateArray(),
+            outcome => outcome.GetProperty("entity").GetString() == "sdkmessageprocessingstep");
+        Assert.Equal("acknowledged", stepOutcome.GetProperty("outcome").GetString());
+        fixture.VerifyStoredStateReadAfterWrite();
+        var write = Assert.Single(fixture.Service.Invocations,
+            call => call.Method.Name == nameof(IPluginRegistrationService.UpsertStepAsync));
+        var requestedStep = Assert.IsType<PluginStepConfig>(write.Arguments[2]);
+        Assert.Equal(RegistrationOperationIntent.Reconcile, requestedStep.OperationIntent);
+        Assert.Null(requestedStep.InvocationSource); // v2 omission requests the declared Parent default.
+        Assert.Equal(fixture.StoredStep.Id, Assert.IsType<StepIdentityResolution>(write.Arguments[6]).ExistingStepId);
+        fixture.VerifyNoDeletes();
+    }
+
+    [Fact]
     public async Task Version2_ExtraStoredImageIsDriftWithoutIndependentDeletion()
     {
         using var fixture = new CommandFixture("2.0");

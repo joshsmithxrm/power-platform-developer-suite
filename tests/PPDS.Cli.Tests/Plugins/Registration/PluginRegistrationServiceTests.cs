@@ -2136,6 +2136,12 @@ public class PluginRegistrationServiceTests
         _retrieveMultipleResult = entities;
 
         // Act
+        _mockPooledClient.Setup(c => c.RetrieveAsync(SdkMessageProcessingStep.EntityLogicalName,
+                stepId, It.IsAny<ColumnSet>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SdkMessageProcessingStep
+            {
+                Id = stepId, InvocationSource = sdkmessageprocessingstep_invocationsource.Child
+            });
         await _sut.UpdateStepAsync(stepId, new StepUpdateRequest(InvocationSource: "Child"));
 
         // Assert

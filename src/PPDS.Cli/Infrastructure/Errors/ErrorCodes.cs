@@ -331,6 +331,12 @@ public static class ErrorCodes
         /// <summary>Target field capability or the required current value could not be established.</summary>
         public const string FieldCapabilityUnknown = "Plugin.FieldCapabilityUnknown";
 
+        /// <summary>An acknowledged plugin update did not persist the requested value.</summary>
+        public const string UpdateNotPersisted = "Plugin.UpdateNotPersisted";
+
+        /// <summary>An acknowledged plugin update could not be verified by a fresh read.</summary>
+        public const string VerificationFailed = "Plugin.VerificationFailed";
+
         /// <summary>The selected package does not contain the expected artifact identity.</summary>
         public const string PackageIdentityMismatch = "Plugin.PackageIdentityMismatch";
 
