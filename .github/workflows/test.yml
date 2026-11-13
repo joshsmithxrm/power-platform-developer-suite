@@ -48,6 +48,9 @@ jobs:
               - 'NuGet.config'
               - '.github/workflows/test.yml'
             extraction:
+              - '.nvmrc'
+              - 'package.json'
+              - 'package-lock.json'
               - 'src/**'
               - 'tests/PPDS.Cli.Tests/**'
               - 'tests/fixtures/SingleFilePlugin/**'
@@ -63,6 +66,8 @@ jobs:
               - '.github/workflows/release-cli.yml'
               - '.github/workflows/publish-nuget.yml'
             python:
+              - '.nvmrc'
+              - '.devcontainer/Dockerfile'
               - 'src/**'
               - 'tests/**'
               - 'scripts/**'
@@ -249,7 +254,8 @@ jobs:
           python-version: '3.13'
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version-file: '.nvmrc'
+          check-latest: true
       - name: Install locked packaging tools without lifecycle scripts
         working-directory: src/PPDS.Extension
         run: npm ci --ignore-scripts --no-audit --no-fund

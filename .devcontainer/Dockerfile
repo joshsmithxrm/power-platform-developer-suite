@@ -1,6 +1,6 @@
 # PPDS Development Container
 # Base: .NET 10.0 devcontainer image (Ubuntu 24.04 Noble)
-# Includes: .NET 8/9/10 SDKs, Node.js 22, PowerShell 7, GitHub CLI, Claude Code
+# Includes: .NET 8/9/10 SDKs, Node.js 26, PowerShell 7, GitHub CLI, Claude Code
 FROM mcr.microsoft.com/devcontainers/dotnet:10.0
 
 # Install additional .NET SDKs for multi-target testing (net8.0, net9.0)
@@ -9,8 +9,9 @@ COPY --from=mcr.microsoft.com/dotnet/sdk:8.0 /usr/share/dotnet/shared /usr/share
 COPY --from=mcr.microsoft.com/dotnet/sdk:9.0 /usr/share/dotnet/sdk /usr/share/dotnet/sdk
 COPY --from=mcr.microsoft.com/dotnet/sdk:9.0 /usr/share/dotnet/shared /usr/share/dotnet/shared
 
-# Install Node.js 22
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+# Match the repository tooling major in .nvmrc.
+ARG NODE_MAJOR=26
+RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && npm install -g npm@latest
 
