@@ -22,6 +22,14 @@ DRIVER = ROOT / "tests/compatibility/plugin_signing_compatibility.py"
 REPOSITORY = "joshsmithxrm/power-platform-developer-suite"
 PLAN_FILES = {"plan.json", "public.bin", "context.json"}
 PRODUCT_PROBE = 'param([string]$Path)\n[Diagnostics.FileVersionInfo]::GetVersionInfo($Path).ProductVersion\n'
+PUBLIC_ENV_PROBE = r'''$ErrorActionPreference = 'Stop'
+$result = [ordered]@{ process_bits = [IntPtr]::Size * 8; fips = [Security.Cryptography.CryptoConfig]::AllowOnlyFipsAlgorithms }
+foreach ($name in @('ApplicationData', 'LocalApplicationData', 'CommonApplicationData', 'UserProfile', 'System')) {
+    $result[$name] = [Environment]::GetFolderPath([Environment+SpecialFolder]::$name)
+}
+$result | ConvertTo-Json -Compress
+'''
+WINDOWS_FOLDER_ENV = ('APPDATA', 'LOCALAPPDATA', 'ProgramData', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH')
 
 
 def checkpoint(phase):
@@ -217,6 +225,31 @@ class Hosted:
                 stream.write(f"{stage}-id={artifact['id']}\n{stage}-digest={artifact['digest']}\n")
         return value["artifact"]
 
+    def keyless_diagnostics(self):
+        # Read-only public host metadata. Never call -k/-p/-R, acquire a key
+        # container, change CSP/machine policy, or inherit tokens into a process.
+        d = self.d
+        minimal = d.environment({"tools": self.tools, "windows_directory": self.env["SYSTEMROOT"]}, self.root / "temp")
+        folders = {**minimal, **{k: self.env[k] for k in WINDOWS_FOLDER_ENV if k in self.env}}
+        probe = self.root / "public-environment.ps1"
+        d.write(probe, PUBLIC_ENV_PROBE.encode())
+        framework_shell = Path(self.env["SYSTEMROOT"]) / "SysWOW64/WindowsPowerShell/v1.0/powershell.exe"
+        d.local_path(framework_shell)
+        shell_pin = d.record(framework_shell)
+        contexts = {}
+        for label, environment in (("minimal", minimal), ("windows-folders", folders)):
+            require(d.record(framework_shell) == shell_pin, "Public diagnostic tool changed")
+            values = json.loads(execute([str(framework_shell), "-NoProfile", "-NonInteractive", "-File", str(probe)],
+                                        cwd=self.root, env=environment, timeout=120))
+            # -m without a value only reads the setting. Never use -c (which
+            # resets CSP configuration even without a value).
+            d.pin({"tools": self.tools}, ["sn"])
+            policy = execute([self.tools["sn"]["path"], "-m"], cwd=self.root, env=environment, timeout=120)
+            contexts[label] = {"folders": values, "sn_machine_policy": policy[:2048]}
+        print(json.dumps({"keyless_public_diagnostics": contexts,
+                          "tools": {k: {f: v[f] for f in ("sha256", "version")} for k, v in self.tools.items()},
+                          "framework_shell": shell_pin, "source": self.args.source}), flush=True)
+
     def plan(self, directory):
         d = self.d
         raw = d.read(directory / "plan.json", 65536)
@@ -345,6 +378,7 @@ def main(argv=None):
         context = Hosted(args, os.environ, load_driver())
         checkpoint("bootstrap-completed")
         if args.bootstrap_only:
+            context.keyless_diagnostics()
             checkpoint("keyless-bootstrap-completed-no-stage-called")
             return 0
         getattr(context, args.stage)()

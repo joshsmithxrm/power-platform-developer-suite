@@ -347,12 +347,40 @@ def test_keyless_bootstrap_never_enters_a_stage(monkeypatch, capsys, stage):
     class KeylessContext:
         def __init__(self, *a):
             pass
+        def keyless_diagnostics(self):
+            pass
         def __getattr__(self, name):
             pytest.fail("Keyless bootstrap entered stage " + name)
     monkeypatch.setattr(h, "Hosted", KeylessContext)
     assert h.main(["--stage", stage, "--source", "a" * 40, "--experiment", "offline", "--authorization", "offline-only",
                    "--admit-network-connected-disposable-signing", "--bootstrap-only"]) == 0
     assert "keyless-bootstrap-completed-no-stage-called" in capsys.readouterr().out
+
+
+def test_keyless_public_diagnostics_never_generate_keys_or_inherit_tokens(tmp_path, monkeypatch, capsys):
+    obj = h.Hosted.__new__(h.Hosted)
+    obj.args, obj.root = args(), tmp_path
+    obj.env = {'SYSTEMROOT': 'C:/Windows', 'APPDATA': 'C:/Public/Roaming',
+               'ACTIONS_RUNTIME_TOKEN': 'PRIVATE_TOKEN', 'UNRELATED': 'PRIVATE_VALUE'}
+    obj.tools = {'sn': {'path': 'public-sn.exe', 'sha256': 'a'*64, 'version': '4.8'}}
+    obj.d = SimpleNamespace(environment=lambda *a: {'SYSTEMROOT': 'C:/Windows'},
+        write=lambda p, raw: p.write_bytes(raw), local_path=lambda p: None,
+        record=lambda p: {'sha256': 'b'*64, 'bytes': 1}, pin=lambda *a: None)
+    commands = []
+    def execute(command, *, env, **kw):
+        commands.append(command)
+        assert set(env) <= {'SYSTEMROOT', 'APPDATA'}
+        assert 'PRIVATE' not in str(env)
+        if command[0] == 'public-sn.exe':
+            assert command == ['public-sn.exe', '-m']
+            return 'Keys stored in machine key store'
+        assert command[1:4] == ['-NoProfile', '-NonInteractive', '-File']
+        return '{"process_bits":32,"ApplicationData":""}'
+    monkeypatch.setattr(h, 'execute', execute)
+    obj.keyless_diagnostics()
+    assert len(commands) == 4
+    assert 'PRIVATE' not in capsys.readouterr().out
+    assert all(token not in h.PUBLIC_ENV_PROBE for token in ['RSACryptoServiceProvider', 'CryptAcquire', 'CryptGen', 'Set-Item', 'SetEnvironmentVariable'])
 
 
 def test_command_failure_reports_only_exit_code_not_private_diagnostics(monkeypatch, capsys, tmp_path):
