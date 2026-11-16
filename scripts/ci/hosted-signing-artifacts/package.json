@@ -1,0 +1,9 @@
+{
+  "name": "ppds-hosted-signing-artifacts",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": { "test": "node --test test/*.test.mjs" },
+  "dependencies": { "@actions/artifact": "6.3.1" }
+}

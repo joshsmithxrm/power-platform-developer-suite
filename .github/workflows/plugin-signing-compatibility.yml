@@ -1,0 +1,146 @@
+name: Disposable plugin signing compatibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      admit_network_connected_disposable_signing:
+        description: 'Admit one disposable-key test on fresh network-connected hosted VMs with public Actions artifacts'
+        type: boolean
+        default: false
+        required: true
+      expected_source:
+        description: 'Reviewed full SHA of this workflow and source (must equal selected ref SHA)'
+        type: string
+        required: true
+      experiment:
+        description: 'Unique test identifier (letters, numbers, underscore or hyphen; maximum 40 characters)'
+        type: string
+        required: true
+      authorization:
+        description: 'Applicable disposable-key/network-custody authorization reference'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  PPDS_ADMISSION: ${{ inputs.admit_network_connected_disposable_signing }}
+  PPDS_EXPECTED_SOURCE: ${{ inputs.expected_source }}
+  PPDS_EXPERIMENT: ${{ inputs.experiment }}
+  PPDS_AUTHORIZATION: ${{ inputs.authorization }}
+
+jobs:
+  # These initial jobs intentionally have NO needs edge. SIGN publishes the public
+  # plan before awaiting PREPARE; unfinished job outputs cannot be a rendezvous.
+  sign:
+    if: inputs.admit_network_connected_disposable_signing && github.repository == 'joshsmithxrm/power-platform-developer-suite' && startsWith(github.ref, 'refs/heads/')
+    runs-on: windows-2025
+    timeout-minutes: 75
+    outputs:
+      plan-id: ${{ steps.compat.outputs.plan-id }}
+      plan-digest: ${{ steps.compat.outputs.plan-digest }}
+      sign-id: ${{ steps.compat.outputs.sign-id }}
+      sign-digest: ${{ steps.compat.outputs.sign-digest }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '26'
+          package-manager-cache: false
+      - name: Bootstrap locked tools before any disposable key exists
+        id: bootstrap
+        shell: pwsh
+        run: ./scripts/ci/bootstrap_hosted_signing.ps1 -Stage sign
+      - name: One admitted signing attempt with original-key cleanup
+        id: compat
+        uses: ./scripts/ci/hosted-signing-artifacts
+        with:
+          python-path: ${{ steps.bootstrap.outputs.python }}
+          coordinator-path: ${{ github.workspace }}/scripts/ci/hosted_signing_compatibility.py
+          arguments-json: ${{ steps.bootstrap.outputs.arguments }}
+
+  prepare:
+    if: inputs.admit_network_connected_disposable_signing && github.repository == 'joshsmithxrm/power-platform-developer-suite' && startsWith(github.ref, 'refs/heads/')
+    runs-on: windows-2025
+    timeout-minutes: 60
+    outputs:
+      prepare-id: ${{ steps.compat.outputs.prepare-id }}
+      prepare-digest: ${{ steps.compat.outputs.prepare-digest }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '26'
+          package-manager-cache: false
+      - name: Bootstrap locked artifact client before public preparation
+        id: bootstrap
+        shell: pwsh
+        run: ./scripts/ci/bootstrap_hosted_signing.ps1 -Stage prepare
+      - name: Prepare using only the admitted public key
+        id: compat
+        uses: ./scripts/ci/hosted-signing-artifacts
+        with:
+          python-path: ${{ steps.bootstrap.outputs.python }}
+          coordinator-path: ${{ github.workspace }}/scripts/ci/hosted_signing_compatibility.py
+          arguments-json: ${{ steps.bootstrap.outputs.arguments }}
+
+  verify:
+    needs: [sign, prepare]
+    if: inputs.admit_network_connected_disposable_signing
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      PPDS_PLAN_ID: ${{ needs.sign.outputs.plan-id }}
+      PPDS_PLAN_DIGEST: ${{ needs.sign.outputs.plan-digest }}
+      PPDS_PREPARE_ID: ${{ needs.prepare.outputs.prepare-id }}
+      PPDS_PREPARE_DIGEST: ${{ needs.prepare.outputs.prepare-digest }}
+      PPDS_SIGN_ID: ${{ needs.sign.outputs.sign-id }}
+      PPDS_SIGN_DIGEST: ${{ needs.sign.outputs.sign-digest }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '26'
+          package-manager-cache: false
+      - name: Bootstrap a fresh keyless verifier
+        id: bootstrap
+        shell: pwsh
+        run: ./scripts/ci/bootstrap_hosted_signing.ps1 -Stage verify
+      - name: Verify all six real compatibility cases and both key cleanups
+        id: compat
+        uses: ./scripts/ci/hosted-signing-artifacts
+        with:
+          python-path: ${{ steps.bootstrap.outputs.python }}
+          coordinator-path: ${{ github.workspace }}/scripts/ci/hosted_signing_compatibility.py
+          arguments-json: ${{ steps.bootstrap.outputs.arguments }}
