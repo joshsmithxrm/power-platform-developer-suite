@@ -183,14 +183,15 @@ def load_plan(path, expected_hash):
     require(check_hex(expected_hash) and digest(raw) == expected_hash, "Plan hash mismatch")
     value = h.decode(raw)
     require(set(value) == {"schema", "kind", "experiment", "source", "tree", "version",
-                          "public_key_sha256", "windows_directory", "tools"}, "Unexpected plan fields")
-    require(value["schema"] == 1 and value["kind"] == "ppds-signing-compatibility-plan", "Candidate plan required")
+                          "public_key_sha256", "windows_directory", "windows_common_data_directory", "tools"}, "Unexpected plan fields")
+    require(value["schema"] == 2 and value["kind"] == "ppds-signing-compatibility-plan", "Candidate plan v2 required")
     require(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}", value["experiment"]) is not None, "Experiment ID required")
     require(check_hex(value["source"], 40) and check_hex(value["tree"], 40), "Source identity required")
     release.strict_version(value["version"])
     require(check_hex(value["public_key_sha256"]) and value["public_key_sha256"] != PRODUCTION_PUBLIC_HASH,
             "Distinct disposable public identity required")
     windows_path(value["windows_directory"])
+    windows_path(value["windows_common_data_directory"])
     require(set(value["tools"]) == {"git", "dotnet", "pwsh", "sn"}, "Exact tool inventory required")
     for name, tool in value["tools"].items():
         require(set(tool) == {"path", "sha256", "version"}, "Exact tool identity required")
@@ -289,6 +290,7 @@ class Runtime:
 def environment(plan, temporary, *, build=False):
     # No os.environ, PATH inheritance, token lookup or secret API.
     result = {"SYSTEMROOT": plan["windows_directory"], "WINDIR": plan["windows_directory"],
+              "PROGRAMDATA": plan["windows_common_data_directory"], "ALLUSERSPROFILE": plan["windows_common_data_directory"],
               "TEMP": str(temporary), "TMP": str(temporary),
               "ProgramFiles(x86)": str(PureWindowsPath(*PureWindowsPath(FIXED_SIGNER).parts[:2]))}
     if build:

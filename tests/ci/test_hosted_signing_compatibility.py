@@ -78,6 +78,7 @@ def signing_context(tmp_path, monkeypatch, fail=None):
     obj = h.Hosted.__new__(h.Hosted)
     obj.args, obj.root, obj.env = args(), tmp_path, {"SYSTEMROOT": "C:/Windows"}
     obj.version, obj.tree = "0.0.0-compat.12345", "b" * 40
+    obj.common_data = "C:/ProgramData"
     obj.binding, obj.context = h.admit_host(args(), environment()), {"test_double": True}
     obj.tools = {"sn": {"path": "fake-never-invoked-sn"}}
     events = []
@@ -360,6 +361,7 @@ def test_keyless_bootstrap_never_enters_a_stage(monkeypatch, capsys, stage):
 def test_keyless_public_diagnostics_never_generate_keys_or_inherit_tokens(tmp_path, monkeypatch, capsys):
     obj = h.Hosted.__new__(h.Hosted)
     obj.args, obj.root = args(), tmp_path
+    obj.common_data = 'C:/ProgramData'
     obj.env = {'SYSTEMROOT': 'C:/Windows', 'APPDATA': 'C:/Public/Roaming',
                'PROGRAMDATA': 'C:/ProgramData', 'ALLUSERSPROFILE': 'C:/ProgramData',
                'ACTIONS_RUNTIME_TOKEN': 'PRIVATE_TOKEN', 'UNRELATED': 'PRIVATE_VALUE'}
@@ -385,6 +387,14 @@ def test_keyless_public_diagnostics_never_generate_keys_or_inherit_tokens(tmp_pa
     assert len(commands) == 4
     assert 'PRIVATE' not in capsys.readouterr().out
     assert all(token not in h.PUBLIC_ENV_PROBE for token in ['RSACryptoServiceProvider', 'CryptAcquire', 'CryptGen', 'Set-Item', 'SetEnvironmentVariable'])
+
+
+@pytest.mark.parametrize('data,alias', [(None, 'C:/ProgramData'), ('C:/ProgramData', None),
+    ('relative', 'relative'), ('C:/ProgramData', 'D:/ProgramData'), ('C:/x/../ProgramData', 'C:/x/../ProgramData')])
+def test_common_data_context_refuses_missing_or_inconsistent_paths(data, alias):
+    driver = h.load_driver()
+    with pytest.raises((ValueError, driver.Error)):
+        h.common_data_directory({'PROGRAMDATA': data, 'ALLUSERSPROFILE': alias}, driver)
 
 
 def test_command_failure_reports_only_exit_code_not_private_diagnostics(monkeypatch, capsys, tmp_path):

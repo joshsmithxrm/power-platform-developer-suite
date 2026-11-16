@@ -11,7 +11,7 @@ import argparse
 import importlib.util
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
 import shutil
 import subprocess
@@ -125,6 +125,16 @@ def cleanup_original(path):
     require(not path.exists() and not path.is_symlink(), "Original key cleanup unproven")
 
 
+def common_data_directory(env, driver):
+    value, alias = env.get("PROGRAMDATA"), env.get("ALLUSERSPROFILE")
+    driver.windows_path(value)
+    driver.windows_path(alias)
+    require(PureWindowsPath(value) == PureWindowsPath(alias), "Windows common-data paths disagree")
+    driver.local_path(Path(value))
+    require(Path(value).is_dir(), "Windows common-data directory required")
+    return str(Path(value))
+
+
 class Hosted:
     def __init__(self, args, env, driver):
         self.args, self.env, self.d = args, dict(env), driver
@@ -147,6 +157,7 @@ class Hosted:
 
     def bootstrap(self):
         d = self.d
+        self.common_data = common_data_directory(self.env, d)
         probe = self.root / "product-version.ps1"
         d.write(probe, PRODUCT_PROBE.encode())
         paths = {name: shutil.which(name + ".exe") for name in ("git", "dotnet", "pwsh")}
@@ -229,7 +240,8 @@ class Hosted:
         # Read-only public host metadata. Never call -k/-p/-R, acquire a key
         # container, change CSP/machine policy, or inherit tokens into a process.
         d = self.d
-        minimal = d.environment({"tools": self.tools, "windows_directory": self.env["SYSTEMROOT"]}, self.root / "temp")
+        minimal = d.environment({"tools": self.tools, "windows_directory": self.env["SYSTEMROOT"],
+                                 "windows_common_data_directory": self.common_data}, self.root / "temp")
         folders = {**minimal, **{k: self.env[k] for k in WINDOWS_FOLDER_ENV if k in self.env}}
         probe = self.root / "public-environment.ps1"
         d.write(probe, PUBLIC_ENV_PROBE.encode())
@@ -259,7 +271,8 @@ class Hosted:
         self.plan_value = d.load_plan(directory / "plan.json", self.plan_hash)
         p = self.plan_value
         require(p["source"] == self.args.source and p["tree"] == self.tree and p["tools"] == self.tools
-                and p["version"] == self.version and p["experiment"] == self.args.experiment,
+                and p["version"] == self.version and p["experiment"] == self.args.experiment
+                and PureWindowsPath(p["windows_common_data_directory"]) == PureWindowsPath(self.common_data),
                 "Local tool/source identity differs from authoritative plan")
         public = d.read(directory / "public.bin", 4096)
         d.public_shape(public)
@@ -281,7 +294,8 @@ class Hosted:
         public.mkdir()
         key = self.root / "original-disposable-key.snk"
         signed, prepared = self.root / "signed", self.root / "prepared"
-        partial_plan = {"tools": self.tools, "windows_directory": self.env["SYSTEMROOT"]}
+        partial_plan = {"tools": self.tools, "windows_directory": self.env["SYSTEMROOT"],
+                        "windows_common_data_directory": self.common_data}
         # Ownership starts before -k; any partial file must be removed too.
         try:
             for options in (("-k", "1024", key), ("-p", key, public / "public.bin")):
@@ -292,7 +306,7 @@ class Hosted:
                 checkpoint("key-generation-completed" if options[0] == "-k" else "public-key-export-completed")
             blob = d.read(public / "public.bin", 4096)
             d.public_shape(blob)
-            plan = {"schema": 1, "kind": "ppds-signing-compatibility-plan", "experiment": self.args.experiment,
+            plan = {"schema": 2, "kind": "ppds-signing-compatibility-plan", "experiment": self.args.experiment,
                     "source": self.args.source, "tree": self.tree, "version": self.version,
                     "public_key_sha256": d.digest(blob), **partial_plan}
             json_write(public / "plan.json", plan)

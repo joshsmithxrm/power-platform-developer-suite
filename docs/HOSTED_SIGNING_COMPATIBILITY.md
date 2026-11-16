@@ -75,7 +75,7 @@ and release decisions remain separate.
 
 `python -m pytest tests/ci/test_hosted_signing_compatibility.py
 tests/ci/test_plugin_signing_compatibility.py` exercises admission, workflow
-structure, failure cleanup and the unchanged driver's contracts. The first test
+structure, failure cleanup and the compatibility driver's contracts. The first test
 module also runs the dependency-injected Node transport/action tests. These
 tests use fake public/"key" bytes and subprocess doubles; they never generate a
 cryptographic key or contact Actions/Dataverse.
@@ -84,3 +84,12 @@ The transport package has an exact `@actions/artifact` version and lockfile.
 Assess its advisories and the selected raw-transfer call paths before execution;
 an npm install or a clean test run is not an advisory review. Do not apply a
 suggested package downgrade without checking the required raw-transfer APIs.
+
+The compatibility plan now uses schema 2 and binds the admitted Windows common
+application-data directory. The constrained child environment supplies only
+`PROGRAMDATA` and `ALLUSERSPROFILE` for that directory in addition to the existing
+OS/temp values. Machine-based Strong Name key containers require this Windows
+context; dropping it made common-data resolution empty on the hosted image.
+The coordinator refuses missing, different, non-local or linked directory
+values before generating a key. No CSP configuration, permission, profile or
+verification policy is changed. Old schema-1 plans must not be replayed.

@@ -133,9 +133,10 @@ def plan():
     for name in ("git", "dotnet", "pwsh", "sn"):
         tools[name] = {"path": d.FIXED_SIGNER if name == "sn" else f"C:/fixture/{name}.exe",
                        "sha256": "d" * 64, "version": "1.2.3.4"}
-    return {"schema": 1, "kind": "ppds-signing-compatibility-plan", "experiment": "offline-fixture",
+    return {"schema": 2, "kind": "ppds-signing-compatibility-plan", "experiment": "offline-fixture",
             "source": SOURCE, "tree": TREE, "version": "3.1.1-compat.1",
             "public_key_sha256": d.digest(public_fixture()), "windows_directory": "C:/Windows",
+            "windows_common_data_directory": "C:/ProgramData",
             "tools": tools}
 
 
@@ -561,7 +562,8 @@ def test_build_invocation_suppresses_certificate_generation_without_inheriting_e
     assert child["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] == "1"
     assert "PLUGINS_SNK_BASE64" not in child
     assert "untrusted-parent-path" not in child["PATH"]
-    assert set(child) == {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "ProgramFiles(x86)",
+    assert child["PROGRAMDATA"] == child["ALLUSERSPROFILE"] == plan["windows_common_data_directory"]
+    assert set(child) == {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "ProgramFiles(x86)", "PROGRAMDATA", "ALLUSERSPROFILE",
                           "DOTNET_CLI_HOME", "NUGET_PACKAGES", "DOTNET_CLI_TELEMETRY_OPTOUT",
                           "DOTNET_NOLOGO", "DOTNET_SKIP_FIRST_TIME_EXPERIENCE",
                           "DOTNET_GENERATE_ASPNET_CERTIFICATE", "PATH"}
@@ -579,7 +581,8 @@ def test_sign_launches_only_sn_and_does_not_claim_completed_metadata(signing_fix
     assert value["cases"] == {"COMPAT-02": "SIGNATURE_OPERATIONS_PASSED_METADATA_PENDING"}
     assert "result" not in value
     for _, options in rt.commands:
-        assert set(options["environment"]) == {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "ProgramFiles(x86)"}
+        assert set(options["environment"]) == {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "ProgramFiles(x86)", "PROGRAMDATA", "ALLUSERSPROFILE"}
+        assert options["environment"]["PROGRAMDATA"] == options["environment"]["ALLUSERSPROFILE"] == "C:/ProgramData"
         assert options["environment"]["ProgramFiles(x86)"] == "C:\\Program Files (x86)"
 
 
