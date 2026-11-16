@@ -528,7 +528,7 @@ public interface IPluginRegistrationService
     /// <param name="imageId">The image ID.</param>
     /// <param name="request">The update request containing properties to change.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <exception cref="InvalidOperationException">Thrown when the image is managed and not customizable.</exception>
+    /// <remarks>Preserves omitted fields using a fresh snapshot and conditional row-version update. Dataverse enforces managed customization rules.</remarks>
     Task UpdateImageAsync(
         Guid imageId,
         ImageUpdateRequest request,

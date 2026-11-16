@@ -54,7 +54,7 @@ public partial class PluginReconciliationWriteTests
         var write = Assert.Single(_writes);
         Assert.True(write.Contains("attributes"));
         Assert.Equal("", Assert.IsType<string>(write["attributes"]));
-        Assert.False(write.Contains("description"));
+        Assert.Equal(_imageSnapshot["description"], write["description"]);
     }
 
     [Theory]
@@ -83,6 +83,6 @@ public partial class PluginReconciliationWriteTests
         await _service.UpdateImageAsync(_existing.Id, request);
         var write = Assert.Single(_writes);
         Assert.Equal("renamed", write["name"]);
-        Assert.False(write.Contains("attributes"));
+        Assert.Equal(_imageSnapshot["attributes"], write["attributes"]);
     }
 }

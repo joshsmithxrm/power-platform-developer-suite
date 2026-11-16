@@ -155,7 +155,8 @@ public partial class PluginReconciliationWriteTests
         foreach (var key in new[] { "rank", "mode", "supporteddeployment" }) Assert.False(step.Contains(key), key);
         await _service.UpdateImageAsync(_existing.Id, new ImageUpdateRequest { ResetFields = ["attributes"] });
         Assert.Null(_writes[1]["attributes"]);
-        Assert.False(_writes[1].Contains("description")); Assert.False(_writes[1].Contains("entityalias"));
+        Assert.Equal(_imageSnapshot["description"], _writes[1]["description"]);
+        Assert.Equal(_imageSnapshot["entityalias"], _writes[1]["entityalias"]);
     }
 
     [PPDS.Plugins.PluginStep(Message = "Update", EntityLogicalName = "account", Stage = PPDS.Plugins.PluginStage.PostOperation, CanBeBypassed = true, CanUseReadOnlyConnection = false, AsyncAutoDelete = false, Description = null)]
