@@ -503,7 +503,18 @@ public partial class RpcMethodHandler
                 ImageType = imageType
             };
 
-            await registrationService.UpdateImageAsync(imageId, request, ct);
+            try
+            {
+                await registrationService.UpdateImageAsync(imageId, request, ct);
+            }
+            catch (PpdsException ex)
+            {
+                // Preserve the service's safe outcome contract, including warnings not
+                // to repeat an acknowledged or uncertain write. The mapper excludes
+                // inner exceptions and private diagnostics; unexpected errors retain
+                // SafeExecuteAsync's redaction and cancellation still passes through.
+                throw MapPpdsToRpcException(ex);
+            }
 
             return new PluginsUpdateResponse { Id = id };
         }, cancellationToken);

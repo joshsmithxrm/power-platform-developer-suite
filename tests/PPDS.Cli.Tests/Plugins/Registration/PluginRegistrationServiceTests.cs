@@ -101,6 +101,8 @@ public class PluginRegistrationServiceTests
 
         _sut = new PluginRegistrationService(_mockPool.Object, new InactiveFakeShakedownGuard(), _mockLogger.Object);
         PluginFieldCapabilityTestMetadata.AllowReadOnlyConnectionWrites(_mockPooledClient);
+        PluginImageUpdateTestContext.Configure(_mockPooledClient, PluginImageUpdateTestContext.Snapshot,
+            entity => _updatedEntity = entity);
     }
 
     #region Core Assembly Tests

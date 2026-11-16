@@ -23,6 +23,7 @@ public partial class PluginReconciliationWriteTests
     private readonly List<Entity> _writes = [];
     private readonly List<QueryExpression> _reads = [];
     private readonly Entity _existing = new("sdkmessageprocessingstep", Guid.NewGuid());
+    private readonly Entity _imageSnapshot;
     private readonly PluginRegistrationService _service;
 
     public PluginReconciliationWriteTests()
@@ -37,6 +38,8 @@ public partial class PluginReconciliationWriteTests
             .Callback<Entity, CancellationToken>((e, _) => _writes.Add(e)).Returns(Task.CompletedTask);
         _service = new PluginRegistrationService(pool.Object, new InactiveFakeShakedownGuard(), Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginRegistrationService>.Instance);
         PluginFieldCapabilityTestMetadata.AllowReadOnlyConnectionWrites(_client);
+        _imageSnapshot = PluginImageUpdateTestContext.Snapshot(_existing.Id);
+        PluginImageUpdateTestContext.Configure(_client, _ => _imageSnapshot, _writes.Add);
     }
 
     private static PluginStepConfig Step() => new()
