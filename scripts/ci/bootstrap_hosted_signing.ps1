@@ -21,7 +21,9 @@ try {
 $arguments = @('--stage', $Stage, '--source', $env:GITHUB_SHA, '--experiment', $env:PPDS_EXPERIMENT,
                '--authorization', $env:PPDS_AUTHORIZATION, '--admit-network-connected-disposable-signing')
 $argumentsJson = ConvertTo-Json -InputObject $arguments -Compress
-$python = (Get-Command python.exe -CommandType Application -ErrorAction Stop).Source
+# Hosted images can expose several Python installations. Match normal PATH
+# resolution; serializing every Source produces one invalid executable path.
+$python = (Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 "arguments=$argumentsJson" >> $env:GITHUB_OUTPUT
 "python=$python" >> $env:GITHUB_OUTPUT
 "PPDS_ARTIFACT_ADAPTER=$(Join-Path $target 'cli.mjs')" >> $env:GITHUB_ENV
