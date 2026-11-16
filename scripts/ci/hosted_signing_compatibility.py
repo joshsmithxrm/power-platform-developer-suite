@@ -233,22 +233,24 @@ class Hosted:
         folders = {**minimal, **{k: self.env[k] for k in WINDOWS_FOLDER_ENV if k in self.env}}
         probe = self.root / "public-environment.ps1"
         d.write(probe, PUBLIC_ENV_PROBE.encode())
-        framework_shell = Path(self.env["SYSTEMROOT"]) / "SysWOW64/WindowsPowerShell/v1.0/powershell.exe"
-        d.local_path(framework_shell)
-        shell_pin = d.record(framework_shell)
+        public_shell = Path(self.tools["pwsh"]["path"])
+        print(json.dumps({"keyless_tool_identity": {k: {f: v[f] for f in ("sha256", "version")}
+                                                   for k, v in self.tools.items()}}), flush=True)
         contexts = {}
         for label, environment in (("minimal", minimal), ("windows-folders", folders)):
-            require(d.record(framework_shell) == shell_pin, "Public diagnostic tool changed")
-            values = json.loads(execute([str(framework_shell), "-NoProfile", "-NonInteractive", "-File", str(probe)],
+            d.pin({"tools": self.tools}, ["pwsh"])
+            checkpoint("keyless-public-folders-" + label)
+            values = json.loads(execute([str(public_shell), "-NoProfile", "-NonInteractive", "-File", str(probe)],
                                         cwd=self.root, env=environment, timeout=120))
             # -m without a value only reads the setting. Never use -c (which
             # resets CSP configuration even without a value).
             d.pin({"tools": self.tools}, ["sn"])
+            checkpoint("keyless-sn-policy-" + label)
             policy = execute([self.tools["sn"]["path"], "-m"], cwd=self.root, env=environment, timeout=120)
             contexts[label] = {"folders": values, "sn_machine_policy": policy[:2048]}
         print(json.dumps({"keyless_public_diagnostics": contexts,
                           "tools": {k: {f: v[f] for f in ("sha256", "version")} for k, v in self.tools.items()},
-                          "framework_shell": shell_pin, "source": self.args.source}), flush=True)
+                          "source": self.args.source}), flush=True)
 
     def plan(self, directory):
         d = self.d

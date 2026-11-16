@@ -362,7 +362,8 @@ def test_keyless_public_diagnostics_never_generate_keys_or_inherit_tokens(tmp_pa
     obj.args, obj.root = args(), tmp_path
     obj.env = {'SYSTEMROOT': 'C:/Windows', 'APPDATA': 'C:/Public/Roaming',
                'ACTIONS_RUNTIME_TOKEN': 'PRIVATE_TOKEN', 'UNRELATED': 'PRIVATE_VALUE'}
-    obj.tools = {'sn': {'path': 'public-sn.exe', 'sha256': 'a'*64, 'version': '4.8'}}
+    obj.tools = {'sn': {'path': 'public-sn.exe', 'sha256': 'a'*64, 'version': '4.8'},
+                 'pwsh': {'path': 'public-pwsh.exe', 'sha256': 'b'*64, 'version': '7'}}
     obj.d = SimpleNamespace(environment=lambda *a: {'SYSTEMROOT': 'C:/Windows'},
         write=lambda p, raw: p.write_bytes(raw), local_path=lambda p: None,
         record=lambda p: {'sha256': 'b'*64, 'bytes': 1}, pin=lambda *a: None)
