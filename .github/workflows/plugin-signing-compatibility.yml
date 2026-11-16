@@ -12,6 +12,11 @@ on:
         description: 'Reviewed full SHA of this workflow and source (must equal selected ref SHA)'
         type: string
         required: true
+      bootstrap_only:
+        description: 'Check the reviewed host and tools only; never generate a key or enter prepare/sign/verify'
+        type: boolean
+        default: false
+        required: true
       experiment:
         description: 'Unique test identifier (letters, numbers, underscore or hyphen; maximum 40 characters)'
         type: string
@@ -32,6 +37,7 @@ env:
   PPDS_EXPECTED_SOURCE: ${{ inputs.expected_source }}
   PPDS_EXPERIMENT: ${{ inputs.experiment }}
   PPDS_AUTHORIZATION: ${{ inputs.authorization }}
+  PPDS_BOOTSTRAP_ONLY: ${{ inputs.bootstrap_only }}
 
 jobs:
   # These initial jobs intentionally have NO needs edge. SIGN publishes the public
@@ -108,7 +114,7 @@ jobs:
 
   verify:
     needs: [sign, prepare]
-    if: inputs.admit_network_connected_disposable_signing
+    if: inputs.admit_network_connected_disposable_signing && !inputs.bootstrap_only
     runs-on: windows-2025
     timeout-minutes: 20
     env:

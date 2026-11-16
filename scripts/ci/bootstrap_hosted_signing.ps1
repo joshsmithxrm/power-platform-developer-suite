@@ -20,6 +20,7 @@ try {
 } finally { Pop-Location }
 $arguments = @('--stage', $Stage, '--source', $env:GITHUB_SHA, '--experiment', $env:PPDS_EXPERIMENT,
                '--authorization', $env:PPDS_AUTHORIZATION, '--admit-network-connected-disposable-signing')
+if ($env:PPDS_BOOTSTRAP_ONLY -ceq 'true') { $arguments += '--bootstrap-only' }
 $argumentsJson = ConvertTo-Json -InputObject $arguments -Compress
 # Hosted images can expose several Python installations. Match normal PATH
 # resolution; serializing every Source produces one invalid executable path.

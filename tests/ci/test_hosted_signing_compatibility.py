@@ -115,7 +115,7 @@ def signing_context(tmp_path, monkeypatch, fail=None):
 
 
 @pytest.mark.parametrize("point", ["generate", "export", "plan", "plan-upload", "prepare-download", "driver-sign", "driver-cleanup"])
-def test_each_failure_cleans_original_and_never_publishes_signed_output(tmp_path, monkeypatch, point):
+def test_each_failure_cleans_original_and_never_publishes_signed_output(tmp_path, monkeypatch, point, capsys):
     obj, events = signing_context(tmp_path, monkeypatch, point)
     with pytest.raises(ValueError):
         obj.sign()
@@ -123,14 +123,17 @@ def test_each_failure_cleans_original_and_never_publishes_signed_output(tmp_path
     assert "sign-upload" not in events
     assert events.count("generate") == 1
     assert events.count("driver-sign") <= 1
+    phases = [json.loads(line)["hosted_compatibility_phase"] for line in capsys.readouterr().out.splitlines()]
+    assert "original-key-cleanup-completed" in phases
 
 
-def test_cleanup_failure_withholds_qualified_artifact(tmp_path, monkeypatch):
+def test_cleanup_failure_withholds_qualified_artifact(tmp_path, monkeypatch, capsys):
     obj, events = signing_context(tmp_path, monkeypatch)
     monkeypatch.setattr(h, "cleanup_original", lambda _: (_ for _ in ()).throw(ValueError("injected cleanup failure")))
     with pytest.raises(ValueError, match="cleanup failure"):
         obj.sign()
     assert "sign-upload" not in events
+    assert "original-key-cleanup-completed" not in capsys.readouterr().out
     # This is a test-double byte file, not signing material.
     (tmp_path / "original-disposable-key.snk").unlink()
 
@@ -248,11 +251,13 @@ def test_workflow_is_manual_read_only_and_has_no_deadlock_or_unfinished_outputs(
     event = workflow.get("on", workflow.get(True))
     assert set(event) == {"workflow_dispatch"}
     assert event["workflow_dispatch"]["inputs"]["admit_network_connected_disposable_signing"]["default"] is False
+    assert event["workflow_dispatch"]["inputs"]["bootstrap_only"]["default"] is False
     assert workflow["permissions"] == {"contents": "read"}
     jobs = workflow["jobs"]
     assert set(jobs) == {"sign", "prepare", "verify"}
     assert "needs" not in jobs["sign"] and "needs" not in jobs["prepare"]
     assert set(jobs["verify"]["needs"]) == {"sign", "prepare"}
+    assert "!inputs.bootstrap_only" in jobs["verify"]["if"]
     for name, job in jobs.items():
         assert job["runs-on"] == "windows-2025"
         assert 0 < job["timeout-minutes"] <= 75
@@ -279,7 +284,8 @@ def test_transport_offline_contracts():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_bootstrap_selects_one_python_when_host_has_multiple_installations(tmp_path):
+@pytest.mark.parametrize("bootstrap_only", [False, True])
+def test_bootstrap_selects_one_python_when_host_has_multiple_installations(tmp_path, bootstrap_only):
     pwsh = shutil.which("pwsh")
     if not pwsh:
         pytest.skip("PowerShell unavailable; actual bootstrap regression not run")
@@ -309,6 +315,7 @@ $bootstrap = $args[0]
            "RUNNER_TEMP": str(runner_temp), "GITHUB_WORKSPACE": str(workspace), "GITHUB_OUTPUT": str(output),
            "GITHUB_ENV": str(environment_output), "PPDS_TEST_FIRST_PYTHON": first, "PPDS_TEST_SECOND_PYTHON": second,
            "PPDS_EXPERIMENT": "fake-offline-only", "PPDS_AUTHORIZATION": "fake-offline-only"}
+    env["PPDS_BOOTSTRAP_ONLY"] = str(bootstrap_only).lower()
     result = subprocess.run([pwsh, "-NoProfile", "-File", str(harness), str(ROOT / "scripts/ci/bootstrap_hosted_signing.ps1")],
                             env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -316,3 +323,32 @@ $bootstrap = $args[0]
     assert outputs["python"] == first
     assert second not in outputs["python"]
     assert json.loads(outputs["arguments"])[0:2] == ["--stage", "sign"]
+    assert ("--bootstrap-only" in json.loads(outputs["arguments"])) is bootstrap_only
+
+
+@pytest.mark.parametrize("stage", ["sign", "prepare", "verify"])
+def test_keyless_bootstrap_never_enters_a_stage(monkeypatch, capsys, stage):
+    monkeypatch.setattr(h, "admit_host", lambda *a: {})
+    monkeypatch.setattr(h, "load_driver", lambda: object())
+    class KeylessContext:
+        def __init__(self, *a):
+            pass
+        def __getattr__(self, name):
+            pytest.fail("Keyless bootstrap entered stage " + name)
+    monkeypatch.setattr(h, "Hosted", KeylessContext)
+    assert h.main(["--stage", stage, "--source", "a" * 40, "--experiment", "offline", "--authorization", "offline-only",
+                   "--admit-network-connected-disposable-signing", "--bootstrap-only"]) == 0
+    assert "keyless-bootstrap-completed-no-stage-called" in capsys.readouterr().out
+
+
+def test_command_failure_reports_only_exit_code_not_private_diagnostics(monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(h, "admit_host", lambda *a: {})
+    monkeypatch.setattr(h, "load_driver", lambda: object())
+    monkeypatch.setattr(h.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=19, stdout="PRIVATE_OUTPUT", stderr="PRIVATE_ERROR"))
+    monkeypatch.setattr(h, "Hosted", lambda *a: h.execute(["PRIVATE_COMMAND"], cwd=tmp_path, env={}, timeout=1))
+    assert h.main(["--stage", "sign", "--source", "a" * 40, "--experiment", "offline", "--authorization", "offline-only",
+                   "--admit-network-connected-disposable-signing"]) == 1
+    captured = capsys.readouterr()
+    assert '"exit_code": 19' in captured.err
+    assert '"hosted_compatibility_failure": "command"' in captured.err
+    assert "PRIVATE_" not in captured.out + captured.err

@@ -39,6 +39,12 @@ reference. The SHA must equal the actual selected workflow/source revision.
 Attempt numbers other than one are refused before key generation. A new
 experiment is a new execution requiring its own scope/state reconciliation.
 
+Use `bootstrap_only: true` for a keyless host/tool admission diagnostic. It stops
+both initial jobs after bootstrap and skips VERIFY; it never enters a signing,
+preparation or verification stage. Fixed phase markers and bounded failure
+categories expose progress and acknowledged key cleanup without raw exceptions,
+commands, process output or key material. Missing cleanup markers remain unknown.
+
 All pinned actions, locked npm dependencies and tool discovery complete before
 SIGN creates its key. The source checkout remains clean; dependency staging and
 all outputs are outside it. Each VM must present the exact same git, dotnet,
