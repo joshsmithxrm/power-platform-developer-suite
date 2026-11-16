@@ -1,0 +1,32 @@
+name: PPDS hosted signing compatibility coordinator
+description: Run the fixed compatibility coordinator with the current job artifact runtime context
+inputs:
+  python-path:
+    description: Absolute path to the admitted Python interpreter
+    required: true
+  coordinator-path:
+    description: Exact checked-out scripts/ci/hosted_signing_compatibility.py path
+    required: true
+  arguments-json:
+    description: JSON array of coordinator arguments
+    required: true
+outputs:
+  plan-id:
+    description: Immutable public-plan artifact ID
+  plan-digest:
+    description: Public-plan envelope SHA256
+  prepare-id:
+    description: Immutable prepared artifact ID
+  prepare-digest:
+    description: Prepared envelope SHA256
+  sign-id:
+    description: Immutable signed artifact ID
+  sign-digest:
+    description: Signed envelope SHA256
+  evidence-id:
+    description: Immutable verification-evidence artifact ID
+  evidence-digest:
+    description: Verification-evidence envelope SHA256
+runs:
+  using: node24
+  main: action.mjs
