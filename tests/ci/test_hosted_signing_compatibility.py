@@ -1,6 +1,7 @@
 """Offline admission/lifecycle contracts. Fake bytes only; no signer or network."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -276,3 +277,42 @@ def test_transport_offline_contracts():
     result = subprocess.run([node, "--test", str(package / "test/transport.test.mjs"), str(package / "test/action.test.mjs")],
                             stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_bootstrap_selects_one_python_when_host_has_multiple_installations(tmp_path):
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("PowerShell unavailable; actual bootstrap regression not run")
+    workspace, runner_temp = tmp_path / "workspace", tmp_path / "runner"
+    source = workspace / "scripts/ci/hosted-signing-artifacts"
+    source.mkdir(parents=True)
+    runner_temp.mkdir()
+    for name in ("package.json", "package-lock.json", "cli.mjs", "transport.mjs"):
+        (source / name).write_text("offline fixture", encoding="utf-8")
+    harness = tmp_path / "bootstrap-harness.ps1"
+    harness.write_text("""
+function npm.cmd { $global:LASTEXITCODE = 0 }
+function Get-Command {
+    param($Name, $CommandType, $ErrorAction)
+    if ($Name -ne 'python.exe') { throw 'Unexpected command discovery' }
+    [pscustomobject]@{ Source = $env:PPDS_TEST_FIRST_PYTHON }
+    [pscustomobject]@{ Source = $env:PPDS_TEST_SECOND_PYTHON }
+}
+$bootstrap = $args[0]
+& $bootstrap -Stage sign
+""", encoding="utf-8")
+    first, second = str(tmp_path / "selected python.exe"), str(tmp_path / "other python.exe")
+    output, environment_output = tmp_path / "output", tmp_path / "environment"
+    env = {**os.environ, "PPDS_ADMISSION": "true", "GITHUB_EVENT_NAME": "workflow_dispatch",
+           "GITHUB_RUN_ATTEMPT": "1", "PPDS_EXPECTED_SOURCE": "a" * 40, "GITHUB_SHA": "a" * 40,
+           "GITHUB_REPOSITORY": h.REPOSITORY, "RUNNER_ENVIRONMENT": "github-hosted", "RUNNER_OS": "Windows",
+           "RUNNER_TEMP": str(runner_temp), "GITHUB_WORKSPACE": str(workspace), "GITHUB_OUTPUT": str(output),
+           "GITHUB_ENV": str(environment_output), "PPDS_TEST_FIRST_PYTHON": first, "PPDS_TEST_SECOND_PYTHON": second,
+           "PPDS_EXPERIMENT": "fake-offline-only", "PPDS_AUTHORIZATION": "fake-offline-only"}
+    result = subprocess.run([pwsh, "-NoProfile", "-File", str(harness), str(ROOT / "scripts/ci/bootstrap_hosted_signing.ps1")],
+                            env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    outputs = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8-sig").splitlines())
+    assert outputs["python"] == first
+    assert second not in outputs["python"]
+    assert json.loads(outputs["arguments"])[0:2] == ["--stage", "sign"]
