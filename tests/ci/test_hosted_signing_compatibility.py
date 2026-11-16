@@ -80,11 +80,11 @@ def signing_context(tmp_path, monkeypatch, fail=None):
     obj.version, obj.tree = "0.0.0-compat.12345", "b" * 40
     obj.common_data = "C:/ProgramData"
     obj.binding, obj.context = h.admit_host(args(), environment()), {"test_double": True}
-    obj.tools = {"sn": {"path": "fake-never-invoked-sn"}}
+    obj.tools = {"sn": {"path": "fake-never-invoked-sn"}, "pwsh": {"path": "fake-never-invoked-pwsh"}}
     events = []
 
     def execute(command, **kwargs):
-        kind = "generate" if "-k" in command else "export"
+        kind = "generate" if "-Output" in command else "export"
         events.append(kind)
         if kind == "generate":
             Path(command[-1]).write_bytes(b"synthetic-not-a-key")
@@ -95,6 +95,7 @@ def signing_context(tmp_path, monkeypatch, fail=None):
 
     monkeypatch.setattr(h, "execute", execute)
     obj.d = SimpleNamespace(pin=lambda *a: None, environment=lambda *a, **kw: {},
+                            write=lambda p, raw: Path(p).write_bytes(raw),
                             read=lambda p, *a: Path(p).read_bytes(), public_shape=lambda _: None,
                             digest=lambda raw: "c" * 64)
 
@@ -158,6 +159,26 @@ def test_success_removes_original_before_upload_and_signs_once(tmp_path, monkeyp
     obj.sign()
     assert events == ["generate", "export", "plan", "plan-upload", "prepare-download", "driver-sign", "sign-upload"]
     assert not (tmp_path / "original-disposable-key.snk").exists()
+
+
+def test_disposable_generator_is_ephemeral_and_does_not_change_csp_policy():
+    assert 'CreateEphemeralKey' in h.DISPOSABLE_KEYGEN
+    assert 'KeyNumber = 2' in h.DISPOSABLE_KEYGEN
+    assert 'PersistKeyInCsp = $false' in h.DISPOSABLE_KEYGEN
+    assert 'FileMode]::CreateNew' in h.DISPOSABLE_KEYGEN
+    assert '$rsa.Dispose()' in h.DISPOSABLE_KEYGEN and '[Array]::Clear' in h.DISPOSABLE_KEYGEN
+    for forbidden in ('KeyContainerName', 'UseExistingKey', 'UseMachineKeyStore', 'Set-ItemProperty', 'GetEnvironmentVariable'):
+        assert forbidden not in h.DISPOSABLE_KEYGEN
+
+
+@pytest.mark.parametrize('number,expected', [('-2146893813', -2146893813), ('9999999999', None), ('PRIVATE', None)])
+def test_generator_hresult_is_numeric_and_never_copies_private_output(monkeypatch, tmp_path, number, expected):
+    monkeypatch.setattr(h.subprocess, 'run', lambda *a, **kw: SimpleNamespace(returncode=1,
+        stdout='PRIVATE_KEY_OUTPUT', stderr='Disposable key generation failed HRESULT=' + number + '\nPRIVATE_ERROR'))
+    with pytest.raises(h.StageCommandError) as failure:
+        h.execute(['PRIVATE_COMMAND'], cwd=tmp_path, env={}, timeout=1)
+    assert failure.value.hresult == expected
+    assert 'PRIVATE' not in str(failure.value)
 
 
 def test_no_private_file_or_directory_is_a_stage_upload():

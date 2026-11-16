@@ -30,6 +30,33 @@ foreach ($name in @('ApplicationData', 'LocalApplicationData', 'CommonApplicatio
 $result | ConvertTo-Json -Compress
 '''
 WINDOWS_FOLDER_ENV = ('APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA', 'ALLUSERSPROFILE', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH')
+DISPOSABLE_KEYGEN = r'''param([string]$Output)
+$ErrorActionPreference = 'Stop'
+$rsa = $null; $blob = $null; $stream = $null
+try {
+    $parameters = [Security.Cryptography.CspParameters]::new(24)
+    $parameters.KeyNumber = 2 # AT_SIGNATURE; no existing/default key container.
+    $parameters.Flags = [Security.Cryptography.CspProviderFlags]::CreateEphemeralKey
+    $rsa = [Security.Cryptography.RSACryptoServiceProvider]::new(1024, $parameters)
+    $rsa.PersistKeyInCsp = $false
+    $blob = $rsa.ExportCspBlob($true)
+    $stream = [IO.File]::Open($Output, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    $stream.Write($blob, 0, $blob.Length)
+    $stream.Flush($true)
+}
+catch {
+    # No key bytes, exception text or paths are logged.
+    $failure = $_.Exception
+    while ($null -ne $failure.InnerException) { $failure = $failure.InnerException }
+    [Console]::Error.WriteLine('Disposable key generation failed HRESULT=' + $failure.HResult)
+    exit 1
+}
+finally {
+    if ($null -ne $stream) { $stream.Dispose() }
+    if ($null -ne $blob) { [Array]::Clear($blob, 0, $blob.Length) }
+    if ($null -ne $rsa) { $rsa.Dispose() }
+}
+'''
 
 
 def checkpoint(phase):
@@ -39,10 +66,11 @@ def checkpoint(phase):
 
 
 class StageCommandError(ValueError):
-    def __init__(self, code, refusal=None):
+    def __init__(self, code, refusal=None, hresult=None):
         super().__init__("Hosted stage command failed")
         self.code = code
         self.refusal = refusal
+        self.hresult = hresult
 
 
 def command_refusal(stdout, stderr):
@@ -97,7 +125,9 @@ def execute(command, *, cwd, env, timeout):
     result = subprocess.run(command, cwd=cwd, env=env, timeout=timeout,
                             capture_output=True, text=True, shell=False, check=False)
     if result.returncode != 0:
-        raise StageCommandError(result.returncode, command_refusal(result.stdout, result.stderr))
+        match = re.search(r"(?m)^Disposable key generation failed HRESULT=(-?[0-9]{1,10})\s*$", result.stderr)
+        hresult = int(match[1]) if match and -(2**31) <= int(match[1]) < 2**31 else None
+        raise StageCommandError(result.returncode, command_refusal(result.stdout, result.stderr), hresult)
     return result.stdout.strip()
 
 
@@ -296,14 +326,19 @@ class Hosted:
         signed, prepared = self.root / "signed", self.root / "prepared"
         partial_plan = {"tools": self.tools, "windows_directory": self.env["SYSTEMROOT"],
                         "windows_common_data_directory": self.common_data}
-        # Ownership starts before -k; any partial file must be removed too.
+        generator = self.root / "generate-disposable.ps1"
+        d.write(generator, DISPOSABLE_KEYGEN.encode())
+        # Ownership starts before generation; any partial file must be removed too.
         try:
-            for options in (("-k", "1024", key), ("-p", key, public / "public.bin")):
-                checkpoint("key-generation-start" if options[0] == "-k" else "public-key-export-start")
-                d.pin(partial_plan, ["sn"])
-                execute([self.tools["sn"]["path"], *map(str, options)], cwd=self.root,
+            commands = (("key-generation", "pwsh", ["-NoProfile", "-NonInteractive", "-File", generator, "-Output", key]),
+                        ("public-key-export", "sn", ["-p", key, public / "public.bin"]))
+            for phase, tool, options in commands:
+                checkpoint(phase + "-start")
+                d.pin(partial_plan, [tool])
+                require(d.read(generator) == DISPOSABLE_KEYGEN.encode(), "Disposable generator bytes changed")
+                execute([self.tools[tool]["path"], *map(str, options)], cwd=self.root,
                         env=d.environment(partial_plan, self.root / "temp"), timeout=120)
-                checkpoint("key-generation-completed" if options[0] == "-k" else "public-key-export-completed")
+                checkpoint(phase + "-completed")
             blob = d.read(public / "public.bin", 4096)
             d.public_shape(blob)
             plan = {"schema": 2, "kind": "ppds-signing-compatibility-plan", "experiment": self.args.experiment,
@@ -417,6 +452,8 @@ def main(argv=None):
             diagnostic["exit_code"] = ex.code
             if ex.refusal:
                 diagnostic["command_refusal"] = ex.refusal
+            if ex.hresult is not None:
+                diagnostic["hresult"] = ex.hresult
         print(json.dumps(diagnostic), file=sys.stderr, flush=True)
         print("Hosted compatibility refused or failed; no passing claim. Private diagnostics omitted.", file=sys.stderr)
         return 1

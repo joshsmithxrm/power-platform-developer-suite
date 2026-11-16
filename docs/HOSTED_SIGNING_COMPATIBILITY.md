@@ -93,3 +93,11 @@ context; dropping it made common-data resolution empty on the hosted image.
 The coordinator refuses missing, different, non-local or linked directory
 values before generating a key. No CSP configuration, permission, profile or
 verification policy is changed. Old schema-1 plans must not be replayed.
+
+The disposable test-key generator uses a 1024-bit AT_SIGNATURE RSA key with
+`CspProviderFlags.CreateEphemeralKey`, exports the owned SNK with CreateNew,
+clears the export buffer and disposes the RSA object. It does not configure or
+use an existing machine key container. The pinned Strong Name tool still must
+export the public identity and perform actual `-R`, `-vf` and `-D` operations.
+This changes only disposable fixture generation; production key handling and
+activation remain held. See [Microsoft's ephemeral-key contract](https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.cspproviderflags).
