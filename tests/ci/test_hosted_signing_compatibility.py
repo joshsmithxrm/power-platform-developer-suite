@@ -361,6 +361,7 @@ def test_keyless_public_diagnostics_never_generate_keys_or_inherit_tokens(tmp_pa
     obj = h.Hosted.__new__(h.Hosted)
     obj.args, obj.root = args(), tmp_path
     obj.env = {'SYSTEMROOT': 'C:/Windows', 'APPDATA': 'C:/Public/Roaming',
+               'PROGRAMDATA': 'C:/ProgramData', 'ALLUSERSPROFILE': 'C:/ProgramData',
                'ACTIONS_RUNTIME_TOKEN': 'PRIVATE_TOKEN', 'UNRELATED': 'PRIVATE_VALUE'}
     obj.tools = {'sn': {'path': 'public-sn.exe', 'sha256': 'a'*64, 'version': '4.8'},
                  'pwsh': {'path': 'public-pwsh.exe', 'sha256': 'b'*64, 'version': '7'}}
@@ -370,7 +371,9 @@ def test_keyless_public_diagnostics_never_generate_keys_or_inherit_tokens(tmp_pa
     commands = []
     def execute(command, *, env, **kw):
         commands.append(command)
-        assert set(env) <= {'SYSTEMROOT', 'APPDATA'}
+        assert set(env) <= {'SYSTEMROOT', 'APPDATA', 'PROGRAMDATA', 'ALLUSERSPROFILE'}
+        if 'APPDATA' in env:
+            assert env['PROGRAMDATA'] == env['ALLUSERSPROFILE'] == 'C:/ProgramData'
         assert 'PRIVATE' not in str(env)
         if command[0] == 'public-sn.exe':
             assert command == ['public-sn.exe', '-m']

@@ -29,7 +29,7 @@ foreach ($name in @('ApplicationData', 'LocalApplicationData', 'CommonApplicatio
 }
 $result | ConvertTo-Json -Compress
 '''
-WINDOWS_FOLDER_ENV = ('APPDATA', 'LOCALAPPDATA', 'ProgramData', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH')
+WINDOWS_FOLDER_ENV = ('APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA', 'ALLUSERSPROFILE', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH')
 
 
 def checkpoint(phase):
