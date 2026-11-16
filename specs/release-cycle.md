@@ -613,6 +613,31 @@ See [independent rebuild comparison](../docs/INDEPENDENT_REBUILD.md) for usage a
 the limits of the source-only contract. Actual independent rebuild or signing
 acceptance cannot be inferred from these tests.
 
+## Serviced SDK selection
+
+Repository build/test jobs must select a serviced SDK explicitly rather than
+relying on an older SDK already present on the runner. `global.json` retains the
+10.0.1xx feature band and `latestPatch`, with a minimum of 10.0.115. Installing
+10.0.404 alone does not satisfy that selection policy. Jobs that build the
+checkout install 10.0.115 directly or use `global-json-file: global.json`.
+The setup steps' additional 8.0/9.0 SDKs use 8.0.428/9.0.321 or later serviced patches.
+
+These floors address [CVE-2026-105544](https://github.com/dotnet/announcements/issues/517)
+in the SDK-bundled VSTest runner. Updating `Microsoft.NET.Test.Sdk` does not
+replace that runner. This is a build/test toolchain correction: package target
+frameworks, native runtime selection and release/publication controls remain
+separate. SDK selection checks are offline configuration contracts; actual
+hosted build/test logs establish what ran. The isolated upload/public-artifact
+verifiers run outside the checkout and retain their independent SDK selection.
+The two-user cache fixture's existing 8.0.427 container runs a prebuilt net8
+probe without VSTest, build or restore; it is not covered by this SDK-selection
+claim. This change does not certify every installed component against all advisories.
+
+| AC | Requirement | Test | Status |
+| --- | --- | --- | --- |
+| AC-65 | The repository SDK floor is a serviced 10.0.1xx patch and retains latestPatch; an older floor or a different feature band is rejected | `test_repository_sdk_floor_is_serviced`, `test_unsafe_repository_sdk_policy_is_rejected` | ✅ offline contract |
+| AC-66 | Every checkout build/test job declares an SDK compatible with the repository floor; a 4xx-only install, missing setup or vulnerable pinned SDK is rejected | `test_checkout_jobs_install_compatible_serviced_sdks`, `test_incompatible_or_vulnerable_installations_are_rejected`, `test_missing_sdk_installation_is_rejected` | ✅ offline contract |
+
 ## Related Specs
 
 - [docs-generation.md](./docs-generation.md) - Release tags trigger docs generation via `docs-release.yml`

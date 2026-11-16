@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Power Platform Developer Suite! T
 
 ### Prerequisites
 
-- .NET SDK 8.0+
+- .NET SDK 10.0.115 or a later serviced 10.0.1xx patch (selected by `global.json`); install the .NET 8/9 runtimes to run all target-framework tests
 - Node.js 26 LTS (repository tooling; use the version selected by `.nvmrc`)
 - PowerShell 7+ (for scripts)
 - Git
