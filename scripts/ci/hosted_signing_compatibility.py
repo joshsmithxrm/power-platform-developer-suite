@@ -31,9 +31,23 @@ def checkpoint(phase):
 
 
 class StageCommandError(ValueError):
-    def __init__(self, code):
+    def __init__(self, code, refusal=None):
         super().__init__("Hosted stage command failed")
         self.code = code
+        self.refusal = refusal
+
+
+def command_refusal(stdout, stderr):
+    # Emit only a fixed classification, never any captured private-phase text.
+    text = (stdout + "\n" + stderr).lower()
+    known = (("access is denied", "access-denied"),
+             ("keyset is not defined", "keyset-undefined"),
+             ("keyset does not exist", "keyset-missing"),
+             ("the system cannot find the file specified", "file-not-found"),
+             ("invalid command line", "command-line"),
+             ("invalid option", "command-line"),
+             ("failed to generate a strong name key pair", "key-generation"))
+    return next((label for phrase, label in known if phrase in text), None)
 
 
 def require(ok, reason):
@@ -75,7 +89,7 @@ def execute(command, *, cwd, env, timeout):
     result = subprocess.run(command, cwd=cwd, env=env, timeout=timeout,
                             capture_output=True, text=True, shell=False, check=False)
     if result.returncode != 0:
-        raise StageCommandError(result.returncode)
+        raise StageCommandError(result.returncode, command_refusal(result.stdout, result.stderr))
     return result.stdout.strip()
 
 
@@ -351,6 +365,8 @@ def main(argv=None):
             diagnostic["refusal"] = safe_refusals[str(ex)]
         if isinstance(ex, StageCommandError):
             diagnostic["exit_code"] = ex.code
+            if ex.refusal:
+                diagnostic["command_refusal"] = ex.refusal
         print(json.dumps(diagnostic), file=sys.stderr, flush=True)
         print("Hosted compatibility refused or failed; no passing claim. Private diagnostics omitted.", file=sys.stderr)
         return 1

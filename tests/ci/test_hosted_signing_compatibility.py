@@ -27,6 +27,20 @@ def environment():
             "RUNNER_OS": "Windows", "RUNNER_ARCH": "X64", "ACTIONS_RUNTIME_TOKEN": "fake-runtime-token"}
 
 
+@pytest.mark.parametrize("diagnostic,expected", [
+    ("Failed to generate a strong name key pair -- Access is denied.", "access-denied"),
+    ("Failed to generate a strong name key pair -- The keyset is not defined.", "keyset-undefined"),
+    ("Keyset does not exist", "keyset-missing"),
+    ("The system cannot find the file specified", "file-not-found"),
+    ("Invalid command line", "command-line"),
+    ("Invalid option", "command-line"),
+    ("Failed to generate a strong name key pair", "key-generation"),
+    ("private-unknown-command-secret", None),
+])
+def test_command_refusal_is_fixed_enum_not_private_diagnostics(diagnostic, expected):
+    assert h.command_refusal("private-prefix " + diagnostic, "private-suffix") == expected
+
+
 def test_default_refuses_before_environment_files_or_tools(monkeypatch):
     class ForbiddenEnvironment:
         def get(self, *args):
