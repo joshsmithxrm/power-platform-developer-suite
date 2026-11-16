@@ -24,6 +24,18 @@ PLAN_FILES = {"plan.json", "public.bin", "context.json"}
 PRODUCT_PROBE = 'param([string]$Path)\n[Diagnostics.FileVersionInfo]::GetVersionInfo($Path).ProductVersion\n'
 
 
+def checkpoint(phase):
+    # Call sites supply fixed literals only. Never print commands, paths,
+    # exception messages, process output, environment values or key material.
+    print(json.dumps({"hosted_compatibility_phase": phase}), flush=True)
+
+
+class StageCommandError(ValueError):
+    def __init__(self, code):
+        super().__init__("Hosted stage command failed")
+        self.code = code
+
+
 def require(ok, reason):
     if not ok:
         raise ValueError(reason)
@@ -62,7 +74,8 @@ def execute(command, *, cwd, env, timeout):
     # Never propagate command/diagnostics: the same path handles private phases.
     result = subprocess.run(command, cwd=cwd, env=env, timeout=timeout,
                             capture_output=True, text=True, shell=False, check=False)
-    require(result.returncode == 0, "Hosted stage command failed")
+    if result.returncode != 0:
+        raise StageCommandError(result.returncode)
     return result.stdout.strip()
 
 
@@ -116,21 +129,26 @@ class Hosted:
         d.write(probe, PRODUCT_PROBE.encode())
         paths = {name: shutil.which(name + ".exe") for name in ("git", "dotnet", "pwsh")}
         paths["sn"] = d.FIXED_SIGNER
+        checkpoint("bootstrap-tool-discovery")
         require(all(paths.values()), "Required tool unavailable")
         for path in paths.values():
             d.local_path(Path(path))
         # The only inherited values needed before public tool admission.
         public_env = {k: self.env[k] for k in ("SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATH") if k in self.env}
         public_env.update(DOTNET_GENERATE_ASPNET_CERTIFICATE="false", DOTNET_SKIP_FIRST_TIME_EXPERIENCE="1")
-        self.tools = {name: {"path": str(Path(path)), "sha256": d.digest(d.read(path, 256 * 1024**2)),
-                            "version": execute([paths["pwsh"], "-NoProfile", "-File", str(probe), path],
-                                               cwd=self.root, env=public_env, timeout=120)}
-                      for name, path in paths.items()}
+        self.tools = {}
+        for name, path in paths.items():
+            checkpoint("bootstrap-tool-" + name + "-start")
+            self.tools[name] = {"path": str(Path(path)), "sha256": d.digest(d.read(path, 256 * 1024**2)),
+                                "version": execute([paths["pwsh"], "-NoProfile", "-File", str(probe), path],
+                                                   cwd=self.root, env=public_env, timeout=120)}
+        checkpoint("bootstrap-tool-identities-verified")
         def git(*args):
             return execute([paths["git"], "-C", str(ROOT), *args], cwd=self.root, env=public_env, timeout=120)
         require(git("rev-parse", "HEAD") == self.args.source and not git("status", "--porcelain"),
                 "Clean exact reviewed source required")
         self.tree = git("rev-parse", "HEAD^{tree}")
+        checkpoint("bootstrap-source-verified")
         helper_names = ("cli.mjs", "transport.mjs", "package.json", "package-lock.json")
         self.pins = {str(self.node): d.record(self.node), str(Path(sys.executable)): d.record(Path(sys.executable)),
                      str(Path(__file__)): d.record(Path(__file__)), str(DRIVER): d.record(DRIVER)}
@@ -218,9 +236,11 @@ class Hosted:
         # Ownership starts before -k; any partial file must be removed too.
         try:
             for options in (("-k", "1024", key), ("-p", key, public / "public.bin")):
+                checkpoint("key-generation-start" if options[0] == "-k" else "public-key-export-start")
                 d.pin(partial_plan, ["sn"])
                 execute([self.tools["sn"]["path"], *map(str, options)], cwd=self.root,
                         env=d.environment(partial_plan, self.root / "temp"), timeout=120)
+                checkpoint("key-generation-completed" if options[0] == "-k" else "public-key-export-completed")
             blob = d.read(public / "public.bin", 4096)
             d.public_shape(blob)
             plan = {"schema": 1, "kind": "ppds-signing-compatibility-plan", "experiment": self.args.experiment,
@@ -229,12 +249,17 @@ class Hosted:
             json_write(public / "plan.json", plan)
             json_write(public / "context.json", self.context)
             self.plan(public)  # Authoritative local bytes; never replaced by PREPARE.
+            checkpoint("public-plan-validated")
             self.transfer("upload", "plan", public)
+            checkpoint("public-plan-uploaded")
             self.transfer("download", "prepare", prepared)
+            checkpoint("prepared-handoff-received")
             self.driver("sign", signed, "--prepared", prepared, "--disposable-key", key,
                         "--key-use-authorization", self.args.authorization)
+            checkpoint("sign-driver-completed")
         finally:
             cleanup_original(key)
+            checkpoint("original-key-cleanup-completed")
         receipt = json.loads(d.read(signed / "sign-receipt.json"))
         require(receipt["key_cleanup"] == "completed", "Driver-owned copy cleanup unproven")
         json_write(signed / "custody.json", {"schema": 1, "binding": self.binding, "plan_sha256": self.plan_hash,
@@ -293,6 +318,7 @@ def parser():
     result.add_argument("--experiment")
     result.add_argument("--authorization")
     result.add_argument("--admit-network-connected-disposable-signing", action="store_true")
+    result.add_argument("--bootstrap-only", action="store_true")
     return result
 
 
@@ -301,11 +327,31 @@ def main(argv=None):
         args = parser().parse_args(argv)
         authorize(args)
         admit_host(args, os.environ)
+        checkpoint("bootstrap-start")
         context = Hosted(args, os.environ, load_driver())
+        checkpoint("bootstrap-completed")
+        if args.bootstrap_only:
+            checkpoint("keyless-bootstrap-completed-no-stage-called")
+            return 0
         getattr(context, args.stage)()
         print("Hosted compatibility stage completed; no release authorization.")
         return 0
-    except Exception:
+    except Exception as ex:
+        category = "command" if isinstance(ex, StageCommandError) else "filesystem" if isinstance(ex, OSError) else "validation"
+        diagnostic = {"hosted_compatibility_failure": category}
+        safe_refusals = {"Fresh hosted manual first attempt required": "host-admission",
+                         "Current-run artifact action context required": "runtime-context",
+                         "Reviewed Windows checkout required": "checkout",
+                         "Linked input/output refused": "linked-path",
+                         "Required tool unavailable": "missing-tool",
+                         "Clean exact reviewed source required": "source-state",
+                         "Tool hash/version required": "tool-identity",
+                         "Original key cleanup unproven": "key-cleanup"}
+        if str(ex) in safe_refusals:
+            diagnostic["refusal"] = safe_refusals[str(ex)]
+        if isinstance(ex, StageCommandError):
+            diagnostic["exit_code"] = ex.code
+        print(json.dumps(diagnostic), file=sys.stderr, flush=True)
         print("Hosted compatibility refused or failed; no passing claim. Private diagnostics omitted.", file=sys.stderr)
         return 1
 
