@@ -115,9 +115,9 @@ jobs:
       with:
         # Pin current SDKs to use the official versioned feed while aka.ms redirects are broken.
         dotnet-version: |
-          8.0.427
-          9.0.320
-          10.0.403
+          8.0.428
+          9.0.321
+          10.0.115
 
     - name: Cache NuGet packages
       uses: actions/cache@v6
@@ -173,7 +173,7 @@ jobs:
         with:
           # Match global.json's 10.0.1xx feature band; pin around broken channel redirects.
           dotnet-version: |
-            8.0.427
+            8.0.428
             10.0.115
       - uses: actions/setup-python@v7
         with:
@@ -247,7 +247,7 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
-            8.0.427
+            8.0.428
             10.0.115
       - uses: actions/setup-python@v7
         with:

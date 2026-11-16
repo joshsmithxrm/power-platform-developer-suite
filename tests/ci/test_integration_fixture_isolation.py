@@ -23,8 +23,8 @@ REFUSAL_SCRIPT = (
 # inputs; the separate Integration Tests workflow remains a tokenless refusal.
 # No Git calls or mutable refs are used by these tests.
 REVIEWED_WORKFLOW_HASHES = {
-    "build.yml": "ac1877f8c0b7d8070b59622b3e85af2db9098a9b2d253b37948d472db18b91d1",
-    "test.yml": "cbae345d66708f3f34f857858237428e840c2cc90308be8aa8c768dfe6a4c946",
+    "build.yml": "776c71af79b10ddb3e2415d8a23405bd7e8c7d4c774bb6ddf0fbde0699f52b6a",
+    "test.yml": "b8d90fedf6dfdb3f76e04abccee95bd2321c72c558b247881dfd53343d1d6027",
 }
 
 
