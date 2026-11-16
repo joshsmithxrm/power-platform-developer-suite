@@ -20,7 +20,7 @@ its Windows native binary on Node 26. The replacement declares support for Node
 of npm's mutable `latest` tag, and
 [GitHub marks 0.14.1 as prerelease](https://github.com/homebridge/node-pty-prebuilt-multiarch/releases/tag/v0.14.1).
 
-Playwright is pinned to 1.64.1, matching the current extension's locked release. The old
+Playwright is pinned to 1.65.0, matching the current extension's locked release. The old
 locked 1.57.0 installer hangs extracting browser downloads on Node 26; the newer release
 includes the [upstream ZIP lifecycle fix](https://github.com/microsoft/playwright/pull/40747).
 

@@ -331,6 +331,9 @@ public static class ErrorCodes
         /// <summary>Target field capability or the required current value could not be established.</summary>
         public const string FieldCapabilityUnknown = "Plugin.FieldCapabilityUnknown";
 
+        /// <summary>The image changed after its update snapshot was read.</summary>
+        public const string ImageUpdateConflict = "Plugin.ImageUpdateConflict";
+
         /// <summary>An acknowledged plugin update did not persist the requested value.</summary>
         public const string UpdateNotPersisted = "Plugin.UpdateNotPersisted";
 

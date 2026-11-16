@@ -1785,20 +1785,19 @@ public sealed partial class PluginRegistrationService : IPluginRegistrationServi
         if (request.Attributes is not null) config.Attributes = request.Attributes;
         if (request.Description is not null) config.Description = request.Description;
         config.ResetFields = request.ResetFields?.ToList() ?? [];
-        // Update does not change type/message; normalize only the supplied optional field plan.
+        // Type and name are handled separately from the optional field plan.
         var desired = PluginRegistrationNormalizer.NormalizeImagePatch(config, RegistrationOperationIntent.Update);
-        var entity = new SdkMessageProcessingStepImage { Id = imageId };
-        if (request.ImageType != null) entity.ImageType = (sdkmessageprocessingstepimage_imagetype)MapImageTypeToValue(PluginRegistrationNormalizer.NormalizeImageType(request.ImageType));
+        var entity = new Entity(SdkMessageProcessingStepImage.EntityLogicalName, imageId);
+        if (request.ImageType != null) entity["imagetype"] = new OptionSetValue(MapImageTypeToValue(PluginRegistrationNormalizer.NormalizeImageType(request.ImageType)));
         if (request.Name != null)
         {
             if (string.IsNullOrWhiteSpace(request.Name)) throw new PpdsException(ErrorCodes.Validation.InvalidValue, "Image name must not be empty.");
-            entity.Name = request.Name;
+            entity["name"] = request.Name;
         }
         foreach (var (field, attribute) in new[] { ("attributes", "attributes"), ("description", "description"), ("entityAlias", "entityalias"), ("messagePropertyName", "messagepropertyname") })
             if (desired.TryGetValue(field, out var value)) entity[attribute] = value;
-        if (!entity.Attributes.Keys.Any(key => key != SdkMessageProcessingStepImage.Fields.SdkMessageProcessingStepImageId)) return;
-        await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-        await UpdateAsync(entity, client, cancellationToken);
+        if (entity.Attributes.Count == 0) return;
+        await UpdateImageConditionallyAsync(entity, cancellationToken);
     }
 
     private async Task<Entity?> GetStepByIdWithManagedStateAsync(Guid stepId, CancellationToken cancellationToken)

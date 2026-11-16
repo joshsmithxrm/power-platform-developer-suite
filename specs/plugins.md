@@ -1766,3 +1766,33 @@ refuse that unknown protection state; this does not provide an atomic conditiona
 |---|---|---|---|
 | AC-108 | Actual step/image readers distinguish missing/null protection from known typed values; initial planning and first/final fresh rechecks refuse unknown protection before any delete dispatch, preserving exact ID/token/lease checks and existing public bool signatures. | `ActualReader_TracksProtectionAvailabilityAndTypedValue`; `Plan_RejectsUnavailableActualProtectionBeforeAnyDelete`; `Apply_RejectsNewNullProtectionAtActualFreshRead`; `ParentSdkQuery_UsesExactDeclaredScope` | ✅ |
 | AC-114 | Operation-specific field writes preserve readable equal create-only values, refuse changed/reset or unknown values before affected writes, and preflight later assemblies before earlier package effects. Progress and typed error/cancellation contracts remain intact. | `PluginStepFieldCapabilityTests`; `PluginStepCapabilityPlanningTests`, including `Reconcile_ImplicitResetOfTrueCreateOnlyField_RefusesBeforeSecureOrStepWrites`, `Reconcile_UnknownUpdateCapabilityEvenWhenEqual_DoesNotClaimSupportedNoOp`, and `Command_LaterAssemblyCapabilityRefusal_PreventsEarlierPackageWrites` | Passed offline (net10.0); original persisted acceptance remains open |
+
+### Conditional direct image updates
+
+Direct image updates use a fresh SDK row version and the seven-field registration
+context (parent step, name, image type, alias, message property, attributes and
+description). They overlay only the normalized requested edits onto that snapshot
+and dispatch one `UpdateRequest` with `IfRowVersionMatches`. This envelope is based
+on observed Dataverse compatibility, not a claim that every field is required by
+the server. Resending unchanged context can have server audit or business effects.
+The conditional request prevents overwriting a row changed after the snapshot; it
+does not make a whole deployment atomic. Deploy/upsert behavior is unchanged.
+
+Metadata must establish optimistic concurrency and read/update capability for all
+seven fields. A missing genuine `Entity.RowVersion`, malformed context, unavailable
+capability or concurrent edit fails clearly. PPDS does not fabricate a token,
+refresh and retry, fall back to an unconditional update, or recreate the image.
+The mutation lease disables SDK transient retries; other leases keep pool policy.
+Failure reporting distinguishes preparation (no dispatch), a rejected or unverified
+dispatch, and an acknowledged update whose connection cleanup fails. Cleanup must
+not replace the original mutation failure or cancellation token.
+Managed/customization enforcement remains with Dataverse. An empty patch remains
+a no-op after the existing existence check; explicit empty strings and resets keep
+their existing meaning, while omitted values retain the fresh snapshot value.
+
+| ID | Criterion | Test | Status |
+|---|---|---|---|
+| AC-129 | Direct updates preserve all omitted context, null/empty values and parent identity while applying normalized explicit edits in one conditional request. | `PluginImageConditionalUpdateTests` | Passed offline (net10.0); corrected public path live acceptance pending |
+| AC-130 | Unknown/unsupported capability or incomplete SDK snapshot refuses before mutation; stale version and other dispatch failures never retry or fall back. | `PluginImageConditionalUpdateTests` | Passed offline (net10.0) |
+| AC-131 | Empty patches, validation, managed delegation, cancellation and separate lease lifetimes remain intact. | `PluginImageConditionalUpdateTests`; `PluginRegistrationServiceGuardTests`; existing image compatibility tests | Passed offline (net10.0) |
+| AC-132 | The image-update RPC preserves service error codes and safe outcome messages, including uncertain outcomes and acknowledged-write cleanup failures, without disclosing private diagnostics or changing cancellation and unexpected-error redaction. | `RpcUpdateImage_WirePreservesSafeOutcomeWithoutPrivateDiagnostics`; `RpcUpdateImage_UnexpectedWireFailureRemainsRedacted`; `RpcUpdateImage_CancellationPreservesOriginalToken` | Passed offline (net10.0) |
