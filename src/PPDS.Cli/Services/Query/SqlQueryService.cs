@@ -657,6 +657,23 @@ public sealed class SqlQueryService : ISqlQueryService
         // not ask for (the extension's default top over RPC) is not marked explicit and is simply ignored for DML.
         // The MAX_ROWS hint is text the user wrote, so ignoring it would change what the statement affects. The engine
         // cannot apply a row limit to DML, so the request is refused instead (on every surface, before anything runs).
+        if (safetyResult.ContainsDml && hints.UnrecognizedHints.Count > 0)
+        {
+            throw new PpdsValidationException(
+                "hint",
+                $"The comment '{hints.UnrecognizedHints[0]}' mentions ppds: but is not an exact supported hint, so nothing " +
+                "was executed: on INSERT, UPDATE or DELETE a hint must be applied exactly or not given. Write it as " +
+                "-- ppds:NAME [value] (a line comment), or remove it.");
+        }
+
+        if (safetyResult.ContainsDml && hints.DmlBatchSize is < 1 or > PPDS.Dataverse.BulkOperations.BulkOperationOptions.MaxBatchSize)
+        {
+            throw new PpdsValidationException(
+                "BATCH_SIZE",
+                $"-- ppds:BATCH_SIZE must be between 1 and {PPDS.Dataverse.BulkOperations.BulkOperationOptions.MaxBatchSize}, " +
+                $"so nothing was executed (got {hints.DmlBatchSize}).");
+        }
+
         if (safetyResult.ContainsDml && hints.MaxResultRows.HasValue)
         {
             throw new PpdsValidationException(
@@ -737,11 +754,13 @@ public sealed class SqlQueryService : ISqlQueryService
             : _poolCapacity;
 
         // Build execution options from bypass hints
-        var executionOptions = (hints.BypassPlugins == true || hints.BypassFlows == true)
+        var dmlBatchSize = safetyResult.ContainsDml ? hints.DmlBatchSize : null;
+        var executionOptions = (hints.BypassPlugins == true || hints.BypassFlows == true || dmlBatchSize.HasValue)
             ? new QueryExecutionOptions
             {
                 BypassPlugins = hints.BypassPlugins == true,
-                BypassFlows = hints.BypassFlows == true
+                BypassFlows = hints.BypassFlows == true,
+                DmlBatchSize = dmlBatchSize
             }
             : null;
 
@@ -793,7 +812,8 @@ public sealed class SqlQueryService : ISqlQueryService
         var maxRowsApplied = hints.MaxResultRows.HasValue && effectiveMaxRows.HasValue
             && planResult.RootNode is not ScriptExecutionNode;
 
-        return (fragment, planResult, safetyResult, executionOptions, CollectAppliedHints(hints, maxRowsApplied));
+        return (fragment, planResult, safetyResult, executionOptions,
+            CollectAppliedHints(hints, maxRowsApplied, batchSizeApplied: dmlBatchSize.HasValue));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1027,7 +1047,7 @@ public sealed class SqlQueryService : ISqlQueryService
     /// Collects the names of query hints that were actively applied.
     /// Returns null when no hints were active.
     /// </summary>
-    private static List<string>? CollectAppliedHints(QueryHintOverrides hints, bool maxRowsApplied)
+    private static List<string>? CollectAppliedHints(QueryHintOverrides hints, bool maxRowsApplied, bool batchSizeApplied)
     {
         var applied = new List<string>();
         if (hints.UseTdsEndpoint == true) applied.Add("USE_TDS");
@@ -1037,7 +1057,7 @@ public sealed class SqlQueryService : ISqlQueryService
         if (maxRowsApplied) applied.Add("MAX_ROWS");
         if (hints.MaxParallelism.HasValue) applied.Add("MAXDOP");
         if (hints.ForceClientAggregation == true) applied.Add("HASH_GROUP");
-        // BATCH_SIZE is parsed but the bulk executor does not take a per-query batch size, so it is never applied.
+        if (batchSizeApplied) applied.Add("BATCH_SIZE"); // DML only: the bulk writes use it
         return applied.Count > 0 ? applied : null;
     }
 

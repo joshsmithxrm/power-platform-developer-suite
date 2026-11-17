@@ -20,4 +20,9 @@ public sealed record QueryExecutionOptions
     /// Set by the <c>-- ppds:BYPASS_FLOWS</c> query hint.
     /// </summary>
     public bool BypassFlows { get; init; }
+
+    /// <summary>
+    /// Records per bulk request for INSERT, UPDATE and DELETE (1 to 1000). Set by the <c>-- ppds:BATCH_SIZE n</c> hint.
+    /// </summary>
+    public int? DmlBatchSize { get; init; }
 }

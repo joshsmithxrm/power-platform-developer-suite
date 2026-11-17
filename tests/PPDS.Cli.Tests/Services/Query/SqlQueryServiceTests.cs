@@ -426,7 +426,7 @@ public class SqlQueryServiceTests
         var dataSource = Assert.Single(result.DataSources!);
         Assert.Equal("Local", dataSource.Label);
         Assert.False(dataSource.IsRemote);
-        Assert.Null(result.AppliedHints); // BATCH_SIZE is parsed but never applied, so it is not reported
+        Assert.Equal(["BATCH_SIZE"], result.AppliedHints); // applied to the DML bulk writes
 
         // Verify executor was never called
         mockExecutor.Verify(
@@ -660,7 +660,7 @@ public class SqlQueryServiceTests
         var dataSource = Assert.Single(result.DataSources!);
         Assert.Equal("Local", dataSource.Label);
         Assert.False(dataSource.IsRemote);
-        Assert.Null(result.AppliedHints); // BATCH_SIZE is parsed but never applied, so it is not reported
+        Assert.Equal(["BATCH_SIZE"], result.AppliedHints); // applied to the DML bulk writes
         Assert.Null(result.ExecutionMode);
         mockExecutor.VerifyNoOtherCalls();
     }

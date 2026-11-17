@@ -273,6 +273,26 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         }
     }
 
+    /// <summary>
+    /// The DML hints (BYPASS_PLUGINS, BYPASS_FLOWS, BATCH_SIZE) as bulk options, so the write does what the statement
+    /// asked; null (executor defaults) when no hint was given.
+    /// </summary>
+    private static BulkOperationOptions? BulkOptions(QueryPlanContext context)
+    {
+        var hints = context.ExecutionOptions;
+        if (hints == null)
+            return null;
+
+        var options = new BulkOperationOptions
+        {
+            BypassCustomLogic = hints.BypassPlugins ? CustomLogicBypass.Synchronous : CustomLogicBypass.None,
+            BypassPowerAutomateFlows = hints.BypassFlows
+        };
+        if (hints.DmlBatchSize.HasValue)
+            options.BatchSize = hints.DmlBatchSize.Value;
+        return options;
+    }
+
     private bool RecordInterrupted(QueryPlanContext context, ProgressTracker tracker)
     {
         context.Statistics.AddDmlOutcome(new DmlStatementOutcome(
@@ -341,6 +361,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         var result = await RunBulkAsync(context, progress => context.BulkOperationExecutor!.CreateMultipleAsync(
             EntityLogicalName,
             entities,
+            options: BulkOptions(context),
             progress: progress,
             cancellationToken: cancellationToken)).ConfigureAwait(false);
 
@@ -396,6 +417,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         var result = await RunBulkAsync(context, progress => context.BulkOperationExecutor!.CreateMultipleAsync(
             EntityLogicalName,
             entities,
+            options: BulkOptions(context),
             progress: progress,
             cancellationToken: cancellationToken)).ConfigureAwait(false);
 
@@ -447,6 +469,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         var result = await RunBulkAsync(context, progress => context.BulkOperationExecutor!.UpdateMultipleAsync(
             EntityLogicalName,
             entities,
+            options: BulkOptions(context),
             progress: progress,
             cancellationToken: cancellationToken)).ConfigureAwait(false);
 
@@ -487,6 +510,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         var result = await RunBulkAsync(context, progress => context.BulkOperationExecutor!.DeleteMultipleAsync(
             EntityLogicalName,
             ids,
+            options: BulkOptions(context),
             progress: progress,
             cancellationToken: cancellationToken)).ConfigureAwait(false);
 

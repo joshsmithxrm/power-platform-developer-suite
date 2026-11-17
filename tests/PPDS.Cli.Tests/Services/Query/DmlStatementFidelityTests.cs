@@ -90,16 +90,77 @@ public class DmlStatementFidelityTests
         Assert.True(result.AppliedHints is null || !result.AppliedHints.Contains("MAX_ROWS"));
     }
 
+    // ---- hints on DML are applied exactly, or refused (S3) --------------------------------------
+
+    [Theory]
+    [InlineData("DELETE FROM account WHERE name = 'x' -- ppds:MAX_ROWS 5;")]
+    [InlineData("DELETE FROM account WHERE name = 'x' -- ppds:MAX_ROWS=5")]
+    [InlineData("DELETE FROM account WHERE name = 'x' -- ppds:MAX_ROWS 1,000")]
+    [InlineData("DELETE FROM account WHERE name = 'x' /* ppds:MAX_ROWS 5 */")]
+    [InlineData("DELETE FROM account WHERE name = 'x' -- ppds:BYPASS_PLUGIN")]
+    [InlineData("/* ppds:BYPASS_PLUGINS */ DELETE FROM account WHERE name = 'x'")]
+    [InlineData("DELETE FROM account WHERE name = 'x' -- run with ppds:BYPASS_FLOWS please")]
+    [InlineData("DELETE FROM account WHERE name = 'x' -- ppds:BATCH_SIZE 5000")]
+    public async Task HintLikeComment_ThatIsNotAnExactSupportedHint_IsRefusedForDml(string sql)
+    {
+        var h = DmlTestHarness.Create(rows: 3);
+
+        var ex = await Assert.ThrowsAsync<PpdsValidationException>(
+            () => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
+
+        Assert.Contains("ppds:", ex.Message);
+        Assert.Contains("nothing was executed", ex.Message);
+        h.AssertNothingChanged();
+    }
+
     [Fact]
-    public async Task BatchSizeHint_IsNotImplemented_SoItIsNeverReportedAsApplied()
+    public async Task HintLikeComment_OnSelect_IsStillIgnored()
+    {
+        var h = DmlTestHarness.Create(rows: 3);
+
+        var result = await h.Service.ExecuteAsync(new SqlQueryRequest { Sql = "SELECT name FROM account -- ppds:MAX_ROWS=2" });
+
+        Assert.Equal(3, result.Result.Count);
+    }
+
+    [Fact]
+    public async Task BypassPluginsAndFlowsHints_AreAppliedToTheDmlWrite()
     {
         var h = DmlTestHarness.Create(rows: 2);
 
         var result = await h.Service.ExecuteAsync(new SqlQueryRequest
         {
-            Sql = "DELETE FROM account WHERE name = 'x' -- ppds:BATCH_SIZE 1",
+            Sql = "-- ppds:BYPASS_PLUGINS\n-- ppds:BYPASS_FLOWS\nUPDATE account SET name = 'y' WHERE name = 'x'",
             DmlSafety = Confirmed
         });
+
+        Assert.Equal(PPDS.Dataverse.BulkOperations.CustomLogicBypass.Synchronous, h.LastOptions!.BypassCustomLogic);
+        Assert.True(h.LastOptions.BypassPowerAutomateFlows);
+        Assert.Contains("BYPASS_PLUGINS", result.AppliedHints!);
+        Assert.Contains("BYPASS_FLOWS", result.AppliedHints!);
+    }
+
+    [Fact]
+    public async Task BatchSizeHint_IsAppliedToTheDmlWrite_AndReported()
+    {
+        var h = DmlTestHarness.Create(rows: 2);
+
+        var result = await h.Service.ExecuteAsync(new SqlQueryRequest
+        {
+            Sql = "DELETE FROM account WHERE name = 'x' -- ppds:BATCH_SIZE 7",
+            DmlSafety = Confirmed
+        });
+
+        Assert.Equal(7, h.LastOptions!.BatchSize);
+        Assert.Contains("BATCH_SIZE", result.AppliedHints!);
+    }
+
+    [Fact]
+    public async Task BatchSizeHint_OnSelect_IsNotReportedAsApplied()
+    {
+        var h = DmlTestHarness.Create(rows: 2);
+
+        var result = await h.Service.ExecuteAsync(new SqlQueryRequest { Sql = "SELECT name FROM account -- ppds:BATCH_SIZE 7" });
 
         Assert.True(result.AppliedHints is null || !result.AppliedHints.Contains("BATCH_SIZE"));
     }
