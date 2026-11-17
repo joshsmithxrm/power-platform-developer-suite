@@ -1,7 +1,7 @@
 # Data Explorer
 
 **Status:** Draft
-**Last Updated:** 2026-10-31
+**Last Updated:** 2026-11-17
 **Code:** [src/PPDS.Extension/src/panels/QueryPanel.ts](../src/PPDS.Extension/src/panels/QueryPanel.ts), [src/PPDS.Extension/src/utils/dmlSafety.ts](../src/PPDS.Extension/src/utils/dmlSafety.ts), [src/PPDS.Extension/src/notebooks/](../src/PPDS.Extension/src/notebooks/), [src/PPDS.Cli/Commands/Serve/Handlers/](../src/PPDS.Cli/Commands/Serve/Handlers/)
 **Surfaces:** Extension, TUI, MCP
 
@@ -534,46 +534,78 @@ contract.
 
 Notebook SQL cells and the Data Explorer share one flow (`src/PPDS.Extension/src/utils/dmlSafety.ts`).
 The extension never decides whether SQL is DML: the daemon's `DmlSafetyGuard` does.
-Every `query/sql` request carrying user SQL sends `dmlSafety: { isConfirmed: false }`,
-so the guard's no-WHERE block, row cap, environment protection and cross-environment
-policy always apply, against both a daemon that skips the guard when `dmlSafety` is
-missing and one that refuses such DML. When the daemon answers
-`Query.DmlConfirmationRequired` (`data.dmlConfirmationRequired` or `data.code`), a
-modal warning names the target environment and type and shows its URL and the
-statement (long statements are shortened with a visible count of hidden characters).
-Only the "Execute Anyway" button runs it, with one retry carrying
-`{ isConfirmed: true }`; Escape, close or Cancel run nothing. A confirmed request that
-is still answered confirmation-required is shown as an error, never re-prompted.
-Confirmation is per execution: it is never remembered across cells, runs or panel
-executions, and the Production/Unknown notebook acknowledgement never grants it.
 
-In notebooks, a declined confirmation leaves the cell marked failed with
-"Not executed: DML confirmation was declined", and stops the current run: remaining
-cells of that run (Run All included) are marked "Not run" and are not sent. Queued
-separate runs are unaffected and prompt for their own DML. Interrupting while the
-confirmation is open sends nothing further and shows "Query cancelled".
+**Request rule.** Every `query/sql` request carrying user SQL sends `dmlSafety`. The first
+attempt, every refresh or re-run, every re-authentication retry and every load-more page send
+`{ isConfirmed: false }`, so the guard's no-WHERE block, row cap, environment protection and
+cross-environment policy always apply, against both a daemon that skips the guard when
+`dmlSafety` is missing and one that refuses such DML. Each execution captures its statement
+text and target (environment URL, profile name and identity) once; the modal and the one
+confirmed request use exactly that pair. `{ isConfirmed: true }` is sent at most once per
+confirmation and never by any retry: a confirmation never outlives the request it was given
+for. If the Data Explorer's environment or profile changes while the modal is open, nothing
+is sent and the panel says the statement must be run again. If a notebook cell, its binding
+or the session default changes while the modal is open, the confirmed request still uses the
+captured text and target. Closing, interrupting or disposing while the modal is open sends
+nothing further.
 
-Refusals (`Query.DmlBlocked`, `Query.DmlRowCapExceeded`, `Safety.ShakedownActive`, or
-`data.dmlBlocked`) render as errors that include the daemon's reason. A DML result
-with failed rows (`success: false` with optional `affectedRows`, `failedRows`,
-`dmlError`, or, from older daemons, a single `affected_rows`/`failed_rows` summary row
-with `failed_rows > 0`) shows the failed and succeeded counts and the reason (or says
-that none was reported): as an error output above the table in a notebook, which
-then ends as failed, and as an error banner above the summary row in the Data
-Explorer. Load More never runs DML: page requests send `{ isConfirmed: false }`, and
-the result of a confirmed execution is never paged; the panel says so in its warning
-banner instead of offering Load More.
+**Confirmation rule.** Only a `Query.DmlConfirmationRequired` answer (`data.dmlConfirmationRequired`
+or `data.code`) opens the modal. The modal names the target environment and type ("type unknown"
+when not resolved), its URL, the profile, and the statement's size, and says that one
+confirmation covers the whole text, every statement in the script. It always notes that SQL
+naming another environment (`[LABEL].entity`) also writes there, because the daemon does not
+report those targets before execution. The daemon's confirmation text is shown only when it is
+not the CLI's `--confirm` wording. The first button, which VS Code makes the default, is the
+non-destructive "Show Full Statement": it opens the exact text in a read-only editor, then a
+non-modal "Continue to Confirmation" step lets the user read it before the modal returns.
+"Execute Anyway" is never the default. A statement of up to 24 lines and 1500 characters is
+shown whole. A longer one shows its first 14 lines (at most 900 characters) and last 8 lines
+(at most 500 characters), states exactly how many characters on how many lines are hidden,
+and offers "Execute Anyway" only after the full statement has been opened. Escape, close,
+Cancel, cancelling the review step, a failed dialog or an abort run nothing. A confirmed
+request that is still answered confirmation-required is shown as an error, never re-prompted.
+Confirmation is never remembered across cells, runs or panel executions, and the
+Production/Unknown notebook acknowledgement never grants it.
+
+**Refusals.** `Query.DmlBlocked`, `Query.DmlRowCapExceeded`, `Safety.ShakedownActive` and
+`data.dmlBlocked` render as errors with the daemon's reason. With today's daemon only the
+no-WHERE block arrives before the prompt. Shakedown and the cross-environment policy are
+checked after planning, so they refuse the confirmed request, after "Execute Anyway". Today's
+daemon stops DML at the row cap without an error (`affected_rows` is the cap), so no row-cap
+refusal is shown; `Query.DmlRowCapExceeded` is handled for a daemon that raises it.
+
+**Failed rows.** A daemon that reports DML outcomes sends `success: false` with `affectedRows`,
+`failedRows` and `dmlError`; these are read whenever present, and only they carry a reason.
+For the result of a confirmed request only, the one-row summary (`affected_rows`,
+`failed_rows`, exactly these two columns) with `failed_rows > 0` is also read as a failure,
+shown with the counts and "The daemon did not report a failure reason." Results of
+unconfirmed requests are never read as a DML summary, so a SELECT cannot be flagged. The
+notebook shows the failure as an error output above the table and the cell ends failed; the
+Data Explorer shows an error banner above the summary row.
+
+**Notebook runs.** When a DML cell is declined, refused, fails, has failed rows or is cancelled
+during its confirmation, the cell ends failed with a message naming the cause and the run stops:
+every remaining cell of that run (Run All included) is marked "Not run: this run stopped because
+…" with the cause and is not sent. Each skipped cell is checked for ownership, always ends its
+execution, and a failure marking one cell never touches another cell's output. Queued separate
+runs are unaffected and prompt for their own DML. Non-DML cells keep the existing behaviour.
+
+**Load More** never runs DML: page requests send `{ isConfirmed: false }`, and the result of a
+confirmed execution is never paged; the panel says so in its warning banner instead of offering
+Load More.
 
 | ID | Criterion | Test | Status |
 |---|---|---|---|
-| AC-DML-01 | A notebook DML cell is executed only after a modal confirmation that shows the statement and target; the first request is unconfirmed and the retry is confirmed. | `DataverseNotebookController.test.ts`: `asks for modal confirmation showing the statement and target, then sends a confirmed request` | ✅ |
-| AC-DML-02 | Notebook DML confirmation is asked on every execution and never remembered. | `DataverseNotebookController.test.ts`: `asks again on every DML execution and never remembers a confirmation` | ✅ |
-| AC-DML-03 | Declining runs nothing, marks the cell not executed, and stops the rest of a Run All. Interrupting during the confirmation sends nothing. | `DataverseNotebookController.test.ts`: `declining runs nothing, marks the cell not executed and stops Run All`, `does not execute when the run is interrupted while the confirmation is open` | ✅ |
+| AC-DML-01 | A notebook DML cell runs only after a modal naming target, profile and statement; the confirmed request carries the same text and target as the first, unconfirmed one, even if the cell or binding changed while the modal was open. | `DataverseNotebookController.test.ts`: `asks once in a modal naming target, profile and statement, then sends the same text and target confirmed`, `sends the confirmed request for the shown text and target even if the cell and binding change while the modal is open` | ✅ |
+| AC-DML-02 | Confirmation is asked on every execution and never remembered; refresh and re-authentication in the Data Explorer start unconfirmed and ask again for the target of that attempt. | `DataverseNotebookController.test.ts`: `asks again on every DML execution and never remembers a confirmation`; `queryPanelDmlSafety.test.ts`: `refresh of a confirmed DML asks again`, `after re-authentication sends the statement unconfirmed again and asks again for the target of that attempt` | ✅ |
+| AC-DML-03 | Declining, cancelling the review, interrupting, closing or disposing runs nothing confirmed; declining marks the cell not executed and stops Run All. | `DataverseNotebookController.test.ts`: `declining runs nothing, marks the cell not executed and stops Run All`, `treats cancelling the review step as declining`, `does not execute when the run is interrupted while the confirmation is open`, `sends nothing when the notebook is %s while the confirmation is open` | ✅ |
 | AC-DML-04 | SELECT cells run without a DML prompt and send unconfirmed safety options; the environment acknowledgement never confirms DML. | `DataverseNotebookController.test.ts`: `runs SELECT cells without a DML prompt and still sends unconfirmed safety options`, `scopes acknowledgement to notebook target profile and type without approving DML` | ✅ |
-| AC-DML-05 | Guard refusals (no WHERE, protected target, row cap, shakedown) and a still-unconfirmed retry render as errors with the reason, without prompting. | `DataverseNotebookController.test.ts`: `renders the %s refusal as an error without prompting`, `shows a confirmed request that is still confirmation-required as an error instead of prompting again`; `queryPanelDmlSafety.test.ts`: `shows a refusal as an error without prompting` | ✅ |
-| AC-DML-06 | Failed DML rows show counts and reason in notebooks (cell ends failed) and the Data Explorer, from the additive fields or a legacy summary row. | `DataverseNotebookController.test.ts`: `renders failed DML rows with counts and the reason reported by the daemon`, `treats a legacy DML summary row with failed rows as a failure even when success is true`; `queryPanelDmlSafety.test.ts`: `posts the failure reason and counts for a DML result with failed rows`, `does not flag a successful SELECT as a DML failure`; `dmlSafety.test.ts`: `ignores successful DML and ordinary rows that merely resemble the summary`, `reads formatted summary values and additive fields` | ✅ |
-| AC-DML-07 | The Data Explorer confirmation uses the shared modal with statement and target; declining sends no confirmed request. | `queryPanelDmlSafety.test.ts`: `confirms DML with the statement and target before a confirmed retry`, `declining sends no confirmed request` | ✅ |
+| AC-DML-05 | A missing-WHERE refusal is shown before any prompt; shakedown, cross-environment and row-cap refusals of the confirmed request are shown after it; a still-unconfirmed retry is an error. Each refusal shows the reason and stops the notebook run. | `DataverseNotebookController.test.ts`: `refuses a missing WHERE before any prompt, shows the reason and stops the run`, `shows a %s refusal of the confirmed request as an error and stops the run`, `shows a confirmed request that is still confirmation-required as an error instead of prompting again`; `queryPanelDmlSafety.test.ts`: `shows a refusal as an error without prompting`, `shows a refusal of the confirmed request as an error` | ✅ |
+| AC-DML-06 | Failed DML rows show counts (and a reason when the daemon sends one) and stop the notebook run; only a confirmed request's result is read as a DML summary. | `DataverseNotebookController.test.ts`: `renders failed DML rows with counts and the reason a daemon reports, and stops the run`, `reads the one-row DML summary of a confirmed request as failed rows even when success is true`, `never flags a SELECT whose columns look like the DML summary`; `queryPanelDmlSafety.test.ts`: `posts the failure reason and counts for a DML result with failed rows`, `never flags a SELECT, even one whose columns look like the DML summary`; `dmlSafety.test.ts`: `ignores successful DML and rows that merely resemble the summary`, `reads formatted summary values and additive fields` | ✅ |
+| AC-DML-07 | The default button never executes: it opens the exact text read-only and asks again. A statement longer than the modal shows its start and end with the hidden amount, and Execute is offered only after the full text was opened. | `DataverseNotebookController.test.ts`: `choosing the default Show Full Statement opens the exact text and asks again before anything runs`, `requires a long statement to be opened in full before Execute is offered, and shows its start and end`, `never executes a long statement that was not opened in full, whatever the modal returns`; `dmlSafety.test.ts`: `shows a short statement whole`, `shows the start and end of a long statement and counts exactly what is hidden`, `cuts a single very long line by characters at both ends` | ✅ |
 | AC-DML-08 | Load More sends unconfirmed safety options and is neither offered nor performed for a confirmed DML result. | `queryPanelDmlSafety.test.ts`: `load more after a SELECT sends unconfirmed safety options`, `never offers or performs load more for a confirmed DML result` | ✅ |
+| AC-DML-09 | The Data Explorer sends the confirmed request only for the target the modal named: a target change or panel disposal while the modal is open sends nothing. | `queryPanelDmlSafety.test.ts`: `confirms DML with statement and target, and sends the confirmed request for the same pair`, `does not send the confirmed request when the environment changed while the modal was open`, `sends nothing confirmed when the panel is disposed while the modal is open`, `declining sends no confirmed request` | ✅ |
+| AC-DML-10 | Cells skipped after a stop are marked one by one; a cell that cannot be marked does not affect any other cell. | `DataverseNotebookController.test.ts`: `marks skipped cells without touching another cell when one cannot be marked` | ✅ |
 
 ### Monaco Editor Integration
 
@@ -755,6 +787,6 @@ Selection & Copy edge cases:
 
 | Date | Change |
 |------|--------|
-| 2026-11-17 | Added DML confirmation and failure display for notebooks and Data Explorer (AC-DML-01 to AC-DML-08) |
+| 2026-11-17 | Added DML confirmation and failure display for notebooks and Data Explorer (AC-DML-01 to AC-DML-10) |
 | 2026-04-25 | Added Diagnostic Markers section: `query/validate` endpoint, live validation flow, execution-time markers, marker clearing rules (#650) |
 | 2026-03-18 | Created from vscode-data-explorer-monaco-editor.md and vscode-data-explorer-selection-copy.md per SL1 |
