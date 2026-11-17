@@ -598,6 +598,10 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         {
             throw; // Don't catch CONTINUE — let it propagate to the enclosing WHILE loop
         }
+        catch (DmlSafetyRefusalException)
+        {
+            throw; // A safety refusal (row cap, unsupported clause) ends the script; script code cannot handle it
+        }
         catch (Exception ex)
         {
             // Store error information in the variable scope so ERROR_MESSAGE() etc. can access it

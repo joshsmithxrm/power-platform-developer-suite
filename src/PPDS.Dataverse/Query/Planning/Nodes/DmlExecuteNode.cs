@@ -208,8 +208,10 @@ public sealed class DmlExecuteNode : IQueryPlanNode
     /// raised while the rows are still being collected, ahead of the first bulk call. Only "at least cap + 1"
     /// is known; the matching rows beyond that are not counted.
     /// </summary>
-    private QueryExecutionException RowCapExceeded() => new(
-        QueryErrorCode.DmlRowCapExceeded,
+    private DmlRowCapExceededException RowCapExceeded() => new(
+        Operation.ToString().ToUpperInvariant(),
+        EntityLogicalName,
+        RowCap,
         $"{Operation.ToString().ToUpperInvariant()} {EntityLogicalName} was refused: it would affect more than the " +
         $"row cap of {RowCap:N0} rows (at least {(long)RowCap + 1:N0} rows match). This statement changed nothing. " +
         "Use --no-limit to remove the cap, or narrow the WHERE clause.");

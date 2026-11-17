@@ -343,4 +343,34 @@ public class DmlStatementFidelityTests
         Assert.Contains(h.Reads, r => r.Page == 2 && r.Cookie == "cookie");
     }
 
+    // ---- guard refusals are not catchable by script code (S1) --------------------------------
+
+    [Fact]
+    public async Task RowCapRefusal_InsideTry_EndsTheScript_KeepsItsCode_AndRunsNothingAfter()
+    {
+        var h = DmlTestHarness.Create(rows: 5, contactRows: 1); // the UPDATE after the CATCH is within the cap
+
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest
+        {
+            Sql = "BEGIN TRY DELETE FROM account WHERE name = 'x' END TRY BEGIN CATCH PRINT 'swallowed' END CATCH; UPDATE contact SET lastname = 'b' WHERE lastname = 'y'",
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = true, RowCap = 2 }
+        }));
+
+        Assert.Equal(ErrorCodes.Query.DmlRowCapExceeded, ex.ErrorCode);
+        h.AssertNothingChanged();
+    }
+
+    [Fact]
+    public async Task OrdinaryErrors_InsideTry_AreStillCaught()
+    {
+        var h = DmlTestHarness.Create(rows: 2);
+
+        await h.Service.ExecuteAsync(new SqlQueryRequest
+        {
+            Sql = "BEGIN TRY THROW 50001, 'boom', 1; END TRY BEGIN CATCH PRINT 'caught' END CATCH; DELETE FROM account WHERE name = 'x'",
+            DmlSafety = Confirmed
+        });
+
+        Assert.Equal(new[] { 2 }, h.Deleted);
+    }
 }
