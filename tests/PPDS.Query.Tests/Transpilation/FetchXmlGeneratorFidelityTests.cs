@@ -90,4 +90,22 @@ public class FetchXmlGeneratorFidelityTests
     [InlineData("SELECT name FROM account WHERE name NOT IN ('a')", "operator=\"not-in\"")]
     public void SupportedNegations_StillWork(string sql, string expected)
         => Fetch(sql).Should().Contain(expected);
+
+    // ---- S6: the shared column collector and plain SELECT ------------------------------------
+
+    [Fact]
+    public void WindowFunctionOrderColumns_AreNotFetched_SoTheResultShapeIsUnchanged()
+        => Fetch("SELECT name, ROW_NUMBER() OVER (ORDER BY createdon DESC) AS rn FROM account")
+            .Should().NotContain("<attribute name=\"createdon\"");
+
+    [Theory]
+    [InlineData("SELECT COALESCE(description, name) AS d FROM account", "description", "name")]
+    [InlineData("SELECT NULLIF(name, 'x') AS d FROM account", "name", "name")]
+    [InlineData("SELECT CASE statecode WHEN 0 THEN name END AS d FROM account", "statecode", "name")]
+    [InlineData("SELECT TRY_CAST(revenue AS int) AS d FROM account", "revenue", "revenue")]
+    public void ComputedColumns_FetchEveryColumnTheyRead(string sql, string first, string second)
+    {
+        var fetch = Fetch(sql);
+        fetch.Should().Contain($"<attribute name=\"{first}\"").And.Contain($"<attribute name=\"{second}\"");
+    }
 }

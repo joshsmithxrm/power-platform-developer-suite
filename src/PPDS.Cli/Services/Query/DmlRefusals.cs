@@ -50,6 +50,9 @@ public sealed class PpdsDmlConfirmationRequiredException : PpdsException
 
     /// <summary>The environments the request would write to.</summary>
     public IReadOnlyList<DmlTarget> Targets { get; }
+
+    /// <summary>Active bypass hints (BYPASS_PLUGINS, BYPASS_FLOWS) the statement would run with; empty when none.</summary>
+    public IReadOnlyList<string> Bypasses { get; init; } = Array.Empty<string>();
 }
 
 /// <summary>

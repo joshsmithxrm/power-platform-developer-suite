@@ -319,10 +319,11 @@ public class DmlAllowlistTests
     {
         var h = DmlTestHarness.Create(rows: 1);
 
-        var ex = await Assert.ThrowsAsync<PPDS.Dataverse.Query.Execution.QueryExecutionException>(
+        // Wrapped in a PpdsException with the engine's code (no raw exception leaves the service).
+        var ex = await Assert.ThrowsAsync<PpdsException>(
             () => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
 
-        Assert.Equal(PPDS.Dataverse.Query.Execution.QueryErrorCode.ExecutionFailed, ex.ErrorCode);
+        Assert.Equal(ErrorCodes.Query.ExecutionFailed, ex.ErrorCode);
         Assert.Contains(message, ex.Message);
         h.AssertNothingChanged();
     }

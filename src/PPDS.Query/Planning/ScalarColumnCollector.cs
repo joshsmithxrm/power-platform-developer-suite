@@ -40,6 +40,12 @@ internal sealed class ScalarColumnCollector : TSqlFragmentVisitor
     {
     }
 
+    public override void ExplicitVisit(OverClause node)
+    {
+        // Window PARTITION BY / ORDER BY columns are not collected: SELECT keeps its previous fetch set and result shape
+        // for window functions, and DML refuses OVER.
+    }
+
     public override void ExplicitVisit(InPredicate node)
     {
         // The left-hand expression and literal values are visited; an IN (subquery) is not.

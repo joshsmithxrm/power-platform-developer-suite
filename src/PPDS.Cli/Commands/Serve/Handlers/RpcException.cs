@@ -181,6 +181,11 @@ public sealed class DmlSafetyErrorData : RpcErrorData
     /// Confirmation required only: every environment the request would write to. Writes to another environment are
     /// refused before confirmation, so today this is the connected environment.
     /// </summary>
+    [JsonPropertyName("dmlBypass")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? DmlBypass { get; init; }
+
+    /// <summary>Confirmation required only: every environment the request would write to.</summary>
     [JsonPropertyName("dmlTargets")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<DmlTargetDto>? DmlTargets { get; init; }

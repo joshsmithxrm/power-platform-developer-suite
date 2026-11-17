@@ -140,9 +140,11 @@ public class DmlInterruptedRunTests
         executor.Setup(x => x.ExecuteFetchXmlAsync(Moq.It.IsAny<string>(), Moq.It.IsAny<int?>(), Moq.It.IsAny<string?>(), Moq.It.IsAny<bool>(), Moq.It.IsAny<PPDS.Dataverse.Query.QueryExecutionOptions?>(), Moq.It.IsAny<CancellationToken>())).ThrowsAsync(auth);
         var service = new SqlQueryService(executor.Object, guard: new PPDS.Cli.Tests.Services.Shared.InactiveFakeShakedownGuard());
 
-        var ex = await Assert.ThrowsAsync<DataverseAuthenticationException>(() => service.ExecuteAsync(
+        // Wrapped (no raw exception leaves the service) but still an Auth code that offers to sign in again.
+        var ex = await Assert.ThrowsAsync<PpdsAuthException>(() => service.ExecuteAsync(
             new SqlQueryRequest { Sql = "SELECT name FROM account" }));
 
+        Assert.Equal(ErrorCodes.Auth.Expired, ex.ErrorCode);
         Assert.True(ex.RequiresReauthentication);
     }
 

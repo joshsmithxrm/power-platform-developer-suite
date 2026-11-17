@@ -15,6 +15,12 @@ namespace PPDS.Dataverse.BulkOperations
     public interface IBulkOperationExecutor
     {
         /// <summary>
+        /// The options used when a call passes none (the configured bulk options). Callers that change one setting clone
+        /// these and overlay it, so the rest of the configuration (parallelism, error handling, bypass) is kept.
+        /// </summary>
+        BulkOperationOptions ConfiguredOptions => new();
+
+        /// <summary>
         /// Creates multiple records using the CreateMultiple API.
         /// </summary>
         /// <param name="entityLogicalName">The entity logical name.</param>

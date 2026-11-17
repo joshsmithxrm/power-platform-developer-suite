@@ -63,7 +63,11 @@ public static class QueryHintParser
                 continue;
 
             var raw = token.Text?.Trim();
-            if (raw == null || raw.IndexOf(CommentPrefix, StringComparison.OrdinalIgnoreCase) < 0)
+            if (raw == null)
+                continue;
+            // A hint-like mention is "ppds:" followed by a name, at the start or after whitespace (not a URL like org/ppds:).
+            var body = raw.StartsWith("--") ? raw[2..] : raw.StartsWith("/*") ? raw[2..].TrimEnd('/').TrimEnd('*') : raw;
+            if (!System.Text.RegularExpressions.Regex.IsMatch(body.Trim(), @"(^|\s)ppds:\s*[A-Za-z_]", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
                 continue;
 
             // Only "-- ppds:NAME [value]" is a hint. Anything else that mentions ppds: (a block comment, a misspelt
@@ -73,11 +77,36 @@ public static class QueryHintParser
                 text = text[2..].TrimStart();
 
             if (token.TokenType != TSqlTokenType.SingleLineComment
-                || !text.StartsWith(CommentPrefix, StringComparison.OrdinalIgnoreCase)
-                || !ApplyCommentHint(text[CommentPrefix.Length..].Trim(), overrides))
+                || !text.StartsWith(CommentPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 overrides.UnrecognizedHints.Add(raw);
+                continue;
             }
+
+            // SELECT keeps the lenient parsing it always had (a flag followed by text, "+5"); DML requires the exact form.
+            var hintText = text[CommentPrefix.Length..].Trim();
+            ApplyLenientHint(hintText, overrides);
+            if (!ApplyCommentHint(hintText, new QueryHintOverrides()))
+                overrides.UnrecognizedHints.Add(raw);
+        }
+    }
+
+    /// <summary>The parsing SELECT has always used: a flag may carry trailing text, a number may have a sign.</summary>
+    private static void ApplyLenientHint(string hintText, QueryHintOverrides overrides)
+    {
+        var parts = hintText.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return;
+        var value = parts.Length > 1 ? parts[1].Trim() : null;
+        switch (parts[0].ToUpperInvariant())
+        {
+            case "USE_TDS": overrides.UseTdsEndpoint = true; break;
+            case "BYPASS_PLUGINS": overrides.BypassPlugins = true; break;
+            case "BYPASS_FLOWS": overrides.BypassFlows = true; break;
+            case "NOLOCK": overrides.NoLock = true; break;
+            case "BATCH_SIZE" when int.TryParse(value, out var batchSize): overrides.DmlBatchSize = batchSize; break;
+            case "MAX_ROWS" when int.TryParse(value, out var maxRows): overrides.MaxResultRows = maxRows; break;
+            case "MAXDOP" when int.TryParse(value, out var maxdop): overrides.MaxParallelism = maxdop; break;
+            case "HASH_GROUP" or "HASHGROUP": overrides.ForceClientAggregation = true; break;
         }
     }
 

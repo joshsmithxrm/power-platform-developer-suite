@@ -249,6 +249,8 @@ public partial class RpcMethodHandler
                     Code = ErrorCodes.Query.DmlConfirmationRequired,
                     Message = confirm.UserMessage,
                     DmlConfirmationRequired = true,
+                    DmlBypass = confirm is PpdsDmlConfirmationRequiredException { Bypasses.Count: > 0 } withBypass
+                        ? withBypass.Bypasses.ToList() : null,
                     DmlTargets = (confirm as PpdsDmlConfirmationRequiredException)?.Targets
                         .Select(t => new DmlTargetDto { Label = t.Label, Url = t.Url, Type = t.Type, Protection = t.Protection })
                         .ToList(),

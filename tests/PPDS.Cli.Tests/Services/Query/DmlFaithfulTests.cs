@@ -178,3 +178,115 @@ public sealed class DmlFaithfulTests : IDisposable
         Assert.Equal(new object?[] { "a\t" }, Values(h, "description"));
     }
 }
+
+/// <summary>Bypass hints, hint parsing and hint reporting (S3, S6, N3, N7).</summary>
+[Trait("Category", "Unit")]
+public class DmlHintGateTests
+{
+    private const string Update = "UPDATE account SET name = 'y' WHERE name = 'x'";
+
+    [Fact]
+    public async Task BypassHint_IsNamedInTheConfirmation_OnEverySurface()
+    {
+        var h = DmlTestHarness.Create(rows: 1);
+
+        var ex = await Assert.ThrowsAsync<PpdsDmlConfirmationRequiredException>(() => h.Service.ExecuteAsync(
+            new SqlQueryRequest { Sql = "-- ppds:BYPASS_PLUGINS\n" + Update, DmlSafety = new DmlSafetyOptions() }));
+
+        Assert.Equal(new[] { "BYPASS_PLUGINS" }, ex.Bypasses);
+        Assert.Contains("bypasses synchronous custom plugins", ex.UserMessage);
+        var cli = PPDS.Cli.Commands.Query.DmlSafetyOptionSet.WithCliWording(ExceptionMapper.Map(ex), ex);
+        Assert.Contains("--confirm", cli.Message);
+        Assert.Contains("bypasses synchronous custom plugins", cli.Message);
+        Assert.True(PPDS.Cli.Commands.Serve.Handlers.RpcMethodHandler.TryMapQuerySqlFailure(ex, Update, out var rpc));
+        var data = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(rpc!.ErrorData, rpc.ErrorData!.GetType())).RootElement;
+        Assert.Equal("BYPASS_PLUGINS", data.GetProperty("dmlBypass")[0].GetString());
+    }
+
+    [Theory]
+    [InlineData("-- ppds:BYPASS_PLUGINS\n")]
+    [InlineData("-- ppds:BYPASS_FLOWS\n")]
+    public async Task BypassHint_InProduction_IsRefused_UnlessTheEnvironmentAlreadyBypasses(string hint)
+    {
+        var h = DmlTestHarness.Create(rows: 1, protection: PPDS.Auth.Profiles.ProtectionLevel.Production);
+
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(
+            new SqlQueryRequest { Sql = hint + Update, DmlSafety = new DmlSafetyOptions { IsConfirmed = true } }));
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        Assert.Contains("Production", ex.Message);
+        h.AssertNothingChanged();
+
+        h.Service.EnvironmentSafetySettings = new PPDS.Auth.Profiles.QuerySafetySettings
+        {
+            BypassCustomPlugins = PPDS.Auth.Profiles.BypassPluginMode.Synchronous,
+            BypassPowerAutomateFlows = true
+        };
+        await h.Service.ExecuteAsync(new SqlQueryRequest { Sql = hint + Update, DmlSafety = new DmlSafetyOptions { IsConfirmed = true } });
+    }
+
+    [Fact]
+    public async Task BypassHint_InAScript_IsRefused_SoItCannotSpreadToOtherStatements()
+    {
+        var h = DmlTestHarness.Create(rows: 1);
+
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest
+        {
+            Sql = "UPDATE contact SET lastname = 'b' WHERE lastname = 'y';\n-- ppds:BYPASS_PLUGINS\n" + Update,
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = true }
+        }));
+
+        Assert.Contains("single", ex.Message);
+        h.AssertNothingChanged();
+    }
+
+    [Fact]
+    public async Task HintOptions_OverlayTheConfiguredBulkOptions()
+    {
+        var h = DmlTestHarness.Create(rows: 1);
+        var configured = new PPDS.Dataverse.BulkOperations.BulkOperationOptions { ContinueOnError = false, MaxParallelBatches = 3 };
+        Moq.Mock.Get(h.Bulk.Object).Setup(b => b.ConfiguredOptions).Returns(configured);
+
+        await h.Service.ExecuteAsync(new SqlQueryRequest { Sql = Update + " -- ppds:BATCH_SIZE 7", DmlSafety = new DmlSafetyOptions { IsConfirmed = true } });
+
+        Assert.Equal(7, h.LastOptions!.BatchSize);
+        Assert.False(h.LastOptions.ContinueOnError);
+        Assert.Equal(3, h.LastOptions.MaxParallelBatches);
+        Assert.Equal(100, configured.BatchSize); // the configured instance is not changed
+    }
+
+    [Theory]
+    [InlineData("SELECT name FROM account -- ppds:NOLOCK (avoid blocking)")]
+    [InlineData("SELECT name FROM account -- ppds:MAX_ROWS +2")]
+    public async Task SelectHints_KeepTheirLenientParsing(string sql)
+    {
+        var h = DmlTestHarness.Create(rows: 3);
+
+        var result = await h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql });
+
+        Assert.NotNull(result.AppliedHints);
+    }
+
+    [Fact]
+    public async Task AUrlThatContainsPpdsColon_IsNotAHint()
+    {
+        var h = DmlTestHarness.Create(rows: 1);
+
+        await h.Service.ExecuteAsync(new SqlQueryRequest
+        {
+            Sql = Update + " -- see github.com/org/ppds: cleanup",
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = true }
+        });
+
+        Assert.Single(h.Writes);
+    }
+
+    [Fact]
+    public async Task HashGroupOnDml_IsNotReportedAsApplied()
+    {
+        var h = DmlTestHarness.Create(rows: 1);
+
+        var result = await h.Service.ExecuteAsync(new SqlQueryRequest { Sql = "-- ppds:HASH_GROUP\n" + Update, DmlSafety = new DmlSafetyOptions { IsConfirmed = true } });
+
+        Assert.True(result.AppliedHints is null || !result.AppliedHints.Contains("HASH_GROUP"));
+    }
+}

@@ -172,6 +172,9 @@ public class BulkOperationOptions
     /// Default: null (use RecommendedDegreesOfParallelism)
     /// </summary>
     public int? MaxParallelBatches { get; set; } = null;
+
+    /// <summary>A copy of these options, so one setting can be changed without altering the configured instance.</summary>
+    public BulkOperationOptions Clone() => (BulkOperationOptions)MemberwiseClone();
 }
 
 /// <summary>

@@ -112,6 +112,12 @@ public sealed class SqlQueryService : ISqlQueryService
         _planExecutor = new PlanExecutor();
     }
 
+    /// <summary>The sentence a confirmation adds for active bypass hints (empty when there are none).</summary>
+    internal static string BypassNote(IReadOnlyList<string> bypasses) => bypasses.Count == 0
+        ? string.Empty
+        : $" It also bypasses {string.Join(" and ", bypasses.Select(b => b == "BYPASS_PLUGINS" ? "synchronous custom plugins and workflows" : "Power Automate flows"))} " +
+          $"(-- ppds:{string.Join(", -- ppds:", bypasses)}).";
+
     /// <summary>The surface-neutral message of <c>Query.DmlConfirmationRequired</c>.</summary>
     public const string ConfirmationRequiredMessage =
         "This request changes data (INSERT, UPDATE or DELETE) and must be confirmed before it runs. Nothing was executed.";
@@ -278,6 +284,10 @@ public sealed class SqlQueryService : ISqlQueryService
                 "Platform admin to enable the TDS Endpoint.",
                 ex);
         }
+        catch (Exception ex) when (ex is not PpdsException and not OperationCanceledException)
+        {
+            throw WrapFailure(ex, context);
+        }
 
         // Expand lookup, optionset, and boolean columns to include *name variants.
         // Virtual column expansion stays in the service layer because it depends on
@@ -315,7 +325,29 @@ public sealed class SqlQueryService : ISqlQueryService
         return wrapped;
     }
 
-    private static bool DmlRan(QueryPlanContext context) => context.Statistics.DmlOutcomes.Count > 0;
+    private static bool DmlRan(QueryPlanContext context)
+        => context.Statistics.DmlOutcomes.Any(o => o.AffectedRows > 0 || o.FailedRows > 0 || o.Interrupted);
+
+    /// <summary>
+    /// A failure before any data changed, as a <see cref="PpdsException"/> (Constitution D4). A sign-in failure keeps
+    /// its Auth code and re-authentication flag, so callers can still offer to sign in again.
+    /// </summary>
+    private static PpdsException WrapFailure(Exception ex, QueryPlanContext context)
+    {
+        var message = PPDS.Dataverse.Security.ConnectionStringRedactor.RedactExceptionMessage(ex.Message);
+        PpdsException wrapped = ex switch
+        {
+            PPDS.Dataverse.Resilience.DataverseAuthenticationException auth => new PpdsAuthException(
+                auth.RequiresReauthentication ? ErrorCodes.Auth.Expired : ErrorCodes.Auth.InsufficientPermissions, message, ex)
+            {
+                RequiresReauthentication = auth.RequiresReauthentication
+            },
+            QueryExecutionException query => new PpdsException(query.ErrorCode, message, ex),
+            _ => new PpdsException(ErrorCodes.Query.ExecutionFailed, message, ex)
+        };
+        RecordCommittedOutcome(wrapped, context);
+        return wrapped;
+    }
 
     /// <summary>A planner refusal raised while a script ran, as a <see cref="PpdsException"/> with its own code.</summary>
     private static PpdsException WrapRefusal(DmlSafetyRefusalException ex, QueryPlanContext context)
@@ -376,6 +408,9 @@ public sealed class SqlQueryService : ISqlQueryService
         {
             throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
         }
+
+        if (fragment is TSqlScript { Batches: var explainBatches } && explainBatches.Count(b => b.Statements.Count > 0) > 1)
+            throw new PpdsValidationException("sql", ExecutionPlanBuilder.MultipleBatchesMessage);
 
         // Parse query hints for EXPLAIN path too
         var hints = QueryHintParser.Parse(fragment);
@@ -527,6 +562,10 @@ public sealed class SqlQueryService : ISqlQueryService
                         "on this environment. Disable TDS mode to query via Dataverse, or ask your Power " +
                         "Platform admin to enable the TDS Endpoint.",
                         ex);
+                }
+                catch (Exception ex) when (ex is not PpdsException and not OperationCanceledException)
+                {
+                    throw WrapFailure(ex, context);
                 }
 
                 // Infer columns from first row
@@ -746,6 +785,34 @@ public sealed class SqlQueryService : ISqlQueryService
         if (safetyResult.ContainsDml && _metadataProvider != null)
             await DmlColumnValidator.ValidateAsync(plannedStatement, _metadataProvider, cancellationToken).ConfigureAwait(false);
 
+        // BYPASS_PLUGINS / BYPASS_FLOWS weaken safeguards: one statement only (a hint is read from the whole request),
+        // never in a Production-protected environment unless its settings already bypass the same logic.
+        var bypasses = safetyResult.ContainsDml
+            ? new[] { hints.BypassPlugins == true ? "BYPASS_PLUGINS" : null, hints.BypassFlows == true ? "BYPASS_FLOWS" : null }
+                .OfType<string>().ToList()
+            : new List<string>();
+        if (bypasses.Count > 0)
+        {
+            if (plannedStatement is not (InsertStatement or UpdateStatement or DeleteStatement))
+            {
+                throw new PpdsException(
+                    ErrorCodes.Query.DmlBlocked,
+                    $"-- ppds:{bypasses[0]} applies to the whole request, so it is allowed only on a request with a single " +
+                    "INSERT, UPDATE or DELETE statement. Nothing was executed. Run that statement on its own.");
+            }
+
+            var settings = EnvironmentSafetySettings ?? new QuerySafetySettings();
+            var allowed = (hints.BypassPlugins != true || settings.BypassCustomPlugins != BypassPluginMode.None)
+                && (hints.BypassFlows != true || settings.BypassPowerAutomateFlows);
+            if (EnvironmentProtectionLevel == ProtectionLevel.Production && !allowed)
+            {
+                throw new PpdsException(
+                    ErrorCodes.Query.DmlBlocked,
+                    $"-- ppds:{string.Join(", -- ppds:", bypasses)} is not allowed in a Production-protected environment " +
+                    "whose safety settings do not already bypass that logic. Nothing was executed.");
+            }
+        }
+
         // A dry-run is the confirmation preview, not an execution attempt. Keep the
         // confirmation requirement on the result so callers know actual execution is
         // still gated, but do not require --confirm merely to build the side-effect-free
@@ -756,8 +823,11 @@ public sealed class SqlQueryService : ISqlQueryService
             // Surface-neutral: the CLI replaces it with its --confirm/--dry-run wording, the TUI and the extension ask.
             // Writes to another environment were refused above, so the connected environment is the only target.
             throw new PpdsDmlConfirmationRequiredException(
-                ConfirmationRequiredMessage,
-                [new DmlTarget(_environmentLabel, _environmentUrl, _environmentType, EnvironmentProtectionLevel.ToString())]);
+                ConfirmationRequiredMessage + BypassNote(bypasses),
+                [new DmlTarget(_environmentLabel, _environmentUrl, _environmentType, EnvironmentProtectionLevel.ToString())])
+            {
+                Bypasses = bypasses
+            };
         }
 
         dmlRowCap = safetyResult.RowCap;
@@ -835,7 +905,8 @@ public sealed class SqlQueryService : ISqlQueryService
             && planResult.RootNode is not ScriptExecutionNode;
 
         return (fragment, planResult, safetyResult, executionOptions,
-            CollectAppliedHints(hints, maxRowsApplied, batchSizeApplied: dmlBatchSize.HasValue));
+            CollectAppliedHints(hints, maxRowsApplied, batchSizeApplied: dmlBatchSize.HasValue,
+                isDml: safetyResult.ContainsDml, isScript: planResult.RootNode is ScriptExecutionNode));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1069,16 +1140,17 @@ public sealed class SqlQueryService : ISqlQueryService
     /// Collects the names of query hints that were actively applied.
     /// Returns null when no hints were active.
     /// </summary>
-    private static List<string>? CollectAppliedHints(QueryHintOverrides hints, bool maxRowsApplied, bool batchSizeApplied)
+    private static List<string>? CollectAppliedHints(
+        QueryHintOverrides hints, bool maxRowsApplied, bool batchSizeApplied, bool isDml, bool isScript)
     {
         var applied = new List<string>();
         if (hints.UseTdsEndpoint == true) applied.Add("USE_TDS");
-        if (hints.NoLock == true) applied.Add("NOLOCK");
+        if (hints.NoLock == true && !isScript) applied.Add("NOLOCK"); // script statements are planned without it
         if (hints.BypassPlugins == true) applied.Add("BYPASS_PLUGINS");
         if (hints.BypassFlows == true) applied.Add("BYPASS_FLOWS");
         if (maxRowsApplied) applied.Add("MAX_ROWS");
         if (hints.MaxParallelism.HasValue) applied.Add("MAXDOP");
-        if (hints.ForceClientAggregation == true) applied.Add("HASH_GROUP");
+        if (hints.ForceClientAggregation == true && !isDml) applied.Add("HASH_GROUP"); // no aggregates in DML
         if (batchSizeApplied) applied.Add("BATCH_SIZE"); // DML only: the bulk writes use it
         return applied.Count > 0 ? applied : null;
     }

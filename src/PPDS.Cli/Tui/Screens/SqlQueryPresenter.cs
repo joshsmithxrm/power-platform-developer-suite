@@ -256,6 +256,13 @@ internal sealed class SqlQueryPresenter : IDisposable
             _isExecuting = false;
             AuthenticationRequired?.Invoke(authEx);
         }
+        catch (PpdsAuthException ppdsAuth) when (ppdsAuth.RequiresReauthentication)
+        {
+            // The service wraps sign-in failures (before any data changed) in a PpdsAuthException.
+            _isExecuting = false;
+            AuthenticationRequired?.Invoke(ppdsAuth.InnerException as DataverseAuthenticationException
+                ?? new DataverseAuthenticationException(ppdsAuth.UserMessage, requiresReauthentication: true));
+        }
         catch (OperationCanceledException cancelled) when (_queryCts?.IsCancellationRequested == true && !screenCancellation.IsCancellationRequested)
         {
             _isExecuting = false;

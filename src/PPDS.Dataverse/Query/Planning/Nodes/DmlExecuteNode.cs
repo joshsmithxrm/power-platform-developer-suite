@@ -300,11 +300,12 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         if (hints == null)
             return null;
 
-        var options = new BulkOperationOptions
-        {
-            BypassCustomLogic = hints.BypassPlugins ? CustomLogicBypass.Synchronous : CustomLogicBypass.None,
-            BypassPowerAutomateFlows = hints.BypassFlows
-        };
+        // Overlay the hints on the configured options; everything else (parallelism, error handling) stays as configured.
+        var options = (context.BulkOperationExecutor?.ConfiguredOptions ?? new BulkOperationOptions()).Clone();
+        if (hints.BypassPlugins)
+            options.BypassCustomLogic |= CustomLogicBypass.Synchronous;
+        if (hints.BypassFlows)
+            options.BypassPowerAutomateFlows = true;
         if (hints.DmlBatchSize.HasValue)
             options.BatchSize = hints.DmlBatchSize.Value;
         return options;

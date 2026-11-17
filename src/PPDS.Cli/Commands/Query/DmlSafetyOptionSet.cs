@@ -79,6 +79,7 @@ internal sealed class DmlSafetyOptionSet
     /// </summary>
     internal static StructuredError WithCliWording(StructuredError error, Exception exception) => exception switch
     {
+        PpdsDmlConfirmationRequiredException confirm => error with { Message = ConfirmationRequiredMessage + SqlQueryService.BypassNote(confirm.Bypasses) },
         PpdsException { ErrorCode: ErrorCodes.Query.DmlConfirmationRequired } => error with { Message = ConfirmationRequiredMessage },
         PpdsDmlRowCapExceededException => error with { Message = error.Message + RowCapRemedy },
         _ => error
