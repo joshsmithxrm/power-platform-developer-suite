@@ -288,14 +288,23 @@ internal sealed class ContributorFormHarness
     internal Func<Exception>? FailPublishWith { get; init; }
     /// <summary>Replaces the read-back text returned after the first update (simulates a server that stores something else).</summary>
     internal Func<string, string>? ReadBackTransform { get; init; }
+    /// <summary>When set, the form XML update throws this exception (for example a fault the server answered with).</summary>
+    internal Func<Exception>? FailUpdateWith { get; init; }
+    /// <summary>Runs after a successful explicit solution association request.</summary>
+    internal Action? AfterSolutionRequest { get; init; }
+    /// <summary>Reads after the first update that selected the form by ID (only counted with readBackById).</summary>
+    internal int ReadBackByIdRequests { get; private set; }
+    private readonly bool _readBackById;
+    private bool _awaitingReadBack; // set by an update: the next read is the read-back
     private readonly IEnvironmentConfirmationService? _confirmationOverride;
     internal Action? BeforeMetadata { get; init; }
 
     internal ContributorFormHarness(CancellationToken token, string fixture = "base", bool emptyDisplayName = false, Action<XDocument>? transform = null,
         IEnumerable<string>? extraColumns = null, IEnvironmentConfirmationService? confirmation = null, string? rawXml = null,
-        bool noColumns = false)
+        bool noColumns = false, bool readBackById = false)
     {
         _token = token;
+        _readBackById = readBackById;
         _confirmationOverride = confirmation;
         var initial = XDocument.Parse(ContributorFormFixture.Build(fixture));
         transform?.Invoke(initial);
@@ -352,6 +361,7 @@ internal sealed class ContributorFormHarness
                     Assert.Equal("fixture_solution", association.SolutionUniqueName); Assert.False(association.AddRequiredComponents);
                     SolutionRequests++; Journal.Add("explicit-solution-request");
                     if (FailSolutionWith is not null) return Task.FromException<OrganizationResponse>(FailSolutionWith());
+                    AfterSolutionRequest?.Invoke();
                     return Task.FromResult(new OrganizationResponse());
                 }
                 if (request is PublishXmlRequest publication)
@@ -367,9 +377,16 @@ internal sealed class ContributorFormHarness
                 Assert.Equal("systemform", query.EntityName);
                 Assert.Equal(2, query.TopCount);
                 Assert.Contains(query.Criteria.Conditions, c => c.AttributeName == "objecttypecode" && (string)c.Values.Single() == "account");
-                // Forms are selected by name, or by the resolved form ID (binding repair reads back by ID).
-                Assert.Contains(query.Criteria.Conditions, c => (c.AttributeName == "name" && (string)c.Values.Single() == "Fixture")
-                    || (c.AttributeName == "formid" && c.Values.Single() is Guid id && id == FormId));
+                if (_readBackById && _awaitingReadBack)
+                {
+                    // Binding repair reads its read-back by the resolved form ID.
+                    Assert.Contains(query.Criteria.Conditions, c => c.AttributeName == "formid" && c.Values.Single() is Guid id && id == FormId);
+                    ReadBackByIdRequests++; _awaitingReadBack = false;
+                }
+                else
+                {
+                    Assert.Contains(query.Criteria.Conditions, c => c.AttributeName == "name" && (string)c.Values.Single() == "Fixture");
+                }
                 var stateXml = Writes.Count > 0 && ReadBackTransform is not null ? ReadBackTransform(StateXml) : StateXml;
                 var state = new Entity("systemform", FormId) { ["formid"] = FormId, ["name"] = "Fixture", ["type"] = new OptionSetValue(FormType),
                     ["ismanaged"] = IsManaged, ["iscustomizable"] = new BooleanManagedProperty(IsCustomizable), ["formxml"] = stateXml };
@@ -382,6 +399,7 @@ internal sealed class ContributorFormHarness
             .Returns<Entity, CancellationToken>((entity, _) =>
             {
                 lease.Operations++; Assert.Equal(1, ActiveLeases); Journal.Add("update-attempt");
+                if (FailUpdateWith is not null) return Task.FromException(FailUpdateWith()); _awaitingReadBack = true;
                 Assert.Equal("systemform", entity.LogicalName); Assert.Equal(FormId, entity.Id);
                 Assert.Equal(new[] { "formxml" }, entity.Attributes.Keys);
                 var xml = entity.GetAttributeValue<string>("formxml"); Assert.NotNull(xml);

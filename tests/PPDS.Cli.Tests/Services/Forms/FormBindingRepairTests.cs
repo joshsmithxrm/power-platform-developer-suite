@@ -63,7 +63,7 @@ public sealed class FormBindingRepairTests
     {
         using var cts = new CancellationTokenSource();
         // Look-alike text that must not be touched: a comment repeating a mis-cased binding.
-        var h = new ContributorFormHarness(cts.Token, transform: doc =>
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: doc =>
         {
             MisCasedEverywhere(doc);
             ContributorFormFixture.Section(doc, "General").AddFirst(new XComment(" datafieldname=\"Name\" "));
@@ -99,7 +99,8 @@ public sealed class FormBindingRepairTests
         Assert.Equal(expectedDoc.ToString(SaveOptions.DisableFormatting), written);
         Assert.Contains("<!-- datafieldname=\"Name\" -->", written);
         FormXmlValidator.Validate(XDocument.Parse(written));
-        Assert.Equal(2, h.ReadRequests); // the plan read and the read-back
+        Assert.Equal(2, h.ReadRequests); // the plan read (by name) and the read-back (by form ID)
+        Assert.Equal(1, h.ReadBackByIdRequests);
         Assert.Equal(0, h.SolutionRequests + h.PublishRequests);
         h.AssertIsolation();
 
@@ -138,7 +139,7 @@ public sealed class FormBindingRepairTests
         var raw = template.Replace("MARKER_A", "Name").Replace("MARKER_B", "TELEPHONE1");
 
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token, rawXml: raw);
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, rawXml: raw);
         var result = await h.Service.RepairBindingsAsync(new("account", "Fixture"), ct: cts.Token);
 
         Assert.Equal(2, result.Repaired.Count);
@@ -153,7 +154,7 @@ public sealed class FormBindingRepairTests
     {
         var raw = ContributorFormFixture.Build("base").Replace("datafieldname=\"name\"", "datafieldname=\"&#78;ame\"");
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token, rawXml: raw);
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, rawXml: raw);
         var result = await h.Service.RepairBindingsAsync(new("account", "Fixture"), ct: cts.Token);
         Assert.Empty(result.Repaired);
         var item = Assert.Single(result.Unchanged);
@@ -168,7 +169,7 @@ public sealed class FormBindingRepairTests
     public async Task Repair_UnknownBinding_AndControlIdCase_AreReportedWithoutListingARepairedControlTwice()
     {
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token, transform: doc =>
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: doc =>
         {
             MisCasedIdAndUnknownBinding(doc);
             // An exact binding whose id is mis-cased: reported, nothing to rewrite.
@@ -205,7 +206,7 @@ public sealed class FormBindingRepairTests
     public async Task Repair_ReportsButNeverRewrites_RelatedUnboundCustomParameterEventAndHiddenData()
     {
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token, transform: doc =>
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: doc =>
         {
             // Rewritten: a plain mis-cased header binding.
             doc.Root!.Add(Area("header", "{cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd}", "{abababab-abab-abab-abab-abababababab}",
@@ -283,7 +284,7 @@ public sealed class FormBindingRepairTests
     public async Task Repair_NothingToRepair_SucceedsWithoutUpdate_AndKeepsExplicitSideEffects()
     {
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token);
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token);
         var result = await h.Service.RepairBindingsAsync(new("account", "Fixture"), ct: cts.Token);
         Assert.Empty(result.Repaired);
         Assert.Empty(result.Unchanged);
@@ -293,7 +294,7 @@ public sealed class FormBindingRepairTests
         Assert.Equal(h.Original, h.StateXml);
         h.AssertIsolation();
 
-        var withEffects = new ContributorFormHarness(cts.Token) { AllowExplicitSideEffects = true };
+        var withEffects = new ContributorFormHarness(readBackById: true, token: cts.Token) { AllowExplicitSideEffects = true };
         var explicitResult = await withEffects.Service.RepairBindingsAsync(
             new("account", "Fixture", SolutionUniqueName: "fixture_solution", Publish: true), ct: cts.Token);
         Assert.False(explicitResult.FormXmlChanged);
@@ -309,7 +310,7 @@ public sealed class FormBindingRepairTests
     public async Task Repair_EmptyColumnList_FailsWithoutWriting()
     {
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token, transform: MisCasedEverywhere, noColumns: true);
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: MisCasedEverywhere, noColumns: true);
         var error = await Assert.ThrowsAsync<PpdsException>(() => h.Service.RepairBindingsAsync(new("account", "Fixture"), ct: cts.Token));
         Assert.Equal(FormErrorCodes.ColumnNotFound, error.ErrorCode);
         Assert.Empty(h.Writes);
@@ -323,7 +324,7 @@ public sealed class FormBindingRepairTests
     {
         using var cts = new CancellationTokenSource();
         // Confirmation would be denied: a dry run must not ask for it.
-        var h = new ContributorFormHarness(cts.Token, transform: MisCasedEverywhere) { DenyConfirmation = true };
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: MisCasedEverywhere) { DenyConfirmation = true };
 
         var plan = await h.Service.RepairBindingsAsync(new("account", "Fixture", DryRun: true), ct: cts.Token);
 
@@ -338,9 +339,10 @@ public sealed class FormBindingRepairTests
         Assert.Equal(1, h.ReadRequests);
         Assert.Equal(h.Original, h.StateXml);
 
-        var real = new ContributorFormHarness(cts.Token, transform: MisCasedEverywhere);
+        var real = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: MisCasedEverywhere);
         var applied = await real.Service.RepairBindingsAsync(new("account", "Fixture"), ct: cts.Token);
-        Assert.Equal(plan.Repaired, applied.Repaired);
+        Assert.Equal(plan.Repaired, applied.Repaired.Select(r => r with { VerifiedBy = null }));
+        Assert.All(applied.Repaired, r => Assert.Equal(BindingVerification.ById, r.VerifiedBy));
         Assert.Equal(plan.Unchanged, applied.Unchanged);
     }
 
@@ -351,7 +353,7 @@ public sealed class FormBindingRepairTests
     public async Task DryRun_WithPublishOrSolution_IsRejectedByTheService(bool publish, string? solution)
     {
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token, transform: MisCasedEverywhere);
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: MisCasedEverywhere);
         var error = await Assert.ThrowsAsync<PpdsValidationException>(() => h.Service.RepairBindingsAsync(
             new("account", "Fixture", DryRun: true, SolutionUniqueName: solution, Publish: publish), ct: cts.Token));
         Assert.Contains("dry run", error.Message, StringComparison.OrdinalIgnoreCase);
@@ -364,13 +366,13 @@ public sealed class FormBindingRepairTests
     public async Task DryRun_SuppliedTargetMustMatch_ButNeedsNoAcknowledgement()
     {
         using var cts = new CancellationTokenSource();
-        var mismatch = new ContributorFormHarness(cts.Token, transform: MisCasedEverywhere);
+        var mismatch = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: MisCasedEverywhere);
         var error = await Assert.ThrowsAsync<PpdsException>(() => mismatch.Service.RepairBindingsAsync(
             new("account", "Fixture", DryRun: true, ConfirmEnvironment: "https://other.example.test"), ct: cts.Token));
         Assert.Equal(EnvironmentConfirmationErrorCodes.TargetMismatch, error.ErrorCode);
         Assert.Equal(0, mismatch.Acquisitions);
 
-        var match = new ContributorFormHarness(cts.Token, transform: MisCasedEverywhere) { DenyConfirmation = true };
+        var match = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: MisCasedEverywhere) { DenyConfirmation = true };
         var plan = await match.Service.RepairBindingsAsync(
             new("account", "Fixture", DryRun: true, ConfirmEnvironment: "https://FORMS.example.test/"), ct: cts.Token);
         Assert.Equal(4, plan.Repaired.Count);
@@ -385,20 +387,20 @@ public sealed class FormBindingRepairTests
     public async Task DeniedConfirmation_NonCustomizable_NonMainForm_AndCancellation_DoNotWrite()
     {
         using var cts = new CancellationTokenSource();
-        var denied = new ContributorFormHarness(cts.Token, transform: MisCasedEverywhere) { DenyConfirmation = true };
+        var denied = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: MisCasedEverywhere) { DenyConfirmation = true };
         var deniedError = await Assert.ThrowsAsync<PpdsException>(() => denied.Service.RepairBindingsAsync(new("account", "Fixture"), ct: cts.Token));
         Assert.Equal("Environment.ReadOnly", deniedError.ErrorCode);
         Assert.Equal(0, denied.Acquisitions);
         Assert.Empty(denied.Writes);
 
-        var locked = new ContributorFormHarness(cts.Token, transform: MisCasedEverywhere) { IsCustomizable = false };
+        var locked = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: MisCasedEverywhere) { IsCustomizable = false };
         var lockedError = await Assert.ThrowsAsync<PpdsException>(() => locked.Service.RepairBindingsAsync(new("account", "Fixture"), ct: cts.Token));
         Assert.Equal(FormErrorCodes.FormNotCustomizable, lockedError.ErrorCode);
         Assert.Empty(locked.Writes);
 
         foreach (var dryRun in new[] { false, true })
         {
-            var quickCreate = new ContributorFormHarness(cts.Token, transform: MisCasedEverywhere) { FormType = 7 };
+            var quickCreate = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: MisCasedEverywhere) { FormType = 7 };
             var typeError = await Assert.ThrowsAsync<PpdsException>(() =>
                 quickCreate.Service.RepairBindingsAsync(new("account", "Fixture", DryRun: dryRun), ct: cts.Token));
             Assert.Equal(FormErrorCodes.FormNotFound, typeError.ErrorCode);
@@ -406,7 +408,7 @@ public sealed class FormBindingRepairTests
             Assert.Empty(quickCreate.Writes);
         }
 
-        var cancelled = new ContributorFormHarness(cts.Token, transform: MisCasedEverywhere) { BeforeMetadata = cts.Cancel };
+        var cancelled = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: MisCasedEverywhere) { BeforeMetadata = cts.Cancel };
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled.Service.RepairBindingsAsync(new("account", "Fixture"), ct: cts.Token));
         Assert.Empty(cancelled.Writes);
         Assert.Equal(0, cancelled.SolutionRequests + cancelled.PublishRequests);
@@ -417,7 +419,7 @@ public sealed class FormBindingRepairTests
     public async Task CancellationBetweenPlanAndWrite_DoesNotWrite()
     {
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token, transform: MisCasedEverywhere) { AllowExplicitSideEffects = true };
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: MisCasedEverywhere) { AllowExplicitSideEffects = true };
         var reporter = new Mock<IProgressReporter>();
         reporter.Setup(r => r.ReportPhase("Writing", It.IsAny<string?>())).Callback(cts.Cancel);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.Service.RepairBindingsAsync(
@@ -435,7 +437,7 @@ public sealed class FormBindingRepairTests
         {
             using var cts = new CancellationTokenSource();
             // A duplicate instance GUID (two cells share an id) fails the bundled validator.
-            var h = new ContributorFormHarness(cts.Token, transform: doc =>
+            var h = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: doc =>
             {
                 MisCasedEverywhere(doc);
                 doc.Descendants("cell").Last().SetAttributeValue("id", (string?)doc.Descendants("cell").First().Attribute("id"));
@@ -452,7 +454,7 @@ public sealed class FormBindingRepairTests
     public async Task ReadBackStillMisCased_FailsAsNotVerified_BeforeAssociationOrPublication()
     {
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token, transform: MisCasedEverywhere) { DiscardWrites = true, AllowExplicitSideEffects = true };
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: MisCasedEverywhere) { DiscardWrites = true, AllowExplicitSideEffects = true };
         var error = await Assert.ThrowsAsync<PpdsException>(() => h.Service.RepairBindingsAsync(
             new("account", "Fixture", SolutionUniqueName: "fixture_solution", Publish: true), ct: cts.Token));
         Assert.Equal(FormErrorCodes.RepairNotVerified, error.ErrorCode);

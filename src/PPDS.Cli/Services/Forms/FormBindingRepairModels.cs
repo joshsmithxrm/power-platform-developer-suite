@@ -23,9 +23,30 @@ public sealed record RepairBindingsRequest(
 /// <param name="SectionId">The containing section's <c>id</c>; null outside sections (form or tab header/footer).</param>
 /// <param name="ControlIdCaseDiffers">True when the control <c>id</c> also spells the logical name in another case; ids are never rewritten.</param>
 public sealed record RepairedBinding(string? ControlId, string OldBinding, string NewBinding, string Location, string? SectionId,
-    bool ControlIdCaseDiffers = false);
+    bool ControlIdCaseDiffers = false)
+{
+    /// <summary>
+    /// How the read-back found this control: <see cref="BindingVerification.ById"/> when its id is present and unique on the
+    /// layout, <see cref="BindingVerification.ByPosition"/> when the id is absent or repeated (the control was matched by its
+    /// position among the layout-bound controls and its container). Null on a dry run and for read-back-only entries.
+    /// </summary>
+    public string? VerifiedBy { get; init; }
+}
 
-/// <summary>An entry the repair reports but does not change. A rewritten control never appears here.</summary>
+/// <summary>Values of <see cref="RepairedBinding.VerifiedBy"/>.</summary>
+public static class BindingVerification
+{
+    /// <summary>Found by its unique control id in the same container.</summary>
+    public const string ById = "id";
+    /// <summary>Found by position among the layout-bound controls (id absent or repeated).</summary>
+    public const string ByPosition = "position";
+}
+
+/// <summary>
+/// An entry the repair reports but does not change. A rewritten control's own binding never appears here. A separate reference
+/// that belongs to a rewritten control (its custom-control <c>datafieldname</c> parameter, or an event naming it) can appear,
+/// with <see cref="OwnerControlRewritten"/> set: that reference was not rewritten, so it now differs in case from the control's binding.
+/// </summary>
 /// <param name="ControlId">The control <c>id</c> (for an event, its <c>control</c>; for hidden data, its <c>id</c>); null when absent.</param>
 /// <param name="Binding">The stored value as read.</param>
 /// <param name="Reason">One of <see cref="BindingRepairReasons"/>.</param>
@@ -33,9 +54,14 @@ public sealed record RepairedBinding(string? ControlId, string OldBinding, strin
 /// "Event '&lt;name&gt;'", "Hidden controls" or "Outside form layout" (see <see cref="BindingLocations"/>).</param>
 /// <param name="SectionId">The containing section's <c>id</c>; null outside sections.</param>
 /// <param name="CanonicalName">The column's logical name when exactly one matches; null for no match or an ambiguous match.</param>
-public sealed record UnchangedBinding(string? ControlId, string Binding, string Reason, string Location, string? SectionId, string? CanonicalName);
+public sealed record UnchangedBinding(string? ControlId, string Binding, string Reason, string Location, string? SectionId, string? CanonicalName)
+{
+    /// <summary>True when this is a custom-control parameter or event reference of a control whose binding this run rewrote.</summary>
+    public bool OwnerControlRewritten { get; init; }
+}
 
-/// <summary>Fixed location values used by binding repair (tab and section labels are added around the first three).</summary>
+/// <summary>Fixed location values used by binding repair. <see cref="TabHeader"/> and <see cref="TabFooter"/> follow a tab label
+/// ("&lt;Tab&gt; / Tab header"); section locations are "&lt;Tab&gt; / &lt;Section&gt;" labels.</summary>
 public static class BindingLocations
 {
     /// <summary>Suffix for a control in a tab header: "&lt;Tab&gt; / Tab header".</summary>
@@ -96,8 +122,8 @@ public static class BindingRepairReasons
 /// <param name="Unchanged">Entries reported but not changed.</param>
 /// <param name="FormXmlChanged">True when the form XML update was submitted; always false on a dry run.</param>
 /// <param name="ReadBackVerified">True when, after the update, the unpublished form was read back and every control this run
-/// rewrote was found at its position with the same id and the new binding. It says nothing about entries in
-/// <see cref="Unchanged"/>. False on a dry run and when nothing was submitted.</param>
+/// rewrote was found (by unique id, or by position where the id is absent or repeated; see <see cref="RepairedBinding.VerifiedBy"/>)
+/// with the new binding. It says nothing about entries in <see cref="Unchanged"/>. False on a dry run and when nothing was submitted.</param>
 /// <param name="SolutionAssociationRequested">True when the explicit solution association request completed.</param>
 /// <param name="PublicationRequested">True when the explicit publication request completed.</param>
 public sealed record RepairBindingsResult(
@@ -117,4 +143,10 @@ public sealed record RepairBindingsResult(
     /// nothing was read back.
     /// </summary>
     public IReadOnlyList<RepairedBinding> ReadBackRepairable { get; init; } = [];
+
+    /// <summary>
+    /// False when the verified read-back could not be scanned for further repairable bindings, so
+    /// <see cref="ReadBackRepairable"/> is empty because nothing is known, not because nothing was found. True otherwise.
+    /// </summary>
+    public bool ReadBackScanComplete { get; init; } = true;
 }

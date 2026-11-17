@@ -111,7 +111,11 @@ public sealed class FormBindingRepairEdgeTests
     public void DoctypeAndEmptyXml_AreRefused()
     {
         var doctype = "<!DOCTYPE form [<!ENTITY c \"<control id='c1' datafieldname='Name' />\">]>" + Form("\n", "<row><cell>&c;</cell></row>");
-        Assert.Equal(FormErrorCodes.InvalidFormXml, Assert.Throws<PpdsException>(() => FormXmlEditor.PlanBindingRepair(doctype, ["name"])).ErrorCode);
+        var doctypeError = Assert.Throws<PpdsException>(() => FormXmlEditor.PlanBindingRepair(doctype, ["name"]));
+        Assert.Equal(FormErrorCodes.InvalidFormXml, doctypeError.ErrorCode);
+        Assert.Contains("a DOCTYPE is not supported", doctypeError.Message); // pins DtdProcessing.Prohibit
+        var truncated = Assert.Throws<PpdsException>(() => FormXmlEditor.PlanBindingRepair("<form><tabs>", ["name"]));
+        Assert.DoesNotContain("DOCTYPE", truncated.Message);
         Assert.Equal(FormErrorCodes.InvalidFormXml, Assert.Throws<PpdsException>(() => FormXmlEditor.PlanBindingRepair("", ["name"])).ErrorCode);
     }
 
@@ -133,7 +137,7 @@ public sealed class FormBindingRepairEdgeTests
     public async Task EmptyStoredFormXml_FailsWithoutWriting()
     {
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token, rawXml: "");
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, rawXml: "");
         var error = await Assert.ThrowsAsync<PpdsException>(() => h.Service.RepairBindingsAsync(new("account", "Fixture"), ct: cts.Token));
         Assert.Equal(FormErrorCodes.InvalidFormXml, error.ErrorCode);
         Assert.Contains("no form XML", error.Message);
@@ -152,7 +156,7 @@ public sealed class FormBindingRepairEdgeTests
             .Replace("datafieldname=\"name\"", "datafieldname=\"Name\"")
             .Replace("datafieldname=\"telephone1\"", "datafieldname=\"&#84;ELEPHONE1\"");
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token, rawXml: raw) { ReadBackTransform = xml => xml.Replace("&#84;ELEPHONE1", "TELEPHONE1") };
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, rawXml: raw) { ReadBackTransform = xml => xml.Replace("&#84;ELEPHONE1", "TELEPHONE1") };
         var result = await h.Service.RepairBindingsAsync(new("account", "Fixture"), ct: cts.Token);
         Assert.True(result.ReadBackVerified);
         Assert.Equal("Name", Assert.Single(result.Repaired).OldBinding);
@@ -167,7 +171,7 @@ public sealed class FormBindingRepairEdgeTests
     public async Task ReadBack_ThatDoesNotShowARewrittenControl_IsNotVerified(string change, string expected)
     {
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere)
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere)
         {
             AllowExplicitSideEffects = true,
             ReadBackTransform = xml =>
@@ -191,7 +195,7 @@ public sealed class FormBindingRepairEdgeTests
     public async Task ReadBack_ThatThrows_IsNotVerified_AndSaysTheUpdateWasSubmitted()
     {
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere)
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere)
             { AllowExplicitSideEffects = true, FailReadBackWith = () => new TimeoutException("synthetic read-back timeout") };
         var error = await Assert.ThrowsAsync<PpdsException>(() => h.Service.RepairBindingsAsync(
             new("account", "Fixture", SolutionUniqueName: "fixture_solution", Publish: true), ct: cts.Token));
@@ -206,7 +210,7 @@ public sealed class FormBindingRepairEdgeTests
     public async Task CancellationDuringReadBack_IsNotVerified_AndSaysTheUpdateWasSubmitted()
     {
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere);
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere);
         var reporter = new Mock<IProgressReporter>();
         reporter.Setup(r => r.ReportPhase("Verifying", It.IsAny<string?>())).Callback(cts.Cancel);
         var error = await Assert.ThrowsAsync<PpdsException>(() => h.Service.RepairBindingsAsync(new("account", "Fixture"), reporter.Object, cts.Token));
@@ -222,7 +226,7 @@ public sealed class FormBindingRepairEdgeTests
     public async Task Success_WithSolutionAndPublish_RunsUpdateReadBackAssociationPublicationInOrder()
     {
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere) { AllowExplicitSideEffects = true };
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere) { AllowExplicitSideEffects = true };
         var result = await h.Service.RepairBindingsAsync(new("account", "Fixture", SolutionUniqueName: "fixture_solution", Publish: true), ct: cts.Token);
         Assert.True(result.ReadBackVerified && result.SolutionAssociationRequested && result.PublicationRequested);
         var update = h.Journal.IndexOf("update-attempt");
@@ -237,23 +241,23 @@ public sealed class FormBindingRepairEdgeTests
     public async Task AssociationFailureAfterAVerifiedWrite_KeepsItsClassification_AndSaysTheBindingsWereWritten()
     {
         using var cts = new CancellationTokenSource();
-        var timeout = new ContributorFormHarness(cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere)
+        var timeout = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere)
             { AllowExplicitSideEffects = true, FailSolutionWith = () => new TimeoutException("synthetic association timeout") };
         var error = await Assert.ThrowsAsync<PpdsException>(() => timeout.Service.RepairBindingsAsync(
             new("account", "Fixture", SolutionUniqueName: "fixture_solution", Publish: true), ct: cts.Token));
         Assert.Equal(ErrorCodes.Connection.Timeout, error.ErrorCode);
         Assert.Equal(ExitCodes.ConnectionError, ExceptionMapper.ToExitCode(error));
         Assert.Contains("4 binding(s) on form 'Fixture' were written and verified", error.Message);
-        Assert.Contains("the solution association then failed: synthetic association timeout", error.Message);
+        Assert.Contains("the solution association then did not complete and its outcome is unknown (synthetic association timeout)", error.Message);
         Assert.Contains("Publication was not attempted", error.Message);
         Assert.Equal(0, timeout.PublishRequests);
 
-        var fault = new ContributorFormHarness(cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere)
+        var fault = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere)
             { AllowExplicitSideEffects = true, FailSolutionWith = () => new InvalidOperationException("synthetic fault") };
         var faultError = await Assert.ThrowsAsync<PpdsException>(() => fault.Service.RepairBindingsAsync(
             new("account", "Fixture", SolutionUniqueName: "fixture_solution"), ct: cts.Token));
         Assert.Equal(FormErrorCodes.SolutionAssociationFailed, faultError.ErrorCode);
-        Assert.DoesNotContain("InvalidFormXml", faultError.ErrorCode);
+        Assert.Contains("the solution association then failed: synthetic fault", faultError.Message);
     }
 
     [Fact]
@@ -261,7 +265,7 @@ public sealed class FormBindingRepairEdgeTests
     public async Task PublicationFailure_IsReportedWithItsOwnCode_AfterWriteOrNoOp()
     {
         using var cts = new CancellationTokenSource();
-        var written = new ContributorFormHarness(cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere)
+        var written = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere)
             { AllowExplicitSideEffects = true, FailPublishWith = () => new InvalidOperationException("synthetic publish fault") };
         var error = await Assert.ThrowsAsync<PpdsException>(() => written.Service.RepairBindingsAsync(
             new("account", "Fixture", SolutionUniqueName: "fixture_solution", Publish: true), ct: cts.Token));
@@ -269,7 +273,7 @@ public sealed class FormBindingRepairEdgeTests
         Assert.Contains("were written and verified", error.Message);
         Assert.Equal(1, written.SolutionRequests);
 
-        var noop = new ContributorFormHarness(cts.Token)
+        var noop = new ContributorFormHarness(readBackById: true, token: cts.Token)
             { AllowExplicitSideEffects = true, FailPublishWith = () => new InvalidOperationException("synthetic publish fault") };
         var noopError = await Assert.ThrowsAsync<PpdsException>(() => noop.Service.RepairBindingsAsync(new("account", "Fixture", Publish: true), ct: cts.Token));
         Assert.Equal(FormErrorCodes.PublicationFailed, noopError.ErrorCode);
@@ -281,7 +285,7 @@ public sealed class FormBindingRepairEdgeTests
     public async Task UpdateTimeout_IsAnUnknownOutcome_ClassifiedAsATimeout_WithNoSideEffects()
     {
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere)
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere)
             { LoseFirstUpdateAcknowledgement = true, AllowExplicitSideEffects = true };
         var error = await Assert.ThrowsAsync<PpdsException>(() => h.Service.RepairBindingsAsync(
             new("account", "Fixture", SolutionUniqueName: "fixture_solution", Publish: true), ct: cts.Token));
@@ -297,7 +301,7 @@ public sealed class FormBindingRepairEdgeTests
     public async Task MetadataReadTimeout_KeepsItsClassification_AndSaysNothingWasWritten()
     {
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere)
+        var h = new ContributorFormHarness(readBackById: true, token: cts.Token, transform: FormBindingRepairTests.MisCasedEverywhere)
             { BeforeMetadata = () => throw new TimeoutException("synthetic metadata timeout") };
         var error = await Assert.ThrowsAsync<PpdsException>(() => h.Service.RepairBindingsAsync(new("account", "Fixture"), ct: cts.Token));
         Assert.Equal(ErrorCodes.Connection.Timeout, error.ErrorCode);

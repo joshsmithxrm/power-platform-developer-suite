@@ -9,13 +9,17 @@ namespace PPDS.Cli.Services.Forms;
 /// <param name="Repaired">Controls whose binding is rewritten, in document order.</param>
 /// <param name="Unchanged">Entries reported but not changed, in document order by kind.</param>
 /// <param name="RepairedXml">The stored text with only the repaired <c>datafieldname</c> values replaced.</param>
-/// <param name="RepairedLayoutIndexes">For each <see cref="Repaired"/> entry, its index among the layout-bound controls
-/// (see <see cref="FormXmlEditor.ReadLayoutBindings"/>), used to verify the read-back positively.</param>
+/// <param name="Targets">For each <see cref="Repaired"/> entry, how to find it again in a read-back.</param>
 internal sealed record BindingRepairPlan(IReadOnlyList<RepairedBinding> Repaired, IReadOnlyList<UnchangedBinding> Unchanged, string RepairedXml,
-    IReadOnlyList<int> RepairedLayoutIndexes);
+    IReadOnlyList<RepairTarget> Targets);
 
-/// <summary>A layout-bound control as read: its <c>id</c> (null when absent) and stored <c>datafieldname</c>.</summary>
-internal sealed record LayoutBinding(string? ControlId, string Binding);
+/// <summary>Where a rewritten control sits: its index among the layout-bound controls (see
+/// <see cref="FormXmlEditor.ReadLayoutBindings"/>), its container key, and whether its id is present and unique in the layout.</summary>
+internal sealed record RepairTarget(int LayoutIndex, string Container, bool IdIsUnique);
+
+/// <summary>A layout-bound control as read: its <c>id</c> (null when absent), stored <c>datafieldname</c> and container key
+/// (<c>section:{id}</c>, <c>tabheader:{tab id}</c>, <c>tabfooter:{tab id}</c>, <c>header</c> or <c>footer</c>).</summary>
+internal sealed record LayoutBinding(string? ControlId, string Binding, string Container);
 
 internal static partial class FormXmlEditor
 {
@@ -54,7 +58,8 @@ internal static partial class FormXmlEditor
         var doc = ParseStoredXml(storedXml, lineInfo: true);
         var lineStarts = LineStarts(storedXml);
         var repaired = new List<RepairedBinding>();
-        var repairedIndexes = new List<int>();
+        var targets = new List<RepairTarget>();
+        var repairedElements = new HashSet<XElement>();
         var unchanged = new List<UnchangedBinding>();
         var patches = new List<(int Start, int Length, string Value)>();
 
@@ -64,11 +69,14 @@ internal static partial class FormXmlEditor
         {
             // Not on the form's own layout path (for example a cell/control look-alike inside custom-control parameters).
             var value = (string)control.Attribute("datafieldname")!;
-            if (Resolve(value).Kind is ColumnMatch.CaseVariant or ColumnMatch.Ambiguous)
+            var (kind, canonical) = Resolve(value);
+            if (kind is ColumnMatch.CaseVariant or ColumnMatch.Ambiguous)
                 unchanged.Add(new((string?)control.Attribute("id"), value, BindingRepairReasons.OutsideFormLayout,
-                    BindingLocations.OutsideFormLayout, null, Resolve(value).Canonical));
+                    BindingLocations.OutsideFormLayout, null, canonical));
         }
 
+        var idCounts = layout.Select(c => (string?)c.Attribute("id")).Where(id => !string.IsNullOrEmpty(id))
+            .GroupBy(id => id!, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
         for (var index = 0; index < layout.Count; index++)
         {
             var control = layout[index];
@@ -110,7 +118,9 @@ internal static partial class FormXmlEditor
 
             patches.Add((span.Start, span.Length, canonical!));
             repaired.Add(new(controlId, stored, canonical!, location, sectionId, ControlIdCaseDiffers(controlId, canonical!)));
-            repairedIndexes.Add(index);
+            targets.Add(new(index, ContainerKey(control),
+                !string.IsNullOrEmpty(controlId) && idCounts.TryGetValue(controlId, out var count) && count == 1));
+            repairedElements.Add(control);
         }
 
         var controlsByUniqueId = doc.Descendants("control")
@@ -125,7 +135,7 @@ internal static partial class FormXmlEditor
             var owner = forControl is not null && controlsByUniqueId.TryGetValue(NormalizeGuidText(forControl), out var c) && layoutSet.Contains(c) ? c : null;
             var (location, sectionId) = owner is null ? (BindingLocations.ControlDescriptions, null) : DescribeLayoutLocation(owner);
             unchanged.Add(new((string?)owner?.Attribute("id"), parameter.Value, BindingRepairReasons.CustomControlParameterCaseDiffers,
-                location, sectionId, canonical));
+                location, sectionId, canonical) { OwnerControlRewritten = owner is not null && repairedElements.Contains(owner) });
         }
 
         foreach (var formEvent in doc.Descendants("event"))
@@ -134,8 +144,13 @@ internal static partial class FormXmlEditor
             var value = (string?)formEvent.Attribute("attribute");
             var (kind, canonical) = Resolve(value);
             if (kind is not (ColumnMatch.CaseVariant or ColumnMatch.Ambiguous)) continue;
-            unchanged.Add(new((string?)formEvent.Attribute("control"), value!, BindingRepairReasons.EventAttributeCaseDiffers,
-                $"Event '{(string?)formEvent.Attribute("name")}'", null, canonical));
+            var eventControl = (string?)formEvent.Attribute("control");
+            unchanged.Add(new(eventControl, value!, BindingRepairReasons.EventAttributeCaseDiffers,
+                $"Event '{(string?)formEvent.Attribute("name")}'", null, canonical)
+            {
+                OwnerControlRewritten = !string.IsNullOrEmpty(eventControl)
+                    && repairedElements.Any(r => string.Equals((string?)r.Attribute("id"), eventControl, StringComparison.Ordinal))
+            });
         }
 
         foreach (var data in doc.Descendants("hiddencontrols").Elements("data"))
@@ -152,19 +167,31 @@ internal static partial class FormXmlEditor
         // Every patch has the same length as the value it replaces (an ignore-case match), so offsets stay valid.
         foreach (var (start, length, value) in patches.OrderByDescending(p => p.Start))
             text.Remove(start, length).Insert(start, value);
-        return new(repaired, unchanged, text.ToString(), repairedIndexes);
+        return new(repaired, unchanged, text.ToString(), targets);
     }
 
-    /// <summary>The id and stored binding of every layout-bound control, in document order (the index space of
-    /// <see cref="BindingRepairPlan.RepairedLayoutIndexes"/>).</summary>
+    /// <summary>The id, stored binding and container of every layout-bound control, in document order (the index space of
+    /// <see cref="RepairTarget.LayoutIndex"/>).</summary>
     internal static IReadOnlyList<LayoutBinding> ReadLayoutBindings(string storedXml)
         => LayoutControls(ParseStoredXml(storedXml, lineInfo: false))
-            .Select(c => new LayoutBinding((string?)c.Attribute("id"), (string)c.Attribute("datafieldname")!)).ToList();
+            .Select(c => new LayoutBinding((string?)c.Attribute("id"), (string)c.Attribute("datafieldname")!, ContainerKey(c))).ToList();
+
+    /// <summary>A stable key for the container of a layout-bound control (see <see cref="LayoutBinding"/>).</summary>
+    private static string ContainerKey(XElement control)
+    {
+        var container = LayoutContainer(control)!;
+        return container.Name.LocalName switch
+        {
+            "section" => "section:" + NormalizeGuidText((string?)container.Attribute("id") ?? ""),
+            "tabheader" or "tabfooter" => container.Name.LocalName + ":" + NormalizeGuidText((string?)container.Parent!.Attribute("id") ?? ""),
+            _ => container.Name.LocalName
+        };
+    }
 
     private static XDocument ParseStoredXml(string? storedXml, bool lineInfo)
     {
         if (string.IsNullOrEmpty(storedXml))
-            throw new PpdsException(FormErrorCodes.InvalidFormXml, "The form has no form XML. Nothing was written.");
+            throw new PpdsException(FormErrorCodes.InvalidFormXml, "The form has no form XML.");
         var settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null };
         try
         {
@@ -173,8 +200,10 @@ internal static partial class FormXmlEditor
         }
         catch (XmlException ex)
         {
+            // Only a DTD error gets the DOCTYPE note; other XML errors are reported as they are.
+            var dtd = ex.Message.Contains("DTD", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("DOCTYPE", StringComparison.OrdinalIgnoreCase);
             throw new PpdsException(FormErrorCodes.InvalidFormXml,
-                $"The stored form XML could not be read for binding repair (a DOCTYPE is not supported): {ex.Message} Nothing was written.", ex);
+                $"The form XML could not be read for binding repair{(dtd ? " (a DOCTYPE is not supported)" : "")}: {ex.Message}", ex);
         }
     }
 
@@ -199,6 +228,7 @@ internal static partial class FormXmlEditor
         if (cell?.Name.LocalName != "cell" || row?.Name.LocalName != "row" || rows?.Name.LocalName != "rows" || container is null)
             return null;
         var root = control.Document?.Root;
+        if (root?.Name.LocalName != "form") return null;
         static bool Is(XElement? element, string name) => element?.Name.LocalName == name;
         switch (container.Name.LocalName)
         {
@@ -243,7 +273,7 @@ internal static partial class FormXmlEditor
     private static (string Location, string? SectionId) DescribeLayoutLocation(XElement control)
     {
         var container = LayoutContainer(control)
-            ?? throw new PpdsException(FormErrorCodes.InvalidFormXml, "A control outside the form layout cannot be described. Nothing was written.");
+            ?? throw new PpdsException(FormErrorCodes.InvalidFormXml, "A control outside the form layout cannot be described.");
         switch (container.Name.LocalName)
         {
             case "section":
@@ -307,7 +337,7 @@ internal static partial class FormXmlEditor
             }
         }
         throw new PpdsException(FormErrorCodes.InvalidFormXml,
-            "Could not locate a control binding in the stored form XML text; nothing was written.");
+            "Could not locate a control binding in the stored form XML text.");
     }
 
     /// <summary>Line starts for <see cref="LocateAttributeValue"/> (test seam).</summary>

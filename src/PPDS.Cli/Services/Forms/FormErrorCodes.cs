@@ -65,6 +65,9 @@ public static class FormErrorCodes
     /// <summary>A binding repair's form XML update did not complete; whether it was applied is unknown.</summary>
     public const string RepairWriteOutcomeUnknown = "Forms.RepairWriteOutcomeUnknown";
 
+    /// <summary>The organisation service answered a binding repair's form XML update with a fault; that request did not change the form.</summary>
+    public const string RepairWriteRejected = "Forms.RepairWriteRejected";
+
     /// <summary>An explicitly requested solution association failed after the form XML step.</summary>
     public const string SolutionAssociationFailed = "Forms.SolutionAssociationFailed";
 
