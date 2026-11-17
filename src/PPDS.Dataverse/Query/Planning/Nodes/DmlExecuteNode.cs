@@ -203,6 +203,17 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         yield return new QueryRow(values, EntityLogicalName);
     }
 
+    /// <summary>
+    /// A statement that would affect more rows than the cap is refused before anything is changed: this is
+    /// raised while the rows are still being collected, ahead of the first bulk call. Only "at least cap + 1"
+    /// is known; the matching rows beyond that are not counted.
+    /// </summary>
+    private QueryExecutionException RowCapExceeded() => new(
+        QueryErrorCode.DmlRowCapExceeded,
+        $"{Operation.ToString().ToUpperInvariant()} {EntityLogicalName} was refused: it would affect more than the " +
+        $"row cap of {RowCap:N0} rows (at least {(long)RowCap + 1:N0} rows match). This statement changed nothing. " +
+        "Use --no-limit to remove the cap, or narrow the WHERE clause.");
+
     /// <summary>A statement that matched no rows still counts as an executed DML statement (keeps positions real).</summary>
     private (long Success, long Failure) NoRows(QueryPlanContext context)
     {
@@ -243,7 +254,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         {
             if (entities.Count >= RowCap)
             {
-                break;
+                throw RowCapExceeded();
             }
 
             var entity = new Microsoft.Xrm.Sdk.Entity(EntityLogicalName);
@@ -276,7 +287,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         {
             if (entities.Count >= RowCap)
             {
-                break;
+                throw RowCapExceeded();
             }
 
             var entity = new Microsoft.Xrm.Sdk.Entity(EntityLogicalName);
@@ -333,7 +344,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         {
             if (entities.Count >= RowCap)
             {
-                break;
+                throw RowCapExceeded();
             }
 
             // Get the record ID from the source row
@@ -378,7 +389,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         {
             if (ids.Count >= RowCap)
             {
-                break;
+                throw RowCapExceeded();
             }
 
             if (!row.Values.TryGetValue(idColumn, out var idValue) || idValue.Value == null)

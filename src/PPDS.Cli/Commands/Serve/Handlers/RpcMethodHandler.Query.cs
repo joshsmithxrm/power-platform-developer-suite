@@ -368,6 +368,19 @@ public partial class RpcMethodHandler
                         DmlBlocked = true,
                     });
             }
+            catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.DmlRowCapExceeded)
+            {
+                throw new RpcException(
+                    ErrorCodes.Query.DmlRowCapExceeded,
+                    ex.UserMessage,
+                    new DmlSafetyErrorData
+                    {
+                        Code = ErrorCodes.Query.DmlRowCapExceeded,
+                        Message = ex.UserMessage,
+                        DmlRowCapExceeded = true,
+                        DmlCommitted = DmlOutcome.From(ex)?.DescribeCommitted(),
+                    });
+            }
             catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.TdsIncompatible)
             {
                 throw new RpcException(ErrorCodes.Query.TdsIncompatible, ex.UserMessage);
@@ -379,6 +392,19 @@ public partial class RpcMethodHandler
             catch (PpdsException ex)
             {
                 throw MapPpdsToRpcException(ex);
+            }
+            catch (Exception ex) when (ex is not RpcException and not OperationCanceledException && DmlOutcome.From(ex) != null)
+            {
+                // A script was interrupted after some DML ran: say so instead of a bare error.
+                throw new RpcException(
+                    ErrorCodes.Query.ExecutionFailed,
+                    ex.Message,
+                    new RpcErrorData
+                    {
+                        Code = ErrorCodes.Query.ExecutionFailed,
+                        Message = ex.Message,
+                        DmlCommitted = DmlOutcome.From(ex)!.DescribeCommitted(),
+                    });
             }
         }, cancellationToken, profileIdentity: request.ProfileIdentity);
 

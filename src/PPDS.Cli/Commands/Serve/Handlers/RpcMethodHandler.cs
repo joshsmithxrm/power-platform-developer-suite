@@ -373,7 +373,7 @@ public partial class RpcMethodHandler : IDisposable
     /// Maps a PpdsException (or subclass) to an RpcException with structured error data.
     /// Preserves subclass-specific properties (RequiresReauthentication, RetryAfter, etc.).
     /// </summary>
-    private static RpcException MapPpdsToRpcException(PpdsException ex)
+    internal static RpcException MapPpdsToRpcException(PpdsException ex)
     {
         var data = new RpcErrorData { Code = ex.ErrorCode, Message = ex.UserMessage };
 
@@ -395,6 +395,8 @@ public partial class RpcMethodHandler : IDisposable
                 data.ResourceId = notFoundEx.ResourceId;
                 break;
         }
+
+        data.DmlCommitted = Services.Query.DmlOutcome.From(ex)?.DescribeCommitted();
 
         return new RpcException(ex.ErrorCode, ex.UserMessage, data);
     }

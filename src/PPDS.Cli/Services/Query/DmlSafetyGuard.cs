@@ -322,7 +322,7 @@ public sealed class DmlSafetyGuard
             // gate that will apply when the caller later requests actual execution.
             RequiresConfirmation = options.IsDryRun || !options.IsConfirmed,
             RowCap = rowCap,
-            ExceedsRowCap = false, // Set during execution when actual count is known
+            ExceedsRowCap = false, // The matching row count is unknown at check time; see ExceedsRowCap
             IsDryRun = options.IsDryRun
         };
     }
@@ -378,7 +378,11 @@ public sealed class DmlSafetyResult
     /// <summary>Active row cap.</summary>
     public int RowCap { get; init; } = DmlSafetyGuard.DefaultRowCap;
 
-    /// <summary>Whether the estimated rows exceed the cap.</summary>
+    /// <summary>
+    /// Always false at check time: the number of matching rows is unknown until the statement runs. A statement
+    /// that would exceed <see cref="RowCap"/> is refused during execution, before anything changes, with
+    /// <c>Query.DmlRowCapExceeded</c>.
+    /// </summary>
     public bool ExceedsRowCap { get; init; }
 
     /// <summary>Whether this is a dry run (no execution).</summary>

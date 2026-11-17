@@ -131,6 +131,13 @@ public class RpcErrorData
     /// </summary>
     [JsonPropertyName("diagnostics")]
     public List<DiagnosticDto>? Diagnostics { get; set; }
+
+    /// <summary>
+    /// For an interrupted SQL script: what the DML statements that had already run did. They are not rolled back.
+    /// </summary>
+    [JsonPropertyName("dmlCommitted")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DmlCommitted { get; set; }
 }
 
 /// <summary>
@@ -161,4 +168,11 @@ public sealed class DmlSafetyErrorData : RpcErrorData
     /// <summary>Whether the DML operation requires user confirmation before execution.</summary>
     [JsonPropertyName("dmlConfirmationRequired")]
     public bool DmlConfirmationRequired { get; init; }
+
+    /// <summary>
+    /// Whether the statement was refused because it would affect more rows than the cap. Nothing was changed by
+    /// that statement; re-run with the cap removed (<c>noLimit</c>) or a narrower WHERE clause.
+    /// </summary>
+    [JsonPropertyName("dmlRowCapExceeded")]
+    public bool DmlRowCapExceeded { get; init; }
 }

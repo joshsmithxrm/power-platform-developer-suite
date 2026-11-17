@@ -295,8 +295,6 @@ public static class SqlCommand
 
             var queryResult = await sqlQueryService.ExecuteAsync(request, cancellationToken);
 
-            WriteTopIgnoredNote(queryResult, top);
-
             if (queryResult.DmlSafetyResult?.IsDryRun == true)
             {
                 WriteDryRunOutput(queryResult, globalOptions.OutputFormat, writer);
@@ -406,6 +404,7 @@ public static class SqlCommand
     {
         Sql = sql,
         TopOverride = top,
+        TopIsUserSpecified = top.HasValue,
         PageNumber = page,
         PagingCookie = pagingCookie,
         IncludeCount = count,
@@ -422,19 +421,6 @@ public static class SqlCommand
         var committed = DmlOutcome.From(exception);
         if (committed != null)
             Console.Error.WriteLine(committed.DescribeCommitted());
-    }
-
-    /// <summary>
-    /// --top limits result sets only; for DML the service ignores it so the statement affects every
-    /// matching row. Say so on stderr instead of silently dropping the option.
-    /// </summary>
-    internal static void WriteTopIgnoredNote(SqlQueryResult result, int? top)
-    {
-        if (top.HasValue && (result.DmlOutcome != null || result.DmlSafetyResult?.ContainsDml == true))
-        {
-            Console.Error.WriteLine(
-                "Note: --top is ignored for DML statements; every matching row is affected (subject to the row cap).");
-        }
     }
 
     /// <summary>

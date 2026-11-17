@@ -224,6 +224,10 @@ public sealed class SqlQueryService : ISqlQueryService
         {
             result = await _planExecutor.ExecuteAsync(planResult, context, cancellationToken);
         }
+        catch (QueryExecutionException ex) when (ex.ErrorCode == QueryErrorCode.DmlRowCapExceeded)
+        {
+            throw WrapRowCapExceeded(ex, context);
+        }
         catch (Exception ex) when (RecordCommittedOutcome(ex, context))
         {
             throw; // never reached: the filter only attaches what already ran and returns false
@@ -269,6 +273,17 @@ public sealed class SqlQueryService : ISqlQueryService
     /// Exception filter: when a script is interrupted (error, cancellation) after some DML statements already
     /// ran, attaches their outcomes to the exception so callers can report what was changed. Always false.
     /// </summary>
+    /// <summary>
+    /// The row-cap refusal as a <see cref="PpdsException"/> with its own error code, carrying the outcomes of
+    /// any earlier script statements that already ran.
+    /// </summary>
+    private static PpdsException WrapRowCapExceeded(QueryExecutionException ex, QueryPlanContext context)
+    {
+        var wrapped = new PpdsException(ErrorCodes.Query.DmlRowCapExceeded, ex.Message, ex);
+        RecordCommittedOutcome(wrapped, context);
+        return wrapped;
+    }
+
     private static bool RecordCommittedOutcome(Exception exception, QueryPlanContext context)
     {
         var outcome = DmlOutcome.From(context.Statistics.DmlOutcomes);
@@ -410,6 +425,10 @@ public sealed class SqlQueryService : ISqlQueryService
                     if (!await streamEnumerator.MoveNextAsync().ConfigureAwait(false))
                         break;
                     row = streamEnumerator.Current;
+                }
+                catch (QueryExecutionException ex) when (ex.ErrorCode == QueryErrorCode.DmlRowCapExceeded)
+                {
+                    throw WrapRowCapExceeded(ex, context);
                 }
                 catch (Exception ex) when (RecordCommittedOutcome(ex, context))
                 {
@@ -557,6 +576,17 @@ public sealed class SqlQueryService : ISqlQueryService
         safetyResult = _dmlSafetyGuard.Check(
             plannedStatement, dmlSafety,
             EnvironmentSafetySettings, EnvironmentProtectionLevel);
+
+        // An explicit --top limits returned rows only. Refuse it for DML rather than silently dropping it
+        // (which would turn "delete 5 rows" into "delete every matching row"). A default top the caller did
+        // not ask for (RPC clients, the MAX_ROWS hint) is not marked explicit and is simply ignored for DML.
+        if (safetyResult.ContainsDml && request.TopIsUserSpecified && request.TopOverride.HasValue)
+        {
+            throw new PpdsValidationException(
+                "top",
+                "--top limits returned rows only and does not apply to INSERT, UPDATE or DELETE, so nothing was " +
+                "executed. Put the limit in the statement's WHERE clause instead.");
+        }
 
         if (safetyResult.IsBlocked)
         {

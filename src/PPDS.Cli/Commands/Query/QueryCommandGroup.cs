@@ -29,7 +29,7 @@ public static class QueryCommandGroup
     /// </summary>
     public static readonly Option<int?> TopOption = new("--top", "-t")
     {
-        Description = "Limit the number of results returned"
+        Description = "Limit the number of rows returned by a query (not valid with INSERT, UPDATE or DELETE)"
     };
 
     /// <summary>

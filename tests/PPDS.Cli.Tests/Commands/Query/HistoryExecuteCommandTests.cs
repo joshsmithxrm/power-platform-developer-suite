@@ -340,25 +340,56 @@ public class HistoryExecuteCommandTests : IDisposable
         Assert.Contains("\\u001B[2K\\u000DSELECT 1", stderr);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Replay_DmlWithExplicitTop_IsRefused_Exit3_NothingExecuted(bool dryRun)
+    {
+        WriteEnvConfig(EnvironmentType.Development);
+        var (service, executor, bulk) = Service();
+
+        var (exit, stdout, stderr) = await Replay(
+            service, DeleteSql, new DmlSafetyOptions { IsConfirmed = true, IsDryRun = dryRun }, top: 5);
+
+        Assert.Equal(ExitCodes.InvalidArguments, exit);
+        Assert.Contains(DeleteSql, stderr); // the statement was shown before the refusal
+        using var json = JsonDocument.Parse(stdout);
+        Assert.Contains("--top limits returned rows only", json.RootElement.GetProperty("error").GetProperty("message").GetString());
+        executor.VerifyNoOtherCalls();
+        bulk.VerifyNoOtherCalls();
+    }
+
     [Fact]
-    public async Task Replay_DmlWithTop_SaysTopIsIgnored_AndAffectsEveryRow()
+    public async Task Replay_SelectWithTop_StillWorks()
+    {
+        WriteEnvConfig(EnvironmentType.Development);
+        var (service, executor, _) = Service(MockBehavior.Loose);
+        var fetched = QueryResult.Empty("account");
+        executor.Setup(x => x.ExecuteFetchXmlAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(fetched);
+        executor.Setup(x => x.ExecuteFetchXmlAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<QueryExecutionOptions?>(), It.IsAny<CancellationToken>())).ReturnsAsync(fetched);
+
+        var (exit, _, _) = await Replay(service, "SELECT name FROM account", new DmlSafetyOptions(), top: 5);
+
+        Assert.Equal(ExitCodes.Success, exit);
+    }
+
+    [Fact]
+    public async Task Replay_DmlOverTheDefaultRowCap_IsRefused_Exit2_UnlessNoLimit()
     {
         WriteEnvConfig(EnvironmentType.Development);
         var (service, executor, bulk) = Service(MockBehavior.Loose);
-        ReturnThreeAccounts(executor, bulk, rows: 3);
-        var deleted = 0;
-        bulk.Setup(b => b.DeleteMultipleAsync(It.IsAny<string>(), It.IsAny<IEnumerable<Guid>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()))
-            .Returns((string _, IEnumerable<Guid> ids, BulkOperationOptions? _, PPDS.Dataverse.Client.DataverseClientOptions? _, IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>? _, CancellationToken _) =>
-            {
-                deleted = ids.Count();
-                return Task.FromResult(new BulkOperationResult { SuccessCount = deleted });
-            });
+        ReturnThreeAccounts(executor, bulk, rows: DmlSafetyGuard.DefaultRowCap + 1);
 
-        var (exit, _, stderr) = await Replay(service, DeleteSql, new DmlSafetyOptions { IsConfirmed = true }, top: 1);
+        var (exit, stdout, _) = await Replay(service, DeleteSql, new DmlSafetyOptions { IsConfirmed = true });
 
-        Assert.Equal(ExitCodes.Success, exit);
-        Assert.Equal(3, deleted);
-        Assert.Contains("--top is ignored for DML", stderr);
+        Assert.Equal(ExitCodes.Failure, exit);
+        using var json = JsonDocument.Parse(stdout);
+        Assert.Equal(ErrorCodes.Query.DmlRowCapExceeded, json.RootElement.GetProperty("error").GetProperty("code").GetString());
+        bulk.Verify(b => b.DeleteMultipleAsync(It.IsAny<string>(), It.IsAny<IEnumerable<Guid>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        var (exit2, _, _) = await Replay(service, DeleteSql, new DmlSafetyOptions { IsConfirmed = true, NoLimit = true });
+
+        Assert.Equal(ExitCodes.Success, exit2);
     }
 
     [Fact]

@@ -310,6 +310,28 @@ public sealed class SqlQueryPresenterTests : IDisposable
         Assert.False(fakeSqlService.ExecutedQueries[0].DmlSafety!.IsConfirmed);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_ScriptInterruptedAfterDmlRan_ErrorSaysWhatAlreadyRan()
+    {
+        var fakeSqlService = await GetFakeSqlQueryService();
+        var failure = new InvalidOperationException("connection lost");
+        DmlOutcome.Attach(failure, DmlOutcome.From(new[]
+        {
+            new DmlStatementOutcome(PPDS.Dataverse.Query.Planning.Nodes.DmlOperation.Delete, "account", 2, 0, null, "1")
+        })!);
+        fakeSqlService.ExceptionToThrow = failure;
+
+        using var presenter = new SqlQueryPresenter(_session, TestEnvironmentUrl);
+        string? receivedError = null;
+        presenter.ErrorOccurred += (msg) => receivedError = msg;
+
+        await presenter.ExecuteAsync("DELETE FROM account WHERE name = 'x'; DELETE FROM contact WHERE name = 'y'", CancellationToken.None);
+
+        Assert.Contains("connection lost", receivedError);
+        Assert.Contains("not rolled back", receivedError);
+        Assert.Contains("#1 DELETE account: 2 affected, 0 failed", receivedError);
+    }
+
     /// <summary>
     /// AC-24: Error handling works for generic exceptions after flattening double try-catch.
     /// </summary>

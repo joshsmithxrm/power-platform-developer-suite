@@ -579,46 +579,25 @@ public class SqlCommandTests
 
     #region --top and DML
 
-    private static string StderrOf(Action action)
+    [Fact]
+    public void BuildRequest_MarksAnExplicitTopAsUserSpecified()
     {
-        using var stderr = new StringWriter();
-        var original = Console.Error;
-        try { Console.SetError(stderr); action(); }
-        finally { Console.SetError(original); }
-        return stderr.ToString();
+        var withTop = SqlCommand.BuildRequest("DELETE FROM account WHERE name = 'x'", 5, null, null, false, false, new DmlSafetyOptions());
+        var withoutTop = SqlCommand.BuildRequest("DELETE FROM account WHERE name = 'x'", null, null, null, false, false, new DmlSafetyOptions());
+
+        Assert.True(withTop.TopIsUserSpecified);
+        Assert.False(withoutTop.TopIsUserSpecified);
     }
 
     [Fact]
-    public void WriteTopIgnoredNote_DmlWithTop_SaysTopIsIgnored()
+    public void TopHelp_SaysItDoesNotApplyToDml()
     {
-        var result = DmlQueryResult(Stmt(DmlOperation.Delete, "account", 3, 0));
-
-        var stderr = StderrOf(() => SqlCommand.WriteTopIgnoredNote(result, 5));
-
-        Assert.Contains("--top is ignored for DML", stderr);
+        Assert.Contains("INSERT, UPDATE or DELETE", QueryCommandGroup.TopOption.Description);
+        Assert.Contains("INSERT, UPDATE and DELETE", ExecuteTopDescription());
     }
 
-    [Fact]
-    public void WriteTopIgnoredNote_DryRunDmlWithTop_SaysTopIsIgnored()
-    {
-        var stderr = StderrOf(() => SqlCommand.WriteTopIgnoredNote(CreateDryRunResult(), 5)) ;
-
-        Assert.Contains("--top is ignored for DML", stderr);
-    }
-
-    [Fact]
-    public void WriteTopIgnoredNote_SelectWithTop_StaysSilent()
-    {
-        var select = new SqlQueryResult { OriginalSql = "SELECT", TranspiledFetchXml = null, Result = QueryResult.Empty("account") };
-
-        Assert.Equal(string.Empty, StderrOf(() => SqlCommand.WriteTopIgnoredNote(select, 5)));
-    }
-
-    [Fact]
-    public void WriteTopIgnoredNote_DmlWithoutTop_StaysSilent()
-    {
-        Assert.Equal(string.Empty, StderrOf(() => SqlCommand.WriteTopIgnoredNote(DmlQueryResult(Stmt(DmlOperation.Delete, "account", 3, 0)), null)));
-    }
+    private static string ExecuteTopDescription()
+        => PPDS.Cli.Commands.Query.History.ExecuteCommand.Create().Options.Single(o => o.Name == "--top").Description!;
 
     #endregion
 

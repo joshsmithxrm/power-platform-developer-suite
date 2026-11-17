@@ -28,7 +28,7 @@ public static class ExecuteCommand
 
         var topOption = new Option<int?>("--top", "-t")
         {
-            Description = "Limit the number of results returned (overrides query TOP)"
+            Description = "Limit the number of rows returned (overrides query TOP). Refused for INSERT, UPDATE and DELETE entries."
         };
 
         // Same DML guard options as 'ppds query sql' (defined once in DmlSafetyOptionSet).
@@ -216,8 +216,6 @@ public static class ExecuteCommand
 
             var queryResult = await sqlQueryService.ExecuteAsync(request, cancellationToken);
 
-            SqlCommand.WriteTopIgnoredNote(queryResult, top);
-
             if (queryResult.DmlSafetyResult?.IsDryRun == true)
             {
                 SqlCommand.WriteDryRunOutput(queryResult, globalOptions.OutputFormat, writer);
@@ -249,6 +247,7 @@ public static class ExecuteCommand
     {
         Sql = sql,
         TopOverride = top,
+        TopIsUserSpecified = top.HasValue,
         DmlSafety = dmlSafety
     };
 }

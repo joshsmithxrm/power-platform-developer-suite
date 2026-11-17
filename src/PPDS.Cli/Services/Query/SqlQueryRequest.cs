@@ -17,6 +17,14 @@ public sealed record SqlQueryRequest
     public int? TopOverride { get; init; }
 
     /// <summary>
+    /// True when a user explicitly asked for <see cref="TopOverride"/> (CLI <c>--top</c>). The service then
+    /// refuses the request if it contains DML (<c>--top</c> limits returned rows only). When false, a
+    /// <see cref="TopOverride"/> is a default the caller applies to every query (for example the extension's
+    /// default top) and is ignored for DML.
+    /// </summary>
+    public bool TopIsUserSpecified { get; init; }
+
+    /// <summary>
     /// Page number for pagination (1-based).
     /// </summary>
     public int? PageNumber { get; init; }

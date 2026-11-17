@@ -273,11 +273,27 @@ internal sealed class SqlQueryPresenter : IDisposable
         }
         catch (Exception ex)
         {
-            _lastErrorMessage = ex.Message;
+            // A script interrupted after some DML ran must say what already ran (not rolled back).
+            var committed = DmlOutcome.From(ex)?.DescribeCommitted();
+            var message = committed == null ? ex.Message : $"{ex.Message} {committed}";
+            _lastErrorMessage = message;
             _isExecuting = false;
-            ErrorOccurred?.Invoke(ex.Message);
+            ErrorOccurred?.Invoke(message);
         }
     }
+
+    /// <summary>
+    /// Load-more re-reads the last statement; it must never run DML. Explicit unconfirmed options make a
+    /// DML-containing script fail the guard instead of executing.
+    /// </summary>
+    internal static SqlQueryRequest BuildLoadMoreRequest(string sql, int pageNumber, string? pagingCookie) => new()
+    {
+        Sql = sql,
+        PageNumber = pageNumber,
+        PagingCookie = pagingCookie,
+        EnablePrefetch = true,
+        DmlSafety = new DmlSafetyOptions()
+    };
 
     /// <summary>
     /// Status line for a finished streaming query. Failed DML rows are reported instead of a plain
@@ -396,16 +412,7 @@ internal sealed class SqlQueryPresenter : IDisposable
             {
                 var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, _profileName, cancellationToken);
 
-                var request = new SqlQueryRequest
-                {
-                    Sql = _lastSql,
-                    PageNumber = _lastPageNumber + 1,
-                    PagingCookie = _lastPagingCookie,
-                    EnablePrefetch = true,
-                    // Load-more re-reads the last statement; it must never run DML. Explicit
-                    // unconfirmed options make a DML-containing script fail the guard here.
-                    DmlSafety = new DmlSafetyOptions()
-                };
+                var request = BuildLoadMoreRequest(_lastSql, _lastPageNumber + 1, _lastPagingCookie);
 
                 var result = await service.ExecuteAsync(request, cancellationToken);
 
