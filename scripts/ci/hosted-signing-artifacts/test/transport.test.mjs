@@ -4,13 +4,46 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {artifactName, decodeEnvelope, download, limits, upload, validateBinding, validatePath} from '../transport.mjs';
+import {artifactName, decodeEnvelope, download, limits, safeRefusal, upload, validateBinding, validatePath} from '../transport.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const binding = {repository: 'owner/repo', run_id: '123', run_attempt: '1', source_sha: 'a'.repeat(40), experiment_id: 'test-01', stage: 'plan'};
 const env = {GITHUB_REPOSITORY: binding.repository, GITHUB_RUN_ID: binding.run_id,
   GITHUB_RUN_ATTEMPT: binding.run_attempt, GITHUB_SHA: binding.source_sha};
 const name = artifactName(binding);
+
+test('transport diagnostics never emit unknown client details', () => {
+  assert.equal(safeRefusal(new Error('PRIVATE_TOKEN_URL')), 'unclassified');
+  assert.equal(safeRefusal(new Error('Downloaded envelope digest mismatch')), 'raw-digest');
+});
+
+test('same-bound preparation failure aborts before any download even if a handoff exists', async t => {
+  const root = await area(t);
+  const prep = {...binding, stage: 'prepare'};
+  const client = new FakeClient();
+  client.add(envelope(), artifactName({...prep, stage: 'prepare-failed'}));
+  client.add(envelope(), artifactName(prep));
+  await assert.rejects(download(request(client, path.join(root, 'out'), {
+    binding: prep, name: artifactName(prep)
+  })), /Preparation reported failure/);
+  assert.equal(client.calls.includes('download'), false);
+  await assert.rejects(fs.stat(path.join(root, 'out')), {code: 'ENOENT'});
+});
+
+test('failure signal from another run cannot abort the current public handoff', async t => {
+  const root = await area(t);
+  const prep = {...binding, stage: 'prepare'};
+  const client = new FakeClient();
+  client.add(envelope(), artifactName({...prep, run_id: '999', stage: 'prepare-failed'}));
+  const data = JSON.parse(envelope().toString('utf8'));
+  data.binding = prep;
+  client.add(Buffer.from(JSON.stringify(data)), artifactName(prep));
+  const result = await download(request(client, path.join(root, 'out'), {
+    binding: prep, name: artifactName(prep)
+  }));
+  assert.equal(result.binding.run_id, binding.run_id);
+  assert.equal(client.calls.filter(call => call === 'download').length, 1);
+});
 
 function envelope(files = {'plan.json': '{}', 'public.bin': 'public-only'}) {
   return Buffer.from(JSON.stringify({schema_version: 1, binding, files: Object.entries(files).map(([file, data]) => {

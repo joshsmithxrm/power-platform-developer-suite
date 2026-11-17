@@ -76,7 +76,18 @@ class StageCommandError(ValueError):
 def command_refusal(stdout, stderr):
     # Emit only a fixed classification, never any captured private-phase text.
     text = (stdout + "\n" + stderr).lower()
-    known = (("access is denied", "access-denied"),
+    for label in ("prepare-failed", "metadata-digest", "metadata-shape", "directory", "client-digest",
+                  "raw-inventory", "raw-size", "raw-digest", "envelope-binding", "envelope-content",
+                  "wait-timeout", "unclassified"):
+        if re.search(r"(?m)^ppds_artifact_refusal=" + label + r"\s*$", text):
+            return "transport-" + label
+    for label in ("tool-hash", "tool-version", "public-shape", "public-identity", "tool-result",
+                  "output-location", "plan-hash", "plan-schema", "unclassified"):
+        if re.search(r"(?m)^ppds_compat_refusal=" + label + r"\s*$", text):
+            return "driver-" + label
+    known = (("artifact transport failed; no successful result was written", "artifact-transport"),
+             ("candidate experiment refused or failed; no passing compatibility claim is available", "candidate-driver"),
+             ("access is denied", "access-denied"),
              ("keyset is not defined", "keyset-undefined"),
              ("keyset does not exist", "keyset-missing"),
              ("the system cannot find the file specified", "file-not-found"),
@@ -138,6 +149,8 @@ def json_write(path, value):
 
 
 def stage_files(stage, version):
+    if stage == "prepare-failed":
+        return {"failure.json"}
     if stage == "plan":
         return PLAN_FILES
     if stage == "prepare":
@@ -366,10 +379,30 @@ class Hosted:
         self.transfer("upload", "sign", signed)
 
     def prepare(self):
+        try:
+            self.prepare_public()
+        except Exception:
+            # Publish a constant-only failure signal so the signer can promptly
+            # enter its existing finally/cleanup. Never upload driver diagnostics.
+            try:
+                failed = self.root / "prepare-failed"
+                failed.mkdir()
+                json_write(failed / "failure.json", {"stage": "prepare", "result": "FAIL"})
+                self.transfer("upload", "prepare-failed", failed)
+                checkpoint("prepare-failure-signalled")
+            except Exception:
+                checkpoint("prepare-failure-signal-unavailable")
+            raise
+
+    def prepare_public(self):
         public, prepared = self.root / "public", self.root / "prepared"
+        checkpoint("prepare-plan-download-started")
         self.transfer("download", "plan", public)
+        checkpoint("prepare-plan-download-completed")
         self.plan(public)
+        checkpoint("prepare-plan-validated")
         self.driver("prepare", prepared, "--source-root", ROOT, "--public-key", public / "public.bin")
+        checkpoint("prepare-driver-completed")
         json_write(prepared / "prepare-context.json", self.context)
         self.transfer("upload", "prepare", prepared)
 

@@ -101,3 +101,12 @@ use an existing machine key container. The pinned Strong Name tool still must
 export the public identity and perform actual `-R`, `-vf` and `-D` operations.
 This changes only disposable fixture generation; production key handling and
 activation remain held. See [Microsoft's ephemeral-key contract](https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.cspproviderflags).
+
+If PREPARE fails after admission, it attempts one constant-only `prepare-failed`
+artifact bound to this run, attempt, source and experiment. A waiting signer
+refuses that handoff and enters its existing original-key cleanup. The signal
+can only abort; it cannot admit bytes or establish any PASS case. If signaling
+also fails, the original bounded wait and cleanup remain. No failed job is
+retried, and a subsequent experiment requires fresh hosts and a new identity.
+Fixed phase/refusal codes distinguish transport from driver failures without
+publishing captured command output, exception text, paths or runtime tokens.

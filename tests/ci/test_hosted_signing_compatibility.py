@@ -21,6 +21,29 @@ def args(stage="sign"):
                            admit_network_connected_disposable_signing=True)
 
 
+@pytest.mark.parametrize("signal_fails", [False, True])
+def test_prepare_failure_signal_contains_no_diagnostics_and_preserves_original_error(tmp_path, signal_fails):
+    obj = h.Hosted.__new__(h.Hosted)
+    obj.root = tmp_path
+    original = ValueError("PRIVATE_ERROR_AND_PATH")
+    def fail():
+        raise original
+    obj.prepare_public = fail
+    calls = []
+    def transfer(operation, stage, folder):
+        calls.append((operation, stage))
+        assert {p.name for p in folder.iterdir()} == {"failure.json"}
+        assert json.loads((folder / "failure.json").read_text()) == {"stage": "prepare", "result": "FAIL"}
+        if signal_fails:
+            raise OSError("PRIVATE_TRANSPORT_ERROR")
+    obj.transfer = transfer
+    with pytest.raises(ValueError) as caught:
+        obj.prepare()
+    assert caught.value is original
+    assert calls == [("upload", "prepare-failed")]
+    assert h.stage_files("prepare-failed", "unused") == {"failure.json"}
+
+
 def environment():
     return {"GITHUB_REPOSITORY": h.REPOSITORY, "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_RUN_ATTEMPT": "1",
             "GITHUB_SHA": "a" * 40, "GITHUB_RUN_ID": "12345", "RUNNER_ENVIRONMENT": "github-hosted",
@@ -28,6 +51,12 @@ def environment():
 
 
 @pytest.mark.parametrize("diagnostic,expected", [
+    ("\nPPDS_ARTIFACT_REFUSAL=raw-size\nPRIVATE_VALUE", "transport-raw-size"),
+    ("PPDS_ARTIFACT_REFUSAL=PRIVATE_VALUE", None),
+    ("Artifact transport failed; no successful result was written", "artifact-transport"),
+    ("Candidate experiment refused or failed; no passing compatibility claim is available.", "candidate-driver"),
+    ("\nPPDS_COMPAT_REFUSAL=tool-hash\nPRIVATE_VALUE", "driver-tool-hash"),
+    ("PPDS_COMPAT_REFUSAL=secret-value", None),
     ("Failed to generate a strong name key pair -- Access is denied.", "access-denied"),
     ("Failed to generate a strong name key pair -- The keyset is not defined.", "keyset-undefined"),
     ("Keyset does not exist", "keyset-missing"),

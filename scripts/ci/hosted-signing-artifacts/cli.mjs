@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import {upload, download} from './transport.mjs';
+import {upload, download, safeRefusal} from './transport.mjs';
 
 const [command, ...args] = process.argv.slice(2);
 const allowed = new Set(['name', 'root', 'inventory', 'binding', 'result', 'dest', 'timeout-seconds', 'expected-id', 'expected-digest']);
@@ -32,9 +32,10 @@ try {
   }
   await fs.writeFile(options.result, JSON.stringify(result, null, 2) + '\n', {flag: 'wx'});
   clearTimeout(timer);
-} catch {
+} catch (error) {
   clearTimeout(timer);
   // Do not surface client exceptions: signed URLs or runtime values can occur in them.
+  process.stderr.write(`PPDS_ARTIFACT_REFUSAL=${safeRefusal(error)}\n`);
   process.stderr.write('Artifact transport failed; no successful result was written\n');
   process.exitCode = 1;
 }

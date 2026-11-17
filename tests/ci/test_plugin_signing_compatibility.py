@@ -27,6 +27,16 @@ sys.modules[SPEC.name] = d
 SPEC.loader.exec_module(d)
 REAL_HOST_OBSERVATION = d.host_observation
 
+
+@pytest.mark.parametrize("reason,expected", [
+    ("Pinned tool bytes differ", "tool-hash"),
+    ("Tool product version mismatch", "tool-version"),
+    ("PRIVATE_PATH_OR_TOKEN", "unclassified"),
+    ("Pinned tool bytes differ PRIVATE_VALUE", "unclassified"),
+])
+def test_failure_diagnostic_uses_only_exact_fixed_codes(reason, expected):
+    assert d.safe_refusal(ValueError(reason)) == expected
+
 SOURCE = "a" * 40
 TREE = "b" * 40
 PLAN_HASH = "c" * 64

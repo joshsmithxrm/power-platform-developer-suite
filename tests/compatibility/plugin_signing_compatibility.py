@@ -911,6 +911,23 @@ def authorize(args):
             windows_path(str(value))
 
 
+def safe_refusal(error):
+    # Only exact, fixed validation reasons leave the process. Unknown exception
+    # text can contain paths, URLs or private values and is never returned.
+    known = {
+        "Pinned tool bytes differ": "tool-hash",
+        "Tool product version mismatch": "tool-version",
+        "Representative public-key shape required": "public-shape",
+        "Test public identity mismatch": "public-identity",
+        "Candidate tool result differs from the required outcome": "tool-result",
+        "Candidate output must be outside the source checkout": "output-location",
+        "Plan hash mismatch": "plan-hash",
+        "Unexpected plan fields": "plan-schema",
+        "Candidate plan v2 required": "plan-schema",
+    }
+    return known.get(str(error), "unclassified")
+
+
 def main(argv=None, *, runtime=None):
     args = parser().parse_args(argv)
     rt = None
@@ -923,7 +940,7 @@ def main(argv=None, *, runtime=None):
         {"prepare": prepare, "sign": sign, "verify": verify}[args.stage](args, plan, rt)
         print("Candidate stage completed; this is not release or activation authorization.")
         return 0
-    except Exception:
+    except Exception as error:
         # Input/tool exceptions may contain private paths; never emit them.
         if rt is not None and rt.owned_output is not None and plan is not None:
             try:
@@ -936,6 +953,7 @@ def main(argv=None, *, runtime=None):
                     "reason": "Stage failed; no passing compatibility claim. Inspect public command outcomes; private diagnostics omitted."})
             except Exception:
                 pass  # Never replace failure with success if even the failure record cannot be retained.
+        print("PPDS_COMPAT_REFUSAL=" + safe_refusal(error), file=sys.stderr)
         print("Candidate experiment refused or failed; no passing compatibility claim is available.", file=sys.stderr)
         return 1
 
