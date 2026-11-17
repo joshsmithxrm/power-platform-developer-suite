@@ -102,6 +102,29 @@ public sealed class MetadataDraftOptionReadTests
         f.AssertRoutingAndCancellation();
     }
 
+    [Theory]
+    [InlineData("status", "timeout")]
+    [InlineData("status", "cancel")]
+    [InlineData("choice", "timeout")]
+    [InlineData("choice", "cancel")]
+    [Trait("AC", "AC-146")]
+    public async Task InsertThatTimesOutOrIsCancelled_SaysTheOutcomeIsUnknown(string kind, string interruption)
+    {
+        Exception failure = interruption == "timeout" ? new TimeoutException("synthetic") : new OperationCanceledException("synthetic");
+        using var f = new Fixture(kind) { InsertFailure = failure };
+        var error = await Assert.ThrowsAsync<PpdsException>(() => f.AddAsync());
+        Assert.Equal(MetadataErrorCodes.SdkOperationFailed, error.ErrorCode);
+        Assert.Same(failure, error.InnerException);
+        Assert.Contains("whether it was added is unknown", error.Message);
+        Assert.Contains(interruption == "timeout" ? "timed out or was cancelled" : "was cancelled", error.Message);
+        Assert.Contains(kind == "status" ? "ppds metadata entity list-statusreasons new_table" : "Check the column's options", error.Message);
+        Assert.Contains("a retry could add a second one", error.Message); // the value was auto-derived
+
+        using var explicitValue = new Fixture(kind) { InsertFailure = new TimeoutException("synthetic") };
+        var withValue = await Assert.ThrowsAsync<PpdsException>(() => explicitValue.AddAsync(value: 77));
+        Assert.DoesNotContain("a retry could add a second one", withValue.Message);
+    }
+
     [Fact]
     public async Task GenericLocalOptionAdd_ColorReadsDraft()
     {

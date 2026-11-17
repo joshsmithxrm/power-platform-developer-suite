@@ -170,7 +170,7 @@ public partial class DataverseMetadataAuthoringService
         return candidates[0];
     }
 
-    /// <summary>An entity + attribute pair fully identifies a column-scoped option set (see VerifyOptionColorAsync).</summary>
+    /// <summary>An entity + attribute pair fully identifies a column-scoped option set (see ReadStoredOptionColorAsync).</summary>
     private static bool IsLocalOptionTarget(string? entityLogicalName, string? attributeLogicalName)
         => !string.IsNullOrEmpty(entityLogicalName) && !string.IsNullOrEmpty(attributeLogicalName);
 

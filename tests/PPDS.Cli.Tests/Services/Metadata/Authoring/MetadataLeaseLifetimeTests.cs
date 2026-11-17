@@ -122,7 +122,15 @@ public sealed partial class MetadataLeaseLifetimeTests
         Assert.Equal(h.ExpectedStages.Take(stageIndex), h.SuccessfulStages);
         Assert.DoesNotContain(h.AttemptedStages.Skip(stageIndex + 1), _ => true);
         var expectedCode = Harness.ExpectedFailureCode(route, stage, fault);
-        if (expectedCode == MetadataErrorCodes.WriteNotConfirmed)
+        if (expectedCode == Harness.PublishAfterWrite)
+        {
+            // The write is committed: a publish failure keeps its own code and says what is saved but not published.
+            Assert.Contains("is saved but not published", error.Message);
+            Assert.True(ReferenceEquals(h.Injected, error.InnerException) || ReferenceEquals(h.Injected, error.InnerException?.InnerException));
+            Assert.Equal(ExceptionMapper.Map(error.InnerException!).Code, ExceptionMapper.Map(error).Code);
+            Assert.Equal(ExceptionMapper.ToExitCode(error.InnerException!), ExceptionMapper.ToExitCode(error));
+        }
+        else if (expectedCode == MetadataErrorCodes.WriteNotConfirmed)
         {
             // After a committed write every read-back failure says so; the cause is kept (directly, or under the
             // shared acquisition wrapper for a checkout failure).
@@ -174,10 +182,49 @@ public sealed partial class MetadataLeaseLifetimeTests
         Assert.True(ReferenceEquals(h.Injected, error.InnerException) || ReferenceEquals(h.Injected, error.InnerException?.InnerException));
         Assert.Contains(route.EndsWith("add", StringComparison.Ordinal) ? "was added with value 77" : "was updated (", error.Message);
         Assert.Equal(publish, error.Message.Contains("Publication (--publish) was not attempted", StringComparison.Ordinal));
-        Assert.DoesNotContain("Synthetic", error.Message); // no provider text from the cause
+        Assert.DoesNotContain("Synthetic SDK fault", error.Message); // a raw (non-PPDS) cause's text is never quoted
         Assert.NotEmpty(h.CacheEvents);
         Assert.DoesNotContain(h.AttemptedStages, s => s == "publish");
         AssertCliEnvelope(error, MetadataErrorCodes.WriteNotConfirmed, 2);
+        h.AssertReturned();
+    }
+
+    /// <summary>
+    /// A read-back that fails because the sign-in expired is WRITE_NOT_CONFIRMED (exit 2) but keeps the
+    /// re-authentication signal: Context["requiresReauthentication"] is true and the inner chain holds the auth failure.
+    /// </summary>
+    [Theory]
+    [InlineData("global-add", "global-color-read")]
+    [InlineData("status-update", "local-color-read")]
+    [InlineData("column-add", "local-color-read")]
+    [Trait("AC", "AC-146")]
+    public async Task ColorReadBackAuthFailure_KeepsTheReauthenticationSignal(string route, string stage)
+    {
+        using var h = new Harness(route, true, route != "global-add", stage, "auth", capacity: 8);
+        var error = Assert.IsType<PpdsException>(await Record.ExceptionAsync(() => h.Run()));
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.Equal(true, error.Context!["requiresReauthentication"]);
+        var cause = error.InnerException;
+        while (cause != null && cause is not PPDS.Dataverse.Resilience.DataverseAuthenticationException) cause = cause.InnerException;
+        Assert.Same(h.Injected, cause);
+        AssertCliEnvelope(error, MetadataErrorCodes.WriteNotConfirmed, 2);
+        h.AssertReturned();
+    }
+
+    /// <summary>A publish failure after a confirmed option write keeps the auth classification and signal.</summary>
+    [Theory]
+    [InlineData("status-update")]
+    [InlineData("column-add")]
+    [Trait("AC", "AC-146")]
+    public async Task PublishAuthFailure_AfterTheWrite_KeepsItsCodeExitAndSignal(string route)
+    {
+        using var h = new Harness(route, true, true, "publish", "auth", capacity: 8);
+        var error = Assert.IsType<PpdsAuthException>(await Record.ExceptionAsync(() => h.Run()));
+        Assert.True(error.RequiresReauthentication);
+        Assert.Same(h.Injected, error.InnerException);
+        Assert.Contains("is saved but not published", error.Message);
+        Assert.Contains("ppds metadata publish new_table", error.Message);
+        Assert.Equal(5, ExceptionMapper.ToExitCode(error));
         h.AssertReturned();
     }
 
@@ -212,7 +259,7 @@ public sealed partial class MetadataLeaseLifetimeTests
     {
         using var h = new Harness(route, route != "table-create", true, stage, "checkout", capacity: 8);
         var error = Assert.IsAssignableFrom<PpdsException>(await Record.ExceptionAsync(() => h.Run()));
-        Assert.Same(h.Injected, error.InnerException);
+        Assert.True(ReferenceEquals(h.Injected, error.InnerException) || ReferenceEquals(h.Injected, error.InnerException?.InnerException));
         AssertCliEnvelope(error, "Connection.Timeout", 4);
         h.AssertReturned();
     }
@@ -324,6 +371,7 @@ public sealed partial class MetadataLeaseLifetimeTests
         internal static string? ExpectedFailureCode(string route, string stage, string fault)
         {
             if (stage.Contains("color", StringComparison.Ordinal)) return MetadataErrorCodes.WriteNotConfirmed; // After the committed write (AC-146).
+            if (stage == "publish" && IsOptionWriteRoute(route)) return PublishAfterWrite;
             if (route == "column-add" && stage == "insert")
                 return fault == "coded" ? null : MetadataErrorCodes.SdkOperationFailed; // Existing try also owns checkout.
             if (fault == "checkout" && CodedAcquisitionBoundaries().Any(row => (string)row[0] == route && (string)row[1] == stage))
@@ -335,7 +383,7 @@ public sealed partial class MetadataLeaseLifetimeTests
             // Status/local update and remove writes let cancellation propagate (CONSTITUTION R2) rather than
             // reporting it as SDK_OPERATION_FAILED.
             if (fault == "cancel" && stage is "option-update" or "option-remove") return null;
-            return stage.Contains("color", StringComparison.Ordinal) || stage is "option-update" or "option-remove" or "status-insert"
+            return stage is "option-update" or "option-remove" or "status-insert"
                 ? MetadataErrorCodes.SdkOperationFailed : null;
         }
 
@@ -351,6 +399,7 @@ public sealed partial class MetadataLeaseLifetimeTests
             {
                 "coded" => new PpdsException("Synthetic.Coded", "Already coded SDK fault"),
                 "checkout" => new PoolExhaustedException(0, _capacity, TimeSpan.FromMilliseconds(40)),
+                "auth" => new PPDS.Dataverse.Resilience.DataverseAuthenticationException("Synthetic expired sign-in", requiresReauthentication: true),
                 _ => new InvalidOperationException("Synthetic SDK fault")
             };
         }
@@ -519,6 +568,11 @@ public sealed partial class MetadataLeaseLifetimeTests
             options.Options.Add(new OptionMetadata(new Label("Other", 1033), 88));
             return options;
         }
+
+        /// <summary>Marker: a publish failure after a committed option write (message names what was written).</summary>
+        internal const string PublishAfterWrite = "publish-after-write";
+
+        internal static bool IsOptionWriteRoute(string route) => route is "status-add" or "status-update" or "column-add" or "column-update";
 
         private void AssertColorParameter(OrganizationRequest request)
         {

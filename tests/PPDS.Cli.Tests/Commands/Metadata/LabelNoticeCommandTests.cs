@@ -128,6 +128,20 @@ public sealed class LabelNoticeCommandTests
         var (exit, stdout, stderr) = await Invoke(command + " --output-format json", MetadataLabelWriteResult.None);
         Assert.Equal(ExitCodes.ValidationError, exit);
         Assert.Contains("Nothing to update: provide --new-label or --color.", stdout + stderr);
+
+        // The check runs before any connection: a provider factory that must not be called.
+        var connected = 0;
+        Task<ServiceProvider> NeverConnect(CancellationToken _) { connected++; throw new InvalidOperationException("connected"); }
+        using var quiet = new StringWriter();
+        var oldOut = Console.Out; var oldError = Console.Error;
+        try
+        {
+            Console.SetOut(quiet); Console.SetError(quiet);
+            var parsed = MetadataCommandGroup.Create(NeverConnect).Parse(command.Split(' '));
+            Assert.Equal(ExitCodes.ValidationError, await parsed.InvokeAsync());
+        }
+        finally { Console.SetOut(oldOut); Console.SetError(oldError); }
+        Assert.Equal(0, connected);
     }
 
     [Fact]

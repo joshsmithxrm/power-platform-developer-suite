@@ -92,7 +92,7 @@ public sealed partial class MetadataLeaseLifetimeTests
         var error = await Record.ExceptionAsync(() => operation);
         var coded = Assert.IsAssignableFrom<PpdsException>(error);
         Assert.Equal(ErrorCodes.Connection.Timeout, coded.ErrorCode);
-        Assert.Same(h.Injected, coded.InnerException);
+        Assert.True(ReferenceEquals(h.Injected, coded.InnerException) || ReferenceEquals(h.Injected, coded.InnerException?.InnerException));
         Assert.True(operation.IsFaulted);
         AssertCliEnvelope(coded, ErrorCodes.Connection.Timeout, 4);
         var index = Array.IndexOf(h.ExpectedStages, stage);
@@ -122,6 +122,14 @@ public sealed partial class MetadataLeaseLifetimeTests
             stage, "checkout", faultFactory: () => original);
         var operation = h.Run();
         var actual = await Record.ExceptionAsync(() => operation);
+        if (stage == "publish" && Harness.IsOptionWriteRoute(route))
+        {
+            // After a committed option write the publish failure is re-raised with what was written, same code/exit.
+            Assert.Same(original, actual!.InnerException);
+            Assert.Contains("is saved but not published", actual.Message);
+            AssertCliEnvelope(actual, ExceptionMapper.Map(original).Code, ExceptionMapper.ToExitCode(original));
+            return;
+        }
         Assert.Same(original, actual);
         Assert.Equal(kind == "cancel", operation.IsCanceled);
         Assert.Equal(kind != "cancel", operation.IsFaulted);

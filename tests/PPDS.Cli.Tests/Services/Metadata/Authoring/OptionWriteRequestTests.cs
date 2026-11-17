@@ -125,8 +125,23 @@ public sealed class OptionWriteRequestTests
         Assert.Equal("red", Assert.Single(verbatim.Requests.OfType<SdkUpdateOption>())["Color"]);
     }
 
+    [Theory]
+    [InlineData("global-delete", "global")]
+    [InlineData("global-reorder", "global")]
+    [InlineData("status-remove", "entity")]
+    [InlineData("column-remove", "entity")]
+    [Trait("AC", "AC-146")]
+    public async Task SuccessfulRemoveOrReorder_InvalidatesTheCache_WithoutPublish(string operation, string scope)
+    {
+        var f = new Fixture();
+        await f.Run(operation, "Sol");
+        if (scope == "global") f.Cache.Verify(c => c.InvalidateGlobalOptionSets(), Times.Once);
+        else f.Cache.Verify(c => c.InvalidateEntity(Table), Times.AtLeastOnce);
+    }
+
     private sealed class Fixture
     {
+        public Mock<PPDS.Dataverse.Metadata.ICachedMetadataProvider> Cache { get; } = new();
         private readonly Dictionary<(string Target, int Value), string> _colors = [];
         public List<OrganizationRequest> Requests { get; } = [];
         public DataverseMetadataAuthoringService Service { get; }
@@ -163,7 +178,7 @@ public sealed class OptionWriteRequestTests
                 });
             var pool = new Mock<IDataverseConnectionPool>();
             pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>())).ReturnsAsync(client.Object);
-            Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard());
+            Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(), cacheProvider: Cache.Object);
         }
 
         private OrganizationResponse Inserted(OrganizationRequest request, string target)

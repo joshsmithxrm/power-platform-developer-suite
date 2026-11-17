@@ -1123,6 +1123,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
         await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
 
+        InvalidateOptionCache(request.EntityLogicalName, request.AttributeLogicalName);
         _logger?.LogInformation("Deleted option value {Value} from {OptionSet}", target.Value, request.OptionSetName);
     }
 
@@ -1245,6 +1246,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         else
             await WithGlobalChoiceNameAsync(request.OptionSetName, "OptionSetName", OrderAsync, null, ct).ConfigureAwait(false);
 
+        InvalidateOptionCache(request.EntityLogicalName, request.AttributeLogicalName);
         _logger?.LogInformation("Reordered options in {OptionSet}", request.OptionSetName);
     }
 
@@ -1458,7 +1460,11 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         {
             throw new PpdsException(
                 MetadataErrorCodes.SdkOperationFailed,
-                AppendDataverseFaultCode($"Failed to add status reason '{request.Label}' to '{request.EntityLogicalName}'.", ex),
+                IsIndeterminate(ex)
+                    ? $"Adding status reason '{request.Label}' to '{request.EntityLogicalName}' {Interruption(ex)}, so whether it was added is unknown. " +
+                      $"List the status reasons (ppds metadata entity list-statusreasons {request.EntityLogicalName}) before retrying" +
+                      (request.Value.HasValue ? "." : "; a retry could add a second one with a new value.")
+                    : AppendDataverseFaultCode($"Failed to add status reason '{request.Label}' to '{request.EntityLogicalName}'.", ex),
                 ex);
         }
 
@@ -1470,7 +1476,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _logger?.LogInformation("Added status reason '{Label}' with value {Value} to '{Entity}'", request.Label, response.NewOptionValue, request.EntityLogicalName);
 
         if (request.Publish)
-            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+            await PublishAfterWriteAsync(request.EntityLogicalName, $"Status reason '{request.Label}' was added with value {response.NewOptionValue}.", ct).ConfigureAwait(false);
 
         return response.NewOptionValue;
     }
@@ -1644,7 +1650,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _logger?.LogInformation("Updated status reason (value {Value}) on '{Entity}'", targetValue, request.EntityLogicalName);
 
         if (request.Publish)
-            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+            await PublishAfterWriteAsync(request.EntityLogicalName, $"Status reason {targetValue} was updated ({Sent(request.NewLabel, null, request.Color)}).", ct).ConfigureAwait(false);
         return notices;
     }
 
@@ -1728,6 +1734,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             }
         }
 
+        _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
         _logger?.LogInformation("Removed status reason (value {Value}) from '{Entity}'", targetValue, request.EntityLogicalName);
 
         if (request.Publish)
@@ -1854,7 +1861,11 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
         {
             throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                AppendDataverseFaultCode($"Failed to add option '{request.Label}' to '{request.EntityLogicalName}.{request.ColumnLogicalName}'.", ex), ex);
+                IsIndeterminate(ex)
+                    ? $"Adding option '{request.Label}' to '{request.EntityLogicalName}.{request.ColumnLogicalName}' {Interruption(ex)}, so whether it was added is unknown. " +
+                      "Check the column's options in Dataverse before retrying" +
+                      (request.Value.HasValue ? "." : "; a retry could add a second one with a new value.")
+                    : AppendDataverseFaultCode($"Failed to add option '{request.Label}' to '{request.EntityLogicalName}.{request.ColumnLogicalName}'.", ex), ex);
         }
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
@@ -1862,7 +1873,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             await ConfirmColorAsync(null, request.EntityLogicalName, request.ColumnLogicalName, response.NewOptionValue, request.Color,
                 $"Option '{request.Label}' was added with value {response.NewOptionValue} to '{request.EntityLogicalName}.{request.ColumnLogicalName}'.", request.Publish, ct).ConfigureAwait(false);
         if (request.Publish)
-            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+            await PublishAfterWriteAsync(request.EntityLogicalName,
+                $"Option '{request.Label}' was added with value {response.NewOptionValue} to '{request.EntityLogicalName}.{request.ColumnLogicalName}'.", ct).ConfigureAwait(false);
 
         _logger?.LogInformation("Added local option {Value} to {Entity}.{Column}", response.NewOptionValue, request.EntityLogicalName, request.ColumnLogicalName);
         return response.NewOptionValue;
@@ -1920,7 +1932,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             await ConfirmColorAsync(null, request.EntityLogicalName, request.ColumnLogicalName, target.Value, request.Color,
                 $"Option {target.Value} on '{request.EntityLogicalName}.{request.ColumnLogicalName}' was updated ({Sent(request.NewLabel, null, request.Color)}).", request.Publish, ct).ConfigureAwait(false);
         if (request.Publish)
-            await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+            await PublishAfterWriteAsync(request.EntityLogicalName,
+                $"Option {target.Value} on '{request.EntityLogicalName}.{request.ColumnLogicalName}' was updated ({Sent(request.NewLabel, null, request.Color)}).", ct).ConfigureAwait(false);
 
         _logger?.LogInformation("Updated local option {Value} on {Entity}.{Column}", target.Value, request.EntityLogicalName, request.ColumnLogicalName);
         return notices;
@@ -2260,7 +2273,10 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     /// <c>WRITE_NOT_CONFIRMED</c> with <paramref name="written"/> (what was committed) and, when publication was
     /// requested, that it was not attempted; the original failure is the inner exception. A colour Dataverse accepted
     /// but did not store therefore can never be reported as applied (#1234), and a caller can tell "written but not
-    /// confirmed" from "nothing written" (<c>SDK_OPERATION_FAILED</c>) and must not blindly retry an insert.
+    /// confirmed" (the write request returned success) from <c>SDK_OPERATION_FAILED</c> (the request itself failed; its
+    /// message says whether the outcome is known) and must not blindly retry an insert. When the read-back failed
+    /// because the sign-in expired, <c>Context["requiresReauthentication"]</c> is true and the inner exception chain
+    /// keeps the authentication failure.
     /// </summary>
     /// <remarks>
     /// The colour itself rides on the write request as the message's <c>Color</c> parameter (see <see cref="WithColor"/>);
@@ -2282,17 +2298,19 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             // Only fixed, service-authored text is quoted: PPDS errors carry no provider diagnostics in their message.
             var reason = ex switch
             {
+                TaskCanceledException => "the read timed out or was cancelled",
                 OperationCanceledException => "the read was cancelled",
                 PpdsException or MetadataValidationException => ex.Message.TrimEnd('.'),
                 _ => "the read failed"
             };
             throw new PpdsException(MetadataErrorCodes.WriteNotConfirmed,
-                $"{written} Its color '{color}' could not be confirmed: {reason}.{notPublished} Check the option before re-running the command.", ex);
+                $"{written} Its color '{color}' could not be confirmed: {reason}.{notPublished} Check the option before re-running the command.",
+                ReauthenticationContext(ex), ex);
         }
 
         if (!ColorsMatch(stored, color))
             throw new PpdsException(MetadataErrorCodes.WriteNotConfirmed,
-                $"{written} Dataverse did not store its color: requested '{color}', stored '{stored ?? "none"}'.{notPublished}");
+                $"{written} Dataverse did not store its color: requested '{color}', stored '{stored ?? "none"}'.{notPublished} Check the option before re-running the command.");
         _logger?.LogInformation("Confirmed color {Color} on option {Value}", color, value);
     }
 
@@ -2302,6 +2320,57 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     /// equal the request exactly. No input is rejected or rewritten: Dataverse rejects none of these.
     /// </summary>
     private static bool ColorsMatch(string? stored, string requested) => string.Equals(stored, requested, StringComparison.Ordinal);
+
+    /// <summary>Context for a failure after a committed write: whether its cause is an expired sign-in.</summary>
+    private static Dictionary<string, object> ReauthenticationContext(Exception ex)
+    {
+        var context = new Dictionary<string, object>();
+        for (var current = ex; current != null; current = current.InnerException)
+        {
+            if (current is PpdsAuthException { RequiresReauthentication: true }
+                or PPDS.Dataverse.Resilience.DataverseAuthenticationException { RequiresReauthentication: true })
+            {
+                context["requiresReauthentication"] = true;
+                break;
+            }
+        }
+        return context;
+    }
+
+    /// <summary>A write request that timed out or was cancelled may or may not have been applied.</summary>
+    private static bool IsIndeterminate(Exception ex) => ex is TimeoutException or OperationCanceledException
+        || ex.InnerException is TimeoutException or OperationCanceledException;
+
+    private static string Interruption(Exception ex)
+        => ex is OperationCanceledException && ex is not TaskCanceledException ? "was cancelled" : "timed out or was cancelled";
+
+    /// <summary>
+    /// Publishes after a committed option write. A failure keeps its own code, exit classification and
+    /// re-authentication signal, and its message says what was already written and that it is not published.
+    /// </summary>
+    private async Task PublishAfterWriteAsync(string entityLogicalName, string written, CancellationToken ct)
+    {
+        try
+        {
+            await PublishEntityInternalAsync(entityLogicalName, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            var (mapped, exit) = ExceptionMapper.MapWithExitCode(ex);
+            var reason = ex switch
+            {
+                OperationCanceledException => "publishing was cancelled",
+                PpdsException or MetadataValidationException => "publishing failed: " + ex.Message.TrimEnd('.'),
+                _ => "publishing failed"
+            };
+            var message = $"{written} It is saved but not published: {reason}. Run 'ppds metadata publish {entityLogicalName}' to publish it.";
+            if (ex is MetadataValidationException validation)
+                throw new MetadataValidationException(validation.ErrorCode, message, validation.Field, ex);
+            if (exit == ExitCodes.AuthError)
+                throw new PpdsAuthException(mapped.Code, message, ex) { RequiresReauthentication = ReauthenticationContext(ex).Count > 0 };
+            throw new PpdsException(mapped.Code, message, ex);
+        }
+    }
 
     /// <summary>The cache entries a committed option write makes stale: the table for a local target, else the global choices.</summary>
     private void InvalidateOptionCache(string? entityLogicalName, string? attributeLogicalName)
