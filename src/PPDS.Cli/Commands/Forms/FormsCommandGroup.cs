@@ -31,7 +31,8 @@ public static class FormsCommandGroup
     internal static string NonCanonicalNotice(NonCanonicalBinding binding)
         => $"Warning: an existing control is bound to '{binding.StoredName}', which differs from the column's logical name '{binding.CanonicalName}' by case; " +
            "this has been reported to stop the control rendering (#1527). The control was left unchanged. " +
-           "Removing and re-adding the field discards that cell's authored labels and settings; editing the binding via 'forms get --raw' and 'forms set-xml' preserves them.";
+           "'ppds forms repair-bindings' rewrites the control bindings in this form's layout that differ from their column's logical name only by case " +
+           "(preview with --dry-run); it changes only those bindings and keeps the cells' authored labels and settings, which removing and re-adding the field would discard.";
 
     internal static Task ConfirmEnvironmentAsync(IServiceProvider provider, string? confirmedEnvironment, CancellationToken ct)
         => provider.GetRequiredService<IEnvironmentConfirmationService>()
@@ -61,6 +62,7 @@ public static class FormsCommandGroup
         command.Subcommands.Add(ReorderFieldsCommand.Create());
         command.Subcommands.Add(ReorderFieldsStrictCommand.Create());
         command.Subcommands.Add(MoveFieldCommand.Create());
+        command.Subcommands.Add(RepairBindingsCommand.Create());
         command.Subcommands.Add(AddSubgridCommand.Create());
         command.Subcommands.Add(RemoveSubgridCommand.Create());
 
