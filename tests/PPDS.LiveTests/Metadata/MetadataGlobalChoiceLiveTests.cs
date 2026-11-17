@@ -545,6 +545,37 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
             await RejectsEmptySolution("status DeleteOptionValue", statusDelete);
             (await RetrieveOptionsAsync(pool, entity, "statuscode")).Should().Contain(o => o.Value == local + 2);
 
+            // Non-canonical colour text is stored verbatim on local, status and state options too (update and insert).
+            string[] formats = ["#ff0000", "#F00", "FF0000", "Red"];
+            for (var i = 0; i < formats.Length; i++)
+            {
+                var input = formats[i];
+                foreach (var (what, attribute, value) in new[] { ("local", column, local), ("status", "statuscode", reason), ("statecode", "statecode", 0) })
+                {
+                    var update = Update(attribute, value, null);
+                    update["Color"] = input;
+                    await ExecuteAsync(pool, update);
+                    var stored = (await Opt(attribute, value)).Color;
+                    _output.WriteLine($"OBSERVED {what} UpdateOptionValue Color '{input}': stored '{stored}'");
+                    stored.Should().Be(input, $"{what} UpdateOptionValue stores the colour verbatim");
+                }
+                var localInsert = new InsertOptionValueRequest { Label = new Label("Fmt " + i, English), Value = local + 10 + i };
+                localInsert["EntityLogicalName"] = entity; localInsert["AttributeLogicalName"] = column; localInsert["Color"] = input;
+                await ExecuteAsync(pool, localInsert);
+                var localStored = (await Opt(column, local + 10 + i)).Color;
+                _output.WriteLine($"OBSERVED local InsertOptionValue Color '{input}': stored '{localStored}'");
+                localStored.Should().Be(input, "local InsertOptionValue stores the colour verbatim");
+                var statusInsertFormat = new InsertStatusValueRequest
+                {
+                    EntityLogicalName = entity, AttributeLogicalName = "statuscode", StateCode = 0, Value = local + 20 + i, Label = new Label("Fmt " + i, English)
+                };
+                statusInsertFormat["Color"] = input;
+                await ExecuteAsync(pool, statusInsertFormat);
+                var statusStored = (await Opt("statuscode", local + 20 + i)).Color;
+                _output.WriteLine($"OBSERVED status InsertStatusValue Color '{input}': stored '{statusStored}'");
+                statusStored.Should().Be(input, "InsertStatusValue stores the colour verbatim");
+            }
+
             // A multi-select (Choices) column: the Color parameter is stored there too.
             var choices = $"{Prefix}_multi{Guid.NewGuid().ToString("N")[..6]}".ToLowerInvariant();
             var multi = new OptionSetMetadata { IsGlobal = false, OptionSetType = OptionSetType.Picklist };
