@@ -44,6 +44,7 @@ internal static class PluginImagePruningService
                         "Version 2 image cleanup requires an explicit images list on every configured step; use [] only to clear its owned images.");
                     var images = step.Images!;
                     _ = PluginRegistrationNormalizer.NormalizeStep(step, RegistrationOperationIntent.Reconcile);
+                    // The uniqueness half is a backstop: EnsureUniqueConfigured above already rejected collisions.
                     Require(images.All(i => i is not null && !string.IsNullOrWhiteSpace(i.Name)) &&
                         images.Select(i => i.Name).Distinct(PluginImageNames.Comparer).Count() == images.Count,
                         "Image cleanup requires unique nonempty configured image names.");
@@ -164,7 +165,7 @@ internal static class PluginImagePruningService
                         type!.Id, type.TypeName, step!.Id, identity, packageResolution);
                     scopes.Add(scope);
                     var listedImages = await ReadAsync(() => service.ListImagesForStepAsync(step.Id, ct), ct);
-                    ValidateImageInventory(listedImages);
+                    ValidateImageInventory(listedImages, stepConfig.Images.Select(i => i.Name).ToArray());
                     observedImages += listedImages.Count;
                     foreach (var listed in listedImages)
                     {
@@ -346,16 +347,26 @@ internal static class PluginImagePruningService
         _ = PluginRegistrationNormalizer.NormalizeMode(step.Mode);
     }
 
-    private static void ValidateImageInventory(IReadOnlyList<PluginImageInfo> images)
+    private static void ValidateImageInventory(IReadOnlyList<PluginImageInfo> images,
+        IReadOnlyCollection<string>? configuredNames = null)
     {
         UniqueIds(images.Select(i => i.Id));
         foreach (var image in images) ValidateImageIdentity(image);
         var collisions = images.GroupBy(i => i.Name, PluginImageNames.Comparer).Where(g => g.Count() > 1).ToList();
-        Require(collisions.Count == 0,
+        if (collisions.Count == 0) return;
+        Require(false,
             "Image cleanup cannot select duplicate image names within a step. In the environment, these stored images " +
             "on one step have names equal ignoring case: " +
-            string.Join("; ", collisions.Select(g => string.Join(", ", g.Select(i => $"'{i.Name}' ({i.Id:D})")))) +
-            ". Remove the extra image with 'ppds plugins unregister image <image-id>'; no cleanup was dispatched.");
+            string.Join("; ", collisions.Select(g =>
+            {
+                var rows = string.Join(", ", g.Select(i => $"'{i.Name}' ({i.Id:D})"));
+                if (configuredNames is null) return rows;
+                var configured = configuredNames.FirstOrDefault(n => PluginImageNames.Same(n, g.Key));
+                return configured is null
+                    ? $"{rows} (no configured image has this name: remove one or both)"
+                    : $"{rows} (configured as '{configured}': remove the extra stored image)";
+            })) +
+            ". Remove images with 'ppds plugins unregister image <image-id>'; no cleanup was dispatched.");
     }
 
     private static void ValidateImageIdentity(PluginImageInfo image)

@@ -245,8 +245,25 @@ public sealed class PluginExtractionMergeTests
         previous.Images.Add(new() { Name = "PRE", ResetFields = ["attributes"] });
         previous.Images.Add(new() { Name = "pre", ResetFields = ["description"] });
         var fresh = Step(); fresh.Images.Add(new() { Name = "Pre", ImageType = "PreImage" });
-        Assert.Throws<PpdsException>(() => Merge(Assembly(fresh), Existing(previous)));
+        var error = Assert.Throws<PpdsException>(() => Merge(Assembly(fresh), Existing(previous)));
+        Assert.Contains("extracted image 'Pre' on step 'handler'", error.Message);
+        Assert.Contains("'PRE', 'pre' in the existing registration file", error.Message);
         Assert.Empty(fresh.Images[0].ResetFields);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-139")]
+    public void ExtractedImageNamesCollidingIgnoringCase_AreReportedAgainstTheSourceAttributes()
+    {
+        var previous = Step(); previous.Images.Add(new() { Name = "Pre", ResetFields = ["attributes"] });
+        var fresh = Step();
+        fresh.Images.Add(new() { Name = "Pre", ImageType = "PreImage" });
+        fresh.Images.Add(new() { Name = "pre", ImageType = "PostImage" });
+        var error = Assert.Throws<PpdsException>(() => Merge(Assembly(fresh), Existing(previous)));
+        Assert.Contains("[PluginImage] attributes", error.Message);
+        Assert.Contains("'Pre', 'pre'", error.Message);
+        Assert.Contains("imageType \"Both\"", error.Message);
+        Assert.All(fresh.Images, i => Assert.Empty(i.ResetFields));
     }
 
     [Fact]

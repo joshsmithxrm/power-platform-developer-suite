@@ -100,8 +100,10 @@ public static class CleanCommand
             if (imageOnly)
                 PluginImagePruningService.ValidateAuthority(config.Assemblies, cancellationToken);
             var packageConfigs = config.Assemblies.Where(a => string.Equals(a.Type, "Nuget", StringComparison.OrdinalIgnoreCase)).ToArray();
+            // 1.0 clean deletes orphaned steps and types and never pairs images, so a colliding image name does not
+            // make it ambiguous; 2.0 cleanup applies the image-name rule in ValidateAuthority above.
             var preflights = await DeployCommand.PreflightAssembliesAsync(packageConfigs, configFile.DirectoryName ?? ".",
-                cancellationToken, packageContentReader);
+                cancellationToken, packageContentReader, checkImageNames: false);
 
             // Connect to Dataverse
             await using var serviceProvider = serviceProviderFactory is null ? await ProfileServiceFactory.CreateFromProfilesAsync(

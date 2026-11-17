@@ -1976,6 +1976,13 @@ public class PluginRegistrationServiceTests
         var id = await _sut.UpsertImageAsync(Guid.NewGuid(), new PluginImageConfig { Name = "PreImage", ImageType = "PreImage" }, "Update");
 
         Assert.Equal(exactId, id);
+        // The tie-break needs createdon from the server; the query must ask for it.
+        var query = Assert.Single(_mockPooledClient.Invocations
+            .Where(i => i.Method.Name.StartsWith("RetrieveMultiple", StringComparison.Ordinal))
+            .Select(i => i.Arguments[0]).OfType<QueryExpression>()
+            .Where(q => q.EntityName == SdkMessageProcessingStepImage.EntityLogicalName));
+        Assert.Contains(SdkMessageProcessingStepImage.Fields.CreatedOn, query.ColumnSet.Columns);
+        Assert.Contains(SdkMessageProcessingStepImage.Fields.Name, query.ColumnSet.Columns);
         _mockPooledClient.Verify(s => s.UpdateAsync(It.Is<Entity>(e => e.Id == exactId &&
             e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Name) == "PreImage"), It.IsAny<CancellationToken>()), Times.Once);
         _mockPooledClient.Verify(s => s.UpdateAsync(It.Is<Entity>(e => e.Id == otherId), It.IsAny<CancellationToken>()), Times.Never);
@@ -2000,6 +2007,23 @@ public class PluginRegistrationServiceTests
         _mockPooledClient.Verify(s => s.UpdateAsync(It.Is<Entity>(e => e.Id == olderId &&
             e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Name) == "PreImage"), It.IsAny<CancellationToken>()), Times.Once);
         _mockPooledClient.Verify(s => s.UpdateAsync(It.Is<Entity>(e => e.Id == newerId), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-139")]
+    public async Task UpsertImageAsync_SeveralMatchesWithoutExactCaseOrCreatedOn_UpdatesTheLowestId()
+    {
+        var lowId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var highId = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        _retrieveMultipleResult = new EntityCollection(
+        [
+            new Entity(SdkMessageProcessingStepImage.EntityLogicalName, highId) { [SdkMessageProcessingStepImage.Fields.Name] = "preimage" },
+            new Entity(SdkMessageProcessingStepImage.EntityLogicalName, lowId) { [SdkMessageProcessingStepImage.Fields.Name] = "PREIMAGE" }
+        ]);
+
+        var id = await _sut.UpsertImageAsync(Guid.NewGuid(), new PluginImageConfig { Name = "PreImage", ImageType = "PreImage" }, "Update");
+
+        Assert.Equal(lowId, id);
     }
 
     #endregion
