@@ -30,7 +30,10 @@ public static class DiffCommand
         {
             Description = "Include hidden registration steps in this read-only comparison"
         };
-        var command = new Command("diff", "Compare managed registration fields against environment state")
+        var command = new Command("diff", "Compare managed registration fields against environment state. " +
+            "Under a missing or 1.0 registration version, step filteringAttributes and image attributes are always compared, " +
+            "an unset value as none (as in PPDS 1.4.2), so a stored value the file does not set is drift (exit 1); " +
+            "other omitted optional properties are not compared and are listed in a notice.")
         {
             configOption, hiddenOption, PluginsCommandGroup.ProfileOption, PluginsCommandGroup.EnvironmentOption
         };
@@ -117,12 +120,15 @@ public static class DiffCommand
                 error.WriteLine($"  [~] Modified image: {item.ImageName} on step {item.StepName}");
                 foreach (var change in item.Changes) error.WriteLine($"      {change.Property}: {change.Expected} -> {change.Actual}");
             }
-            foreach (var warning in assembly.Warnings) error.WriteLine($"  [!] {warning}");
+            // The 1.0 compared-omission guidance is printed once per run below, not per assembly.
+            foreach (var warning in assembly.Warnings.Where(w => w != assembly.ComparedOmissionWarning))
+                error.WriteLine($"  [!] {warning}");
             RenderCoverage(assembly.Coverage, error);
         }
         RenderCoverage(result.Coverage, error);
         var preserved = result.Assemblies.SelectMany(a => a.PreservedLegacyValues ?? []).ToList();
-        foreach (var line in PluginLegacyPreservationService.DescribeNotice(preserved, includeValues: true))
+        var comparedOmissions = result.Assemblies.Aggregate(ComparedOmissionKinds.None, (kinds, a) => kinds | a.LegacyComparedOmissions);
+        foreach (var line in PluginLegacyPreservationService.DescribeDiffGuidance(preserved, comparedOmissions))
             error.WriteLine(line);
     }
 

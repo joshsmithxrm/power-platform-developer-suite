@@ -9,6 +9,7 @@ using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services;
+using PPDS.Cli.Services.Plugins;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Tests.TestHelpers;
 using Xunit;
@@ -117,6 +118,34 @@ public sealed class DeployReconciliationVerificationTests
         fixture.Service.Verify(s => s.ListStepsForTypeAsync(It.IsAny<Guid>(), It.IsAny<PluginListOptions?>(), CancellationToken.None), Times.Exactly(2));
         fixture.VerifyNoDeletes();
     }
+
+    [Fact]
+    [Trait("AC", "AC-138")]
+    public async Task Version1_Notice_ListsDiffComparedValuesUnderTheirOwnHeadingWithoutChangingExit()
+    {
+        using var fixture = new CommandFixture("1.0");
+        fixture.StoredStep.Description = "legacy-preserved-description";
+        fixture.StoredStep.FilteringAttributes = "telephone1";
+
+        var (exit, error) = await fixture.RunTextAsync();
+        Assert.Equal(0, exit);
+        // Advisory-only values keep the "not compared" heading; filteringAttributes is listed separately because diff compares it.
+        Assert.Contains("Notice: 1 omitted optional value(s) are preserved, not managed, under registration version 1.0 " +
+            "and differ from the registration version 2.0 default (not compared; exit code unaffected):\n" +
+            "  assembly:LocalFixture/type:Contoso.Handler/step:Update account: description", error.ReplaceLineEndings("\n"));
+        Assert.Contains("Notice: 1 " + PluginLegacyPreservationService.ReportedAsDriftHeading + "\n" +
+            "  assembly:LocalFixture/type:Contoso.Handler/step:Update account: filteringAttributes", error.ReplaceLineEndings("\n"));
+        Assert.Equal(1, PluginDiffReconciliationTests.Occurrences(error, PluginLegacyPreservationService.AdoptionGuidance));
+
+        Assert.Equal(0, await fixture.RunAsync());
+        using var json = JsonDocument.Parse(fixture.Output.ToString());
+        var preserved = SingleDeployment(json.RootElement).GetProperty("preservedLegacyValues").EnumerateArray()
+            .Select(v => v.GetProperty("property").GetString()).ToList();
+        Assert.Equal(["filteringAttributes", "description"], preserved); // deploy's list stays complete; JSON shape unchanged
+        Assert.DoesNotContain("reportedAsDriftByDiff", fixture.Output.ToString(), StringComparison.OrdinalIgnoreCase);
+        fixture.VerifyNoDeletes();
+    }
+
     [Theory]
     [InlineData(false, false, 0, "match")]
     [InlineData(true, false, 1, "drift")]

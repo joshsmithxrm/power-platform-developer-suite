@@ -20,8 +20,45 @@ internal static class PluginRegistrationNormalizer
     /// <summary>Optional image fields version 2.0 resets on omission (and that resetFields may name).</summary>
     internal static IReadOnlyCollection<string> ResettableImageFields => ImageResets;
 
+    // Fields PPDS CLI 1.4.2 compared for every matched step/image, set or not. Diff keeps comparing
+    // them against "none" when a missing/1.0 file omits them, so upgrading never turns that drift gate green.
+    private static readonly string[] LegacyComparedStepFields = ["filteringAttributes"];
+    private static readonly string[] LegacyComparedImageFields = ["attributes"];
+
     internal static IReadOnlyDictionary<string, object?> NormalizeStep(PluginStepConfig config, RegistrationOperationIntent intent) =>
         NormalizeStepCore(config, intent, rejectUnknownFields: true);
+
+    /// <summary>
+    /// For a missing/1.0 step, the 1.4.2-compared fields the legacy plan leaves unmanaged (omitted, null or
+    /// empty, and not in resetFields). Diff compares each against "none"; deploy still preserves them.
+    /// Empty for version 2.0, which manages every resettable field.
+    /// </summary>
+    internal static IReadOnlyList<string> LegacyComparedOmissions(PluginStepConfig config)
+    {
+        if (config.OperationIntent == RegistrationOperationIntent.Reconcile) return [];
+        var legacy = NormalizeStep(config, RegistrationOperationIntent.Deploy);
+        return LegacyComparedStepFields.Where(f => !legacy.ContainsKey(f)).ToList();
+    }
+
+    /// <summary>
+    /// Image counterpart of <see cref="LegacyComparedOmissions(PluginStepConfig)"/>. Like diff, the
+    /// step's file contract selects the image plan.
+    /// </summary>
+    internal static IReadOnlyList<string> LegacyComparedOmissions(PluginStepConfig step, PluginImageConfig config)
+    {
+        if (step.OperationIntent == RegistrationOperationIntent.Reconcile) return [];
+        var legacy = NormalizeImage(config, step.Message, RegistrationOperationIntent.Deploy);
+        return LegacyComparedImageFields.Where(f => !legacy.ContainsKey(f)).ToList();
+    }
+
+    /// <summary>Whether a supplied non-empty filteringAttributes is accepted for this step message.</summary>
+    internal static bool SupportsFilteringAttributes(string? message) =>
+        string.Equals(message, "Update", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(message, "UpdateMultiple", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether diff compares this omitted legacy field (and so reports it as drift, not advisory).</summary>
+    internal static bool IsLegacyComparedField(string field, bool onImage) =>
+        (onImage ? LegacyComparedImageFields : LegacyComparedStepFields).Contains(field, StringComparer.Ordinal);
 
     /// <summary>
     /// For a legacy (missing/1.0) step, the optional nonsecret fields the legacy contract leaves
@@ -85,8 +122,7 @@ internal static class PluginRegistrationNormalizer
             fields.Remove("asyncAutoDelete"); // false/default is not applicable to synchronous steps
         }
         if (fields.TryGetValue("filteringAttributes", out var attributes) && !string.IsNullOrWhiteSpace(attributes as string) &&
-            !string.Equals(config.Message, "Update", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(config.Message, "UpdateMultiple", StringComparison.OrdinalIgnoreCase))
+            !SupportsFilteringAttributes(config.Message))
             throw Invalid("filteringAttributes requires Update or UpdateMultiple.");
         return fields;
     }

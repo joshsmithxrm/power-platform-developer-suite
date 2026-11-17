@@ -75,7 +75,8 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
                 var managed = PluginRegistrationNormalizer.NormalizeStep(step, DesiredIntent(step));
                 var path = StepPath(type, step);
                 Unknown(step.ExtensionData, path, drift.Coverage);
-                foreach (var field in OptionalStepFields.Where(f => !managed.ContainsKey(f)))
+                var legacyCompared = PluginRegistrationNormalizer.LegacyComparedOmissions(step);
+                foreach (var field in OptionalStepFields.Where(f => !managed.ContainsKey(f) && !legacyCompared.Contains(f)))
                     drift.Coverage.Unmanaged.Add(new(path, field));
                 drift.Coverage.Excluded.Add(new(path, "secureConfiguration (value never read or returned)"));
                 // A supplied value is written but can never be read back. Report it as excluded so the
@@ -92,7 +93,8 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
                     var managedImage = PluginRegistrationNormalizer.NormalizeImage(image, step.Message, DesiredIntent(step));
                     var imagePath = $"{path}/image:{image.Name}";
                     Unknown(image.ExtensionData, imagePath, drift.Coverage);
-                    foreach (var field in OptionalImageFields.Where(f => !managedImage.ContainsKey(f)))
+                    var legacyComparedImage = PluginRegistrationNormalizer.LegacyComparedOmissions(step, image);
+                    foreach (var field in OptionalImageFields.Where(f => !managedImage.ContainsKey(f) && !legacyComparedImage.Contains(f)))
                         drift.Coverage.Unmanaged.Add(new(imagePath, field));
                 }
                 configured.Add((type, step));
@@ -155,6 +157,7 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
             return !hiddenIdentities.Contains(id) || visibleIdentities.Contains(id);
         });
         var legacyInputs = new List<LegacyPreservationInput>();
+        var comparedOmissions = ComparedOmissionKinds.None;
         var matches = PluginStepMatcher.Match(relevantConfigured, existing, (id, configCount, envCount) =>
         {
             drift.Warnings.Add(PluginStepMatcher.DescribeResidualCollision(id, configCount, envCount));
@@ -224,6 +227,14 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
                 Check(field, expected, actual, path, stepInfo.UnavailableProperties, changes, drift.Coverage,
                     redact: field == "unsecureConfiguration");
             }
+            // Missing/1.0 parity with 1.4.2: an omitted filteringAttributes is still compared against none.
+            foreach (var field in PluginRegistrationNormalizer.LegacyComparedOmissions(stepConfig))
+            {
+                PluginStoredValues.TryStep(field, stepInfo, out var actual);
+                if (Check(field, null, actual, path, stepInfo.UnavailableProperties, changes, drift.Coverage))
+                    comparedOmissions |= PluginRegistrationNormalizer.SupportsFilteringAttributes(stepConfig.Message)
+                        ? ComparedOmissionKinds.FilterableStep : ComparedOmissionKinds.OtherStep;
+            }
             if (changes.Count > 0)
                 drift.ModifiedSteps.Add(new() { TypeName = match.TypeConfig!.TypeName, StepName = name, Changes = changes });
 
@@ -263,13 +274,28 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
                     PluginStoredValues.TryImage(field, envImage, out var actual);
                     Check(field, expected, actual, imagePath, envImage.UnavailableProperties, imageChanges, drift.Coverage);
                 }
+                // Missing/1.0 parity with 1.4.2: omitted image attributes are still compared against none.
+                foreach (var field in PluginRegistrationNormalizer.LegacyComparedOmissions(stepConfig, image))
+                {
+                    PluginStoredValues.TryImage(field, envImage, out var actual);
+                    if (Check(field, null, actual, imagePath, envImage.UnavailableProperties, imageChanges, drift.Coverage))
+                        comparedOmissions |= ComparedOmissionKinds.Image;
+                }
                 if (imageChanges.Count > 0)
                     drift.ModifiedImages.Add(new() { StepName = name, ImageName = image.Name, Changes = imageChanges });
             }
         }
         ct.ThrowIfCancellationRequested();
+        if (comparedOmissions != ComparedOmissionKinds.None)
+        {
+            drift.LegacyComparedOmissions = comparedOmissions;
+            drift.ComparedOmissionWarning = PluginLegacyPreservationService.DescribeComparedOmissionWarning(comparedOmissions);
+            drift.Warnings.Add(drift.ComparedOmissionWarning);
+        }
         // Advisory only, computed after the comparison from rows already read; a failure omits it.
-        drift.PreservedLegacyValues = PluginLegacyPreservationService.TryCollect(legacyInputs, out _);
+        // Values compared above are drift, so they are not repeated in the advisory.
+        drift.PreservedLegacyValues = PluginLegacyPreservationService.TryCollect(legacyInputs, out _,
+            excludeComparedOmissions: true);
         return drift;
     }
 
@@ -280,18 +306,20 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
     private static string StepPath(PluginTypeConfig type, PluginStepConfig step) =>
         $"type:{type.TypeName}/step:{PluginStepMatcher.ResolveConfigName(type, step)}";
 
-    private static void Check(string field, object? expected, object? actual, string path,
+    /// <returns>True when a change was recorded.</returns>
+    private static bool Check(string field, object? expected, object? actual, string path,
         HashSet<string> unavailable, List<PropertyChange> changes, ComparisonCoverage coverage, bool redact = false)
     {
         if (unavailable.Contains(field))
         {
             coverage.Unsupported.Add(new(path, $"{field} unavailable"));
-            return;
+            return false;
         }
         coverage.Checked.Add(new(path, field));
-        if (!Equals(expected, actual))
-            changes.Add(new(field, redact ? "(redacted)" : PluginStoredValues.Format(expected),
-                redact ? "(redacted)" : PluginStoredValues.Format(actual)));
+        if (Equals(expected, actual)) return false;
+        changes.Add(new(field, redact ? "(redacted)" : PluginStoredValues.Format(expected),
+            redact ? "(redacted)" : PluginStoredValues.Format(actual)));
+        return true;
     }
 
     private static void Unknown(Dictionary<string, JsonElement>? extensions, string path, ComparisonCoverage coverage)
@@ -344,9 +372,19 @@ internal sealed class AssemblyDrift
     /// <summary>
     /// Legacy (missing/1.0) files only: omitted optional values that are preserved and not compared,
     /// but differ from what registration version 2.0 would write. Advisory; never drift or incompleteness.
+    /// Omitted filteringAttributes and image attributes are compared (drift) and so are not listed here.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<PreservedLegacyValue>? PreservedLegacyValues { get; set; }
+    /// <summary>
+    /// Which missing/1.0 unset filteringAttributes or image attributes differed from none and were reported
+    /// as drift; when any, <see cref="Warnings"/> also carries <see cref="ComparedOmissionWarning"/>.
+    /// </summary>
+    [JsonIgnore]
+    public ComparedOmissionKinds LegacyComparedOmissions { get; set; }
+    /// <summary>The resolution guidance added to <see cref="Warnings"/>; text output prints it once per run instead.</summary>
+    [JsonIgnore]
+    public string? ComparedOmissionWarning { get; set; }
     public bool HasDrift => AssemblyMissing || MissingSteps.Count > 0 || OrphanedSteps.Count > 0 ||
         ModifiedSteps.Count > 0 || MissingImages.Count > 0 || OrphanedImages.Count > 0 || ModifiedImages.Count > 0;
     public bool IsComplete => Coverage.Unsupported.Count == 0;

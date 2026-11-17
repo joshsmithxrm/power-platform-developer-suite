@@ -14,6 +14,7 @@ using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services;
+using PPDS.Cli.Services.Plugins;
 using PPDS.Cli.Tests.Services.Shared;
 using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Pooling;
@@ -42,6 +43,15 @@ public sealed class PluginRoundTripConvergenceTests
         "canBeBypassed", "canUseReadOnlyConnection", "imageAttributes", "imageDescription"
     };
 
+    // Under 1.0, diff compares these two when omitted (PPDS 1.4.2 parity); the rest are advisory only.
+    public static TheoryData<string> Version1ComparedProperties() => new() { "filteringAttributes", "imageAttributes" };
+
+    public static TheoryData<string> Version1AdvisoryProperties() => new()
+    {
+        "unsecureConfiguration", "description", "runAsUser", "asyncAutoDelete",
+        "canBeBypassed", "canUseReadOnlyConnection", "imageDescription"
+    };
+
     [Theory]
     [Trait("AC", "AC-133")]
     [MemberData(nameof(Properties))]
@@ -68,8 +78,110 @@ public sealed class PluginRoundTripConvergenceTests
     }
 
     [Theory]
+    [Trait("AC", "AC-138")]
+    [MemberData(nameof(Version1ComparedProperties))]
+    public async Task Version1_ValueThenOmission_ComparedAttributeSetIsPreservedAndDiffReportsDriftWithGuidance(string property)
+    {
+        using var store = new InMemoryRegistrationStore("1.0");
+        var spec = PropertySpec.For(property, store.UserId);
+
+        store.SetConfigured(spec, include: true);
+        Assert.Equal(0, await store.DeployAsync());
+        store.SetConfigured(spec, include: false);
+        Assert.Equal(0, await store.DeployAsync()); // deploy's exit code and 1.0 preservation are unchanged
+        Assert.Equal(spec.Value, store.StoredValue(spec));
+
+        // Deploy's notice still lists the preserved value.
+        using (var deploy = JsonDocument.Parse(store.LastDeployOutput))
+        {
+            var row = Assert.Single(deploy.RootElement.GetProperty("data").EnumerateArray());
+            Assert.Contains(row.GetProperty("preservedLegacyValues").EnumerateArray(), v =>
+                v.GetProperty("path").GetString() == spec.Path(store) && v.GetProperty("property").GetString() == spec.Field);
+            Assert.False(row.TryGetProperty("reconciliationStatus", out var status) && status.ValueKind != JsonValueKind.Null,
+                "1.0 deploy runs no post-deploy verification");
+        }
+
+        var (diffExit, diffOutput) = await store.DiffAsync(json: true);
+        Assert.Equal(1, diffExit);
+        using (var diff = JsonDocument.Parse(diffOutput))
+        {
+            Assert.Equal("drift", diff.RootElement.GetProperty("metadata").GetProperty("status").GetString());
+            var assembly = diff.RootElement.GetProperty("data")[0];
+            var modified = Assert.Single(assembly.GetProperty(spec.OnImage ? "modifiedImages" : "modifiedSteps").EnumerateArray());
+            var change = Assert.Single(modified.GetProperty("changes").EnumerateArray());
+            Assert.Equal(spec.Field, change.GetProperty("property").GetString());
+            Assert.Equal("(none)", change.GetProperty("expected").GetString());
+            Assert.Equal(spec.Value, change.GetProperty("actual").GetString());
+            Assert.False(assembly.TryGetProperty("preservedLegacyValues", out _)); // drift, not also advisory
+        }
+        var (textExit, text) = await store.DiffAsync(json: false);
+        Assert.Equal(1, textExit);
+        Assert.Contains($"{spec.Field}: (none) -> {spec.Value}", text);
+        Assert.Contains(PluginLegacyPreservationService.ComparedOmissionIntro, text);
+        Assert.Contains(spec.OnImage ? PluginLegacyPreservationService.ImageOption : PluginLegacyPreservationService.FilterableStepOption, text);
+        Assert.Equal(0, store.Deletes);
+    }
+
+    [Theory]
+    [Trait("AC", "AC-138")]
+    [MemberData(nameof(Version1ComparedProperties))]
+    public async Task Version1_ExplicitNullAttributeSet_FollowingTheGuidanceClearsTheStoredValue(string property)
+    {
+        using var store = new InMemoryRegistrationStore("1.0");
+        var spec = PropertySpec.For(property, store.UserId);
+        store.SetConfigured(spec, include: true);
+        Assert.Equal(0, await store.DeployAsync());
+
+        // The shape the model serialiser writes: the property present as an explicit null.
+        store.SetExplicitNull(spec);
+        Assert.Equal(0, await store.DeployAsync());
+        Assert.Equal(spec.Value, store.StoredValue(spec)); // 1.0 preserves it
+        var (exit, text) = await store.DiffAsync(json: false);
+        Assert.Equal(1, exit);
+        Assert.Contains("must be removed too", text);
+
+        // Listing it in resetFields while the null is still present is rejected, before any write.
+        store.SetResetFields(spec);
+        Assert.NotEqual(0, await store.DeployAsync());
+        Assert.Equal(spec.Value, store.StoredValue(spec));
+        Assert.Equal(3, (await store.DiffAsync(json: true)).Exit);
+
+        // Following the guidance: remove the property and keep it in resetFields.
+        store.SetConfigured(spec, include: false);
+        Assert.Equal(0, await store.DeployAsync());
+        Assert.Null(store.StoredValue(spec));
+        var (diffExit, diffOutput) = await store.DiffAsync(json: true);
+        Assert.Equal(0, diffExit);
+        using var diff = JsonDocument.Parse(diffOutput);
+        Assert.Equal("match", diff.RootElement.GetProperty("metadata").GetProperty("status").GetString());
+        Assert.Equal(0, store.Deletes);
+    }
+
+    [Theory]
+    [Trait("AC", "AC-138")]
+    [MemberData(nameof(Version1ComparedProperties))]
+    public async Task Version1_ResetFields_ClearsComparedAttributeSetAndDiffMatches(string property)
+    {
+        using var store = new InMemoryRegistrationStore("1.0");
+        var spec = PropertySpec.For(property, store.UserId);
+
+        store.SetConfigured(spec, include: true);
+        Assert.Equal(0, await store.DeployAsync());
+        store.SetConfigured(spec, include: false);
+        store.SetResetFields(spec);
+        Assert.Equal(0, await store.DeployAsync());
+        Assert.Null(store.StoredValue(spec)); // resetFields under 1.0 clears the stored value
+
+        var (diffExit, diffOutput) = await store.DiffAsync(json: true);
+        Assert.Equal(0, diffExit);
+        using var diff = JsonDocument.Parse(diffOutput);
+        Assert.Equal("match", diff.RootElement.GetProperty("metadata").GetProperty("status").GetString());
+        Assert.Equal(0, store.Deletes);
+    }
+
+    [Theory]
     [Trait("AC", "AC-133")]
-    [MemberData(nameof(Properties))]
+    [MemberData(nameof(Version1AdvisoryProperties))]
     public async Task Version1_ValueThenOmission_PreservesStoredValueDiffMatchesAndNoticeListsIt(string property)
     {
         using var store = new InMemoryRegistrationStore("1.0");
@@ -215,6 +327,11 @@ public sealed class PluginRoundTripConvergenceTests
             if (include) target[spec.Field] = spec.ConfigValue();
             else target.Remove(spec.Field);
         }
+
+        public void SetExplicitNull(PropertySpec spec) => (spec.OnImage ? Image : Step)[spec.Field] = null;
+
+        public void SetResetFields(PropertySpec spec) =>
+            (spec.OnImage ? Image : Step)["resetFields"] = new JsonArray(JsonValue.Create(spec.Field));
 
         public void SetStep(string field, JsonNode? value)
         {

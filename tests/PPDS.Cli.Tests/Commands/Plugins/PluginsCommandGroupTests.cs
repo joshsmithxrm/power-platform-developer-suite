@@ -132,6 +132,19 @@ public class PluginsCommandGroupTests
     }
 
     [Fact]
+    [Trait("AC", "AC-138")]
+    public void DiffAndDeployHelp_DescribeTheTwoPropertiesAlwaysComparedUnderVersion1()
+    {
+        var diff = _command.Subcommands.Single(c => c.Name == "diff").Description!;
+        Assert.Contains("Under a missing or 1.0 registration version, step filteringAttributes and image attributes are always compared", diff);
+        Assert.Contains("an unset value as none (as in PPDS 1.4.2)", diff);
+        Assert.Contains("other omitted optional properties are not compared", diff);
+        var deploy = _command.Subcommands.Single(c => c.Name == "deploy").Description!;
+        Assert.Contains("diff compares an omitted step filteringAttributes or image attributes against none", deploy);
+        Assert.Contains("remove it from the step or image and list it in resetFields", deploy);
+    }
+
+    [Fact]
     public void Create_HasTwelveSubcommands()
     {
         Assert.Equal(12, _command.Subcommands.Count);

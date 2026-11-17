@@ -658,12 +658,12 @@ Explicit extraction/output serialization redacts secure values and reports exclu
 | Field | Legacy v1 deployment | Version 2 desired state |
 | --- | --- | --- |
 | runAsUser | Omission/null/empty preserves; explicit CallingUser clears | Omission/null/empty defaults CallingUser; explicit GUID/domain/email resolves uniquely |
-| filteringAttributes | Omission/null/empty preserves | Omission/null/empty clears; applicable Update/UpdateMultiple attribute sets are canonical |
+| filteringAttributes | Omission/null/empty preserves on deploy; diff still compares it against none (1.4.2 parity) | Omission/null/empty clears; applicable Update/UpdateMultiple attribute sets are canonical |
 | unsecureConfiguration, step/image description | Omission/null/empty preserves | Omission/null/empty clears; supplied nonempty text remains exact |
 | asyncAutoDelete | Omission/null preserves; supplied false/true writes where applicable | Omission/null defaults false for async; true on synchronous is invalid |
 | canBeBypassed | Omission/null preserves; supplied booleans write | Omission/null uses the explicit PPDS true default |
 | canUseReadOnlyConnection | Omission/null preserves; supplied booleans require target Create/Update capability | Omission/null uses the explicit PPDS false desired default; target Create/Update capability governs writes |
-| image attributes | Omission/null/empty preserves | Omission/null/empty means all attributes; preview must make this broadening visible |
+| image attributes | Omission/null/empty preserves on deploy; diff still compares it against none (1.4.2 parity) | Omission/null/empty means all attributes; preview must make this broadening visible |
 | deployment, invocationSource, enabled, executionOrder | Existing defaults ServerOnly, Parent, true, 1 | Same explicit defaults |
 | image alias/message property | Existing image-name/message-specific defaults | Same explicit defaults |
 | secureConfiguration | Omitted/null preserves; non-null including empty is write-only input | Same write request; a supplied value is listed as excluded (write-only, never read back), is never compared and never makes the comparison incomplete |
@@ -709,13 +709,36 @@ errors retain precedence. Consumers must use status/completeness and exit code: 
 is shared by an incomplete comparison and general failures, so scripts must read
 `metadata.status` (an error result has an `error` object and no comparison metadata).
 
-For missing/1.0 files, diff and deploy also report omitted optional step/image values
-that are preserved but differ from what 2.0 would write: diff prints a labelled stderr
-notice and adds `data[].preservedLegacyValues`; deploy (real and dry-run) prints one
-stderr notice and adds `data[].preservedLegacyValues` from the rows it already read.
-Items carry path, property, stored and version2Value; unsecure configuration is
-redacted and secure configuration is never listed. This is advisory only: 1.0 writes,
-compared fields, status and exit codes are unchanged.
+For missing/1.0 files, diff always compares step `filteringAttributes` and image
+`attributes`, as CLI 1.4.2 did. When the file omits one of them (or supplies null/empty)
+and it is not listed in `resetFields`, the stored value is compared against none using
+the same attribute-set normalisation as a supplied value (trimmed, case-insensitive,
+de-duplicated, order-insensitive; empty means none). A non-empty stored value is drift:
+a modified-step or modified-image change with expected `(none)` and the normalised stored
+value as actual, so `hasDrift` is true and the exit code is 1 (2 when the comparison is
+also incomplete). Deploy under 1.0 still preserves the value and runs no verification, so
+diff adds guidance: once per text run on stderr, and in JSON as an entry in that
+assembly's `data[].warnings`. It says the stored value is not in the file and is preserved
+by 1.0 deploy, and offers only the options that apply to the drift found: setting the
+property to match (for `filteringAttributes` only on Update/UpdateMultiple steps, since
+another message rejects a non-empty value); removing the property from the step or image,
+including an explicit null or empty value (`resetFields` is rejected while the property is
+present), and listing it in that object's `resetFields` (`"resetFields": ["filteringAttributes"]`
+on the step, `"resetFields": ["attributes"]` on the image; a 1.0 deploy then clears it, and a
+cleared image list selects all attributes); or adopting version 2.0 (the shared adoption text).
+A field already listed in `resetFields` is managed, so it is compared once as an ordinary
+reset and gets no compared-omission guidance. Non-Update steps are compared too (1.4.2 parity).
+
+Every other omitted optional property under missing/1.0 is not compared. Diff and deploy
+report those that are preserved but differ from what 2.0 would write: diff prints a
+labelled stderr notice and adds `data[].preservedLegacyValues`; deploy (real and dry-run)
+prints one stderr notice and adds `data[].preservedLegacyValues` from the rows it already
+read. Diff does not repeat `filteringAttributes` or image `attributes` there, because it
+reports them as drift; deploy's notice still lists them, under a separate heading stating
+they are preserved by deploy but reported as drift by `plugins diff` (deploy's exit code is
+unaffected; the JSON items are unchanged). Items carry path, property,
+stored and version2Value; unsecure configuration is redacted and secure configuration is
+never listed. This notice is advisory only: 1.0 writes, status and exit codes are unchanged.
 
 Real v2 deployment performs read-only verification after acknowledged writes; drift
 or incomplete coverage yields overall non-success and retained mutation outcomes.
@@ -744,9 +767,10 @@ globally non-updatable or change its default or Diff semantics.
 | AC-124 | Explicit direct invocation-source Update reports success only after a fresh exact-row typed match; a retained different value fails without retry, and CLI/RPC propagate the coded failure. | `ExplicitInvocationSource_PersistedValueSucceedsAfterFreshRead`, `ExplicitInvocationSource_RetainedValueFailsWithAcknowledgement`, `CliUpdateStep_VerificationFailureIsNonSuccess`, `RpcUpdateStep_VerificationFailureIsNonSuccess` | Passed offline (net10.0) |
 | AC-125 | Missing/malformed stored evidence, read failure and cancellation preserve acknowledged service effects and safe diagnostics; CLI shows the cancellation warning while RPC wire cancellation retains its standard response without a mutation receipt. Omission preserves established single-write behavior. | `ExplicitInvocationSource_InvalidReadbackIsUnverified`, `ExplicitInvocationSource_ReadFailureIsSafeAndRetainsAcknowledgement`, `ExplicitInvocationSource_CancellationRetainsTokenAndAcknowledgement`, `OmittedInvocationSource_DoesNotAddVerification`, `CliUpdateStep_CancelledVerificationReportsAcknowledgedUnverifiedFailure`, `RpcUpdateStep_CancelledVerificationPreservesExceptionTokenAndAcknowledgement`, `RpcUpdateStep_CancelledWireResponseDoesNotExposeMutationReceipt` | Passed offline (net10.0) |
 | AC-126 | Real v2 command orchestration treats acknowledged Parent write followed by stored Child as drift/non-success with its acknowledgement retained and no retry or deletion. | `Version2_AcknowledgedParentWriteRetainingChildIsDriftWithoutRetry` | Passed offline (net10.0) |
-| AC-133 | For each #1519 step/image property, a 2.0 deploy with a value followed by a 2.0 deploy without it leaves the stored row at the PPDS default, deploy self-verification matches and diff exits 0; the same sequence under 1.0 preserves the value, diff exits 0 and the preserved-value notice lists it. Runs the actual command pipelines and step/image service code against a stateful in-memory row store that honours each query's ColumnSet and link entities, not Dataverse. | `PluginRoundTripConvergenceTests.Version2_ValueThenOmission_ConvergesStoredRowToDefaultAndDiffMatches`, `PluginRoundTripConvergenceTests.Version1_ValueThenOmission_PreservesStoredValueDiffMatchesAndNoticeListsIt` | Passed offline; live convergence unobserved |
+| AC-133 | For each #1519 step/image property, a 2.0 deploy with a value followed by a 2.0 deploy without it leaves the stored row at the PPDS default, deploy self-verification matches and diff exits 0; the same sequence under 1.0 preserves the value and, for every property except `filteringAttributes` and image `attributes` (AC-138), diff exits 0 and the preserved-value notice lists it. Runs the actual command pipelines and step/image service code against a stateful in-memory row store that honours each query's ColumnSet and link entities, not Dataverse. | `PluginRoundTripConvergenceTests.Version2_ValueThenOmission_ConvergesStoredRowToDefaultAndDiffMatches`, `PluginRoundTripConvergenceTests.Version1_ValueThenOmission_PreservesStoredValueDiffMatchesAndNoticeListsIt` | Passed offline; live convergence unobserved |
 | AC-134 | Supplied secure configuration is written, preserved when later omitted, never printed, and does not make a 2.0 deploy or diff non-success. | `SecureConfiguration_SuppliedThenOmitted_IsPreservedAndNeverMakesVerificationFail`, `Version2_SuppliedSecureConfiguration_DeploySucceedsAndVerificationIsComplete`, `RealCommand_SuppliedSecureConfiguration_DoesNotChangeStatusOrExit` | Passed offline |
 | AC-135 | Missing/1.0 diff and deploy report preserved values that differ from 2.0 defaults (text notice and additive `preservedLegacyValues`) without changing status or exit code, redacting unsecure configuration; deploy uses no additional reads, and the advisory is computed outside the write path so a failure in it only omits the notice. | `LegacyOmittedValues_AreReportedAsPreservedNoticeWithoutChangingExit`, `LegacyNotice_IsAbsentWhenStoredValuesEqualVersion2DefaultsAndForVersion2Files`, `Version1_TextAndJson_ReportPreservedValuesThatVersion2WouldChange`, `Version1_AdvisoryFailure_NeverChangesWritesSuccessOrExit`, `EveryVersion2ResettableField_HasASharedStoredValueMappingAndIsReported`, `TryCollect_FailureOmitsTheAdvisoryInsteadOfThrowing`, `StepPaths_IncludeTheAssemblySoSameNamedStepsStayDistinct` | Passed offline |
+| AC-138 | Missing/1.0 diff compares an unset (absent, null or empty) step `filteringAttributes` and image `attributes` against none as CLI 1.4.2 did, for every message: a non-empty stored value (after attribute-set normalisation) is a modified entry with expected `(none)`, exit 1 and `success=true`/`status=drift`, and is not repeated in diff's `preservedLegacyValues`. Resolution guidance is printed once per text run on stderr (nothing on the real stdout), even across assemblies, and per assembly in `data[].warnings` in JSON; it offers only options the validator accepts (set-to-match only for Update/UpdateMultiple steps and images; remove the property, including an explicit null/empty, then list it in `resetFields`; or 2.0). A stored empty value matches; supplied equal-after-normalisation sets match; a field already in `resetFields` is one ordinary change without the guidance; property plus `resetFields` is still rejected; other omitted properties stay advisory; 2.0 is unchanged; incomplete coverage still yields exit 2. 1.0 deploy still preserves the value, exits 0 and lists it under a separate "reported as drift by diff" heading; following the guidance clears it so diff then matches. Help for diff and deploy states the rule. | `PluginDiffReconciliationTests.OmittedOptionalFields_FilteringAttributesIsComparedAsIn142DescriptionIsNot`, `OmittedDescription_AloneIsPreservedNotComparedAndNotDrift`, `RealCommand_Version1UnsetAttributeSet_StoredValueIsDriftWithGuidanceOnStderr`, `RealCommand_Version1AbsentAttributeSets_StoredEmptyIsMatch`, `RealCommand_Version1SetAttributeSets_EqualAfterNormalisationMatch`, `RealCommand_Version1NonUpdateStep_StoredFilteringAttributesIsDriftAndGuidanceOffersOnlyAcceptedOptions`, `RealCommand_Version1ResetFieldsWithStoredValue_IsOneManagedChangeWithoutComparedOmissionGuidance`, `RealCommand_Version1ResetFieldsWithExplicitNullOrEmptyProperty_IsStillRejected`, `RealCommand_TwoDriftingAssemblies_PrintGuidanceOnceWithTheUnionOfOptions`, `RealCommand_Version2SameData_IsUnchangedDriftWithoutLegacyGuidance`, `RealCommand_Version1UnknownPropertyWithComparedOmissionDrift_RemainsIncomplete`, `PluginDiffConsoleStdoutTests.RealCommand_TextMode_ComparedOmissionGuidanceIsOnStderrAndNothingReachesStdout`, `PluginRoundTripConvergenceTests.Version1_ValueThenOmission_ComparedAttributeSetIsPreservedAndDiffReportsDriftWithGuidance`, `PluginRoundTripConvergenceTests.Version1_ResetFields_ClearsComparedAttributeSetAndDiffMatches`, `PluginRoundTripConvergenceTests.Version1_ExplicitNullAttributeSet_FollowingTheGuidanceClearsTheStoredValue`, `DeployReconciliationVerificationTests.Version1_Notice_ListsDiffComparedValuesUnderTheirOwnHeadingWithoutChangingExit`, `PluginsCommandGroupTests.DiffAndDeployHelp_DescribeTheTwoPropertiesAlwaysComparedUnderVersion1` | Passed offline |
 | AC-136 | Dry-run text output of `deploy --clean` and `plugins clean` (2.0) lists each planned image deletion and a planned total without deleting; JSON is unchanged. | `Version2_DryRunCleanText_ListsPlannedImageDeletionsWithPlannedCount`, `ActualCleanCommand_DryRunText_ListsEachPlannedImageWithoutDeleting`, `Version2_CleanPlansBeforeWritesAndPrunesOnlyImages` | Passed offline |
 | AC-137 | The 2.0 orphaned-step warning and deploy/clean help name `ppds plugins unregister step <step-id>` (which parses) and state that verification exits 1 until removal. | `OrphanStepWarning_UsesCleanupGuidanceForTheSelectedFileVersion`, `OrphanedStepGuidance_NamesACommandThatParses`, `DeployCleanAndExtractHelp_DescribeVersionsAndSecureConfiguration` | Passed offline |
 
