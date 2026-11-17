@@ -332,6 +332,34 @@ public sealed class SqlQueryPresenterTests : IDisposable
         Assert.Contains("#1 DELETE account: 2 affected, 0 failed", receivedError);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_CancelledAfterDmlRan_SaysWhatAlreadyRanInsteadOfAPlainCancel()
+    {
+        var fakeSqlService = await GetFakeSqlQueryService();
+        using var presenter = new SqlQueryPresenter(_session, TestEnvironmentUrl);
+        var cancelled = new OperationCanceledException();
+        DmlOutcome.Attach(cancelled, DmlOutcome.From(new[]
+        {
+            new DmlStatementOutcome(PPDS.Dataverse.Query.Planning.Nodes.DmlOperation.Delete, "account", 2, 0, null, "1"),
+            new DmlStatementOutcome(PPDS.Dataverse.Query.Planning.Nodes.DmlOperation.Delete, "contact", 0, 0, null, "2", Interrupted: true)
+        })!);
+        fakeSqlService.ExceptionToThrow = cancelled;
+        presenter.StatusChanged += _ => presenter.CancelQuery(); // the user cancels while it runs
+
+        string? receivedError = null;
+        var plainCancel = false;
+        presenter.ErrorOccurred += msg => receivedError = msg;
+        presenter.QueryCancelled += () => plainCancel = true;
+
+        await presenter.ExecuteAsync("DELETE FROM account WHERE name = 'x'; DELETE FROM contact WHERE name = 'y'", CancellationToken.None);
+
+        Assert.False(plainCancel);
+        Assert.StartsWith("Query cancelled.", receivedError);
+        Assert.Contains("#1 DELETE account: 2 affected, 0 failed", receivedError);
+        Assert.Contains("#2 DELETE contact was running when the run was interrupted and may be partly applied", receivedError);
+        Assert.False(presenter.IsExecuting);
+    }
+
     /// <summary>
     /// AC-24: Error handling works for generic exceptions after flattening double try-catch.
     /// </summary>

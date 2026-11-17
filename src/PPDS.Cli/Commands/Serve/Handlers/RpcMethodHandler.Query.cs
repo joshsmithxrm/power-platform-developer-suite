@@ -327,84 +327,9 @@ public partial class RpcMethodHandler
 
                 return mapped;
             }
-            catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.ParseError)
+            catch (Exception ex) when (TryMapQuerySqlFailure(ex, request.Sql, out var rpcException))
             {
-                var diagnostics = ExtractParseDiagnostics(ex, request.Sql);
-                if (diagnostics is { Count: > 0 })
-                {
-                    throw new RpcException(
-                        ErrorCodes.Query.ParseError,
-                        ex.UserMessage,
-                        new RpcErrorData
-                        {
-                            Code = ErrorCodes.Query.ParseError,
-                            Message = ex.UserMessage,
-                            Diagnostics = diagnostics,
-                        });
-                }
-                throw new RpcException(ErrorCodes.Query.ParseError, ex.UserMessage);
-            }
-            catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.DmlConfirmationRequired)
-            {
-                throw new RpcException(
-                    ErrorCodes.Query.DmlConfirmationRequired,
-                    ex.UserMessage,
-                    new DmlSafetyErrorData
-                    {
-                        Code = ErrorCodes.Query.DmlConfirmationRequired,
-                        Message = ex.UserMessage,
-                        DmlConfirmationRequired = true,
-                    });
-            }
-            catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.DmlBlocked)
-            {
-                throw new RpcException(
-                    ErrorCodes.Query.DmlBlocked,
-                    ex.UserMessage,
-                    new DmlSafetyErrorData
-                    {
-                        Code = ErrorCodes.Query.DmlBlocked,
-                        Message = ex.UserMessage,
-                        DmlBlocked = true,
-                    });
-            }
-            catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.DmlRowCapExceeded)
-            {
-                throw new RpcException(
-                    ErrorCodes.Query.DmlRowCapExceeded,
-                    ex.UserMessage,
-                    new DmlSafetyErrorData
-                    {
-                        Code = ErrorCodes.Query.DmlRowCapExceeded,
-                        Message = ex.UserMessage,
-                        DmlRowCapExceeded = true,
-                        DmlCommitted = DmlOutcome.From(ex)?.DescribeCommitted(),
-                    });
-            }
-            catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.TdsIncompatible)
-            {
-                throw new RpcException(ErrorCodes.Query.TdsIncompatible, ex.UserMessage);
-            }
-            catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.TdsConnectionFailed)
-            {
-                throw new RpcException(ErrorCodes.Query.TdsConnectionFailed, ex.UserMessage);
-            }
-            catch (PpdsException ex)
-            {
-                throw MapPpdsToRpcException(ex);
-            }
-            catch (Exception ex) when (ex is not RpcException and not OperationCanceledException && DmlOutcome.From(ex) != null)
-            {
-                // A script was interrupted after some DML ran: say so instead of a bare error.
-                throw new RpcException(
-                    ErrorCodes.Query.ExecutionFailed,
-                    ex.Message,
-                    new RpcErrorData
-                    {
-                        Code = ErrorCodes.Query.ExecutionFailed,
-                        Message = ex.Message,
-                        DmlCommitted = DmlOutcome.From(ex)!.DescribeCommitted(),
-                    });
+                throw rpcException!;
             }
         }, cancellationToken, profileIdentity: request.ProfileIdentity);
 

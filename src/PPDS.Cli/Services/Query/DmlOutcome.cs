@@ -32,8 +32,11 @@ public sealed class DmlOutcome
     /// <summary>Total rows that failed across all statements.</summary>
     public long FailedRows { get; }
 
-    /// <summary>True when any row of any statement failed.</summary>
-    public bool HasFailures => FailedRows > 0;
+    /// <summary>
+    /// True when any row of any statement failed, or a statement was interrupted part-way (its rows may be partly
+    /// applied, so the run is not a success).
+    /// </summary>
+    public bool HasFailures => FailedRows > 0 || Statements.Any(s => s.Interrupted);
 
     /// <summary>True when rows failed and none succeeded in any statement.</summary>
     public bool IsTotalFailure => HasFailures && AffectedRows == 0;
@@ -69,16 +72,33 @@ public sealed class DmlOutcome
         => exception.Data.Contains(ExceptionDataKey) ? exception.Data[ExceptionDataKey] as DmlOutcome : null;
 
     /// <summary>
-    /// For a run that was interrupted (error or cancellation): what the statements that already ran did.
-    /// They are not rolled back.
+    /// For a run that was interrupted (error or cancellation): what the statements that already ran did (they are not
+    /// rolled back), and which statement was running when it stopped (it may be partly applied). Never claims a rollback.
     /// </summary>
     public string DescribeCommitted()
     {
-        var parts = Statements.Take(MaxStatementsListed).Select((s, i) =>
-            $"{Label(s, i + 1)}: {s.AffectedRows} affected, {s.FailedRows} failed");
-        var more = Statements.Count > MaxStatementsListed ? $"; and {Statements.Count - MaxStatementsListed} more" : string.Empty;
-        return $"Statements that already ran before the interruption were not rolled back: {string.Join("; ", parts)}{more}.";
+        var indexed = Statements.Select((s, i) => (Statement: s, Index: i + 1)).ToList();
+        var completed = indexed.Where(x => !x.Statement.Interrupted).ToList();
+        var sentences = new List<string>();
+
+        if (completed.Count > 0)
+        {
+            var parts = completed.Take(MaxStatementsListed).Select(x =>
+                $"{Label(x.Statement, x.Index)}: {x.Statement.AffectedRows} affected, {x.Statement.FailedRows} failed");
+            var more = completed.Count > MaxStatementsListed ? $"; and {completed.Count - MaxStatementsListed} more" : string.Empty;
+            sentences.Add($"Statements that already ran before the interruption were not rolled back: {string.Join("; ", parts)}{more}.");
+        }
+
+        foreach (var x in indexed.Where(x => x.Statement.Interrupted).Take(MaxStatementsListed))
+            sentences.Add($"{Label(x.Statement, x.Index)} was running when the run was interrupted and may be partly applied: {InterruptedCounts(x.Statement)}");
+
+        return string.Join(" ", sentences);
     }
+
+    private static string InterruptedCounts(DmlStatementOutcome s)
+        => s.AffectedRows + s.FailedRows > 0
+            ? $"{s.AffectedRows} row(s) had been reported as changed and {s.FailedRows} as failed before it stopped; the exact number of changed rows is unknown."
+            : "the number of rows it changed is unknown.";
 
     private static string Label(DmlStatementOutcome s, int executionIndex)
         => $"#{s.Position ?? executionIndex.ToString()} {s.Operation.ToString().ToUpperInvariant()} {s.EntityLogicalName}";
@@ -87,13 +107,15 @@ public sealed class DmlOutcome
     {
         var failed = Statements
             .Select((s, i) => (Statement: s, Index: i + 1))
-            .Where(x => x.Statement.FailedRows > 0)
+            .Where(x => x.Statement.FailedRows > 0 || x.Statement.Interrupted)
             .ToList();
 
         if (Statements.Count == 1)
         {
             var only = failed[0].Statement;
             var what = $"{only.Operation.ToString().ToUpperInvariant()} {only.EntityLogicalName}";
+            if (only.Interrupted)
+                return $"DML was interrupted ({what}) and may be partly applied: {InterruptedCounts(only)}";
             var head = only.AffectedRows > 0
                 ? $"DML partially succeeded ({what}): {only.AffectedRows} row(s) affected, {only.FailedRows} row(s) failed."
                 : $"DML failed ({what}): all {only.FailedRows} row(s) failed.";
@@ -103,9 +125,10 @@ public sealed class DmlOutcome
         var summary = IsTotalFailure
             ? $"DML failed across {Statements.Count} statements: all {FailedRows} row(s) failed."
             : $"DML partially succeeded across {Statements.Count} statements: {AffectedRows} row(s) affected, {FailedRows} row(s) failed.";
-        var details = failed.Take(MaxStatementsListed).Select(x =>
-            $"{Label(x.Statement, x.Index)}: {x.Statement.AffectedRows} affected, {x.Statement.FailedRows} failed" +
-            ErrorSuffix(x.Statement.ErrorMessage, " (example error: ", ")"));
+        var details = failed.Take(MaxStatementsListed).Select(x => x.Statement.Interrupted
+            ? $"{Label(x.Statement, x.Index)}: interrupted and may be partly applied ({x.Statement.AffectedRows} affected, {x.Statement.FailedRows} failed reported before it stopped)"
+            : $"{Label(x.Statement, x.Index)}: {x.Statement.AffectedRows} affected, {x.Statement.FailedRows} failed" +
+              ErrorSuffix(x.Statement.ErrorMessage, " (example error: ", ")"));
         var more = failed.Count > MaxStatementsListed ? $"; and {failed.Count - MaxStatementsListed} more" : string.Empty;
         return $"{summary} Failed statements: {string.Join("; ", details)}{more}.";
     }

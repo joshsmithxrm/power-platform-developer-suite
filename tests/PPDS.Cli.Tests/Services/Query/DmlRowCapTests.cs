@@ -1,7 +1,5 @@
-using System.Text.Json;
 using Moq;
 using PPDS.Auth.Profiles;
-using PPDS.Cli.Commands.Serve.Handlers;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Query;
 using PPDS.Cli.Tests.Services.Shared;
@@ -198,42 +196,8 @@ public class DmlRowCapTests
         AssertNothingChanged(h);
     }
 
-    // ---- RPC shape --------------------------------------------------------------
-
-    [Fact]
-    public void Rpc_RowCapRefusal_SerializesLikeTheOtherGuardRefusals()
-    {
-        var data = new DmlSafetyErrorData
-        {
-            Code = ErrorCodes.Query.DmlRowCapExceeded,
-            Message = "refused",
-            DmlRowCapExceeded = true,
-        };
-
-        using var json = JsonDocument.Parse(JsonSerializer.Serialize(data, data.GetType()));
-
-        Assert.Equal("Query.DmlRowCapExceeded", json.RootElement.GetProperty("code").GetString());
-        Assert.True(json.RootElement.GetProperty("dmlRowCapExceeded").GetBoolean());
-        Assert.False(json.RootElement.GetProperty("dmlBlocked").GetBoolean());
-        Assert.False(json.RootElement.TryGetProperty("dmlCommitted", out _));
-    }
-
-    [Fact]
-    public async Task Rpc_InterruptedScript_ErrorDataCarriesWhatAlreadyRan()
-    {
-        var h = Create(rows: 2, contactRows: 5);
-        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest
-        {
-            Sql = "DELETE FROM account WHERE name = 'x'; DELETE FROM contact WHERE lastname = 'y'",
-            DmlSafety = Cap(2)
-        }));
-
-        var rpc = RpcMethodHandler.MapPpdsToRpcException(ex);
-
-        var data = Assert.IsAssignableFrom<RpcErrorData>(rpc.ErrorData);
-        Assert.Equal(ErrorCodes.Query.DmlRowCapExceeded, data.Code);
-        Assert.Contains("#1 DELETE account", data.DmlCommitted);
-    }
+    // RPC error data for the row cap is asserted through the handler's real mapping in
+    // DmlInterruptedRunTests.Rpc_RowCapRefusal_GoesThroughTheHandlerMapping_WithItsFlagAndWhatAlreadyRan.
 
     // ---- --top ----------------------------------------------------------------
 

@@ -115,7 +115,8 @@ public class DmlScriptReportingTests
         bulk.Setup(b => b.UpdateMultipleAsync("contact", It.IsAny<IEnumerable<Microsoft.Xrm.Sdk.Entity>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("connection lost"));
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExecuteAsync(new SqlQueryRequest
+        // Wrapped in a PpdsException with a code (Constitution D4), carrying what already ran.
+        var ex = await Assert.ThrowsAsync<PPDS.Cli.Infrastructure.Errors.PpdsException>(() => service.ExecuteAsync(new SqlQueryRequest
         {
             Sql = "UPDATE account SET name = 'a' WHERE name = 'x'; UPDATE contact SET lastname = 'b' WHERE lastname = 'y'",
             DmlSafety = Confirmed

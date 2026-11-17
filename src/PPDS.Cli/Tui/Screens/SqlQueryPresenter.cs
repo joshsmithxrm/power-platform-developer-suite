@@ -256,10 +256,20 @@ internal sealed class SqlQueryPresenter : IDisposable
             _isExecuting = false;
             AuthenticationRequired?.Invoke(authEx);
         }
-        catch (OperationCanceledException) when (_queryCts?.IsCancellationRequested == true && !screenCancellation.IsCancellationRequested)
+        catch (OperationCanceledException cancelled) when (_queryCts?.IsCancellationRequested == true && !screenCancellation.IsCancellationRequested)
         {
             _isExecuting = false;
-            QueryCancelled?.Invoke();
+            // Cancelling after DML ran must say what already changed (not rolled back) and what may be partly applied.
+            var committed = DmlOutcome.From(cancelled)?.DescribeCommitted();
+            if (committed == null)
+            {
+                QueryCancelled?.Invoke();
+            }
+            else
+            {
+                _lastErrorMessage = $"Query cancelled. {committed}";
+                ErrorOccurred?.Invoke(_lastErrorMessage);
+            }
         }
         catch (OperationCanceledException) when (screenCancellation.IsCancellationRequested)
         {

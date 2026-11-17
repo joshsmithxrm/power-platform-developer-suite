@@ -242,6 +242,64 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         return (result.SuccessCount, result.FailureCount);
     }
 
+    /// <summary>
+    /// Runs the bulk call that changes rows. If it throws or is cancelled part-way, rows of this statement may already be
+    /// committed (batches run in parallel and are not rolled back), so the statement is recorded as interrupted with the
+    /// counts the executor had reported so far, before the exception propagates.
+    /// </summary>
+    private async System.Threading.Tasks.Task<BulkOperationResult> RunBulkAsync(
+        QueryPlanContext context,
+        Func<IProgress<ProgressSnapshot>, System.Threading.Tasks.Task<BulkOperationResult>> bulkCall)
+    {
+        var tracker = new ProgressTracker(CreateProgressAdapter(context));
+        try
+        {
+            return await bulkCall(tracker).ConfigureAwait(false);
+        }
+        catch (Exception) when (RecordInterrupted(context, tracker))
+        {
+            throw; // never reached: the filter records the interrupted statement and returns false
+        }
+    }
+
+    private bool RecordInterrupted(QueryPlanContext context, ProgressTracker tracker)
+    {
+        context.Statistics.AddDmlOutcome(new DmlStatementOutcome(
+            Operation, EntityLogicalName, tracker.Succeeded, tracker.Failed, null,
+            context.Statistics.CurrentStatementPosition, Interrupted: true));
+        return false;
+    }
+
+    /// <summary>Remembers the latest counts the bulk executor reported, and forwards each report.</summary>
+    private sealed class ProgressTracker : IProgress<ProgressSnapshot>
+    {
+        private readonly IProgress<ProgressSnapshot>? _inner;
+        private long _succeeded;
+        private long _failed;
+
+        public ProgressTracker(IProgress<ProgressSnapshot>? inner) => _inner = inner;
+
+        public long Succeeded => Interlocked.Read(ref _succeeded);
+        public long Failed => Interlocked.Read(ref _failed);
+
+        public void Report(ProgressSnapshot value)
+        {
+            // Parallel batches can report out of order; counts only grow, so keep the largest seen.
+            InterlockedMax(ref _succeeded, value.Succeeded);
+            InterlockedMax(ref _failed, value.Failed);
+            _inner?.Report(value);
+        }
+
+        private static void InterlockedMax(ref long target, long value)
+        {
+            long current;
+            while (value > (current = Interlocked.Read(ref target))
+                && Interlocked.CompareExchange(ref target, value, current) != current)
+            {
+            }
+        }
+    }
+
     private static readonly IReadOnlyDictionary<string, QueryValue> EmptyRow =
         new Dictionary<string, QueryValue>();
 
@@ -268,12 +326,11 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             entities.Add(entity);
         }
 
-        var progress = CreateProgressAdapter(context);
-        var result = await context.BulkOperationExecutor!.CreateMultipleAsync(
+        var result = await RunBulkAsync(context, progress => context.BulkOperationExecutor!.CreateMultipleAsync(
             EntityLogicalName,
             entities,
             progress: progress,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+            cancellationToken: cancellationToken)).ConfigureAwait(false);
 
         return Summarize(context, result);
     }
@@ -324,12 +381,11 @@ public sealed class DmlExecuteNode : IQueryPlanNode
 
         if (entities.Count == 0) return NoRows(context);
 
-        var progress = CreateProgressAdapter(context);
-        var result = await context.BulkOperationExecutor!.CreateMultipleAsync(
+        var result = await RunBulkAsync(context, progress => context.BulkOperationExecutor!.CreateMultipleAsync(
             EntityLogicalName,
             entities,
             progress: progress,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+            cancellationToken: cancellationToken)).ConfigureAwait(false);
 
         return Summarize(context, result);
     }
@@ -370,12 +426,11 @@ public sealed class DmlExecuteNode : IQueryPlanNode
 
         if (entities.Count == 0) return NoRows(context);
 
-        var progress = CreateProgressAdapter(context);
-        var result = await context.BulkOperationExecutor!.UpdateMultipleAsync(
+        var result = await RunBulkAsync(context, progress => context.BulkOperationExecutor!.UpdateMultipleAsync(
             EntityLogicalName,
             entities,
             progress: progress,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+            cancellationToken: cancellationToken)).ConfigureAwait(false);
 
         return Summarize(context, result);
     }
@@ -405,12 +460,11 @@ public sealed class DmlExecuteNode : IQueryPlanNode
 
         if (ids.Count == 0) return NoRows(context);
 
-        var progress = CreateProgressAdapter(context);
-        var result = await context.BulkOperationExecutor!.DeleteMultipleAsync(
+        var result = await RunBulkAsync(context, progress => context.BulkOperationExecutor!.DeleteMultipleAsync(
             EntityLogicalName,
             ids,
             progress: progress,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+            cancellationToken: cancellationToken)).ConfigureAwait(false);
 
         return Summarize(context, result);
     }

@@ -227,6 +227,10 @@ public sealed class SqlQueryService : ISqlQueryService
         {
             throw WrapRowCapExceeded(ex, context);
         }
+        catch (Exception ex) when (DmlRan(context) && ex is not PpdsException and not OperationCanceledException)
+        {
+            throw WrapInterrupted(ex, context);
+        }
         catch (Exception ex) when (RecordCommittedOutcome(ex, context))
         {
             throw; // never reached: the filter only attaches what already ran and returns false
@@ -269,10 +273,6 @@ public sealed class SqlQueryService : ISqlQueryService
     }
 
     /// <summary>
-    /// Exception filter: when a script is interrupted (error, cancellation) after some DML statements already
-    /// ran, attaches their outcomes to the exception so callers can report what was changed. Always false.
-    /// </summary>
-    /// <summary>
     /// The row-cap refusal as a <see cref="PpdsException"/> with its own error code, carrying the outcomes of
     /// any earlier script statements that already ran.
     /// </summary>
@@ -283,6 +283,36 @@ public sealed class SqlQueryService : ISqlQueryService
         return wrapped;
     }
 
+    private static bool DmlRan(QueryPlanContext context) => context.Statistics.DmlOutcomes.Count > 0;
+
+    /// <summary>
+    /// A failure after DML already changed rows (an earlier statement ran, or the failing statement was part-way
+    /// through). Wrapped in a <see cref="PpdsException"/> (keeping the original code for query errors) that carries
+    /// what already ran, so every caller can report it. Cancellation stays an <see cref="OperationCanceledException"/>.
+    /// </summary>
+    private static PpdsException WrapInterrupted(Exception ex, QueryPlanContext context)
+    {
+        var message = PPDS.Dataverse.Security.ConnectionStringRedactor.RedactExceptionMessage(ex.Message);
+        PpdsException wrapped = ex switch
+        {
+            PPDS.Dataverse.Resilience.DataverseAuthenticationException auth => new PpdsAuthException(
+                auth.RequiresReauthentication ? ErrorCodes.Auth.Expired : ErrorCodes.Auth.InsufficientPermissions, message, ex)
+            {
+                // Never re-authenticate and retry automatically: statements that already ran would run again.
+                RequiresReauthentication = false
+            },
+            QueryExecutionException query => new PpdsException(query.ErrorCode, message, ex),
+            _ => new PpdsException(ErrorCodes.Query.ExecutionFailed, message, ex)
+        };
+        RecordCommittedOutcome(wrapped, context);
+        return wrapped;
+    }
+
+    /// <summary>
+    /// Exception filter: when a run is interrupted (error, cancellation) after some DML already ran, attaches the
+    /// outcomes (including a statement that was part-way through) to the exception so callers can report what was
+    /// changed. Always false.
+    /// </summary>
     private static bool RecordCommittedOutcome(Exception exception, QueryPlanContext context)
     {
         var outcome = DmlOutcome.From(context.Statistics.DmlOutcomes);
@@ -431,6 +461,10 @@ public sealed class SqlQueryService : ISqlQueryService
                 catch (QueryExecutionException ex) when (ex.ErrorCode == QueryErrorCode.DmlRowCapExceeded)
                 {
                     throw WrapRowCapExceeded(ex, context);
+                }
+                catch (Exception ex) when (DmlRan(context) && ex is not PpdsException and not OperationCanceledException)
+                {
+                    throw WrapInterrupted(ex, context);
                 }
                 catch (Exception ex) when (RecordCommittedOutcome(ex, context))
                 {

@@ -133,10 +133,15 @@ public sealed class NodeStatistics
 /// parallel, so this is not necessarily the error of the first row.
 /// </param>
 /// <param name="Position">Position of the statement in its script ("3", "2.1" in a block); null outside scripts.</param>
+/// <param name="Interrupted">
+/// True when the statement's bulk call threw or was cancelled part-way: some of its rows may be committed. The counts
+/// are what had been reported before the interruption (a lower bound), not the final result.
+/// </param>
 public sealed record DmlStatementOutcome(
     Nodes.DmlOperation Operation,
     string EntityLogicalName,
     long AffectedRows,
     long FailedRows,
     string? ErrorMessage,
-    string? Position = null);
+    string? Position = null,
+    bool Interrupted = false);

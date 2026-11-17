@@ -219,6 +219,75 @@ public partial class RpcMethodHandler
             : new DmlSafetyOptions(),
     };
 
+    /// <summary>
+    /// Maps a failure of <c>query/sql</c> to the error clients receive. Every guard refusal carries its flag
+    /// (<c>dmlConfirmationRequired</c>, <c>dmlBlocked</c>, <c>dmlRowCapExceeded</c>); when DML already ran before the
+    /// failure (including a cancelled run), <c>dmlCommitted</c> says what changed and the message repeats it. Returns
+    /// false for anything else, which then propagates unchanged (an <see cref="RpcException"/>, or a bare cancellation).
+    /// </summary>
+    internal static bool TryMapQuerySqlFailure(Exception ex, string sql, out RpcException? rpcException)
+    {
+        var committed = DmlOutcome.From(ex)?.DescribeCommitted();
+        string WithCommitted(string message) => committed == null ? message : $"{message} {committed}";
+
+        rpcException = ex switch
+        {
+            RpcException => null,
+            PpdsException { ErrorCode: ErrorCodes.Query.ParseError } parse =>
+                ExtractParseDiagnostics(parse, sql) is { Count: > 0 } diagnostics
+                    ? new RpcException(ErrorCodes.Query.ParseError, parse.UserMessage, new RpcErrorData
+                    {
+                        Code = ErrorCodes.Query.ParseError,
+                        Message = parse.UserMessage,
+                        Diagnostics = diagnostics,
+                    })
+                    : new RpcException(ErrorCodes.Query.ParseError, parse.UserMessage),
+            PpdsException { ErrorCode: ErrorCodes.Query.DmlConfirmationRequired } confirm =>
+                new RpcException(ErrorCodes.Query.DmlConfirmationRequired, confirm.UserMessage, new DmlSafetyErrorData
+                {
+                    Code = ErrorCodes.Query.DmlConfirmationRequired,
+                    Message = confirm.UserMessage,
+                    DmlConfirmationRequired = true,
+                }),
+            PpdsException { ErrorCode: ErrorCodes.Query.DmlBlocked } blocked =>
+                new RpcException(ErrorCodes.Query.DmlBlocked, blocked.UserMessage, new DmlSafetyErrorData
+                {
+                    Code = ErrorCodes.Query.DmlBlocked,
+                    Message = blocked.UserMessage,
+                    DmlBlocked = true,
+                }),
+            PpdsException { ErrorCode: ErrorCodes.Query.DmlRowCapExceeded } cap =>
+                new RpcException(ErrorCodes.Query.DmlRowCapExceeded, WithCommitted(cap.UserMessage), new DmlSafetyErrorData
+                {
+                    Code = ErrorCodes.Query.DmlRowCapExceeded,
+                    Message = WithCommitted(cap.UserMessage),
+                    DmlRowCapExceeded = true,
+                    DmlCommitted = committed,
+                }),
+            PpdsException { ErrorCode: ErrorCodes.Query.TdsIncompatible or ErrorCodes.Query.TdsConnectionFailed } tds =>
+                new RpcException(tds.ErrorCode, tds.UserMessage),
+            PpdsException other => WithCommittedMessage(MapPpdsToRpcException(other), committed),
+            OperationCanceledException when committed != null =>
+                new RpcException(ErrorCodes.Operation.Cancelled, WithCommitted("The query was cancelled."), new RpcErrorData
+                {
+                    Code = ErrorCodes.Operation.Cancelled,
+                    Message = WithCommitted("The query was cancelled."),
+                    DmlCommitted = committed,
+                }),
+            _ => null
+        };
+        return rpcException != null;
+    }
+
+    private static RpcException WithCommittedMessage(RpcException mapped, string? committed)
+    {
+        if (committed == null || mapped.ErrorData is not RpcErrorData data)
+            return mapped;
+
+        data.Message = $"{data.Message} {committed}";
+        return new RpcException(mapped.StructuredErrorCode, data.Message, data);
+    }
+
     internal static QueryResultResponse MapToResponse(SqlQueryResult result)
     {
         var response = MapToResponse(result.Result, result.TranspiledFetchXml);
