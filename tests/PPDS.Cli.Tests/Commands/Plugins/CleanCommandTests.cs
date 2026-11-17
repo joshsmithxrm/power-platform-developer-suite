@@ -49,8 +49,9 @@ public class CleanCommandTests : IDisposable
     [Fact]
     public void Create_ReturnsCommandWithDescription()
     {
-        Assert.Contains("Version 1: legacy parent cleanup", _command.Description);
-        Assert.Contains("version 2: prune owned images on configured steps", _command.Description);
+        Assert.Contains("Version 1.0/missing: delete orphaned steps", _command.Description);
+        Assert.Contains("Version 2.0: delete only owned images not listed on configured steps", _command.Description);
+        Assert.Contains("ppds plugins unregister step <step-id>", _command.Description);
     }
 
     [Fact]

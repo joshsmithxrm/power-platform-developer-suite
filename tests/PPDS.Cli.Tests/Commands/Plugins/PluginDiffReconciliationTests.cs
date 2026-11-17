@@ -7,6 +7,7 @@ using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Plugins;
+using PPDS.Cli.Tests.TestHelpers;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Plugins;
@@ -14,7 +15,7 @@ namespace PPDS.Cli.Tests.Commands.Plugins;
 [Trait("Category", "Unit")]
 public sealed class PluginDiffReconciliationTests
 {
-    private static (PluginAssemblyConfig Config, PluginStepConfig Step, PluginStepInfo Env,
+    internal static (PluginAssemblyConfig Config, PluginStepConfig Step, PluginStepInfo Env,
         PluginImageConfig Image, PluginImageInfo EnvImage, Mock<IPluginRegistrationService> Service) Fixture()
     {
         var image = new PluginImageConfig { Name = "before", ImageType = "PreImage", Attributes = "name" };
@@ -151,12 +152,359 @@ public sealed class PluginDiffReconciliationTests
     }
 
     [Fact]
-    public async Task OmittedOptionalFields_PreserveAndDoNotCompare()
+    [Trait("AC", "AC-138")]
+    public async Task OmittedOptionalFields_FilteringAttributesIsComparedAsIn142DescriptionIsNot()
     {
         var f = Fixture();
         f.Env.FilteringAttributes = "telephone1";
         f.Env.Description = "existing";
-        Assert.False((await DiffCommand.ComputeDriftAsync(f.Service.Object, f.Config)).HasDrift);
+        var drift = await DiffCommand.ComputeDriftAsync(f.Service.Object, f.Config);
+
+        // filteringAttributes: compared against none even though omitted (1.4.2 parity) -> drift.
+        Assert.True(drift.HasDrift);
+        Assert.True(drift.IsComplete);
+        var change = Assert.Single(Assert.Single(drift.ModifiedSteps).Changes);
+        Assert.Equal(new PropertyChange("filteringAttributes", "(none)", "telephone1"), change);
+        Assert.Empty(drift.ModifiedImages);
+        Assert.Contains(drift.Coverage.Checked, c => c.Field == "filteringAttributes");
+        Assert.DoesNotContain(drift.Coverage.Unmanaged, c => c.Field == "filteringAttributes");
+        Assert.Equal(ComparedOmissionKinds.FilterableStep, drift.LegacyComparedOmissions);
+        Assert.Equal(PluginLegacyPreservationService.DescribeComparedOmissionWarning(ComparedOmissionKinds.FilterableStep),
+            Assert.Single(drift.Warnings));
+
+        // description: still preserved, not compared, advisory only.
+        Assert.Contains(drift.Coverage.Unmanaged, c => c.Field == "description");
+        Assert.Contains(drift.PreservedLegacyValues!, v => v.Property == "description");
+        Assert.DoesNotContain(drift.PreservedLegacyValues!, v => v.Property == "filteringAttributes");
+    }
+
+    [Fact]
+    [Trait("AC", "AC-138")]
+    public async Task OmittedDescription_AloneIsPreservedNotComparedAndNotDrift()
+    {
+        var f = Fixture();
+        f.Env.Description = "existing";
+        var drift = await DiffCommand.ComputeDriftAsync(f.Service.Object, f.Config);
+        Assert.False(drift.HasDrift);
+        Assert.True(drift.IsComplete);
+        Assert.Equal(ComparedOmissionKinds.None, drift.LegacyComparedOmissions);
+        Assert.Empty(drift.Warnings);
+        Assert.Contains(drift.PreservedLegacyValues!, v => v.Property == "description");
+    }
+
+    [Theory]
+    [Trait("AC", "AC-138")]
+    [InlineData(null, false, "absent")]
+    [InlineData("1.0", false, "absent")]
+    [InlineData("1.0", false, "null")]
+    [InlineData("1.0", false, "empty")]
+    [InlineData(null, true, "absent")]
+    [InlineData("1.0", true, "absent")]
+    [InlineData("1.0", true, "null")]
+    [InlineData("1.0", true, "empty")]
+    public async Task RealCommand_Version1UnsetAttributeSet_StoredValueIsDriftWithGuidanceOnStderr(string? version, bool onImage, string shape)
+    {
+        var f = Fixture();
+        string property, actual;
+        if (onImage)
+        {
+            f.EnvImage.Attributes = " Telephone1,NAME ";
+            (property, actual) = ("attributes", "name,telephone1");
+        }
+        else
+        {
+            f.Env.FilteringAttributes = "telephone1,Name";
+            (property, actual) = ("filteringAttributes", "name,telephone1");
+        }
+        f.Env.Description = "stored description"; // other omissions stay advisory
+        var kind = onImage ? ComparedOmissionKinds.Image : ComparedOmissionKinds.FilterableStep;
+        // Hand-written so "absent" is truly absent (the model serialiser writes explicit nulls).
+        var input = FileJson(version, AssemblyJson(
+            step: onImage ? "" : Shape("filteringAttributes", shape),
+            image: onImage ? Shape("attributes", shape) : NamedImageAttributes));
+
+        var (exit, output, error) = await Invoke(f.Service.Object, input, json: true);
+        Assert.Equal(1, exit);
+        Assert.Empty(error);
+        using (var document = JsonDocument.Parse(output))
+        {
+            var root = document.RootElement;
+            Assert.True(root.GetProperty("success").GetBoolean());
+            var metadata = root.GetProperty("metadata");
+            Assert.Equal("drift", metadata.GetProperty("status").GetString());
+            Assert.True(metadata.GetProperty("isComplete").GetBoolean());
+            Assert.True(metadata.GetProperty("hasDrift").GetBoolean());
+            var assembly = Assert.Single(root.GetProperty("data").EnumerateArray());
+            var modified = Assert.Single(assembly.GetProperty(onImage ? "modifiedImages" : "modifiedSteps").EnumerateArray());
+            Assert.Empty(assembly.GetProperty(onImage ? "modifiedSteps" : "modifiedImages").EnumerateArray());
+            var change = Assert.Single(modified.GetProperty("changes").EnumerateArray());
+            Assert.Equal(property, change.GetProperty("property").GetString());
+            Assert.Equal("(none)", change.GetProperty("expected").GetString());
+            Assert.Equal(actual, change.GetProperty("actual").GetString());
+            Assert.Equal(PluginLegacyPreservationService.DescribeComparedOmissionWarning(kind),
+                Assert.Single(assembly.GetProperty("warnings").EnumerateArray()).GetString());
+            // Reported as drift, so not repeated in the advisory; the other omission remains advisory.
+            var preserved = assembly.GetProperty("preservedLegacyValues").EnumerateArray()
+                .Select(v => v.GetProperty("property").GetString()).ToList();
+            Assert.Equal(["description"], preserved);
+        }
+
+        // Stdout is pinned by PluginDiffConsoleStdoutTests; the injected writer is unused in text mode.
+        (exit, _, error) = await Invoke(f.Service.Object, input, json: false);
+        Assert.Equal(1, exit);
+        Assert.Contains($"{property}: (none) -> {actual}", error);
+        Assert.Contains("Notice: " + PluginLegacyPreservationService.DescribeComparedOmissionGuidance(kind), error);
+        Assert.Equal(1, Occurrences(error, PluginLegacyPreservationService.ComparedOmissionIntro));
+        Assert.Equal(1, Occurrences(error, PluginLegacyPreservationService.AdoptionGuidance));
+        Assert.Equal(!onImage, error.Contains(PluginLegacyPreservationService.FilterableStepOption, StringComparison.Ordinal));
+        Assert.Equal(onImage, error.Contains(PluginLegacyPreservationService.ImageOption, StringComparison.Ordinal));
+        Assert.DoesNotContain(PluginLegacyPreservationService.OtherStepOption, error);
+        Assert.Contains("must be removed too", error);
+        Assert.Contains("description stored stored description", error);
+        Assert.DoesNotContain($"{property} stored", error);
+    }
+
+    [Theory]
+    [Trait("AC", "AC-138")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" , ")]
+    public async Task RealCommand_Version1AbsentAttributeSets_StoredEmptyIsMatch(string? stored)
+    {
+        var f = Fixture();
+        f.Env.FilteringAttributes = stored;
+        f.EnvImage.Attributes = stored;
+        var input = FileJson(null, AssemblyJson(image: "")); // unversioned; both properties absent
+        var (exit, output, error) = await Invoke(f.Service.Object, input, json: true);
+        Assert.Equal(0, exit);
+        Assert.Empty(error);
+        using (var document = JsonDocument.Parse(output))
+        {
+            Assert.Equal("match", document.RootElement.GetProperty("metadata").GetProperty("status").GetString());
+            Assert.Empty(document.RootElement.GetProperty("data")[0].GetProperty("warnings").EnumerateArray());
+        }
+        (exit, _, error) = await Invoke(f.Service.Object, input, json: false);
+        Assert.Equal(0, exit);
+        Assert.DoesNotContain(PluginLegacyPreservationService.ComparedOmissionIntro, error);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-138")]
+    public async Task RealCommand_Version1SetAttributeSets_EqualAfterNormalisationMatch()
+    {
+        var f = Fixture();
+        f.Step.FilteringAttributes = " Telephone1 , NAME,name";
+        f.Env.FilteringAttributes = "name,telephone1";
+        f.Image.Attributes = "NAME ";
+        f.EnvImage.Attributes = "name";
+        var input = JsonSerializer.Serialize(new PluginRegistrationConfig { Version = "1.0", Assemblies = [f.Config] });
+        var (exit, _, error) = await Invoke(f.Service.Object, input, json: false);
+        Assert.Equal(0, exit);
+        Assert.DoesNotContain(PluginLegacyPreservationService.ComparedOmissionIntro, error);
+        (exit, var output, _) = await Invoke(f.Service.Object, input, json: true);
+        Assert.Equal(0, exit);
+        using var document = JsonDocument.Parse(output);
+        Assert.Equal("match", document.RootElement.GetProperty("metadata").GetProperty("status").GetString());
+    }
+
+    [Fact]
+    [Trait("AC", "AC-138")]
+    public async Task RealCommand_Version1NonUpdateStep_StoredFilteringAttributesIsDriftAndGuidanceOffersOnlyAcceptedOptions()
+    {
+        var f = Fixture();
+        f.Env.Message = "Create";
+        f.Env.FilteringAttributes = "name";
+        f.Service.Setup(s => s.ListImagesForStepAsync(f.Env.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+
+        var input = FileJson("1.0", AssemblyJson(message: "Create", images: false));
+        var (exit, output, _) = await Invoke(f.Service.Object, input, json: true);
+        Assert.Equal(1, exit);
+        using (var document = JsonDocument.Parse(output))
+        {
+            var assembly = document.RootElement.GetProperty("data")[0];
+            var change = Assert.Single(Assert.Single(assembly.GetProperty("modifiedSteps").EnumerateArray())
+                .GetProperty("changes").EnumerateArray());
+            Assert.Equal(("filteringAttributes", "(none)", "name"), (change.GetProperty("property").GetString(),
+                change.GetProperty("expected").GetString(), change.GetProperty("actual").GetString()));
+            Assert.Equal(PluginLegacyPreservationService.DescribeComparedOmissionWarning(ComparedOmissionKinds.OtherStep),
+                Assert.Single(assembly.GetProperty("warnings").EnumerateArray()).GetString());
+        }
+        var (textExit, _, error) = await Invoke(f.Service.Object, input, json: false);
+        Assert.Equal(1, textExit);
+        Assert.Contains(PluginLegacyPreservationService.OtherStepOption, error);
+        Assert.DoesNotContain(PluginLegacyPreservationService.FilterableStepOption, error);
+        Assert.DoesNotContain("set filteringAttributes in the file", error);
+
+        // The option it does not offer is the one the validator rejects for this message.
+        var setToMatch = FileJson("1.0", AssemblyJson(message: "Create", step: ",\"filteringAttributes\":\"name\"", images: false));
+        Assert.Equal(3, (await Invoke(f.Service.Object, setToMatch, json: true)).Exit);
+        // The option it offers is accepted: the reset is managed (still drift until deploy clears it), no guidance.
+        var reset = FileJson("1.0", AssemblyJson(message: "Create", step: ",\"resetFields\":[\"filteringAttributes\"]", images: false));
+        (exit, output, _) = await Invoke(f.Service.Object, reset, json: true);
+        Assert.Equal(1, exit);
+        using var resetDocument = JsonDocument.Parse(output);
+        Assert.Empty(resetDocument.RootElement.GetProperty("data")[0].GetProperty("warnings").EnumerateArray());
+    }
+
+    [Theory]
+    [Trait("AC", "AC-138")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RealCommand_Version1ResetFieldsWithStoredValue_IsOneManagedChangeWithoutComparedOmissionGuidance(bool onImage)
+    {
+        var f = Fixture();
+        if (onImage) f.EnvImage.Attributes = "name";
+        else f.Env.FilteringAttributes = "telephone1";
+        var input = FileJson("1.0", AssemblyJson(
+            step: onImage ? "" : ",\"resetFields\":[\"filteringAttributes\"]",
+            image: onImage ? ",\"resetFields\":[\"attributes\"]" : NamedImageAttributes));
+        var (exit, output, _) = await Invoke(f.Service.Object, input, json: true);
+        Assert.Equal(1, exit);
+        using (var document = JsonDocument.Parse(output))
+        {
+            var assembly = document.RootElement.GetProperty("data")[0];
+            var change = Assert.Single(assembly.GetProperty("modifiedSteps").EnumerateArray()
+                .Concat(assembly.GetProperty("modifiedImages").EnumerateArray())
+                .SelectMany(m => m.GetProperty("changes").EnumerateArray()));
+            Assert.Equal(onImage ? ("attributes", "(none)", "name") : ("filteringAttributes", "(none)", "telephone1"),
+                (change.GetProperty("property").GetString(), change.GetProperty("expected").GetString(), change.GetProperty("actual").GetString()));
+            Assert.Empty(assembly.GetProperty("warnings").EnumerateArray()); // already managed: no compared-omission guidance
+        }
+        var (textExit, _, error) = await Invoke(f.Service.Object, input, json: false);
+        Assert.Equal(1, textExit);
+        Assert.DoesNotContain(PluginLegacyPreservationService.ComparedOmissionIntro, error);
+    }
+
+    [Theory]
+    [Trait("AC", "AC-138")]
+    [InlineData(false, "null")]
+    [InlineData(false, "empty")]
+    [InlineData(true, "null")]
+    [InlineData(true, "empty")]
+    public async Task RealCommand_Version1ResetFieldsWithExplicitNullOrEmptyProperty_IsStillRejected(bool onImage, string shape)
+    {
+        // The validator is unchanged: the guidance therefore says to remove the property before listing it.
+        var f = Fixture();
+        var input = FileJson("1.0", AssemblyJson(
+            step: onImage ? "" : Shape("filteringAttributes", shape) + ",\"resetFields\":[\"filteringAttributes\"]",
+            image: onImage ? Shape("attributes", shape) + ",\"resetFields\":[\"attributes\"]" : NamedImageAttributes));
+        var (exit, output, _) = await Invoke(f.Service.Object, input, json: true);
+        Assert.Equal(3, exit);
+        using var document = JsonDocument.Parse(output);
+        var error = document.RootElement.GetProperty("error");
+        Assert.Equal("Validation.InvalidValue", error.GetProperty("code").GetString());
+        Assert.Contains("cannot specify both a value and resetFields intent", error.GetProperty("message").GetString());
+    }
+
+    [Fact]
+    [Trait("AC", "AC-138")]
+    public async Task RealCommand_TwoDriftingAssemblies_PrintGuidanceOnceWithTheUnionOfOptions()
+    {
+        var f = Fixture();
+        f.Env.FilteringAttributes = "telephone1";
+        f.Service.Setup(s => s.GetAssemblyByNameAsync("OfflineFixture2", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PluginAssemblyInfo { Id = Guid.NewGuid(), Name = "OfflineFixture2" });
+        var input = FileJson("1.0", AssemblyJson(),
+            AssemblyJson(name: "OfflineFixture2", image: ""));  // second assembly also leaves image attributes unset
+
+        var (exit, output, _) = await Invoke(f.Service.Object, input, json: true);
+        Assert.Equal(1, exit);
+        using (var document = JsonDocument.Parse(output))
+        {
+            var warnings = document.RootElement.GetProperty("data").EnumerateArray()
+                .Select(a => Assert.Single(a.GetProperty("warnings").EnumerateArray()).GetString()).ToList();
+            Assert.Equal([
+                PluginLegacyPreservationService.DescribeComparedOmissionWarning(ComparedOmissionKinds.FilterableStep),
+                PluginLegacyPreservationService.DescribeComparedOmissionWarning(ComparedOmissionKinds.FilterableStep | ComparedOmissionKinds.Image)
+            ], warnings);
+        }
+        var (textExit, _, error) = await Invoke(f.Service.Object, input, json: false);
+        Assert.Equal(1, textExit);
+        Assert.Equal(2, Occurrences(error, "[~] Modified step: handler"));
+        Assert.Equal(1, Occurrences(error, PluginLegacyPreservationService.ComparedOmissionIntro));
+        Assert.Equal(1, Occurrences(error, PluginLegacyPreservationService.FilterableStepOption));
+        Assert.Equal(1, Occurrences(error, PluginLegacyPreservationService.ImageOption));
+        Assert.Equal(1, Occurrences(error, PluginLegacyPreservationService.AdoptionGuidance));
+        Assert.DoesNotContain("[!] " + PluginLegacyPreservationService.ComparedOmissionIntro, error);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-138")]
+    public async Task RealCommand_Version2SameData_IsUnchangedDriftWithoutLegacyGuidance()
+    {
+        var f = Fixture();
+        f.Env.FilteringAttributes = "telephone1";
+        f.Image.Attributes = null;
+        var input = JsonSerializer.Serialize(new PluginRegistrationConfig { Version = "2.0", Assemblies = [f.Config] });
+        var (exit, output, error) = await Invoke(f.Service.Object, input, json: true);
+        Assert.Equal(1, exit);
+        Assert.Empty(error);
+        using (var document = JsonDocument.Parse(output))
+        {
+            var assembly = document.RootElement.GetProperty("data")[0];
+            Assert.Equal("drift", document.RootElement.GetProperty("metadata").GetProperty("status").GetString());
+            var changes = assembly.GetProperty("modifiedSteps").EnumerateArray()
+                .Concat(assembly.GetProperty("modifiedImages").EnumerateArray())
+                .SelectMany(m => m.GetProperty("changes").EnumerateArray())
+                .Select(c => (c.GetProperty("property").GetString(), c.GetProperty("expected").GetString(), c.GetProperty("actual").GetString()))
+                .ToList();
+            Assert.Equal([("filteringAttributes", "(none)", "telephone1"), ("attributes", "(none)", "name")], changes);
+            Assert.Empty(assembly.GetProperty("warnings").EnumerateArray());
+            Assert.False(assembly.TryGetProperty("preservedLegacyValues", out _));
+        }
+        (exit, _, error) = await Invoke(f.Service.Object, input, json: false);
+        Assert.Equal(1, exit);
+        Assert.DoesNotContain(PluginLegacyPreservationService.ComparedOmissionIntro, error);
+        Assert.DoesNotContain("Notice:", error);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-138")]
+    public async Task RealCommand_Version1UnknownPropertyWithComparedOmissionDrift_RemainsIncomplete()
+    {
+        var f = Fixture();
+        f.Env.FilteringAttributes = "telephone1";
+        var input = FileJson("1.0", AssemblyJson(step: ",\"unrecognizedSetting\":\"x\""));
+        var (exit, output, _) = await Invoke(f.Service.Object, input, json: true);
+        Assert.Equal(2, exit);
+        using var document = JsonDocument.Parse(output);
+        Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+        var metadata = document.RootElement.GetProperty("metadata");
+        Assert.Equal("incomplete", metadata.GetProperty("status").GetString());
+        Assert.True(metadata.GetProperty("hasDrift").GetBoolean());
+        Assert.False(metadata.GetProperty("isComplete").GetBoolean());
+    }
+
+    internal const string NamedImageAttributes = ",\"attributes\":\"name\"";
+
+    /// <summary>One fixture assembly as hand-written JSON, so an absent property is truly absent.</summary>
+    internal static string AssemblyJson(string name = "OfflineFixture", string step = "", string image = NamedImageAttributes,
+        string message = "Update", bool images = true)
+    {
+        var imageJson = images ? "{\"name\":\"before\",\"imageType\":\"PreImage\"" + image + "}" : "";
+        return "{\"name\":\"" + name + "\",\"types\":[{\"typeName\":\"Offline.Handler\",\"steps\":[{\"name\":\"handler\"," +
+            "\"message\":\"" + message + "\",\"entity\":\"account\",\"stage\":\"PostOperation\"" + step +
+            ",\"images\":[" + imageJson + "]}]}]}";
+    }
+
+    internal static string FileJson(string? version, params string[] assemblies) =>
+        "{" + (version is null ? "" : "\"version\":\"" + version + "\",") + "\"assemblies\":[" + string.Join(",", assemblies) + "]}";
+
+    internal static string Shape(string property, string shape) => shape switch
+    {
+        "absent" => "",
+        "null" => $",\"{property}\":null",
+        "empty" => $",\"{property}\":\"\"",
+        _ => throw new ArgumentOutOfRangeException(nameof(shape))
+    };
+
+    internal static int Occurrences(string text, string value)
+    {
+        var count = 0;
+        for (var index = text.IndexOf(value, StringComparison.Ordinal); index >= 0;
+             index = text.IndexOf(value, index + value.Length, StringComparison.Ordinal))
+            count++;
+        return count;
     }
 
     [Fact]
@@ -357,17 +705,123 @@ public sealed class PluginDiffReconciliationTests
     }
 
     [Theory]
-    [InlineData(null, true)]
-    [InlineData("", false)]
-    [InlineData("TOP-SECRET-DO-NOT-PRINT", false)]
-    public async Task SecureConfiguration_UnknownWhenSupplied_AlwaysExcluded(string? secret, bool complete)
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("TOP-SECRET-DO-NOT-PRINT")]
+    [Trait("AC", "AC-81")]
+    public async Task SecureConfiguration_SuppliedOrOmitted_IsExcludedWithoutMakingComparisonIncomplete(string? secret)
     {
         var f = Fixture();
         f.Step.SecureConfiguration = secret;
         var result = await DiffCommand.ComputeDriftAsync(f.Service.Object, f.Config);
-        Assert.Equal(complete, result.IsComplete);
+        // Write-only input is reported, never compared, and never makes the comparison incomplete.
+        Assert.True(result.IsComplete);
+        Assert.False(result.HasDrift);
+        Assert.Empty(result.Coverage.Unsupported);
         Assert.Contains(result.Coverage.Excluded, c => c.Field.StartsWith("secureConfiguration"));
+        Assert.Equal(secret is not null, result.Coverage.Excluded.Any(c => c.Field.Contains("supplied but not compared")));
         Assert.DoesNotContain("TOP-SECRET-DO-NOT-PRINT", JsonSerializer.Serialize(result));
+    }
+
+    [Theory]
+    [InlineData("1.0", false, 0)]
+    [InlineData("1.0", true, 1)]
+    [InlineData("2.0", false, 0)]
+    [InlineData("2.0", true, 1)]
+    [Trait("AC", "AC-134")]
+    public async Task RealCommand_SuppliedSecureConfiguration_DoesNotChangeStatusOrExit(string version, bool drift, int expectedExit)
+    {
+        var f = Fixture();
+        if (drift) f.Env.IsEnabled = false;
+        var input = JsonSerializer.Serialize(new PluginRegistrationConfig { Version = version, Assemblies = [f.Config] })
+            .Replace("\"name\":\"handler\"", "\"name\":\"handler\",\"secureConfiguration\":\"SECRET-SUPPLIED\"");
+        foreach (var json in new[] { true, false })
+        {
+            var (exit, output, error) = await Invoke(f.Service.Object, input, json);
+            Assert.Equal(expectedExit, exit);
+            Assert.DoesNotContain("SECRET-SUPPLIED", output + error);
+            if (json)
+            {
+                using var document = JsonDocument.Parse(output);
+                Assert.True(document.RootElement.GetProperty("success").GetBoolean());
+                var metadata = document.RootElement.GetProperty("metadata");
+                Assert.True(metadata.GetProperty("isComplete").GetBoolean());
+                Assert.Equal(drift ? "drift" : "match", metadata.GetProperty("status").GetString());
+                var coverage = document.RootElement.GetProperty("data")[0].GetProperty("coverage");
+                Assert.Empty(coverage.GetProperty("unsupported").EnumerateArray());
+                Assert.Contains(coverage.GetProperty("excluded").EnumerateArray(), item =>
+                    item.GetProperty("field").GetString()!.Contains("secureConfiguration supplied but not compared"));
+            }
+            else
+                Assert.Contains("Excluded: type:Offline.Handler/step:handler: secureConfiguration supplied but not compared", error);
+        }
+    }
+
+    [Fact]
+    [Trait("AC", "AC-135")]
+    public async Task LegacyOmittedValues_AreReportedAsPreservedNoticeWithoutChangingExit()
+    {
+        var f = Fixture();
+        // Omitted filteringAttributes and image attributes are compared under 1.0 (1.4.2 parity) and
+        // covered by the AC-138 tests; every other omitted optional property is advisory only.
+        f.Env.Configuration = "PRIVATE-STORED-CONFIG";
+        f.Env.Description = "stored description";
+        f.Env.ImpersonatingUserId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        f.Env.CanBeBypassed = false;
+        f.Env.CanUseReadOnlyConnection = true;
+        f.EnvImage.Description = "stored image description";
+        var input = JsonSerializer.Serialize(new PluginRegistrationConfig { Assemblies = [f.Config] });
+
+        var (exit, output, error) = await Invoke(f.Service.Object, input, json: true);
+        Assert.Equal(0, exit);
+        Assert.DoesNotContain("PRIVATE-STORED-CONFIG", output + error);
+        using (var document = JsonDocument.Parse(output))
+        {
+            Assert.Equal("match", document.RootElement.GetProperty("metadata").GetProperty("status").GetString());
+            var preserved = document.RootElement.GetProperty("data")[0].GetProperty("preservedLegacyValues").EnumerateArray()
+                .Select(v => (Path: v.GetProperty("path").GetString(), Property: v.GetProperty("property").GetString(),
+                    Stored: v.GetProperty("stored").GetString(), Version2: v.GetProperty("version2Value").GetString())).ToList();
+            const string step = "assembly:OfflineFixture/type:Offline.Handler/step:handler";
+            Assert.Contains((step, "unsecureConfiguration", "(redacted)", "(redacted)"), preserved);
+            Assert.Contains((step, "description", "stored description", "(none)"), preserved);
+            Assert.Contains((step, "runAsUser", "33333333-3333-3333-3333-333333333333", "CallingUser"), preserved);
+            Assert.Contains((step, "canBeBypassed", "false", "true"), preserved);
+            Assert.Contains((step, "canUseReadOnlyConnection", "true", "false"), preserved);
+            Assert.Contains((step + "/image:before", "description", "stored image description", "(none)"), preserved);
+            Assert.Equal(6, preserved.Count);
+        }
+
+        (exit, output, error) = await Invoke(f.Service.Object, input, json: false);
+        Assert.Equal(0, exit);
+        Assert.Empty(output);
+        Assert.Contains("preserved, not managed, under registration version 1.0", error);
+        Assert.Contains("description stored stored description (2.0 default (none))", error);
+        Assert.DoesNotContain(PluginLegacyPreservationService.ComparedOmissionIntro, error);
+        Assert.Contains("unsecureConfiguration stored (redacted)", error);
+        Assert.Contains("--registration-version 2.0", error);
+        Assert.Contains("\"version\": \"2.0\"", error);
+        Assert.Contains("--clean removes only owned extra images", error);
+        Assert.DoesNotContain("PRIVATE-STORED-CONFIG", error);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-135")]
+    public async Task LegacyNotice_IsAbsentWhenStoredValuesEqualVersion2DefaultsAndForVersion2Files()
+    {
+        var f = Fixture();
+        f.Image.Attributes = null;
+        f.EnvImage.Attributes = null;
+        var (exit, _, error) = await Invoke(f.Service.Object,
+            JsonSerializer.Serialize(new PluginRegistrationConfig { Assemblies = [f.Config] }), json: false);
+        Assert.Equal(0, exit);
+        Assert.DoesNotContain("Notice:", error);
+
+        f.Env.Description = "stored description";
+        (exit, var output, _) = await Invoke(f.Service.Object,
+            JsonSerializer.Serialize(new PluginRegistrationConfig { Version = "2.0", Assemblies = [f.Config] }), json: true);
+        Assert.Equal(1, exit); // 2.0 manages the omission: real drift, not a notice
+        using var document = JsonDocument.Parse(output);
+        Assert.False(document.RootElement.GetProperty("data")[0].TryGetProperty("preservedLegacyValues", out _));
     }
 
     [Fact]
@@ -426,7 +880,8 @@ public sealed class PluginDiffReconciliationTests
     [InlineData("drift", 1, true)]
     [InlineData("unknown", 2, false)]
     [InlineData("both", 2, true)]
-    [InlineData("secret", 2, false)]
+    [InlineData("secret", 0, false)]
+    [Trait("AC", "AC-93")]
     public async Task RealCommand_JsonAndExitCode_ReportTruthfulStatus(string scenario, int expectedExit, bool expectedDrift)
     {
         var f = Fixture();
@@ -451,6 +906,7 @@ public sealed class PluginDiffReconciliationTests
         Assert.Equal(expectedDrift, metadata.GetProperty("hasDrift").GetBoolean());
         Assert.Equal(expectedExit != 2, metadata.GetProperty("isComplete").GetBoolean());
         Assert.Equal(expectedExit == 2 ? "incomplete" : expectedDrift ? "drift" : "match", metadata.GetProperty("status").GetString());
+        Assert.Equal(expectedExit != 2, document.RootElement.GetProperty("success").GetBoolean()); // success=false only when incomplete
     }
 
     [Fact]
@@ -485,6 +941,7 @@ public sealed class PluginDiffReconciliationTests
     }
 
     [Theory]
+    [Trait("AC", "AC-93")]
     [InlineData(false, 2)]
     [InlineData(true, 0)]
     public async Task RealCommand_IncludeHidden_ReversesReadExclusion(bool includeHidden, int expectedExit)
@@ -495,6 +952,10 @@ public sealed class PluginDiffReconciliationTests
             JsonSerializer.Serialize(new PluginRegistrationConfig { Assemblies = [f.Config] }), json: true, includeHidden);
         Assert.Equal(expectedExit, exit);
         using var document = JsonDocument.Parse(output);
+        // A hidden step excluded without --include-hidden is a genuinely incomplete comparison.
+        Assert.Equal(includeHidden, document.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal(includeHidden ? "match" : "incomplete",
+            document.RootElement.GetProperty("metadata").GetProperty("status").GetString());
         var coverage = document.RootElement.GetProperty("data")[0].GetProperty("coverage");
         Assert.Equal(1, coverage.GetProperty("totalSteps").GetInt32());
         Assert.Equal(1, coverage.GetProperty("hiddenSteps").GetInt32());
@@ -517,7 +978,7 @@ public sealed class PluginDiffReconciliationTests
         Assert.Equal(code, document.RootElement.GetProperty("error").GetProperty("code").GetString());
     }
 
-    private static async Task<(int Exit, string Output, string Error)> Invoke(
+    internal static async Task<(int Exit, string Output, string Error)> Invoke(
         IPluginRegistrationService service, string config, bool json, bool includeHidden = false)
     {
         var path = Path.Combine(Path.GetTempPath(), $"ppds-diff-{Guid.NewGuid():N}.json");
@@ -536,5 +997,45 @@ public sealed class PluginDiffReconciliationTests
             return (exit, output.ToString(), error.ToString());
         }
         finally { File.Delete(path); }
+    }
+}
+
+/// <summary>
+/// Text-mode diff never receives the injected stdout writer, so "nothing on stdout" is only
+/// observable on the real process console. Swaps Console.Out/Error, hence the serialized collection.
+/// </summary>
+[Trait("Category", "Unit")]
+[Collection(nameof(ConsoleCaptureCollection))]
+public sealed class PluginDiffConsoleStdoutTests
+{
+    [Fact]
+    [Trait("AC", "AC-138")]
+    public async Task RealCommand_TextMode_ComparedOmissionGuidanceIsOnStderrAndNothingReachesStdout()
+    {
+        var f = PluginDiffReconciliationTests.Fixture();
+        f.Env.FilteringAttributes = "telephone1";
+        f.EnvImage.Attributes = "name";
+        var input = PluginDiffReconciliationTests.FileJson("1.0", PluginDiffReconciliationTests.AssemblyJson(image: ""));
+        var previousOut = Console.Out;
+        var previousError = Console.Error;
+        using var stdout = new StringWriter();
+        using var processStderr = new StringWriter();
+        int exit;
+        string error;
+        try
+        {
+            Console.SetOut(stdout);
+            Console.SetError(processStderr);
+            (exit, _, error) = await PluginDiffReconciliationTests.Invoke(f.Service.Object, input, json: false);
+        }
+        finally
+        {
+            Console.SetOut(previousOut);
+            Console.SetError(previousError);
+        }
+        Assert.Equal(1, exit);
+        Assert.Equal("", stdout.ToString());
+        Assert.Contains(PluginLegacyPreservationService.DescribeComparedOmissionGuidance(
+            ComparedOmissionKinds.FilterableStep | ComparedOmissionKinds.Image), error);
     }
 }

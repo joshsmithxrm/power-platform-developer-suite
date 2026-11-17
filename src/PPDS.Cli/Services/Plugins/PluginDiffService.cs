@@ -75,11 +75,14 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
                 var managed = PluginRegistrationNormalizer.NormalizeStep(step, DesiredIntent(step));
                 var path = StepPath(type, step);
                 Unknown(step.ExtensionData, path, drift.Coverage);
-                foreach (var field in OptionalStepFields.Where(f => !managed.ContainsKey(f)))
+                var legacyCompared = PluginRegistrationNormalizer.LegacyComparedOmissions(step);
+                foreach (var field in OptionalStepFields.Where(f => !managed.ContainsKey(f) && !legacyCompared.Contains(f)))
                     drift.Coverage.Unmanaged.Add(new(path, field));
                 drift.Coverage.Excluded.Add(new(path, "secureConfiguration (value never read or returned)"));
+                // A supplied value is written but can never be read back. Report it as excluded so the
+                // comparison stays visible without making every secure-config file incomplete.
                 if (step.SecureConfiguration is not null)
-                    drift.Coverage.Unsupported.Add(new(path, "secureConfiguration equality is unknown"));
+                    drift.Coverage.Excluded.Add(new(path, "secureConfiguration supplied but not compared (write-only; never read back)"));
                 else
                     drift.Coverage.Unmanaged.Add(new(path, "secureConfiguration"));
                 if (step.IsSpecified("asyncAutoDelete") &&
@@ -90,7 +93,8 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
                     var managedImage = PluginRegistrationNormalizer.NormalizeImage(image, step.Message, DesiredIntent(step));
                     var imagePath = $"{path}/image:{image.Name}";
                     Unknown(image.ExtensionData, imagePath, drift.Coverage);
-                    foreach (var field in OptionalImageFields.Where(f => !managedImage.ContainsKey(f)))
+                    var legacyComparedImage = PluginRegistrationNormalizer.LegacyComparedOmissions(step, image);
+                    foreach (var field in OptionalImageFields.Where(f => !managedImage.ContainsKey(f) && !legacyComparedImage.Contains(f)))
                         drift.Coverage.Unmanaged.Add(new(imagePath, field));
                 }
                 configured.Add((type, step));
@@ -152,6 +156,8 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
             var id = PluginStepIdentity.FromConfig(c.Type.TypeName, c.Step);
             return !hiddenIdentities.Contains(id) || visibleIdentities.Contains(id);
         });
+        var legacyInputs = new List<LegacyPreservationInput>();
+        var comparedOmissions = ComparedOmissionKinds.None;
         var matches = PluginStepMatcher.Match(relevantConfigured, existing, (id, configCount, envCount) =>
         {
             drift.Warnings.Add(PluginStepMatcher.DescribeResidualCollision(id, configCount, envCount));
@@ -200,32 +206,19 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
                 if (IdentityFields.Contains(field) || field is "name" or "secureConfiguration")
                     continue;
                 object? expected = expectedValue;
-                object? actual;
-                switch (field)
+                if (field == "asyncAutoDelete" && !string.Equals(stepInfo.Mode, "Asynchronous", StringComparison.OrdinalIgnoreCase))
                 {
-                    case "executionOrder": actual = stepInfo.ExecutionOrder; break;
-                    case "enabled": actual = stepInfo.IsEnabled; break;
-                    case "deployment": actual = stepInfo.Deployment; break;
-                    case "invocationSource": actual = stepInfo.InvocationSource; break;
-                    case "filteringAttributes": actual = NormalizeAttributes(stepInfo.FilteringAttributes); break;
-                    case "unsecureConfiguration": actual = EmptyToNull(stepInfo.Configuration); break;
-                    case "description": actual = EmptyToNull(stepInfo.Description); break;
-                    case "asyncAutoDelete":
-                        if (!string.Equals(stepInfo.Mode, "Asynchronous", StringComparison.OrdinalIgnoreCase))
-                        {
-                            drift.Coverage.Excluded.Add(new(path, "asyncAutoDelete not applicable to synchronous step"));
-                            continue;
-                        }
-                        actual = stepInfo.AsyncAutoDelete; break;
-                    case "canBeBypassed": actual = stepInfo.CanBeBypassed; break;
-                    case "canUseReadOnlyConnection": actual = stepInfo.CanUseReadOnlyConnection; break;
-                    case "runAsUser":
-                        expected = await registration.ResolveRunAsUserAsync((string?)expectedValue, ct);
-                        actual = stepInfo.ImpersonatingUserId; break;
-                    default:
-                        drift.Coverage.Unsupported.Add(new(path, field));
-                        continue;
+                    drift.Coverage.Excluded.Add(new(path, "asyncAutoDelete not applicable to synchronous step"));
+                    continue;
                 }
+                // One stored-value mapping is shared with the legacy preservation advisory.
+                if (!PluginStoredValues.TryStep(field, stepInfo, out var actual))
+                {
+                    drift.Coverage.Unsupported.Add(new(path, field));
+                    continue;
+                }
+                if (field == "runAsUser")
+                    expected = await registration.ResolveRunAsUserAsync((string?)expectedValue, ct);
                 if (actual is null && field is "canBeBypassed" or "canUseReadOnlyConnection" or "invocationSource")
                 {
                     drift.Coverage.Unsupported.Add(new(path, $"{field} unavailable"));
@@ -234,10 +227,21 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
                 Check(field, expected, actual, path, stepInfo.UnavailableProperties, changes, drift.Coverage,
                     redact: field == "unsecureConfiguration");
             }
+            // Missing/1.0 parity with 1.4.2: an omitted filteringAttributes is still compared against none.
+            foreach (var field in PluginRegistrationNormalizer.LegacyComparedOmissions(stepConfig))
+            {
+                PluginStoredValues.TryStep(field, stepInfo, out var actual);
+                if (Check(field, null, actual, path, stepInfo.UnavailableProperties, changes, drift.Coverage))
+                    comparedOmissions |= PluginRegistrationNormalizer.SupportsFilteringAttributes(stepConfig.Message)
+                        ? ComparedOmissionKinds.FilterableStep : ComparedOmissionKinds.OtherStep;
+            }
             if (changes.Count > 0)
                 drift.ModifiedSteps.Add(new() { TypeName = match.TypeConfig!.TypeName, StepName = name, Changes = changes });
 
             var images = await registration.ListImagesForStepAsync(stepInfo.Id, ct);
+            if (DesiredIntent(stepConfig) != RegistrationOperationIntent.Reconcile)
+                legacyInputs.Add(new(PluginLegacyPreservationService.StepPath(config.Name, match.TypeConfig!.TypeName, name),
+                    stepConfig, stepInfo, images));
             foreach (var image in images.Where(i => i.UnavailableProperties.Contains("name")))
                 drift.Coverage.Unsupported.Add(new($"{path}/image:{image.Id}", "image name unavailable"));
             var ambiguousNames = images.GroupBy(i => i.Name, StringComparer.Ordinal)
@@ -267,23 +271,31 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
                 foreach (var (field, expected) in PluginRegistrationNormalizer.NormalizeImage(image, stepConfig.Message, DesiredIntent(stepConfig)))
                 {
                     ct.ThrowIfCancellationRequested();
-                    object? actual = field switch
-                    {
-                        "name" => envImage.Name,
-                        "imageType" => envImage.ImageType,
-                        "attributes" => NormalizeAttributes(envImage.Attributes),
-                        "entityAlias" => envImage.EntityAlias,
-                        "messagePropertyName" => envImage.MessagePropertyName,
-                        "description" => EmptyToNull(envImage.Description),
-                        _ => null
-                    };
+                    PluginStoredValues.TryImage(field, envImage, out var actual);
                     Check(field, expected, actual, imagePath, envImage.UnavailableProperties, imageChanges, drift.Coverage);
+                }
+                // Missing/1.0 parity with 1.4.2: omitted image attributes are still compared against none.
+                foreach (var field in PluginRegistrationNormalizer.LegacyComparedOmissions(stepConfig, image))
+                {
+                    PluginStoredValues.TryImage(field, envImage, out var actual);
+                    if (Check(field, null, actual, imagePath, envImage.UnavailableProperties, imageChanges, drift.Coverage))
+                        comparedOmissions |= ComparedOmissionKinds.Image;
                 }
                 if (imageChanges.Count > 0)
                     drift.ModifiedImages.Add(new() { StepName = name, ImageName = image.Name, Changes = imageChanges });
             }
         }
         ct.ThrowIfCancellationRequested();
+        if (comparedOmissions != ComparedOmissionKinds.None)
+        {
+            drift.LegacyComparedOmissions = comparedOmissions;
+            drift.ComparedOmissionWarning = PluginLegacyPreservationService.DescribeComparedOmissionWarning(comparedOmissions);
+            drift.Warnings.Add(drift.ComparedOmissionWarning);
+        }
+        // Advisory only, computed after the comparison from rows already read; a failure omits it.
+        // Values compared above are drift, so they are not repeated in the advisory.
+        drift.PreservedLegacyValues = PluginLegacyPreservationService.TryCollect(legacyInputs, out _,
+            excludeComparedOmissions: true);
         return drift;
     }
 
@@ -294,30 +306,21 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
     private static string StepPath(PluginTypeConfig type, PluginStepConfig step) =>
         $"type:{type.TypeName}/step:{PluginStepMatcher.ResolveConfigName(type, step)}";
 
-    private static object? EmptyToNull(string? value) => string.IsNullOrEmpty(value) ? null : value;
-
-    private static object? NormalizeAttributes(string? value) => PluginRegistrationNormalizer.NormalizeAttributes(value);
-
-    private static void Check(string field, object? expected, object? actual, string path,
+    /// <returns>True when a change was recorded.</returns>
+    private static bool Check(string field, object? expected, object? actual, string path,
         HashSet<string> unavailable, List<PropertyChange> changes, ComparisonCoverage coverage, bool redact = false)
     {
         if (unavailable.Contains(field))
         {
             coverage.Unsupported.Add(new(path, $"{field} unavailable"));
-            return;
+            return false;
         }
         coverage.Checked.Add(new(path, field));
-        if (!Equals(expected, actual))
-            changes.Add(new(field, redact ? "(redacted)" : Format(expected), redact ? "(redacted)" : Format(actual)));
+        if (Equals(expected, actual)) return false;
+        changes.Add(new(field, redact ? "(redacted)" : PluginStoredValues.Format(expected),
+            redact ? "(redacted)" : PluginStoredValues.Format(actual)));
+        return true;
     }
-
-    private static string Format(object? value) => value switch
-    {
-        null => "(none)",
-        bool boolean => boolean ? "true" : "false",
-        IFormattable formatted => formatted.ToString(null, CultureInfo.InvariantCulture),
-        _ => value.ToString() ?? "(none)"
-    };
 
     private static void Unknown(Dictionary<string, JsonElement>? extensions, string path, ComparisonCoverage coverage)
     {
@@ -366,6 +369,22 @@ internal sealed class AssemblyDrift
     public List<ModifiedImageDrift> ModifiedImages { get; set; } = [];
     public List<string> Warnings { get; set; } = [];
     public ComparisonCoverage Coverage { get; } = new();
+    /// <summary>
+    /// Legacy (missing/1.0) files only: omitted optional values that are preserved and not compared,
+    /// but differ from what registration version 2.0 would write. Advisory; never drift or incompleteness.
+    /// Omitted filteringAttributes and image attributes are compared (drift) and so are not listed here.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<PreservedLegacyValue>? PreservedLegacyValues { get; set; }
+    /// <summary>
+    /// Which missing/1.0 unset filteringAttributes or image attributes differed from none and were reported
+    /// as drift; when any, <see cref="Warnings"/> also carries <see cref="ComparedOmissionWarning"/>.
+    /// </summary>
+    [JsonIgnore]
+    public ComparedOmissionKinds LegacyComparedOmissions { get; set; }
+    /// <summary>The resolution guidance added to <see cref="Warnings"/>; text output prints it once per run instead.</summary>
+    [JsonIgnore]
+    public string? ComparedOmissionWarning { get; set; }
     public bool HasDrift => AssemblyMissing || MissingSteps.Count > 0 || OrphanedSteps.Count > 0 ||
         ModifiedSteps.Count > 0 || MissingImages.Count > 0 || OrphanedImages.Count > 0 || ModifiedImages.Count > 0;
     public bool IsComplete => Coverage.Unsupported.Count == 0;

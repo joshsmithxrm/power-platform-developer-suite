@@ -98,6 +98,53 @@ public class PluginsCommandGroupTests
     }
 
     [Fact]
+    [Trait("AC", "AC-137")]
+    public void OrphanedStepGuidance_NamesACommandThatParses()
+    {
+        // Deploy/clean help and the version 2.0 orphaned-step warning point users at this exact command.
+        var parsed = _command.Parse(["unregister", "step", Guid.NewGuid().ToString("D"), "--force"]);
+        Assert.Empty(parsed.Errors);
+        var deployClean = _command.Subcommands.Single(c => c.Name == "deploy").Options.Single(o => o.Name == "--clean").Description!;
+        Assert.Contains("ppds plugins unregister step <step-id>", deployClean);
+        Assert.Contains("exit 1", deployClean);
+        var clean = _command.Subcommands.Single(c => c.Name == "clean").Description!;
+        Assert.Contains("ppds plugins unregister step <step-id>", clean);
+        Assert.Contains("exits 1", clean);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-137")]
+    public void DeployCleanAndExtractHelp_DescribeVersionsAndSecureConfiguration()
+    {
+        var deploy = _command.Subcommands.Single(c => c.Name == "deploy").Description!;
+        Assert.Contains("missing or 1.0 preserves omitted optional", deploy);
+        Assert.Contains("2.0 resets omitted optional properties to PPDS defaults", deploy);
+        Assert.Contains("secureConfiguration is write-only", deploy);
+        Assert.Contains("preserved when omitted", deploy);
+        Assert.Contains("cannot be cleared by omitting it", deploy);
+        var extract = _command.Subcommands.Single(c => c.Name == "extract").Options.Single(o => o.Name == "--registration-version").Description!;
+        Assert.Contains("1.0 (legacy: deploy preserves omitted optional properties)", extract);
+        Assert.Contains("secureConfiguration is never written to the output", extract);
+        Assert.Contains("write-only", extract);
+        Assert.Contains("cannot be cleared by omission", extract);
+        var clean = _command.Subcommands.Single(c => c.Name == "clean").Description!;
+        Assert.Contains("Secure configuration of configured steps is never read or changed", clean);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-138")]
+    public void DiffAndDeployHelp_DescribeTheTwoPropertiesAlwaysComparedUnderVersion1()
+    {
+        var diff = _command.Subcommands.Single(c => c.Name == "diff").Description!;
+        Assert.Contains("Under a missing or 1.0 registration version, step filteringAttributes and image attributes are always compared", diff);
+        Assert.Contains("an unset value as none (as in PPDS 1.4.2)", diff);
+        Assert.Contains("other omitted optional properties are not compared", diff);
+        var deploy = _command.Subcommands.Single(c => c.Name == "deploy").Description!;
+        Assert.Contains("diff compares an omitted step filteringAttributes or image attributes against none", deploy);
+        Assert.Contains("remove it from the step or image and list it in resetFields", deploy);
+    }
+
+    [Fact]
     public void Create_HasTwelveSubcommands()
     {
         Assert.Equal(12, _command.Subcommands.Count);

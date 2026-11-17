@@ -39,7 +39,11 @@ public static class ExtractCommand
 
         var registrationVersionOption = new Option<string?>("--registration-version")
         {
-            Description = "Registration contract: 1.0 (legacy) or 2.0 (nonsecret reconciliation); defaults to the existing file version or 1.0"
+            Description = "Registration contract: 1.0 (legacy: deploy preserves omitted optional properties) or 2.0 " +
+                "(deploy resets omitted optional properties to PPDS defaults; extraction does not inherit earlier file overrides); " +
+                "defaults to the existing file version or 1.0. secureConfiguration is never written to the output; it is " +
+                "write-only (never read back or compared), and under either version deploy preserves it when omitted, " +
+                "so it cannot be cleared by omission"
         };
 
         var referenceDirOption = new Option<DirectoryInfo[]>("--reference-dir")

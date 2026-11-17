@@ -36,7 +36,9 @@ public static class DeployCommand
 
         var cleanOption = new Option<bool>("--clean")
         {
-            Description = "Version 1: legacy parent cleanup; version 2: prune owned images on configured steps",
+            Description = "Version 1.0/missing: delete orphaned steps. Version 2.0: delete only owned images not listed on " +
+                "configured steps; orphaned steps are kept and reported as drift (exit 1) until removed with " +
+                "'ppds plugins unregister step <step-id>' (add --force if it has images)",
             DefaultValueFactory = _ => false
         };
 
@@ -46,7 +48,13 @@ public static class DeployCommand
             DefaultValueFactory = _ => false
         };
 
-        var command = new Command("deploy", "Deploy plugin registrations to environment")
+        var command = new Command("deploy",
+            "Deploy plugin registrations to environment. The registration file \"version\" selects the contract: " +
+            "missing or 1.0 preserves omitted optional step/image properties on update (diff compares an omitted step filteringAttributes or image attributes against none, as 1.4.2 did, " +
+            "and does not compare the others; to have deploy clear a field, remove it from the step or image and list it in resetFields); " +
+            "2.0 resets omitted optional properties to PPDS defaults and re-reads the result with diff after a real deploy. " +
+            "secureConfiguration is write-only under both versions: written when supplied, preserved when omitted, " +
+            "never read back or compared, and it cannot be cleared by omitting it (supplying \"\" writes an empty value).")
         {
             configOption,
             PluginsCommandGroup.ProfileOption,
@@ -256,9 +264,23 @@ public static class DeployCommand
                 var totalUpdated = results.Sum(r => r.StepsUpdated + r.ImagesUpdated);
                 var totalDeleted = results.Sum(r => r.StepsDeleted + r.ImagesDeleted);
 
-                Console.Error.WriteLine($"Deployment complete: {totalCreated} created, {totalUpdated} updated, {totalDeleted} deleted");
+                if (dryRun)
+                {
+                    // imagesDeleted counts acknowledged deletes only, so a preview would otherwise show 0.
+                    var planned = results.Select(r => r.ImageCleanup).OfType<PluginImagePruningResult>()
+                        .SelectMany(c => c.Plan.Images).ToList();
+                    foreach (var line in PluginImagePruningService.DescribePlannedDeletions(planned))
+                        Console.Error.WriteLine(line);
+                    Console.Error.WriteLine($"Dry-run complete (planned, not performed): {totalCreated} would be created, " +
+                        $"{totalUpdated} updated, {totalDeleted + planned.Count} deleted");
+                }
+                else
+                    Console.Error.WriteLine($"Deployment complete: {totalCreated} created, {totalUpdated} updated, {totalDeleted} deleted");
                 if (verification is not null)
                     Console.Error.WriteLine($"Nonsecret reconciliation verification: {verification.Status}; no rollback was attempted.");
+                foreach (var line in PluginLegacyPreservationService.DescribeNotice(
+                             results.SelectMany(r => r.PreservedLegacyValues ?? []).ToList(), includeValues: false))
+                    Console.Error.WriteLine(line);
                 if (results.Any(r => !r.Success)) WriteRetainedOutcomes(results);
             }
 
@@ -438,6 +460,7 @@ public static class DeployCommand
         var solution = solutionOverride ?? assemblyConfig.Solution;
         // Keep earlier per-step diagnostics even if a later operation also fails.
         var stepErrors = new List<string>();
+        var legacyInputs = new List<LegacyPreservationInput>();
 
         try
         {
@@ -745,6 +768,12 @@ public static class DeployCommand
                         : await service.ListImagesForStepAsync(stepId, cancellationToken);
                     var existingImageNames = existingImages.Select(i => i.Name).ToHashSet();
 
+                    // Legacy files preserve omitted optional values. Only capture the rows already read here;
+                    // the advisory is computed after every write for this assembly, fully isolated.
+                    if (matchedEnvStep is not null && stepConfig.OperationIntent != RegistrationOperationIntent.Reconcile)
+                        legacyInputs.Add(new(PluginLegacyPreservationService.StepPath(assemblyConfig.Name, typeConfig.TypeName, stepName),
+                            stepConfig, matchedEnvStep, existingImages));
+
                     foreach (var imageConfig in stepConfig.Images)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
@@ -812,11 +841,14 @@ public static class DeployCommand
 
                 if (orphanedSteps.Count > 0)
                 {
+                    var reconcile = assemblyConfig.OperationIntent == RegistrationOperationIntent.Reconcile;
                     var descriptions = string.Join(
                         ", ",
-                        orphanedSteps.Select(o => $"{o.Name} ({o.Stage}, {o.Mode})"));
-                    var guidance = assemblyConfig.OperationIntent == RegistrationOperationIntent.Reconcile
-                        ? "Version 2 --clean removes owned images only. Parent registrations remain drift; their removal requires separate explicit ownership/adoption."
+                        orphanedSteps.Select(o => reconcile ? $"{o.Name} ({o.Stage}, {o.Mode}; id {o.Id:D})" : $"{o.Name} ({o.Stage}, {o.Mode})"));
+                    var guidance = reconcile
+                        ? "Version 2 --clean removes owned images only; it never deletes steps. Remove each orphaned step separately with " +
+                          "'ppds plugins unregister step <step-id>' (add --force if the step has images). Until they are removed, " +
+                          "version 2.0 deploy verification reports drift and exits 1."
                         : "Re-run with --clean to remove them.";
                     var warning =
                         $"{orphanedSteps.Count} step(s) in the environment no longer match the configuration and were " +
@@ -874,6 +906,12 @@ public static class DeployCommand
                     Console.Error.WriteLine($"  Recovery: {result.RecoveryGuidance}");
             }
         }
+
+        // Read-only advisory, outside the mutation try/catch and after every write for this assembly.
+        // TryCollect never throws: a failure omits the notice and cannot change writes, success or exit code.
+        result.PreservedLegacyValues = PluginLegacyPreservationService.TryCollect(legacyInputs, out var advisoryFailure);
+        if (advisoryFailure is not null && globalOptions.Debug && !globalOptions.IsJsonMode)
+            Console.Error.WriteLine($"  [debug] Preserved-value notice omitted: {advisoryFailure.GetType().Name}");
 
         foreach (var outcome in calls.Outcomes)
             if (!result.Outcomes.Any(o => o.EventId == outcome.EventId)) result.Outcomes.Add(outcome);
@@ -1105,6 +1143,14 @@ public static class DeployCommand
         [JsonPropertyName("verificationScope")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public ComparisonCoverage? VerificationScope { get; set; }
+
+        /// <summary>
+        /// Legacy (missing/1.0) files only: omitted optional values this deployment preserved that
+        /// differ from what registration version 2.0 would write. Advisory; does not affect success.
+        /// </summary>
+        [JsonPropertyName("preservedLegacyValues")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<PreservedLegacyValue>? PreservedLegacyValues { get; set; }
 
         [JsonPropertyName("partial")]
         public bool Partial => !DryRun && !Success && (Outcomes.Any(o => o.Outcome == "acknowledged") || StepsCreated + StepsUpdated + StepsDeleted + ImagesCreated + ImagesUpdated + ImagesDeleted > 0);
