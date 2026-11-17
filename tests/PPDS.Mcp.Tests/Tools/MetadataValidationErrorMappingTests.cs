@@ -175,7 +175,7 @@ public sealed class MetadataValidationErrorMappingTests
         internal static IMetadataAuthoringService Create(Exception failure)
         {
             var proxy = Create<IMetadataAuthoringService, ThrowingAuthoringService>();
-            ((ThrowingAuthoringService)(object)proxy)._failure = failure;
+            ((ThrowingAuthoringService)proxy)._failure = failure;
             return proxy;
         }
 

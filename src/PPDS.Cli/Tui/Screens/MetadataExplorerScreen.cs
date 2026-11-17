@@ -619,10 +619,10 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
     /// <summary>Status text after a label-writing update, with any English-only label notices appended.</summary>
     internal static string UpdatedStatus(string what, string name, MetadataLabelWriteResult? result)
     {
-        var status = $"{what} updated: {name}";
+        var status = new System.Text.StringBuilder($"{what} updated: {name}");
         foreach (var notice in result?.ValidationMessages ?? [])
-            status += $" Warning: {notice.Message}";
-        return status;
+            status.Append(" Warning: ").Append(notice.Message);
+        return status.ToString();
     }
 
     private async Task ExecuteUpdateGlobalChoiceAsync(UpdateGlobalChoiceRequest request)
