@@ -186,7 +186,7 @@ public sealed class PluginImageNameMatchingTests
         var extraId = store.AddStoredImage("BEFORE"); // stored: "Before" and "BEFORE"
 
         var (diffExit, diffOutput) = await store.DiffAsync(json: true);
-        Assert.Equal(2, diffExit);
+        Assert.Equal(ExitCodes.Incomplete, diffExit);
         using (var diff = JsonDocument.Parse(diffOutput))
         {
             Assert.Equal("incomplete", diff.RootElement.GetProperty("metadata").GetProperty("status").GetString());
@@ -220,7 +220,7 @@ public sealed class PluginImageNameMatchingTests
         var extraId = store.AddStoredImage("BEFORE");
 
         var (exit, error) = await store.DeployTextAsync();
-        Assert.Equal(2, exit);
+        Assert.Equal(ExitCodes.Incomplete, exit);
         Assert.Contains("Nonsecret reconciliation verification: incomplete", error);
         Assert.Contains("Unknown: ", error);
         Assert.Contains(extraId.ToString("D"), error);

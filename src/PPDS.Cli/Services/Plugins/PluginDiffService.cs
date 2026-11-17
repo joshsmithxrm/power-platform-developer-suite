@@ -354,7 +354,8 @@ internal sealed class PluginDiffResult
     public bool HasDrift => Assemblies.Any(a => a.HasDrift);
     public bool IsComplete => Coverage.Unsupported.Count == 0 && Assemblies.All(a => a.IsComplete);
     public string Status => !IsComplete ? "incomplete" : HasDrift ? "drift" : "match";
-    [JsonIgnore] public int ExitCode => !IsComplete ? ExitCodes.Failure : HasDrift ? ExitCodes.PartialSuccess : ExitCodes.Success;
+    /// <summary>0 match, 1 drift, 12 incomplete (result unknown; checked before drift). 2 is reserved for real failures.</summary>
+    [JsonIgnore] public int ExitCode => !IsComplete ? ExitCodes.Incomplete : HasDrift ? ExitCodes.PartialSuccess : ExitCodes.Success;
 }
 
 internal sealed class ComparisonCoverage
