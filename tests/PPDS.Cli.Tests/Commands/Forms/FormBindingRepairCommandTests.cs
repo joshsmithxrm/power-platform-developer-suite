@@ -33,7 +33,7 @@ public sealed class FormBindingRepairCommandTests
         using var doc = JsonDocument.Parse(stdout);
         var data = doc.RootElement.GetProperty("data");
         Assert.Equal(new[] { "entity", "form", "formId", "dryRun", "message", "repairedCount", "unchangedCount", "formXmlChanged",
-            "readBackVerified", "solutionAssociationRequested", "publicationRequested", "repaired", "unchanged" },
+            "readBackVerified", "solutionAssociationRequested", "publicationRequested", "repaired", "unchanged", "readBackRepairable" },
             data.EnumerateObject().Select(p => p.Name));
         Assert.False(data.GetProperty("dryRun").GetBoolean());
         Assert.True(data.GetProperty("formXmlChanged").GetBoolean());
@@ -80,7 +80,7 @@ public sealed class FormBindingRepairCommandTests
         var (_, exit, stdout, stderr) = await Run(ct => new ContributorFormHarness(ct, transform: FormBindingRepairTests.MisCasedIdAndUnknownBinding), []);
         Assert.True(exit == ExitCodes.Success, stderr);
         Assert.Equal(string.Empty, stdout);
-        Assert.Contains("Repaired 1 control binding(s) on form 'Fixture': the update was submitted and reading the form back found no binding left", stderr);
+        Assert.Contains("Repaired 1 control binding(s) on form 'Fixture': the update was submitted and the form, read back, shows each rewritten control with the logical name.", stderr);
         Assert.Contains("Repaired: control 'Name' (My Tab / General) binding 'Name' -> 'name'. Its id also differs", stderr);
         Assert.Contains("is bound to 'New_Gone', which matches no column on 'account'", stderr);
         Assert.Contains("1 binding(s) match no column", stderr);
