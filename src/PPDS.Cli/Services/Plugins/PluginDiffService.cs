@@ -62,6 +62,8 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
         ct.ThrowIfCancellationRequested();
         progress.ReportPhase("Comparing plugin registration", config.Name);
         var drift = new AssemblyDrift { AssemblyName = config.Name };
+        // A file rule, not a coverage gap: two configured entries can never both be satisfied by one row.
+        PluginImageNames.EnsureUniqueConfigured(config);
         Unknown(config.ExtensionData, "assembly", drift.Coverage);
         var configured = new List<(PluginTypeConfig Type, PluginStepConfig Step)>();
         foreach (var type in config.Types)
@@ -244,14 +246,24 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
                     stepConfig, stepInfo, images));
             foreach (var image in images.Where(i => i.UnavailableProperties.Contains("name")))
                 drift.Coverage.Unsupported.Add(new($"{path}/image:{image.Id}", "image name unavailable"));
-            var ambiguousNames = images.GroupBy(i => i.Name, StringComparer.Ordinal)
-                .Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet(StringComparer.Ordinal);
-            if (ambiguousNames.Count > 0)
+            // One pairing rule shared with deploy and pruning: names differing only by case are the same image.
+            // Configured collisions were rejected above. Stored rows whose names collide are ambiguous only when
+            // a configured image would pair with them; colliding rows that are not configured are plain orphans.
+            var desiredNames = stepConfig.Images.Select(i => i.Name).ToHashSet(PluginImageNames.Comparer);
+            var storedCollisions = images.GroupBy(i => i.Name, PluginImageNames.Comparer).Where(g => g.Count() > 1).ToList();
+            var ambiguousNames = new HashSet<string>(PluginImageNames.Comparer);
+            foreach (var group in storedCollisions.Where(g => desiredNames.Contains(g.Key)))
             {
-                drift.Coverage.Unsupported.Add(new(path, "duplicate image names prevent unambiguous comparison"));
+                ambiguousNames.Add(group.Key);
+                var configuredName = stepConfig.Images.First(i => PluginImageNames.Same(i.Name, group.Key)).Name;
+                drift.Coverage.Unsupported.Add(new(path,
+                    "duplicate image names prevent unambiguous comparison: in the environment, stored images " +
+                    string.Join(", ", group.Select(i => $"'{i.Name}' ({i.Id:D})")) +
+                    $" on this step are equal ignoring case to configured image '{configuredName}'. " +
+                    "Remove the extra image with 'ppds plugins unregister image <image-id>'."));
             }
-            var byName = images.Where(i => !ambiguousNames.Contains(i.Name)).ToDictionary(i => i.Name, StringComparer.Ordinal);
-            var desiredNames = stepConfig.Images.Select(i => i.Name).ToHashSet(StringComparer.Ordinal);
+            var collidingNames = storedCollisions.Select(g => g.Key).ToHashSet(PluginImageNames.Comparer);
+            var byName = images.Where(i => !collidingNames.Contains(i.Name)).ToDictionary(i => i.Name, PluginImageNames.Comparer);
             foreach (var image in images.Where(i => !desiredNames.Contains(i.Name)))
             {
                 ct.ThrowIfCancellationRequested();
@@ -268,6 +280,8 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
                 }
                 var imagePath = $"{path}/image:{image.Name}";
                 var imageChanges = new List<PropertyChange>();
+                // Paired case-insensitively; the normalized fields include "name", compared exactly, so a case-only
+                // difference is a modified-image name change (deploy writes the configured name to this row).
                 foreach (var (field, expected) in PluginRegistrationNormalizer.NormalizeImage(image, stepConfig.Message, DesiredIntent(stepConfig)))
                 {
                     ct.ThrowIfCancellationRequested();

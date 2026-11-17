@@ -143,6 +143,15 @@ public class ExportCommandTests : IDisposable
     }
 
     [Fact]
+    public void MaxRecordsPerEntityHelp_SaysUnsupportedSchemasAreRefusedNotSilentlyReduced()
+    {
+        var description = _command.Options.Single(option => option.Name == "--max-records-per-entity").Description!;
+        Assert.Contains("refused before export starts", description);
+        Assert.Contains("relationships", description);
+        Assert.DoesNotContain("disables", description);
+    }
+
+    [Fact]
     public void Parse_WithAllRequiredOptions_Succeeds()
     {
         var result = _command.Parse($"--schema \"{_tempSchemaFile}\" --output \"{_tempOutputFile}\"");

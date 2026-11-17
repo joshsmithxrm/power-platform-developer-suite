@@ -45,6 +45,26 @@ use one shared image-only planner. What the code enforces:
   are candidates. Assembly ownership comes from the assembly name or, for packages,
   the validated local nupkg identity, exact package ID and matching assembly parent.
   Names, filters and solution membership alone do not establish ownership.
+- A stored image is configured when its name equals a configured image name ignoring
+  case, the same rule deploy (update versus create), `plugins diff` and 2.0 deploy
+  verification use. A case-only difference is never a deletion candidate: deploy
+  updates that row and writes the configured name, and diff reports it beforehand as a
+  modified-image `name` change, not as a missing image plus an orphaned one. Only case
+  is covered: if the environment's collation also equates other differences (for
+  example accents or trailing spaces), the write can update a row this rule does not
+  pair, and the plan can list that row for deletion. `deploy --clean` then stops at
+  the pre-delete name recheck without deleting it; standalone `plugins clean` would
+  delete it. This is not established for Dataverse and is a known unpaired case.
+- Configured image names on one step that collide ignoring case are rejected as a file
+  error (exit 3) before connecting, by deploy, diff and 2.0 cleanup (version 1.0
+  `plugins clean` never pairs images and does not apply the rule). For a same-named
+  pre-image and post-image the message suggests one entry with `imageType: "Both"`.
+- If a configured step's stored images have names that collide ignoring case, cleanup
+  refuses the whole plan before any mutation (exit 3), naming the stored images and
+  their IDs and whether one of them is configured; remove the extra one (or, when
+  neither is configured, one or both) with `ppds plugins unregister image <image-id>`.
+  Diff reports the same rows as incomplete when one is configured, and as ordinary
+  orphans when neither is.
 - Hidden, managed, non-customizable, unavailable or ambiguous targets fail the whole
   plan visibly instead of being skipped. The complete plan for every configured
   scope is built before the first mutation; `deploy --clean` applies it only after

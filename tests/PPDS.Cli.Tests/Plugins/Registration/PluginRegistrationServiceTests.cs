@@ -1951,6 +1951,83 @@ public class PluginRegistrationServiceTests
 
     #endregion
 
+    #region UpsertImageAsync case-insensitive match tie-break (AC-139)
+
+    private static Entity StoredImage(Guid id, string name, DateTime createdOn) =>
+        new(SdkMessageProcessingStepImage.EntityLogicalName, id)
+        {
+            [SdkMessageProcessingStepImage.Fields.Name] = name,
+            [SdkMessageProcessingStepImage.Fields.CreatedOn] = createdOn
+        };
+
+    [Fact]
+    [Trait("AC", "AC-139")]
+    public async Task UpsertImageAsync_SeveralCaseInsensitiveMatches_UpdatesTheExactCaseRowWhateverTheServerOrder()
+    {
+        var exactId = Guid.NewGuid();
+        var otherId = Guid.NewGuid();
+        // The non-preferred row comes first and is older, so neither server order nor age picks the exact row.
+        _retrieveMultipleResult = new EntityCollection(
+        [
+            StoredImage(otherId, "PREIMAGE", new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
+            StoredImage(exactId, "PreImage", new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc))
+        ]);
+
+        var id = await _sut.UpsertImageAsync(Guid.NewGuid(), new PluginImageConfig { Name = "PreImage", ImageType = "PreImage" }, "Update");
+
+        Assert.Equal(exactId, id);
+        // The tie-break needs createdon from the server; the query must ask for it.
+        var query = Assert.Single(_mockPooledClient.Invocations
+            .Where(i => i.Method.Name.StartsWith("RetrieveMultiple", StringComparison.Ordinal))
+            .Select(i => i.Arguments[0]).OfType<QueryExpression>()
+            .Where(q => q.EntityName == SdkMessageProcessingStepImage.EntityLogicalName));
+        Assert.Contains(SdkMessageProcessingStepImage.Fields.CreatedOn, query.ColumnSet.Columns);
+        Assert.Contains(SdkMessageProcessingStepImage.Fields.Name, query.ColumnSet.Columns);
+        _mockPooledClient.Verify(s => s.UpdateAsync(It.Is<Entity>(e => e.Id == exactId &&
+            e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Name) == "PreImage"), It.IsAny<CancellationToken>()), Times.Once);
+        _mockPooledClient.Verify(s => s.UpdateAsync(It.Is<Entity>(e => e.Id == otherId), It.IsAny<CancellationToken>()), Times.Never);
+        _mockPooledClient.Verify(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-139")]
+    public async Task UpsertImageAsync_SeveralMatchesWithoutExactCase_UpdatesTheEarliestCreatedAndWritesTheConfiguredName()
+    {
+        var newerId = Guid.NewGuid();
+        var olderId = Guid.NewGuid();
+        _retrieveMultipleResult = new EntityCollection(
+        [
+            StoredImage(newerId, "preimage", new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
+            StoredImage(olderId, "PREIMAGE", new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc))
+        ]);
+
+        var id = await _sut.UpsertImageAsync(Guid.NewGuid(), new PluginImageConfig { Name = "PreImage", ImageType = "PreImage" }, "Update");
+
+        Assert.Equal(olderId, id);
+        _mockPooledClient.Verify(s => s.UpdateAsync(It.Is<Entity>(e => e.Id == olderId &&
+            e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Name) == "PreImage"), It.IsAny<CancellationToken>()), Times.Once);
+        _mockPooledClient.Verify(s => s.UpdateAsync(It.Is<Entity>(e => e.Id == newerId), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-139")]
+    public async Task UpsertImageAsync_SeveralMatchesWithoutExactCaseOrCreatedOn_UpdatesTheLowestId()
+    {
+        var lowId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var highId = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        _retrieveMultipleResult = new EntityCollection(
+        [
+            new Entity(SdkMessageProcessingStepImage.EntityLogicalName, highId) { [SdkMessageProcessingStepImage.Fields.Name] = "preimage" },
+            new Entity(SdkMessageProcessingStepImage.EntityLogicalName, lowId) { [SdkMessageProcessingStepImage.Fields.Name] = "PREIMAGE" }
+        ]);
+
+        var id = await _sut.UpsertImageAsync(Guid.NewGuid(), new PluginImageConfig { Name = "PreImage", ImageType = "PreImage" }, "Update");
+
+        Assert.Equal(lowId, id);
+    }
+
+    #endregion
+
     #region UpsertImageAsync New Properties Tests
 
     [Fact]

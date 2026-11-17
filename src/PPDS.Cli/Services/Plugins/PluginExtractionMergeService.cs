@@ -13,6 +13,8 @@ internal static class PluginExtractionMergeService
         try
         {
             ValidateAssembly(fresh);
+            // Same rule and message deploy would give for these images, reported against the source attributes.
+            PluginImageNames.EnsureUniqueConfigured(fresh, extracted: true);
             if (existing?.Assemblies is null) throw InvalidStructure();
             foreach (var assembly in existing.Assemblies) ValidateAssembly(assembly);
             var intent = PluginRegistrationContract.ValidateForVersion(existing, targetVersion);
@@ -139,13 +141,21 @@ internal static class PluginExtractionMergeService
 
         foreach (var image in fresh.Images)
         {
-            // Image identity is exact name, consistent with deploy/diff. Never attach metadata from
-            // a differently cased sibling or pick the first duplicate.
-            var oldImage = Unique(existing.Images.Where(i => string.Equals(i.Name, image.Name, StringComparison.Ordinal)),
-                "image name");
+            // Image identity follows PluginImageNames (case-insensitive), as deploy and diff do, so a
+            // case-only rename keeps its inherited settings. An exact-case counterpart still wins over a
+            // differently cased sibling; otherwise exactly one counterpart is required, never the first
+            // of several.
+            var candidates = existing.Images.Where(i => PluginImageNames.Same(i.Name, image.Name)).ToList();
+            var exact = candidates.Where(i => string.Equals(i.Name, image.Name, StringComparison.Ordinal)).ToList();
+            if (exact.Count != 1 && candidates.Count > 1)
+                throw Ambiguous($"image name: extracted image '{image.Name}' on step '{fresh.Name ?? fresh.Message}' matches " +
+                    $"{string.Join(", ", candidates.Select(i => $"'{i.Name}'"))} in the existing registration file, " +
+                    "which are equal ignoring case");
+            var oldImage = exact.Count == 1 ? exact[0] : candidates.SingleOrDefault();
             if (oldImage is null) continue;
-            if (fresh.Images.Count(i => string.Equals(i.Name, image.Name, StringComparison.Ordinal)) != 1)
-                throw Ambiguous("fresh image name");
+            // Fresh-side collisions were rejected up front (EnsureUniqueConfigured); this stays as a backstop.
+            if (fresh.Images.Count(i => PluginImageNames.Same(i.Name, image.Name)) != 1)
+                throw Ambiguous($"extracted image name '{image.Name}' on step '{fresh.Name ?? fresh.Message}'");
             operations.Add(() =>
             {
                 if (!reconcile) MergeResetIntent(image, oldImage);

@@ -1615,7 +1615,8 @@ public sealed partial class PluginRegistrationService : IPluginRegistrationServi
         // Check if image exists
         var query = new QueryExpression(SdkMessageProcessingStepImage.EntityLogicalName)
         {
-            ColumnSet = new ColumnSet(SdkMessageProcessingStepImage.Fields.SdkMessageProcessingStepImageId),
+            ColumnSet = new ColumnSet(SdkMessageProcessingStepImage.Fields.SdkMessageProcessingStepImageId,
+                SdkMessageProcessingStepImage.Fields.Name, SdkMessageProcessingStepImage.Fields.CreatedOn),
             Criteria = new FilterExpression
             {
                 Conditions =
@@ -1628,7 +1629,15 @@ public sealed partial class PluginRegistrationService : IPluginRegistrationServi
 
         await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
         var results = await RetrieveMultipleAsync(query, client, cancellationToken);
-        var existing = results.Entities.FirstOrDefault();
+        // Dataverse string conditions are case-insensitive by default (PluginImageNames), so several rows can match.
+        // Choose independently of server order: the exact-case row, otherwise the earliest created, then the lowest
+        // ID. The update writes the configured name, so a case-only difference converges.
+        var existing = results.Entities
+            .OrderByDescending(e => string.Equals(e.GetAttributeValue<string>(SdkMessageProcessingStepImage.Fields.Name),
+                imageConfig.Name, StringComparison.Ordinal))
+            .ThenBy(e => e.GetAttributeValue<DateTime?>(SdkMessageProcessingStepImage.Fields.CreatedOn) ?? DateTime.MaxValue)
+            .ThenBy(e => e.Id)
+            .FirstOrDefault();
 
         var entity = new SdkMessageProcessingStepImage
         {

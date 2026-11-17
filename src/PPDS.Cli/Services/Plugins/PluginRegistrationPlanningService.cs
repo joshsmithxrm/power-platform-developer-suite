@@ -8,7 +8,14 @@ namespace PPDS.Cli.Services.Plugins;
 /// <summary>Read-only registration preflight shared by real deployment and preview.</summary>
 internal static class PluginRegistrationPlanningService
 {
-    internal static void ValidateAssembly(PluginAssemblyConfig assembly, CancellationToken cancellationToken)
+    /// <param name="assembly">The configured assembly.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="checkImageNames">
+    /// False only for callers that never pair images (version 1.0 <c>plugins clean</c>); version 2.0 cleanup
+    /// applies the same rule through <see cref="PluginImagePruningService.ValidateAuthority"/>.
+    /// </param>
+    internal static void ValidateAssembly(PluginAssemblyConfig assembly, CancellationToken cancellationToken,
+        bool checkImageNames = true)
     {
         foreach (var type in assembly.Types)
         foreach (var step in type.Steps)
@@ -25,6 +32,7 @@ internal static class PluginRegistrationPlanningService
                 _ = PluginRegistrationNormalizer.NormalizeImage(image, step.Message, step.OperationIntent);
             }
         }
+        if (checkImageNames) PluginImageNames.EnsureUniqueConfigured(assembly);
     }
 
     /// <summary>
