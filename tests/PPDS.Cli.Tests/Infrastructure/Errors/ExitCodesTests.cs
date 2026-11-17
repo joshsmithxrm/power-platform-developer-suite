@@ -48,6 +48,13 @@ public class ExitCodesTests
     }
 
     [Fact]
+    public void Incomplete_IsTwelve_AndDistinctFromFailure()
+    {
+        Assert.Equal(12, ExitCodes.Incomplete);
+        Assert.NotEqual(ExitCodes.Failure, ExitCodes.Incomplete);
+    }
+
+    [Fact]
     public void AllCodesAreUnique()
     {
         var codes = new[]
@@ -58,7 +65,8 @@ public class ExitCodesTests
             ExitCodes.InvalidArguments,
             ExitCodes.ConnectionError,
             ExitCodes.AuthError,
-            ExitCodes.NotFoundError
+            ExitCodes.NotFoundError,
+            ExitCodes.Incomplete
         };
 
         Assert.Equal(codes.Length, codes.Distinct().Count());
@@ -75,7 +83,8 @@ public class ExitCodesTests
             ExitCodes.InvalidArguments,
             ExitCodes.ConnectionError,
             ExitCodes.AuthError,
-            ExitCodes.NotFoundError
+            ExitCodes.NotFoundError,
+            ExitCodes.Incomplete
         };
 
         Assert.All(codes, code => Assert.True(code >= 0));
@@ -93,7 +102,8 @@ public class ExitCodesTests
             ExitCodes.InvalidArguments,
             ExitCodes.ConnectionError,
             ExitCodes.AuthError,
-            ExitCodes.NotFoundError
+            ExitCodes.NotFoundError,
+            ExitCodes.Incomplete
         };
 
         Assert.All(codes, code => Assert.InRange(code, 0, 255));

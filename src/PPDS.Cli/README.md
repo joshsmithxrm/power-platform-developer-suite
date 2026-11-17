@@ -1011,6 +1011,9 @@ select an entity is deprecated and prints a notice on stderr, so prefer `--entit
 | 4 | ConnectionError | Failed to connect to Dataverse |
 | 5 | AuthError | Authentication failed |
 | 6 | NotFoundError | Resource not found (profile, environment, file) |
+| 10 | PreconditionFailed | Operation blocked by current state (for example blocking dependencies) |
+| 11 | ConfirmationRequired | Interactive confirmation needed but stdin is redirected; use `--force` |
+| 12 | Incomplete | The check could not be completed; the result is unknown (neither match nor drift). `plugins diff` and 2.0 `plugins deploy` verification: 0 match, 1 drift, 12 incomplete, 2 failure |
 
 ---
 

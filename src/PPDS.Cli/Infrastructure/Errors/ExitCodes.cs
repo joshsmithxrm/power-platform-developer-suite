@@ -40,4 +40,7 @@ public static class ExitCodes
 
     /// <summary>Confirmation required - interactive prompt needed but stdin is redirected. Use --force to bypass.</summary>
     public const int ConfirmationRequired = 11;
+
+    /// <summary>The check could not be completed; the result is unknown (neither match nor drift).</summary>
+    public const int Incomplete = 12;
 }

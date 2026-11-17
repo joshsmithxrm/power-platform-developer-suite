@@ -52,7 +52,7 @@ public static class DeployCommand
             "Deploy plugin registrations to environment. The registration file \"version\" selects the contract: " +
             "missing or 1.0 preserves omitted optional step/image properties on update (diff compares an omitted step filteringAttributes or image attributes against none, as 1.4.2 did, " +
             "and does not compare the others; to have deploy clear a field, remove it from the step or image and list it in resetFields); " +
-            "2.0 resets omitted optional properties to PPDS defaults and re-reads the result with diff after a real deploy. " +
+            "2.0 resets omitted optional properties to PPDS defaults and re-reads the result with diff after a real deploy (verification drift exits 1; verification that could not be completed exits 12; a failed deploy exits 2). " +
             "secureConfiguration is write-only under both versions: written when supplied, preserved when omitted, " +
             "never read back or compared, and it cannot be cleared by omitting it (supplying \"\" writes an empty value).")
         {

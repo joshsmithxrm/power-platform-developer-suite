@@ -5,6 +5,7 @@ using Moq;
 using PPDS.Cli.Commands;
 using PPDS.Cli.Commands.Plugins;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
@@ -149,8 +150,8 @@ public sealed class DeployReconciliationVerificationTests
     [Theory]
     [InlineData(false, false, 0, "match")]
     [InlineData(true, false, 1, "drift")]
-    [InlineData(false, true, 2, "incomplete")]
-    [InlineData(true, true, 2, "incomplete")]
+    [InlineData(false, true, 12, "incomplete")]
+    [InlineData(true, true, 12, "incomplete")]
     public async Task Version2_PostApplyReadControlsEnvelopeAndExitCode(
         bool storedDrift, bool unknownCapability, int expectedExit, string expectedStatus)
     {
@@ -185,6 +186,21 @@ public sealed class DeployReconciliationVerificationTests
             outcome.GetProperty("outcome").GetString() == "acknowledged");
         fixture.VerifyStoredStateReadAfterWrite();
         fixture.VerifyNoDeletes();
+    }
+
+    [Fact]
+    public async Task Version2_FailedDeploy_StillExitsFailureNotIncomplete()
+    {
+        using var fixture = new CommandFixture("2.0");
+        fixture.Service.Setup(s => s.UpsertStepAsync(It.IsAny<Guid>(), "pluginType", It.IsAny<PluginStepConfig>(),
+                It.IsAny<Guid>(), It.IsAny<Guid?>(), null, It.IsAny<StepIdentityResolution?>(), CancellationToken.None))
+            .ThrowsAsync(new InvalidOperationException("synthetic write failure"));
+
+        var exit = await fixture.RunAsync();
+
+        Assert.Equal(ExitCodes.Failure, exit);
+        Assert.NotEqual(ExitCodes.Incomplete, exit);
+        Assert.DoesNotContain("verify", fixture.Events);
     }
 
     [Fact]

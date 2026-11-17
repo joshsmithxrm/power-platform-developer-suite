@@ -105,7 +105,7 @@ public sealed class MetadataDeleteDependencyCommandTests(ITestOutputHelper outpu
     {
         using var f = new Fixture(Family(noun)) { DependencyShape = "more-records" };
         var result = await Run(f, noun, true, dryRun: true);
-        Assert.NotEqual(0, result.Exit);
+        Assert.Equal(ExitCodes.Incomplete, result.Exit);
         using var document = JsonDocument.Parse(result.Out);
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
         Assert.Single(f.Requests.OfType<Microsoft.Crm.Sdk.Messages.RetrieveDependenciesForDeleteRequest>());

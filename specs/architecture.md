@@ -227,6 +227,7 @@ public class PpdsException : Exception
 | 4 | ConnectionError | `Connection.*` |
 | 5 | AuthError | `Auth.*`, `Profile.*` |
 | 6 | NotFoundError | `*.NotFound` |
+| 12 | Incomplete | Check could not be completed; result unknown (`plugins diff`, 2.0 deploy verification, delete-dependency preview) |
 
 ### Progress Reporting
 
