@@ -126,7 +126,7 @@ public static class SqlCommand
             OutputFormat format;
             try
             {
-                format = result.GetValue(GlobalOptions.CsvCapableOutputFormat);
+                format = GlobalOptions.GetOutputFormat(result);
             }
             catch (InvalidOperationException)
             {

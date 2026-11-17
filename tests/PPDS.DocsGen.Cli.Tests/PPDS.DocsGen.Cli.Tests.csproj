@@ -42,6 +42,11 @@
     <!-- The fixture assembly is consumed via its built DLL on disk, but we
          take a ProjectReference to ensure it's built before tests run. -->
     <ProjectReference Include="Fixtures\PPDS.DocsGen.Cli.Tests.FixtureCli.csproj" />
+    <!-- The real CLI is loaded from its build output (not referenced as an assembly) to prove generated
+         reference pages match production help; this reference only guarantees it is built first. -->
+    <ProjectReference Include="..\..\src\PPDS.Cli\PPDS.Cli.csproj"
+                      ReferenceOutputAssembly="false"
+                      SetTargetFramework="TargetFramework=net8.0" />
   </ItemGroup>
 
   <ItemGroup>

@@ -494,7 +494,7 @@ ppds query fetch --file query.xml -f csv > results.csv
 ```
 
 Options:
-- `--file`, `-f` - Read FetchXML from file
+- `--file` - Read FetchXML from file
 - `--stdin` - Read FetchXML from stdin
 - `--profile`, `-p` - Profile name
 - `--environment`, `-env` - Override environment URL
@@ -538,7 +538,7 @@ ppds query sql "UPDATE contact SET jobtitle = 'Senior Developer' WHERE jobtitle 
 ```
 
 Options:
-- `--file`, `-f` - Read SQL from file
+- `--file` - Read SQL from file
 - `--stdin` - Read SQL from stdin
 - `--show-fetchxml` - Output the transpiled FetchXML instead of executing
 - `--explain` - Show the execution plan without executing
@@ -985,9 +985,9 @@ These options are available on all commands:
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--output-format` | `-f` | Output format: `text` (default) or `json`. On `data load`, `-f` is `--file`, so use `-o` there |
+| `--output-format` | `-f` | Output format: `text` (default) or `json`. On `data load`, `-f` is `--file`, so use `-o` there. On commands where `-f` belongs to another option (`--force` on `plugins unregister`, `plugins extract`, `plugins download assembly`/`package`, `custom-apis unregister`, `service-endpoints unregister`, `query history clear`; `--file` on `deployment-settings sync`) use the long form `--output-format` |
 | `--quiet` | `-q` | Show only warnings and errors |
-| `--verbose` | `-v` | Show debug messages |
+| `--verbose` | `-v` | Show debug messages. On the `views` commands that take `--view` (`-v`), use the long form `--verbose` |
 | `--debug` | | Show trace-level diagnostics |
 | `--correlation-id` | | Correlation ID for distributed tracing |
 
