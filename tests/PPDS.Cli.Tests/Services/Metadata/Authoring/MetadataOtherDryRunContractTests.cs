@@ -76,7 +76,7 @@ public sealed class MetadataOtherDryRunContractTests
             "table-create" or "column-create" or "one-to-many" or "many-to-many" or "choice-create" or "key-create" => ["solution", "publisher"],
             "status-add" => ["statuscode:True", "solution", "publisher"],
             "local-add" => ["new_column:True", "solution", "publisher"],
-            "local-update" or "local-remove" => ["new_column:False"],
+            "local-update" or "local-remove" => ["new_column:True"], // #1531: target resolution reads drafts.
             "option-update" or "option-remove" => ["new_choice:True"], _ => []
         };
         internal Fixture(string operation, bool cancel = false)
