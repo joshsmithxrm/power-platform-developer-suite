@@ -1,6 +1,7 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using PPDS.Cli.Plugins.Extraction;
+using PPDS.Cli.Tests.TestHelpers;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Plugins.Extraction;
@@ -128,13 +129,13 @@ public sealed class AssemblyExtractorTests : IDisposable
 
     /// <summary>
     /// Creates a unique, tracked cache base directory so self-heal tests never touch the
-    /// real per-user reference-assembly cache in the temp directory and never observe
-    /// state left behind by other tests. See #1326.
+    /// real per-user reference-assembly cache and never observe state left behind by other
+    /// tests. See #1326. The directory passes through the cache trust check, so it is rooted
+    /// in protected storage rather than the shared temp directory.
     /// </summary>
     private string CreateIsolatedCacheBaseDir()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"ppds-test-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
+        var dir = ProtectedTestDirectory.Create("ppds-test-");
         _tempFiles.Add(dir);
         return dir;
     }
