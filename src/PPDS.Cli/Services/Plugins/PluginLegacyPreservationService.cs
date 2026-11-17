@@ -152,13 +152,13 @@ internal static class PluginLegacyPreservationService
         return values;
     }
 
-    /// <summary>Stored images that can be paired by exact name (duplicate names are not compared).</summary>
+    /// <summary>Stored images paired by <see cref="PluginImageNames"/> (colliding names are not compared).</summary>
     internal static IReadOnlyList<PreservedLegacyValue> ForImages(string stepPath, PluginStepConfig step,
         IEnumerable<PluginImageInfo> storedImages, bool excludeComparedOmissions = false)
     {
         if (step.OperationIntent == RegistrationOperationIntent.Reconcile) return [];
-        var unique = storedImages.GroupBy(i => i.Name, StringComparer.Ordinal).Where(g => g.Count() == 1)
-            .ToDictionary(g => g.Key, g => g.Single(), StringComparer.Ordinal);
+        var unique = storedImages.GroupBy(i => i.Name, PluginImageNames.Comparer).Where(g => g.Count() == 1)
+            .ToDictionary(g => g.Key, g => g.Single(), PluginImageNames.Comparer);
         var values = new List<PreservedLegacyValue>();
         foreach (var image in step.Images)
             if (unique.TryGetValue(image.Name, out var stored))

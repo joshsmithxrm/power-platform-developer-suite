@@ -353,11 +353,32 @@ public sealed class PluginRoundTripConvergenceTests
 
         public string? StoredSecureValue(Guid id) => _tables["sdkmessageprocessingstepsecureconfig"][id].GetAttributeValue<string>("secureconfig");
 
-        public async Task<int> DeployAsync()
+        /// <summary>Sets the configured name of the step's single image.</summary>
+        public void SetConfiguredImageName(string name) => Image["name"] = name;
+
+        /// <summary>Renames the stored image row, or adds another stored image row on the same step.</summary>
+        public void SetStoredImageName(string name) =>
+            _tables["sdkmessageprocessingstepimage"].Values.Single()["name"] = name;
+
+        public void AddStoredImage(string name)
+        {
+            var image = new Entity("sdkmessageprocessingstepimage", Guid.NewGuid())
+            {
+                ["sdkmessageprocessingstepid"] = new EntityReference("sdkmessageprocessingstep", _stepId),
+                ["name"] = name, ["imagetype"] = new OptionSetValue(0), ["entityalias"] = ImageName,
+                ["messagepropertyname"] = "Target", ["ismanaged"] = false
+            };
+            _tables["sdkmessageprocessingstepimage"][image.Id] = image;
+        }
+
+        public IReadOnlyList<string> StoredImageNames() =>
+            _tables["sdkmessageprocessingstepimage"].Values.Select(i => i.GetAttributeValue<string>("name")).ToList();
+
+        public async Task<int> DeployAsync(bool clean = false, bool dryRun = false)
         {
             var path = WriteConfig();
             using var output = new StringWriter();
-            var exit = await DeployCommand.ExecuteAsync(new FileInfo(path), null, null, null, clean: false, dryRun: false,
+            var exit = await DeployCommand.ExecuteAsync(new FileInfo(path), null, null, null, clean: clean, dryRun: dryRun,
                 new GlobalOptionValues { OutputFormat = OutputFormat.Json }, CancellationToken.None,
                 serviceProviderFactory: _ => Task.FromResult(new ServiceCollection()
                     .AddSingleton(_service.Object)
@@ -514,6 +535,9 @@ public sealed class PluginRoundTripConvergenceTests
                 BooleanManagedProperty managed => managed.Value,
                 _ => actual
             };
+            // Dataverse evaluates string equality under its default case-insensitive collation.
+            if (actual is string text && condition.Values[0] is string value)
+                return string.Equals(text, value, StringComparison.OrdinalIgnoreCase);
             return Equals(actual, condition.Values[0]);
         }
 
@@ -554,6 +578,29 @@ public sealed class PluginRoundTripConvergenceTests
             _service.Setup(s => s.UpsertImageAsync(It.IsAny<Guid>(), It.IsAny<PluginImageConfig>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .Returns((Guid step, PluginImageConfig config, string message, CancellationToken ct) =>
                     real.UpsertImageAsync(step, config, message, ct));
+
+            // Version 2 image cleanup (--clean): ownership reads are stubs; step/image reads and deletes are real.
+            _service.Setup(s => s.ListAssembliesAsync(AssemblyName, It.IsAny<PluginListOptions?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync([assembly]);
+            _service.Setup(s => s.GetPluginTypeByNameOrIdAsync(_typeId.ToString("D"), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PluginTypeInfo { Id = _typeId, TypeName = TypeName, AssemblyId = _assemblyId });
+            _service.Setup(s => s.GetStepByNameOrIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns(async (string id, CancellationToken ct) =>
+                {
+                    var steps = await real.ListStepsForTypeAsync(_typeId, new PluginListOptions(IncludeHidden: true), ct);
+                    var step = steps.SingleOrDefault(s => s.Id.ToString("D") == id);
+                    if (step is not null) step.PluginTypeId ??= _typeId;
+                    return step;
+                });
+            _service.Setup(s => s.GetImageByNameOrIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns(async (string id, CancellationToken ct) =>
+                {
+                    var image = (await real.ListImagesForStepAsync(_stepId, ct)).SingleOrDefault(i => i.Id.ToString("D") == id);
+                    if (image is not null) image.StepId ??= _stepId;
+                    return image;
+                });
+            _service.Setup(s => s.DeleteImageAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .Returns((Guid id, CancellationToken ct) => real.DeleteImageAsync(id, ct));
         }
     }
 }

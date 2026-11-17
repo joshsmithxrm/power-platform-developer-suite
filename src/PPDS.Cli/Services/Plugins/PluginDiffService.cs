@@ -244,14 +244,17 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
                     stepConfig, stepInfo, images));
             foreach (var image in images.Where(i => i.UnavailableProperties.Contains("name")))
                 drift.Coverage.Unsupported.Add(new($"{path}/image:{image.Id}", "image name unavailable"));
-            var ambiguousNames = images.GroupBy(i => i.Name, StringComparer.Ordinal)
-                .Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet(StringComparer.Ordinal);
+            // One pairing rule shared with deploy and pruning: names differing only by case are the same image.
+            // Names that collide under that rule, on either side, cannot be paired unambiguously.
+            var ambiguousNames = images.Select(i => i.Name).GroupBy(n => n, PluginImageNames.Comparer)
+                .Concat(stepConfig.Images.Select(i => i.Name).GroupBy(n => n, PluginImageNames.Comparer))
+                .Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet(PluginImageNames.Comparer);
             if (ambiguousNames.Count > 0)
             {
                 drift.Coverage.Unsupported.Add(new(path, "duplicate image names prevent unambiguous comparison"));
             }
-            var byName = images.Where(i => !ambiguousNames.Contains(i.Name)).ToDictionary(i => i.Name, StringComparer.Ordinal);
-            var desiredNames = stepConfig.Images.Select(i => i.Name).ToHashSet(StringComparer.Ordinal);
+            var byName = images.Where(i => !ambiguousNames.Contains(i.Name)).ToDictionary(i => i.Name, PluginImageNames.Comparer);
+            var desiredNames = stepConfig.Images.Select(i => i.Name).ToHashSet(PluginImageNames.Comparer);
             foreach (var image in images.Where(i => !desiredNames.Contains(i.Name)))
             {
                 ct.ThrowIfCancellationRequested();
@@ -268,6 +271,8 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
                 }
                 var imagePath = $"{path}/image:{image.Name}";
                 var imageChanges = new List<PropertyChange>();
+                // Paired case-insensitively; the normalized fields include "name", compared exactly, so a case-only
+                // difference is a modified-image name change (deploy writes the configured name to this row).
                 foreach (var (field, expected) in PluginRegistrationNormalizer.NormalizeImage(image, stepConfig.Message, DesiredIntent(stepConfig)))
                 {
                     ct.ThrowIfCancellationRequested();

@@ -45,6 +45,13 @@ use one shared image-only planner. What the code enforces:
   are candidates. Assembly ownership comes from the assembly name or, for packages,
   the validated local nupkg identity, exact package ID and matching assembly parent.
   Names, filters and solution membership alone do not establish ownership.
+- A stored image is configured when its name equals a configured image name ignoring
+  case, the same rule deploy (update versus create), `plugins diff` and 2.0 deploy
+  verification use. A case-only difference is never a deletion candidate: deploy
+  updates that row and writes the configured name, and diff reports it beforehand as a
+  modified-image `name` change, not as a missing image plus an orphaned one. Configured
+  or stored names that collide ignoring case are ambiguous: cleanup refuses the plan
+  and diff reports the step's images as incomplete.
 - Hidden, managed, non-customizable, unavailable or ambiguous targets fail the whole
   plan visibly instead of being skipped. The complete plan for every configured
   scope is built before the first mutation; `deploy --clean` applies it only after

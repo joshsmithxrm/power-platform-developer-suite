@@ -41,7 +41,7 @@ internal static class PluginImagePruningService
                     var images = step.Images!;
                     _ = PluginRegistrationNormalizer.NormalizeStep(step, RegistrationOperationIntent.Reconcile);
                     Require(images.All(i => i is not null && !string.IsNullOrWhiteSpace(i.Name)) &&
-                        images.Select(i => i.Name).Distinct(Names).Count() == images.Count,
+                        images.Select(i => i.Name).Distinct(PluginImageNames.Comparer).Count() == images.Count,
                         "Image cleanup requires unique nonempty configured image names.");
                     foreach (var image in images)
                         _ = PluginRegistrationNormalizer.NormalizeImage(image, step.Message, RegistrationOperationIntent.Reconcile);
@@ -172,7 +172,7 @@ internal static class PluginImagePruningService
                         ValidateImageIdentity(image!);
                         Require(Names.Equals(image!.Name, listed.Name) && image.ImageType == listed.ImageType,
                             "Image cleanup image identity changed during planning.");
-                        if (stepConfig.Images.Any(c => Names.Equals(c.Name, image.Name))) continue;
+                        if (stepConfig.Images.Any(c => PluginImageNames.Same(c.Name, image.Name))) continue;
                         Require(!image.IsManaged && image.IsCustomizable,
                             "Image cleanup cannot delete a managed or noncustomizable image.");
                         images.Add(new(scope, image.Id, image.Name, image.ImageType, image.ModifiedOn));
@@ -346,7 +346,7 @@ internal static class PluginImagePruningService
     {
         UniqueIds(images.Select(i => i.Id));
         foreach (var image in images) ValidateImageIdentity(image);
-        Require(images.Select(i => i.Name).Distinct(Names).Count() == images.Count,
+        Require(images.Select(i => i.Name).Distinct(PluginImageNames.Comparer).Count() == images.Count,
             "Image cleanup cannot select duplicate image names within a step.");
     }
 
