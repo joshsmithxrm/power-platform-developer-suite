@@ -811,13 +811,13 @@ public sealed class PluginDiffReconciliationTests
         var f = Fixture();
         f.Image.Attributes = null;
         f.EnvImage.Attributes = null;
-        var (exit, output, error) = await Invoke(f.Service.Object,
+        var (exit, _, error) = await Invoke(f.Service.Object,
             JsonSerializer.Serialize(new PluginRegistrationConfig { Assemblies = [f.Config] }), json: false);
         Assert.Equal(0, exit);
         Assert.DoesNotContain("Notice:", error);
 
         f.Env.Description = "stored description";
-        (exit, output, _) = await Invoke(f.Service.Object,
+        (exit, var output, _) = await Invoke(f.Service.Object,
             JsonSerializer.Serialize(new PluginRegistrationConfig { Version = "2.0", Assemblies = [f.Config] }), json: true);
         Assert.Equal(1, exit); // 2.0 manages the omission: real drift, not a notice
         using var document = JsonDocument.Parse(output);
