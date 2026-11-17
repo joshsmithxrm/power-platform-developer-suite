@@ -534,9 +534,32 @@ public sealed class DaemonTestFixtureTests
         try
         {
             await fixture.InitializeAsync();
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            while (fixture.StderrCharactersDiscarded < 5000 * Secret.Length)
-                await Task.Delay(10, deadline.Token);
+            // The completion signal is the drained-character count reaching the child's full output
+            // (the child then blocks on stdin, so stderr EOF is not a usable signal). The deadline is
+            // only a hang backstop: cmd.exe's echo loop is slow and starves under heavy parallel
+            // load, so it is generous, and a failure names exactly what was being awaited.
+            const int expectedLines = 5000;
+            var expectedCharacters = expectedLines * Secret.Length;
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+            while (fixture.StderrCharactersDiscarded < expectedCharacters)
+            {
+                // Read completion first: the drain adds to the counter before it can complete, so a
+                // completed drain with the counter still short is a real shortfall, not a race.
+                var drainCompleted = fixture.StderrCompletion.IsCompleted;
+                if (drainCompleted && fixture.StderrCharactersDiscarded < expectedCharacters)
+                {
+                    var faulted = fixture.StderrCompletion.IsFaulted;
+                    Assert.Fail($"The stderr drain {(faulted ? "faulted" : "ended")} after " +
+                        $"{fixture.StderrCharactersDiscarded} of at least {expectedCharacters} expected characters.");
+                }
+                try { await Task.Delay(10, deadline.Token); }
+                catch (OperationCanceledException)
+                {
+                    Assert.Fail($"Timed out after 120s waiting for the fixture to drain native child stderr: " +
+                        $"{fixture.StderrCharactersDiscarded} of at least {expectedCharacters} characters " +
+                        $"({expectedLines} lines) were drained.");
+                }
+            }
             await fixture.DisposeAsync();
             Assert.True(fixture.StopEvidence!.ExitConfirmed);
             Assert.False(fixture.RequiresManualReview);

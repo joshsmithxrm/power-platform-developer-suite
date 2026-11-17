@@ -1,5 +1,6 @@
 """Behavior and workflow wiring for the required test aggregate."""
 import importlib.util
+import re
 from pathlib import Path
 
 import pytest
@@ -79,3 +80,15 @@ def test_reusable_python_suite_feeds_always_reporting_gate():
     assert "concurrency" not in called
     assert any(step.get("run") == "python -m pytest tests/ -q"
                for step in called["jobs"]["workflow-tests"]["steps"])
+    # The Windows job must keep existing and keep failing (not skipping) without its tools.
+    windows = called["jobs"]["windows-tool-tests"]
+    assert windows["runs-on"] == "windows-2025" and windows["env"]["PPDS_REQUIRE_WINDOWS_TOOLS"] == "1"
+    assert windows["timeout-minutes"] <= 30
+    dotnet = next(step for step in windows["steps"] if step.get("uses", "").startswith("actions/setup-dotnet@"))
+    assert re.fullmatch(r"actions/setup-dotnet@[0-9a-f]{40}", dotnet["uses"])  # Pinned to a commit.
+    assert dotnet["with"] == {"global-json-file": "global.json"}
+    command = next(step["run"] for step in windows["steps"] if "pytest" in step.get("run", "") and "-q" in step["run"])
+    for target in ("tests/ci/test_inspect_release_assemblies.py",
+                   "test_pwsh_needs_pathext_to_launch_a_native_tool_under_the_driver_environment",
+                   "test_signer_process_preserves_common_data_without_inheriting_secrets"):
+        assert target in command
