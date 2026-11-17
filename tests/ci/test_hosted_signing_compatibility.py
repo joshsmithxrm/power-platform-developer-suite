@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -14,6 +15,13 @@ ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("hosted_signing_contract", ROOT / "scripts/ci/hosted_signing_compatibility.py")
 h = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(h)
+
+
+@pytest.fixture(autouse=True)
+def isolated_driver_module(monkeypatch):
+    # driver_vocabulary/refusal_code read sys.modules; start every test without the driver entry
+    # so a test sees the driver only when it loads it itself. monkeypatch restores the entry.
+    monkeypatch.delitem(sys.modules, h.DRIVER_MODULE, raising=False)
 
 
 def args(stage="sign"):
@@ -67,12 +75,15 @@ def environment():
     ("private-unknown-command-secret", None),
 ])
 def test_command_refusal_is_fixed_enum_not_private_diagnostics(diagnostic, expected):
+    h.load_driver()
     assert h.command_refusal("private-prefix " + diagnostic, "private-suffix") == expected
 
 
 def test_command_refusal_accepts_exactly_the_driver_registry_codes():
     driver = h.load_driver()
-    assert driver.REFUSAL_CODES >= set(driver.REFUSALS.values())
+    # The accepted set is the registry's codes plus the fixed buckets, and nothing else.
+    assert driver.REFUSAL_CODES == set(driver.REFUSALS.values()) | {"unregistered", "exception-other"} | {
+        "exception-" + name.lower() for name in driver.EXCEPTION_CLASSES}
     for code in driver.REFUSAL_CODES:
         assert h.command_refusal("PRIVATE_OUTPUT", "PRIVATE\nPPDS_COMPAT_REFUSAL=" + code + "\nPRIVATE") == "driver-" + code
     for unknown in ("unclassified", "C:/PRIVATE/path", "tool-hash PRIVATE", "TOOL-HASH", ""):
@@ -93,6 +104,7 @@ def test_command_refusal_accepts_exactly_the_driver_registry_codes():
     ("no diagnostic lines at all", None, None),
 ])
 def test_driver_operation_and_status_pass_only_fixed_values(text, operation, status):
+    h.load_driver()
     assert h.command_operation("PRIVATE_STDOUT", text) == operation
     assert h.command_status("PRIVATE_STDOUT", text) == status
 
@@ -143,6 +155,15 @@ def test_coordinator_registry_covers_every_reason_with_a_distinct_code():
 ])
 def test_coordinator_refusal_codes_never_carry_exception_text(error, expected):
     assert h.refusal_code(error) == expected
+    h.load_driver()
+    assert h.refusal_code(error) == expected
+
+
+def test_without_the_driver_module_nothing_from_the_driver_passes_through(monkeypatch):
+    monkeypatch.setattr(h, "load_driver", lambda: object())
+    assert h.command_refusal("", "PPDS_COMPAT_REFUSAL=tool-hash") is None
+    assert h.command_operation("", "PPDS_COMPAT_OPERATION=sign") is None
+    assert h.command_status("", "PPDS_COMPAT_STATUS=0") is None
 
 
 def test_coordinator_maps_driver_refusals_through_the_driver_registry():

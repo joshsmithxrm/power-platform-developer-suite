@@ -63,16 +63,19 @@ OPERATIONS = frozenset({
     "fresh-forced-verification", "fresh-signature-comparison", "corrupt-signature-rejection",
     "non-signature-change-rejection", "packaged-forced-verification", "packaged-metadata",
 })
+# Operations whose raw output is kept in the receipt. Package verification is not one of them:
+# its parsed, fixed-field `signature` row is the only thing recorded about it.
 PUBLIC_DIAGNOSTIC_OPERATIONS = frozenset({
     "delay-forced-rejection", "signed-forced-verification", "signature-only-comparison",
     "fresh-forced-verification", "fresh-signature-comparison", "corrupt-signature-rejection",
-    "non-signature-change-rejection", "packaged-forced-verification", "package-signature-verification",
+    "non-signature-change-rejection", "packaged-forced-verification",
 })
 BASE64_SHA512 = r"[A-Za-z0-9+/]{86}=="
-# Global properties that would replace or skip MinVer's derivation of the version properties.
-EXPLICIT_VERSION_PROPERTIES = tuple("-p:" + name.lower() + "=" for name in (
-    "Version", "VersionPrefix", "VersionSuffix", "PackageVersion", "AssemblyVersion", "FileVersion",
-    "InformationalVersion", "MinVerSkip", "MinVerVersion", "IncludeSourceRevisionInInformationalVersion"))
+REFERENCE_PACKAGE = "microsoft.netframework.referenceassemblies.net462"
+# Where MSBuild finds an installed .NET Framework 4.6.2 targeting pack, under ProgramFiles(x86).
+TARGETING_PACK = ("Reference Assemblies", "Microsoft", "Framework", ".NETFramework", "v4.6.2")
+# The first package verification on a fresh host may fetch revocation data; later ones are bounded.
+FIRST_VERIFICATION_TIMEOUT, VERIFICATION_TIMEOUT = 600, 120
 
 # This trusted, metadata-only probe never loads target code. Its bytes are bound
 # in receipts. All parameters are passed separately, not interpolated as code.
@@ -470,9 +473,15 @@ def validate_build_record(value, plan, control):
             and props.get("AssemblyOriginatorKeyFile"), "Required evaluated build observations differ")
     require(check_hex(value["assets_sha256"]) and set(value["binaries"]) == {"msbuild", "roslyn"},
             "Actual assets/compiler observations missing")
+    dotnet_root = PureWindowsPath(plan["tools"]["dotnet"]["path"]).parent
     for row in value["binaries"].values():
         require(isinstance(row, dict) and check_hex(row.get("sha256")) and row.get("bytes", 0) > 0
-                and row.get("path") and product_version(row.get("product_version")), "Compiler observation incomplete")
+                and isinstance(row.get("path"), str) and product_version(row.get("product_version")),
+                "Compiler observation incomplete")
+        # The same containment PREPARE applied, re-checked by every stage that admits the receipt.
+        recorded = PureWindowsPath(row["path"])
+        require(".." not in recorded.parts and recorded.is_relative_to(dotnet_root),
+                "Compiler is outside the pinned dotnet root")
     restore = value["restore"]
     require(isinstance(restore, dict) and restore.get("fallback_folders") == [] and restore.get("package_folders") == 1
             and isinstance(restore.get("source"), str) and restore["source"].startswith("https://"),
@@ -487,9 +496,14 @@ def validate_build_record(value, plan, control):
         require(base64_sha512(row.get("sha512")) and base64_sha512(row.get("content_sha512")),
                 "Resolved dependency content hash missing")
         require(row.get("source") == restore["source"], "Resolved dependency source differs")
-        reference = row.get("reference")
-        require(reference in {"direct-pinned", "direct-sdk-implicit", "transitive"}
-                and (row.get("pin") == row["version"] if reference == "direct-pinned" else row.get("pin") is None),
+        reference, central = row.get("reference"), row.get("pin")
+        # A direct central reference must equal its pin. A transitive package with a central entry
+        # records that entry and whether it matched (CPM does not pin transitive packages here).
+        require((reference == "direct-pinned" and central == row["version"] and row.get("pin_matches") is True)
+                or (reference == "direct-sdk-implicit" and central is None and row.get("pin_matches") is None)
+                or (reference == "transitive" and (
+                    (central is None and row.get("pin_matches") is None)
+                    or (isinstance(central, str) and row.get("pin_matches") is (central == row["version"])))),
                 "Resolved dependency pin observation differs")
         signature = row.get("signature")
         require(isinstance(signature, dict) and signature.get("content_sha512") == row["content_sha512"]
@@ -498,8 +512,30 @@ def validate_build_record(value, plan, control):
                 "Resolved dependency signature observation incomplete")
         require(row["id"].lower() not in ids, "Duplicate resolved dependency observation")
         ids.add(row["id"].lower())
-    require({"minver", "microsoft.sourcelink.github", "microsoft.netframework.referenceassemblies.net462"} <= ids,
-            "Required build dependencies missing")
+    require({"minver", "microsoft.sourcelink.github"} <= ids, "Required build dependencies missing")
+    validate_reference_assemblies(value.get("reference_assemblies"), packages)
+
+
+def validate_reference_assemblies(value, packages):
+    # Exactly one source of .NET Framework 4.6.2 reference assemblies: the restored package
+    # (bound by its signature row) or an installed targeting pack (directory and file hashes).
+    rows = [row for row in packages if row["id"].lower() == REFERENCE_PACKAGE]
+    require(isinstance(value, dict) and value.get("kind") in {"package", "targeting-pack"},
+            "Reference assembly observation required")
+    if value["kind"] == "package":
+        require(set(value) == {"kind", "id", "version"} and len(rows) == 1
+                and value["id"] == rows[0]["id"] and value["version"] == rows[0]["version"],
+                "Reference assembly observation differs")
+        return
+    files = value.get("files")
+    require(set(value) == {"kind", "directory", "files"} and not rows
+            and isinstance(value["directory"], str)
+            and [p.lower() for p in PureWindowsPath(value["directory"]).parts[-len(TARGETING_PACK):]]
+            == [p.lower() for p in TARGETING_PACK]
+            and isinstance(files, dict) and set(files) == {"mscorlib.dll", "System.dll"}
+            and all(isinstance(row, dict) and check_hex(row.get("sha256")) and type(row.get("bytes")) is int
+                    and row["bytes"] > 0 for row in files.values()),
+            "Reference assembly observation differs")
 
 
 def validate_observations(value, stage, plan):
@@ -543,12 +579,17 @@ def validate_observations(value, stage, plan):
             "Both build observations required")
     for name in ("delay", "public"):
         validate_build_record(value["build_evidence"][name], plan, name == "public")
+    # The overlay is deterministic given the plan and PREPARE's output directory (the key-file
+    # item names it), so the recorded list must equal exactly what build_overlay produces: no
+    # added, reordered, /p:, -property: or ;-joined property can be present.
     overlay = value.get("build_overlay")
-    require(isinstance(overlay, list) and all(isinstance(item, str) for item in overlay)
-            and {"-p:SignAssembly=true", "-p:DebugType=portable", "-p:MinVerVersionOverride=" + plan["version"],
-                 "-p:SourceRevisionId=" + plan["source"]} <= set(overlay), "Public build overlay observation incomplete")
-    require(not any(item.lower().startswith(prefix) for item in overlay for prefix in EXPLICIT_VERSION_PROPERTIES),
-            "Build overlay must not bypass MinVer's version derivation")
+    require(isinstance(overlay, list) and all(isinstance(item, str) for item in overlay),
+            "Public build overlay observation incomplete")
+    keys = [item for item in overlay if item.startswith(KEY_FILE_PROPERTY)]
+    require(len(keys) == 1, "Public build overlay observation incomplete")
+    key_file = PureWindowsPath(keys[0][len(KEY_FILE_PROPERTY):])
+    require(key_file.name == "test-public.bin" and overlay == build_overlay(plan, key_file.parent),
+            "Build overlay differs from the overlay PREPARE builds")
     rule = version_rule(plan["version"])
     for field in ("metadata", "control_metadata"):
         row = value.get(field)
@@ -756,8 +797,11 @@ def central_pins(source):
 
 def signature_verification(text, package_id, version, source_url):
     # Parse `dotnet nuget verify --all` output (English CLI language is fixed in the environment).
-    # NuGet computes the content hash from the archive, and a successful verification means the
-    # repository signature over that hash is valid. Only these fixed fields are kept.
+    # NuGet computes the content hash from the archive, and a successful verification means a
+    # repository signature over that content is valid and chains to a trusted root. The service
+    # index is an attribute the signer writes, and the certificate is recorded but not pinned, so
+    # this proves "a valid repository signature whose signer names nuget.org's index". Only
+    # these fixed fields are kept; the raw output is not retained in the receipt.
     lines = [line.strip() for line in text.splitlines()]
     hashes = [line[len("Content hash: "):] for line in lines if line.startswith("Content hash: ")]
     require(len(hashes) == 1 and base64_sha512(hashes[0]), "Package signature verification incomplete")
@@ -781,12 +825,14 @@ def build_evidence(rt, plan, output, source, project, work, props, probe, contro
     fields = ("NETCoreSdkVersion", "MSBuildVersion", "MSBuildBinPath", "RoslynTargetsPath",
               "CscToolPath", "CscToolExe", "TargetFramework", "SignAssembly", "PublicSign",
               "DelaySign", "AssemblyOriginatorKeyFile", "AssemblyVersion", "FileVersion",
-              "InformationalVersion", "PackageVersion", "MinVerVersion", "Configuration")
+              "InformationalVersion", "PackageVersion", "MinVerVersion", "Configuration",
+              "TargetFrameworkDirectory")
     # MinVer and the SDK set the version properties inside targets, so evaluation alone reports
     # the SDK defaults. Running GetAssemblyAttributes (MinVer runs before GetAssemblyVersion; the
-    # SDK then appends SourceRevisionId) reports the values the compiler was given.
+    # SDK then appends SourceRevisionId) reports the values the compiler was given, and
+    # GetReferenceAssemblyPaths reports the reference-assembly directories the compiler used.
     result = invoke(rt, plan, "dotnet", ["msbuild", project, "-getProperty:" + ",".join(fields),
-                    "-t:GetAssemblyAttributes", "-p:Configuration=Release", *props],
+                    "-t:GetReferenceAssemblyPaths;GetAssemblyAttributes", "-p:Configuration=Release", *props],
                     output, "evaluated-properties", build=True, nuget=True, cwd=source)
     observed = h.decode(result.encode())["Properties"]
     require(set(fields) <= observed.keys(), "Evaluated build evidence incomplete")
@@ -854,30 +900,78 @@ def build_evidence(rt, plan, output, source, project, work, props, probe, contro
         require(recorded == sha512, "Resolved package file hash differs")
         dependency = direct.get(package_id.lower())
         if dependency is None:
-            reference, pin = "transitive", None
+            # CPM does not pin transitive packages here; a central entry is compared and recorded.
+            central = pins.get(package_id.lower())
+            reference, matches = "transitive", None if central is None else central == version
         elif dependency.get("versionCentrallyManaged") is True:
-            reference, pin = "direct-pinned", pins.get(package_id.lower())
-            require(pin == version and dependency.get("version") == "[" + pin + ", )",
+            reference, central = "direct-pinned", pins.get(package_id.lower())
+            require(central == version and dependency.get("version") == "[" + central + ", )",
                     "Resolved package differs from its central pin")
+            matches = True
         else:
             require(dependency.get("autoReferenced") is True, "Unpinned direct build dependency")
-            reference, pin = "direct-sdk-implicit", None
+            reference, central, matches = "direct-sdk-implicit", None, None
         signature = signature_verification(
             # Normal verbosity: the default omits the service index and the success line.
             invoke(rt, plan, "dotnet", ["nuget", "verify", "--all", archive, "-v", "normal"], output,
-                   "package-signature-verification", build=True, nuget=True, cwd=source),
+                   "package-signature-verification", build=True, nuget=True, cwd=source,
+                   timeout=VERIFICATION_TIMEOUT if packages else FIRST_VERIFICATION_TIMEOUT),
             package_id, version, source_url)
         require(signature["content_sha512"] == library["sha512"], "Verified package content hash differs")
         packages.append({"id": package_id, "version": version, "sha256": digest(data), "sha512": sha512,
                          "content_sha512": library["sha512"], "source": source_url, "reference": reference,
-                         "pin": pin, "signature": signature})
+                         "pin": central, "pin_matches": matches, "signature": signature})
     ids = {row["id"].lower() for row in packages}
-    require({"minver", "microsoft.sourcelink.github", "microsoft.netframework.referenceassemblies.net462"} <= ids,
-            "Required resolved build inputs missing")
+    require({"minver", "microsoft.sourcelink.github"} <= ids, "Required resolved build inputs missing")
     return {"sdk": sdk, "evaluated_properties": observed, "binaries": binaries,
             "assets_sha256": digest(assets_raw), "packages": packages,
+            "reference_assemblies": reference_assemblies(observed["TargetFrameworkDirectory"], output, packages),
             "restore": {"fallback_folders": [], "package_folders": 1, "source": source_url,
                         "sources": sorted(restore.get("sources", {}))}}
+
+
+def reference_assemblies(reported, output, packages):
+    # The SDK references the Microsoft.NETFramework.ReferenceAssemblies package only when
+    # GetReferenceAssemblyPaths finds no installed 4.6.2 targeting pack (IncludeTargetingPackReference
+    # in Microsoft.NET.Sdk.FrameworkReferenceResolution.targets), so either source is legitimate.
+    # Record which one the compiler used: the package (already bound by its signature row) or the
+    # installed targeting pack's directory and its mscorlib/System reference-assembly hashes.
+    def norm(value):
+        return os.path.normcase(os.path.normpath(str(value).replace("\\", os.sep)))
+    directories = [entry for entry in str(reported).split(";") if entry.strip()]
+    require(directories, "Reference assembly directory missing")
+    primary = norm(directories[0])
+    require(all(norm(entry) in {primary, norm(os.path.join(primary, "Facades"))} for entry in directories),
+            "Unexpected reference assembly directories")
+    rows = [row for row in packages if row["id"].lower() == REFERENCE_PACKAGE]
+    if rows:
+        expected = os.path.join(str(output / "temp/packages"), REFERENCE_PACKAGE, rows[0]["version"].lower(),
+                                "build", ".NETFramework", "v4.6.2")
+        require(primary == norm(expected), "Reference assemblies differ from the restored package")
+        return {"kind": "package", "id": rows[0]["id"], "version": rows[0]["version"]}
+    installed = PureWindowsPath(*PureWindowsPath(FIXED_SIGNER).parts[:2], *TARGETING_PACK)
+    require(primary == norm(installed), "Reference assemblies differ from the installed targeting pack")
+    return {"kind": "targeting-pack", "directory": str(installed),
+            "files": {name: record(Path(str(installed)) / name) for name in ("mscorlib.dll", "System.dll")}}
+
+
+KEY_FILE_PROPERTY = "-p:AssemblyOriginatorKeyFile="
+
+
+def build_overlay(plan, output):
+    # The exact global-property overlay for the owned copy; receipt validation rebuilds it.
+    version_rule(plan["version"])
+    return [
+        "-p:SignAssembly=true", KEY_FILE_PROPERTY + str(output / "test-public.bin"),
+        # Production lets MinVer derive Version, PackageVersion, AssemblyVersion ({Major}.0.0.0),
+        # FileVersion ({Major}.{Minor}.{Patch}.0) and InformationalVersion from the Git tag. The
+        # owned copy has no .git, so MinVer's own target is given the candidate version instead
+        # of a tag; it still runs and derives every property by the production rule. The SDK
+        # then appends SourceRevisionId to InformationalVersion as SourceLink does in production.
+        "-p:MinVerVersionOverride=" + plan["version"],
+        "-p:RepositoryCommit=" + plan["source"], "-p:SourceRevisionId=" + plan["source"],
+        "-p:ContinuousIntegrationBuild=true", "-p:DebugType=portable",
+    ]
 
 
 def prepare(args, plan, rt):
@@ -894,18 +988,7 @@ def prepare(args, plan, rt):
     # Owned copy only. Global properties provide an explicit source/public-key overlay; no Git
     # tag or activated signing policy is fabricated.
     project = source / "src/PPDS.Plugins/PPDS.Plugins.csproj"
-    version_rule(plan["version"])
-    overlay = [
-        "-p:SignAssembly=true", "-p:AssemblyOriginatorKeyFile=" + str(output / "test-public.bin"),
-        # Production lets MinVer derive Version, PackageVersion, AssemblyVersion ({Major}.0.0.0),
-        # FileVersion ({Major}.{Minor}.{Patch}.0) and InformationalVersion from the Git tag. The
-        # owned copy has no .git, so MinVer's own target is given the candidate version instead
-        # of a tag; it still runs and derives every property by the production rule. The SDK
-        # then appends SourceRevisionId to InformationalVersion as SourceLink does in production.
-        "-p:MinVerVersionOverride=" + plan["version"],
-        "-p:RepositoryCommit=" + plan["source"], "-p:SourceRevisionId=" + plan["source"],
-        "-p:ContinuousIntegrationBuild=true", "-p:DebugType=portable",
-    ]
+    overlay = build_overlay(plan, output)
     # Owned user-level NuGet configuration (see NUGET_USER_CONFIG); APPDATA points here for
     # NuGet children only.
     (output / "temp/appdata/NuGet").mkdir(parents=True)
@@ -1037,6 +1120,14 @@ def package_adapter(rt, plan, output, public_key):
     return inspect
 
 
+def bind_restore_source(prepared, source):
+    # VERIFY holds its own owned source copy: the package source PREPARE recorded for both builds
+    # (and, through validate_build_record, for every package row) must be the one NuGet.config names.
+    expected = repository_source(source)
+    require(all(prepared["build_evidence"][name]["restore"]["source"] == expected for name in ("delay", "public")),
+            "Prepared package source differs from the repository source")
+
+
 def complete_cases(cases, evidence_class):
     require(evidence_class == "real-process" and set(cases) == set(CASES)
             and all(cases[name] == "PASS" for name in CASES), "All six real cases must pass")
@@ -1081,6 +1172,7 @@ def verify(args, plan, rt):
     p.repackage(packages, raw, final)
     graph_source, source_inputs = source_copy(rt, plan, args.source_root, output)
     require(source_inputs == prepared["source_inputs"], "Verification source differs from prepared source")
+    bind_restore_source(prepared, graph_source)
     graph = ReleaseGraph.discover(graph_source)
     adapter = package_adapter(rt, plan, output, output / "test-public.bin")
     inventories = {}
@@ -1212,7 +1304,14 @@ REFUSALS = {
     "Prepared case/tool observations incomplete": "prepare-observations",
     "Both build observations required": "build-records",
     "Public build overlay observation incomplete": "overlay-incomplete",
-    "Build overlay must not bypass MinVer's version derivation": "overlay-version-bypass",
+    "Build overlay differs from the overlay PREPARE builds": "overlay-differs",
+    "Reference assembly observation required": "reference-assemblies-missing",
+    "Reference assembly observation differs": "reference-assemblies-record",
+    "Reference assembly directory missing": "reference-assemblies-directory",
+    "Unexpected reference assembly directories": "reference-assemblies-directories",
+    "Reference assemblies differ from the restored package": "reference-assemblies-package",
+    "Reference assemblies differ from the installed targeting pack": "reference-assemblies-targeting-pack",
+    "Prepared package source differs from the repository source": "verify-package-source",
     "Assembly/PDB observations missing": "assembly-observation-missing",
     "Assembly observation identity differs": "assembly-observation-identity",
     "PDB observation identity differs": "pdb-observation-identity",
