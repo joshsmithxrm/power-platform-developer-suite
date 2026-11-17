@@ -184,10 +184,16 @@ public partial class DataverseMetadataAuthoringService
         ["Could not find an optionset with name", "Could not find an option set with"];
 
     /// <summary>
-    /// True only for Dataverse's "option set not found" fault about <paramref name="requestedName"/>: the fault
-    /// text must contain one of the anchored phrases (ordinal, case-insensitive) AND the requested name. A "Could
-    /// not find …" fault about a solution, publisher, attribute or option value never qualifies, even when an
-    /// echoed identifier happens to contain "optionset".
+    /// The wording Dataverse returned in the field report for #1535. It echoes no name, so it can only be about
+    /// the option set the request itself named. Keep in step with the copy in DataverseMetadataQueryService.
+    /// </summary>
+    private const string OptionSetNotFoundUnnamedPhrase = "Could not find an option set with specified name";
+
+    /// <summary>
+    /// True only for Dataverse's "option set not found" fault about <paramref name="requestedName"/>. Either the
+    /// fault text is the unnamed wording, or it contains one of the anchored phrases (ordinal, case-insensitive)
+    /// AND the requested name. A "Could not find …" fault about a solution, publisher, attribute, option value
+    /// or a different option set never qualifies, even when an echoed identifier happens to contain "optionset".
     /// </summary>
     private static bool IsOptionSetNotFoundFault(Exception exception, string requestedName)
     {
@@ -197,8 +203,12 @@ public partial class DataverseMetadataAuthoringService
     }
 
     private static bool IsOptionSetNotFoundText(string? text, string requestedName)
-        => !string.IsNullOrEmpty(text)
-           && !string.IsNullOrEmpty(requestedName)
-           && OptionSetNotFoundPhrases.Any(phrase => text.Contains(phrase, StringComparison.OrdinalIgnoreCase))
-           && text.Contains(requestedName, StringComparison.OrdinalIgnoreCase);
+    {
+        if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(requestedName))
+            return false;
+        if (text.Contains(OptionSetNotFoundUnnamedPhrase, StringComparison.OrdinalIgnoreCase))
+            return true;
+        return OptionSetNotFoundPhrases.Any(phrase => text.Contains(phrase, StringComparison.OrdinalIgnoreCase))
+               && text.Contains(requestedName, StringComparison.OrdinalIgnoreCase);
+    }
 }

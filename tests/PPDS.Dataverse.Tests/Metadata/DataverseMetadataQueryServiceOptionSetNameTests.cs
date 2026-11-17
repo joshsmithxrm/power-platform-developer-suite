@@ -99,6 +99,19 @@ public sealed class DataverseMetadataQueryServiceOptionSetNameTests
     }
 
     [Fact]
+    [Trait("AC", "AC-133")]
+    public async Task UnnamedNotFoundWording_TriggersResolution()
+    {
+        // The wording quoted in #1535 echoes no name; it must still resolve the stored spelling.
+        var f = new Fixture { NotFoundMessage = _ => "Could not find an option set with specified name" };
+        var result = await f.Service.GetOptionSetAsync("mayo_AIRequestType");
+        Assert.Equal(Stored, result.Name);
+        Assert.Single(f.Requests.OfType<RetrieveAllOptionSetsRequest>());
+        Assert.Equal(new[] { "mayo_AIRequestType", Stored }, f.Requests.OfType<RetrieveOptionSetRequest>().Select(r => r.Name));
+        f.AssertLeases();
+    }
+
+    [Fact]
     [Trait("AC", "AC-134")]
     public async Task CatalogLookupFailure_KeepsTheOriginalFault()
     {

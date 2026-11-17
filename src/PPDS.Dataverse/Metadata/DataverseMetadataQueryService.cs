@@ -433,8 +433,15 @@ public class DataverseMetadataQueryService : IMetadataQueryService
         ["Could not find an optionset with name", "Could not find an option set with"];
 
     /// <summary>
-    /// True only for the "option set not found" fault about <paramref name="requestedName"/>: the fault text must
-    /// contain an anchored phrase (ordinal, case-insensitive) AND the requested name.
+    /// The wording Dataverse returned in the field report for #1535. It echoes no name, so it can only be about
+    /// the option set the request itself named. Keep in step with the authoring service's copy.
+    /// </summary>
+    private const string OptionSetNotFoundUnnamedPhrase = "Could not find an option set with specified name";
+
+    /// <summary>
+    /// True only for the "option set not found" fault about <paramref name="requestedName"/>: either the fault
+    /// text is the unnamed wording, or it contains an anchored phrase (ordinal, case-insensitive) AND the
+    /// requested name.
     /// </summary>
     private static bool IsOptionSetNotFoundFault(Exception exception, string requestedName)
     {
@@ -449,10 +456,14 @@ public class DataverseMetadataQueryService : IMetadataQueryService
     }
 
     private static bool IsOptionSetNotFoundText(string? text, string requestedName)
-        => !string.IsNullOrEmpty(text)
-           && !string.IsNullOrEmpty(requestedName)
-           && OptionSetNotFoundPhrases.Any(phrase => text.Contains(phrase, StringComparison.OrdinalIgnoreCase))
-           && text.Contains(requestedName, StringComparison.OrdinalIgnoreCase);
+    {
+        if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(requestedName))
+            return false;
+        if (text.Contains(OptionSetNotFoundUnnamedPhrase, StringComparison.OrdinalIgnoreCase))
+            return true;
+        return OptionSetNotFoundPhrases.Any(phrase => text.Contains(phrase, StringComparison.OrdinalIgnoreCase))
+               && text.Contains(requestedName, StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<EntityKeyDto>> GetKeysAsync(

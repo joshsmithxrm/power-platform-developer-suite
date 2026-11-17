@@ -190,6 +190,7 @@ public sealed class GlobalChoiceNameResolutionTests
     [Theory]
     [InlineData("Could not find an optionset with name {0}")]      // recorded server wording
     [InlineData("Could not find an option set with name '{0}'.")]  // spaced variant
+    [InlineData("Could not find an option set with specified name")] // wording quoted in #1535; echoes no name
     [Trait("AC", "AC-133")]
     public async Task RecognisedNotFoundWordings_TriggerResolution(string template)
     {
