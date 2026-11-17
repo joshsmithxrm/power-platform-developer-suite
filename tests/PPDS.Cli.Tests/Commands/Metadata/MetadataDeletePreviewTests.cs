@@ -154,6 +154,20 @@ public sealed class MetadataDeletePreviewTests
     }
 
     [Fact]
+    public void WriteDependencies_UnrecognisedStatus_FallsBackToFailure()
+    {
+        var preview = new MetadataDeletePreviewResult { Status = "unrecognised" };
+        var oldError = Console.Error;
+        using var stderr = new StringWriter();
+        Console.SetError(stderr);
+        try
+        {
+            Assert.Equal(ExitCodes.Failure, MetadataDeletePreview.WriteDependencies(new TextOutputWriter(), new { preview }, preview));
+        }
+        finally { Console.SetError(oldError); }
+    }
+
+    [Fact]
     public async Task SchemaDelete_MissingInput_RemainsValidationFailure()
     {
         using var fixture = new Fixture();

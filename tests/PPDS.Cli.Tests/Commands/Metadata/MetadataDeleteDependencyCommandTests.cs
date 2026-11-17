@@ -130,6 +130,46 @@ public sealed class MetadataDeleteDependencyCommandTests(ITestOutputHelper outpu
         f.AssertReadsAndReturned();
     }
 
+    [Theory]
+    [InlineData("entity")]
+    [InlineData("table")]
+    [InlineData("attribute")]
+    [InlineData("column")]
+    [InlineData("relationship")]
+    [InlineData("key")]
+    [InlineData("optionset")]
+    [InlineData("choice")]
+    [Trait("AC", "AC-119")]
+    public async Task Force_IncompleteDependencyRefusal_ExitsIncompleteAndDeletesNothing(string noun)
+    {
+        using var f = new Fixture(Family(noun)) { DependencyShape = "more-records" };
+        var result = await Run(f, noun, true, dryRun: false);
+        Assert.Equal(ExitCodes.Incomplete, result.Exit);
+        Assert.DoesNotContain(f.Requests, r => r.RequestName.StartsWith("Delete", StringComparison.Ordinal));
+        f.AssertReadsAndReturned();
+    }
+
+    [Theory]
+    [InlineData("entity")]
+    [InlineData("table")]
+    [InlineData("attribute")]
+    [InlineData("column")]
+    [InlineData("relationship")]
+    [InlineData("key")]
+    [InlineData("optionset")]
+    [InlineData("choice")]
+    [Trait("AC", "AC-118")]
+    public async Task DependencyReadFailure_StillExitsFailureNotIncomplete(string noun)
+    {
+        foreach (var dryRun in new[] { true, false })
+        {
+            using var f = new Fixture(Family(noun)) { FailDependency = true };
+            var result = await Run(f, noun, true, dryRun);
+            Assert.Equal(ExitCodes.Failure, result.Exit);
+            f.AssertReadsAndReturned();
+        }
+    }
+
     private static string Family(string noun) => noun switch
     {
         "entity" or "table" => "table", "attribute" or "column" => "column",

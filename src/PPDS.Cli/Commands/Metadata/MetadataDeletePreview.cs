@@ -13,7 +13,7 @@ internal sealed class MetadataDeletePreview
 {
     internal const string InputOnlyHelp = "Validate required inputs only. Target existence, dependencies and deletion feasibility are not checked. No changes persisted.";
     internal const string OptionExistenceHelp = "Validate target option existence only. Dependencies and deletion feasibility are not checked. No changes persisted.";
-    internal const string DependenciesHelp = "Read target metadata and deletion dependencies without deleting. Blocking components exit 10 and incomplete checks exit 12; other server constraints remain unchecked.";
+    internal const string DependenciesHelp = "Read target metadata and deletion dependencies without deleting. Blocking components exit 10 and incomplete checks exit 12, for a dry run and for a real delete that is refused; other failures exit with their own non-zero code (see exit codes). Other server constraints remain unchecked.";
 
     internal static Task<MetadataDeletePreviewResult> InspectDependenciesAsync(IMetadataAuthoringService service, MetadataDeleteTarget target, CancellationToken ct)
         => service is IMetadataDeletePreviewService preview
@@ -36,7 +36,7 @@ internal sealed class MetadataDeletePreview
             foreach (var issue in preview.NameResolutionIssues)
                 Console.Error.WriteLine($"  Name lookup: {issue.ErrorCode}; reauthentication required: {issue.RequiresReauthentication}.");
         }
-        return preview.IsClear ? ExitCodes.Success : preview.Status == "blocked" ? ExitCodes.PreconditionFailed : preview.Status == "incomplete" ? ExitCodes.Incomplete : ExitCodes.Failure;
+        return preview.IsClear ? ExitCodes.Success : preview.Status is "blocked" or "incomplete" ? preview.RefusalExitCode : ExitCodes.Failure;
     }
 
     internal static MetadataDeletePreview InputOnly { get; } = new("input-only", false);

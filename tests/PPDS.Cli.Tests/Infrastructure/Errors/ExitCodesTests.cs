@@ -5,6 +5,19 @@ namespace PPDS.Cli.Tests.Infrastructure.Errors;
 
 public class ExitCodesTests
 {
+    // Every public int constant on ExitCodes, so a future code cannot be missed by the guards below.
+    private static int[] AllCodes() => typeof(ExitCodes)
+        .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+        .Where(f => f.IsLiteral && f.FieldType == typeof(int))
+        .Select(f => (int)f.GetRawConstantValue()!)
+        .ToArray();
+
+    [Fact]
+    public void AllCodes_CoversEveryConstant()
+    {
+        Assert.Equal(13, AllCodes().Length); // 0-12; update when a code is added
+    }
+
     [Fact]
     public void Success_IsZero()
     {
@@ -57,17 +70,7 @@ public class ExitCodesTests
     [Fact]
     public void AllCodesAreUnique()
     {
-        var codes = new[]
-        {
-            ExitCodes.Success,
-            ExitCodes.PartialSuccess,
-            ExitCodes.Failure,
-            ExitCodes.InvalidArguments,
-            ExitCodes.ConnectionError,
-            ExitCodes.AuthError,
-            ExitCodes.NotFoundError,
-            ExitCodes.Incomplete
-        };
+        var codes = AllCodes();
 
         Assert.Equal(codes.Length, codes.Distinct().Count());
     }
@@ -75,17 +78,7 @@ public class ExitCodesTests
     [Fact]
     public void AllCodesAreNonNegative()
     {
-        var codes = new[]
-        {
-            ExitCodes.Success,
-            ExitCodes.PartialSuccess,
-            ExitCodes.Failure,
-            ExitCodes.InvalidArguments,
-            ExitCodes.ConnectionError,
-            ExitCodes.AuthError,
-            ExitCodes.NotFoundError,
-            ExitCodes.Incomplete
-        };
+        var codes = AllCodes();
 
         Assert.All(codes, code => Assert.True(code >= 0));
     }
@@ -94,17 +87,7 @@ public class ExitCodesTests
     public void AllCodesAreWithinValidRange()
     {
         // Exit codes should be 0-255 for cross-platform compatibility
-        var codes = new[]
-        {
-            ExitCodes.Success,
-            ExitCodes.PartialSuccess,
-            ExitCodes.Failure,
-            ExitCodes.InvalidArguments,
-            ExitCodes.ConnectionError,
-            ExitCodes.AuthError,
-            ExitCodes.NotFoundError,
-            ExitCodes.Incomplete
-        };
+        var codes = AllCodes();
 
         Assert.All(codes, code => Assert.InRange(code, 0, 255));
     }

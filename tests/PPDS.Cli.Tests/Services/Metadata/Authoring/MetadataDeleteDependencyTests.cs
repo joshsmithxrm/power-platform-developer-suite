@@ -199,7 +199,25 @@ public sealed class MetadataDeleteDependencyTests
         await f.Run();
         var ex = await Assert.ThrowsAnyAsync<PpdsException>(() => f.Run(dryRun: false));
         Assert.Equal(MetadataErrorCodes.DependencyConflict, ex.ErrorCode);
+        Assert.Equal(ExitCodes.PreconditionFailed, ExceptionMapper.ToExitCode(ex)); // same as the command preflight
         Assert.Equal(2, f.Requests.OfType<RetrieveDependenciesForDeleteRequest>().Count());
+        f.AssertReadsAndReturned();
+    }
+
+    [Theory]
+    [InlineData("table")]
+    [InlineData("column")]
+    [InlineData("relationship")]
+    [InlineData("key")]
+    [InlineData("choice")]
+    [Trait("AC", "AC-119")]
+    public async Task ActualDelete_RecheckIncomplete_RefusesWithIncompleteExitAndUnchangedError(string family)
+    {
+        using var f = new Fixture(family) { AllowDelete = true, DependencyShape = "more-records" };
+        var ex = await Assert.ThrowsAnyAsync<PpdsException>(() => f.Run(dryRun: false));
+        Assert.Equal(ErrorCodes.Operation.Internal, ex.ErrorCode);
+        Assert.Equal("Deletion dependency inspection is incomplete; no deletion is permitted.", ex.UserMessage);
+        Assert.Equal(ExitCodes.Incomplete, ExceptionMapper.ToExitCode(ex));
         f.AssertReadsAndReturned();
     }
 

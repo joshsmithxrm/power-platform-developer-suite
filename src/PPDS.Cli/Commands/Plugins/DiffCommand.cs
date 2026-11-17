@@ -41,7 +41,7 @@ public static class DiffCommand
             "Under a missing or 1.0 registration version, step filteringAttributes and image attributes are always compared, " +
             "an unset value as none (as in PPDS 1.4.2), so a stored value the file does not set is drift (exit 1); " +
             "other omitted optional properties are not compared and are listed in a notice. " +
-            "Exit codes: 0 match, 1 drift, 12 incomplete (the comparison could not be completed; the result is unknown), 2 failure.")
+            "Exit codes: 0 match, 1 drift, 12 incomplete (the comparison could not be completed; the result is unknown); other failures exit with their own non-zero code (see exit codes).")
         {
             configOption, hiddenOption, PluginsCommandGroup.ProfileOption, PluginsCommandGroup.EnvironmentOption
         };
