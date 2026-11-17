@@ -331,7 +331,8 @@ public static class SqlCommand
         catch (Exception ex)
         {
             var error = DmlSafetyOptionSet.WithCliWording(
-                ExceptionMapper.Map(ex, context: "executing SQL query", debug: globalOptions.Debug), ex);
+                ExceptionMapper.Map(ex, context: "executing SQL query", debug: globalOptions.Debug), ex)
+                with { DmlCommitted = DmlOutcome.From(ex)?.DescribeCommitted() };
             writer.WriteError(error);
             WriteCommittedNote(ex);
             return ExceptionMapper.ToExitCode(ex);

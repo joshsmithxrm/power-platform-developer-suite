@@ -632,6 +632,12 @@ public sealed class SqlQueryService : ISqlQueryService
         // DML safety check. A request without explicit options is checked with the defaults (not
         // confirmed, not dry-run, default row cap): the guard fails closed instead of being skipped.
         var dmlSafety = request.DmlSafety ?? new DmlSafetyOptions();
+        if (dmlSafety.RowCap is <= 0)
+        {
+            throw new PpdsValidationException(
+                "rowCap",
+                $"The row cap must be a positive number of rows (got {dmlSafety.RowCap}). Nothing was executed.");
+        }
         int? dmlRowCap = null;
         DmlSafetyResult? safetyResult = null;
 

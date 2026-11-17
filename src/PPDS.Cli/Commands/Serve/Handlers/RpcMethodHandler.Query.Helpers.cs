@@ -308,7 +308,8 @@ public partial class RpcMethodHandler
         if (result.DmlOutcome is { HasFailures: true } dml)
         {
             // Failed rows are not a success. Counts and reason are additive so clients that only read
-            // the table keep working; 'success' now tells scripts and notebook cells the DML failed.
+            // the table keep working; 'success' tells the client the DML failed. (Notebook cells send no
+            // dmlSafety, so they never run DML: the fail-closed guard refuses it.)
             response.Success = false;
             response.AffectedRows = dml.AffectedRows;
             response.FailedRows = dml.FailedRows;

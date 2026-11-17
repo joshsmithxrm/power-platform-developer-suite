@@ -155,7 +155,8 @@ public sealed class JsonOutputWriter : IOutputWriter
             Code = error.Code,
             Message = error.Message,
             Details = error.Details,
-            Target = error.Target
+            Target = error.Target,
+            DmlCommitted = error.DmlCommitted
         };
     }
 
@@ -195,6 +196,7 @@ public sealed class JsonOutputWriter : IOutputWriter
         public string? Message { get; set; }
         public string? Details { get; set; }
         public string? Target { get; set; }
+        public string? DmlCommitted { get; set; }
     }
 
     private sealed class JsonItemResultDto

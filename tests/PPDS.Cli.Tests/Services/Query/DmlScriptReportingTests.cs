@@ -205,12 +205,24 @@ public class TerminalTextTests
     [InlineData(0x85)]
     [InlineData(0x202E)]
     [InlineData(0x2028)]
+    [InlineData(0x200E)]
+    [InlineData(0x200F)]
+    [InlineData(0x061C)]
+    [InlineData(0x200B)]
+    [InlineData(0x200C)]
+    [InlineData(0x200D)]
+    [InlineData(0x2060)]
+    [InlineData(0xFEFF)]
     public void OtherControlAndBidiCharacters_AreEscaped(int code)
     {
         var result = TerminalText.Sanitize("a" + (char)code + "b");
 
         Assert.Equal("a\\u" + code.ToString("X4") + "b", result);
     }
+
+    [Fact]
+    public void OrdinaryUnicode_IsUnchanged()
+        => Assert.Equal("Café 日本 😀 مرحبا", TerminalText.Sanitize("Café 日本 😀 مرحبا"));
 
     [Fact]
     public void NullAndEmpty_AreSafe()

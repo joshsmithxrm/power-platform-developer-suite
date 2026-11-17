@@ -337,6 +337,27 @@ public class HistoryExecuteCommandTests : IDisposable
     }
 
     [Fact]
+    public void HistoryGet_TextOutput_KeepsSqlExactWhenRedirected_SanitisesItOnATerminal_AndAlwaysSanitisesTheError()
+    {
+        var esc = ((char)0x1B).ToString();
+        var entry = new QueryHistoryEntry
+        {
+            Id = "abc", Sql = $"SELECT 1 /*{esc}[2K*/\r\nFROM account", ExecutedAt = DateTimeOffset.UtcNow,
+            ErrorMessage = $"bad{esc}[31m"
+        };
+
+        using var redirected = new StringWriter();
+        PPDS.Cli.Commands.Query.History.GetCommand.WriteTextOutput(entry, redirected, toTerminal: false);
+        using var terminal = new StringWriter();
+        PPDS.Cli.Commands.Query.History.GetCommand.WriteTextOutput(entry, terminal, toTerminal: true);
+
+        Assert.Contains(entry.Sql, redirected.ToString(), StringComparison.Ordinal); // data stays exact
+        Assert.DoesNotContain(esc, terminal.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Error:        bad\\u001B[31m", redirected.ToString());
+        Assert.Contains("Error:        bad\\u001B[31m", terminal.ToString());
+    }
+
+    [Fact]
     public async Task Replay_UnknownId_IsNotFound()
     {
         WriteEnvConfig();
@@ -433,7 +454,7 @@ public class HistoryExecuteCommandTests : IDisposable
                 return Task.FromResult(new BulkOperationResult { SuccessCount = ids.Count() });
             });
 
-        var (exit, _, stderr) = await Replay(
+        var (exit, stdout, stderr) = await Replay(
             service, "DELETE FROM account WHERE name = 'a'; DELETE FROM account WHERE name = 'b'",
             new DmlSafetyOptions { IsConfirmed = true });
 
@@ -441,6 +462,9 @@ public class HistoryExecuteCommandTests : IDisposable
         Assert.Contains("not rolled back", stderr);
         Assert.Contains("#1 DELETE account: 2 affected, 0 failed", stderr);
         Assert.Contains("#2 DELETE account was running when the run was interrupted and may be partly applied", stderr);
+        // JSON mode also carries the note in the error envelope (additive), for scripts that read only stdout.
+        using var json = JsonDocument.Parse(stdout);
+        Assert.Contains("#1 DELETE account: 2 affected", json.RootElement.GetProperty("error").GetProperty("dmlCommitted").GetString());
     }
 
     // ---- request building ------------------------------------------------

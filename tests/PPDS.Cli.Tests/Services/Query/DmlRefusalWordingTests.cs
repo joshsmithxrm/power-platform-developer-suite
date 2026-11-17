@@ -111,6 +111,20 @@ public class DmlRefusalWordingTests
         Assert.False(data.TryGetProperty("dmlCommitted", out _)); // nothing ran before the refusal
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public async Task NonPositiveRowCap_IsRefusedAsInvalid_BeforeAnythingRuns(int rowCap)
+    {
+        var h = DmlTestHarness.Create(rows: 3);
+
+        var ex = await Assert.ThrowsAsync<PpdsValidationException>(() => h.Service.ExecuteAsync(
+            new SqlQueryRequest { Sql = DeleteSql, DmlSafety = new DmlSafetyOptions { IsConfirmed = true, RowCap = rowCap } }));
+
+        Assert.Contains("positive number", ex.Message);
+        h.AssertNothingChanged();
+    }
+
     [Fact]
     public void RowCap_Tui_SaysTheCapCannotBeRemovedThere()
     {

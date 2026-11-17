@@ -17,6 +17,12 @@ public sealed record StructuredError(
     string? Target = null)
 {
     /// <summary>
+    /// For a SQL run interrupted after DML already ran: what those statements did (not rolled back) and which one may
+    /// be partly applied. Written to the JSON error envelope as <c>error.dmlCommitted</c> when set.
+    /// </summary>
+    public string? DmlCommitted { get; init; }
+
+    /// <summary>
     /// Creates a StructuredError with redacted details when not in debug mode.
     /// Uses <see cref="ConnectionStringRedactor"/> to sanitize sensitive data.
     /// </summary>

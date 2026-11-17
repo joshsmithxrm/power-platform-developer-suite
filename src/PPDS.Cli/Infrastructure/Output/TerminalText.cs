@@ -10,8 +10,9 @@ namespace PPDS.Cli.Infrastructure.Output;
 public static class TerminalText
 {
     /// <summary>
-    /// Replaces C0 controls (other than newline and tab), DEL, C1 controls, and Unicode line/paragraph
-    /// separators and bidirectional overrides with a visible <c>\uXXXX</c> form. Printable text is unchanged.
+    /// Replaces C0 controls (other than newline and tab), DEL, C1 controls, Unicode line/paragraph separators,
+    /// bidirectional overrides, isolates and marks, and zero-width characters with a visible <c>\uXXXX</c> form.
+    /// Printable text is unchanged.
     /// </summary>
     public static string Sanitize(string? text)
     {
@@ -47,5 +48,8 @@ public static class TerminalText
            || (c >= 0x80 && c <= 0x9F)
            || c == 0x2028 || c == 0x2029          // line / paragraph separators
            || (c >= 0x202A && c <= 0x202E)        // bidirectional embeddings and overrides
-           || (c >= 0x2066 && c <= 0x2069);       // bidirectional isolates
+           || (c >= 0x2066 && c <= 0x2069)        // bidirectional isolates
+           || c == 0x200E || c == 0x200F || c == 0x061C // left-to-right, right-to-left and Arabic letter marks
+           || (c >= 0x200B && c <= 0x200D)        // zero-width space, non-joiner, joiner
+           || c == 0x2060 || c == 0xFEFF;         // word joiner, zero-width no-break space
 }
