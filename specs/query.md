@@ -363,6 +363,8 @@ public enum QueryExecutionMode
 
 Manages per-environment query history with deduplication.
 
+**Replaying history (`ppds query history execute <id>`).** History can contain DML (the daemon and TUI record every executed statement), so replay is guarded exactly like `ppds query sql`: the request always carries `DmlSafety`, built from the same `--confirm`, `--dry-run` and `--no-limit` options (defined once in `DmlSafetyOptionSet` and shared by both commands), and the same environment safety settings are applied through `SqlCommand.ConfigureDmlSafetyAsync`. Replayed DML therefore needs `--confirm` (exit code 11 otherwise), honours the no-WHERE block, the 10,000-row cap and environment protection (Production and Test require `--confirm`), and `--dry-run` previews the plan without executing. The statement text is echoed to stderr before anything runs or is refused, so the user sees what is about to execute. SELECT replay is unchanged. `--dry-run` rejects CSV output, as in `query sql`.
+
 ```csharp
 public interface IQueryHistoryService
 {
@@ -544,6 +546,7 @@ public sealed class SqlParseException : Exception
 - [ ] DML `--dry-run` succeeds without `--confirm`, executes no mutations, and leaves hard DML safety blocks intact
 - [ ] Daemon `query/sql` DML dry-run responses include the preview plan, FetchXML, row cap, and execution-confirmation requirement
 - [ ] Streaming DML dry-run completion chunks include the preview plan and DML safety metadata without dispatching an executor
+- [ ] `query history execute` of DML is refused without `--confirm` (exit 11), runs with it, `--dry-run` executes nothing, and Production/Test protection, the no-WHERE block and the row cap match `query sql`
 
 ### Edge Cases
 

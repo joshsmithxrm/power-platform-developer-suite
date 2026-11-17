@@ -31,7 +31,12 @@ public static class ExecuteCommand
             Description = "Limit the number of results returned (overrides query TOP)"
         };
 
-        var command = new Command("execute", "Re-execute a query from history")
+        // Same DML guard options as 'ppds query sql' (defined once in DmlSafetyOptionSet).
+        var dmlSafety = new DmlSafetyOptionSet();
+
+        var command = new Command("execute",
+            "Re-execute a query from history. DML (INSERT/UPDATE/DELETE) is guarded exactly like 'ppds query sql': " +
+            "it needs --confirm, honours the row cap and environment protection, and --dry-run previews the plan.")
         {
             idArgument,
             HistoryCommandGroup.ProfileOption,
@@ -39,7 +44,26 @@ public static class ExecuteCommand
             topOption
         };
 
+        dmlSafety.AddTo(command);
+
         GlobalOptions.AddToCommand(command, supportsCsv: true);
+
+        // --dry-run renders a plan, not a result set (same rule as 'query sql').
+        command.Validators.Add(result =>
+        {
+            if (!result.GetValue(dmlSafety.DryRun))
+                return;
+
+            try
+            {
+                if (GlobalOptions.GetOutputFormat(result) == OutputFormat.Csv)
+                    result.AddError(DmlSafetyOptionSet.DryRunCsvError);
+            }
+            catch (InvalidOperationException)
+            {
+                // --output-format failed to parse; its own error is already reported.
+            }
+        });
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
@@ -49,7 +73,8 @@ public static class ExecuteCommand
             var top = parseResult.GetValue(topOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(id, profile, environment, top, globalOptions, cancellationToken);
+            return await ExecuteAsync(
+                id, profile, environment, top, dmlSafety.GetOptions(parseResult), globalOptions, cancellationToken);
         });
 
         return command;
@@ -60,6 +85,7 @@ public static class ExecuteCommand
         string? profile,
         string? environment,
         int? top,
+        DmlSafetyOptions dmlSafety,
         GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
     {
@@ -100,9 +126,15 @@ public static class ExecuteCommand
             {
                 ConsoleHeader.WriteConnectedAs(connectionInfo);
                 Console.Error.WriteLine();
-                Console.Error.WriteLine($"Executing query from history: {id}");
-                Console.Error.WriteLine();
             }
+
+            // Show exactly what is about to run before any guard refusal, prompt or execution
+            // ('query sql' echoes nothing because the user just typed the statement; here they did not).
+            Console.Error.WriteLine(dmlSafety.IsDryRun
+                ? $"Building DML preview for history entry {id}:"
+                : $"Executing query from history entry {id}:");
+            Console.Error.WriteLine(entry.Sql);
+            Console.Error.WriteLine();
 
             var sqlQueryService = serviceProvider.GetRequiredService<ISqlQueryService>();
 
@@ -135,9 +167,15 @@ public static class ExecuteCommand
                     concreteSqlService, envConfigStore, resolver, environmentUrl, cancellationToken);
             }
 
-            var request = BuildRequest(entry.Sql, top);
+            var request = BuildRequest(entry.Sql, top, dmlSafety);
 
             var queryResult = await sqlQueryService.ExecuteAsync(request, cancellationToken);
+
+            if (queryResult.DmlSafetyResult?.IsDryRun == true)
+            {
+                SqlCommand.WriteDryRunOutput(queryResult, globalOptions.OutputFormat, writer);
+                return ExitCodes.Success;
+            }
 
             return SqlCommand.WriteResult(
                 queryResult,
@@ -161,14 +199,13 @@ public static class ExecuteCommand
     }
 
     /// <summary>
-    /// Builds the replay request. Uses the same guard defaults as 'ppds query sql' without
-    /// --confirm/--dry-run/--no-limit: replayed DML is checked (confirmation, row cap, environment
-    /// protection) instead of skipping safety.
+    /// Builds the replay request. DmlSafety is always set (a null value would skip every DML check), carrying
+    /// the same options 'ppds query sql' builds from --confirm/--dry-run/--no-limit.
     /// </summary>
-    internal static SqlQueryRequest BuildRequest(string sql, int? top) => new()
+    internal static SqlQueryRequest BuildRequest(string sql, int? top, DmlSafetyOptions dmlSafety) => new()
     {
         Sql = sql,
         TopOverride = top,
-        DmlSafety = new DmlSafetyOptions()
+        DmlSafety = dmlSafety
     };
 }

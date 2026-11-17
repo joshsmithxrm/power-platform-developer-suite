@@ -53,20 +53,10 @@ public static class SqlCommand
             Description = "Route query through the TDS Endpoint (direct SQL) instead of FetchXML"
         };
 
-        var confirmOption = new Option<bool>("--confirm")
-        {
-            Description = "Confirm DML execution without interactive prompt"
-        };
-
-        var dryRunOption = new Option<bool>("--dry-run")
-        {
-            Description = "Show the execution plan without running the DML statement"
-        };
-
-        var noLimitOption = new Option<bool>("--no-limit")
-        {
-            Description = "Remove the 10,000 row safety cap for DML operations"
-        };
+        var dmlSafety = new DmlSafetyOptionSet();
+        var confirmOption = dmlSafety.Confirm;
+        var dryRunOption = dmlSafety.DryRun;
+        var noLimitOption = dmlSafety.NoLimit;
 
         var command = new Command("sql", "Execute a SQL query against Dataverse (transpiled to FetchXML)")
         {
