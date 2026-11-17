@@ -23,7 +23,8 @@ internal static class DmlColumnValidator
     // Anything else is refused: a shape that was not proven against Dataverse does not run.
     private static readonly HashSet<string> WriteTypes = new(StringComparer.OrdinalIgnoreCase) { "String", "Integer", "Decimal", "Boolean" };
     private static readonly HashSet<string> ValueReadTypes = new(StringComparer.OrdinalIgnoreCase) { "String", "Integer", "Decimal" };
-    private static readonly HashSet<string> FilterTypes = new(StringComparer.OrdinalIgnoreCase) { "String", "Integer", "Decimal", "Boolean", "Picklist", "DateTime" };
+    private static readonly HashSet<string> FilterTypes = new(StringComparer.OrdinalIgnoreCase) { "String", "Integer", "Decimal", "Boolean", "Picklist" };
+    private static readonly HashSet<string> IsNullTypes = new(StringComparer.OrdinalIgnoreCase) { "String", "Integer", "Decimal", "DateTime" };
     private static readonly HashSet<string> OrderedFilterTypes = new(StringComparer.OrdinalIgnoreCase) { "Integer", "Decimal", "DateTime" };
     private static readonly HashSet<string> InTypes = new(StringComparer.OrdinalIgnoreCase) { "String" };
     private static readonly HashSet<string> LikeTypes = new(StringComparer.OrdinalIgnoreCase) { "String" };
@@ -254,7 +255,7 @@ internal static class DmlColumnValidator
 
         public override void Visit(LikePredicate node) => Check(node.FirstExpression, LikeTypes, "LIKE");
 
-        public override void Visit(BooleanIsNullExpression node) => Check(node.Expression, FilterTypes, "IS NULL");
+        public override void Visit(BooleanIsNullExpression node) => Check(node.Expression, IsNullTypes, "IS NULL");
 
         private void Check(ScalarExpression expression, HashSet<string> types, string use)
         {

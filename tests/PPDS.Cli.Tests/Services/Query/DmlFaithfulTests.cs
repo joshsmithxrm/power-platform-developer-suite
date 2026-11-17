@@ -112,6 +112,8 @@ public sealed class DmlFaithfulTests : IDisposable
     [InlineData("DELETE FROM account WHERE name > 'n1'", "text column, which is not supported in a WHERE comparison with < > <= >=")]
     [InlineData("DELETE FROM account WHERE revenue IN (500, 1000)", "decimal column, which is not supported in IN")]
     [InlineData("DELETE FROM account WHERE creditlimit > 5", "currency column")]
+    [InlineData("DELETE FROM account WHERE createdon = '2024-01-01T00:00:00Z'", "date/time column, which is not supported in a WHERE comparison")]
+    [InlineData("DELETE FROM account WHERE customertypecode IS NULL", "choice column, which is not supported in IS NULL")]
     [InlineData("UPDATE account SET creditlimit = 5 WHERE name = 'n1'", "currency column")]
     [InlineData("UPDATE account SET customertypecode = 1 WHERE name = 'n1'", "choice column")]
     [InlineData("UPDATE account SET notes = 'x' WHERE name = 'n1'", "multiline text column")]
