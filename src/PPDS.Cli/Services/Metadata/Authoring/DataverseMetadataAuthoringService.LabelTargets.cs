@@ -57,9 +57,10 @@ public partial class DataverseMetadataAuthoringService
     /// <summary>
     /// The label an option or status-reason update sends: a requested label as the single LCID 1033 label (the request
     /// also sets MergeLabels, so other languages keep their text), and no label at all when the caller did not ask to
-    /// change it. Observed live (OptionColorPersistenceLiveTests): an UpdateOptionValue without a Label leaves every
-    /// language of the option's label unchanged, for global options, local options and status reasons, so a colour- or
-    /// description-only update never rewrites a label.
+    /// change it. Asserted live (OptionColorPersistenceLiveTests for a global option;
+    /// MetadataGlobalChoiceLiveTests.ColourMechanisms_LocalOptionStatusReasonAndStateValue for a local option and a
+    /// status reason): an UpdateOptionValue without a Label leaves the English label unchanged, so a colour- or
+    /// description-only update never rewrites it. Other languages are not observed (English-only organisation).
     /// </summary>
     private static Label? OptionLabelForUpdate(string? requested)
         => requested == null ? null : new Label(requested, 1033);

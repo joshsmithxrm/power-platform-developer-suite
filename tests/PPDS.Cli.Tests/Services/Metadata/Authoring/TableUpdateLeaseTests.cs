@@ -139,14 +139,14 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
 
     public static IEnumerable<object[]> ReadFailures()
     {
-        foreach (var kind in new[] { "ordinary", "coded", "cancel", "timeout", "auth" })
+        foreach (var kind in new[] { "ordinary", "coded", "cancel", "timeout", "auth", "connection" })
             yield return ["read-sdk", kind];
-        foreach (var kind in new[] { "ordinary", "coded", "cancel", "timeout", "pool" })
+        foreach (var kind in new[] { "ordinary", "coded", "cancel", "timeout", "pool", "auth" })
             yield return ["read-checkout", kind];
     }
 
     /// <summary>
-    /// S1/AC-147: the pre-write table read keeps the classification the update stage has: checkout failures follow the
+    /// AC-147: the pre-write table read keeps the classification the update stage has: checkout failures follow the
     /// shared acquisition rule, SDK timeouts stay Connection.Timeout (exit 4), auth failures stay auth errors with the
     /// re-authentication signal, coded and cancellation failures propagate as themselves; nothing is written.
     /// </summary>
@@ -169,7 +169,8 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
                 (_, "coded") => ("Synthetic.Coded", 2),
                 (_, "cancel") => ("Operation.Cancelled", 2),
                 (_, "timeout" or "pool") => ("Connection.Timeout", 4),
-                ("read-sdk", "auth") => (ExceptionMapper.Map(h.Injected!).Code, 5),
+                (_, "auth") => (ExceptionMapper.Map(h.Injected!).Code, 5),
+                (_, "connection") => (ExceptionMapper.Map(h.Injected!).Code, 4),
                 ("read-sdk", _) => (MetadataErrorCodes.SdkOperationFailed, 1),
                 _ => ("Operation.Internal", 2)
             };
@@ -191,7 +192,7 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
         finally { output.WriteLine(h.Snapshot(operation)); }
     }
 
-    /// <summary>N2/AC-147: a read that returns no table metadata stops the update with a coded error.</summary>
+    /// <summary>AC-147: a read that returns no table metadata stops the update with a coded error.</summary>
     [Fact]
     [Trait("AC", "AC-147")]
     public async Task LabelReadWithoutTableMetadata_StopsBeforeTheUpdate()
@@ -386,6 +387,7 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
                 "timeout" => new TimeoutException("SDK/acquisition timeout fixture"),
                 "pool" => new PoolExhaustedException(Active, _capacity, TimeSpan.FromMilliseconds(40)),
                 "auth" => new PPDS.Dataverse.Resilience.DataverseAuthenticationException("Synthetic expired sign-in", requiresReauthentication: true),
+                "connection" => new PPDS.Dataverse.Security.DataverseConnectionException("Synthetic dropped connection"),
                 "cancel" => Cancel(),
                 _ => new InvalidOperationException("Ordinary fixture failure")
             };

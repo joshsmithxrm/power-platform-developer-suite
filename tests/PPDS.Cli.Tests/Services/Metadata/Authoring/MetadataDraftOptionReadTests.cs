@@ -161,7 +161,7 @@ public sealed class MetadataDraftOptionReadTests
         {
             var update = Assert.Single(f.Requests.OfType<SdkUpdateOption>());
             Assert.Equal(10001, update.Value);
-            Assert.False(update.Parameters.ContainsKey("Label")); // The current draft label is left alone (not re-sent).
+            Assert.Equal("Renamed", Assert.Single(update.Label.LocalizedLabels).Label); // Only the requested label is sent.
         }
         f.AssertRoutingAndCancellation();
     }
@@ -350,11 +350,13 @@ public sealed class MetadataDraftOptionReadTests
     [Theory]
     [InlineData("status")]
     [InlineData("choice")]
-    public async Task ColorReadCancellation_Propagates(string kind)
+    public async Task ColorReadCancellation_AfterTheInsert_IsWriteNotConfirmed(string kind)
     {
         using var f = new Fixture(kind) { CancelReadNumber = 2 };
-        var ex = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => f.AddAsync(value: 77, color: "#123456"));
-        Assert.Same(f.Cancellation, ex);
+        var error = await Assert.ThrowsAsync<PpdsException>(() => f.AddAsync(value: 77, color: "#123456"));
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.Same(f.Cancellation, error.InnerException);
+        Assert.Contains("was added with value 77", error.Message);
         // The colour rode on the insert; only the confirming read was cancelled, and nothing else was written.
         Assert.Equal("#123456", Assert.Single(f.Requests, r => r is InsertOptionValueRequest or InsertStatusValueRequest)["Color"]);
         Assert.DoesNotContain(f.Requests, r => r is SdkUpdateOption);
@@ -490,9 +492,10 @@ public sealed class MetadataDraftOptionReadTests
             ? Service.RemoveStatusReasonAsync(new RemoveStatusReasonRequest { EntityLogicalName = "new_table", Label = label }, Token)
             : Service.RemoveColumnOptionAsync(new RemoveColumnOptionRequest { EntityLogicalName = "new_table", ColumnLogicalName = Attribute, Label = label }, Token);
 
+        // An update must change something: without a colour it renames the option.
         public Task UpdateAsync(int value, string? color = null) => _kind == "status"
-            ? Service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = "new_table", Value = value, Color = color }, Token)
-            : Service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = "new_table", ColumnLogicalName = Attribute, Value = value, Color = color }, Token);
+            ? Service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = "new_table", Value = value, Color = color, NewLabel = color == null ? "Renamed" : null }, Token)
+            : Service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = "new_table", ColumnLogicalName = Attribute, Value = value, Color = color, NewLabel = color == null ? "Renamed" : null }, Token);
 
         public Task RemoveAsync(int value) => _kind == "status"
             ? Service.RemoveStatusReasonAsync(new RemoveStatusReasonRequest { EntityLogicalName = "new_table", Value = value }, Token)

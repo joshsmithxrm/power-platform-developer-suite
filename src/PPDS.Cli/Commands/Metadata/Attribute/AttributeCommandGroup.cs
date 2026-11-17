@@ -1064,6 +1064,12 @@ public static class AttributeCommandGroup
                 return ExitCodes.ValidationError;
             }
 
+            if (newLabel == null && string.IsNullOrEmpty(color))
+            {
+                writer.WriteError(StructuredError.Create("MISSING_REQUIRED_FIELD", "Nothing to update: provide --new-label or --color."));
+                return ExitCodes.ValidationError;
+            }
+
             try
             {
                 await using var serviceProvider = serviceProviderFactory is null

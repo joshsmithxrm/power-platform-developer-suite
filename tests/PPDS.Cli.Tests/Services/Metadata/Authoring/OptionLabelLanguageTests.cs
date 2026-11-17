@@ -24,8 +24,8 @@ public sealed class OptionLabelLanguageTests
 
     /// <summary>
     /// An update that does not ask to change the label sends no Label at all, whatever the existing label holds, so
-    /// it cannot replace the English text with the caller's user-language text. Observed live: an UpdateOptionValue
-    /// without a Label leaves every language of the label unchanged.
+    /// it cannot replace the English text with the caller's user-language text. Asserted live: an UpdateOptionValue
+    /// without a Label leaves the English label unchanged (other languages not observed).
     /// </summary>
     [Theory]
     [MemberData(nameof(UnrequestedCases))]
@@ -263,15 +263,16 @@ public sealed class OptionLabelLanguageTests
         public Task<MetadataLabelWriteResult> UpdateAsync(string kind, int value, string? newLabel) => kind switch
         {
             "global" => Service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = ChoiceName, Value = value, NewLabel = newLabel, Description = newLabel == null ? "Changed description" : null }),
-            "local" => Service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = "new_table", ColumnLogicalName = "new_pick", Value = value, NewLabel = newLabel }),
-            _ => Service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = "new_table", Value = value, NewLabel = newLabel })
+            // Without a new label, local and status updates change the colour (an update must change something).
+            "local" => Service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = "new_table", ColumnLogicalName = "new_pick", Value = value, NewLabel = newLabel, Color = newLabel == null ? "#112233" : null }),
+            _ => Service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = "new_table", Value = value, NewLabel = newLabel, Color = newLabel == null ? "#112233" : null })
         };
 
         public Task<MetadataLabelWriteResult> UpdateByLabelAsync(string kind, string label) => kind switch
         {
             "global" => Service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = ChoiceName, Label = label, Description = "Changed description" }),
-            "local" => Service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = "new_table", ColumnLogicalName = "new_pick", Label = label }),
-            _ => Service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = "new_table", Label = label })
+            "local" => Service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = "new_table", ColumnLogicalName = "new_pick", Label = label, Color = "#112233" }),
+            _ => Service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = "new_table", Label = label, Color = "#112233" })
         };
     }
 }

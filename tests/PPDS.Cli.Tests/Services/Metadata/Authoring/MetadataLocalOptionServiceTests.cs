@@ -222,7 +222,7 @@ public class MetadataLocalOptionServiceTests
             Color = "#00FF00"
         });
 
-        // S8: one UpdateOptionValue carries the new label and the Color parameter (observed live to store both).
+        // One UpdateOptionValue carries the new label and the Color parameter (observed live to store both).
         _optionWrites.Should().Be(1);
         var update = _captured.Should().BeOfType<SdkUpdateOptionValueRequest>().Subject;
         update["EntityLogicalName"].Should().Be("hsl_diagnosis");

@@ -49,4 +49,10 @@ public static class MetadataErrorCodes
 
     /// <summary>The Dataverse SDK call failed with an unexpected error.</summary>
     public const string SdkOperationFailed = "SDK_OPERATION_FAILED";
+
+    /// <summary>
+    /// A write was committed but a follow-up confirmation (for example the stored option colour) failed or disagreed;
+    /// the message states what was written. Unlike <see cref="SdkOperationFailed"/>, the change is in Dataverse.
+    /// </summary>
+    public const string WriteNotConfirmed = "WRITE_NOT_CONFIRMED";
 }

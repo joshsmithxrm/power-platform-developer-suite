@@ -1252,6 +1252,12 @@ public static class EntityCommand
                 return ExitCodes.ValidationError;
             }
 
+            if (newLabel == null && string.IsNullOrEmpty(color))
+            {
+                writer.WriteError(StructuredError.Create("MISSING_REQUIRED_FIELD", "Nothing to update: provide --new-label or --color."));
+                return ExitCodes.ValidationError;
+            }
+
             return await ExecuteUpdateStatusReasonAsync(
                 entity, value, label, newLabel, color, solution, publish,
                 profile, environment, globalOptions, cancellationToken, serviceProviderFactory);

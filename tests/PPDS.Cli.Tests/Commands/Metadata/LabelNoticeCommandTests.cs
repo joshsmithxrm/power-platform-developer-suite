@@ -4,6 +4,7 @@ using Moq;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Commands.Metadata;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Cli.Tests.TestHelpers;
 using PPDS.Dataverse.Metadata.Authoring;
@@ -115,6 +116,18 @@ public sealed class LabelNoticeCommandTests
         Assert.Equal("Choice updated: new_choice", PPDS.Cli.Tui.Screens.MetadataExplorerScreen.ChoiceUpdatedStatus("new_choice", null));
         var status = PPDS.Cli.Tui.Screens.MetadataExplorerScreen.ChoiceUpdatedStatus("new_choice", Notice);
         Assert.StartsWith("Choice updated: new_choice Warning: Only the English (LCID 1033) label is written.", status);
+    }
+
+    [Theory]
+    [InlineData("optionset update-option --solution Sol --name new_choice --value 1")]
+    [InlineData("attribute update-option --solution Sol --entity new_table --column new_pick --value 1")]
+    [InlineData("entity update-statusreason --solution Sol --entity new_table --value 1")]
+    [Trait("AC", "AC-146")]
+    public async Task UpdateOption_WithNothingToChange_IsAValidationErrorBeforeConnecting(string command)
+    {
+        var (exit, stdout, stderr) = await Invoke(command + " --output-format json", MetadataLabelWriteResult.None);
+        Assert.Equal(ExitCodes.ValidationError, exit);
+        Assert.Contains("Nothing to update: provide --new-label or --color.", stdout + stderr);
     }
 
     [Fact]

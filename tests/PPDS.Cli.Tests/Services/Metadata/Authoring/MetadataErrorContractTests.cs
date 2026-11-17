@@ -13,16 +13,18 @@ public sealed partial class MetadataLeaseLifetimeTests
 {
     public static IEnumerable<object[]> ColorCancellationCases()
     {
-        foreach (var (route, stage) in new[]
-        {
-            ("global-add", "global-color-read"), ("column-add", "local-color-read")
-        })
+        foreach (var (route, stage) in new[] { ("global-add", "global-color-read"), ("column-add", "local-color-read") })
         foreach (var delayed in new[] { false, true })
             yield return [route, stage, delayed];
     }
 
+    /// <summary>
+    /// AC-97 amended by AC-146: the colour read-back runs after the committed write, so its cancellation (immediate or
+    /// delayed) is reported as WRITE_NOT_CONFIRMED carrying the exact cancellation exception and token as the cause,
+    /// stops later work and returns every lease.
+    /// </summary>
     [Theory, MemberData(nameof(ColorCancellationCases)), Trait("AC", "AC-97")]
-    public async Task ErrorContract_ColorCancellation_PreservesIdentityTaskAndCliEnvelope(string route, string stage, bool delayed)
+    public async Task ErrorContract_ColorCancellation_IsWriteNotConfirmedCarryingTheCancellation(string route, string stage, bool delayed)
     {
         using var h = new Harness(route, true, true, stage, "cancel", delayFault: delayed);
         var operation = h.Run();
@@ -34,16 +36,17 @@ public sealed partial class MetadataLeaseLifetimeTests
                 Assert.False(operation.IsCompleted);
                 h.ReleaseFault();
             }
-            var error = await Assert.ThrowsAsync<OperationCanceledException>(() => operation);
-            Assert.Same(h.Injected, error);
-            Assert.Equal(h.Token, error.CancellationToken);
-            Assert.True(operation.IsCanceled);
-            Assert.False(operation.IsFaulted);
-            AssertCliEnvelope(error, ErrorCodes.Operation.Cancelled, 2);
+            var error = await Assert.ThrowsAsync<PpdsException>(() => operation);
+            Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+            var cause = Assert.IsType<OperationCanceledException>(error.InnerException);
+            Assert.Same(h.Injected, cause);
+            Assert.Equal(h.Token, cause.CancellationToken);
+            Assert.Contains("the read was cancelled", error.Message);
+            Assert.True(operation.IsFaulted);
+            AssertCliEnvelope(error, MetadataErrorCodes.WriteNotConfirmed, 2);
             var failedIndex = Array.IndexOf(h.ExpectedStages, stage);
             h.AssertFinished(h.ExpectedStages.Take(failedIndex + 1));
             Assert.Equal(h.ExpectedStages.Take(failedIndex), h.SuccessfulStages);
-            Assert.Empty(h.CacheEvents);
         }
         finally { h.ReleaseFault(); }
     }
@@ -57,12 +60,10 @@ public sealed partial class MetadataLeaseLifetimeTests
         using var h = new Harness("global-add", true, false, "global-color-read", "cancel",
             faultFactory: () => original);
         var operation = h.Run();
-        var error = await Assert.ThrowsAsync<OperationCanceledException>(() => operation);
+        var error = await Assert.ThrowsAsync<PpdsException>(() => operation);
         Assert.False(h.Token.IsCancellationRequested);
-        Assert.Same(original, error);
-        Assert.Equal(sdkCancellation.Token, error.CancellationToken);
-        Assert.True(operation.IsCanceled);
-        AssertCliEnvelope(error, ErrorCodes.Operation.Cancelled, 2);
+        Assert.Same(original, error.InnerException);
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
         h.AssertReturned();
     }
 
@@ -70,12 +71,12 @@ public sealed partial class MetadataLeaseLifetimeTests
     {
         foreach (var (route, stages) in new[]
         {
-            ("global-add", new[] { "insert", "global-color-read" }),
-            ("global-update", new[] { "option-update", "global-color-read" }),
-            ("status-update", new[] { "option-update", "local-color-read", "publish" }),
+            ("global-add", new[] { "insert" }),
+            ("global-update", new[] { "option-update" }),
+            ("status-update", new[] { "option-update", "publish" }),
             ("status-remove", new[] { "option-remove", "publish" }),
             ("table-create", new[] { "solution", "publisher", "table-create", "publish" }),
-            ("column-add", new[] { "local-color-read", "publish" }),
+            ("column-add", new[] { "publish" }), // Colour read-back checkouts: ColorReadBackFailure_AfterTheWrite_IsWriteNotConfirmed.
             ("column-update", new[] { "publish" }) // Shared helper's limited wider reach.
         })
         foreach (var stage in stages)

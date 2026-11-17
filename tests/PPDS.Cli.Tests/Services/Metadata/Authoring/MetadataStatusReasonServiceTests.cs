@@ -270,6 +270,9 @@ public class MetadataStatusReasonServiceTests
         _client.Verify(c => c.ExecuteAsync(
             It.Is<OrganizationRequest>(r => r.RequestName == "UpdateOptionValue" && !r.Parameters.ContainsKey("Color")),
             It.IsAny<CancellationToken>()), Times.Never);
+        _client.Verify(c => c.ExecuteAsync(
+            It.Is<OrganizationRequest>(r => r.RequestName == "UpdateOptionValue" && r.Parameters.ContainsKey("Color")),
+            It.IsAny<CancellationToken>()), Times.Once);
         _capturedAttrUpdate.Should().NotBeNull();
         _capturedAttrUpdate!["EntityLogicalName"].Should().Be("account");
         _capturedAttrUpdate["AttributeLogicalName"].Should().Be("statuscode");

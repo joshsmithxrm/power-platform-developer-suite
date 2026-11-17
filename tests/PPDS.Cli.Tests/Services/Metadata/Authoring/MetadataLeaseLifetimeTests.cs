@@ -75,11 +75,14 @@ public sealed partial class MetadataLeaseLifetimeTests
     [InlineData("column-add")]
     [InlineData("status-update")]
     [Trait("AC", "AC-84")]
-    public async Task ColorRead_MissingTarget_PreventsWriteAndPublication(string route)
+    public async Task ColorRead_MissingTarget_ReportsWriteNotConfirmed_AndSkipsPublication(string route)
     {
+        // The write that carried the colour is committed; the read-back cannot find the option.
         using var h = new Harness(route, true, true, capacity: 8, missingColorTarget: true);
-        var error = await Assert.ThrowsAsync<MetadataValidationException>(() => h.Run());
-        Assert.Equal(MetadataErrorCodes.OptionNotFound, error.ErrorCode);
+        var error = await Assert.ThrowsAsync<PpdsException>(() => h.Run());
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.Equal(MetadataErrorCodes.OptionNotFound, Assert.IsType<MetadataValidationException>(error.InnerException).ErrorCode);
+        Assert.NotEmpty(h.CacheEvents); // invalidated right after the committed write
         var colorRead = Array.FindIndex(h.ExpectedStages, s => s.EndsWith("color-read", StringComparison.Ordinal));
         h.AssertFinished(h.ExpectedStages.Take(colorRead + 1));
         Assert.DoesNotContain(h.AttemptedStages, s => s == "publish");
@@ -119,52 +122,87 @@ public sealed partial class MetadataLeaseLifetimeTests
         Assert.Equal(h.ExpectedStages.Take(stageIndex), h.SuccessfulStages);
         Assert.DoesNotContain(h.AttemptedStages.Skip(stageIndex + 1), _ => true);
         var expectedCode = Harness.ExpectedFailureCode(route, stage, fault);
-        if (expectedCode != null)
+        if (expectedCode == MetadataErrorCodes.WriteNotConfirmed)
+        {
+            // After a committed write every read-back failure says so; the cause is kept (directly, or under the
+            // shared acquisition wrapper for a checkout failure).
+            var coded = Assert.IsAssignableFrom<PpdsException>(error);
+            Assert.Equal(expectedCode, coded.ErrorCode);
+            Assert.True(ReferenceEquals(h.Injected, coded.InnerException) || ReferenceEquals(h.Injected, coded.InnerException?.InnerException));
+            Assert.Contains(" was ", coded.Message);
+        }
+        else if (expectedCode != null)
         {
             Assert.Equal(expectedCode, Assert.IsAssignableFrom<PpdsException>(error).ErrorCode);
             Assert.Same(h.Injected, error.InnerException);
         }
         else Assert.Same(h.Injected, error);
-        Assert.Equal(fault.Contains("cancel", StringComparison.Ordinal) && expectedCode == null, operation.IsCanceled);
+        Assert.Equal(fault.Contains("cancel", StringComparison.Ordinal) && expectedCode is null, operation.IsCanceled);
         // No successful publication or later SDK operation after a failed stage; preceding writes are never replayed.
         Assert.All(h.AttemptedStages.GroupBy(s => s), group => Assert.Single(group));
     }
 
-    [Theory]
-    [InlineData("global-add", "global-color-read", "sdk")]
-    [InlineData("column-add", "local-color-read", "sdk")]
-    [InlineData("global-add", "global-color-read", "cancel")]
-    [InlineData("column-add", "local-color-read", "cancel")]
-    [Trait("AC", "AC-87")]
-    public async Task ColorSdkFaults_PreserveSdkFaultAndCancellationCliEnvelope(string route, string stage, string fault)
+    public static IEnumerable<object[]> ReadBackFailures()
     {
-        using var h = new Harness(route, true, false, stage, fault, capacity: 8);
+        foreach (var (route, stage, publish) in new[]
+        {
+            ("global-add", "global-color-read", false), ("global-update", "global-color-read", false),
+            ("generic-local-add", "local-color-read", false), ("status-add", "local-color-read", true),
+            ("status-update", "local-color-read", true), ("column-add", "local-color-read", true),
+            ("column-update", "local-color-read", true)
+        })
+        foreach (var fault in new[] { "sdk", "cancel", "coded", "checkout" })
+            yield return [route, stage, publish, fault];
+    }
+
+    /// <summary>
+    /// AC-146: once the insert/update that carried the colour is committed, every read-back failure (SDK fault,
+    /// cancellation, coded error, checkout failure) is WRITE_NOT_CONFIRMED, says what was written and, when requested,
+    /// that publication was not attempted; the cause is the inner exception; the cache was invalidated after the write.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ReadBackFailures))]
+    [Trait("AC", "AC-87")]
+    [Trait("AC", "AC-146")]
+    public async Task ColorReadBackFailure_AfterTheWrite_IsWriteNotConfirmed(string route, string stage, bool publish, string fault)
+    {
+        using var h = new Harness(route, true, publish, stage, fault, capacity: 8);
         var operation = h.Run();
-        var error = await Record.ExceptionAsync(() => operation);
-        // The colour read-back preserves cancellation; ordinary SDK faults stay coded. (The colour itself rides on
-        // the insert/update, so there is no separate colour write stage.)
-        if (fault == "cancel")
-        {
-            var canceled = Assert.IsType<OperationCanceledException>(error);
-            Assert.Same(h.Injected, canceled);
-            Assert.Equal(h.Token, canceled.CancellationToken);
-            Assert.True(operation.IsCanceled);
-            AssertCliEnvelope(canceled, "Operation.Cancelled", 2);
-        }
-        else
-        {
-            var wrapped = Assert.IsType<PpdsException>(error);
-            Assert.Same(h.Injected, wrapped.InnerException);
-            Assert.True(operation.IsFaulted);
-            Assert.Equal("SDK_OPERATION_FAILED", wrapped.ErrorCode);
-            AssertCliEnvelope(wrapped, "SDK_OPERATION_FAILED", 2);
-        }
+        var error = Assert.IsType<PpdsException>(await Record.ExceptionAsync(() => operation));
+        Assert.True(operation.IsFaulted);
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.True(ReferenceEquals(h.Injected, error.InnerException) || ReferenceEquals(h.Injected, error.InnerException?.InnerException));
+        Assert.Contains(route.EndsWith("add", StringComparison.Ordinal) ? "was added with value 77" : "was updated (", error.Message);
+        Assert.Equal(publish, error.Message.Contains("Publication (--publish) was not attempted", StringComparison.Ordinal));
+        Assert.DoesNotContain("Synthetic", error.Message); // no provider text from the cause
+        Assert.NotEmpty(h.CacheEvents);
+        Assert.DoesNotContain(h.AttemptedStages, s => s == "publish");
+        AssertCliEnvelope(error, MetadataErrorCodes.WriteNotConfirmed, 2);
         h.AssertReturned();
     }
 
     [Theory]
-    [InlineData("global-add", "global-color-read")]
-    [InlineData("column-add", "local-color-read")]
+    [InlineData("global-add")]
+    [InlineData("global-update")]
+    [InlineData("status-add")]
+    [InlineData("status-update")]
+    [InlineData("column-add")]
+    [InlineData("column-update")]
+    [InlineData("generic-local-add")]
+    [Trait("AC", "AC-146")]
+    public async Task ColorNotStored_AfterTheWrite_IsWriteNotConfirmed_OnEveryPath(string route)
+    {
+        using var h = new Harness(route, true, route.StartsWith("status", StringComparison.Ordinal) || route.StartsWith("column", StringComparison.Ordinal), capacity: 8, ignoreColor: true);
+        var error = await Assert.ThrowsAsync<PpdsException>(() => h.Run());
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.Contains("did not store its color: requested '#123456', stored 'none'", error.Message);
+        Assert.Contains(route.EndsWith("add", StringComparison.Ordinal) ? "was added with value 77" : "was updated (", error.Message);
+        Assert.NotEmpty(h.CacheEvents);
+        Assert.DoesNotContain(h.AttemptedStages, s => s == "publish");
+        h.AssertReturned();
+    }
+
+    [Theory]
     [InlineData("status-update", "publish")]
     [InlineData("table-create", "publisher")]
     [InlineData("table-create", "table-create")]
@@ -214,7 +252,7 @@ public sealed partial class MetadataLeaseLifetimeTests
         private readonly SemaphoreSlim _slots;
         private readonly CancellationTokenSource _cts = new();
         private readonly string _route;
-        private readonly bool _color, _publish, _missingColorTarget;
+        private readonly bool _color, _publish, _missingColorTarget, _ignoreColor;
         private readonly string? _failStage, _fault;
         private readonly int _capacity;
         private readonly bool _delayFault;
@@ -239,8 +277,9 @@ public sealed partial class MetadataLeaseLifetimeTests
         internal int Acquired => _acquired.Count;
         internal int PeakActive { get; private set; }
 
-        internal Harness(string route, bool color, bool publish, string? failStage = null, string? fault = null, int capacity = 1, bool missingColorTarget = false, bool delayFault = false, Func<Exception>? faultFactory = null)
+        internal Harness(string route, bool color, bool publish, string? failStage = null, string? fault = null, int capacity = 1, bool missingColorTarget = false, bool delayFault = false, Func<Exception>? faultFactory = null, bool ignoreColor = false)
         {
+            _ignoreColor = ignoreColor;
             _route = route; _color = color; _publish = publish; _failStage = failStage; _fault = fault;
             _missingColorTarget = missingColorTarget; _delayFault = delayFault; _faultFactory = faultFactory;
             _capacity = capacity; _slots = new SemaphoreSlim(capacity, capacity);
@@ -284,12 +323,12 @@ public sealed partial class MetadataLeaseLifetimeTests
 
         internal static string? ExpectedFailureCode(string route, string stage, string fault)
         {
+            if (stage.Contains("color", StringComparison.Ordinal)) return MetadataErrorCodes.WriteNotConfirmed; // After the committed write (AC-146).
             if (route == "column-add" && stage == "insert")
                 return fault == "coded" ? null : MetadataErrorCodes.SdkOperationFailed; // Existing try also owns checkout.
             if (fault == "checkout" && CodedAcquisitionBoundaries().Any(row => (string)row[0] == route && (string)row[1] == stage))
                 return ErrorCodes.Connection.Timeout;
             if (fault.StartsWith("checkout", StringComparison.Ordinal)) return null;
-            if (stage.Contains("color", StringComparison.Ordinal) && fault == "cancel") return null; // Approved color cancellation contract.
             if (stage is "status-target" or "local-target")
                 return fault == "cancel" ? null : MetadataErrorCodes.EntityNotFound; // Existing list readers wrap coded errors too.
             if (fault == "coded") return null;
@@ -440,7 +479,7 @@ public sealed partial class MetadataLeaseLifetimeTests
                     response = new InsertStatusValueResponse { Results = new ParameterCollection { ["NewOptionValue"] = Value } };
                     break;
                 case SdkUpdateOption r:
-                    // S8: one request carries the label and, when requested, the Color parameter (live-observed).
+                    // One request carries the label and, when requested, the Color parameter (live-observed).
                     Assert.Equal(Value, r.Value); Assert.Equal(Solution, r.SolutionUniqueName); Assert.True(r.MergeLabels);
                     AssertColorParameter(r);
                     StoredLabel = Assert.Single(r.Label.LocalizedLabels).Label; Assert.Equal("Changed", StoredLabel);
@@ -474,7 +513,7 @@ public sealed partial class MetadataLeaseLifetimeTests
                 OptionMetadata target = status ? new StatusOptionMetadata { State = 0 } : new OptionMetadata();
                 target.Value = Value; target.Label = new Label(StoredLabel, 1033);
                 target.Label.LocalizedLabels.Add(new LocalizedLabel("Existant", 1036));
-                target.Color = _mutated && _color ? Color : null; // Dataverse stores the Color parameter (observed live).
+                target.Color = _mutated && _color && !_ignoreColor ? Color : null; // Dataverse stores the Color parameter (asserted live).
                 options.Options.Add(target);
             }
             options.Options.Add(new OptionMetadata(new Label("Other", 1033), 88));

@@ -913,6 +913,12 @@ public static class OptionSetCommand
                 return ExitCodes.ValidationError;
             }
 
+            if (newLabel == null && string.IsNullOrEmpty(color))
+            {
+                writer.WriteError(StructuredError.Create("MISSING_REQUIRED_FIELD", "Nothing to update: provide --new-label or --color."));
+                return ExitCodes.ValidationError;
+            }
+
             return await ExecuteUpdateOptionAsync(
                 solution, name, value, label, newLabel, color, dryRun,
                 profile, environment, globalOptions, cancellationToken, serviceProviderFactory);

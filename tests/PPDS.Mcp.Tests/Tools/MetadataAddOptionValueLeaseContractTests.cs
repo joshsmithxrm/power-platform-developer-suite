@@ -161,7 +161,7 @@ public sealed class MetadataAddOptionValueLeaseContractTests
 
     [Theory, Trait("AC", "AC-100")]
     [InlineData("global-color-read")]
-    public async Task ActualColorCancellation_PropagatesOriginalAtMcpBoundary(string stage)
+    public async Task ActualColorCancellation_AfterTheInsert_IsWriteNotConfirmedAtMcpBoundary(string stage)
     {
         using var cancellation = new CancellationTokenSource();
         var original = new OperationCanceledException("Actual service SDK cancellation", cancellation.Token);
@@ -217,11 +217,13 @@ public sealed class MetadataAddOptionValueLeaseContractTests
         using var fixture = await Fixture.CreateAsync((request, token) => service.AddOptionValueAsync(request, token));
 
         var task = fixture.InvokeAsync(cancellation.Token);
-        var actual = await Assert.ThrowsAsync<OperationCanceledException>(() => task);
-        Assert.Same(original, actual);
-        Assert.Equal(cancellation.Token, actual.CancellationToken);
-        Assert.True(task.IsCanceled);
-        Assert.False(task.IsFaulted);
+        // The insert is committed before the read-back, so its cancellation is a structured WRITE_NOT_CONFIRMED
+        // that says the option was added (AC-146), not a bare cancellation.
+        var actual = await Assert.ThrowsAsync<ModelContextProtocol.McpException>(() => task);
+        using var payload = System.Text.Json.JsonDocument.Parse(actual.Message);
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, payload.RootElement.GetProperty("errorCode").GetString());
+        Assert.Contains("was added with value 77", payload.RootElement.GetProperty("userMessage").GetString());
+        Assert.True(task.IsFaulted);
         Assert.Equal(new[] { "insert", "global-color-read" }, sdkCalls); // The colour rides on the insert.
         Assert.Equal(2, acquired);
         Assert.Equal(acquired, disposed);

@@ -40,15 +40,19 @@ public sealed class MetadataSdkDiagnosticPrivacyProbeTests
 
         var task = fixture.InvokeAsync(cancellation.Token);
         var actual = await Assert.ThrowsAsync<McpException>(() => task);
+        // The read-back runs after the committed insert (AC-146): WRITE_NOT_CONFIRMED wrapping the service's coded
+        // read failure, whose cause is the raw SDK exception.
         var wrapped = Assert.IsType<PpdsException>(fixture.ServiceError);
-        Assert.Same(sdk.Original, wrapped.InnerException);
-        Assert.Equal(MetadataErrorCodes.SdkOperationFailed, wrapped.ErrorCode);
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, wrapped.ErrorCode);
+        var readFailure = Assert.IsType<PpdsException>(wrapped.InnerException);
+        Assert.Equal(MetadataErrorCodes.SdkOperationFailed, readFailure.ErrorCode);
+        Assert.Same(sdk.Original, readFailure.InnerException);
         Assert.Equal(2, ExceptionMapper.ToExitCode(wrapped));
         Assert.True(task.IsFaulted);
         sdk.AssertComplete();
         fixture.AssertCalledOnce(cancellation.Token);
         using var payload = JsonDocument.Parse(actual.Message);
-        Assert.Equal(MetadataErrorCodes.SdkOperationFailed, payload.RootElement.GetProperty("errorCode").GetString());
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, payload.RootElement.GetProperty("errorCode").GetString());
         Assert.False(payload.RootElement.TryGetProperty("success", out _));
 
         // Intended privacy contract: these same assertions must fail before and pass after a fix.
@@ -89,9 +93,9 @@ public sealed class MetadataSdkDiagnosticPrivacyProbeTests
 
         await Assert.ThrowsAsync<McpException>(() => fixture.InvokeAsync(cancellation.Token));
         var wrapped = Assert.IsType<PpdsException>(fixture.ServiceError);
-        Assert.Same(sdk.Original, wrapped.InnerException);
+        Assert.Same(sdk.Original, wrapped.InnerException!.InnerException);
         var mapped = ExceptionMapper.MapWithExitCode(wrapped);
-        Assert.Equal(MetadataErrorCodes.SdkOperationFailed, mapped.Error.Code);
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, mapped.Error.Code);
         Assert.Equal(2, mapped.ExitCode);
         Assert.DoesNotContain(SecretSentinel, mapped.Error.Message);
         sdk.AssertComplete();

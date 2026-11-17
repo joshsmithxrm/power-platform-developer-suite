@@ -172,7 +172,7 @@ public class MetadataGlobalOptionServiceTests
             Color = "#112233"
         });
 
-        // S8: one UpdateOptionValue carries the label and the colour, so neither can commit without the other.
+        // One UpdateOptionValue carries the label and the colour, so neither can commit without the other.
         _client.Verify(c => c.ExecuteAsync(It.IsAny<SdkUpdateOptionValueRequest>(), It.IsAny<CancellationToken>()), Times.Once);
         var update = _captured.Should().BeOfType<SdkUpdateOptionValueRequest>().Subject;
         update.Label.LocalizedLabels.Should().ContainSingle().Which.Label.Should().Be("Renamed");
@@ -402,7 +402,7 @@ public class MetadataGlobalOptionServiceTests
 
     [Fact]
     [Trait("AC", "AC-146")]
-    public async Task ColorThatDataverseDidNotStore_FailsWithSdkOperationFailed()
+    public async Task ColorThatDataverseDidNotStore_FailsWithWriteNotConfirmed()
     {
         SetupGlobalOptions((100000000, "Draft"));
         _ignoreColor = true;
@@ -413,8 +413,8 @@ public class MetadataGlobalOptionServiceTests
         });
 
         var error = (await act.Should().ThrowAsync<PpdsException>()).Which;
-        error.ErrorCode.Should().Be(MetadataErrorCodes.SdkOperationFailed);
-        error.Message.Should().Contain("did not store it").And.Contain("#FF0000");
+        error.ErrorCode.Should().Be(MetadataErrorCodes.WriteNotConfirmed);
+        error.Message.Should().Contain("Option 100000000 was updated (color).").And.Contain("did not store its color: requested '#FF0000', stored 'none'");
     }
 
     [Theory]
