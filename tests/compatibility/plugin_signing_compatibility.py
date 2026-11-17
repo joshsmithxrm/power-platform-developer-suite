@@ -418,8 +418,8 @@ def validate_build_record(value, plan, control):
         require(isinstance(row, dict) and isinstance(row.get("id"), str) and row["id"]
                 and isinstance(row.get("version"), str) and row["version"] and check_hex(row.get("sha256")),
                 "Resolved dependency observation incomplete")
-        require(isinstance(row.get("sha512"), str) and re.fullmatch(r"[A-Za-z0-9+/]{86}==", row["sha512"]),
-                "Resolved dependency content hash missing")
+        require(all(isinstance(row.get(key), str) and re.fullmatch(r"[A-Za-z0-9+/]{86}==", row[key])
+                    for key in ("sha512", "content_sha512")), "Resolved dependency content hash missing")
         require(row["id"].lower() not in ids, "Duplicate resolved dependency observation")
         ids.add(row["id"].lower())
     require({"minver", "microsoft.sourcelink.github", "microsoft.netframework.referenceassemblies.net462"} <= ids,
@@ -668,11 +668,22 @@ def build_evidence(rt, plan, output, source, project, work, props, probe, contro
         expected_path = package_id.lower() + "/" + version.lower()
         require(library["path"] == expected_path and ".." not in Path(expected_path).parts,
                 "Resolved package path differs")
-        archive = output / "temp/packages" / expected_path / (package_id.lower() + "." + version.lower() + ".nupkg")
+        folder = output / "temp/packages" / expected_path
+        archive = folder / (package_id.lower() + "." + version.lower() + ".nupkg")
         data = read(archive)
         sha512 = base64.b64encode(hashlib.sha512(data).digest()).decode()
-        require(sha512 == library["sha512"], "Resolved package content hash differs")
-        packages.append({"id": package_id, "version": version, "sha256": digest(data), "sha512": sha512})
+        # project.assets.json records NuGet's content hash, which leaves out the repository
+        # signature every nuget.org package carries, so it never equals the hash of the file.
+        # NuGet writes both values beside the package: the content hash in .nupkg.metadata and
+        # the hash of the downloaded file in <name>.nupkg.sha512. Bind the resolved entry to
+        # the first and the bytes actually used to the second, and record both.
+        metadata = h.decode(read(folder / ".nupkg.metadata", 65536))
+        require(isinstance(metadata, dict) and metadata.get("contentHash") == library["sha512"],
+                "Resolved package content hash differs")
+        recorded = read(folder / (archive.name + ".sha512"), 4096).decode("ascii", "replace").strip()
+        require(recorded == sha512, "Resolved package file hash differs")
+        packages.append({"id": package_id, "version": version, "sha256": digest(data), "sha512": sha512,
+                         "content_sha512": library["sha512"]})
     ids = {row["id"].lower() for row in packages}
     require({"minver", "microsoft.sourcelink.github", "microsoft.netframework.referenceassemblies.net462"} <= ids,
             "Required resolved build inputs missing")

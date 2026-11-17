@@ -270,7 +270,8 @@ def build_record_fixture(plan, control):
     for name in ("MinVer", "Microsoft.SourceLink.GitHub", "Microsoft.NETFramework.ReferenceAssemblies.net462"):
         raw = ("synthetic package " + name).encode()
         packages.append({"id": name, "version": "1.0.0", "sha256": d.digest(raw),
-                         "sha512": base64.b64encode(hashlib.sha512(raw).digest()).decode()})
+                         "sha512": base64.b64encode(hashlib.sha512(raw).digest()).decode(),
+                         "content_sha512": base64.b64encode(hashlib.sha512(b"content " + raw).digest()).decode()})
     return {"sdk": "10.0.403", "assets_sha256": "e" * 64, "packages": packages,
             "evaluated_properties": {"NETCoreSdkVersion": "10.0.403", "MSBuildVersion": "18.0.1",
                 "TargetFramework": "net462", "SignAssembly": "true", "PublicSign": str(control).lower(),
@@ -845,9 +846,17 @@ def test_build_evidence_checks_actual_properties_and_package_hashes(monkeypatch,
         raw = ("synthetic resolved package " + name).encode()
         version = "1.0.0"
         relative = name.lower() + "/" + version
-        assets["libraries"][name + "/" + version] = {
-            "type": "package", "path": relative, "sha512": base64.b64encode(hashlib.sha512(raw).digest()).decode()}
-        virtual[output / "temp/packages" / relative / (name.lower() + "." + version + ".nupkg")] = raw
+        # As with every repository-signed nuget.org package, the content hash that the assets file
+        # records differs from the hash of the package file. NuGet writes both beside the package.
+        file_hash = base64.b64encode(hashlib.sha512(raw).digest()).decode()
+        content_hash = base64.b64encode(hashlib.sha512(b"content without signature " + raw).digest()).decode()
+        assert file_hash != content_hash
+        assets["libraries"][name + "/" + version] = {"type": "package", "path": relative, "sha512": content_hash}
+        folder = output / "temp/packages" / relative
+        archive = name.lower() + "." + version + ".nupkg"
+        virtual[folder / archive] = raw
+        virtual[folder / ".nupkg.metadata"] = json.dumps({"version": 2, "contentHash": content_hash}).encode()
+        virtual[folder / (archive + ".sha512")] = file_hash.encode()
 
     def read_virtual(path, limit=d.h.MAX_PACKAGE):
         if Path(path) == work / "obj/project.assets.json":
@@ -871,7 +880,25 @@ def test_build_evidence_checks_actual_properties_and_package_hashes(monkeypatch,
     result = call()
     assert result["sdk"] == "10.0.403" and len(result["packages"]) == 3
     assert set(result["binaries"]) == {"msbuild", "roslyn"}
-    first = next(iter(assets["libraries"].values()))
+    for row in result["packages"]:
+        library = assets["libraries"][row["id"] + "/" + row["version"]]
+        assert row["content_sha512"] == library["sha512"] and row["sha512"] != library["sha512"]
+    d.validate_build_record({**build_record_fixture(plan, False), "packages": result["packages"]}, plan, False)
+    first_name, first = next(iter(assets["libraries"].items()))
+    recorded_content = first["sha512"]
+    first["sha512"] = "incorrect-content-hash"
+    with pytest.raises(d.Error, match="content hash"):
+        call()
+    first["sha512"] = recorded_content
+    # A package file that is not the one NuGet recorded downloading is refused.
+    sidecar = output / "temp/packages" / first["path"] / (first_name.replace("/", ".").lower() + ".nupkg.sha512")
+    assert sidecar in virtual
+    genuine = virtual[sidecar]
+    virtual[sidecar] = base64.b64encode(hashlib.sha512(b"another file").digest())
+    with pytest.raises(d.Error, match="file hash"):
+        call()
+    virtual[sidecar] = genuine
+    call()
     first["sha512"] = "incorrect-content-hash"
     with pytest.raises(d.Error, match="content hash"):
         call()
