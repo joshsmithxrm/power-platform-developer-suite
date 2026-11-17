@@ -4,12 +4,22 @@ param(
     [switch]$DelaySignedInput
 )
 $ErrorActionPreference = 'Stop'
+# Callers see the throw text as before. For the failures this script raises itself (a plain `throw`
+# of a fixed message, not a .NET or cmdlet error) the first line of the message is also written as
+# an anchored line, so a caller can classify the failure without parsing PowerShell's error
+# rendering, which includes the failing source line and terminal colour codes.
+trap {
+    if ($_.Exception.GetType().FullName -ceq 'System.Management.Automation.RuntimeException') {
+        [Console]::Error.WriteLine('PPDS_INSPECTOR_MESSAGE=' + ($_.Exception.Message -split '\r?\n')[0])
+    }
+    break
+}
+# The caller has checked that the tool exists.
 function Invoke-StrongNameVerification([string]$Tool, [string]$Assembly) {
-    if (!(Test-Path -LiteralPath $Tool -PathType Leaf)) { throw 'Required Windows SDK sn.exe is missing' }
-    # A native command that never started leaves no exit code. Clear any stale one first so an
-    # unset value can be told apart from a real result of an earlier call.
+    # A native command that reported no exit code leaves $LASTEXITCODE unset. Clear any stale one
+    # first so an unset value can be told apart from the result of an earlier call.
     $global:LASTEXITCODE = $null
-    $notRun = 'Strong-name verification tool did not run; the environment may lack PATHEXT, which PowerShell needs to launch a native executable by full path'
+    $notRun = 'Strong-name verification tool did not report an exit code; without PATHEXT in the environment PowerShell starts a native executable detached and cannot observe it'
     try {
         # -vf forces verification even if verification skipping is configured.
         $diagnostics = & $Tool -vf $Assembly 2>&1

@@ -52,3 +52,30 @@ jobs:
 
       - name: Run Python regression suite
         run: python -m pytest tests/ -q
+
+  # The inspector and PATHEXT tests drive real PowerShell 7 and the Windows SDK sn.exe, so the
+  # Ubuntu job above skips them. This job runs only those tests, on the image the hosted signing
+  # experiment uses (it expects sn.exe at a fixed SDK path), and fails rather than skips when a
+  # required tool is missing.
+  windows-tool-tests:
+    name: windows-tool-tests
+    runs-on: windows-2025
+    env:
+      PPDS_REQUIRE_WINDOWS_TOOLS: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.11'
+
+      - name: Install pytest + pyyaml
+        run: pip install pytest pyyaml
+
+      - name: Run inspector and PATHEXT tests
+        shell: pwsh
+        run: python -m pytest tests/ci/test_inspect_release_assemblies.py "tests/ci/test_hosted_signing_compatibility.py::test_pwsh_needs_pathext_to_launch_a_native_tool_under_the_driver_environment" -q

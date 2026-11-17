@@ -351,9 +351,10 @@ def environment(plan, temporary, *, build=False, nuget=False, native=False):
     if native:
         # A PowerShell child that itself launches a native tool by full path (the release
         # inspector's `& sn.exe -vf`) needs PATHEXT. Without it pwsh does not treat the .exe as an
-        # application: nothing runs and $LASTEXITCODE stays $null (no command-not-found error was
-        # seen under $ErrorActionPreference = 'Stop'; the inspector handles both). Observed locally
-        # and as hosted run r12's packaged-metadata failure. Only .EXE is admitted.
+        # application but starts it detached through the shell: not waited for, no output or exit
+        # code captured, so $LASTEXITCODE stays $null (and no command-not-found error was seen under
+        # $ErrorActionPreference = 'Stop'; the inspector handles both). Observed locally with a
+        # marker-file stand-in and as hosted run r12's packaged-metadata failure. Only .EXE is admitted.
         require(not build, "Native-launch setting is only for PowerShell children")
         return {**environment(plan, temporary), "PATHEXT": ".EXE"}
     result = {"SYSTEMROOT": plan["windows_directory"], "WINDIR": plan["windows_directory"],
@@ -1491,9 +1492,10 @@ def safe_refusal(error):
 
 # The release inspector's fixed failure messages (scripts/ci/inspect_release_assemblies.ps1), each
 # with a fixed code, so a `packaged-metadata` failure says WHICH check failed. The child's stderr is
-# only searched for these phrases and is never printed or stored; a failure that matches none
-# (a parameter-binding or .NET error, for example) is INSPECTOR_UNCLASSIFIED. A test checks that
-# every throw in the inspector has an entry here.
+# only searched, on the one anchored PPDS_INSPECTOR_MESSAGE= line the inspector writes for its own
+# fixed throws, and is never printed or stored; a failure with no such line, or whose message matches
+# none of these (a parameter-binding or .NET error, for example), is INSPECTOR_UNCLASSIFIED. A test
+# checks that every throw in the inspector has an entry here.
 INSPECTOR_DIAGNOSTICS = (
     ("Delay-signed input requires an expected public key", "inspector-delay-key"),
     ("Unexpected assembly for Plugins signing gate", "inspector-assembly-name"),
@@ -1502,7 +1504,7 @@ INSPECTOR_DIAGNOSTICS = (
     ("Invalid framework attribute", "inspector-framework-attribute"),
     ("Plugins must target net462", "inspector-framework"),
     ("Required Windows SDK sn.exe is missing", "inspector-sn-missing"),
-    ("Strong-name verification tool did not run", "inspector-sn-not-run"),
+    ("Strong-name verification tool did not report an exit code", "inspector-sn-no-result"),
     ("Plugins cryptographic strong-name verification failed", "inspector-sn-verification"),
     ("No assemblies to inspect", "inspector-no-assemblies"),
 )
@@ -1511,11 +1513,17 @@ DIAGNOSTIC_CODES = frozenset(code for _, code in INSPECTOR_DIAGNOSTICS) | {INSPE
 
 
 def inspector_diagnostic(stderr):
-    # PowerShell echoes the failing source line after the message, so the earliest phrase is the one
-    # that was thrown. Whitespace is folded because the host may wrap the message.
-    text = " ".join(stderr.split()) if isinstance(stderr, str) else ""
-    found = sorted((text.find(phrase), code) for phrase, code in INSPECTOR_DIAGNOSTICS if phrase in text)
-    return found[0][1] if found else INSPECTOR_UNCLASSIFIED
+    # Only the inspector's own anchored line is read, never PowerShell's rendering of the error
+    # (which repeats the failing source line and carries colour codes). The first such line is the
+    # inspector's, written before PowerShell prints anything, so later text cannot add another.
+    if not isinstance(stderr, str):
+        return INSPECTOR_UNCLASSIFIED
+    match = re.search(r"(?m)^PPDS_INSPECTOR_MESSAGE=(.*?)\r?$", stderr)
+    message = " ".join(match[1].split()) if match else ""
+    for phrase, code in INSPECTOR_DIAGNOSTICS:
+        if message.startswith(phrase):
+            return code
+    return INSPECTOR_UNCLASSIFIED
 
 
 def last_operation(calls):

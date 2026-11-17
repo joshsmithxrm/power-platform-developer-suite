@@ -108,13 +108,20 @@ sources; what restore actually used is checked afterwards, as below.
 
 The VERIFY `packaged-metadata` child (PowerShell running the release
 inspector, which itself launches `sn.exe -vf`) additionally gets
-`PATHEXT=.EXE`. Without it PowerShell does not run the `.exe` at all: on the
-PowerShell 7 used here the call returns silently (even under
+`PATHEXT=.EXE`. Without it PowerShell 7 does not treat the `.exe` as an
+application: it starts it detached through the shell, without waiting and
+without capturing its output or exit code. The call returns at once (even under
 `$ErrorActionPreference = 'Stop'`, no command-not-found error was observed) and
-`$LASTEXITCODE` stays `$null`. Hosted run r12 stopped there. The inspector now
+`$LASTEXITCODE` stays `$null`. This was checked with a `cmd.exe` stand-in that
+leaves a marker file: the marker appeared a few seconds after the call had
+returned, and a test pins that behaviour. So a verification tool would run
+unobserved, not be skipped. Hosted run r12 stopped there. The inspector now
 clears `$LASTEXITCODE` first and treats an unset value, or a command-not-found
-error, as "the tool did not run", failing with a fixed message that names a
+error, as "no exit code reported", failing with a fixed message that names a
 missing `PATHEXT` as the likely cause (no environment contents are printed).
+For its own fixed throws it also writes the first line of the message as a
+`PPDS_INSPECTOR_MESSAGE=` line on stderr; the driver classifies only that line,
+never PowerShell's rendering of the error.
 No other child gets `PATHEXT`; a test pins that the only call site asking for
 it is `packaged-metadata`.
 
@@ -227,7 +234,7 @@ cause: a refusal after a successful call reports that call with status 0.
 (1-based, bounded integer; passed through as `driver_operation_index`). When
 the failed call is `packaged-metadata`, the driver also classifies the release
 inspector's stderr against the inspector's fixed failure messages and prints
-`PPDS_COMPAT_DIAGNOSTIC=<code>` (`inspector-sn-not-run`, `inspector-public-key`,
+`PPDS_COMPAT_DIAGNOSTIC=<code>` (`inspector-sn-no-result`, `inspector-public-key`,
 `inspector-framework`, ... or `inspector-unclassified`); the raw output is
 searched for those phrases but never printed or stored. The coordinator passes
 through only registry codes, listed operation names, that status pattern, a

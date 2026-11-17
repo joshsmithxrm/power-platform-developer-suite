@@ -1190,16 +1190,35 @@ def test_only_the_packaged_metadata_child_is_launched_with_pathext():
         assert "PATHEXT" not in d.environment(plan, Path("C:/fixture/temp"), **options)
 
 
-def test_inspector_diagnostics_cover_every_message_the_inspector_throws():
+def inspector_throw_messages():
+    # Every fixed failure message in the inspector. A `throw` form this cannot read fails the test
+    # rather than being skipped, so a new form cannot hide a message from the phrase table.
     source = (d.ROOT / "scripts/ci/inspect_release_assemblies.ps1").read_text(encoding="utf-8")
-    messages = (re.findall(r"throw '([^']+)'", source) + re.findall(r"\$notRun = '([^']+)'", source)
-                + [m.split(":")[0] for m in re.findall(r'throw "([^"]+)"', source)])
+    code_lines = [line for line in source.splitlines() if not line.lstrip().startswith("#")]
+    not_run = re.findall(r"\$notRun = '([^']+)'", "\n".join(code_lines))
+    messages = []
+    for line in code_lines:
+        for found in re.finditer(r"\bthrow\b(.*)", line):
+            rest = found[1].strip()
+            if match := re.match(r"'([^']+)'", rest):
+                messages.append(match[1])
+            elif match := re.match(r'"([^"]+)"', rest):
+                messages.append(match[1].split(":")[0])
+            elif re.match(r"\$notRun\b", rest):
+                messages.extend(not_run)
+            else:
+                pytest.fail("Unreadable throw form in the inspector: " + line.strip())
+    return messages
+
+
+def test_inspector_diagnostics_cover_every_message_the_inspector_throws():
+    messages = inspector_throw_messages()
     phrases = [phrase for phrase, _ in d.INSPECTOR_DIAGNOSTICS]
     assert len(messages) >= 10
     # Every fixed message the inspector can throw starts with exactly one registered phrase, and no
     # registered phrase is stale.
     for message in messages:
-        assert [phrase for phrase in phrases if message.startswith(phrase)] != [], message
+        assert len([phrase for phrase in phrases if message.startswith(phrase)]) == 1, message
     assert all(any(message.startswith(phrase) for message in messages) for phrase in phrases)
     codes = [code for _, code in d.INSPECTOR_DIAGNOSTICS]
     assert len(codes) == len(set(codes)) and d.INSPECTOR_UNCLASSIFIED not in codes
@@ -1207,21 +1226,38 @@ def test_inspector_diagnostics_cover_every_message_the_inspector_throws():
     assert d.DIAGNOSTIC_CODES.isdisjoint(d.REFUSAL_CODES)
 
 
+def test_inspector_throw_harvest_fails_loudly_on_a_form_it_cannot_read(monkeypatch):
+    real = Path.read_text
+    monkeypatch.setattr(Path, "read_text", lambda self, *a, **kw: real(self, *a, **kw) + "\nthrow $other\n")
+    with pytest.raises(pytest.fail.Exception, match="Unreadable throw form"):
+        inspector_throw_messages()
+
+
+def marker(message):
+    return "PPDS_INSPECTOR_MESSAGE=" + message
+
+
 @pytest.mark.parametrize("phrase,code", d.INSPECTOR_DIAGNOSTICS)
 def test_inspector_diagnostic_maps_each_fixed_message_to_its_code(phrase, code):
-    echoed = "Exception: " + phrase + "\nAt C:/PRIVATE/inspect_release_assemblies.ps1:47 char:9\n+ throw '" + phrase + "'"
-    assert d.inspector_diagnostic(echoed) == code
-    assert d.inspector_diagnostic("Exception: " + phrase.replace(" ", "\n   ", 1)) == code
+    # The anchored line comes first (CRLF as pwsh writes it); PowerShell's own rendering follows.
+    stderr = (marker(phrase + ": raw tool output PRIVATE") + "\r\n\x1b[31;1mException: \x1b[0mC:\\PRIVATE\\inspect.ps1:47\r\n"
+              "   47 |  { throw '" + phrase + "' }\r\n")
+    assert d.inspector_diagnostic(stderr) == code
 
 
-@pytest.mark.parametrize("stderr", ["", "PRIVATE C:/Users/x/secret.snk", "Cannot bind argument to parameter PRIVATE", None, 7])
+@pytest.mark.parametrize("stderr", [
+    "", "PRIVATE C:/Users/x/secret.snk", "Cannot bind argument to parameter PRIVATE", None, 7,
+    # The phrase appears only in PowerShell's rendering (a source line echo), not on the anchored line.
+    "\x1b[31;1mException: \x1b[0m x.ps1:49\n   49 | $blob.ReadUInt16(); throw 'Invalid framework attribute'\n",
+    "  PPDS_INSPECTOR_MESSAGE=Plugins must target net462",  # Not anchored at line start.
+    marker("Something else entirely PRIVATE"),
+])
 def test_inspector_diagnostic_never_returns_text_it_did_not_register(stderr):
     assert d.inspector_diagnostic(stderr) == d.INSPECTOR_UNCLASSIFIED
 
 
-def test_inspector_diagnostic_prefers_the_thrown_message_over_a_later_echo():
-    stderr = ("Exception: Plugins must target net462\nAt inspect.ps1:40\n"
-              "+ ... { throw 'No assemblies to inspect' }")
+def test_inspector_diagnostic_uses_the_first_anchored_line_only():
+    stderr = marker("Plugins must target net462") + "\n" + marker("No assemblies to inspect") + "\n"
     assert d.inspector_diagnostic(stderr) == "inspector-framework"
 
 
@@ -1234,18 +1270,18 @@ def packaged_metadata_run(monkeypatch, tmp_path, plan, *, operation, returncode,
 
 def test_a_failed_packaged_metadata_call_records_which_inspector_check_failed(monkeypatch, tmp_path, plan):
     rt, call = packaged_metadata_run(monkeypatch, tmp_path, plan, operation="packaged-metadata", returncode=1,
-                                     stderr="Exception: Strong-name verification tool did not run; PRIVATE")
+                                     stderr=marker("Strong-name verification tool did not report an exit code; PRIVATE"))
     with pytest.raises(d.Error, match="required outcome"):
         call()
-    assert rt.diagnostic == "inspector-sn-not-run"
+    assert rt.diagnostic == "inspector-sn-no-result"
     assert "PRIVATE" not in json.dumps(rt.calls)
     # Success and other operations leave it unset.
     rt, call = packaged_metadata_run(monkeypatch, tmp_path, plan, operation="packaged-metadata", returncode=0,
-                                     stderr="Exception: Plugins must target net462")
+                                     stderr=marker("Plugins must target net462"))
     call()
     assert rt.diagnostic is None
     rt, call = packaged_metadata_run(monkeypatch, tmp_path, plan, operation="metadata", returncode=1,
-                                     stderr="Exception: Plugins must target net462")
+                                     stderr=marker("Plugins must target net462"))
     with pytest.raises(d.Error, match="required outcome"):
         call()
     assert rt.diagnostic is None
@@ -1257,7 +1293,7 @@ def test_main_prints_only_the_fixed_inspector_diagnostic_code(monkeypatch, tmp_p
     monkeypatch.setattr(d, "json_write", lambda *args: None)
     monkeypatch.setattr(d, "pin", lambda *args: None)
     monkeypatch.setattr(d.subprocess, "run", lambda *a, **kw: SimpleNamespace(
-        returncode=1, stdout="PRIVATE_OUT", stderr="Exception: Plugins must target net462 PRIVATE_ERR"))
+        returncode=1, stdout="PRIVATE_OUT", stderr=marker("Plugins must target net462") + "\nPRIVATE_ERR"))
     monkeypatch.setattr(d, "verify", lambda args, selected, runtime: REAL_INVOKE(
         runtime, selected, "pwsh", ["PRIVATE_ARG"], tmp_path, "packaged-metadata", native=True))
     assert d.main(stage_arguments("verify"), runtime=d.Runtime(evidence_class="process-double")) == 1
