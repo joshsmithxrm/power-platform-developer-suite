@@ -22,6 +22,7 @@ using Xunit;
 namespace PPDS.Cli.Tests.Commands.Plugins;
 
 [Trait("Category", "Unit")]
+[Collection(nameof(PPDS.Cli.Tests.TestHelpers.ConsoleCaptureCollection))] // one text-mode case swaps Console.Error
 public sealed class ImagePruningSafetyTests
 {
     [Fact]
@@ -198,6 +199,42 @@ public sealed class ImagePruningSafetyTests
         finally
         {
             Assert.StartsWith(Path.GetFullPath(Path.GetTempPath()), Path.GetFullPath(directory), StringComparison.OrdinalIgnoreCase);
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    [Trait("AC", "AC-136")]
+    public async Task ActualCleanCommand_DryRunText_ListsEachPlannedImageWithoutDeleting()
+    {
+        var f = new Fixture();
+        var directory = Path.Combine(Path.GetTempPath(), "ppds-image-prune-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        using var error = new StringWriter();
+        var previous = Console.Error;
+        try
+        {
+            var path = Path.Combine(directory, "registrations.json");
+            File.WriteAllText(path, JsonSerializer.Serialize(new PluginRegistrationConfig { Version = "2.0", Assemblies = [f.Config] }));
+            var command = CleanCommand.Create(_ => Task.FromResult(new ServiceCollection().AddSingleton(f.Service.Object)
+                .AddSingleton(new PPDS.Cli.Infrastructure.ResolvedConnectionInfo
+                {
+                    Profile = new PPDS.Auth.Profiles.AuthProfile { Name = "offline-fixture" }, EnvironmentUrl = "https://fixture.example.test"
+                }).BuildServiceProvider()));
+            var parsed = command.Parse(["--config", path, "--dry-run"]); Assert.Empty(parsed.Errors);
+            Console.SetError(error);
+            Assert.Equal(0, await parsed.InvokeAsync());
+            Console.SetError(previous);
+            var text = error.ToString();
+            Assert.Contains("Planned image deletions (dry-run; not performed): 1", text);
+            Assert.Contains($"Would delete image '{f.Image.Name}' ({f.Image.Id:D}) on step", text);
+            Assert.Contains($"({f.Step.Id:D})", text);
+            Assert.Contains("Would delete 1 owned image(s) (planned, not performed)", text);
+            Assert.Empty(f.Deletes);
+        }
+        finally
+        {
+            Console.SetError(previous);
             Directory.Delete(directory, recursive: true);
         }
     }

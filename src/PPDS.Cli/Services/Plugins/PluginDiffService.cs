@@ -78,8 +78,10 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
                 foreach (var field in OptionalStepFields.Where(f => !managed.ContainsKey(f)))
                     drift.Coverage.Unmanaged.Add(new(path, field));
                 drift.Coverage.Excluded.Add(new(path, "secureConfiguration (value never read or returned)"));
+                // A supplied value is written but can never be read back. Report it as excluded so the
+                // comparison stays visible without making every secure-config file incomplete.
                 if (step.SecureConfiguration is not null)
-                    drift.Coverage.Unsupported.Add(new(path, "secureConfiguration equality is unknown"));
+                    drift.Coverage.Excluded.Add(new(path, "secureConfiguration supplied but not compared (write-only; never read back)"));
                 else
                     drift.Coverage.Unmanaged.Add(new(path, "secureConfiguration"));
                 if (step.IsSpecified("asyncAutoDelete") &&
@@ -152,6 +154,7 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
             var id = PluginStepIdentity.FromConfig(c.Type.TypeName, c.Step);
             return !hiddenIdentities.Contains(id) || visibleIdentities.Contains(id);
         });
+        var legacyInputs = new List<LegacyPreservationInput>();
         var matches = PluginStepMatcher.Match(relevantConfigured, existing, (id, configCount, envCount) =>
         {
             drift.Warnings.Add(PluginStepMatcher.DescribeResidualCollision(id, configCount, envCount));
@@ -200,32 +203,19 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
                 if (IdentityFields.Contains(field) || field is "name" or "secureConfiguration")
                     continue;
                 object? expected = expectedValue;
-                object? actual;
-                switch (field)
+                if (field == "asyncAutoDelete" && !string.Equals(stepInfo.Mode, "Asynchronous", StringComparison.OrdinalIgnoreCase))
                 {
-                    case "executionOrder": actual = stepInfo.ExecutionOrder; break;
-                    case "enabled": actual = stepInfo.IsEnabled; break;
-                    case "deployment": actual = stepInfo.Deployment; break;
-                    case "invocationSource": actual = stepInfo.InvocationSource; break;
-                    case "filteringAttributes": actual = NormalizeAttributes(stepInfo.FilteringAttributes); break;
-                    case "unsecureConfiguration": actual = EmptyToNull(stepInfo.Configuration); break;
-                    case "description": actual = EmptyToNull(stepInfo.Description); break;
-                    case "asyncAutoDelete":
-                        if (!string.Equals(stepInfo.Mode, "Asynchronous", StringComparison.OrdinalIgnoreCase))
-                        {
-                            drift.Coverage.Excluded.Add(new(path, "asyncAutoDelete not applicable to synchronous step"));
-                            continue;
-                        }
-                        actual = stepInfo.AsyncAutoDelete; break;
-                    case "canBeBypassed": actual = stepInfo.CanBeBypassed; break;
-                    case "canUseReadOnlyConnection": actual = stepInfo.CanUseReadOnlyConnection; break;
-                    case "runAsUser":
-                        expected = await registration.ResolveRunAsUserAsync((string?)expectedValue, ct);
-                        actual = stepInfo.ImpersonatingUserId; break;
-                    default:
-                        drift.Coverage.Unsupported.Add(new(path, field));
-                        continue;
+                    drift.Coverage.Excluded.Add(new(path, "asyncAutoDelete not applicable to synchronous step"));
+                    continue;
                 }
+                // One stored-value mapping is shared with the legacy preservation advisory.
+                if (!PluginStoredValues.TryStep(field, stepInfo, out var actual))
+                {
+                    drift.Coverage.Unsupported.Add(new(path, field));
+                    continue;
+                }
+                if (field == "runAsUser")
+                    expected = await registration.ResolveRunAsUserAsync((string?)expectedValue, ct);
                 if (actual is null && field is "canBeBypassed" or "canUseReadOnlyConnection" or "invocationSource")
                 {
                     drift.Coverage.Unsupported.Add(new(path, $"{field} unavailable"));
@@ -238,6 +228,9 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
                 drift.ModifiedSteps.Add(new() { TypeName = match.TypeConfig!.TypeName, StepName = name, Changes = changes });
 
             var images = await registration.ListImagesForStepAsync(stepInfo.Id, ct);
+            if (DesiredIntent(stepConfig) != RegistrationOperationIntent.Reconcile)
+                legacyInputs.Add(new(PluginLegacyPreservationService.StepPath(config.Name, match.TypeConfig!.TypeName, name),
+                    stepConfig, stepInfo, images));
             foreach (var image in images.Where(i => i.UnavailableProperties.Contains("name")))
                 drift.Coverage.Unsupported.Add(new($"{path}/image:{image.Id}", "image name unavailable"));
             var ambiguousNames = images.GroupBy(i => i.Name, StringComparer.Ordinal)
@@ -267,16 +260,7 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
                 foreach (var (field, expected) in PluginRegistrationNormalizer.NormalizeImage(image, stepConfig.Message, DesiredIntent(stepConfig)))
                 {
                     ct.ThrowIfCancellationRequested();
-                    object? actual = field switch
-                    {
-                        "name" => envImage.Name,
-                        "imageType" => envImage.ImageType,
-                        "attributes" => NormalizeAttributes(envImage.Attributes),
-                        "entityAlias" => envImage.EntityAlias,
-                        "messagePropertyName" => envImage.MessagePropertyName,
-                        "description" => EmptyToNull(envImage.Description),
-                        _ => null
-                    };
+                    PluginStoredValues.TryImage(field, envImage, out var actual);
                     Check(field, expected, actual, imagePath, envImage.UnavailableProperties, imageChanges, drift.Coverage);
                 }
                 if (imageChanges.Count > 0)
@@ -284,6 +268,8 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
             }
         }
         ct.ThrowIfCancellationRequested();
+        // Advisory only, computed after the comparison from rows already read; a failure omits it.
+        drift.PreservedLegacyValues = PluginLegacyPreservationService.TryCollect(legacyInputs, out _);
         return drift;
     }
 
@@ -293,10 +279,6 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
 
     private static string StepPath(PluginTypeConfig type, PluginStepConfig step) =>
         $"type:{type.TypeName}/step:{PluginStepMatcher.ResolveConfigName(type, step)}";
-
-    private static object? EmptyToNull(string? value) => string.IsNullOrEmpty(value) ? null : value;
-
-    private static object? NormalizeAttributes(string? value) => PluginRegistrationNormalizer.NormalizeAttributes(value);
 
     private static void Check(string field, object? expected, object? actual, string path,
         HashSet<string> unavailable, List<PropertyChange> changes, ComparisonCoverage coverage, bool redact = false)
@@ -308,16 +290,9 @@ internal sealed class PluginDiffService(IPluginRegistrationService registration)
         }
         coverage.Checked.Add(new(path, field));
         if (!Equals(expected, actual))
-            changes.Add(new(field, redact ? "(redacted)" : Format(expected), redact ? "(redacted)" : Format(actual)));
+            changes.Add(new(field, redact ? "(redacted)" : PluginStoredValues.Format(expected),
+                redact ? "(redacted)" : PluginStoredValues.Format(actual)));
     }
-
-    private static string Format(object? value) => value switch
-    {
-        null => "(none)",
-        bool boolean => boolean ? "true" : "false",
-        IFormattable formatted => formatted.ToString(null, CultureInfo.InvariantCulture),
-        _ => value.ToString() ?? "(none)"
-    };
 
     private static void Unknown(Dictionary<string, JsonElement>? extensions, string path, ComparisonCoverage coverage)
     {
@@ -366,6 +341,12 @@ internal sealed class AssemblyDrift
     public List<ModifiedImageDrift> ModifiedImages { get; set; } = [];
     public List<string> Warnings { get; set; } = [];
     public ComparisonCoverage Coverage { get; } = new();
+    /// <summary>
+    /// Legacy (missing/1.0) files only: omitted optional values that are preserved and not compared,
+    /// but differ from what registration version 2.0 would write. Advisory; never drift or incompleteness.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<PreservedLegacyValue>? PreservedLegacyValues { get; set; }
     public bool HasDrift => AssemblyMissing || MissingSteps.Count > 0 || OrphanedSteps.Count > 0 ||
         ModifiedSteps.Count > 0 || MissingImages.Count > 0 || OrphanedImages.Count > 0 || ModifiedImages.Count > 0;
     public bool IsComplete => Coverage.Unsupported.Count == 0;

@@ -1,7 +1,8 @@
 # Registration compatibility and reconciliation
 
 This change restores established Update clears and adds explicit registration
-file version 2.0. It does not activate CI, publish packages or add image pruning.
+file version 2.0, including version 2.0 owned-image pruning under `--clean` (see
+"Version 2.0 image pruning" below). It does not activate CI or publish packages.
 The plugin repair is separate from NuGet trusted-publishing adoption.
 
 ## Old/new/reason/compatibility ledger
@@ -15,11 +16,12 @@ The plugin repair is separate from NuGet trusted-publishing adoption.
 | Public update records | Initial appended positional members replaced old constructors/deconstruction | Keep original eight/two-argument positional contracts; new fields are init properties | Old constructor and deconstruction signatures remain available |
 | Provider interface | Initial user resolver added an abstract obligation | Default implementation handles CallingUser and refuses unverifiable explicit identities | Existing implementations can load; unsupported resolution is not fabricated |
 | Register/RPC | Initial nullable mode/rank could omit result keys and change defaults | Keep established register defaults and non-null result fields; append new wire options after target/profile | Register placeholders and Update clears remain operation-specific |
-| Diff | Partial comparison could appear clean; initial incomplete result used success=true | Keep data[] with explicit status/coverage, 0/1/2 exits, success=false when incomplete | Completed drift remains a completed comparison with exit 1; no global writer reinterpretation |
+| Diff | Partial comparison could appear clean; initial incomplete result used success=true | Keep data[] with explicit status/coverage, 0/1/2 exits, success=false when incomplete | Completed drift remains a completed comparison with exit 1; no global writer reinterpretation. Exit 2 is shared by an incomplete comparison and general failures: scripts must read `metadata.status` (`match`/`drift`/`incomplete`); an error result carries an `error` object and no comparison metadata. Pinned by `ActualDiff_RetainsArrayAndReportsTruthfulSuccessStatusAndExit` (unknown property: exit 2, `success=false`, `incomplete`), `RealCommand_JsonAndExitCode_ReportTruthfulStatus` and `RealCommand_IncludeHidden_ReversesReadExclusion` (hidden step without `--include-hidden`) |
+| Legacy visibility | Missing/1.0 files silently preserved omitted optional values that differ from 2.0 defaults | Diff (text notice on stderr, additive `data[].preservedLegacyValues`) and deploy (one stderr notice, additive `data[].preservedLegacyValues`) list stored values that 2.0 would reset, with an adoption pointer | Advisory only: 1.0 writes, compared fields, status and exit codes are unchanged; unsecure configuration values are redacted and secure values are never listed. Deploy uses rows it already read |
 | Extraction | Existing optional overrides/reset lists could remain sticky | V2 fresh defaults are authoritative; v1 retains its deployment overlay | Explicit --registration-version selects migration; absence keeps the existing/new-file contract |
-| Secure input | Non-null including empty is an existing write-only request | Preserve that write path; null/absence preserves; comparison is unknown when supplied | No equality, secret reset/deletion, plaintext/hash output or new secret authority |
+| Secure input | Non-null including empty is an existing write-only request | Preserve that write path; null/absence preserves; a supplied value is listed as excluded (write-only, never read back) and is not compared | No equality, secret reset/deletion, plaintext/hash output or new secret authority. A supplied value does not make a comparison incomplete, so it does not change `status`, `success` or the exit code, and a successful 2.0 deploy that supplies it succeeds |
 | Verification | SDK acknowledgement could be mistaken for stored convergence | V2 real deployment reads back through the nonsecret comparison; drift/incomplete is non-success | Dry-run is preview-only; failures retain effects, without rollback |
-| Extra registrations | Existing clean deletes orphan steps and their current children | Extra images remain drift; v2 rejects --clean before connection and no independent image deletion is added | V1 clean retains its existing scope; neither empty images nor v2 opts into pruning or proves parent cascade safety |
+| Extra registrations | Existing clean deletes orphan steps and their current children | Ordinary deploy leaves extra images and steps as drift. V2 `deploy --clean` and `plugins clean` prune only owned extra images on configured steps (conditions below); they never delete steps, types or assemblies | V1 clean retains its existing orphan-step (and, for `plugins clean`, empty-type) scope. Under v2 an orphaned step stays drift, so real v2 deploy verification exits 1 until it is removed separately with `ppds plugins unregister step <step-id>` (`--force` also deletes its images) |
 | System selector | Documentation advertised a registration shorthand not implemented at R | CallingUser and explicit valid users remain registration choices | Runtime CreateOrganizationService(null) SYSTEM behavior is separate plug-in code |
 | Publisher/version train | Initial candidate also bundled OIDC and replacement library notes | Keep that reviewed source/evidence separate | No trust activation, token exchange, release tags or version publication here |
 
@@ -29,30 +31,39 @@ false. All-attributes images and cleared filtering can broaden workload. Review 
 versioned plan before execution. The comparison does not cover assembly/package
 bytes, solution membership, Custom APIs or unrelated environment state.
 
-## Bounded future image-prune design — not implemented
+## Version 2.0 image pruning — implemented scope
 
-Independent orphan-image removal requires its own destructive-behavior adoption.
-Recommended boundary: exact target URL/tenant/organization, assembly/type/step IDs,
-and an immutable explicit set of image IDs created by this deployment or adopted
-by the operator after inventory review. Names, prefixes, IsManaged, an upsert ID,
-or an earlier empty query do not establish ownership.
+Under a version 2.0 file, `ppds plugins deploy --clean` and `ppds plugins clean`
+use one shared image-only planner. What the code enforces:
 
-A future preview should identify every proposed image ID and parent, preserve all
-unowned/hidden/ambiguous entries, distinguish omitted from authoritative empty
-collections, and bind the reviewed plan to source/config and target. Apply should
-re-read scope, refuse a changed/unknown plan and delete only approved image IDs,
-with bounded cancellation, acknowledged/unknown outcomes and final readback.
-Conditional-delete support must be established from the target's real capability;
-it cannot be assumed. No automatic retries after uncertain submission.
+- Every configured step must carry an explicit `images` list. `images: []`
+  authorizes removing that step's owned images. An omitted list, or a step that
+  supplies the `images` key twice (in any casing), is rejected before connecting.
+  Property names bind case-insensitively, so a single `"Images": []` is an explicit
+  empty list and authorizes pruning every owned image on that step.
+- Only images on configured steps that resolve to exactly one owned environment step
+  are candidates. Assembly ownership comes from the assembly name or, for packages,
+  the validated local nupkg identity, exact package ID and matching assembly parent.
+  Names, filters and solution membership alone do not establish ownership.
+- Hidden, managed, non-customizable, unavailable or ambiguous targets fail the whole
+  plan visibly instead of being skipped. The complete plan for every configured
+  scope is built before the first mutation; `deploy --clean` applies it only after
+  all ordinary writes succeed.
+- Only the planned image IDs are deleted, each after a fresh ownership recheck.
+  Images added after planning are retained and counted. Deletion uses the existing
+  unconditional image delete: there is no row-version or transaction guarantee, so a
+  change after the final read remains possible. Acknowledged and unknown outcomes
+  are retained; there is no rollback or automatic retry.
+- `--dry-run` deletes nothing. JSON output lists the plan (`imageCleanup.plan.images`,
+  with `imagesDeleted` counting performed deletes only, so 0 in a preview). Text
+  output lists each planned image (name, ID, step identity and step ID) under
+  "Planned image deletions (dry-run; not performed)" and a planned total.
 
-This does not authorize parent-step/type/assembly deletion. Their cascades can
-reach children added after a client check. Parent rowversion checks and transaction
-grouping do not by themselves prove an atomic exact-child-set guarantee. A stronger
-server mechanism or an approved exclusive disposable environment would need its
-own proof and lifecycle decision. Current fixture ownership/cascade limitations
-remain unresolved, and no live prune validation is part of this preparation.
-
-Before implementing prune, decide: which existing IDs may be adopted, how changed
-inventory is handled, what conditional delete the platform supports, and whether
-the target is shared or exclusively owned. The recommendation is owned leaf IDs
-only, no broad --clean expansion, and fail-closed unknown scope.
+Not implemented and still future work: deleting parent steps, types or assemblies
+under version 2.0. Their cascades can reach children added after a client check,
+and parent row-version checks or transaction grouping do not by themselves prove an
+atomic exact-child-set guarantee. Under 2.0 an orphaned step is reported as drift
+(real deploy verification exits 1) until the operator removes it explicitly with
+`ppds plugins unregister step <step-id>` (add `--force` when it still has images).
+Version 1.0 cleanup keeps its legacy orphan-step scope. No live prune validation
+has been performed; the guarantees above are covered by offline tests only.

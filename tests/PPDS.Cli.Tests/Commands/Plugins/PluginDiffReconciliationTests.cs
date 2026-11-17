@@ -357,17 +357,124 @@ public sealed class PluginDiffReconciliationTests
     }
 
     [Theory]
-    [InlineData(null, true)]
-    [InlineData("", false)]
-    [InlineData("TOP-SECRET-DO-NOT-PRINT", false)]
-    public async Task SecureConfiguration_UnknownWhenSupplied_AlwaysExcluded(string? secret, bool complete)
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("TOP-SECRET-DO-NOT-PRINT")]
+    [Trait("AC", "AC-81")]
+    public async Task SecureConfiguration_SuppliedOrOmitted_IsExcludedWithoutMakingComparisonIncomplete(string? secret)
     {
         var f = Fixture();
         f.Step.SecureConfiguration = secret;
         var result = await DiffCommand.ComputeDriftAsync(f.Service.Object, f.Config);
-        Assert.Equal(complete, result.IsComplete);
+        // Write-only input is reported, never compared, and never makes the comparison incomplete.
+        Assert.True(result.IsComplete);
+        Assert.False(result.HasDrift);
+        Assert.Empty(result.Coverage.Unsupported);
         Assert.Contains(result.Coverage.Excluded, c => c.Field.StartsWith("secureConfiguration"));
+        Assert.Equal(secret is not null, result.Coverage.Excluded.Any(c => c.Field.Contains("supplied but not compared")));
         Assert.DoesNotContain("TOP-SECRET-DO-NOT-PRINT", JsonSerializer.Serialize(result));
+    }
+
+    [Theory]
+    [InlineData("1.0", false, 0)]
+    [InlineData("1.0", true, 1)]
+    [InlineData("2.0", false, 0)]
+    [InlineData("2.0", true, 1)]
+    [Trait("AC", "AC-134")]
+    public async Task RealCommand_SuppliedSecureConfiguration_DoesNotChangeStatusOrExit(string version, bool drift, int expectedExit)
+    {
+        var f = Fixture();
+        if (drift) f.Env.IsEnabled = false;
+        var input = JsonSerializer.Serialize(new PluginRegistrationConfig { Version = version, Assemblies = [f.Config] })
+            .Replace("\"name\":\"handler\"", "\"name\":\"handler\",\"secureConfiguration\":\"SECRET-SUPPLIED\"");
+        foreach (var json in new[] { true, false })
+        {
+            var (exit, output, error) = await Invoke(f.Service.Object, input, json);
+            Assert.Equal(expectedExit, exit);
+            Assert.DoesNotContain("SECRET-SUPPLIED", output + error);
+            if (json)
+            {
+                using var document = JsonDocument.Parse(output);
+                Assert.True(document.RootElement.GetProperty("success").GetBoolean());
+                var metadata = document.RootElement.GetProperty("metadata");
+                Assert.True(metadata.GetProperty("isComplete").GetBoolean());
+                Assert.Equal(drift ? "drift" : "match", metadata.GetProperty("status").GetString());
+                var coverage = document.RootElement.GetProperty("data")[0].GetProperty("coverage");
+                Assert.Empty(coverage.GetProperty("unsupported").EnumerateArray());
+                Assert.Contains(coverage.GetProperty("excluded").EnumerateArray(), item =>
+                    item.GetProperty("field").GetString()!.Contains("secureConfiguration supplied but not compared"));
+            }
+            else
+                Assert.Contains("Excluded: type:Offline.Handler/step:handler: secureConfiguration supplied but not compared", error);
+        }
+    }
+
+    [Fact]
+    [Trait("AC", "AC-135")]
+    public async Task LegacyOmittedValues_AreReportedAsPreservedNoticeWithoutChangingExit()
+    {
+        var f = Fixture();
+        f.Env.FilteringAttributes = "telephone1";
+        f.Env.Configuration = "PRIVATE-STORED-CONFIG";
+        f.Env.Description = "stored description";
+        f.Env.ImpersonatingUserId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        f.Env.CanBeBypassed = false;
+        f.Env.CanUseReadOnlyConnection = true;
+        f.EnvImage.Description = "stored image description";
+        f.Image.Attributes = null; // omitted under 1.0: stored "name" is preserved, 2.0 would select all attributes
+        var input = JsonSerializer.Serialize(new PluginRegistrationConfig { Assemblies = [f.Config] });
+
+        var (exit, output, error) = await Invoke(f.Service.Object, input, json: true);
+        Assert.Equal(0, exit);
+        Assert.DoesNotContain("PRIVATE-STORED-CONFIG", output + error);
+        using (var document = JsonDocument.Parse(output))
+        {
+            Assert.Equal("match", document.RootElement.GetProperty("metadata").GetProperty("status").GetString());
+            var preserved = document.RootElement.GetProperty("data")[0].GetProperty("preservedLegacyValues").EnumerateArray()
+                .Select(v => (Path: v.GetProperty("path").GetString(), Property: v.GetProperty("property").GetString(),
+                    Stored: v.GetProperty("stored").GetString(), Version2: v.GetProperty("version2Value").GetString())).ToList();
+            const string step = "assembly:OfflineFixture/type:Offline.Handler/step:handler";
+            Assert.Contains((step, "filteringAttributes", "telephone1", "(none)"), preserved);
+            Assert.Contains((step, "unsecureConfiguration", "(redacted)", "(redacted)"), preserved);
+            Assert.Contains((step, "description", "stored description", "(none)"), preserved);
+            Assert.Contains((step, "runAsUser", "33333333-3333-3333-3333-333333333333", "CallingUser"), preserved);
+            Assert.Contains((step, "canBeBypassed", "false", "true"), preserved);
+            Assert.Contains((step, "canUseReadOnlyConnection", "true", "false"), preserved);
+            Assert.Contains((step + "/image:before", "attributes", "name", "(all attributes)"), preserved);
+            Assert.Contains((step + "/image:before", "description", "stored image description", "(none)"), preserved);
+            Assert.Equal(8, preserved.Count);
+        }
+
+        (exit, output, error) = await Invoke(f.Service.Object, input, json: false);
+        Assert.Equal(0, exit);
+        Assert.Empty(output);
+        Assert.Contains("preserved, not managed, under registration version 1.0", error);
+        Assert.Contains("filteringAttributes stored telephone1 (2.0 default (none))", error);
+        Assert.Contains("unsecureConfiguration stored (redacted)", error);
+        Assert.Contains("--registration-version 2.0", error);
+        Assert.Contains("\"version\": \"2.0\"", error);
+        Assert.Contains("--clean removes only owned extra images", error);
+        Assert.DoesNotContain("PRIVATE-STORED-CONFIG", error);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-135")]
+    public async Task LegacyNotice_IsAbsentWhenStoredValuesEqualVersion2DefaultsAndForVersion2Files()
+    {
+        var f = Fixture();
+        f.Image.Attributes = null;
+        f.EnvImage.Attributes = null;
+        var (exit, output, error) = await Invoke(f.Service.Object,
+            JsonSerializer.Serialize(new PluginRegistrationConfig { Assemblies = [f.Config] }), json: false);
+        Assert.Equal(0, exit);
+        Assert.DoesNotContain("Notice:", error);
+
+        f.Env.Description = "stored description";
+        (exit, output, _) = await Invoke(f.Service.Object,
+            JsonSerializer.Serialize(new PluginRegistrationConfig { Version = "2.0", Assemblies = [f.Config] }), json: true);
+        Assert.Equal(1, exit); // 2.0 manages the omission: real drift, not a notice
+        using var document = JsonDocument.Parse(output);
+        Assert.False(document.RootElement.GetProperty("data")[0].TryGetProperty("preservedLegacyValues", out _));
     }
 
     [Fact]
@@ -426,7 +533,8 @@ public sealed class PluginDiffReconciliationTests
     [InlineData("drift", 1, true)]
     [InlineData("unknown", 2, false)]
     [InlineData("both", 2, true)]
-    [InlineData("secret", 2, false)]
+    [InlineData("secret", 0, false)]
+    [Trait("AC", "AC-93")]
     public async Task RealCommand_JsonAndExitCode_ReportTruthfulStatus(string scenario, int expectedExit, bool expectedDrift)
     {
         var f = Fixture();
@@ -451,6 +559,7 @@ public sealed class PluginDiffReconciliationTests
         Assert.Equal(expectedDrift, metadata.GetProperty("hasDrift").GetBoolean());
         Assert.Equal(expectedExit != 2, metadata.GetProperty("isComplete").GetBoolean());
         Assert.Equal(expectedExit == 2 ? "incomplete" : expectedDrift ? "drift" : "match", metadata.GetProperty("status").GetString());
+        Assert.Equal(expectedExit != 2, document.RootElement.GetProperty("success").GetBoolean()); // success=false only when incomplete
     }
 
     [Fact]
@@ -485,6 +594,7 @@ public sealed class PluginDiffReconciliationTests
     }
 
     [Theory]
+    [Trait("AC", "AC-93")]
     [InlineData(false, 2)]
     [InlineData(true, 0)]
     public async Task RealCommand_IncludeHidden_ReversesReadExclusion(bool includeHidden, int expectedExit)
@@ -495,6 +605,10 @@ public sealed class PluginDiffReconciliationTests
             JsonSerializer.Serialize(new PluginRegistrationConfig { Assemblies = [f.Config] }), json: true, includeHidden);
         Assert.Equal(expectedExit, exit);
         using var document = JsonDocument.Parse(output);
+        // A hidden step excluded without --include-hidden is a genuinely incomplete comparison.
+        Assert.Equal(includeHidden, document.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal(includeHidden ? "match" : "incomplete",
+            document.RootElement.GetProperty("metadata").GetProperty("status").GetString());
         var coverage = document.RootElement.GetProperty("data")[0].GetProperty("coverage");
         Assert.Equal(1, coverage.GetProperty("totalSteps").GetInt32());
         Assert.Equal(1, coverage.GetProperty("hiddenSteps").GetInt32());

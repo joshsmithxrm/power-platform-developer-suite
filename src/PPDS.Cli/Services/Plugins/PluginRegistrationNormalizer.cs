@@ -14,9 +14,42 @@ internal static class PluginRegistrationNormalizer
     };
     private static readonly HashSet<string> ImageResets = new(StringComparer.Ordinal) { "attributes", "description" };
 
-    internal static IReadOnlyDictionary<string, object?> NormalizeStep(PluginStepConfig config, RegistrationOperationIntent intent)
+    /// <summary>Optional step fields version 2.0 resets on omission (and that resetFields may name).</summary>
+    internal static IReadOnlyCollection<string> ResettableStepFields => StepResets;
+
+    /// <summary>Optional image fields version 2.0 resets on omission (and that resetFields may name).</summary>
+    internal static IReadOnlyCollection<string> ResettableImageFields => ImageResets;
+
+    internal static IReadOnlyDictionary<string, object?> NormalizeStep(PluginStepConfig config, RegistrationOperationIntent intent) =>
+        NormalizeStepCore(config, intent, rejectUnknownFields: true);
+
+    /// <summary>
+    /// For a legacy (missing/1.0) step, the optional nonsecret fields the legacy contract leaves
+    /// unmanaged (and therefore preserves on update) that registration version 2.0 would write,
+    /// with the value 2.0 would write. Read-only advisory input; it never changes the legacy plan.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, object?> Version2ValuesForLegacyOmissions(PluginStepConfig config)
     {
-        RejectUnknownFields(config.ExtensionData?.Count ?? 0, "step", intent);
+        var legacy = NormalizeStep(config, RegistrationOperationIntent.Deploy);
+        // Unknown fields are preserved under 1.0; this advisory must not reject them.
+        var version2 = NormalizeStepCore(config, RegistrationOperationIntent.Reconcile, rejectUnknownFields: false);
+        return version2.Where(p => StepResets.Contains(p.Key) && !legacy.ContainsKey(p.Key))
+            .ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+    }
+
+    /// <summary>Image counterpart of <see cref="Version2ValuesForLegacyOmissions(PluginStepConfig)"/>.</summary>
+    internal static IReadOnlyDictionary<string, object?> Version2ValuesForLegacyOmissions(PluginImageConfig config, string message)
+    {
+        var legacy = NormalizeImage(config, message, RegistrationOperationIntent.Deploy);
+        var version2 = NormalizeImageCore(config, message, RegistrationOperationIntent.Reconcile, rejectUnknownFields: false);
+        return version2.Where(p => ImageResets.Contains(p.Key) && !legacy.ContainsKey(p.Key))
+            .ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+    }
+
+    private static IReadOnlyDictionary<string, object?> NormalizeStepCore(PluginStepConfig config, RegistrationOperationIntent intent,
+        bool rejectUnknownFields)
+    {
+        if (rejectUnknownFields) RejectUnknownFields(config.ExtensionData?.Count ?? 0, "step", intent);
         ValidateResets(config, StepResets);
         if (config.Images == null) throw Invalid("images must be an array; use an empty array to configure no images.");
         if (config.Name != null && string.IsNullOrWhiteSpace(config.Name)) throw Invalid("A supplied step name must not be empty.");
@@ -58,9 +91,13 @@ internal static class PluginRegistrationNormalizer
         return fields;
     }
 
-    internal static IReadOnlyDictionary<string, object?> NormalizeImage(PluginImageConfig config, string message, RegistrationOperationIntent intent)
+    internal static IReadOnlyDictionary<string, object?> NormalizeImage(PluginImageConfig config, string message, RegistrationOperationIntent intent) =>
+        NormalizeImageCore(config, message, intent, rejectUnknownFields: true);
+
+    private static IReadOnlyDictionary<string, object?> NormalizeImageCore(PluginImageConfig config, string message,
+        RegistrationOperationIntent intent, bool rejectUnknownFields)
     {
-        RejectUnknownFields(config.ExtensionData?.Count ?? 0, "image", intent);
+        if (rejectUnknownFields) RejectUnknownFields(config.ExtensionData?.Count ?? 0, "image", intent);
         ValidateResets(config, ImageResets);
         if (string.IsNullOrWhiteSpace(config.Name)) throw Invalid("Image name is required.");
         var messageProperty = PluginRegistrationService.GetDefaultImagePropertyName(message)

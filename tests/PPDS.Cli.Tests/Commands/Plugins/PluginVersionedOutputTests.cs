@@ -56,13 +56,21 @@ public class PluginVersionedOutputTests
         finally { File.Delete(path); }
     }
 
+    // Exit 0/1/2 with success=false only for an incomplete comparison (AC-93). A supplied secure value
+    // is excluded and never makes a comparison incomplete (AC-81); an unknown property does (1.0 only,
+    // because 2.0 rejects unknown fields before connecting).
     [Theory]
-    [InlineData("1.0", false)]
-    [InlineData("2.0", false)]
-    [InlineData("1.0", true)]
-    [InlineData("2.0", true)]
-    public async Task ActualDiff_RetainsArrayAndMakesIncompleteVerificationUnsuccessful(string version, bool secret)
+    [Trait("AC", "AC-93")]
+    [InlineData("1.0", "plain", 1)]
+    [InlineData("2.0", "plain", 1)]
+    [InlineData("1.0", "secret", 1)]
+    [InlineData("2.0", "secret", 1)]
+    [InlineData("1.0", "unknown", 2)]
+    [InlineData("1.0", "unknown-and-secret", 2)]
+    public async Task ActualDiff_RetainsArrayAndReportsTruthfulSuccessStatusAndExit(string version, string shape, int expectedExit)
     {
+        var secret = shape.Contains("secret", StringComparison.Ordinal);
+        var incomplete = expectedExit == 2;
         const string sentinel = "SYNTHETIC-SECRET-OUTPUT-BOUNDARY";
         var service = new Mock<IPluginRegistrationService>(MockBehavior.Strict);
         PluginAssemblyInfo? missingAssembly = null;
@@ -73,6 +81,7 @@ public class PluginVersionedOutputTests
             ["message"] = "Update", ["entity"] = "account", ["stage"] = "PostOperation"
         };
         if (secret) step["secureConfiguration"] = sentinel;
+        if (shape.StartsWith("unknown", StringComparison.Ordinal)) step["unrecognizedSetting"] = "SYNTHETIC-UNKNOWN-VALUE";
         var json = JsonSerializer.Serialize(new
         {
             version,
@@ -87,16 +96,17 @@ public class PluginVersionedOutputTests
             var parse = DiffCommand.CreateForTesting(service.Object, output, error)
                 .Parse(["--config", path, "--output-format", "json"]);
             Assert.Empty(parse.Errors);
-            Assert.Equal(secret ? 2 : 1, await parse.InvokeAsync());
+            Assert.Equal(expectedExit, await parse.InvokeAsync());
             using var document = JsonDocument.Parse(output.ToString());
             Assert.Equal("1.0", document.RootElement.GetProperty("version").GetString());
             Assert.Equal(JsonValueKind.Array, document.RootElement.GetProperty("data").ValueKind);
-            Assert.Equal(!secret, document.RootElement.GetProperty("success").GetBoolean());
+            Assert.Equal(!incomplete, document.RootElement.GetProperty("success").GetBoolean());
             var metadata = document.RootElement.GetProperty("metadata");
-            Assert.Equal(secret ? "incomplete" : "drift", metadata.GetProperty("status").GetString());
-            Assert.Equal(!secret, metadata.GetProperty("isComplete").GetBoolean());
-            Assert.True(metadata.GetProperty("hasDrift").GetBoolean());
+            Assert.Equal(incomplete ? "incomplete" : "drift", metadata.GetProperty("status").GetString());
+            Assert.Equal(!incomplete, metadata.GetProperty("isComplete").GetBoolean());
+            Assert.True(metadata.GetProperty("hasDrift").GetBoolean()); // known drift does not hide incompleteness
             Assert.DoesNotContain(sentinel, output.ToString() + error);
+            Assert.DoesNotContain("SYNTHETIC-UNKNOWN-VALUE", output.ToString() + error);
             service.VerifyAll();
             service.VerifyNoOtherCalls();
         }

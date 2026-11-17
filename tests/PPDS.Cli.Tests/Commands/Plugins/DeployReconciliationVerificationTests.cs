@@ -9,14 +9,114 @@ using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Plugins.Models;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services;
+using PPDS.Auth.Profiles;
+using PPDS.Cli.Tests.TestHelpers;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Plugins;
 
 // Runs the actual command pipeline with mocked registration services. No auth profile,
 // Dataverse, native plugin loading, or persisted convergence is claimed by this fixture.
+// Text-mode cases swap Console.Error, so the class joins the console-capture collection.
+[Collection(nameof(ConsoleCaptureCollection))]
 public sealed class DeployReconciliationVerificationTests
 {
+    [Fact]
+    [Trait("AC", "AC-134")]
+    public async Task Version2_SuppliedSecureConfiguration_DeploySucceedsAndVerificationIsComplete()
+    {
+        using var fixture = new CommandFixture("2.0");
+        fixture.SetStepProperty("secureConfiguration", JsonValue.Create("synthetic-secure-input"));
+
+        Assert.Equal(0, await fixture.RunAsync());
+
+        using var json = JsonDocument.Parse(fixture.Output.ToString());
+        Assert.True(json.RootElement.GetProperty("success").GetBoolean());
+        var row = SingleDeployment(json.RootElement);
+        Assert.Equal("match", row.GetProperty("reconciliationStatus").GetString());
+        var verification = row.GetProperty("verification");
+        Assert.True(verification.GetProperty("isComplete").GetBoolean());
+        Assert.Empty(verification.GetProperty("coverage").GetProperty("unsupported").EnumerateArray());
+        Assert.Contains(verification.GetProperty("coverage").GetProperty("excluded").EnumerateArray(), item =>
+            item.GetProperty("field").GetString()!.Contains("secureConfiguration supplied but not compared", StringComparison.Ordinal));
+        Assert.DoesNotContain("synthetic-secure-input", fixture.Output.ToString());
+        fixture.VerifyStoredStateReadAfterWrite();
+    }
+
+    [Fact]
+    [Trait("AC", "AC-136")]
+    public async Task Version2_DryRunCleanText_ListsPlannedImageDeletionsWithPlannedCount()
+    {
+        using var fixture = new CommandFixture("2.0");
+        var extra = new PluginImageInfo { Id = Guid.NewGuid(), Name = "Extra", ImageType = "PreImage", StepId = fixture.StoredStep.Id };
+        fixture.StoredImages.Add(extra);
+
+        var (exit, error) = await fixture.RunTextAsync(dryRun: true, clean: true);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("Planned image deletions (dry-run; not performed): 1", error);
+        Assert.Contains($"Would delete image 'Extra' ({extra.Id:D}) on step contoso.handler: update of account (postoperation, synchronous) ({fixture.StoredStep.Id:D})", error);
+        Assert.Contains("Dry-run complete (planned, not performed): 0 would be created, 1 updated, 1 deleted", error);
+        Assert.DoesNotContain("Deployment complete", error);
+        fixture.VerifyNoDeletes();
+        Assert.Single(fixture.StoredImages);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-135")]
+    public async Task Version1_AdvisoryFailure_NeverChangesWritesSuccessOrExit()
+    {
+        using var fixture = new CommandFixture("1.0");
+        fixture.StoredStep.Description = "legacy-preserved-description";
+        fixture.SetStepProperty("images", new JsonArray(new JsonObject { ["name"] = "Before", ["imageType"] = "PreImage" }));
+        // A null stored image name cannot come from the real reader; it makes the advisory computation throw.
+        fixture.StoredImages.Add(new PluginImageInfo { Id = Guid.NewGuid(), Name = null! });
+        fixture.Service.Setup(s => s.UpsertImageAsync(fixture.StoredStep.Id, It.IsAny<PluginImageConfig>(), "Update", CancellationToken.None))
+            .Callback(() => fixture.Events.Add("write-image")).ReturnsAsync(Guid.NewGuid());
+
+        Assert.Equal(0, await fixture.RunAsync());
+
+        using var json = JsonDocument.Parse(fixture.Output.ToString());
+        Assert.True(json.RootElement.GetProperty("success").GetBoolean());
+        var row = SingleDeployment(json.RootElement);
+        Assert.Equal("completed", row.GetProperty("status").GetString());
+        Assert.False(row.TryGetProperty("preservedLegacyValues", out _)); // advisory omitted, nothing else changed
+        Assert.Equal(["write-assembly", "write-type", "write-step", "write-image"],
+            fixture.Events.Where(e => e.StartsWith("write-", StringComparison.Ordinal)));
+        Assert.Equal(1, row.GetProperty("stepsUpdated").GetInt32());
+        Assert.Equal(1, row.GetProperty("imagesCreated").GetInt32());
+
+        var (textExit, error) = await fixture.RunTextAsync();
+        Assert.Equal(0, textExit);
+        Assert.DoesNotContain("Notice:", error);
+        Assert.Equal(2, fixture.Events.Count(e => e == "write-image"));
+        fixture.VerifyNoDeletes();
+    }
+
+    [Fact]
+    [Trait("AC", "AC-135")]
+    public async Task Version1_TextAndJson_ReportPreservedValuesThatVersion2WouldChange()
+    {
+        using var fixture = new CommandFixture("1.0");
+        fixture.StoredStep.Description = "legacy-preserved-description";
+        fixture.StoredStep.CanBeBypassed = false;
+
+        var (exit, error) = await fixture.RunTextAsync();
+        Assert.Equal(0, exit);
+        Assert.Contains("Notice: 2 omitted optional value(s) are preserved, not managed, under registration version 1.0", error);
+        Assert.Contains("assembly:LocalFixture/type:Contoso.Handler/step:Update account: description, canBeBypassed", error);
+        Assert.Contains("--registration-version 2.0", error);
+
+        Assert.Equal(0, await fixture.RunAsync());
+        using var json = JsonDocument.Parse(fixture.Output.ToString());
+        Assert.True(json.RootElement.GetProperty("success").GetBoolean());
+        var preserved = SingleDeployment(json.RootElement).GetProperty("preservedLegacyValues").EnumerateArray()
+            .Select(v => v.GetProperty("property").GetString()).ToList();
+        Assert.Equal(["description", "canBeBypassed"], preserved);
+        // No extra reads: the notice uses the inventory deploy already performed.
+        fixture.Service.Verify(s => s.ListStepsForTypeAsync(It.IsAny<Guid>(), It.IsAny<PluginListOptions?>(), CancellationToken.None), Times.Exactly(2));
+        fixture.VerifyNoDeletes();
+    }
     [Theory]
     [InlineData(false, false, 0, "match")]
     [InlineData(true, false, 1, "drift")]
@@ -170,6 +270,7 @@ public sealed class DeployReconciliationVerificationTests
     [InlineData("2.0", "empty-steps")]
     [InlineData("2.0", "empty-types")]
     [InlineData("1.0", "configured-step")]
+    [Trait("AC", "AC-137")]
     public async Task OrphanStepWarning_UsesCleanupGuidanceForTheSelectedFileVersion(string version, string shape)
     {
         using var fixture = new CommandFixture(version);
@@ -192,9 +293,13 @@ public sealed class DeployReconciliationVerificationTests
         {
             Assert.Contains("Version 2 --clean removes owned images only", warning, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("Re-run with --clean to remove them", warning, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("separate", warning, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("Parent registrations remain drift", warning, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("adoption", warning, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("separately", warning, StringComparison.OrdinalIgnoreCase);
+            // The guidance names the real removal command and the orphan's own ID, and states the exit-code effect.
+            Assert.Contains("'ppds plugins unregister step <step-id>'", warning, StringComparison.Ordinal);
+            Assert.Contains("--force", warning, StringComparison.Ordinal);
+            var orphanId = shape == "configured-step" ? fixture.AdditionalStoredSteps[0].Id : fixture.StoredStep.Id;
+            Assert.Contains($"id {orphanId:D}", warning, StringComparison.Ordinal);
+            Assert.Contains("reports drift and exits 1", warning, StringComparison.Ordinal);
             Assert.Equal("drift", row.GetProperty("reconciliationStatus").GetString());
         }
         else
@@ -357,18 +462,44 @@ public sealed class DeployReconciliationVerificationTests
             File.WriteAllText(path, config.ToJsonString());
         }
 
-        public Task<int> RunAsync(bool dryRun = false, bool clean = false) => DeployCommand.ExecuteAsync(
+        public void SetStepProperty(string field, JsonNode? value)
+        {
+            var path = Path.Combine(_directory, "registrations.json");
+            var config = JsonNode.Parse(File.ReadAllText(path))!;
+            config["assemblies"]![0]!["types"]![0]!["steps"]![0]![field] = value;
+            File.WriteAllText(path, config.ToJsonString());
+        }
+
+        public Task<int> RunAsync(bool dryRun = false, bool clean = false, bool json = true) => DeployCommand.ExecuteAsync(
             new FileInfo(Path.Combine(_directory, "registrations.json")), null, null, null, clean, dryRun,
-            new GlobalOptionValues { OutputFormat = OutputFormat.Json }, CancellationToken.None,
+            new GlobalOptionValues { OutputFormat = json ? OutputFormat.Json : OutputFormat.Text }, CancellationToken.None,
             serviceProviderFactory: _ =>
             {
                 ProviderCalls++;
                 return Task.FromResult(new ServiceCollection()
                     .AddSingleton(Service.Object)
                     .AddSingleton(new Mock<ICustomApiService>(MockBehavior.Strict).Object)
+                    .AddSingleton(new ResolvedConnectionInfo
+                    {
+                        Profile = new AuthProfile { Name = "offline-fixture" }, EnvironmentUrl = "https://fixture.example.test"
+                    })
                     .BuildServiceProvider());
             },
-            outputWriter: new JsonOutputWriter(Output));
+            outputWriter: json ? new JsonOutputWriter(Output) : null);
+
+        /// <summary>Runs in text mode, capturing stderr (the class is in the console-capture collection).</summary>
+        public async Task<(int Exit, string Error)> RunTextAsync(bool dryRun = false, bool clean = false)
+        {
+            using var error = new StringWriter();
+            var previous = Console.Error;
+            try
+            {
+                Console.SetError(error);
+                var exit = await RunAsync(dryRun, clean, json: false);
+                return (exit, error.ToString());
+            }
+            finally { Console.SetError(previous); }
+        }
 
         public void VerifyStoredStateReadAfterWrite()
         {

@@ -121,6 +121,9 @@ public static class DiffCommand
             RenderCoverage(assembly.Coverage, error);
         }
         RenderCoverage(result.Coverage, error);
+        var preserved = result.Assemblies.SelectMany(a => a.PreservedLegacyValues ?? []).ToList();
+        foreach (var line in PluginLegacyPreservationService.DescribeNotice(preserved, includeValues: true))
+            error.WriteLine(line);
     }
 
     private static void RenderCoverage(ComparisonCoverage coverage, TextWriter error)
