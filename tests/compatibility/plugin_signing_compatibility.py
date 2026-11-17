@@ -309,8 +309,12 @@ def environment(plan, temporary, *, build=False):
               "TEMP": str(temporary), "TMP": str(temporary),
               "ProgramFiles(x86)": str(PureWindowsPath(*PureWindowsPath(FIXED_SIGNER).parts[:2]))}
     if build:
+        # NuGet resolves its configuration and cache folders from APPDATA and LOCALAPPDATA and
+        # fails restore with a null-path error when either is absent. Both point inside the
+        # owned temporary directory, so no user profile or ambient NuGet state is read.
         result.update(DOTNET_CLI_HOME=str(temporary / "dotnet-home"),
                       NUGET_PACKAGES=str(temporary / "packages"),
+                      APPDATA=str(temporary / "appdata"), LOCALAPPDATA=str(temporary / "localappdata"),
                       DOTNET_CLI_TELEMETRY_OPTOUT="1", DOTNET_NOLOGO="1",
                       DOTNET_SKIP_FIRST_TIME_EXPERIENCE="1",
                       DOTNET_GENERATE_ASPNET_CERTIFICATE="false")

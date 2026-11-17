@@ -573,7 +573,11 @@ def test_build_invocation_suppresses_certificate_generation_without_inheriting_e
     assert "PLUGINS_SNK_BASE64" not in child
     assert "untrusted-parent-path" not in child["PATH"]
     assert child["PROGRAMDATA"] == child["ALLUSERSPROFILE"] == plan["windows_common_data_directory"]
+    # NuGet needs both folders to restore; they must stay inside the owned temporary directory.
+    owned = Path(child["TEMP"])
+    assert Path(child["APPDATA"]) == owned / "appdata" and Path(child["LOCALAPPDATA"]) == owned / "localappdata"
     assert set(child) == {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "ProgramFiles(x86)", "PROGRAMDATA", "ALLUSERSPROFILE",
+                          "APPDATA", "LOCALAPPDATA",
                           "DOTNET_CLI_HOME", "NUGET_PACKAGES", "DOTNET_CLI_TELEMETRY_OPTOUT",
                           "DOTNET_NOLOGO", "DOTNET_SKIP_FIRST_TIME_EXPERIENCE",
                           "DOTNET_GENERATE_ASPNET_CERTIFICATE", "PATH"}
