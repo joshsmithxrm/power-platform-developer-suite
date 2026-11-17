@@ -158,17 +158,19 @@ public class DmlStatementFidelityTests
     }
 
     [Fact]
-    public async Task UpdateWithJoinedFrom_IsStillHonoured()
+    public async Task UpdateWithJoinedFrom_IsRefused_UntilTheJoinIsProven()
     {
+        // A join can return a target row more than once and its WHERE is evaluated outside Dataverse; not on the allowlist.
         var h = DmlTestHarness.Create(rows: 3);
 
-        await h.Service.ExecuteAsync(new SqlQueryRequest
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest
         {
             Sql = "UPDATE account SET name = 'y' FROM account INNER JOIN contact ON contact.parentcustomerid = account.accountid WHERE account.name = 'x'",
             DmlSafety = Confirmed
-        });
+        }));
 
-        Assert.Equal(new[] { 3 }, h.Updated);
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        h.AssertNothingChanged();
     }
 
     // ---- other statement kinds ----------------------------------------------------------------
@@ -257,17 +259,21 @@ public class DmlStatementFidelityTests
     }
 
     [Fact]
-    public async Task ReadFromAnotherEnvironment_WriteLocally_StillRuns()
+    public async Task ReadFromAnotherEnvironment_IntoTheConnectedOne_IsRefused()
     {
+        // The remote read path fetches every row and attribute and drops the WHERE, so INSERT ... SELECT FROM [QA]
+        // would copy every QA row. Not on the allowlist until the remote read honours its WHERE.
         var h = WithRemote("QA", CrossEnvironmentDmlPolicy.ReadOnly);
 
-        await h.Service.ExecuteAsync(new SqlQueryRequest
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest
         {
             Sql = "INSERT INTO account (name) SELECT name FROM [QA].account WHERE name = 'x'",
             DmlSafety = Confirmed
-        });
+        }));
 
-        Assert.Equal(new[] { ("Create", "account", 2) }, h.Writes);
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        Assert.Contains("another environment", ex.Message);
+        h.AssertNothingChanged();
     }
 
     // ---- paging arguments (S4) ----------------------------------------------------------------

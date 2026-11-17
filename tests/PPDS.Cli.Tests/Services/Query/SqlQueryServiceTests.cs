@@ -1651,7 +1651,7 @@ public class SqlQueryServiceTests
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task ExecuteAsync_MultipartLocalDmlTarget_DoesNotTreatRemoteReadAsWriteTarget()
+    public async Task ExecuteAsync_LocalTargetWithRemoteFromSource_IsRefused()
     {
         var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
         var mockBulkExecutor = new Mock<IBulkOperationExecutor>(MockBehavior.Strict);
@@ -1683,10 +1683,11 @@ public class SqlQueryServiceTests
             DmlSafety = new DmlSafetyOptions { IsDryRun = true }
         };
 
-        var result = await service.ExecuteAsync(request);
+        // Ids read from another environment would be applied to the connected one: refused, also for a dry-run.
+        var exception = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
 
-        Assert.True(result.DmlSafetyResult?.IsDryRun);
-        Assert.Equal(["Local", "PROD"], result.DataSources!.Select(source => source.Label));
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, exception.ErrorCode);
+        Assert.Contains("another environment", exception.Message);
         mockExecutor.VerifyNoOtherCalls();
         mockBulkExecutor.VerifyNoOtherCalls();
     }

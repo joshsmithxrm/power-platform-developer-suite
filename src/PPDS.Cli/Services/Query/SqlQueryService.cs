@@ -591,6 +591,10 @@ public sealed class SqlQueryService : ISqlQueryService
             throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
         }
 
+        // Only one batch runs per request: refuse rather than drop the batches after GO without a word.
+        if (fragment is TSqlScript { Batches: var batches } && batches.Count(b => b.Statements.Count > 0) > 1)
+            throw new PpdsValidationException("sql", ExecutionPlanBuilder.MultipleBatchesMessage);
+
         // Parse query hints (-- ppds:* comments and OPTION() clauses)
         var hints = QueryHintParser.Parse(fragment);
 
@@ -692,16 +696,16 @@ public sealed class SqlQueryService : ISqlQueryService
             }
         }
 
+        // Writes to another environment are refused here, before any confirmation is asked for (confirming cannot make
+        // them run where the statement says), and before the allowlist refusal so the message names the environment.
+        CheckCrossEnvironmentDmlPolicy(fragment, safetyResult);
+
         if (safetyResult.IsBlocked)
         {
             throw new PpdsException(
                 safetyResult.ErrorCode ?? ErrorCodes.Query.DmlBlocked,
                 safetyResult.BlockReason ?? "DML operation blocked by safety guard.");
         }
-
-        // Writes to another environment are refused here, before any confirmation is asked for: confirming
-        // cannot make them run where the statement says.
-        CheckCrossEnvironmentDmlPolicy(fragment, safetyResult);
 
         // A dry-run is the confirmation preview, not an execution attempt. Keep the
         // confirmation requirement on the result so callers know actual execution is
@@ -1232,6 +1236,14 @@ public sealed class SqlQueryService : ISqlQueryService
         var plannedStatement = ExtractPlannedStatement(fragment);
         foreach (var targetLabel in DetectCrossEnvironmentDmlTargets(fragment, safetyResult))
         {
+            if (_environmentLabel != null && string.Equals(targetLabel, _environmentLabel, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new PpdsException(
+                    ErrorCodes.Query.DmlBlocked,
+                    $"[{targetLabel}] is the connected environment. Name the table without the environment label (for " +
+                    "example UPDATE account ... instead of UPDATE [" + targetLabel + "].account ...). Nothing was executed.");
+            }
+
             var targetConfig = ProfileResolver?.ResolveByLabel(targetLabel);
             var targetType = targetConfig?.Type ?? EnvironmentType.Production;
             var targetProtection = targetConfig?.Protection

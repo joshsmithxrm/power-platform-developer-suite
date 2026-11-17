@@ -16,6 +16,12 @@ internal sealed class DmlTestHarness
     public required SqlQueryService Service { get; init; }
     public required Mock<IBulkOperationExecutor> Bulk { get; init; }
 
+    /// <summary>Every id passed to a bulk delete, in call order.</summary>
+    public List<Guid> DeletedIds { get; } = new();
+
+    /// <summary>The bulk options of the latest write.</summary>
+    public BulkOperationOptions? LastOptions { get; set; }
+
     /// <summary>Every bulk write: ("Delete"|"Update"|"Create", entity, rows).</summary>
     public List<(string Operation, string Entity, int Rows)> Writes { get; } = new();
 
@@ -38,7 +44,10 @@ internal sealed class DmlTestHarness
         {
             ["accountid"] = QueryValue.Simple(Guid.NewGuid()),
             ["contactid"] = QueryValue.Simple(Guid.NewGuid()),
-            ["name"] = QueryValue.Simple("n" + i)
+            ["name"] = QueryValue.Simple("n" + i),
+            // revenue 500, 1000, 1500, ...; description null on even rows, "d<i>" on odd rows
+            ["revenue"] = QueryValue.Simple(500m * (i + 1)),
+            ["description"] = i % 2 == 0 ? QueryValue.Null : QueryValue.Simple("d" + i)
         }).ToArray(),
         Count = count,
         MoreRecords = moreRecords,
@@ -53,7 +62,8 @@ internal sealed class DmlTestHarness
         int rows,
         int? contactRows = null,
         int pages = 1,
-        ProtectionLevel protection = ProtectionLevel.Development)
+        ProtectionLevel protection = ProtectionLevel.Development,
+        bool duplicateRows = false)
     {
         var executor = new Mock<IQueryExecutor>(MockBehavior.Loose);
         var bulk = new Mock<IBulkOperationExecutor>(MockBehavior.Loose);
@@ -71,7 +81,18 @@ internal sealed class DmlTestHarness
             harness.Reads.Add((fetchXml, page, cookie));
             var count = fetchXml.Contains("contact") ? contactRows ?? rows : rows;
             var more = (page ?? 1) < pages;
-            return Rows(count, more, page ?? 1);
+            var result = OnlyRequestedAttributes(Rows(count, more, page ?? 1), fetchXml);
+            if (duplicateRows)
+            {
+                // Each record twice (same id), as a one-to-many source would produce.
+                result = new QueryResult
+                {
+                    PageNumber = result.PageNumber, EntityLogicalName = result.EntityLogicalName, Columns = result.Columns,
+                    Records = result.Records.SelectMany(r => new[] { r, r }).ToArray(), Count = result.Count * 2,
+                    MoreRecords = result.MoreRecords, PagingCookie = result.PagingCookie
+                };
+            }
+            return result;
         }
 
         executor.Setup(x => x.ExecuteFetchXmlAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
@@ -87,16 +108,58 @@ internal sealed class DmlTestHarness
         }
 
         bulk.Setup(b => b.DeleteMultipleAsync(It.IsAny<string>(), It.IsAny<IEnumerable<Guid>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()))
-            .Returns((string entity, IEnumerable<Guid> ids, BulkOperationOptions? _, PPDS.Dataverse.Client.DataverseClientOptions? _, IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>? progress, CancellationToken _) =>
-                Task.FromResult(Record("Delete", entity, ids.Count(), progress)));
+            .Returns((string entity, IEnumerable<Guid> ids, BulkOperationOptions? options, PPDS.Dataverse.Client.DataverseClientOptions? _, IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>? progress, CancellationToken _) =>
+            {
+                harness.DeletedIds.AddRange(ids);
+                harness.LastOptions = options;
+                return Task.FromResult(Record("Delete", entity, ids.Count(), progress));
+            });
         bulk.Setup(b => b.UpdateMultipleAsync(It.IsAny<string>(), It.IsAny<IEnumerable<Microsoft.Xrm.Sdk.Entity>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()))
-            .Returns((string entity, IEnumerable<Microsoft.Xrm.Sdk.Entity> e, BulkOperationOptions? _, PPDS.Dataverse.Client.DataverseClientOptions? _, IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>? progress, CancellationToken _) =>
-                Task.FromResult(Record("Update", entity, e.Count(), progress)));
+            .Returns((string entity, IEnumerable<Microsoft.Xrm.Sdk.Entity> e, BulkOperationOptions? options, PPDS.Dataverse.Client.DataverseClientOptions? _, IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>? progress, CancellationToken _) =>
+            {
+                harness.WrittenEntities.AddRange(e);
+                harness.LastOptions = options;
+                return Task.FromResult(Record("Update", entity, e.Count(), progress));
+            });
         bulk.Setup(b => b.CreateMultipleAsync(It.IsAny<string>(), It.IsAny<IEnumerable<Microsoft.Xrm.Sdk.Entity>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()))
-            .Returns((string entity, IEnumerable<Microsoft.Xrm.Sdk.Entity> e, BulkOperationOptions? _, PPDS.Dataverse.Client.DataverseClientOptions? _, IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>? progress, CancellationToken _) =>
-                Task.FromResult(Record("Create", entity, e.Count(), progress)));
+            .Returns((string entity, IEnumerable<Microsoft.Xrm.Sdk.Entity> e, BulkOperationOptions? options, PPDS.Dataverse.Client.DataverseClientOptions? _, IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>? progress, CancellationToken _) =>
+            {
+                harness.WrittenEntities.AddRange(e);
+                harness.LastOptions = options;
+                return Task.FromResult(Record("Create", entity, e.Count(), progress));
+            });
         return harness;
     }
 
     public void AssertNothingChanged() => Xunit.Assert.Empty(Writes);
+
+    /// <summary>Every entity passed to a bulk create or update, in call order.</summary>
+    public List<Microsoft.Xrm.Sdk.Entity> WrittenEntities { get; } = new();
+
+    /// <summary>
+    /// Like Dataverse, returns only the attributes the FetchXML asks for (all of them for &lt;all-attributes/&gt;), so a
+    /// test fails when the engine does not request a column it later reads.
+    /// </summary>
+    public static QueryResult OnlyRequestedAttributes(QueryResult result, string fetchXml)
+    {
+        if (fetchXml.Contains("<all-attributes", StringComparison.OrdinalIgnoreCase))
+            return result;
+
+        var requested = System.Text.RegularExpressions.Regex.Matches(fetchXml, "<attribute name=\"([^\"]+)\"")
+            .Select(m => m.Groups[1].Value)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return new QueryResult
+        {
+            PageNumber = result.PageNumber,
+            EntityLogicalName = result.EntityLogicalName,
+            Columns = result.Columns.Where(c => requested.Contains(c.LogicalName)).ToArray(),
+            Records = result.Records
+                .Select(r => (IReadOnlyDictionary<string, QueryValue>)r.Where(kv => requested.Contains(kv.Key))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value))
+                .ToArray(),
+            Count = result.Count,
+            MoreRecords = result.MoreRecords,
+            PagingCookie = result.PagingCookie
+        };
+    }
 }

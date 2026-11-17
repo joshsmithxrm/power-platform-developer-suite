@@ -60,17 +60,34 @@ public sealed partial class ExecutionPlanBuilder
     {
         var opts = options ?? new QueryPlanOptions();
 
+        // Only one batch runs per request; a later batch (after GO) would otherwise be dropped without a word.
+        if (fragment is TSqlScript script && script.Batches.Count(b => b.Statements.Count > 0) > 1)
+            throw new QueryParseException(MultipleBatchesMessage);
+
         // Extract the first statement from the script
         var statement = ExtractFirstStatement(fragment);
 
         return PlanStatement(statement, opts);
     }
 
+    /// <summary>The refusal for SQL with more than one batch (separated by GO).</summary>
+    public const string MultipleBatchesMessage =
+        "The SQL contains more than one batch (separated by GO), and only one batch runs per request, so nothing was " +
+        "executed. Remove GO, or run each batch separately.";
+
     /// <summary>
     /// Plans a single TSqlStatement. Entry point for recursive planning (used by script execution).
     /// </summary>
     public QueryPlanResult PlanStatement(TSqlStatement statement, QueryPlanOptions options)
     {
+        // DML runs only when every part is on the allowlist of shapes the engine honours; MERGE and impersonation never
+        // run. Checked here so every caller (explain, scripts, the ADO.NET provider) is covered, not only the guard.
+        if (statement is InsertStatement or UpdateStatement or DeleteStatement or MergeStatement
+            or ExecuteAsStatement or RevertStatement)
+        {
+            DmlStatementSupport.ThrowIfUnsupported(statement);
+        }
+
         return statement switch
         {
             SelectStatement selectStmt => PlanSelectStatement(selectStmt, options),

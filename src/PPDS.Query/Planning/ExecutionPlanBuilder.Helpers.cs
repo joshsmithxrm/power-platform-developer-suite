@@ -1147,45 +1147,7 @@ public sealed partial class ExecutionPlanBuilder
     /// Used for UPDATE SET clause dependency detection without converting to legacy AST.
     /// </summary>
     private static List<string> ExtractColumnNamesFromScriptDom(ScalarExpression expr)
-    {
-        var columns = new List<string>();
-        ExtractColumnNamesFromScriptDomRecursive(expr, columns);
-        return columns;
-    }
-
-    private static void ExtractColumnNamesFromScriptDomRecursive(ScalarExpression expr, List<string> columns)
-    {
-        switch (expr)
-        {
-            case ColumnReferenceExpression col:
-                columns.Add(GetScriptDomColumnName(col));
-                break;
-            case BinaryExpression bin:
-                ExtractColumnNamesFromScriptDomRecursive(bin.FirstExpression, columns);
-                ExtractColumnNamesFromScriptDomRecursive(bin.SecondExpression, columns);
-                break;
-            case UnaryExpression unary:
-                ExtractColumnNamesFromScriptDomRecursive(unary.Expression, columns);
-                break;
-            case ParenthesisExpression paren:
-                ExtractColumnNamesFromScriptDomRecursive(paren.Expression, columns);
-                break;
-            case FunctionCall func:
-                if (func.Parameters != null)
-                    foreach (var p in func.Parameters)
-                        ExtractColumnNamesFromScriptDomRecursive(p, columns);
-                break;
-            case CastCall cast:
-                ExtractColumnNamesFromScriptDomRecursive(cast.Parameter, columns);
-                break;
-            case SearchedCaseExpression caseExpr:
-                foreach (var w in caseExpr.WhenClauses)
-                    ExtractColumnNamesFromScriptDomRecursive(w.ThenExpression, columns);
-                if (caseExpr.ElseExpression != null)
-                    ExtractColumnNamesFromScriptDomRecursive(caseExpr.ElseExpression, columns);
-                break;
-        }
-    }
+        => ScalarColumnCollector.Collect(expr).Select(GetScriptDomColumnName).ToList();
 
     // ═══════════════════════════════════════════════════════════════════
     //  Aggregate partitioning helpers (ported from legacy planner

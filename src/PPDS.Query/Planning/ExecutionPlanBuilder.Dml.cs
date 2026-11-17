@@ -9,6 +9,7 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning.Partitioning;
 using PPDS.Dataverse.Sql.Transpilation;
 using PPDS.Query.Execution;
@@ -28,7 +29,6 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private QueryPlanResult PlanInsert(InsertStatement insert, QueryPlanOptions options)
     {
-        DmlStatementSupport.ThrowIfUnsupported(insert);
         var targetEntity = GetInsertTargetEntity(insert);
         var columns = GetInsertColumns(insert);
 
@@ -42,6 +42,7 @@ public sealed partial class ExecutionPlanBuilder
             var generator = s_scriptGenerator;
             generator.GenerateScript(selectSource, out var selectSql);
             var sourceResult = ParseAndPlanSyntheticSelect(selectSql, options);
+            EnsureDataverseEvaluatesTheSource(sourceResult.RootNode, "INSERT ... SELECT", allowProjection: true);
 
             var sourceColumns = ExtractSelectColumnNamesFromQuerySpec(selectSource);
             rootNode = DmlExecuteNode.InsertSelect(
@@ -95,12 +96,13 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private QueryPlanResult PlanUpdate(UpdateStatement update, QueryPlanOptions options)
     {
-        DmlStatementSupport.ThrowIfUnsupported(update);
         // Extract entity name directly from ScriptDom
         if (update.UpdateSpecification.Target is not NamedTableReference targetNamed)
             throw new QueryParseException("UPDATE target must be a named table.");
-        var entityName = GetMultiPartName(targetNamed.SchemaObject);
-        var baseName = targetNamed.SchemaObject.BaseIdentifier?.Value ?? entityName;
+        // The target may be the alias of the FROM table (UPDATE a ... FROM account a): write to that table.
+        var resolved = DmlStatementSupport.ResolveTarget(targetNamed, update.UpdateSpecification.FromClause);
+        var entityName = GetMultiPartName(resolved.SchemaObject);
+        var baseName = resolved.SchemaObject.BaseIdentifier?.Value ?? entityName;
 
         // Compile SET clauses directly from ScriptDom AST to delegates
         var compiledClauses = new List<CompiledSetClause>();
@@ -161,6 +163,7 @@ public sealed partial class ExecutionPlanBuilder
 
         // Parse and plan through normal ScriptDom path
         var selectResult = ParseAndPlanSyntheticSelect(sb.ToString(), options);
+        EnsureDataverseEvaluatesTheSource(selectResult.RootNode, "UPDATE", allowProjection: false);
 
         var rootNode = DmlExecuteNode.Update(
             entityName,
@@ -188,12 +191,13 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private QueryPlanResult PlanDelete(DeleteStatement delete, QueryPlanOptions options)
     {
-        DmlStatementSupport.ThrowIfUnsupported(delete);
         // Extract entity name directly from ScriptDom
         if (delete.DeleteSpecification.Target is not NamedTableReference targetNamed)
             throw new QueryParseException("DELETE target must be a named table.");
-        var entityName = GetMultiPartName(targetNamed.SchemaObject);
-        var baseName = targetNamed.SchemaObject.BaseIdentifier?.Value ?? entityName;
+        // The target may be the alias of the FROM table (DELETE a FROM account a): delete from that table.
+        var resolved = DmlStatementSupport.ResolveTarget(targetNamed, delete.DeleteSpecification.FromClause);
+        var entityName = GetMultiPartName(resolved.SchemaObject);
+        var baseName = resolved.SchemaObject.BaseIdentifier?.Value ?? entityName;
 
         // Build a synthetic SELECT SQL string: SELECT [entityid] FROM target [JOINs] [WHERE ...]
         // Use baseName for columns (simple identifiers), ScriptDom for FROM (preserves multi-part names).
@@ -224,6 +228,7 @@ public sealed partial class ExecutionPlanBuilder
 
         // Parse and plan through normal ScriptDom path
         var selectResult = ParseAndPlanSyntheticSelect(sb.ToString(), options);
+        EnsureDataverseEvaluatesTheSource(selectResult.RootNode, "DELETE", allowProjection: false);
 
         var rootNode = DmlExecuteNode.Delete(
             entityName,
@@ -237,6 +242,27 @@ public sealed partial class ExecutionPlanBuilder
             VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
             EntityLogicalName = entityName
         };
+    }
+
+    /// <summary>
+    /// The rows a DML statement changes must be selected entirely by Dataverse (one FetchXML scan of the target, with the
+    /// WHERE as FetchXML conditions). Any client-side node (filter, join, semi-join, remote scan) would evaluate the WHERE
+    /// against rows that lack its columns, or read another environment, so the statement is refused instead.
+    /// </summary>
+    private static void EnsureDataverseEvaluatesTheSource(IQueryPlanNode node, string verb, bool allowProjection)
+    {
+        var current = node;
+        if (allowProjection && current is ProjectNode project)
+            current = project.Children[0];
+        if (current is PrefetchScanNode prefetch)
+            current = prefetch.Children[0];
+        if (current is not FetchXmlScanNode)
+        {
+            throw new DmlSafetyRefusalException(
+                QueryErrorCode.DmlBlocked,
+                $"The rows of this {verb} cannot be selected by Dataverse alone (the plan needs {node.Description}), so " +
+                "nothing was executed. Use only conditions on the table's own columns.");
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════

@@ -407,6 +407,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         CancellationToken cancellationToken)
     {
         var entities = new List<Microsoft.Xrm.Sdk.Entity>();
+        var seen = new HashSet<Guid>();
         var idColumn = EntityLogicalName + "id";
         var attributeMap = await LoadAttributeMapAsync(context, cancellationToken).ConfigureAwait(false);
 
@@ -418,12 +419,17 @@ public sealed class DmlExecuteNode : IQueryPlanNode
                 continue;
             }
 
+            var recordId = idValue.Value is Guid guid ? guid : Guid.Parse(idValue.Value.ToString()!);
+            if (seen.Contains(recordId))
+                continue; // the same target row again: it is changed once and counted once
+
             if (entities.Count >= RowCap)
             {
                 throw RowCapExceeded();
             }
 
-            var recordId = idValue.Value is Guid guid ? guid : Guid.Parse(idValue.Value.ToString()!);
+            seen.Add(recordId);
+
             var entity = new Microsoft.Xrm.Sdk.Entity(EntityLogicalName, recordId);
 
             // Evaluate compiled SET clauses against the source row values
@@ -452,6 +458,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         CancellationToken cancellationToken)
     {
         var ids = new List<Guid>();
+        var seen = new HashSet<Guid>();
         var idColumn = EntityLogicalName + "id";
 
         await foreach (var row in SourceNode!.ExecuteAsync(context, cancellationToken))
@@ -462,12 +469,16 @@ public sealed class DmlExecuteNode : IQueryPlanNode
                 continue;
             }
 
+            var recordId = idValue.Value is Guid guid ? guid : Guid.Parse(idValue.Value.ToString()!);
+            if (seen.Contains(recordId))
+                continue; // the same target row again: it is deleted once and counted once
+
             if (ids.Count >= RowCap)
             {
                 throw RowCapExceeded();
             }
 
-            var recordId = idValue.Value is Guid guid ? guid : Guid.Parse(idValue.Value.ToString()!);
+            seen.Add(recordId);
             ids.Add(recordId);
         }
 

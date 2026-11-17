@@ -991,58 +991,10 @@ public sealed class FetchXmlGenerator
     /// </summary>
     private static void CollectColumnsFromScalar(ScalarExpression expression, List<string> columnNames)
     {
-        switch (expression)
-        {
-            case ColumnReferenceExpression colRef when colRef.ColumnType != ColumnType.Wildcard:
-                columnNames.Add(GetColumnName(colRef));
-                break;
-
-            case FunctionCall funcCall:
-                foreach (var param in funcCall.Parameters)
-                {
-                    CollectColumnsFromScalar(param, columnNames);
-                }
-                break;
-
-            case BinaryExpression binExpr:
-                CollectColumnsFromScalar(binExpr.FirstExpression, columnNames);
-                CollectColumnsFromScalar(binExpr.SecondExpression, columnNames);
-                break;
-
-            case UnaryExpression unaryExpr:
-                CollectColumnsFromScalar(unaryExpr.Expression, columnNames);
-                break;
-
-            case SearchedCaseExpression caseExpr:
-                foreach (var whenClause in caseExpr.WhenClauses)
-                {
-                    CollectExpressionConditionColumns(whenClause.WhenExpression, columnNames);
-                    CollectColumnsFromScalar(whenClause.ThenExpression, columnNames);
-                }
-                if (caseExpr.ElseExpression is not null)
-                {
-                    CollectColumnsFromScalar(caseExpr.ElseExpression, columnNames);
-                }
-                break;
-
-            case IIfCall iifCall:
-                CollectExpressionConditionColumns(iifCall.Predicate, columnNames);
-                CollectColumnsFromScalar(iifCall.ThenExpression, columnNames);
-                CollectColumnsFromScalar(iifCall.ElseExpression, columnNames);
-                break;
-
-            case CastCall castCall:
-                CollectColumnsFromScalar(castCall.Parameter, columnNames);
-                break;
-
-            case ConvertCall convertCall:
-                CollectColumnsFromScalar(convertCall.Parameter, columnNames);
-                break;
-
-            case ParenthesisExpression parenExpr:
-                CollectColumnsFromScalar(parenExpr.Expression, columnNames);
-                break;
-        }
+        // Every column at any depth (COALESCE, NULLIF, simple CASE, TRY_CAST, ...): a column that is not fetched
+        // evaluates as NULL.
+        foreach (var column in PPDS.Query.Planning.ScalarColumnCollector.Collect(expression))
+            columnNames.Add(GetColumnName(column));
     }
 
     /// <summary>
