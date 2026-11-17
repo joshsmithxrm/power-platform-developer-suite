@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path, PureWindowsPath
 import re
 import stat
@@ -618,6 +619,18 @@ def source_copy(rt, plan, source, output):
     return copied, inputs
 
 
+def canonical_tool_path(reported):
+    # The SDK reports RoslynTargetsPath as "<sdk>/Sdks/Microsoft.NET.Sdk/targets/../../../Roslyn".
+    # Collapse the parent segments lexically, then require that the result is the same file the
+    # reported path names once links are resolved, so a link among the collapsed segments cannot
+    # redirect the recorded compiler. The collapsed path still goes through the link/reparse and
+    # traversal checks when it is read.
+    collapsed = Path(os.path.normpath(str(reported)))
+    require(os.path.realpath(str(collapsed)) == os.path.realpath(str(reported)),
+            "Reported compiler path does not resolve to its canonical form")
+    return collapsed
+
+
 def build_evidence(rt, plan, output, source, project, work, props, probe, control):
     fields = ("NETCoreSdkVersion", "MSBuildVersion", "MSBuildBinPath", "RoslynTargetsPath",
               "CscToolPath", "CscToolExe", "TargetFramework", "SignAssembly", "PublicSign",
@@ -638,8 +651,9 @@ def build_evidence(rt, plan, output, source, project, work, props, probe, contro
     compiler = (Path(observed["CscToolPath"]) if observed["CscToolPath"] else
                 Path(observed["RoslynTargetsPath"]) / "bincore") / (observed["CscToolExe"] or "csc.dll")
     binaries = {}
-    for name, path in {"msbuild": Path(observed["MSBuildBinPath"]) / "MSBuild.dll", "roslyn": compiler}.items():
-        require(path.is_absolute(), "Actual compiler path required")
+    for name, reported in {"msbuild": Path(observed["MSBuildBinPath"]) / "MSBuild.dll", "roslyn": compiler}.items():
+        require(reported.is_absolute(), "Actual compiler path required")
+        path = canonical_tool_path(reported)
         version = invoke(rt, plan, "pwsh", ["-NoProfile", "-File", probe, "-Tool", path],
                          output, "compiler-product-version").rstrip("\r\n")
         require(version, "Actual compiler product version missing")

@@ -884,6 +884,40 @@ def test_build_evidence_checks_actual_properties_and_package_hashes(monkeypatch,
         call()
 
 
+def test_canonical_tool_path_collapses_the_parent_segments_the_sdk_reports(tmp_path):
+    # MSBuild reports RoslynTargetsPath as <sdk>/Sdks/Microsoft.NET.Sdk/targets/../../../Roslyn.
+    targets = tmp_path / "sdk/Sdks/Microsoft.NET.Sdk/targets"
+    targets.mkdir(parents=True)
+    compiler = tmp_path / "sdk/Roslyn/bincore/csc.dll"
+    compiler.parent.mkdir(parents=True)
+    compiler.write_bytes(b"synthetic compiler")
+    reported = targets / ".." / ".." / ".." / "Roslyn" / "bincore" / "csc.dll"
+    assert ".." in reported.parts
+    collapsed = d.canonical_tool_path(reported)
+    assert collapsed == compiler and ".." not in collapsed.parts
+    # A path with no parent segments is returned unchanged.
+    assert d.canonical_tool_path(compiler) == compiler
+
+
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="Windows resolves parent segments lexically before following links, so the collapsed form is exact there")
+def test_canonical_tool_path_refuses_a_link_among_the_collapsed_segments(tmp_path):
+    # Where the OS follows a link before applying "..", the lexical result can name a different
+    # file than the one the reported path reaches. That must be refused, not silently recorded.
+    real = tmp_path / "elsewhere/Sdks/inner"
+    real.mkdir(parents=True)
+    (tmp_path / "elsewhere/Roslyn").mkdir()
+    (tmp_path / "elsewhere/Roslyn/csc.dll").write_bytes(b"reached through the link")
+    (tmp_path / "sdk").mkdir()
+    link = tmp_path / "sdk/targets"
+    try:
+        os.symlink(real, link, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Directory links are not available to this account")
+    with pytest.raises(d.Error, match="canonical form"):
+        d.canonical_tool_path(link / ".." / ".." / "Roslyn" / "csc.dll")
+
+
 class GitDouble(d.Runtime):
     """Answers the source-inspection git calls from a table; launches nothing."""
     def __init__(self, answers):
