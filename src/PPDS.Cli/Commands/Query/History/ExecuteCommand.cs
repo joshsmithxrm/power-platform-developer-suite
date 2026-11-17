@@ -171,6 +171,8 @@ public static class ExecuteCommand
 
             var queryResult = await sqlQueryService.ExecuteAsync(request, cancellationToken);
 
+            SqlCommand.WriteTopIgnoredNote(queryResult, top);
+
             if (queryResult.DmlSafetyResult?.IsDryRun == true)
             {
                 SqlCommand.WriteDryRunOutput(queryResult, globalOptions.OutputFormat, writer);

@@ -285,7 +285,11 @@ public sealed class SqlQueryService : ISqlQueryService
 
         // Don't override explicit TOP with hints.MaxResultRows (same guard as PrepareExecutionAsync)
         var sqlHasExplicitTop = ExtractQuerySpecification(fragment)?.TopRowFilter != null;
-        var effectiveMaxRows = sqlHasExplicitTop ? null : hints.MaxResultRows;
+        var containsDml = _dmlSafetyGuard.Check(
+            ExtractPlannedStatement(fragment), new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true },
+            EnvironmentSafetySettings, EnvironmentProtectionLevel).ContainsDml;
+        // Row limits never apply to DML (see PrepareExecutionAsync), so the plan must not show one.
+        var effectiveMaxRows = sqlHasExplicitTop || containsDml ? null : hints.MaxResultRows;
 
         var planOptions = new QueryPlanOptions
         {
@@ -580,8 +584,10 @@ public sealed class SqlQueryService : ISqlQueryService
         // Only apply TopOverride as MaxRows if the SQL itself does not contain a TOP clause.
         // The extension sends a default top (100) on every query — we must not clobber the
         // user's explicit TOP 5 with the default 100.
+        // TopOverride (and the MAX_ROWS hint) limits result sets only. It must never change which rows a
+        // DML statement affects, so it is ignored when the request contains DML.
         var sqlHasExplicitTop = ExtractQuerySpecification(fragment)?.TopRowFilter != null;
-        var effectiveMaxRows = sqlHasExplicitTop ? null : request.TopOverride;
+        var effectiveMaxRows = sqlHasExplicitTop || safetyResult.ContainsDml ? null : request.TopOverride;
 
         // Build execution plan
         var planOptions = new QueryPlanOptions

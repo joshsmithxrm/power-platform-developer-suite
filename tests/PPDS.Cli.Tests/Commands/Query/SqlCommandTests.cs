@@ -418,6 +418,7 @@ public class SqlCommandTests
         Result = QueryResult.Empty("dry-run"),
         DmlSafetyResult = new DmlSafetyResult
         {
+            ContainsDml = true,
             IsDryRun = true,
             RequiresConfirmation = true,
             RowCap = DmlSafetyGuard.DefaultRowCap
@@ -572,6 +573,51 @@ public class SqlCommandTests
         Assert.Contains("#1 UPDATE account: 0 affected, 3 failed", message);
         Assert.Contains("plugin X threw", message);
         Assert.DoesNotContain("#2", message);
+    }
+
+    #endregion
+
+    #region --top and DML
+
+    private static string StderrOf(Action action)
+    {
+        using var stderr = new StringWriter();
+        var original = Console.Error;
+        try { Console.SetError(stderr); action(); }
+        finally { Console.SetError(original); }
+        return stderr.ToString();
+    }
+
+    [Fact]
+    public void WriteTopIgnoredNote_DmlWithTop_SaysTopIsIgnored()
+    {
+        var result = DmlQueryResult(Stmt(DmlOperation.Delete, "account", 3, 0));
+
+        var stderr = StderrOf(() => SqlCommand.WriteTopIgnoredNote(result, 5));
+
+        Assert.Contains("--top is ignored for DML", stderr);
+    }
+
+    [Fact]
+    public void WriteTopIgnoredNote_DryRunDmlWithTop_SaysTopIsIgnored()
+    {
+        var stderr = StderrOf(() => SqlCommand.WriteTopIgnoredNote(CreateDryRunResult(), 5)) ;
+
+        Assert.Contains("--top is ignored for DML", stderr);
+    }
+
+    [Fact]
+    public void WriteTopIgnoredNote_SelectWithTop_StaysSilent()
+    {
+        var select = new SqlQueryResult { OriginalSql = "SELECT", TranspiledFetchXml = null, Result = QueryResult.Empty("account") };
+
+        Assert.Equal(string.Empty, StderrOf(() => SqlCommand.WriteTopIgnoredNote(select, 5)));
+    }
+
+    [Fact]
+    public void WriteTopIgnoredNote_DmlWithoutTop_StaysSilent()
+    {
+        Assert.Equal(string.Empty, StderrOf(() => SqlCommand.WriteTopIgnoredNote(DmlQueryResult(Stmt(DmlOperation.Delete, "account", 3, 0)), null)));
     }
 
     #endregion
