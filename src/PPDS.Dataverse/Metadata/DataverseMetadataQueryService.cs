@@ -424,10 +424,17 @@ public class DataverseMetadataQueryService : IMetadataQueryService
     }
 
     /// <summary>
-    /// The anchored phrases of Dataverse's "option set not found" fault. The recorded server text is
-    /// "Could not find an optionset with name statuscode" (docs/qa/shakedown-v1-2026-04-20.md). This mirrors the
-    /// authoring service's recognition (that copy lives in PPDS.Cli, which this assembly cannot reference); keep
-    /// the two in step.
+    /// Dataverse's language-independent "object not found" fault code (ObjectDoesNotExist, 0x80040217), which a
+    /// lookup by name returns for a name it does not know. Keep in step with the authoring service's copy.
+    /// </summary>
+    private const int ObjectDoesNotExistErrorCode = unchecked((int)0x80040217);
+
+    /// <summary>
+    /// The anchored phrases of Dataverse's "option set not found" fault, kept as a fallback for a fault that
+    /// carries a different code (Microsoft does not document which code this message uses). The recorded server
+    /// text is "Could not find an optionset with name statuscode" (docs/qa/shakedown-v1-2026-04-20.md). This
+    /// mirrors the authoring service's recognition (that copy lives in PPDS.Cli, which this assembly cannot
+    /// reference); keep the two in step.
     /// </summary>
     private static readonly string[] OptionSetNotFoundPhrases =
         ["Could not find an optionset with name", "Could not find an option set with"];
@@ -439,9 +446,11 @@ public class DataverseMetadataQueryService : IMetadataQueryService
     private const string OptionSetNotFoundUnnamedPhrase = "Could not find an option set with specified name";
 
     /// <summary>
-    /// True only for the "option set not found" fault about <paramref name="requestedName"/>: either the fault
-    /// text is the unnamed wording, or it contains an anchored phrase (ordinal, case-insensitive) AND the
-    /// requested name.
+    /// True for a "not found" fault that may be about <paramref name="requestedName"/>. The typed fault code
+    /// decides, independent of the organisation's language: any ObjectDoesNotExist fault qualifies. A fault with
+    /// another code qualifies only through the English fallback: the unnamed wording, or an anchored phrase
+    /// (ordinal, case-insensitive) AND the requested name. Qualifying only lists the catalog; a retry still needs
+    /// a single stored case variant.
     /// </summary>
     private static bool IsOptionSetNotFoundFault(Exception exception, string requestedName)
     {
@@ -449,7 +458,8 @@ public class DataverseMetadataQueryService : IMetadataQueryService
         for (var depth = 0; depth < 8 && current is not null; depth++, current = current.InnerException)
         {
             if (current is System.ServiceModel.FaultException<OrganizationServiceFault> { Detail: not null } fault)
-                return IsOptionSetNotFoundText(fault.Detail.Message, requestedName) || IsOptionSetNotFoundText(fault.Message, requestedName);
+                return fault.Detail.ErrorCode == ObjectDoesNotExistErrorCode
+                    || IsOptionSetNotFoundText(fault.Detail.Message, requestedName) || IsOptionSetNotFoundText(fault.Message, requestedName);
         }
 
         return false;

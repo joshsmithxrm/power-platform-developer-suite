@@ -26,6 +26,18 @@ internal sealed record MetadataDryRunScope(string ValidationScope, bool Publishe
     public bool ChangesPersisted => false;
     public bool TargetOptionsRead => ValidationScope is "option-existence" or "option-data-and-draft-value";
 
+    /// <summary>
+    /// Present (false) only on input-only dry-runs that take a global choice name: the name was not looked up,
+    /// so a mis-cased or unknown name is resolved or rejected only when changes are applied (#1535). Omitted
+    /// (null) everywhere else.
+    /// </summary>
+    public bool? GlobalChoiceNameChecked { get; init; }
+
+    internal string? GlobalChoiceName { get; init; }
+
+    internal MetadataDryRunScope WithUncheckedGlobalChoiceName(string name)
+        => this with { GlobalChoiceNameChecked = false, GlobalChoiceName = name };
+
     internal void WriteSuccess<T>(IOutputWriter writer, bool dryRun, T data)
     {
         if (dryRun && writer is JsonOutputWriter json)
@@ -34,7 +46,13 @@ internal sealed record MetadataDryRunScope(string ValidationScope, bool Publishe
             writer.WriteSuccess(data);
     }
 
-    internal void WriteDiagnostic() => Console.Error.WriteLine(
-        $"[Dry-Run] Checks: {ValidationScope}. Target existence {(TargetExistenceChecked ? "checked" : "not checked")}. " +
-        $"Dependencies and server feasibility not checked. Option value allocation: {OptionValueAllocation}. No changes persisted.");
+    internal void WriteDiagnostic()
+    {
+        Console.Error.WriteLine(
+            $"[Dry-Run] Checks: {ValidationScope}. Target existence {(TargetExistenceChecked ? "checked" : "not checked")}. " +
+            $"Dependencies and server feasibility not checked. Option value allocation: {OptionValueAllocation}. No changes persisted.");
+        if (GlobalChoiceName != null)
+            Console.Error.WriteLine(
+                $"[Dry-Run] Global choice name '{GlobalChoiceName}' was not looked up; its spelling and existence are checked only when changes are applied.");
+    }
 }

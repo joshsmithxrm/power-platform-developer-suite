@@ -180,11 +180,56 @@ public sealed class GlobalChoiceNameResolutionTests
     [Trait("AC", "AC-134")]
     public async Task NearMissNotFoundFault_PropagatesWithoutListingOrRetry(string message)
     {
-        using var f = new GlobalChoiceServerFake { FailFirstNamedRequestWith = () => GlobalChoiceServerFake.Fault(message) };
+        // The text fallback only applies to faults that do not carry the ObjectDoesNotExist code.
+        using var f = new GlobalChoiceServerFake { FailFirstNamedRequestWith = () => GlobalChoiceServerFake.Fault(message, 0x80040203) };
         var ex = await Assert.ThrowsAsync<FaultException<OrganizationServiceFault>>(() => f.Run("option-add", Typed));
         Assert.Same(f.InjectedFault, ex);
         Assert.DoesNotContain(f.Requests, r => r is RetrieveAllOptionSetsRequest);
         Assert.Single(f.Requests, r => GlobalChoiceServerFake.NameOf(r) != null);
+    }
+
+    [Theory]
+    [MemberData(nameof(ResolvingOperations))]
+    [Trait("AC", "AC-133")]
+    public async Task NonEnglishNotFoundFault_ResolvesByFaultCode(string operation)
+    {
+        // #1535 on a non-English organisation: the fault text matches none of the English phrases, but the
+        // ObjectDoesNotExist code identifies it.
+        using var f = new GlobalChoiceServerFake { NotFoundTemplate = "Impossible de trouver un groupe d'options nommé {0}" };
+        await f.Run(operation, Typed);
+        Assert.Single(f.Requests, r => r is RetrieveAllOptionSetsRequest);
+        Assert.Equal(Typed, Assert.Single(f.Faults));
+        var afterListing = f.Requests.SkipWhile(r => r is not RetrieveAllOptionSetsRequest).Skip(1).ToList();
+        Assert.All(afterListing.Select(GlobalChoiceServerFake.NameOf).Where(n => n != null), name => Assert.Equal(Stored, name));
+        f.AssertLeases();
+    }
+
+    [Fact]
+    [Trait("AC", "AC-134")]
+    public async Task NonEnglishFaultWithAnotherCode_PropagatesWithoutListingOrRetry()
+    {
+        using var f = new GlobalChoiceServerFake { FailFirstNamedRequestWith = () => GlobalChoiceServerFake.Fault("Le privilège prvWriteOptionSet est manquant.", 0x80040220) };
+        var ex = await Assert.ThrowsAsync<FaultException<OrganizationServiceFault>>(() => f.Run("option-add", Typed));
+        Assert.Same(f.InjectedFault, ex);
+        Assert.DoesNotContain(f.Requests, r => r is RetrieveAllOptionSetsRequest);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-134")]
+    public async Task ObjectDoesNotExistAboutAnotherObject_RetriesOnceAndSurfacesTheRetryFailure()
+    {
+        // The code cannot say WHICH object was missing (here: the solution). The catalog lookup still requires a
+        // single stored case variant, the not-found write wrote nothing, and the one retry's own failure surfaces.
+        using var f = new GlobalChoiceServerFake
+        {
+            FailFirstNamedRequestWith = () => GlobalChoiceServerFake.Fault("Could not find solution with name Sol"),
+            FailStoredNameWith = () => GlobalChoiceServerFake.Fault("Could not find solution with name Sol")
+        };
+        var ex = await Assert.ThrowsAsync<FaultException<OrganizationServiceFault>>(() => f.Run("option-add", Typed));
+        Assert.Same(f.InjectedFault, ex);
+        Assert.Single(f.Requests, r => r is RetrieveAllOptionSetsRequest);
+        Assert.Equal(new[] { Typed, Stored }, f.Requests.OfType<InsertOptionValueRequest>().Select(r => r.OptionSetName));
+        f.AssertLeases();
     }
 
     [Theory]
@@ -194,7 +239,8 @@ public sealed class GlobalChoiceNameResolutionTests
     [Trait("AC", "AC-133")]
     public async Task RecognisedNotFoundWordings_TriggerResolution(string template)
     {
-        using var f = new GlobalChoiceServerFake { NotFoundTemplate = template };
+        // English fallback: the wording alone is recognised when the fault carries another code.
+        using var f = new GlobalChoiceServerFake { NotFoundTemplate = template, NotFoundCode = 0x80040203 };
         await f.Run("option-add", Typed);
         Assert.Single(f.Requests, r => r is RetrieveAllOptionSetsRequest);
         Assert.Equal(new[] { Typed, Stored }, f.Requests.OfType<InsertOptionValueRequest>().Select(r => r.OptionSetName));
@@ -608,8 +654,11 @@ internal sealed class GlobalChoiceServerFake : IDisposable
     internal Label? DraftDescription { get; init; }
     internal Label? PublishedDescription { get; init; }
 
+    /// <summary>Not-found fault code; the default is ObjectDoesNotExist.</summary>
+    internal uint NotFoundCode { get; init; } = 0x80040217;
+
     internal FaultException<OrganizationServiceFault> NotFoundFault(string name) =>
-        (FaultException<OrganizationServiceFault>)Fault(string.Format(System.Globalization.CultureInfo.InvariantCulture, NotFoundTemplate, name), 0x80040217);
+        (FaultException<OrganizationServiceFault>)Fault(string.Format(System.Globalization.CultureInfo.InvariantCulture, NotFoundTemplate, name), NotFoundCode);
 
     internal static Exception Fault(string message, uint code = 0x80040217) => new FaultException<OrganizationServiceFault>(
         new OrganizationServiceFault { ErrorCode = unchecked((int)code), Message = message }, message);

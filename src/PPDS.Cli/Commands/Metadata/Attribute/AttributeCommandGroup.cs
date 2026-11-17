@@ -488,6 +488,8 @@ public static class AttributeCommandGroup
                 && request.Options is { Length: > 0 }
                 && request.Options.Any(option => !option.HasExplicitValue)
                     ? MetadataDryRunScope.PublisherProvisional : MetadataDryRunScope.Publisher;
+            if ((request.ColumnType is SchemaColumnType.Choice or SchemaColumnType.Choices) && !string.IsNullOrEmpty(request.OptionSetName))
+                previewScope = previewScope.WithUncheckedGlobalChoiceName(request.OptionSetName);
 
             if (globalOptions.IsJsonMode)
             {

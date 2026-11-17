@@ -441,10 +441,11 @@ public static class OptionSetCommand
 
             // Global option sets aren't entity-bound; suggest publish --all.
             const string publishHint = "ppds publish --all";
+            var previewScope = MetadataDryRunScope.Inputs.WithUncheckedGlobalChoiceName(name);
 
             if (globalOptions.IsJsonMode)
             {
-                MetadataDryRunScope.Inputs.WriteSuccess(writer, dryRun, new
+                previewScope.WriteSuccess(writer, dryRun, new
                 {
                     name,
                     updated = true,
@@ -455,7 +456,7 @@ public static class OptionSetCommand
             }
             else if (dryRun)
             {
-                MetadataDryRunScope.Inputs.WriteDiagnostic();
+                previewScope.WriteDiagnostic();
             }
             else
             {
@@ -788,8 +789,8 @@ public static class OptionSetCommand
 
             var assignedValue = await authoringService.AddOptionValueAsync(request, ct: cancellationToken);
             // #1530: an omitted value is reported as unallocated (server-assigned), never as a number.
-            var previewScope = dryRun && !value.HasValue
-                ? MetadataDryRunScope.ServerAssignedValue : MetadataDryRunScope.RequestedValue;
+            var previewScope = (dryRun && !value.HasValue
+                ? MetadataDryRunScope.ServerAssignedValue : MetadataDryRunScope.RequestedValue).WithUncheckedGlobalChoiceName(name);
 
             if (globalOptions.IsJsonMode)
             {
