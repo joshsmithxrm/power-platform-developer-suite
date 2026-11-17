@@ -103,6 +103,7 @@ const filterInput = document.getElementById('filter-input') as HTMLInputElement;
 const filterCount = document.getElementById('filter-count') as HTMLElement;
 const transpileWarningBanner = document.getElementById('transpile-warning-banner') as HTMLElement;
 const dataSourceBanner = document.getElementById('data-source-banner') as HTMLElement;
+const dmlFailureBanner = document.getElementById('dml-failure-banner') as HTMLElement;
 const resultsWrapper = document.getElementById('results-wrapper') as HTMLElement;
 const loadMoreBar = document.getElementById('load-more-bar') as HTMLElement;
 const loadMoreBtn = document.getElementById('load-more-btn') as HTMLElement;
@@ -520,6 +521,7 @@ clearBtn.addEventListener('click', () => {
     filterBar.classList.remove('visible');
     transpileWarningBanner.style.display = 'none';
     dataSourceBanner.style.display = 'none';
+    showDmlFailure(undefined);
     statusText.textContent = 'Ready';
     rowCountEl.textContent = '';
     executionTimeEl.textContent = '';
@@ -854,6 +856,7 @@ window.addEventListener('message', (event: MessageEvent<QueryPanelHostToWebview>
         case 'queryResult':
             if (editor) monaco.editor.setModelMarkers(editor.getModel()!, 'ppds', []);
             handleQueryResult(msg.data);
+            showDmlFailure(msg.dmlFailure);
             break;
         case 'appendResults':
             handleAppendResults(msg.data);
@@ -869,6 +872,7 @@ window.addEventListener('message', (event: MessageEvent<QueryPanelHostToWebview>
             resultsWrapper.innerHTML = '<div class="empty-state"><div class="spinner" style="width:24px;height:24px;margin:0 auto 12px;"></div><div>Executing query...</div></div>';
             statusText.innerHTML = '<span class="spinner"></span> Executing...';
             loadMoreBar.style.display = 'none';
+            dmlFailureBanner.style.display = 'none';
             rowCountEl.textContent = '';
             executionTimeEl.textContent = '';
             break;
@@ -904,6 +908,7 @@ window.addEventListener('message', (event: MessageEvent<QueryPanelHostToWebview>
             isExecuting = false;
             cancelBtn.style.display = 'none';
             executeBtn.style.display = '';
+            showDmlFailure(undefined);
             statusText.textContent = 'Query cancelled';
             resultsWrapper.innerHTML = '<div class="empty-state">Query cancelled</div>';
             break;
@@ -1036,8 +1041,21 @@ function setDiagnosticMarkers(diagnostics: Array<{ start: number; length: number
     monaco.editor.setModelMarkers(model, 'ppds', markers);
 }
 
+/** Failed DML rows are an error, not a normal result: show counts and reason above the summary row. */
+function showDmlFailure(message: string | undefined): void {
+    if (!message) {
+        dmlFailureBanner.style.display = 'none';
+        dmlFailureBanner.textContent = '';
+        return;
+    }
+    dmlFailureBanner.textContent = message;
+    dmlFailureBanner.style.display = '';
+    statusText.textContent = 'DML failed';
+}
+
 function showError(error: string): void {
     resetExecuteBtn();
+    showDmlFailure(undefined);
     resultsWrapper.innerHTML = '<div class="error-state">' + escapeHtml(error) + '</div>';
     statusText.textContent = 'Error';
     loadMoreBar.style.display = 'none';

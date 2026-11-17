@@ -37,7 +37,8 @@ export type QueryPanelHostToWebview =
     | { command: 'loadQuery'; sql: string }
     | { command: 'updateEnvironment'; name: string; url: string | null; profileName?: string; envType: string | null; envColor: string | null }
     | { command: 'executionStarted' }
-    | { command: 'queryResult'; data: QueryResultResponse }
+    /** dmlFailure: set when a DML execution reported failed rows (counts and reason, shown as an error). */
+    | { command: 'queryResult'; data: QueryResultResponse; dmlFailure?: string }
     | { command: 'queryCancelled' }
     | { command: 'queryError'; error: string; diagnostics?: Array<{ start: number; length: number; severity: string; message: string }> }
     | { command: 'appendResults'; data: QueryResultResponse }

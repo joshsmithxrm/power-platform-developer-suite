@@ -5,6 +5,9 @@ import type { DaemonClient } from '../daemonClient.js';
 import type { QueryResultResponse } from '../types.js';
 import { isAuthError } from '../utils/errorUtils.js';
 import { showErrorWithReport } from '../utils/errorNotify.js';
+import {
+    UNCONFIRMED_DML_SAFETY, confirmDmlExecution, describeDmlFailure, dmlRefusalMessage, isDmlConfirmationRequired,
+} from '../utils/dmlSafety.js';
 
 import { renderResultsHtml } from './notebookResultRenderer.js';
 
@@ -261,9 +264,13 @@ export class DataverseNotebookController implements vscode.Disposable {
                         if (initialBinding === bindingUrl(state.notebook)) state.acknowledgement = key;
                     }
                     this.updateStatusBarVisibility(vscode.window.activeNotebookEditor);
-                    for (const cell of pending.cells) {
+                    for (const [index, cell] of pending.cells.entries()) {
                         if (!this.ownsRun(state, run) || run.cancelled || state.notebook.isClosed) break;
-                        await this.executeCell(cell, state, run, run.context);
+                        if (await this.executeCell(cell, state, run, run.context) === 'declined') {
+                            // Declining one DML cell stops the rest of this run (Run All included).
+                            if (this.ownsRun(state, run) && !run.cancelled) await this.markNotRun(pending.cells.slice(index + 1), run.context);
+                            break;
+                        }
                     }
                 } catch (error) {
                     const cell = pending.cells[0];
@@ -308,7 +315,7 @@ export class DataverseNotebookController implements vscode.Disposable {
         return new vscode.NotebookCellOutput([vscode.NotebookCellOutputItem.error(error instanceof Error ? error : new Error(String(error)))]);
     }
 
-    private async executeCell(cell: vscode.NotebookCell, state: NotebookState, run: NotebookRun, context: NotebookExecutionContext): Promise<void> {
+    private async executeCell(cell: vscode.NotebookCell, state: NotebookState, run: NotebookRun, context: NotebookExecutionContext): Promise<'completed' | 'declined'> {
         const execution = this.controller.createNotebookCellExecution(cell);
         execution.executionOrder = ++this.executionOrder;
         const startedAt = Date.now();
@@ -323,9 +330,10 @@ export class DataverseNotebookController implements vscode.Disposable {
             entry.cts.cancel();
         });
         const ownsExecution = (): boolean => this.ownsRun(state, run) && this.activeExecutions.get(cellUri) === entry;
-        const writeOutput = async (output: vscode.NotebookCellOutput): Promise<void> => {
-            if (ownsExecution()) await execution.replaceOutput([...this.contextOutputs(context, executedAt), output]);
+        const writeOutputs = async (outputs: vscode.NotebookCellOutput[]): Promise<void> => {
+            if (ownsExecution()) await execution.replaceOutput([...this.contextOutputs(context, executedAt), ...outputs]);
         };
+        const writeOutput = (output: vscode.NotebookCellOutput): Promise<void> => writeOutputs([output]);
         const textOutput = (text: string): vscode.NotebookCellOutput =>
             new vscode.NotebookCellOutput([vscode.NotebookCellOutputItem.text(text, 'text/plain')]);
         let success = false;
@@ -334,29 +342,60 @@ export class DataverseNotebookController implements vscode.Disposable {
             if (!content) {
                 await writeOutput(textOutput('Empty query'));
                 success = true;
-                return;
+                return 'completed';
             }
             const isFetchXml = ['fetchxml', 'xml'].includes(cell.document.languageId) || this.looksLikeFetchXml(content);
             const target = { environmentUrl: context.environmentUrl, profileName: context.profileName, profileIdentity: context.profileIdentity };
-            const result = isFetchXml
-                ? await this.daemon.queryFetch({ fetchXml: content, ...target }, entry.cts.token)
-                : await this.daemon.querySql({ sql: content, ...target }, entry.cts.token);
-            if (entry.abort.signal.aborted || run.cancelled) {
-                await writeOutput(textOutput('Query cancelled'));
-                return;
+            const cancelled = (): boolean => entry.abort.signal.aborted || run.cancelled;
+            let result: QueryResultResponse;
+            if (isFetchXml) {
+                result = await this.daemon.queryFetch({ fetchXml: content, ...target }, entry.cts.token);
+            } else {
+                // Same flow as the Data Explorer: always send unconfirmed safety options so the
+                // daemon's DML guard runs; confirm only when the daemon says the statement needs it.
+                try {
+                    result = await this.daemon.querySql({ sql: content, ...target, dmlSafety: { ...UNCONFIRMED_DML_SAFETY } }, entry.cts.token);
+                } catch (error) {
+                    if (cancelled() || !isDmlConfirmationRequired(error)) throw error;
+                    if (!ownsExecution()) return 'completed';
+                    await writeOutput(textOutput('Waiting for DML confirmation…'));
+                    const confirmed = await confirmDmlExecution(content, context);
+                    if (cancelled()) {
+                        await writeOutput(textOutput('Query cancelled'));
+                        return 'completed';
+                    }
+                    if (!ownsExecution()) return 'completed';
+                    if (!confirmed) {
+                        await writeOutput(textOutput('Not executed: DML confirmation was declined. No records were changed.'));
+                        return 'declined';
+                    }
+                    // A second confirmation-required answer is not re-prompted; it surfaces as an error below.
+                    result = await this.daemon.querySql({ sql: content, ...target, dmlSafety: { isConfirmed: true } }, entry.cts.token);
+                }
             }
-            if (!ownsExecution()) return;
+            if (cancelled()) {
+                await writeOutput(textOutput('Query cancelled'));
+                return 'completed';
+            }
+            if (!ownsExecution()) return 'completed';
             this.cellResults.set(cellUri, { result, context, executedAt });
-            await writeOutput(new vscode.NotebookCellOutput([
+            const table = new vscode.NotebookCellOutput([
                 vscode.NotebookCellOutputItem.text(renderResultsHtml(result, context.environmentUrl), 'text/html'),
-            ]));
-            success = result.success;
+            ]);
+            const dmlFailure = describeDmlFailure(result);
+            await writeOutputs(dmlFailure ? [this.errorOutput(new Error(dmlFailure)), table] : [table]);
+            success = result.success && !dmlFailure;
         } catch (error) {
             if (entry.abort.signal.aborted || run.cancelled) {
                 await writeOutput(textOutput('Query cancelled'));
-                return;
+                return 'completed';
             }
-            if (!ownsExecution()) return;
+            if (!ownsExecution()) return 'completed';
+            const refusal = dmlRefusalMessage(error);
+            if (refusal) {
+                await writeOutput(this.errorOutput(new Error(refusal)));
+                return 'completed';
+            }
             if (isAuthError(error)) {
                 // Name/index may have been reused since this run captured its profile.
                 // Recovery must never invalidate whichever profile now owns that alias.
@@ -364,7 +403,7 @@ export class DataverseNotebookController implements vscode.Disposable {
                 await writeOutput(this.errorOutput(new Error(
                     `${message}\nAuthentication failed for the profile captured by this run (${context.profileName}) on ${context.environmentName}. Confirm the intended profile in PPDS Profiles, re-authenticate it, then run the cell again.`,
                 )));
-                return;
+                return 'completed';
             }
             await writeOutput(this.errorOutput(error));
         } finally {
@@ -372,6 +411,21 @@ export class DataverseNotebookController implements vscode.Disposable {
             tokenDisposable.dispose();
             entry.cts.dispose();
             execution.end(success, Date.now());
+        }
+        return 'completed';
+    }
+
+    /** Marks cells a Run All did not reach because the user declined a DML confirmation. */
+    private async markNotRun(cells: readonly vscode.NotebookCell[], context: NotebookExecutionContext): Promise<void> {
+        const executedAt = new Date().toISOString();
+        for (const cell of cells) {
+            this.cellResults.delete(cell.document.uri.toString());
+            const execution = this.controller.createNotebookCellExecution(cell);
+            execution.start(Date.now());
+            await execution.replaceOutput([...this.contextOutputs(context, executedAt), new vscode.NotebookCellOutput([
+                vscode.NotebookCellOutputItem.text('Not run: this run stopped because a DML confirmation in an earlier cell was declined.', 'text/plain'),
+            ])]);
+            execution.end(false, Date.now());
         }
     }
 

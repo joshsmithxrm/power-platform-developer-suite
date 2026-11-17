@@ -121,6 +121,12 @@ export interface QueryResultResponse {
     plan?: QueryPlanDescription;
     rowCap?: number;
     requiresConfirmationForExecution?: boolean;
+    /** DML only, when any row failed (newer daemons): rows that succeeded across all statements. */
+    affectedRows?: number | null;
+    /** DML only, when any row failed (newer daemons): rows that failed across all statements. */
+    failedRows?: number | null;
+    /** DML only, when any row failed (newer daemons): counts and a representative error. */
+    dmlError?: string | null;
 }
 
 export interface QueryPlanDescription {

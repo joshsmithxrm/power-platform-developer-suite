@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as vscode from 'vscode';
+import { ResponseError } from 'vscode-jsonrpc/node';
 import type { DaemonClient } from '../../daemonClient.js';
 import type { AuthWhoResponse, QueryResultResponse } from '../../types.js';
 
@@ -414,7 +415,8 @@ describe('DataverseNotebookController environment isolation', () => {
         host.change?.({ notebook: a });
         await run(a);
         expect(host.window.showWarningMessage).toHaveBeenCalledTimes(5);
-        expect(daemon.querySql.mock.calls.every(call => !('dmlSafety' in call[0]))).toBe(true);
+        // The environment acknowledgement never approves DML: every request stays unconfirmed.
+        expect(daemon.querySql.mock.calls.every(call => call[0].dmlSafety?.isConfirmed === false)).toBe(true);
         expect(a.metadata).not.toHaveProperty('acknowledgement');
         controller.dispose();
     });
@@ -518,3 +520,181 @@ describe('DataverseNotebookController environment isolation', () => {
     });
 });
 
+describe('DataverseNotebookController DML safety', () => {
+    const CONFIRM = 'Execute Anyway';
+    const confirmationRequired = () => new ResponseError(-32000, 'DML operations require --confirm to execute.', {
+        code: 'Query.DmlConfirmationRequired', message: 'DML operations require --confirm to execute.', dmlConfirmationRequired: true,
+    });
+
+    /** Notebook whose cells hold the given SQL statements. */
+    function sqlNotebook(name: string, statements: string[]): vscode.NotebookDocument {
+        const nb = notebook(name, A, statements.map(() => 'sql'));
+        nb.getCells().forEach((cell, i) => { (cell.document as any).getText = () => statements[i]; });
+        return nb;
+    }
+
+    /** Mirrors the daemon guard: an unconfirmed DML statement is answered with confirmation-required. */
+    function guardLikeDaemon(daemon: ReturnType<typeof setup>['daemon'], response: QueryResultResponse = result()) {
+        daemon.querySql.mockImplementation(async (params: any) => {
+            if (/^\s*(delete|update|insert)/i.test(params.sql) && params.dmlSafety?.isConfirmed !== true) throw confirmationRequired();
+            return response;
+        });
+    }
+
+    function dmlPrompts(): any[][] {
+        return host.window.showWarningMessage.mock.calls.filter(call => String(call[0]).startsWith('Execute this DML statement'));
+    }
+
+    function answerDml(answer: string | undefined) {
+        host.window.showWarningMessage.mockImplementation(async (message: string) =>
+            message.startsWith('Execute this DML statement') ? answer : 'Run on this environment');
+    }
+
+    function executionsFor(nb: vscode.NotebookDocument, index: number): any[] {
+        const uri = nb.getCells()[index].document.uri.toString();
+        return host.executions.filter(execution => execution.cell.document.uri.toString() === uri);
+    }
+
+    function cellText(nb: vscode.NotebookDocument, index: number): string {
+        const execution = executionsFor(nb, index).at(-1);
+        return execution.output.flatMap((output: any) => output.items.map((item: any) => item.value)).join('\n');
+    }
+
+    it('asks for modal confirmation showing the statement and target, then sends a confirmed request', async () => {
+        const { daemon, controller, run } = setup();
+        guardLikeDaemon(daemon);
+        answerDml(CONFIRM);
+        const nb = sqlNotebook('dml', ["DELETE FROM account WHERE name = 'x'"]);
+        await run(nb);
+        expect(daemon.querySql.mock.calls.map(call => call[0].dmlSafety)).toEqual([{ isConfirmed: false }, { isConfirmed: true }]);
+        const [prompt] = dmlPrompts();
+        expect(prompt[0]).toContain('Environment 0');
+        expect(prompt[1]).toMatchObject({ modal: true });
+        expect(prompt[1].detail).toContain(A);
+        expect(prompt[1].detail).toContain("DELETE FROM account WHERE name = 'x'");
+        expect(prompt.slice(2)).toEqual([CONFIRM]);
+        expect(executionsFor(nb, 0).at(-1).end).toHaveBeenCalledWith(true, expect.any(Number));
+        controller.dispose();
+    });
+
+    it('asks again on every DML execution and never remembers a confirmation', async () => {
+        const { daemon, controller, run } = setup();
+        guardLikeDaemon(daemon);
+        answerDml(CONFIRM);
+        const nb = sqlNotebook('dml', ['UPDATE account SET name = 1 WHERE accountid = 1', 'UPDATE account SET name = 2 WHERE accountid = 2']);
+        await run(nb);
+        await run(nb);
+        expect(dmlPrompts()).toHaveLength(4);
+        controller.dispose();
+    });
+
+    it('declining runs nothing, marks the cell not executed and stops Run All', async () => {
+        const { daemon, controller, run } = setup();
+        guardLikeDaemon(daemon);
+        answerDml(undefined);
+        const nb = sqlNotebook('mixed', ['SELECT name FROM account', 'DELETE FROM account WHERE name = 1', 'SELECT name FROM contact']);
+        await run(nb);
+        expect(daemon.querySql.mock.calls.map(call => call[0].sql)).toEqual(['SELECT name FROM account', 'DELETE FROM account WHERE name = 1']);
+        expect(daemon.querySql.mock.calls.some(call => call[0].dmlSafety?.isConfirmed === true)).toBe(false);
+        expect(executionsFor(nb, 0).at(-1).end).toHaveBeenCalledWith(true, expect.any(Number));
+        expect(cellText(nb, 1)).toContain('DML confirmation was declined');
+        expect(executionsFor(nb, 1).at(-1).end).toHaveBeenCalledWith(false, expect.any(Number));
+        expect(cellText(nb, 2)).toContain('Not run');
+        expect(executionsFor(nb, 2).at(-1).end).toHaveBeenCalledWith(false, expect.any(Number));
+        expect(controller.hasCellResults(nb.getCells()[1].document.uri.toString())).toBe(false);
+        controller.dispose();
+    });
+
+    it('runs SELECT cells without a DML prompt and still sends unconfirmed safety options', async () => {
+        const { daemon, controller, run } = setup();
+        guardLikeDaemon(daemon);
+        answerDml(CONFIRM);
+        await run(sqlNotebook('select', ['SELECT name FROM account', 'SELECT name FROM contact']));
+        expect(dmlPrompts()).toHaveLength(0);
+        expect(daemon.querySql.mock.calls.map(call => call[0].dmlSafety)).toEqual([{ isConfirmed: false }, { isConfirmed: false }]);
+        controller.dispose();
+    });
+
+    it('does not execute when the run is interrupted while the confirmation is open', async () => {
+        const { daemon, controller, run, interrupt } = setup();
+        guardLikeDaemon(daemon);
+        const answer = deferred<string>();
+        const opened = deferred<void>();
+        host.window.showWarningMessage.mockImplementation((message: string) => {
+            if (!message.startsWith('Execute this DML statement')) return Promise.resolve('Run on this environment');
+            opened.resolve();
+            return answer.promise;
+        });
+        const nb = sqlNotebook('dml', ['DELETE FROM account WHERE name = 1']);
+        const pending = run(nb);
+        await opened.promise;
+        interrupt(nb);
+        answer.resolve(CONFIRM);
+        await pending;
+        expect(daemon.querySql).toHaveBeenCalledTimes(1);
+        expect(cellText(nb, 0)).toContain('Query cancelled');
+        controller.dispose();
+    });
+
+    it.each([
+        ['missing WHERE', 'Query.DmlBlocked', 'DELETE without WHERE is not allowed.', { dmlBlocked: true }],
+        ['protected target', 'Query.DmlBlocked', 'Cross-environment DML is set to read-only.', { dmlBlocked: true }],
+        ['row cap', 'Query.DmlRowCapExceeded', 'DML would affect more than 10000 rows.', {}],
+        ['shakedown', 'Safety.ShakedownActive', 'Mutations are disabled during shakedown.', {}],
+    ])('renders the %s refusal as an error without prompting', async (_label, code, message, extra) => {
+        const { daemon, controller, run } = setup();
+        daemon.querySql.mockRejectedValue(new ResponseError(-32000, message, { code, message, ...extra }));
+        const nb = sqlNotebook('refused', ['DELETE FROM account']);
+        await run(nb);
+        expect(dmlPrompts()).toHaveLength(0);
+        const error = executionsFor(nb, 0).at(-1).output.at(-1).items[0];
+        expect(error.mime).toBe('application/vnd.code.notebook.error');
+        expect(error.value).toContain('DML safety guard refused');
+        expect(error.value).toContain(message);
+        expect(executionsFor(nb, 0).at(-1).end).toHaveBeenCalledWith(false, expect.any(Number));
+        controller.dispose();
+    });
+
+    it('shows a confirmed request that is still confirmation-required as an error instead of prompting again', async () => {
+        const { daemon, controller, run } = setup();
+        daemon.querySql.mockRejectedValue(confirmationRequired());
+        answerDml(CONFIRM);
+        const nb = sqlNotebook('dml', ['DELETE FROM account WHERE name = 1']);
+        await run(nb);
+        expect(dmlPrompts()).toHaveLength(1);
+        expect(daemon.querySql).toHaveBeenCalledTimes(2);
+        expect(executionsFor(nb, 0).at(-1).output.at(-1).items[0].mime).toBe('application/vnd.code.notebook.error');
+        expect(executionsFor(nb, 0).at(-1).end).toHaveBeenCalledWith(false, expect.any(Number));
+        controller.dispose();
+    });
+
+    it('renders failed DML rows with counts and the reason reported by the daemon', async () => {
+        const { daemon, controller, run } = setup();
+        guardLikeDaemon(daemon, {
+            ...result(), success: false, columns: [], records: [{ affected_rows: 2, failed_rows: 3 }],
+            affectedRows: 2, failedRows: 3, dmlError: 'UPDATE account: 3 row(s) failed. First error: Access denied.',
+        });
+        answerDml(CONFIRM);
+        const nb = sqlNotebook('failed', ['UPDATE account SET name = 1 WHERE statecode = 0']);
+        await run(nb);
+        const error = executionsFor(nb, 0).at(-1).output[1].items[0];
+        expect(error.mime).toBe('application/vnd.code.notebook.error');
+        expect(error.value).toContain('3 row(s) failed');
+        expect(error.value).toContain('2 row(s) succeeded');
+        expect(error.value).toContain('Access denied');
+        expect(executionsFor(nb, 0).at(-1).end).toHaveBeenCalledWith(false, expect.any(Number));
+        controller.dispose();
+    });
+
+    it('treats a legacy DML summary row with failed rows as a failure even when success is true', async () => {
+        const { daemon, controller, run } = setup();
+        guardLikeDaemon(daemon, { ...result(), columns: [], records: [{ affected_rows: 0, failed_rows: 4 }] });
+        answerDml(CONFIRM);
+        const nb = sqlNotebook('legacy', ['DELETE FROM account WHERE name = 1']);
+        await run(nb);
+        expect(cellText(nb, 0)).toContain('4 row(s) failed');
+        expect(cellText(nb, 0)).toContain('did not report a failure reason');
+        expect(executionsFor(nb, 0).at(-1).end).toHaveBeenCalledWith(false, expect.any(Number));
+        controller.dispose();
+    });
+});

@@ -7,6 +7,9 @@ import { showQueryHistory } from '../commands/queryHistoryCommand.js';
 import { handleAuthError, isAuthError } from '../utils/errorUtils.js';
 import { showErrorWithReport } from '../utils/errorNotify.js';
 import { queryDefaultTop } from '../utils/config.js';
+import {
+    UNCONFIRMED_DML_SAFETY, confirmDmlExecution, describeDmlFailure, dmlRefusalMessage, isDmlConfirmationRequired,
+} from '../utils/dmlSafety.js';
 
 import { getNonce } from './webviewUtils.js';
 import { WebviewPanelBase } from './WebviewPanelBase.js';
@@ -61,6 +64,8 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
     private lastUseTds = false;
     /** Language used for the last query (for loadMore to use the same execution path). */
     private lastLanguage = 'sql';
+    /** True when the last result came from a confirmed (DML-capable) execution; such results are never paged. */
+    private lastWasConfirmedDml = false;
     protected readonly panelLabel = 'Data Explorer';
     private readonly initialSql: string | undefined;
     private profileIdentity: string | undefined;
@@ -348,11 +353,22 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             this.lastSql = sql;
             this.lastUseTds = tds;
             this.lastLanguage = language ?? 'sql';
+            // Only a confirmed execution can have run DML. Its result is never paged: load-more
+            // replays lastSql, and a DML statement must not be replayed outside this confirmation.
+            this.lastWasConfirmedDml = isConfirmed;
+            if (isConfirmed && result.moreRecords) {
+                result = {
+                    ...result, moreRecords: false, pagingCookie: null,
+                    warnings: [...(result.warnings ?? []), 'Load More is not available for the result of a DML statement. Run a SELECT to page through records.'],
+                };
+            }
             this.lastResult = result;
             this.allRecords = [...result.records];
+            const dmlFailure = describeDmlFailure(result);
             this.postMessage({
                 command: 'queryResult',
                 data: result,
+                ...(dmlFailure ? { dmlFailure } : {}),
             });
         } catch (error) {
             // If the token was cancelled, notify the webview and return early
@@ -363,16 +379,15 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 
             // Check for DML safety errors from the daemon
             if (error instanceof ResponseError) {
-                const data = error.data as { dmlBlocked?: boolean; dmlConfirmationRequired?: boolean; message?: string; code?: string } | undefined;
-
-                // DML confirmation required — prompt the user
-                if (data?.dmlConfirmationRequired || data?.code === 'Query.DmlConfirmationRequired') {
-                    const choice = await vscode.window.showWarningMessage(
-                        data?.message || 'This DML operation requires confirmation.',
-                        { modal: true },
-                        'Execute Anyway'
-                    );
-                    if (choice === 'Execute Anyway') {
+                // DML confirmation required — prompt the user (once per execution; a confirmed
+                // request that is still refused is shown as an error, never re-prompted).
+                if (!isConfirmed && isDmlConfirmationRequired(error)) {
+                    const confirmed = await confirmDmlExecution(sql, {
+                        environmentName: this.environmentDisplayName,
+                        environmentUrl: this.environmentUrl,
+                        environmentType: this.environmentType,
+                    });
+                    if (confirmed) {
                         await this.executeQuery(sql, isRetry, useTds, language, true);
                     } else {
                         this.postMessage({ command: 'queryCancelled' });
@@ -380,9 +395,10 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                     return;
                 }
 
-                // DML blocked outright — show error
-                if (data?.dmlBlocked || data?.code === 'Query.DmlBlocked') {
-                    this.postMessage({ command: 'queryError', error: data?.message || 'DML operation blocked.' });
+                // DML refused outright (no WHERE, row cap, protected target) — show error
+                const refusal = dmlRefusalMessage(error);
+                if (refusal) {
+                    this.postMessage({ command: 'queryError', error: refusal });
                     return;
                 }
             }
@@ -446,6 +462,10 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 
     private async loadMore(pagingCookie: string, page: number): Promise<void> {
         if (!this.lastResult || !this.lastSql) return;
+        if (this.lastWasConfirmedDml) {
+            this.postMessage({ command: 'queryError', error: 'Load More is not available for the result of a DML statement. Run a SELECT to page through records.' });
+            return;
+        }
         try {
             this.postMessage({ command: 'executionStarted' });
 
@@ -464,6 +484,8 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                     pagingCookie,
                     useTds: this.lastUseTds,
                     ...this.queryTarget,
+                    // Never confirmed: a page request must not be able to execute DML.
+                    dmlSafety: { ...UNCONFIRMED_DML_SAFETY },
                 });
             }
 
@@ -683,6 +705,8 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 <div class="transpile-warning-banner" id="transpile-warning-banner" style="display:none"></div>
 
 <div class="data-source-banner" id="data-source-banner" style="display:none"></div>
+
+<div class="dml-failure-banner error-state" id="dml-failure-banner" role="alert" style="display:none"></div>
 
 <div class="results-wrapper" id="results-wrapper">
     <div class="empty-state" id="empty-state">Run a query to see results</div>
