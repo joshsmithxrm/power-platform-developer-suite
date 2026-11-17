@@ -350,7 +350,7 @@ public class DmlStatementFidelityTests
     {
         var h = DmlTestHarness.Create(rows: 5, contactRows: 1); // the UPDATE after the CATCH is within the cap
 
-        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest
+        var ex = await Assert.ThrowsAsync<PpdsDmlRowCapExceededException>(() => h.Service.ExecuteAsync(new SqlQueryRequest
         {
             Sql = "BEGIN TRY DELETE FROM account WHERE name = 'x' END TRY BEGIN CATCH PRINT 'swallowed' END CATCH; UPDATE contact SET lastname = 'b' WHERE lastname = 'y'",
             DmlSafety = new DmlSafetyOptions { IsConfirmed = true, RowCap = 2 }

@@ -1,4 +1,5 @@
 using System.CommandLine;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Query;
 
 namespace PPDS.Cli.Commands.Query;
@@ -64,4 +65,22 @@ internal sealed class DmlSafetyOptionSet
 
     private static Option<bool> Find(Command command, string name)
         => command.Options.OfType<Option<bool>>().Single(o => o.Name == name);
+
+    /// <summary>The CLI wording of <c>Query.DmlConfirmationRequired</c> (the service message is surface-neutral).</summary>
+    internal const string ConfirmationRequiredMessage =
+        "DML operations require --confirm to execute. Use --dry-run to preview the operation.";
+
+    /// <summary>What the CLI adds to a row-cap refusal (the service message names no flag).</summary>
+    internal const string RowCapRemedy = " To change every matching row, re-run with --no-limit.";
+
+    /// <summary>
+    /// Words a guard refusal for the CLI: the service messages are surface-neutral, so the CLI names its own flags
+    /// (<c>--confirm</c>, <c>--dry-run</c>, <c>--no-limit</c>). Other errors are unchanged.
+    /// </summary>
+    internal static StructuredError WithCliWording(StructuredError error, Exception exception) => exception switch
+    {
+        PpdsException { ErrorCode: ErrorCodes.Query.DmlConfirmationRequired } => error with { Message = ConfirmationRequiredMessage },
+        PpdsDmlRowCapExceededException => error with { Message = error.Message + RowCapRemedy },
+        _ => error
+    };
 }

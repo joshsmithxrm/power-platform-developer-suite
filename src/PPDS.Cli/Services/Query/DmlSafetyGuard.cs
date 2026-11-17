@@ -115,7 +115,7 @@ public sealed class DmlSafetyGuard
             {
                 IsBlocked = true,
                 ContainsDml = true,
-                BlockReason = $"Cross-environment DML is set to read-only. Source: [{sourceLabel}], Target: [{targetLabel}]. Change cross_env_dml_policy to 'Prompt' or 'Allow' to enable.",
+                BlockReason = $"Cross-environment DML is set to read-only. Source: [{sourceLabel}], Target: [{targetLabel}]. Nothing was executed.",
                 ErrorCode = ErrorCodes.Query.DmlBlocked
             };
         }

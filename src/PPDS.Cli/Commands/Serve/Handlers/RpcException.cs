@@ -175,4 +175,19 @@ public sealed class DmlSafetyErrorData : RpcErrorData
     /// </summary>
     [JsonPropertyName("dmlRowCapExceeded")]
     public bool DmlRowCapExceeded { get; init; }
+
+    /// <summary>Row cap refusal only: the cap that would have been exceeded (at least <c>rowCap + 1</c> rows match).</summary>
+    [JsonPropertyName("rowCap")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RowCap { get; init; }
+
+    /// <summary>Row cap refusal only: the refused operation (INSERT, UPDATE or DELETE).</summary>
+    [JsonPropertyName("operation")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Operation { get; init; }
+
+    /// <summary>Row cap refusal only: the target entity of the refused statement.</summary>
+    [JsonPropertyName("entity")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Entity { get; init; }
 }

@@ -90,6 +90,10 @@ public sealed class SqlQueryService : ISqlQueryService
         _planExecutor = new PlanExecutor();
     }
 
+    /// <summary>The surface-neutral message of <c>Query.DmlConfirmationRequired</c>.</summary>
+    public const string ConfirmationRequiredMessage =
+        "This request changes data (INSERT, UPDATE or DELETE) and must be confirmed before it runs. Nothing was executed.";
+
     /// <inheritdoc />
     public string TranspileSql(string sql, int? topOverride = null)
     {
@@ -278,7 +282,9 @@ public sealed class SqlQueryService : ISqlQueryService
     /// </summary>
     private static PpdsException WrapRowCapExceeded(QueryExecutionException ex, QueryPlanContext context)
     {
-        var wrapped = new PpdsException(ErrorCodes.Query.DmlRowCapExceeded, ex.Message, ex);
+        var wrapped = ex is DmlRowCapExceededException cap
+            ? new PpdsDmlRowCapExceededException(cap.Operation, cap.EntityLogicalName, cap.RowCap, ex.Message, ex)
+            : new PpdsException(ErrorCodes.Query.DmlRowCapExceeded, ex.Message, ex);
         RecordCommittedOutcome(wrapped, context);
         return wrapped;
     }
@@ -675,9 +681,8 @@ public sealed class SqlQueryService : ISqlQueryService
         // apply to previews.
         if (safetyResult.ContainsDml && safetyResult.RequiresConfirmation && !safetyResult.IsDryRun)
         {
-            throw new PpdsException(
-                ErrorCodes.Query.DmlConfirmationRequired,
-                "DML operations require --confirm to execute. Use --dry-run to preview the operation.");
+            // Surface-neutral: the CLI replaces it with its --confirm/--dry-run wording, the TUI and the extension ask.
+            throw new PpdsException(ErrorCodes.Query.DmlConfirmationRequired, ConfirmationRequiredMessage);
         }
 
         dmlRowCap = safetyResult.RowCap;

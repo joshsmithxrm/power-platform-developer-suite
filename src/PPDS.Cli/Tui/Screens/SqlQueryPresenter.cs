@@ -285,12 +285,17 @@ internal sealed class SqlQueryPresenter : IDisposable
         {
             // A script interrupted after some DML ran must say what already ran (not rolled back).
             var committed = DmlOutcome.From(ex)?.DescribeCommitted();
-            var message = committed == null ? ex.Message : $"{ex.Message} {committed}";
+            var refusal = ex is PpdsDmlRowCapExceededException ? ex.Message + RowCapRemedy : ex.Message;
+            var message = committed == null ? refusal : $"{refusal} {committed}";
             _lastErrorMessage = message;
             _isExecuting = false;
             ErrorOccurred?.Invoke(message);
         }
     }
+
+    /// <summary>What the TUI adds to a row-cap refusal: the cap cannot be removed here, so it says where it can.</summary>
+    internal const string RowCapRemedy =
+        " The row cap cannot be removed in the TUI; to change every matching row, run the statement with 'ppds query sql --no-limit'.";
 
     /// <summary>
     /// Load-more re-reads the last statement; it must never run DML. Explicit unconfirmed options make a

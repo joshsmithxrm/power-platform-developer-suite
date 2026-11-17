@@ -333,6 +333,23 @@ public sealed class SqlQueryPresenterTests : IDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_RowCapRefusal_SaysTheCapCannotBeRemovedInTheTui()
+    {
+        var fakeSqlService = await GetFakeSqlQueryService();
+        fakeSqlService.ExceptionToThrow = new PpdsDmlRowCapExceededException(
+            "DELETE", "account", 10_000, "DELETE account was refused: ... This statement changed nothing.", new Exception("inner"));
+
+        using var presenter = new SqlQueryPresenter(_session, TestEnvironmentUrl);
+        string? receivedError = null;
+        presenter.ErrorOccurred += msg => receivedError = msg;
+
+        await presenter.ExecuteAsync("DELETE FROM account WHERE name = 'x'", CancellationToken.None);
+
+        Assert.StartsWith("DELETE account was refused", receivedError);
+        Assert.EndsWith(SqlQueryPresenter.RowCapRemedy, receivedError);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_CancelledAfterDmlRan_SaysWhatAlreadyRanInsteadOfAPlainCancel()
     {
         var fakeSqlService = await GetFakeSqlQueryService();

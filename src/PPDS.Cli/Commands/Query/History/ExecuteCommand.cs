@@ -232,7 +232,8 @@ public static class ExecuteCommand
         }
         catch (Exception ex)
         {
-            var error = ExceptionMapper.Map(ex, context: "executing query from history", debug: globalOptions.Debug);
+            var error = DmlSafetyOptionSet.WithCliWording(
+                ExceptionMapper.Map(ex, context: "executing query from history", debug: globalOptions.Debug), ex);
             writer.WriteError(error);
             SqlCommand.WriteCommittedNote(ex);
             return ExceptionMapper.ToExitCode(ex);

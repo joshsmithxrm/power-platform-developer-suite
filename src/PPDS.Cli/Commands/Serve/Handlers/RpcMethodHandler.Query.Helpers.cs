@@ -263,6 +263,9 @@ public partial class RpcMethodHandler
                     Message = WithCommitted(cap.UserMessage),
                     DmlRowCapExceeded = true,
                     DmlCommitted = committed,
+                    RowCap = (cap as PpdsDmlRowCapExceededException)?.RowCap,
+                    Operation = (cap as PpdsDmlRowCapExceededException)?.Operation,
+                    Entity = (cap as PpdsDmlRowCapExceededException)?.EntityLogicalName,
                 }),
             PpdsException { ErrorCode: ErrorCodes.Query.TdsIncompatible or ErrorCodes.Query.TdsConnectionFailed } tds =>
                 new RpcException(tds.ErrorCode, tds.UserMessage),

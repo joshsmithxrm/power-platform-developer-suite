@@ -126,7 +126,7 @@ public class DmlInterruptedRunTests
     public async Task Rpc_RowCapRefusal_GoesThroughTheHandlerMapping_WithItsFlagAndWhatAlreadyRan()
     {
         var h = DmlTestHarness.Create(rows: 2, contactRows: 5);
-        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest
+        var ex = await Assert.ThrowsAsync<PpdsDmlRowCapExceededException>(() => h.Service.ExecuteAsync(new SqlQueryRequest
         {
             Sql = TwoDeletes,
             DmlSafety = new DmlSafetyOptions { IsConfirmed = true, RowCap = 2 }

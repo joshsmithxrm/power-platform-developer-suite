@@ -208,13 +208,24 @@ public sealed class DmlExecuteNode : IQueryPlanNode
     /// raised while the rows are still being collected, ahead of the first bulk call. Only "at least cap + 1"
     /// is known; the matching rows beyond that are not counted.
     /// </summary>
-    private DmlRowCapExceededException RowCapExceeded() => new(
-        Operation.ToString().ToUpperInvariant(),
-        EntityLogicalName,
-        RowCap,
-        $"{Operation.ToString().ToUpperInvariant()} {EntityLogicalName} was refused: it would affect more than the " +
-        $"row cap of {RowCap:N0} rows (at least {(long)RowCap + 1:N0} rows match). This statement changed nothing. " +
-        "Use --no-limit to remove the cap, or narrow the WHERE clause.");
+    /// <remarks>
+    /// The message names no surface-specific remedy (such as a CLI flag); each surface adds its own from the
+    /// structured properties of <see cref="DmlRowCapExceededException"/>.
+    /// </remarks>
+    private DmlRowCapExceededException RowCapExceeded(long? exactCount = null)
+    {
+        var operation = Operation.ToString().ToUpperInvariant();
+        var cap = RowCap.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+        var matched = exactCount.HasValue
+            ? $"it would insert {exactCount.Value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} rows"
+            : $"at least {((long)RowCap + 1).ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} rows match";
+        return new DmlRowCapExceededException(
+            operation,
+            EntityLogicalName,
+            RowCap,
+            $"{operation} {EntityLogicalName} was refused: it would affect more than the row cap of {cap} rows " +
+            $"({matched}). This statement changed nothing. Narrow the WHERE clause to affect fewer rows.");
+    }
 
     /// <summary>A statement that matched no rows still counts as an executed DML statement (keeps positions real).</summary>
     private (long Success, long Failure) NoRows(QueryPlanContext context)
@@ -310,12 +321,13 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         var entities = new List<Microsoft.Xrm.Sdk.Entity>();
         var attributeMap = await LoadAttributeMapAsync(context, cancellationToken).ConfigureAwait(false);
 
-        foreach (var row in InsertValueRows!)
+        if (InsertValueRows!.Count > RowCap)
         {
-            if (entities.Count >= RowCap)
-            {
-                throw RowCapExceeded();
-            }
+            throw RowCapExceeded(InsertValueRows.Count);
+        }
+
+        foreach (var row in InsertValueRows)
+        {
 
             var entity = new Microsoft.Xrm.Sdk.Entity(EntityLogicalName);
             for (var i = 0; i < InsertColumns!.Count; i++)
@@ -400,15 +412,15 @@ public sealed class DmlExecuteNode : IQueryPlanNode
 
         await foreach (var row in SourceNode!.ExecuteAsync(context, cancellationToken))
         {
-            if (entities.Count >= RowCap)
-            {
-                throw RowCapExceeded();
-            }
-
-            // Get the record ID from the source row
+            // Get the record ID from the source row (a row without one is skipped and does not count toward the cap)
             if (!row.Values.TryGetValue(idColumn, out var idValue) || idValue.Value == null)
             {
                 continue;
+            }
+
+            if (entities.Count >= RowCap)
+            {
+                throw RowCapExceeded();
             }
 
             var recordId = idValue.Value is Guid guid ? guid : Guid.Parse(idValue.Value.ToString()!);
@@ -444,14 +456,15 @@ public sealed class DmlExecuteNode : IQueryPlanNode
 
         await foreach (var row in SourceNode!.ExecuteAsync(context, cancellationToken))
         {
-            if (ids.Count >= RowCap)
-            {
-                throw RowCapExceeded();
-            }
-
+            // A row without an id is skipped and does not count toward the cap.
             if (!row.Values.TryGetValue(idColumn, out var idValue) || idValue.Value == null)
             {
                 continue;
+            }
+
+            if (ids.Count >= RowCap)
+            {
+                throw RowCapExceeded();
             }
 
             var recordId = idValue.Value is Guid guid ? guid : Guid.Parse(idValue.Value.ToString()!);
