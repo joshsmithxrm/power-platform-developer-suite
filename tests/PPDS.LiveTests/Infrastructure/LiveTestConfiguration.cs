@@ -114,6 +114,21 @@ public sealed class LiveTestConfiguration : IDisposable
         !string.IsNullOrWhiteSpace(AzureDevOpsServiceConnectionId);
 
     /// <summary>
+    /// Name of an existing PPDS auth profile (PPDS_TEST_PROFILE) for local runs without a service-principal secret.
+    /// Honoured only by the in-process metadata live tests (see <see cref="LiveTestProfileConnectionSource"/>); every other
+    /// live test still needs the service-principal settings.
+    /// </summary>
+    public string? ProfileName { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether a PPDS auth profile and DATAVERSE_URL are configured (local profile mode).
+    /// Not part of <see cref="HasAnyCredentials"/>.
+    /// </summary>
+    public bool HasProfileCredentials =>
+        !string.IsNullOrWhiteSpace(DataverseUrl) &&
+        !string.IsNullOrWhiteSpace(ProfileName);
+
+    /// <summary>
     /// Gets a value indicating whether any live test credentials are available.
     /// </summary>
     public bool HasAnyCredentials => HasClientSecretCredentials || HasCertificateCredentials || HasGitHubOidcCredentials || HasAzureDevOpsOidcCredentials;
@@ -135,6 +150,7 @@ public sealed class LiveTestConfiguration : IDisposable
         AzureDevOpsOidcRequestUri = Environment.GetEnvironmentVariable("SYSTEM_OIDCREQUESTURI");
         AzureDevOpsAccessToken = Environment.GetEnvironmentVariable("SYSTEM_ACCESSTOKEN");
         AzureDevOpsServiceConnectionId = Environment.GetEnvironmentVariable("AZURESUBSCRIPTION_SERVICE_CONNECTION_ID");
+        ProfileName = Environment.GetEnvironmentVariable("PPDS_TEST_PROFILE")?.Trim();
     }
 
     /// <summary>

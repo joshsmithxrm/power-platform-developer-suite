@@ -36,17 +36,21 @@ public partial class DataverseMetadataAuthoringService
     /// <summary>
     /// Runs <paramref name="operation"/> with the caller's spelling of a global choice name. The exact
     /// spelling is always tried first and its outcome stands, with one exception: when Dataverse rejects it
-    /// with an "option set not found" fault, the catalog is listed. If exactly one stored name differs from
+    /// with a "not found" fault (see <see cref="IsOptionSetNotFoundFault"/>), the catalog is listed. If exactly one stored name differs from
     /// the request only by case, the operation is retried once under that stored name. If several do, the
     /// existing ambiguity error is raised (with the original fault as its inner exception). In every other
     /// case (no case variant, the requested spelling is itself stored, or the lookup fails) the original
     /// exception is rethrown unchanged.
     /// </summary>
     /// <remarks>
-    /// Any other failure (privilege, duplicate value, validation, unknown solution, managed property, plugin,
-    /// timeout, throttle, connection, cancellation) propagates untouched with no listing and no retry, so an
-    /// exact-name caller whose request fails for another reason sends nothing extra. A not-found fault means the
-    /// named option set was not located, so nothing was written under the first spelling.
+    /// Recognition is by fault code, so any ObjectDoesNotExist fault qualifies, including one about another object
+    /// (for example a missing solution). That costs one extra as-if-published catalog listing (every global choice
+    /// with its options) before the original error returns; the write is re-sent once only when a single stored
+    /// case variant of the requested name exists, and that retry's own failure surfaces. Every other failure
+    /// (privilege, duplicate value, validation, managed property, plugin, timeout, throttle, connection,
+    /// cancellation, and faults with other codes and no English not-found wording) propagates untouched with no
+    /// listing and no retry. The design assumes, pending live confirmation, that a not-found fault means nothing
+    /// was written under the first spelling.
     /// Each attempt and the catalog lookup acquire and release their own pooled lease.
     /// </remarks>
     /// <returns>The name the successful attempt used (the stored name when Dataverse reports it) and its result.</returns>
@@ -166,7 +170,7 @@ public partial class DataverseMetadataAuthoringService
         return candidates[0];
     }
 
-    /// <summary>An entity + attribute pair fully identifies a column-scoped option set (see ApplyOptionColorAsync).</summary>
+    /// <summary>An entity + attribute pair fully identifies a column-scoped option set (see ReadStoredOptionColorAsync).</summary>
     private static bool IsLocalOptionTarget(string? entityLogicalName, string? attributeLogicalName)
         => !string.IsNullOrEmpty(entityLogicalName) && !string.IsNullOrEmpty(attributeLogicalName);
 
@@ -176,9 +180,19 @@ public partial class DataverseMetadataAuthoringService
             : requested;
 
     /// <summary>
-    /// The anchored phrases of Dataverse's "option set not found" fault. The recorded server text is
-    /// "Could not find an optionset with name statuscode" (docs/qa/shakedown-v1-2026-04-20.md); the spaced
-    /// variant covers the same message family. Keep in step with the copy in DataverseMetadataQueryService.
+    /// Dataverse's language-independent "object not found" fault code (ObjectDoesNotExist, 0x80040217). ASSUMPTION,
+    /// pending live confirmation: Microsoft does not document which code an unknown global choice name returns; this
+    /// is the generic not-found code the offline fakes model (see the live test
+    /// MetadataGlobalChoiceLiveTests). Keep in step with DataverseMetadataQueryService.
+    /// </summary>
+    private const int ObjectDoesNotExistErrorCode = unchecked((int)0x80040217);
+
+    /// <summary>
+    /// The anchored phrases of Dataverse's "option set not found" fault, kept as a fallback for a fault that
+    /// carries a different code: Microsoft does not document which code this message uses, while the English
+    /// wording is recorded from a real server, "Could not find an optionset with name statuscode"
+    /// (docs/qa/shakedown-v1-2026-04-20.md); the spaced variant covers the same message family. Keep in step
+    /// with the copy in DataverseMetadataQueryService.
     /// </summary>
     private static readonly string[] OptionSetNotFoundPhrases =
         ["Could not find an optionset with name", "Could not find an option set with"];
@@ -190,16 +204,18 @@ public partial class DataverseMetadataAuthoringService
     private const string OptionSetNotFoundUnnamedPhrase = "Could not find an option set with specified name";
 
     /// <summary>
-    /// True only for Dataverse's "option set not found" fault about <paramref name="requestedName"/>. Either the
-    /// fault text is the unnamed wording, or it contains one of the anchored phrases (ordinal, case-insensitive)
-    /// AND the requested name. A "Could not find …" fault about a solution, publisher, attribute, option value
-    /// or a different option set never qualifies, even when an echoed identifier happens to contain "optionset".
+    /// True for a Dataverse "not found" fault that may be about <paramref name="requestedName"/>. The typed fault
+    /// code decides, so recognition does not depend on the organisation's language: any ObjectDoesNotExist fault
+    /// qualifies. A fault with another code qualifies only through the English fallback: the unnamed wording, or
+    /// an anchored phrase (ordinal, case-insensitive) AND the requested name. Qualifying only lists the catalog;
+    /// a retry still needs a single stored case variant of the requested name, and its own failure surfaces.
     /// </summary>
     private static bool IsOptionSetNotFoundFault(Exception exception, string requestedName)
     {
         var fault = FindTypedFault(exception);
         return fault is not null
-            && (IsOptionSetNotFoundText(fault.Detail?.Message, requestedName) || IsOptionSetNotFoundText(fault.Message, requestedName));
+            && (fault.Detail?.ErrorCode == ObjectDoesNotExistErrorCode
+                || IsOptionSetNotFoundText(fault.Detail?.Message, requestedName) || IsOptionSetNotFoundText(fault.Message, requestedName));
     }
 
     private static bool IsOptionSetNotFoundText(string? text, string requestedName)

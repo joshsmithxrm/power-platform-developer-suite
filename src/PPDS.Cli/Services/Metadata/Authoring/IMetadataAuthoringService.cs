@@ -16,8 +16,8 @@ public interface IMetadataAuthoringService
     /// <summary>Creates a new Dataverse table (entity) in the specified solution.</summary>
     Task<CreateTableResult> CreateTableAsync(CreateTableRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
 
-    /// <summary>Updates an existing Dataverse table (entity).</summary>
-    Task UpdateTableAsync(UpdateTableRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
+    /// <summary>Updates an existing Dataverse table (entity). Labels are written for English (LCID 1033) and merged with the other languages; the result says when the label Dataverse shows the caller is in another language and was not changed.</summary>
+    Task<MetadataLabelWriteResult> UpdateTableAsync(UpdateTableRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
 
     /// <summary>Deletes a Dataverse table (entity).</summary>
     Task DeleteTableAsync(DeleteTableRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
@@ -27,8 +27,8 @@ public interface IMetadataAuthoringService
     /// <summary>Creates a new column (attribute) on a Dataverse table.</summary>
     Task<CreateColumnResult> CreateColumnAsync(CreateColumnRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
 
-    /// <summary>Updates an existing column (attribute) on a Dataverse table.</summary>
-    Task UpdateColumnAsync(UpdateColumnRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
+    /// <summary>Updates an existing column (attribute) on a Dataverse table. Labels are written for English (LCID 1033) and merged with the other languages; the result says when the label Dataverse shows the caller is in another language and was not changed.</summary>
+    Task<MetadataLabelWriteResult> UpdateColumnAsync(UpdateColumnRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
 
     /// <summary>Deletes a column (attribute) from a Dataverse table.</summary>
     Task DeleteColumnAsync(DeleteColumnRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
@@ -52,8 +52,8 @@ public interface IMetadataAuthoringService
     /// <summary>Creates a new global choice (option set).</summary>
     Task<CreateChoiceResult> CreateGlobalChoiceAsync(CreateGlobalChoiceRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
 
-    /// <summary>Updates an existing global choice (option set).</summary>
-    Task UpdateGlobalChoiceAsync(UpdateGlobalChoiceRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
+    /// <summary>Updates an existing global choice (option set). The result says when only the English (LCID 1033) label was changed and the caller's own-language label was not.</summary>
+    Task<MetadataLabelWriteResult> UpdateGlobalChoiceAsync(UpdateGlobalChoiceRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
 
     /// <summary>Deletes a global choice (option set).</summary>
     Task DeleteGlobalChoiceAsync(DeleteGlobalChoiceRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
@@ -61,8 +61,8 @@ public interface IMetadataAuthoringService
     /// <summary>Adds a new option value to an existing option set.</summary>
     Task<int> AddOptionValueAsync(AddOptionValueRequest request, CancellationToken ct = default);
 
-    /// <summary>Updates an existing option value in an option set.</summary>
-    Task UpdateOptionValueAsync(UpdateOptionValueRequest request, CancellationToken ct = default);
+    /// <summary>Updates an existing option value in an option set. The result says when only the English (LCID 1033) label was changed and the caller's own-language label was not.</summary>
+    Task<MetadataLabelWriteResult> UpdateOptionValueAsync(UpdateOptionValueRequest request, CancellationToken ct = default);
 
     /// <summary>Deletes an option value from an option set.</summary>
     Task DeleteOptionValueAsync(DeleteOptionValueRequest request, CancellationToken ct = default);
@@ -92,8 +92,8 @@ public interface IMetadataAuthoringService
     /// <summary>Lists all status reasons for an entity's statuscode attribute.</summary>
     Task<IReadOnlyList<StatusReasonInfo>> ListStatusReasonsAsync(string entityLogicalName, CancellationToken ct = default);
 
-    /// <summary>Updates an existing status reason on an entity.</summary>
-    Task UpdateStatusReasonAsync(UpdateStatusReasonRequest request, CancellationToken ct = default);
+    /// <summary>Updates an existing status reason on an entity. The result says when only the English (LCID 1033) label was changed and the caller's own-language label was not.</summary>
+    Task<MetadataLabelWriteResult> UpdateStatusReasonAsync(UpdateStatusReasonRequest request, CancellationToken ct = default);
 
     /// <summary>Removes a status reason from an entity's statuscode attribute.</summary>
     Task RemoveStatusReasonAsync(RemoveStatusReasonRequest request, CancellationToken ct = default);
@@ -106,8 +106,8 @@ public interface IMetadataAuthoringService
     /// <summary>Adds an option to a column's local option set, deriving the value when not explicit.</summary>
     Task<int> AddColumnOptionAsync(AddColumnOptionRequest request, CancellationToken ct = default);
 
-    /// <summary>Updates an option (label and/or color) on a column's local option set.</summary>
-    Task UpdateColumnOptionAsync(UpdateColumnOptionRequest request, CancellationToken ct = default);
+    /// <summary>Updates an option (label and/or color) on a column's local option set. The result says when only the English (LCID 1033) label was changed and the caller's own-language label was not.</summary>
+    Task<MetadataLabelWriteResult> UpdateColumnOptionAsync(UpdateColumnOptionRequest request, CancellationToken ct = default);
 
     /// <summary>Removes an option from a column's local option set.</summary>
     Task RemoveColumnOptionAsync(RemoveColumnOptionRequest request, CancellationToken ct = default);

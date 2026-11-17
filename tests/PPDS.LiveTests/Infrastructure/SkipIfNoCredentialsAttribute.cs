@@ -191,6 +191,71 @@ public sealed class SkipIfNoSolutionAttribute : FactAttribute
 }
 
 /// <summary>
+/// In-process metadata live tests that create schema in PPDS_TEST_SOLUTION. Like <see cref="SkipIfNoSolutionAttribute"/>
+/// but runs on .NET 8.0 only (as the CLI E2E attributes do): the behaviour under test is server-side, so running the
+/// same schema-creating test on three target frameworks would only triple the throwaway objects and contend for the
+/// organisation's customisation lock. Credentials: the service-principal client-secret settings, or (local runs only)
+/// DATAVERSE_URL plus PPDS_TEST_PROFILE, an existing signed-in InteractiveBrowser PPDS auth profile used silently through
+/// <see cref="LiveTestProfileConnectionSource"/>; the client secret wins when both are set.
+/// </summary>
+public sealed class MetadataLiveFactAttribute : FactAttribute
+{
+    private static readonly LiveTestConfiguration Configuration = new();
+
+    /// <summary>
+    /// Initializes a new instance that skips when prerequisites are missing.
+    /// </summary>
+    public MetadataLiveFactAttribute()
+    {
+        Skip = MetadataLivePrerequisites.MissingReason(Configuration);
+    }
+}
+
+/// <summary>
+/// <see cref="MetadataLiveFactAttribute"/> plus a second provisioned language: requires PPDS_TEST_SECOND_LCID, the
+/// LCID (not 1033) of a language provisioned in the target organisation. Without it the test is reported as skipped,
+/// never as passed. The test fails with a clear message if that LCID is not actually provisioned.
+/// </summary>
+public sealed class MetadataLiveMultiLanguageFactAttribute : FactAttribute
+{
+    private static readonly LiveTestConfiguration Configuration = new();
+
+    /// <summary>
+    /// Initializes a new instance that skips when prerequisites are missing.
+    /// </summary>
+    public MetadataLiveMultiLanguageFactAttribute()
+    {
+        Skip = MetadataLivePrerequisites.MissingReason(Configuration)
+            ?? (MetadataLivePrerequisites.SecondLanguage is null
+                ? "Multi-language metadata test requires PPDS_TEST_SECOND_LCID: the LCID (other than 1033) of a language provisioned in the target organisation, e.g. 1036."
+                : null);
+    }
+}
+
+/// <summary>Shared prerequisite checks for the metadata live-test attributes.</summary>
+public static class MetadataLivePrerequisites
+{
+    /// <summary>PPDS_TEST_SECOND_LCID parsed, or null when unset, invalid or 1033.</summary>
+    public static int? SecondLanguage =>
+        int.TryParse(Environment.GetEnvironmentVariable("PPDS_TEST_SECOND_LCID"), out var lcid) && lcid > 0 && lcid != 1033 ? lcid : null;
+
+    internal static string? MissingReason(LiveTestConfiguration configuration)
+    {
+#if !NET8_0
+        return "Metadata live tests only run on .NET 8.0 (server-side behaviour; one framework avoids triplicate schema).";
+#else
+        if (!configuration.HasClientSecretCredentials && !configuration.HasProfileCredentials)
+            return "Credentials not configured. Set DATAVERSE_URL, PPDS_TEST_APP_ID, PPDS_TEST_CLIENT_SECRET, and PPDS_TEST_TENANT_ID; " +
+                   "or, locally, DATAVERSE_URL and PPDS_TEST_PROFILE (an existing InteractiveBrowser PPDS auth profile bound to that environment, already signed in).";
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PPDS_TEST_SOLUTION"))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PPDS_TEST_PREFIX")))
+            return "Solution-scoped metadata test requires PPDS_TEST_SOLUTION (target unmanaged solution unique name) and PPDS_TEST_PREFIX (publisher customization prefix, e.g., 'new' or 'hsl').";
+        return null;
+#endif
+    }
+}
+
+/// <summary>
 /// Fact attribute for CLI E2E tests that mutate solution-scoped metadata. Requires client secret
 /// credentials, .NET 8.0, and a configured target solution and publisher prefix
 /// (PPDS_TEST_SOLUTION, PPDS_TEST_PREFIX). Use for tests that create custom tables, columns,
