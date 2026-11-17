@@ -206,6 +206,16 @@ public partial class RpcMethodHandler
             _ => null
         };
 
+        if (result.DmlOutcome is { HasFailures: true } dml)
+        {
+            // Failed rows are not a success. Counts and reason are additive so clients that only read
+            // the table keep working; 'success' now tells scripts and notebook cells the DML failed.
+            response.Success = false;
+            response.AffectedRows = dml.AffectedRows;
+            response.FailedRows = dml.FailedRows;
+            response.DmlError = dml.Message;
+        }
+
         if (safety?.IsDryRun == true)
         {
             response.DryRun = true;

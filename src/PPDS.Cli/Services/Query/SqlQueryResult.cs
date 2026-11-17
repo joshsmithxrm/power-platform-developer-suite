@@ -56,8 +56,8 @@ public sealed class SqlQueryResult
     public QueryExecutionMode? ExecutionMode { get; init; }
 
     /// <summary>
-    /// For executed DML: the message of the first row that failed. Null when no row failed
-    /// or the statement was not DML.
+    /// Outcome of the DML statements that executed, covering every statement of a script (not only the
+    /// last one). Null when no DML executed (SELECT, dry-run) or no DML statement touched any row.
     /// </summary>
-    public string? DmlFirstError { get; init; }
+    public DmlOutcome? DmlOutcome { get; init; }
 }

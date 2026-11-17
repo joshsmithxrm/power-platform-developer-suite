@@ -2361,4 +2361,100 @@ public class SqlQueryServiceTests
     }
 
     #endregion
+
+    #region DML failure outcome (all surfaces read DmlOutcome)
+
+    private static SqlQueryService ServiceWithBulk(Mock<IBulkOperationExecutor> bulk) => new(
+        new Mock<IQueryExecutor>().Object,
+        guard: new InactiveFakeShakedownGuard(),
+        bulkOperationExecutor: bulk.Object)
+    {
+        EnvironmentProtectionLevel = ProtectionLevel.Development
+    };
+
+    private static BulkOperationResult Failed(int ok, int failed, string? message) => new()
+    {
+        SuccessCount = ok,
+        FailureCount = failed,
+        Errors = message == null ? Array.Empty<BulkOperationError>() : new[] { new BulkOperationError { Message = message } }
+    };
+
+    private static readonly SqlQueryRequest InsertRequest = new()
+    {
+        Sql = "INSERT INTO solution (friendlyname) VALUES ('x')",
+        DmlSafety = new DmlSafetyOptions { IsConfirmed = true }
+    };
+
+    [Fact]
+    [Trait("Category", "PlanUnit")]
+    public async Task ExecuteAsync_DmlRowsFail_SurfacesOutcomeWithReason()
+    {
+        var bulk = new Mock<IBulkOperationExecutor>();
+        bulk.Setup(b => b.CreateMultipleAsync(It.IsAny<string>(), It.IsAny<IEnumerable<Microsoft.Xrm.Sdk.Entity>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Failed(0, 1, "The 'CreateMultiple' method does not support entities of type 'solution'."));
+
+        var result = await ServiceWithBulk(bulk).ExecuteAsync(InsertRequest);
+
+        Assert.NotNull(result.DmlOutcome);
+        Assert.True(result.DmlOutcome!.IsTotalFailure);
+        Assert.Contains("does not support entities of type 'solution'", result.DmlOutcome.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "PlanUnit")]
+    public async Task ExecuteAsync_DmlSucceeds_OutcomeHasNoFailures()
+    {
+        var bulk = new Mock<IBulkOperationExecutor>();
+        bulk.Setup(b => b.CreateMultipleAsync(It.IsAny<string>(), It.IsAny<IEnumerable<Microsoft.Xrm.Sdk.Entity>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Failed(1, 0, null));
+
+        var result = await ServiceWithBulk(bulk).ExecuteAsync(InsertRequest);
+
+        Assert.False(result.DmlOutcome!.HasFailures);
+    }
+
+    [Fact]
+    [Trait("Category", "PlanUnit")]
+    public async Task ExecuteAsync_Script_FirstStatementFailsLastSucceeds_OutcomeStillFails_AndReasonBelongsToFirst()
+    {
+        var bulk = new Mock<IBulkOperationExecutor>();
+        bulk.Setup(b => b.CreateMultipleAsync("account", It.IsAny<IEnumerable<Microsoft.Xrm.Sdk.Entity>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Failed(0, 1, "account failure"));
+        bulk.Setup(b => b.CreateMultipleAsync("contact", It.IsAny<IEnumerable<Microsoft.Xrm.Sdk.Entity>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Failed(1, 0, null));
+
+        var result = await ServiceWithBulk(bulk).ExecuteAsync(new SqlQueryRequest
+        {
+            Sql = "INSERT INTO account (name) VALUES ('a'); INSERT INTO contact (lastname) VALUES ('b')",
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = true }
+        });
+
+        var outcome = result.DmlOutcome!;
+        Assert.Equal(2, outcome.Statements.Count);
+        Assert.True(outcome.HasFailures);
+        Assert.Equal(PPDS.Cli.Infrastructure.Errors.ExitCodes.PartialSuccess, outcome.ExitCode);
+        Assert.Contains("#1 INSERT account", outcome.Message);
+        Assert.Contains("account failure", outcome.Message);
+        Assert.DoesNotContain("contact", outcome.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "PlanUnit")]
+    public async Task ExecuteStreamingAsync_DmlRowsFail_FinalChunkCarriesOutcome()
+    {
+        var bulk = new Mock<IBulkOperationExecutor>();
+        bulk.Setup(b => b.CreateMultipleAsync(It.IsAny<string>(), It.IsAny<IEnumerable<Microsoft.Xrm.Sdk.Entity>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Failed(0, 1, "stream failure"));
+
+        var chunks = new List<SqlQueryStreamChunk>();
+        await foreach (var chunk in ServiceWithBulk(bulk).ExecuteStreamingAsync(InsertRequest))
+            chunks.Add(chunk);
+
+        var final = chunks[^1];
+        Assert.True(final.IsComplete);
+        Assert.Contains("stream failure", final.DmlOutcome!.Message);
+        Assert.All(chunks.Take(chunks.Count - 1), c => Assert.Null(c.DmlOutcome));
+    }
+
+    #endregion
 }

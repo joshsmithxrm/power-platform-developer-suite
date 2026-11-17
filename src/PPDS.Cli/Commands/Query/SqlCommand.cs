@@ -320,38 +320,13 @@ public static class SqlCommand
                 return ExitCodes.Success;
             }
 
-            var dmlExitCode = DmlExitCode(queryResult.Result);
-            var dmlFailure = dmlExitCode == ExitCodes.Success
-                ? null
-                : BuildDmlFailureError(queryResult.Result, queryResult.DmlFirstError);
-
-            switch (globalOptions.OutputFormat)
-            {
-                case OutputFormat.Json when dmlFailure != null:
-                    // Same data payload, but success=false plus a results[] entry naming the first failure.
-                    writer.WritePartialSuccess(queryResult.Result, new[] { ItemResult.Fail("dml", dmlFailure) });
-                    break;
-                case OutputFormat.Json:
-                    writer.WriteSuccess(queryResult.Result);
-                    break;
-                case OutputFormat.Csv:
-                    QueryResultFormatter.WriteCsvOutput(queryResult.Result);
-                    break;
-                default:
-                    QueryResultFormatter.WriteTableOutput(
-                        queryResult.Result,
-                        globalOptions.Verbose,
-                        queryResult.TranspiledFetchXml);
-                    break;
-            }
-
-            if (dmlFailure != null && globalOptions.OutputFormat != OutputFormat.Json)
-            {
-                // Status goes to stderr; stdout stays data-only.
-                Console.Error.WriteLine($"Error: {dmlFailure.Message}");
-            }
-
-            return dmlExitCode;
+            return WriteResult(
+                queryResult,
+                globalOptions.OutputFormat,
+                globalOptions.Verbose,
+                writer,
+                queryResult.TranspiledFetchXml,
+                pagingHint: null);
         }
         catch (QueryParseException ex)
         {
@@ -441,25 +416,48 @@ public static class SqlCommand
         public bool RequiresConfirmationForExecution { get; init; }
     }
 
-    internal static int DmlExitCode(QueryResult result)
+    /// <summary>
+    /// Writes an executed query result and reports DML row failures. Data goes to stdout; the failure
+    /// message goes to stderr (text/CSV) or into the JSON envelope (<c>success: false</c> with the unchanged
+    /// <c>data</c>, a top-level <c>error</c> and a <c>results[]</c> entry). Returns the process exit code.
+    /// </summary>
+    internal static int WriteResult(
+        SqlQueryResult queryResult,
+        OutputFormat format,
+        bool verbose,
+        IOutputWriter writer,
+        string? fetchXml,
+        string? pagingHint)
     {
-        // DmlExecuteNode always yields exactly one row with exactly two columns:
-        // affected_rows and failed_rows. Guard on that shape so a SELECT with a
-        // user-named "failed_rows" column can't produce a false-positive exit code.
-        if (result.Records.Count != 1)
-            return ExitCodes.Success;
+        var outcome = queryResult.DmlOutcome;
+        var failure = outcome is { HasFailures: true }
+            ? StructuredError.Create(outcome.ErrorCode, outcome.Message!)
+            : null;
 
-        var row = result.Records[0];
-        if (row.Count != 2 ||
-            !row.TryGetValue("failed_rows", out var fq) ||
-            !row.TryGetValue("affected_rows", out var sq))
-            return ExitCodes.Success;
+        switch (format)
+        {
+            case OutputFormat.Json when failure != null:
+                writer.WritePartialSuccess(
+                    queryResult.Result, new[] { ItemResult.Fail("dml", failure) }, failure);
+                break;
+            case OutputFormat.Json:
+                writer.WriteSuccess(queryResult.Result);
+                break;
+            case OutputFormat.Csv:
+                QueryResultFormatter.WriteCsvOutput(queryResult.Result);
+                break;
+            default:
+                QueryResultFormatter.WriteTableOutput(queryResult.Result, verbose, fetchXml, pagingHint);
+                break;
+        }
 
-        if (fq.Value is not long failed || failed == 0)
-            return ExitCodes.Success;
+        if (failure != null && format != OutputFormat.Json)
+        {
+            // Status goes to stderr; stdout stays data-only.
+            Console.Error.WriteLine($"Error: {failure.Message}");
+        }
 
-        var succeeded = sq.Value is long s && s > 0;
-        return succeeded ? ExitCodes.PartialSuccess : ExitCodes.Failure;
+        return outcome?.ExitCode ?? ExitCodes.Success;
     }
 
     /// <summary>
@@ -482,19 +480,6 @@ public static class SqlCommand
             service.EnvironmentProtectionLevel = envConfig.Protection
                 ?? DmlSafetyGuard.DetectProtectionLevel(envType);
         }
-    }
-
-    internal static StructuredError BuildDmlFailureError(QueryResult result, string? firstError)
-    {
-        var row = result.Records[0];
-        var failed = (long)row["failed_rows"].Value!;
-        var affected = row["affected_rows"].Value is long a ? a : 0;
-        var message = affected > 0
-            ? $"DML partially succeeded: {affected} row(s) affected, {failed} row(s) failed."
-            : $"DML failed: all {failed} row(s) failed.";
-        if (!string.IsNullOrWhiteSpace(firstError))
-            message += $" First error: {firstError}";
-        return StructuredError.Create(ErrorCodes.Query.ExecutionFailed, message);
     }
 
     private static async Task<string> GetSqlAsync(

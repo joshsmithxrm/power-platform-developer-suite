@@ -695,6 +695,21 @@ public class QueryResultResponse
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? QueryMode { get; set; }
 
+    /// <summary>DML only, when any row failed: total rows that succeeded across all statements.</summary>
+    [JsonPropertyName("affectedRows")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? AffectedRows { get; set; }
+
+    /// <summary>DML only, when any row failed: total rows that failed across all statements.</summary>
+    [JsonPropertyName("failedRows")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? FailedRows { get; set; }
+
+    /// <summary>DML only, when any row failed: counts and a representative error per failed statement.</summary>
+    [JsonPropertyName("dmlError")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DmlError { get; set; }
+
     [JsonPropertyName("dataSources")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<QueryDataSourceDto>? DataSources { get; set; }

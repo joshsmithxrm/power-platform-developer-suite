@@ -203,15 +203,20 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         yield return new QueryRow(values, EntityLogicalName);
     }
 
-    private static (long Success, long Failure) Summarize(
+    private (long Success, long Failure) Summarize(
         QueryPlanContext context,
         BulkOperationResult result)
     {
-        if (result.FailureCount > 0 && context.Statistics.DmlFirstError == null)
+        string? message = null;
+        if (result.FailureCount > 0)
         {
-            var message = result.Errors.FirstOrDefault(e => !string.IsNullOrWhiteSpace(e.Message))?.Message;
-            context.Statistics.DmlFirstError = message ?? "The operation failed without an error message.";
+            // Parallel batches add errors in arbitrary order, so this is a representative error, not the first.
+            message = result.Errors.FirstOrDefault(e => !string.IsNullOrWhiteSpace(e.Message))?.Message
+                ?? "The operation failed without an error message.";
         }
+
+        context.Statistics.AddDmlOutcome(new DmlStatementOutcome(
+            Operation, EntityLogicalName, result.SuccessCount, result.FailureCount, message));
         return (result.SuccessCount, result.FailureCount);
     }
 

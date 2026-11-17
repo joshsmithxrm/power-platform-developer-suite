@@ -441,4 +441,29 @@ public sealed class SqlQueryPresenterTests : IDisposable
     }
 
     #endregion
+
+    #region DML completion status
+
+    [Fact]
+    public void FormatCompletionStatus_DmlFailure_ReportsFailureInsteadOfReturnedRows()
+    {
+        var outcome = DmlOutcome.From(new[]
+        {
+            new DmlStatementOutcome(PPDS.Dataverse.Query.Planning.Nodes.DmlOperation.Delete, "account", 0, 2, "boom")
+        });
+
+        var status = SqlQueryPresenter.FormatCompletionStatus(1, 12, " via Dataverse", outcome);
+
+        Assert.StartsWith("DML failed: all 2 row(s) failed.", status);
+        Assert.DoesNotContain("Returned", status);
+    }
+
+    [Fact]
+    public void FormatCompletionStatus_NoOutcome_KeepsReturnedRowsText()
+    {
+        Assert.Equal("Returned 5 rows in 12ms via Dataverse",
+            SqlQueryPresenter.FormatCompletionStatus(5, 12, " via Dataverse", null));
+    }
+
+    #endregion
 }

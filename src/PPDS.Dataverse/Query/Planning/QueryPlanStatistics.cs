@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading;
 
 namespace PPDS.Dataverse.Query.Planning;
@@ -29,15 +30,23 @@ public sealed class QueryPlanStatistics
     /// <summary>Per-node statistics keyed by node description.</summary>
     public ConcurrentDictionary<string, NodeStatistics> NodeStats { get; } = new();
 
+    private readonly ConcurrentQueue<DmlStatementOutcome> _dmlOutcomes = new();
+
+    /// <summary>
+    /// One outcome per executed DML statement, in execution order. Unlike the paging metadata
+    /// below, this is safe to append to from concurrent nodes.
+    /// </summary>
+    public IReadOnlyList<DmlStatementOutcome> DmlOutcomes => _dmlOutcomes.ToArray();
+
+    /// <summary>Records the outcome of one executed DML statement.</summary>
+    public void AddDmlOutcome(DmlStatementOutcome outcome) => _dmlOutcomes.Enqueue(outcome);
+
     // Paging metadata: only valid for single-scan-node plans (Phase 0).
     // Phase 4 parallel partitioning will need a different approach since each
     // partition has its own paging state. Not protected by Interlocked.
 
     /// <summary>Paging cookie from the last fetched page (for caller-controlled paging).</summary>
     public string? LastPagingCookie { get; set; }
-
-    /// <summary>Message of the first failed row of a DML statement, if any row failed.</summary>
-    public string? DmlFirstError { get; set; }
 
     /// <summary>Whether more records are available after the last fetched page.</summary>
     public bool LastMoreRecords { get; set; }
@@ -93,3 +102,21 @@ public sealed class NodeStatistics
     /// <summary>Adds <paramref name="ms"/> to <see cref="TimeMs"/>.</summary>
     public void AddTimeMs(long ms) => Interlocked.Add(ref _timeMs, ms);
 }
+
+/// <summary>
+/// Result of one executed DML statement (INSERT, UPDATE or DELETE).
+/// </summary>
+/// <param name="Operation">The DML operation.</param>
+/// <param name="EntityLogicalName">The target entity.</param>
+/// <param name="AffectedRows">Rows that succeeded.</param>
+/// <param name="FailedRows">Rows that failed.</param>
+/// <param name="ErrorMessage">
+/// A representative error message when <paramref name="FailedRows"/> is greater than zero. Batches may run in
+/// parallel, so this is not necessarily the error of the first row.
+/// </param>
+public sealed record DmlStatementOutcome(
+    Nodes.DmlOperation Operation,
+    string EntityLogicalName,
+    long AffectedRows,
+    long FailedRows,
+    string? ErrorMessage);

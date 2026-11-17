@@ -226,7 +226,7 @@ public class DmlExecuteNodeCoercionTests
     }
 
     [Fact]
-    public async Task InsertValues_AllRowsFail_RecordsFirstErrorInStatistics()
+    public async Task InsertValues_AllRowsFail_RecordsErrorInStatistics()
     {
         var bulk = new ConfigurableBulkExecutor(0, 1, "The 'CreateMultiple' method does not support entities of type 'solution'.");
         var context = new QueryPlanContext(new StubQueryExecutor(), bulkOperationExecutor: bulk);
@@ -237,11 +237,11 @@ public class DmlExecuteNodeCoercionTests
 
         await foreach (var _ in node.ExecuteAsync(context, CancellationToken.None)) { }
 
-        Assert.Contains("does not support entities of type 'solution'", context.Statistics.DmlFirstError);
+        Assert.Contains("does not support entities of type 'solution'", Assert.Single(context.Statistics.DmlOutcomes).ErrorMessage);
     }
 
     [Fact]
-    public async Task InsertValues_NoFailures_LeavesFirstErrorNull()
+    public async Task InsertValues_NoFailures_LeavesErrorNull()
     {
         var bulk = new ConfigurableBulkExecutor(1, 0, "ignored");
         var context = new QueryPlanContext(new StubQueryExecutor(), bulkOperationExecutor: bulk);
@@ -252,7 +252,7 @@ public class DmlExecuteNodeCoercionTests
 
         await foreach (var _ in node.ExecuteAsync(context, CancellationToken.None)) { }
 
-        Assert.Null(context.Statistics.DmlFirstError);
+        Assert.Null(Assert.Single(context.Statistics.DmlOutcomes).ErrorMessage);
     }
 
     [Fact]
@@ -527,5 +527,89 @@ public class DmlExecuteNodeCoercionTests
                 yield return row;
             }
         }
+    }
+
+    private static StaticPlanNode IdRows(string entity, int count) => new(
+        Enumerable.Range(0, count).Select(_ => new QueryRow(
+            new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase)
+            {
+                [entity + "id"] = QueryValue.Simple(Guid.NewGuid())
+            },
+            entity)).ToArray());
+
+    private static async Task Drain(DmlExecuteNode node, QueryPlanContext context)
+    {
+        await foreach (var _ in node.ExecuteAsync(context, CancellationToken.None)) { }
+    }
+
+    [Fact]
+    public async Task Update_AllFail_RecordsOutcomeWithOperationEntityCountsAndError()
+    {
+        var context = new QueryPlanContext(
+            new StubQueryExecutor(), bulkOperationExecutor: new ConfigurableBulkExecutor(0, 2, "update boom"));
+        CompiledScalarExpression expr = _ => "n";
+        var node = DmlExecuteNode.Update("hsl_pet", IdRows("hsl_pet", 2), new[] { new CompiledSetClause("hsl_name", expr) });
+
+        await Drain(node, context);
+
+        var outcome = Assert.Single(context.Statistics.DmlOutcomes);
+        Assert.Equal(new DmlStatementOutcome(DmlOperation.Update, "hsl_pet", 0, 2, "update boom"), outcome);
+    }
+
+    [Fact]
+    public async Task Delete_AllFail_RecordsOutcomeWithError()
+    {
+        var context = new QueryPlanContext(
+            new StubQueryExecutor(), bulkOperationExecutor: new ConfigurableBulkExecutor(0, 3, "delete boom"));
+        var node = DmlExecuteNode.Delete("hsl_pet", IdRows("hsl_pet", 3));
+
+        await Drain(node, context);
+
+        var outcome = Assert.Single(context.Statistics.DmlOutcomes);
+        Assert.Equal(DmlOperation.Delete, outcome.Operation);
+        Assert.Equal(3, outcome.FailedRows);
+        Assert.Equal("delete boom", outcome.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task InsertSelect_AllFail_RecordsOutcomeWithError()
+    {
+        var context = new QueryPlanContext(
+            new StubQueryExecutor(), bulkOperationExecutor: new ConfigurableBulkExecutor(0, 2, "insert-select boom"));
+        var source = new StaticPlanNode(new[]
+        {
+            new QueryRow(new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase) { ["hsl_name"] = QueryValue.Simple("a") }, "hsl_pet"),
+            new QueryRow(new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase) { ["hsl_name"] = QueryValue.Simple("b") }, "hsl_pet"),
+        });
+        var node = DmlExecuteNode.InsertSelect("hsl_pet", new[] { "hsl_name" }, source);
+
+        await Drain(node, context);
+
+        var outcome = Assert.Single(context.Statistics.DmlOutcomes);
+        Assert.Equal(DmlOperation.Insert, outcome.Operation);
+        Assert.Equal("insert-select boom", outcome.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Failure_WithoutErrorDetail_GetsFallbackMessage()
+    {
+        var context = new QueryPlanContext(
+            new StubQueryExecutor(), bulkOperationExecutor: new ConfigurableBulkExecutor(0, 1));
+        var node = DmlExecuteNode.Delete("hsl_pet", IdRows("hsl_pet", 1));
+
+        await Drain(node, context);
+
+        Assert.Contains("without an error message", Assert.Single(context.Statistics.DmlOutcomes).ErrorMessage);
+    }
+
+    [Fact]
+    public async Task TwoStatements_ShareOneContext_KeepSeparateOutcomesInOrder()
+    {
+        var context = new QueryPlanContext(
+            new StubQueryExecutor(), bulkOperationExecutor: new ConfigurableBulkExecutor(0, 1, "first"));
+        await Drain(DmlExecuteNode.Delete("a", IdRows("a", 1)), context);
+        await Drain(DmlExecuteNode.Delete("b", IdRows("b", 1)), context);
+
+        Assert.Equal(new[] { "a", "b" }, context.Statistics.DmlOutcomes.Select(o => o.EntityLogicalName));
     }
 }

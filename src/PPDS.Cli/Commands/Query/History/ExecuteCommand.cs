@@ -139,24 +139,13 @@ public static class ExecuteCommand
 
             var queryResult = await sqlQueryService.ExecuteAsync(request, cancellationToken);
 
-            switch (globalOptions.OutputFormat)
-            {
-                case Commands.OutputFormat.Json:
-                    writer.WriteSuccess(queryResult.Result);
-                    break;
-                case Commands.OutputFormat.Csv:
-                    QueryResultFormatter.WriteCsvOutput(queryResult.Result);
-                    break;
-                default:
-                    QueryResultFormatter.WriteTableOutput(
-                        queryResult.Result,
-                        globalOptions.Verbose,
-                        fetchXml: null,
-                        pagingHint: "More records available (use 'ppds query sql' with --page for continuation)");
-                    break;
-            }
-
-            return ExitCodes.Success;
+            return SqlCommand.WriteResult(
+                queryResult,
+                globalOptions.OutputFormat,
+                globalOptions.Verbose,
+                writer,
+                fetchXml: null,
+                pagingHint: "More records available (use 'ppds query sql' with --page for continuation)");
         }
         catch (Exception ex)
         {

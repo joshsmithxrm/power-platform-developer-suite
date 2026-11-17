@@ -188,6 +188,7 @@ internal sealed class SqlQueryPresenter : IDisposable
             var totalRows = 0;
             var isFirstChunk = true;
             QueryExecutionMode? executionMode = null;
+            DmlOutcome? dmlOutcome = null;
 
             await foreach (var chunk in service.ExecuteStreamingAsync(request, StreamingChunkSize, queryCt))
             {
@@ -215,6 +216,11 @@ internal sealed class SqlQueryPresenter : IDisposable
                     executionMode = chunk.ExecutionMode;
                 }
 
+                if (chunk.IsComplete)
+                {
+                    dmlOutcome = chunk.DmlOutcome;
+                }
+
                 isFirstChunk = false;
             }
 
@@ -231,7 +237,7 @@ internal sealed class SqlQueryPresenter : IDisposable
             _isExecuting = false;
 
             var modeText = executionMode == QueryExecutionMode.Tds ? " via TDS" : " via Dataverse";
-            var statusText = $"Returned {totalRows:N0} rows in {elapsedMs}ms{modeText}";
+            var statusText = FormatCompletionStatus(totalRows, elapsedMs, modeText, dmlOutcome);
 
             ExecutionComplete?.Invoke(statusText, elapsedMs, executionMode);
 
@@ -272,6 +278,15 @@ internal sealed class SqlQueryPresenter : IDisposable
             ErrorOccurred?.Invoke(ex.Message);
         }
     }
+
+    /// <summary>
+    /// Status line for a finished streaming query. Failed DML rows are reported instead of a plain
+    /// "Returned N rows" (a DML result is one summary row, which read as success).
+    /// </summary>
+    internal static string FormatCompletionStatus(int totalRows, long elapsedMs, string modeText, DmlOutcome? dmlOutcome)
+        => dmlOutcome is { HasFailures: true }
+            ? $"{dmlOutcome.Message} ({elapsedMs}ms{modeText})"
+            : $"Returned {totalRows:N0} rows in {elapsedMs}ms{modeText}";
 
     public async Task ExecuteFetchXmlAsync(string fetchXml, CancellationToken screenCancellation)
     {

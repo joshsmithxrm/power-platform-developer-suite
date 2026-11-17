@@ -257,7 +257,7 @@ public sealed class SqlQueryService : ISqlQueryService
             DataSources = dataSources,
             AppliedHints = appliedHints,
             ExecutionMode = DetectExecutionMode(planResult.RootNode),
-            DmlFirstError = context.Statistics.DmlFirstError
+            DmlOutcome = DmlOutcome.From(context.Statistics.DmlOutcomes)
         };
     }
 
@@ -454,7 +454,8 @@ public sealed class SqlQueryService : ISqlQueryService
             TranspiledFetchXml = isFirstChunk ? planResult.FetchXml : null,
             DataSources = streamDataSources,
             AppliedHints = streamAppliedHints,
-            ExecutionMode = DetectExecutionMode(planResult.RootNode)
+            ExecutionMode = DetectExecutionMode(planResult.RootNode),
+            DmlOutcome = DmlOutcome.From(context.Statistics.DmlOutcomes)
         };
     }
 
