@@ -29,6 +29,7 @@ public sealed class FormConfirmationCoverageTests
             () => service.AddFieldAsync(new("account", "form", "section", ["name"])),
             () => service.RemoveFieldAsync(new("account", "form", "name")),
             () => service.ReorderFieldsAsync(new("account", "form", "section", ["name"])),
+            () => service.ReorderFieldsWithResultAsync(new("account", "form", "section", ["name"])),
             () => service.AddFieldsWithResultAsync(new("account", "form", "section", ["name"])),
             () => service.ReorderFieldsStrictAsync(new("account", "form", "section", ["name"])),
             () => service.MoveFieldAsync(new("account", "form", "name", "section", "section")),

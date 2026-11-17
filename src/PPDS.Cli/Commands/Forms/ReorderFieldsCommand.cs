@@ -135,15 +135,21 @@ public static class ReorderFieldsCommand
             }
 
             var request = new ReorderFieldsRequest(entity, form, section, fieldNames, solution, publish);
-            await formService.ReorderFieldsAsync(request, null, cancellationToken);
+            var reorder = await formService.ReorderFieldsWithResultAsync(request, null, cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { section, fields = fieldNames, message = "Fields reordered." });
+                // The legacy data shape is pinned; the additive field appears only when there is something to report.
+                if (reorder.NonCanonicalBindings is { Count: > 0 })
+                    writer.WriteSuccess(new { section, fields = fieldNames, message = "Fields reordered.", nonCanonicalBindings = reorder.NonCanonicalBindings });
+                else
+                    writer.WriteSuccess(new { section, fields = fieldNames, message = "Fields reordered." });
             }
             else
             {
                 Console.Error.WriteLine($"Fields in section '{section}' reordered.");
+                foreach (var binding in reorder.NonCanonicalBindings ?? [])
+                    Console.Error.WriteLine(FormsCommandGroup.NonCanonicalNotice(binding));
             }
 
             return ExitCodes.Success;
