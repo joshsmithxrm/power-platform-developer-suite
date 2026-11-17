@@ -863,7 +863,8 @@ def build_evidence(rt, plan, output, source, project, work, props, probe, contro
             require(dependency.get("autoReferenced") is True, "Unpinned direct build dependency")
             reference, pin = "direct-sdk-implicit", None
         signature = signature_verification(
-            invoke(rt, plan, "dotnet", ["nuget", "verify", "--all", archive], output,
+            # Normal verbosity: the default omits the service index and the success line.
+            invoke(rt, plan, "dotnet", ["nuget", "verify", "--all", archive, "-v", "normal"], output,
                    "package-signature-verification", build=True, nuget=True, cwd=source),
             package_id, version, source_url)
         require(signature["content_sha512"] == library["sha512"], "Verified package content hash differs")

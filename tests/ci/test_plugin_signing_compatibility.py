@@ -1172,7 +1172,7 @@ class BuildEvidenceFixture:
         if operation == "selected-sdk":
             return "10.0.403"
         if operation == "package-signature-verification":
-            assert argv[:3] == ["nuget", "verify", "--all"]
+            assert argv[:3] == ["nuget", "verify", "--all"] and argv[4:] == ["-v", "normal"]
             return self.verified[argv[3]]
         assert operation == "compiler-product-version"
         return "1.2.3.4"
