@@ -7,18 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Security
-
-- Metadata option-color failures keep their existing error code while structured MCP errors omit SDK diagnostic text from the bounded service-owned messages. Synthetic read/write checks cover fake ClientSecret and Bearer details; initial raw-failure fallback and covered cancellation/acquisition behavior remain. No repository-wide or log-privacy guarantee is implied.
-
-### Fixed
-
-- Global-choice creation preserves omitted versus explicit-zero values and returns existing service warnings in additive validationMessages output (#1530). Explicit out-of-range values remain unchanged.
-
-
-- Metadata option-add reports Connection.Timeout for normalized pool acquisition timeouts and preserves cancellation from covered option-color SDK operations. CLI timeout/cancellation exits remain 4/2; raw service errors outside normalization retain their existing generic fallback.
-
-## [1.3.0] - 2026-11-01
+## [1.3.0] - Unreleased
 
 ### Added
 
@@ -28,15 +17,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Captured startup authentication/target defaults. Allowed switches affect future calls in that session without changing global defaults; creating or replacing startup authentication requires a server restart.
 - Form writes require `confirmEnvironment` when effective protection requires acknowledgement. `--allowed-env` permits switching but does not authorize writes; `--read-only` rejects covered form mutations. Publication separately requires `confirmPublishEntity`, publishes all pending customizations for that table and verifies only the selected form (#1015, partial).
-- Updated to consume CLI 1.5.0 and the coordinated library/runtime dependency refresh, including Microsoft.Extensions.Hosting 10.0.14 (#1501).
+- Updated to consume CLI 1.5.0 and the coordinated library/runtime dependency refresh, including Microsoft.Extensions.Hosting 10.0.14 (#1501), MSAL 4.92.0 (#1513) and System.Text.Json 10.0.14 (#1565).
+- `ppds_metadata_update_table`, `ppds_metadata_create_table` and `ppds_metadata_add_option_value` share the CLI metadata service's earlier return of pooled connections before cache invalidation, option-colour and publication follow-ups, so these calls can complete with one available pooled connection. Separate requests can still complete partially if a later step fails.
+- `ppds_metadata_update_column` can change the display name and description of State, Status and unique-identifier (GUID) columns, including a table's primary ID; any other setting on these columns is rejected (#1550, #1559).
 - **Compatibility exception for this release only** - Josh approved CLI 1.5.0 and MCP 1.3.0 on 2026-11-01 with explicit protected-write/session migration and custom-embedder signature incompatibilities. This is not a blanket backward-compatibility claim or a permanent version-policy waiver; see the [scoped exception and migration guide](https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/docs/releases/v1.8.0.md#one-release-compatibility-exception).
 
 ### Fixed
 
+- Global-choice creation preserves omitted versus explicit-zero values and returns existing service warnings in additive validationMessages output (#1530). Explicit out-of-range values remain unchanged.
+- Metadata option-add reports Connection.Timeout for normalized pool acquisition timeouts and preserves cancellation from covered option-color SDK operations. CLI timeout/cancellation exits remain 4/2; raw service errors outside normalization retain their existing generic fallback.
+- `ppds_metadata_update_choice` and `ppds_metadata_add_option_value` accept a global choice name that differs from the stored name only by case, through the shared CLI metadata service. The stored name is looked up only when Dataverse reports the option set as not found; other errors are unchanged. If several stored names match by case the call fails; the MCP error for that case is the generic `Operation.Internal` (the CLI reports `INVALID_CONSTRAINT` for the same condition) (#1535).
+- When `confirmEnvironment` is required because the environment has no saved type, the error now adds that the environment is treated as Production and how to record its type. The error code is unchanged (#1533).
 - Auth inspection reports the actual session target after `--environment` overrides and allowed environment switches, matching subsequent operations.
 - Captured profile/target snapshots and pool identity prevent external default changes or reused profile names from redirecting in-flight operations.
 
 ### Security
+
+- Metadata option-color failures keep their existing error code while structured MCP errors omit SDK diagnostic text from the bounded service-owned messages. Synthetic read/write checks cover fake ClientSecret and Bearer details; initial raw-failure fallback and covered cancellation/acquisition behavior remain. No repository-wide or log-privacy guarantee is implied.
+- The CLI metadata service's fixed, diagnostic-free messages for covered SDK/catalog read failures also reach MCP `userMessage` text through `ppds_metadata_add_option_value` and `ppds_metadata_update_column` (primary ID labels). Error codes are unchanged.
 
 - Rejected disallowed or malformed environment URLs before direct authenticated resolution. Name-based selection now uses discovery only, then enforces the session allowlist; final switching rechecks the resolved target.
 
