@@ -173,6 +173,45 @@ internal static partial class FormXmlEditor
         => section.Descendants("control").Any(control => string.Equals(
             (string?)control.Attribute("datafieldname"), fieldLogicalName, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// Returns the stored <c>datafieldname</c> spelling of a control in the section bound to the field (case-insensitive).
+    /// A non-canonical spelling is preferred when the section holds several controls for the column.
+    /// </summary>
+    internal static string? FindStoredBinding(XElement section, string fieldLogicalName)
+    {
+        var matches = section.Descendants("control")
+            .Select(control => (string?)control.Attribute("datafieldname"))
+            .Where(name => string.Equals(name, fieldLogicalName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        return matches.FirstOrDefault(name => !string.Equals(name, fieldLogicalName, StringComparison.Ordinal)) ?? matches.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Describes the label-based locations ("Tab / Section", "Header" or "Footer") of every placement of the field
+    /// outside the given section, in document order. Distinct sections that share labels collapse to one entry.
+    /// </summary>
+    internal static IReadOnlyList<string> FindPlacementsOutside(XDocument formXml, XElement section, string fieldLogicalName)
+    {
+        var result = new List<string>();
+        foreach (var other in formXml.Descendants("section"))
+        {
+            if (ReferenceEquals(other, section) || !ContainsField(other, fieldLogicalName)) continue;
+            var tab = other.Ancestors("tab").FirstOrDefault();
+            var location = tab is null ? Describe(other) : $"{Describe(tab)} / {Describe(other)}";
+            if (!result.Contains(location, StringComparer.Ordinal)) result.Add(location);
+        }
+        // Header and footer hold rows/cells directly (no sections).
+        foreach (var area in formXml.Root?.Elements() ?? [])
+            if ((area.Name.LocalName is "header" or "footer") && ContainsField(area, fieldLogicalName))
+                result.Add(area.Name.LocalName == "header" ? "Header" : "Footer");
+        return result;
+
+        static string Describe(XElement element)
+            => (string?)element.Element("labels")?.Element("label")?.Attribute("description")
+                is { Length: > 0 } label ? label
+                : (string?)element.Attribute("name") ?? (string?)element.Attribute("id") ?? "(unnamed)";
+    }
+
     internal static XDocument AddField(XDocument formXml, string sectionLabel, string fieldLogicalName, string classId, string displayName)
     {
         var section = RequireSection(formXml, sectionLabel);

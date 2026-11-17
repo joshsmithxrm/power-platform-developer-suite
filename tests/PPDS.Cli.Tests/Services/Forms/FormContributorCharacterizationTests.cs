@@ -393,6 +393,14 @@ internal sealed class ContributorFormHarness
     internal ServiceProvider CreateProvider() => new ServiceCollection().AddSingleton<IFormService>(Service)
         .AddSingleton<IEnvironmentConfirmationService>(_confirmation.Object).BuildServiceProvider();
 
+    /// <summary>Provider for text-mode command runs, which print the connected-as header.</summary>
+    internal ServiceProvider CreateTextProvider(IFormService? service = null) => new ServiceCollection()
+        .AddSingleton(service ?? Service)
+        .AddSingleton<IEnvironmentConfirmationService>(_confirmation.Object)
+        .AddSingleton(new PPDS.Cli.Infrastructure.ResolvedConnectionInfo
+            { Profile = new PPDS.Auth.Profiles.AuthProfile { Name = "offline-fixture" }, EnvironmentUrl = "https://forms.example.test" })
+        .BuildServiceProvider();
+
     internal object Snapshot()
     {
         var doc = XDocument.Parse(StateXml);

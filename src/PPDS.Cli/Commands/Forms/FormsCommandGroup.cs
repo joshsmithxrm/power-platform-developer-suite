@@ -1,6 +1,7 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Services.Environment;
+using PPDS.Cli.Services.Forms;
 
 namespace PPDS.Cli.Commands.Forms;
 
@@ -26,6 +27,11 @@ public static class FormsCommandGroup
     {
         Description = "Acknowledge writing to this exact resolved environment URL"
     };
+
+    internal static string NonCanonicalNotice(NonCanonicalBinding binding)
+        => $"Warning: an existing control is bound to '{binding.StoredName}', which differs from the column's logical name '{binding.CanonicalName}' by case; " +
+           "this has been reported to stop the control rendering (#1527). The control was left unchanged. " +
+           "Removing and re-adding the field discards that cell's authored labels and settings; editing the binding via 'forms get --raw' and 'forms set-xml' preserves them.";
 
     internal static Task ConfirmEnvironmentAsync(IServiceProvider provider, string? confirmedEnvironment, CancellationToken ct)
         => provider.GetRequiredService<IEnvironmentConfirmationService>()

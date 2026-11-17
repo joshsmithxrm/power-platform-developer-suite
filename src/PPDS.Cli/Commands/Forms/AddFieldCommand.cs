@@ -144,11 +144,16 @@ public static class AddFieldCommand
                     duplicateRequestCount = result.CountsKnown ? result.DuplicateRequests!.Count : (int?)null,
                     addedFields = result.AddedFields, alreadyPresentFields = result.AlreadyPresentFields,
                     duplicateRequests = result.DuplicateRequests, formXmlChanged = result.FormXmlChanged,
-                    solutionAssociationRequested = result.SolutionAssociationRequested, publicationRequested = result.PublicationRequested });
+                    solutionAssociationRequested = result.SolutionAssociationRequested, publicationRequested = result.PublicationRequested,
+                    otherPlacements = result.OtherPlacements, nonCanonicalBindings = result.NonCanonicalBindings });
             }
             else
             {
                 Console.Error.WriteLine(message);
+                foreach (var notice in result.OtherPlacements ?? [])
+                    Console.Error.WriteLine($"Notice: '{notice.Field}' is also placed elsewhere on this form: {string.Join("; ", notice.Locations)}. It was added to '{section}' as requested.");
+                foreach (var binding in result.NonCanonicalBindings ?? [])
+                    Console.Error.WriteLine(FormsCommandGroup.NonCanonicalNotice(binding));
             }
 
             return ExitCodes.Success;
