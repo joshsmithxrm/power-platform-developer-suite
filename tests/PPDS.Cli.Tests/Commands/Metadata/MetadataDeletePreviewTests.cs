@@ -115,7 +115,7 @@ public sealed class MetadataDeletePreviewTests
         var help = fixture.Command(noun).Options.Single(o => o.Name == "--dry-run").Description!;
         Assert.Contains("dependencies", help, StringComparison.OrdinalIgnoreCase);
         if (noun is "global-option" or "local-option") Assert.Contains("not checked", help);
-        else { Assert.Contains("without deleting", help); Assert.Contains("incomplete", help); Assert.Contains("exit 10", help); Assert.Contains("exit 12", help); }
+        else { Assert.Contains("without deleting", help); Assert.Contains("incomplete", help); Assert.Contains("exit 10", help); Assert.Contains("exit 12", help); Assert.Contains("for a dry run and for a real delete that is refused", help); Assert.Contains("the exit code table in the CLI README", help); }
     }
 
     [Theory]

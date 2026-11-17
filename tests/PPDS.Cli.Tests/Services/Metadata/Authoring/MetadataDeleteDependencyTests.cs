@@ -262,6 +262,7 @@ public sealed class MetadataDeleteDependencyTests
         internal bool FailName { get; init; }
         internal bool AllowDelete { get; init; }
         internal int BlockersFromDependencyRead { get; init; }
+        internal int IncompleteFromDependencyRead { get; init; }
         internal CancellationToken Token => _operationToken;
         internal OperationCanceledException Cancellation { get; private set; }
         internal Exception SdkFailure { get; } = new InvalidOperationException("ClientSecret=SyntheticClientSecret; fake provider diagnostic");
@@ -326,7 +327,7 @@ public sealed class MetadataDeleteDependencyTests
                                     rows.Entities.Add(view);
                                     if (blocked) rows.Entities.Add(new Entity("dependency") { ["dependentcomponentobjectid"] = UnknownId, ["dependentcomponenttype"] = new OptionSetValue(90000) });
                                 }
-                                rows.MoreRecords = DependencyShape == "more-records";
+                                rows.MoreRecords = DependencyShape == "more-records" || IncompleteFromDependencyRead > 0 && _dependencyReads >= IncompleteFromDependencyRead;
                                 return Task.FromResult<OrganizationResponse>(new RetrieveDependenciesForDeleteResponse { Results = new ParameterCollection { ["EntityCollection"] = DependencyShape == "null-collection" ? null! : rows } });
                             }
                             var metadataId = IdentityShape == "missing-id" ? (Guid?)null : TargetId;
