@@ -22,7 +22,7 @@ public class DmlRefusalWordingTests
     {
         var h = DmlTestHarness.Create(rows: 1);
 
-        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(
+        var ex = await Assert.ThrowsAsync<PpdsDmlConfirmationRequiredException>(() => h.Service.ExecuteAsync(
             new SqlQueryRequest { Sql = DeleteSql, DmlSafety = new DmlSafetyOptions() }));
 
         Assert.Equal(SqlQueryService.ConfirmationRequiredMessage, ex.UserMessage);
@@ -32,6 +32,65 @@ public class DmlRefusalWordingTests
         var cli = DmlSafetyOptionSet.WithCliWording(ExceptionMapper.Map(ex), ex);
         Assert.Equal("DML operations require --confirm to execute. Use --dry-run to preview the operation.", cli.Message);
         Assert.Equal(ErrorCodes.Query.DmlConfirmationRequired, cli.Code);
+    }
+
+    [Fact]
+    public async Task ConfirmationRequired_Rpc_ListsTheEnvironmentItWouldWriteTo()
+    {
+        var h = DmlTestHarness.Create(rows: 1, protection: PPDS.Auth.Profiles.ProtectionLevel.Production);
+        h.Service.ConfigureEnvironment("https://prod.crm.dynamics.com/", new PPDS.Auth.Profiles.EnvironmentConfig
+        {
+            Url = "https://prod.crm.dynamics.com/",
+            Label = "PROD",
+            Type = PPDS.Auth.Profiles.EnvironmentType.Production
+        });
+
+        var ex = await Assert.ThrowsAsync<PpdsDmlConfirmationRequiredException>(() => h.Service.ExecuteAsync(
+            new SqlQueryRequest { Sql = DeleteSql, DmlSafety = new DmlSafetyOptions() }));
+        Assert.True(RpcMethodHandler.TryMapQuerySqlFailure(ex, DeleteSql, out var rpc));
+
+        var data = JsonDocument.Parse(JsonSerializer.Serialize(rpc!.ErrorData, rpc.ErrorData!.GetType())).RootElement;
+        Assert.True(data.GetProperty("dmlConfirmationRequired").GetBoolean());
+        var target = Assert.Single(data.GetProperty("dmlTargets").EnumerateArray().ToList());
+        Assert.Equal("PROD", target.GetProperty("label").GetString());
+        Assert.Equal("https://prod.crm.dynamics.com/", target.GetProperty("url").GetString());
+        Assert.Equal("Production", target.GetProperty("type").GetString());
+        Assert.Equal("Production", target.GetProperty("protection").GetString());
+    }
+
+    [Fact]
+    public async Task ConfirmationRequired_ForAnUnconfiguredEnvironment_ReportsItsUrlAndTheProtectionApplied()
+    {
+        var h = DmlTestHarness.Create(rows: 1);
+        h.Service.ConfigureEnvironment("https://dev.crm.dynamics.com/", config: null);
+
+        var ex = await Assert.ThrowsAsync<PpdsDmlConfirmationRequiredException>(() => h.Service.ExecuteAsync(
+            new SqlQueryRequest { Sql = DeleteSql, DmlSafety = new DmlSafetyOptions() }));
+
+        var target = Assert.Single(ex.Targets);
+        Assert.Equal(new DmlTarget(null, "https://dev.crm.dynamics.com/", null, "Development"), target);
+    }
+
+    [Fact]
+    public async Task ReadOnlyCrossEnvironmentWrite_IsRefusedBeforeConfirmationIsAskedFor()
+    {
+        var h = DmlTestHarness.Create(rows: 1);
+        h.Service.RemoteExecutorFactory = _ => new Moq.Mock<PPDS.Dataverse.Query.IQueryExecutor>().Object;
+        h.Service.ProfileResolver = new PPDS.Cli.Services.ProfileResolutionService(
+        [
+            new PPDS.Auth.Profiles.EnvironmentConfig
+            {
+                Url = "https://qa.crm.dynamics.com/", Label = "QA",
+                SafetySettings = new PPDS.Auth.Profiles.QuerySafetySettings { CrossEnvironmentDmlPolicy = PPDS.Auth.Profiles.CrossEnvironmentDmlPolicy.ReadOnly }
+            }
+        ]);
+
+        // Unconfirmed: the policy refusal comes first, so confirming would not lead to it.
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(
+            new SqlQueryRequest { Sql = "DELETE FROM [QA].account WHERE name = 'x'", DmlSafety = new DmlSafetyOptions() }));
+
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        Assert.Contains("read-only", ex.Message);
     }
 
     [Fact]

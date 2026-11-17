@@ -27,3 +27,27 @@ public sealed class PpdsDmlRowCapExceededException : PpdsException
     /// <summary>The cap that would have been exceeded.</summary>
     public int RowCap { get; }
 }
+
+/// <summary>An environment a DML request would write to, as reported with <c>Query.DmlConfirmationRequired</c>.</summary>
+/// <param name="Label">The environment's configured label, if any.</param>
+/// <param name="Url">The environment URL, when the caller supplied it.</param>
+/// <param name="Type">The configured environment type (Production, Sandbox, ...), when known.</param>
+/// <param name="Protection">The protection level the guard applied (Production, Test, Development).</param>
+public sealed record DmlTarget(string? Label, string? Url, string? Type, string Protection);
+
+/// <summary>
+/// DML was requested without confirmation (<c>Query.DmlConfirmationRequired</c>). Carries every environment the
+/// request would write to, so a client can show where the change will happen before asking.
+/// </summary>
+public sealed class PpdsDmlConfirmationRequiredException : PpdsException
+{
+    /// <summary>Creates the refusal.</summary>
+    public PpdsDmlConfirmationRequiredException(string message, IReadOnlyList<DmlTarget> targets)
+        : base(ErrorCodes.Query.DmlConfirmationRequired, message)
+    {
+        Targets = targets;
+    }
+
+    /// <summary>The environments the request would write to.</summary>
+    public IReadOnlyList<DmlTarget> Targets { get; }
+}

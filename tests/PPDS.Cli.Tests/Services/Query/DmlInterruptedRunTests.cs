@@ -183,7 +183,7 @@ public class DmlInterruptedRunTests
     public async Task Rpc_ConfirmationRequired_AndBlocked_CarryTheirFlags()
     {
         var h = DmlTestHarness.Create(rows: 1);
-        var confirm = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(
+        var confirm = await Assert.ThrowsAsync<PpdsDmlConfirmationRequiredException>(() => h.Service.ExecuteAsync(
             new SqlQueryRequest { Sql = "DELETE FROM account WHERE name = 'x'", DmlSafety = new DmlSafetyOptions() }));
         var blocked = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(
             new SqlQueryRequest { Sql = "DELETE FROM account", DmlSafety = Confirmed }));

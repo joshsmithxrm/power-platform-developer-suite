@@ -38,7 +38,7 @@ public class DmlGuardFailClosedTests
     {
         var (service, executor, bulk) = Create();
 
-        var ex = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(new SqlQueryRequest { Sql = sql }));
+        var ex = await Assert.ThrowsAsync<PpdsDmlConfirmationRequiredException>(() => service.ExecuteAsync(new SqlQueryRequest { Sql = sql }));
 
         Assert.Equal(ErrorCodes.Query.DmlConfirmationRequired, ex.ErrorCode);
         executor.VerifyNoOtherCalls();
@@ -50,7 +50,7 @@ public class DmlGuardFailClosedTests
     {
         var (service, executor, bulk) = Create();
 
-        var ex = await Assert.ThrowsAsync<PpdsException>(async () =>
+        var ex = await Assert.ThrowsAsync<PpdsDmlConfirmationRequiredException>(async () =>
         {
             await foreach (var _ in service.ExecuteStreamingAsync(new SqlQueryRequest { Sql = "DELETE FROM account WHERE name = 'x'" })) { }
         });
@@ -79,7 +79,7 @@ public class DmlGuardFailClosedTests
     {
         var (service, _, _) = Create(ProtectionLevel.Production);
 
-        var ex = await Assert.ThrowsAsync<PpdsException>(
+        var ex = await Assert.ThrowsAsync<PpdsDmlConfirmationRequiredException>(
             () => service.ExecuteAsync(new SqlQueryRequest { Sql = "DELETE FROM account WHERE name = 'x'" }));
 
         Assert.Equal(ErrorCodes.Query.DmlConfirmationRequired, ex.ErrorCode);
@@ -120,7 +120,7 @@ public class DmlGuardFailClosedTests
         var (service, executor, bulk) = Create();
         var request = RpcMethodHandler.BuildSqlRequest(new QuerySqlRequest { Sql = "DELETE FROM account WHERE name = 'x'" });
 
-        var ex = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
+        var ex = await Assert.ThrowsAsync<PpdsDmlConfirmationRequiredException>(() => service.ExecuteAsync(request));
 
         Assert.Equal(ErrorCodes.Query.DmlConfirmationRequired, ex.ErrorCode);
         executor.VerifyNoOtherCalls();

@@ -248,6 +248,9 @@ public partial class RpcMethodHandler
                     Code = ErrorCodes.Query.DmlConfirmationRequired,
                     Message = confirm.UserMessage,
                     DmlConfirmationRequired = true,
+                    DmlTargets = (confirm as PpdsDmlConfirmationRequiredException)?.Targets
+                        .Select(t => new DmlTargetDto { Label = t.Label, Url = t.Url, Type = t.Type, Protection = t.Protection })
+                        .ToList(),
                 }),
             PpdsException { ErrorCode: ErrorCodes.Query.DmlBlocked } blocked =>
                 new RpcException(ErrorCodes.Query.DmlBlocked, blocked.UserMessage, new DmlSafetyErrorData

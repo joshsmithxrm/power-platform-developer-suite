@@ -57,6 +57,28 @@ public sealed class SqlQueryService : ISqlQueryService
     /// </summary>
     public ProfileResolutionService? ProfileResolver { get; set; }
 
+    private string? _environmentUrl;
+    private string? _environmentLabel;
+    private string? _environmentType;
+
+    /// <summary>
+    /// Applies the connected environment's DML safety settings and protection level (from its configuration, when
+    /// there is one; otherwise the defaults stay: Production protection) and records its identity, which is reported
+    /// as the write target when confirmation is required. Every surface calls this, so they configure the guard alike.
+    /// </summary>
+    public void ConfigureEnvironment(string environmentUrl, EnvironmentConfig? config)
+    {
+        _environmentUrl = environmentUrl;
+        _environmentLabel = config?.Label;
+        _environmentType = config?.Type?.ToString();
+        if (config == null)
+            return;
+
+        EnvironmentSafetySettings = config.SafetySettings;
+        EnvironmentProtectionLevel = config.Protection
+            ?? DmlSafetyGuard.DetectProtectionLevel(config.Type ?? EnvironmentType.Unknown);
+    }
+
     /// <summary>
     /// Creates a new instance of <see cref="SqlQueryService"/>.
     /// </summary>
@@ -682,7 +704,10 @@ public sealed class SqlQueryService : ISqlQueryService
         if (safetyResult.ContainsDml && safetyResult.RequiresConfirmation && !safetyResult.IsDryRun)
         {
             // Surface-neutral: the CLI replaces it with its --confirm/--dry-run wording, the TUI and the extension ask.
-            throw new PpdsException(ErrorCodes.Query.DmlConfirmationRequired, ConfirmationRequiredMessage);
+            // Writes to another environment were refused above, so the connected environment is the only target.
+            throw new PpdsDmlConfirmationRequiredException(
+                ConfirmationRequiredMessage,
+                [new DmlTarget(_environmentLabel, _environmentUrl, _environmentType, EnvironmentProtectionLevel.ToString())]);
         }
 
         dmlRowCap = safetyResult.RowCap;

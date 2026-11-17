@@ -295,14 +295,7 @@ public partial class RpcMethodHandler
                     _logger.LogWarning("Environment config has duplicate or reserved labels — cross-environment queries disabled");
                 }
 
-                var envConfig = await configStore.GetConfigAsync(env.Url, ct);
-                if (envConfig != null)
-                {
-                    concrete.EnvironmentSafetySettings = envConfig.SafetySettings;
-                    var envType = envConfig.Type ?? PPDS.Auth.Profiles.EnvironmentType.Unknown;
-                    concrete.EnvironmentProtectionLevel = envConfig.Protection
-                        ?? DmlSafetyGuard.DetectProtectionLevel(envType);
-                }
+                concrete.ConfigureEnvironment(env.Url, await configStore.GetConfigAsync(env.Url, ct));
             }
 
             // Build the shared request

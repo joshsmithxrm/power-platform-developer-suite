@@ -604,7 +604,7 @@ public class SqlQueryServiceTests
             DmlSafety = new DmlSafetyOptions()
         };
 
-        var exception = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
+        var exception = await Assert.ThrowsAsync<PpdsDmlConfirmationRequiredException>(() => service.ExecuteAsync(request));
 
         Assert.Equal(ErrorCodes.Query.DmlConfirmationRequired, exception.ErrorCode);
     }

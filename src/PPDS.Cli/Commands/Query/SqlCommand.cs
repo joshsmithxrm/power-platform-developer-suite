@@ -481,14 +481,7 @@ public static class SqlCommand
         CancellationToken cancellationToken)
     {
         service.ProfileResolver = resolver;
-        var envConfig = await envConfigStore.GetConfigAsync(environmentUrl, cancellationToken);
-        if (envConfig != null)
-        {
-            service.EnvironmentSafetySettings = envConfig.SafetySettings;
-            var envType = envConfig.Type ?? EnvironmentType.Unknown;
-            service.EnvironmentProtectionLevel = envConfig.Protection
-                ?? DmlSafetyGuard.DetectProtectionLevel(envType);
-        }
+        service.ConfigureEnvironment(environmentUrl, await envConfigStore.GetConfigAsync(environmentUrl, cancellationToken));
     }
 
     private static async Task<string> GetSqlAsync(
