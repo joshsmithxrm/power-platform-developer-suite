@@ -878,3 +878,65 @@ def test_build_evidence_checks_actual_properties_and_package_hashes(monkeypatch,
     props["Configuration"] = "Debug"
     with pytest.raises(d.Error, match="properties differ"):
         call()
+
+
+class GitDouble(d.Runtime):
+    """Answers the source-inspection git calls from a table; launches nothing."""
+    def __init__(self, answers):
+        super().__init__(evidence_class="process-double")
+        self.answers = answers
+
+    def run(self, command, **kwargs):
+        assert kwargs["operation"] == "source-identity"
+        return SimpleNamespace(returncode=0, stdout=self.answers[tuple(command[3:])], stderr="")
+
+
+def tracked_tree(tmp_path, monkeypatch, plan, files):
+    tree = tmp_path / "tree"
+    for name, raw in files.items():
+        target = tree / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(raw)
+    monkeypatch.setattr(d, "ROOT", tree)
+    monkeypatch.setattr(d, "HELPERS", ("helper.py",))
+    monkeypatch.setattr(d, "pin", lambda *args: None)
+    output = tmp_path / "output"
+    output.mkdir()
+    answers = {("rev-parse", "HEAD"): plan["source"] + "\n", ("rev-parse", "HEAD^{tree}"): plan["tree"] + "\n",
+               ("status", "--porcelain"): "", ("ls-files", "-z"): "\0".join(files) + "\0"}
+    return tree, output, GitDouble(answers)
+
+
+def test_source_copy_admits_empty_tracked_files(tmp_path, monkeypatch, plan):
+    # The real repository tracks zero-byte files (.gitkeep, package __init__.py). A reader
+    # that requires a non-empty handoff file refused them, so PREPARE could never pass.
+    files = {"helper.py": b"print('helper')\n", "pkg/__init__.py": b"", "keep/.gitkeep": b""}
+    tree, output, rt = tracked_tree(tmp_path, monkeypatch, plan, files)
+    copied, inputs = d.source_copy(rt, plan, tree, output)
+    assert copied == output / "source"
+    for name, raw in files.items():
+        assert (copied / name).read_bytes() == raw
+        assert inputs[name] == d.digest(raw)
+    assert set(inputs) == set(files)
+
+
+def test_read_source_keeps_every_other_regular_file_rule_for_empty_files(tmp_path):
+    empty = tmp_path / "empty.txt"
+    empty.write_bytes(b"")
+    assert d.read_source(empty) == b""
+    os.link(empty, tmp_path / "second-name.txt")
+    with pytest.raises(d.Error, match="Regular tracked source file required"):
+        d.read_source(empty)
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    with pytest.raises(d.Error):
+        d.read_source(directory)
+
+
+def test_read_source_still_applies_the_handoff_rule_to_non_empty_files(tmp_path):
+    present = tmp_path / "present.txt"
+    present.write_bytes(b"content")
+    assert d.read_source(present) == b"content"
+    os.link(present, tmp_path / "second-name.txt")
+    with pytest.raises(d.Error, match="Bounded regular handoff file required"):
+        d.read_source(present)

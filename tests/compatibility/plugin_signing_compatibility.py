@@ -136,6 +136,21 @@ def read(path, limit=h.MAX_PACKAGE):
     return h.regular_bytes(path, limit)
 
 
+def read_source(path):
+    # Tracked source can legitimately be empty (.gitkeep, package __init__.py). A handoff
+    # file must not be, so the empty case is admitted here only, with every other
+    # regular-file property still required: no link, no reparse point, a single name.
+    path = Path(path)
+    local_path(path)
+    info = path.lstat()
+    if info.st_size:
+        return h.regular_bytes(path, h.MAX_PACKAGE)
+    require(stat.S_ISREG(info.st_mode) and not path.is_symlink() and info.st_nlink == 1
+            and not getattr(info, "st_file_attributes", 0) & 0x400, "Regular tracked source file required")
+    require(path.read_bytes() == b"", "Tracked source file changed while reading")
+    return b""
+
+
 def record(path):
     raw = read(path)
     return {"sha256": digest(raw), "bytes": len(raw)}
@@ -588,7 +603,7 @@ def source_copy(rt, plan, source, output):
     for name in filter(None, names):
         require(not Path(name).is_absolute() and "\\" not in name and ".." not in Path(name).parts
                 and Path(name).suffix.lower() != ".snk", "Unsafe source inventory")
-        data = read(source / name)
+        data = read_source(source / name)
         target = copied / name
         target.parent.mkdir(parents=True, exist_ok=True)
         write(target, data)
