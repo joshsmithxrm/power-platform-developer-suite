@@ -156,7 +156,7 @@ public sealed class MetadataSdkDiagnosticPrivacyProbeTests
                         {
                             InsertOptionValueRequest => "insert",
                             RetrieveOptionSetRequest => "global-color-read",
-                            UpdateOptionSetRequest => "global-color-write",
+                            Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest u when u.Parameters.ContainsKey("Color") => "global-color-write",
                             _ => throw new InvalidOperationException("Unexpected synthetic SDK request")
                         };
                         _calls.Add(current);

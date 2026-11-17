@@ -36,7 +36,7 @@ public class MetadataLocalOptionServiceTests
     // Stateful backing store so a post-insert retrieve (used by the color step) sees the new option.
     private readonly List<OptionMetadata> _options = new();
     private OrganizationRequest? _captured;
-    private UpdateAttributeRequest? _capturedColorUpdate;
+    private SdkUpdateOptionValueRequest? _capturedColorUpdate;
 
     public MetadataLocalOptionServiceTests()
     {
@@ -48,7 +48,7 @@ public class MetadataLocalOptionServiceTests
     /// <summary>
     /// Seeds the column's local option set and wires the mock client to serve RetrieveAttribute from the
     /// live <see cref="_options"/> list, capture Insert/Update/Delete OptionValue, and capture the
-    /// UpdateAttribute color follow-up.
+    /// colour follow-up (UpdateOptionValue carrying the Color parameter).
     /// </summary>
     private void SetupColumnOptions(params (int value, string label)[] options)
     {
@@ -77,25 +77,24 @@ public class MetadataLocalOptionServiceTests
                         var insResponse = new InsertOptionValueResponse();
                         insResponse.Results["NewOptionValue"] = insertedValue;
                         return Task.FromResult<OrganizationResponse>(insResponse);
+                    case SdkUpdateOptionValueRequest colour when colour.Parameters.ContainsKey("Color"):
+                        _capturedColorUpdate = colour;
+                        return Task.FromResult<OrganizationResponse>(new UpdateOptionValueResponse());
                     case SdkUpdateOptionValueRequest:
                         _captured = req;
                         return Task.FromResult<OrganizationResponse>(new UpdateOptionValueResponse());
                     case SdkDeleteOptionValueRequest:
                         _captured = req;
                         return Task.FromResult<OrganizationResponse>(new DeleteOptionValueResponse());
-                    case UpdateAttributeRequest upd:
-                        _capturedColorUpdate = upd;
-                        return Task.FromResult<OrganizationResponse>(new UpdateAttributeResponse());
                     default:
                         return Task.FromResult(new OrganizationResponse());
                 }
             });
     }
 
-    /// <summary>Reads the color the service applied to <paramref name="value"/> via UpdateAttribute.</summary>
+    /// <summary>Reads the color the service's colour write applied to <paramref name="value"/>.</summary>
     private string? CapturedColorFor(int value)
-        => ((_capturedColorUpdate?.Attribute as EnumAttributeMetadata)?.OptionSet?.Options)
-            ?.FirstOrDefault(o => o.Value == value)?.Color;
+        => _capturedColorUpdate is { } update && update.Value == value ? update["Color"] as string : null;
 
     [Fact]
     public async Task AddColumnOption_ExplicitValue_InsertsScopedToColumn() // AC-55
@@ -120,7 +119,7 @@ public class MetadataLocalOptionServiceTests
     }
 
     [Fact]
-    public async Task AddColumnOption_WithColor_AppliesColorViaUpdateAttribute() // AC-55 + color (Gemini #review)
+    public async Task AddColumnOption_WithColor_AppliesColorViaUpdateOptionValueColorParameter() // AC-55 + color (Gemini #review)
     {
         SetupColumnOptions((864630000, "Mild"));
 
@@ -133,10 +132,12 @@ public class MetadataLocalOptionServiceTests
             Color = "#FF8800"
         });
 
-        // The Insert message does not carry color — a follow-up UpdateAttribute sets OptionMetadata.Color.
+        // The Insert message does not carry color — a follow-up UpdateOptionValue carries the Color parameter.
         ((InsertOptionValueRequest)_captured!).Parameters.ContainsKey("Color").Should().BeFalse();
         _capturedColorUpdate.Should().NotBeNull();
-        _capturedColorUpdate!.EntityName.Should().Be("hsl_diagnosis");
+        _capturedColorUpdate!["EntityLogicalName"].Should().Be("hsl_diagnosis");
+        _capturedColorUpdate["AttributeLogicalName"].Should().Be("hsl_severity");
+        _capturedColorUpdate.Label.Should().BeNull("the colour write changes no label");
         CapturedColorFor(864630001).Should().Be("#FF8800");
     }
 
@@ -208,7 +209,7 @@ public class MetadataLocalOptionServiceTests
     }
 
     [Fact]
-    public async Task UpdateColumnOption_WithColor_AppliesColorViaUpdateAttribute() // AC-56 + color (Gemini #review)
+    public async Task UpdateColumnOption_WithColor_AppliesColorViaUpdateOptionValueColorParameter() // AC-56 + color (Gemini #review)
     {
         SetupColumnOptions((864630000, "Mild"));
 
@@ -224,9 +225,10 @@ public class MetadataLocalOptionServiceTests
         // Label change still goes through UpdateOptionValue (without a Color parameter)...
         var update = _captured.Should().BeOfType<SdkUpdateOptionValueRequest>().Subject;
         update.Parameters.ContainsKey("Color").Should().BeFalse();
-        // ...but color is applied via the documented OptionMetadata.Color + UpdateAttribute mechanism.
+        // ...and color by a separate UpdateOptionValue carrying only the Color parameter (observed live).
         _capturedColorUpdate.Should().NotBeNull();
-        _capturedColorUpdate!.EntityName.Should().Be("hsl_diagnosis");
+        _capturedColorUpdate!["EntityLogicalName"].Should().Be("hsl_diagnosis");
+        _capturedColorUpdate.Label.Should().BeNull("the colour write changes no label");
         CapturedColorFor(864630000).Should().Be("#00FF00");
     }
 

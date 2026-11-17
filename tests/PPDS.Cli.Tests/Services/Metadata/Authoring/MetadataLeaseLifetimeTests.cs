@@ -384,9 +384,8 @@ public sealed partial class MetadataLeaseLifetimeTests
         private bool IsDelayedFaultRequest(OrganizationRequest request) => request switch
         {
             RetrieveOptionSetRequest => _mutated && _failStage == "global-color-read",
-            UpdateOptionSetRequest => _failStage == "global-color-write",
             RetrieveAttributeRequest => _mutated && _failStage == "local-color-read",
-            UpdateAttributeRequest => _failStage == "local-color-write",
+            SdkUpdateOption u when IsColorWrite(u) => _failStage == ColorWriteStage(u),
             _ => false
         };
 
@@ -410,8 +409,8 @@ public sealed partial class MetadataLeaseLifetimeTests
                 RetrieveOptionSetRequest => _mutated ? "global-color-read" : "global-target",
                 RetrieveAttributeRequest a => _mutated ? "local-color-read" : a.LogicalName == "statuscode" ? "status-target" : "local-target",
                 InsertOptionValueRequest => "insert", InsertStatusValueRequest => "status-insert",
+                SdkUpdateOption u when IsColorWrite(u) => ColorWriteStage(u),
                 SdkUpdateOption => "option-update", SdkDeleteOption => "option-remove",
-                UpdateOptionSetRequest => "global-color-write", UpdateAttributeRequest => "local-color-write",
                 CreateEntityRequest => "table-create", PublishXmlRequest => "publish",
                 _ => throw new InvalidOperationException("Unexpected SDK request: " + request.RequestName)
             };
@@ -447,6 +446,19 @@ public sealed partial class MetadataLeaseLifetimeTests
                     StoredLabel = "Added";
                     response = new InsertStatusValueResponse { Results = new ParameterCollection { ["NewOptionValue"] = Value } };
                     break;
+                case SdkUpdateOption r when IsColorWrite(r):
+                    // The colour write: UpdateOptionValue's Color parameter, no Label, MergeLabels (live-observed).
+                    Assert.Equal(Value, r.Value); Assert.Equal(Solution, r.SolutionUniqueName);
+                    Assert.Equal(Color, r[DataverseMetadataAuthoringService.ColorParameter]);
+                    Assert.Null(r.Label); Assert.True(r.MergeLabels);
+                    if (ColorWriteStage(r) == "global-color-write") Assert.Equal(Global, r.OptionSetName);
+                    else
+                    {
+                        Assert.Equal(Table, r["EntityLogicalName"]);
+                        Assert.Equal(_route.StartsWith("status", StringComparison.Ordinal) ? "statuscode" : Column, r["AttributeLogicalName"]);
+                    }
+                    response = new UpdateOptionValueResponse();
+                    break;
                 case SdkUpdateOption r:
                     Assert.Equal(Value, r.Value); Assert.Equal(Solution, r.SolutionUniqueName);
                     StoredLabel = Assert.Single(r.Label.LocalizedLabels).Label; Assert.Equal("Changed", StoredLabel);
@@ -455,16 +467,6 @@ public sealed partial class MetadataLeaseLifetimeTests
                 case SdkDeleteOption r:
                     Assert.Equal(Value, r.Value); Assert.Equal(Solution, r.SolutionUniqueName);
                     response = new DeleteOptionValueResponse();
-                    break;
-                case UpdateOptionSetRequest r:
-                    Assert.Equal(Solution, r.SolutionUniqueName); VerifyOptions(Assert.IsType<OptionSetMetadata>(r.OptionSet));
-                    response = new UpdateOptionSetResponse();
-                    break;
-                case UpdateAttributeRequest r:
-                    Assert.Equal(Table, r.EntityName); Assert.Equal(Solution, r.SolutionUniqueName);
-                    Assert.Null(r.Attribute.RequiredLevel); Assert.Null(r.Attribute.Description);
-                    VerifyOptions(Assert.IsAssignableFrom<EnumAttributeMetadata>(r.Attribute).OptionSet);
-                    response = new UpdateAttributeResponse();
                     break;
                 case CreateEntityRequest r:
                     Assert.Equal("new_Table", r.Entity.SchemaName); Assert.Equal(Solution, r.SolutionUniqueName);
@@ -496,16 +498,10 @@ public sealed partial class MetadataLeaseLifetimeTests
             return options;
         }
 
-        private void VerifyOptions(OptionSetMetadata options)
-        {
-            Assert.Equal(Global, options.Name);
-            Assert.Equal(2, options.Options.Count);
-            var target = Assert.Single(options.Options, o => o.Value == Value);
-            Assert.Equal(Color, target.Color);
-            Assert.Equal(StoredLabel, Assert.Single(target.Label.LocalizedLabels, l => l.LanguageCode == 1033).Label);
-            Assert.Equal("Existant", Assert.Single(target.Label.LocalizedLabels, l => l.LanguageCode == 1036).Label);
-            Assert.Equal("Other", Assert.Single(Assert.Single(options.Options, o => o.Value == 88).Label.LocalizedLabels).Label);
-        }
+        private static bool IsColorWrite(SdkUpdateOption request) => request.Parameters.Contains(DataverseMetadataAuthoringService.ColorParameter);
+
+        private static string ColorWriteStage(SdkUpdateOption request)
+            => request.Parameters.Contains("AttributeLogicalName") ? "local-color-write" : "global-color-write";
 
         internal CreateTableRequest TableRequest(bool dryRun = false) => new()
         {

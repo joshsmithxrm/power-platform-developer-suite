@@ -176,11 +176,14 @@ public sealed class OptionLabelLanguageTests
 
     [Fact]
     [Trait("AC", "AC-142")]
-    public async Task ColorReadback_UpdateOptionSet_MergesLabels()
+    public async Task ColorWrite_SendsNoLabel_AndMergesLabels()
     {
         var f = new Fixture();
         await f.Service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = Fixture.ChoiceName, Value = 1, Color = "#112233" });
-        Assert.True(Assert.Single(f.Requests.OfType<UpdateOptionSetRequest>()).MergeLabels);
+        var colour = Assert.Single(f.Requests.OfType<SdkUpdateOption>(), r => r.Parameters.ContainsKey("Color"));
+        Assert.Null(colour.Label);
+        Assert.True(colour.MergeLabels);
+        Assert.DoesNotContain(f.Requests, r => r is UpdateOptionSetRequest);
     }
 
     private static (int, string)[] Pairs(Label label)

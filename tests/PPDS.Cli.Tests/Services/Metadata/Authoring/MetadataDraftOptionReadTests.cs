@@ -75,11 +75,14 @@ public sealed class MetadataDraftOptionReadTests
         Assert.Equal(77, await f.AddAsync(value: 77, color: "#123456"));
         Assert.Equal(2, f.Reads.Count());
         Assert.All(f.Reads, r => Assert.True(r.RetrieveAsIfPublished));
-        var updated = Assert.IsAssignableFrom<EnumAttributeMetadata>(Assert.Single(f.Requests.OfType<UpdateAttributeRequest>()).Attribute);
-        Assert.Equal("#123456", updated.OptionSet.Options.Single(o => o.Value == 77).Color);
-        Assert.Equal("Draft label", updated.OptionSet.Options.Single(o => o.Value == 10000).Label.LocalizedLabels[0].Label);
-        Assert.Equal("Unpublished", updated.OptionSet.Options.Single(o => o.Value == 10001).Label.LocalizedLabels[0].Label);
-        Assert.Null(updated.RequiredLevel); // Keep the existing minimal color carrier.
+        // The colour write names only the new option: no option collection or attribute is re-sent, so the other
+        // draft options and their labels cannot be touched (observed live: UpdateAttribute ignores option colours).
+        var colour = Assert.Single(f.Requests.OfType<SdkUpdateOption>(), IsColourWrite);
+        Assert.Equal(77, colour.Value);
+        Assert.Equal("#123456", colour["Color"]);
+        Assert.Null(colour.Label);
+        Assert.True(colour.MergeLabels);
+        Assert.DoesNotContain(f.Requests, r => r is UpdateAttributeRequest);
         Assert.DoesNotContain(f.Requests, r => r.RequestName == "PublishXml");
         f.AssertRoutingAndCancellation();
     }
@@ -94,13 +97,16 @@ public sealed class MetadataDraftOptionReadTests
         await f.UpdateAsync(10000, "#654321");
         Assert.All(f.Reads, r => Assert.True(r.RetrieveAsIfPublished)); // Target resolution and color readback include drafts (#1531).
         // With no NewLabel the current DRAFT label is re-sent, so an unpublished label edit is not reverted.
-        Assert.Equal("Draft label", Assert.Single(f.Requests.OfType<SdkUpdateOption>()).Label.LocalizedLabels[0].Label);
-        var update = Assert.Single(f.Requests.OfType<UpdateAttributeRequest>());
-        var options = Assert.IsAssignableFrom<EnumAttributeMetadata>(update.Attribute).OptionSet.Options;
-        Assert.Contains(options, o => o.Value == 10001);
-        Assert.Equal("#654321", options.Single(o => o.Value == 10000).Color);
+        Assert.Equal("Draft label", Assert.Single(f.Requests.OfType<SdkUpdateOption>(), r => !IsColourWrite(r)).Label.LocalizedLabels[0].Label);
+        var colour = Assert.Single(f.Requests.OfType<SdkUpdateOption>(), IsColourWrite);
+        Assert.Equal(10000, colour.Value);
+        Assert.Equal("#654321", colour["Color"]);
+        Assert.Null(colour.Label);
+        Assert.DoesNotContain(f.Requests, r => r is UpdateAttributeRequest);
         f.AssertRoutingAndCancellation();
     }
+
+    private static bool IsColourWrite(SdkUpdateOption request) => request.Parameters.ContainsKey("Color");
 
     [Fact]
     public async Task GenericLocalOptionAdd_ColorReadsDraft()
@@ -113,7 +119,7 @@ public sealed class MetadataDraftOptionReadTests
         }, f.Token);
         Assert.Equal(77, value);
         Assert.True(Assert.Single(f.Reads).RetrieveAsIfPublished);
-        Assert.Single(f.Requests.OfType<UpdateAttributeRequest>());
+        Assert.Equal("#123456", Assert.Single(f.Requests.OfType<SdkUpdateOption>(), IsColourWrite)["Color"]);
         f.AssertRoutingAndCancellation();
     }
 
@@ -354,7 +360,7 @@ public sealed class MetadataDraftOptionReadTests
         using var f = new Fixture(kind) { CancelReadNumber = 2 };
         var ex = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => f.AddAsync(value: 77, color: "#123456"));
         Assert.Same(f.Cancellation, ex);
-        Assert.DoesNotContain(f.Requests, r => r is UpdateAttributeRequest);
+        Assert.DoesNotContain(f.Requests, r => r is SdkUpdateOption u && IsColourWrite(u));
         f.AssertRoutingAndCancellation();
     }
 
@@ -451,8 +457,6 @@ public sealed class MetadataDraftOptionReadTests
                             if (WriteFailureFactory != null) throw WriteFailureFactory();
                             if (WriteFailure != null) throw WriteFailure;
                             return Task.FromResult<OrganizationResponse>(new UpdateOptionValueResponse());
-                        case UpdateAttributeRequest:
-                            return Task.FromResult<OrganizationResponse>(new UpdateAttributeResponse());
                         case SdkDeleteOption:
                             if (WriteFailureFactory != null) throw WriteFailureFactory();
                             if (WriteFailure != null) throw WriteFailure;
@@ -509,7 +513,11 @@ public sealed class MetadataDraftOptionReadTests
                 Assert.Equal("new_table", insert["EntityLogicalName"]);
                 Assert.Equal(Attribute, insert["AttributeLogicalName"]);
             });
-            Assert.All(Requests.OfType<UpdateAttributeRequest>(), write => Assert.Equal("new_table", write.EntityName));
+            Assert.All(Requests.OfType<SdkUpdateOption>(), write =>
+            {
+                Assert.Equal("new_table", write["EntityLogicalName"]);
+                Assert.Equal(Attribute, write["AttributeLogicalName"]);
+            });
         }
     }
 }

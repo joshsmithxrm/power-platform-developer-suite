@@ -493,20 +493,23 @@ public sealed class GlobalChoiceNameResolutionTests
 
     [Fact]
     [Trait("AC", "AC-135")]
-    public async Task AddOptionWithColor_ReadsDraftAndResendsTheDraftSetWithTheNewColor()
+    public async Task AddOptionWithColor_ReadsDraftAndWritesTheColorToTheNewOption()
     {
         // The inserted option exists only in draft metadata. A published read (the previous behaviour) could not
-        // find it, and its UpdateOptionSet would have re-sent the published set.
+        // find it. The colour is then written to that option alone through UpdateOptionValue's Color parameter
+        // under the stored name (observed live: UpdateOptionSet ignores option colours).
         using var f = new GlobalChoiceServerFake();
         await f.Run("option-add-color", Stored);
         var colorRead = f.Requests.OfType<RetrieveOptionSetRequest>().Single();
         Assert.True(colorRead.RetrieveAsIfPublished);
-        var update = Assert.IsType<OptionSetMetadata>(Assert.Single(f.Requests.OfType<UpdateOptionSetRequest>()).OptionSet);
-        Assert.Equal(Stored, update.Name);
-        Assert.Equal(new int?[] { 1, 2, 3 }, update.Options.Select(o => o.Value));
-        Assert.Equal("#112233", update.Options.Single(o => o.Value == 3).Color);
-        Assert.All(update.Options.Where(o => o.Value != 3), o => Assert.Null(o.Color));
-        Assert.Equal("Sol", Assert.Single(f.Requests.OfType<UpdateOptionSetRequest>()).SolutionUniqueName);
+        var colour = Assert.Single(f.Requests.OfType<SdkUpdateOption>());
+        Assert.Equal(Stored, colour.OptionSetName);
+        Assert.Equal(3, colour.Value);
+        Assert.Equal("#112233", colour["Color"]);
+        Assert.Null(colour.Label);
+        Assert.True(colour.MergeLabels);
+        Assert.Equal("Sol", colour.SolutionUniqueName);
+        Assert.DoesNotContain(f.Requests, r => r is UpdateOptionSetRequest);
     }
 }
 

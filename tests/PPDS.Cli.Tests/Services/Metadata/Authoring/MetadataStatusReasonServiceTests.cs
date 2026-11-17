@@ -30,9 +30,9 @@ public class MetadataStatusReasonServiceTests
     private readonly Mock<IPooledClient> _client = new(MockBehavior.Loose);
     private readonly DataverseMetadataAuthoringService _service;
 
-    // Captures the UpdateAttribute that carries an option color (status color is set via
-    // StatusOptionMetadata.Color, not via a parameter on the Insert/Update OptionValue messages).
-    private UpdateAttributeRequest? _capturedAttrUpdate;
+    // Captures the colour write: an UpdateOptionValue carrying the Color parameter (observed live: re-sending
+    // StatusOptionMetadata.Color through UpdateAttribute leaves the colour unchanged).
+    private Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest? _capturedAttrUpdate;
 
     public MetadataStatusReasonServiceTests()
     {
@@ -42,12 +42,12 @@ public class MetadataStatusReasonServiceTests
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new OrganizationResponse());
 
-        // Registered after the blanket setup so it wins for UpdateAttribute (color follow-up).
-        _client.Setup(c => c.ExecuteAsync(It.IsAny<UpdateAttributeRequest>(), It.IsAny<CancellationToken>()))
+        // Registered after the blanket setup so it wins for the colour follow-up.
+        _client.Setup(c => c.ExecuteAsync(It.Is<Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest>(r => r.Parameters.ContainsKey("Color")), It.IsAny<CancellationToken>()))
             .Returns<OrganizationRequest, CancellationToken>((req, _) =>
             {
-                _capturedAttrUpdate = (UpdateAttributeRequest)req;
-                return Task.FromResult<OrganizationResponse>(new UpdateAttributeResponse());
+                _capturedAttrUpdate = (Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest)req;
+                return Task.FromResult<OrganizationResponse>(new UpdateOptionValueResponse());
             });
 
         _service = new DataverseMetadataAuthoringService(
@@ -57,8 +57,7 @@ public class MetadataStatusReasonServiceTests
     }
 
     private string? CapturedStatusColorFor(int value)
-        => ((_capturedAttrUpdate?.Attribute as EnumAttributeMetadata)?.OptionSet?.Options)
-            ?.FirstOrDefault(o => o.Value == value)?.Color;
+        => _capturedAttrUpdate is { } update && update.Value == value ? update["Color"] as string : null;
 
     private void SetupListStatusReasons(string entityLogicalName, IEnumerable<(int value, string label, int state)> options)
     {
@@ -241,14 +240,14 @@ public class MetadataStatusReasonServiceTests
         _client.Verify(c => c.ExecuteAsync(
             It.Is<OrganizationRequest>(r => r.RequestName == "UpdateOptionValue"),
             It.IsAny<CancellationToken>()), Times.Once);
-        // No color requested → no UpdateAttribute color follow-up.
+        // No color requested → no colour follow-up.
         _capturedAttrUpdate.Should().BeNull();
     }
 
-    // Color is NOT a parameter on UpdateOptionValue/InsertStatusValue — it must be applied via
-    // StatusOptionMetadata.Color + UpdateAttribute (Gemini #review). Assert the service does exactly that.
+    // Observed live: an existing status reason's colour persists only through UpdateOptionValue's Color
+    // parameter; StatusOptionMetadata.Color re-sent through UpdateAttribute is accepted and ignored.
     [Fact]
-    public async Task UpdateStatusReasonAsync_WithColor_AppliesColorViaUpdateAttribute()
+    public async Task UpdateStatusReasonAsync_WithColor_AppliesColorViaUpdateOptionValueColorParameter()
     {
         SetupListStatusReasons("account", [(1, "Active", 0), (2, "Inactive", 1)]);
 
@@ -261,13 +260,15 @@ public class MetadataStatusReasonServiceTests
 
         await _service.UpdateStatusReasonAsync(request);
 
-        // Label still travels via UpdateOptionValue...
+        // The status update itself carries no Color parameter...
         _client.Verify(c => c.ExecuteAsync(
-            It.Is<OrganizationRequest>(r => r.RequestName == "UpdateOptionValue"),
+            It.Is<OrganizationRequest>(r => r.RequestName == "UpdateOptionValue" && !r.Parameters.ContainsKey("Color")),
             It.IsAny<CancellationToken>()), Times.Once);
-        // ...color is applied to statuscode via UpdateAttribute.
+        // ...color is a separate UpdateOptionValue on statuscode carrying only the Color parameter.
         _capturedAttrUpdate.Should().NotBeNull();
-        _capturedAttrUpdate!.EntityName.Should().Be("account");
+        _capturedAttrUpdate!["EntityLogicalName"].Should().Be("account");
+        _capturedAttrUpdate["AttributeLogicalName"].Should().Be("statuscode");
+        _capturedAttrUpdate.Label.Should().BeNull("the colour write changes no label");
         CapturedStatusColorFor(2).Should().Be("#3366FF");
     }
 

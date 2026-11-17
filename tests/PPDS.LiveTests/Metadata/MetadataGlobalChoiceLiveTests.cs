@@ -25,7 +25,11 @@ namespace PPDS.LiveTests.Metadata;
 /// dotnet test tests/PPDS.LiveTests/PPDS.LiveTests.csproj -f net8.0 --filter "FullyQualifiedName~MetadataGlobalChoiceLiveTests" --logger "console;verbosity=detailed"
 /// </code>
 /// Settings: DATAVERSE_URL, PPDS_TEST_APP_ID, PPDS_TEST_CLIENT_SECRET, PPDS_TEST_TENANT_ID, PPDS_TEST_SOLUTION,
-/// PPDS_TEST_PREFIX; optional PPDS_TEST_SECOND_LCID (a provisioned language other than 1033) for the multi-language
+/// PPDS_TEST_PREFIX. For a local run without a secret, set DATAVERSE_URL and PPDS_TEST_PROFILE (the name of an existing,
+/// already signed-in PPDS auth profile bound to that environment) instead of the three PPDS_TEST_APP_ID/CLIENT_SECRET/
+/// TENANT_ID settings: the token is acquired silently through the product's profile store and credential provider, the
+/// run fails rather than prompting when a sign-in would be needed, and the connected organisation must equal
+/// DATAVERSE_URL before anything is written (<see cref="ProfileConnectionSource"/>). Optional PPDS_TEST_SECOND_LCID (a provisioned language other than 1033) for the multi-language
 /// tests, which are reported as skipped without it. The detailed console logger is needed to see the "OBSERVED" lines
 /// (fault codes, messages, label languages); xunit hides the output of passing tests otherwise.
 /// <para>
@@ -45,16 +49,18 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
 
     private readonly ITestOutputHelper _output;
     private DataverseConnectionPool? _pool;
-    private ServiceClientSource? _source;
+    private IConnectionSource? _source;
 
     public MetadataGlobalChoiceLiveTests(ITestOutputHelper output) => _output = output;
 
     private static string Prefix => Environment.GetEnvironmentVariable("PPDS_TEST_PREFIX")!.Trim().ToLowerInvariant();
     private static string Solution => Environment.GetEnvironmentVariable("PPDS_TEST_SOLUTION")!.Trim();
 
-    // AC-141: optionset update keeps an unpublished edit to a property it does not change.
+    // AC-141: optionset update changes only the requested property and keeps another edit to a property it does not
+    // change. Whether a global choice's label edit stays unpublished until PublishXml is recorded, not assumed: on the
+    // organisation observed (2026-11-17) an UpdateOptionSet label edit is returned by the published read at once.
     [MetadataLiveFact]
-    public async Task ChoiceUpdate_KeepsAnUnpublishedDescription_ChangesOnlyTheDisplayName_AndPublishesNothing()
+    public async Task ChoiceUpdate_ChangesOnlyTheDisplayName_KeepsAnotherDescriptionEdit()
     {
         var (pool, service) = await ConnectAsync();
         var name = NewName("upd");
@@ -64,23 +70,36 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
             await PublishChoiceAsync(pool, name);
             var before = await RetrieveChoiceAsync(pool, name, asIfPublished: true);
 
-            // An unpublished description edit made by someone else.
-            before.Description = new Label("Unpublished description", English);
+            // A description edit made by someone else, not published.
+            before.Description = new Label("Edited description", English);
             await ExecuteAsync(pool, new UpdateOptionSetRequest { OptionSet = before, MergeLabels = true, SolutionUniqueName = Solution });
-            Text((await RetrieveChoiceAsync(pool, name, asIfPublished: false)).Description, English)
-                .Should().Be("Published description", "precondition: the raw unpublished edit must not have been published");
+            var publishedAfterEdit = Text((await RetrieveChoiceAsync(pool, name, asIfPublished: false)).Description, English);
+            var editIsLiveWithoutPublish = publishedAfterEdit == "Edited description";
+            _output.WriteLine($"OBSERVED published read after an unpublished UpdateOptionSet description edit: '{publishedAfterEdit}' " +
+                (editIsLiveWithoutPublish ? "(the edit is visible without PublishXml)" : "(the edit waits for PublishXml)"));
+            publishedAfterEdit.Should().BeOneOf("Edited description", "Published description");
 
             await service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = Solution, Name = name, DisplayName = "Renamed" });
 
             var draft = await RetrieveChoiceAsync(pool, name, asIfPublished: true);
             Text(draft.DisplayName, English).Should().Be("Renamed");
-            Text(draft.Description, English).Should().Be("Unpublished description", "the unpublished description must not revert to the published copy");
+            Text(draft.Description, English).Should().Be("Edited description", "the other edit must not revert to the published copy");
             draft.Options.Select(o => (o.Value, Text(o.Label, English))).Should().BeEquivalentTo(
                 before.Options.Select(o => (o.Value, Text(o.Label, English))), "options must be untouched");
 
             var published = await RetrieveChoiceAsync(pool, name, asIfPublished: false);
-            Text(published.DisplayName, English).Should().Be("Original name", "optionset update publishes nothing");
-            Text(published.Description, English).Should().Be("Published description", "optionset update publishes nothing");
+            _output.WriteLine($"OBSERVED published read after optionset update: display name '{Text(published.DisplayName, English)}', description '{Text(published.Description, English)}'.");
+            if (editIsLiveWithoutPublish)
+            {
+                // No publish boundary exists to check; the published read must show the same single change.
+                Text(published.DisplayName, English).Should().Be("Renamed");
+                Text(published.Description, English).Should().Be("Edited description");
+            }
+            else
+            {
+                Text(published.DisplayName, English).Should().Be("Original name", "optionset update publishes nothing");
+                Text(published.Description, English).Should().Be("Published description", "optionset update publishes nothing");
+            }
         });
     }
 
@@ -97,6 +116,12 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
             var option = (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single();
             Text(option.Label, English).Should().Be("Closed");
             await AssertColourAndDescriptionChangeNoLabelAsync(pool, service, name, value);
+
+            // add-option --color: the colour lands on the new option only.
+            var added = await service.AddOptionValueAsync(new AddOptionValueRequest { OptionSetName = name, Label = "Added", Color = "#ABCDEF", SolutionUniqueName = Solution });
+            var options = (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options;
+            options.Single(o => o.Value == added).Color.Should().Be("#ABCDEF", "add-option --color must persist the colour");
+            options.Single(o => o.Value == value).Color.Should().Be("#123456", "the other option keeps its colour");
         });
     }
 
@@ -320,7 +345,7 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
         await service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = name, Value = value, Color = "#123456", SolutionUniqueName = Solution });
         var afterColour = (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single();
         Pairs(afterColour.Label).Should().BeEquivalentTo(labelsBefore, "a colour-only update must change no label");
-        afterColour.Color.Should().Be("#123456");
+        afterColour.Color.Should().Be("#123456", "the colour must persist");
 
         await service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = name, Value = value, Description = "Only the description", SolutionUniqueName = Solution });
         var afterDescription = (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single();
@@ -332,14 +357,18 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
     {
         var before = Pairs((await RetrieveOptionsAsync(pool, entity, column)).Single().Label);
         await service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = entity, ColumnLogicalName = column, Value = value, Color = "#654321", SolutionUniqueName = Solution });
-        Pairs((await RetrieveOptionsAsync(pool, entity, column)).Single().Label).Should().BeEquivalentTo(before, "a colour-only update must change no label");
+        var after = (await RetrieveOptionsAsync(pool, entity, column)).Single();
+        Pairs(after.Label).Should().BeEquivalentTo(before, "a colour-only update must change no label");
+        after.Color.Should().Be("#654321", "the colour must persist");
     }
 
     private static async Task AssertStatusColourChangesNoLabelAsync(IDataverseConnectionPool pool, DataverseMetadataAuthoringService service, string entity, int value)
     {
         var before = Pairs((await ReasonAsync(pool, entity, value)).Label);
         await service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = entity, Value = value, Color = "#0A0B0C", SolutionUniqueName = Solution });
-        Pairs((await ReasonAsync(pool, entity, value)).Label).Should().BeEquivalentTo(before, "a colour-only status update must change no label");
+        var after = await ReasonAsync(pool, entity, value);
+        Pairs(after.Label).Should().BeEquivalentTo(before, "a colour-only status update must change no label");
+        after.Color.Should().Be("#0A0B0C", "the colour must persist");
     }
 
     /// <summary>Runs `--description ""` and classifies the result; any non-Dataverse failure is rethrown.</summary>
@@ -368,7 +397,9 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
     {
         var guard = new EnvironmentShakedownGuard();
         guard.EnsureCanMutate("livetests.metadata.setup"); // before any raw schema write
-        _source = await LiveTestHelpers.CreateConnectionSourceAsync(Configuration, "MetadataGlobalChoiceLiveTests", maxPoolSize: 3);
+        _source = Configuration.HasClientSecretCredentials
+            ? await LiveTestHelpers.CreateConnectionSourceAsync(Configuration, "MetadataGlobalChoiceLiveTests", maxPoolSize: 3)
+            : await ProfileConnectionSource.CreateAsync(Configuration, "MetadataGlobalChoiceLiveTests", maxPoolSize: 3);
         _pool = LiveTestHelpers.CreateConnectionPool(new[] { _source });
         return (_pool, new DataverseMetadataAuthoringService(_pool, new SchemaValidator(), guard));
     }

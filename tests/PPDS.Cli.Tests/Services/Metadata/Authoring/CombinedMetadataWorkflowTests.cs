@@ -198,19 +198,16 @@ public sealed class CombinedMetadataWorkflowTests : IDisposable
             return new InsertOptionValueResponse { Results = new ParameterCollection { ["NewOptionValue"] = r.Value } };
         });
         ExpectRead(true);
-        Expect<UpdateAttributeRequest>(r =>
+        Expect<Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest>(r =>
         {
-            Assert.Equal(Table, r.EntityName);
-            var carrier = Assert.IsType<PicklistAttributeMetadata>(r.Attribute);
-            Assert.NotSame(lastRead, carrier);
-            Assert.Equal(Local, carrier.LogicalName);
-            Assert.Equal("new_Category", carrier.SchemaName);
-            Assert.Null(carrier.RequiredLevel);
-            var draft = Assert.Single(carrier.OptionSet.Options, o => o.Value == 10001);
-            Assert.Equal("Draft only", Assert.Single(draft.Label.LocalizedLabels).Label);
-            Assert.Equal("#010203", draft.Color);
-            Assert.Equal("#abcdef", Assert.Single(carrier.OptionSet.Options, o => o.Value == 10002).Color);
-            return new UpdateAttributeResponse();
+            // The colour is written to the inserted option alone; other draft options are not re-sent.
+            Assert.Equal(Table, r["EntityLogicalName"]);
+            Assert.Equal(Local, r["AttributeLogicalName"]);
+            Assert.Equal(10002, r.Value);
+            Assert.Equal("#abcdef", r["Color"]);
+            Assert.Null(r.Label);
+            Assert.True(r.MergeLabels);
+            return new UpdateOptionValueResponse();
         });
         var value = await _service.AddColumnOptionAsync(new AddColumnOptionRequest
         {

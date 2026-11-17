@@ -964,8 +964,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         else
             (optionSetName, response) = await WithGlobalChoiceNameAsync(optionSetName, "OptionSetName", InsertAsync, null, ct).ConfigureAwait(false);
 
-        // Color is applied via OptionMetadata.Color (UpdateOptionSet/UpdateAttribute), never the
-        // InsertOptionValue["Color"] indexer — that parameter is silently dropped by the platform.
+        // Color is applied after the insert by the shared colour helper (UpdateOptionValue's Color parameter).
         if (!string.IsNullOrEmpty(request.Color))
             await ApplyOptionColorAsync(optionSetName, request.EntityLogicalName, request.AttributeLogicalName,
                 response.NewOptionValue, request.Color, request.SolutionUniqueName, ct).ConfigureAwait(false);
@@ -1024,8 +1023,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
         }
 
-        // Color is applied to the resolved option via OptionMetadata.Color (UpdateOptionSet/UpdateAttribute),
-        // never the UpdateOptionValue["Color"] indexer — that parameter is silently dropped by the platform.
+        // Color is applied to the resolved option by the shared colour helper (UpdateOptionValue's Color parameter).
         if (!string.IsNullOrEmpty(request.Color))
             await ApplyOptionColorAsync(target.OptionSetName, request.EntityLogicalName, request.AttributeLogicalName,
                 target.Value, request.Color, request.SolutionUniqueName, ct).ConfigureAwait(false);
@@ -2198,21 +2196,18 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     }
 
     /// <summary>
-    /// Applies an option <paramref name="color"/> via the ONLY SDK-supported mechanism: set
-    /// <see cref="OptionMetadata.Color"/> on the retrieved option set / attribute and re-send it through
-    /// <c>UpdateOptionSet</c> (global choices) or <c>UpdateAttribute</c> (local column options and status
-    /// reasons — the <c>statuscode</c> attribute).
+    /// Applies an option <paramref name="color"/> to an existing option: the target is read back first (draft
+    /// metadata, so a just-inserted option is found and a missing one fails before any write), then the colour is
+    /// written with <c>UpdateOptionValue</c> carrying the message's <c>Color</c> parameter, with no <c>Label</c>
+    /// and <c>MergeLabels = true</c>, so no label in any language is touched.
     /// </summary>
     /// <remarks>
-    /// The Insert/Update OptionValue and InsertStatusValue messages do NOT define a <c>Color</c> parameter
-    /// (verified against the SDK message contracts — see UpdateOptionValueRequest / InsertOptionValueRequest /
-    /// InsertStatusValueRequest, none of which expose Color). Setting <c>request["Color"]</c> only writes an
-    /// unrecognized entry into the request's <c>Parameters</c> collection, which the platform silently ignores —
-    /// the color never persists. This was flagged by Gemini review. Routing every color write through this
-    /// helper keeps the dialect uniform across global choices, local column options, and status reasons, and
-    /// mirrors the create path in <see cref="BuildLocalOptionSet"/> which already uses
-    /// <see cref="OptionMetadata.Color"/>. Do NOT reintroduce the <c>["Color"]</c> indexer on option-value
-    /// messages.
+    /// Observed live (specs/metadata-authoring.md "Option colours"): Dataverse persists an existing option's colour
+    /// only through the <c>Color</c> parameter of <c>UpdateOptionValue</c> (and of <c>InsertOptionValue</c> /
+    /// <c>InsertStatusValue</c> for a new option). Re-sending <see cref="OptionMetadata.Color"/> through
+    /// <c>UpdateOptionSet</c> (global choices) or <c>UpdateAttribute</c> (local options and status reasons) is
+    /// accepted but leaves the colour unchanged, before and after publishing. <see cref="OptionMetadata.Color"/>
+    /// is honoured only when the option set or column is created.
     /// </remarks>
     private Task ApplyOptionColorAsync(
         string? optionSetName,
@@ -2244,7 +2239,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         try
         {
             // #1531: read as-if-published so an option inserted moments earlier (add-option --color) is found,
-            // and so the UpdateOptionSet below re-sends the draft option set rather than the published one.
+            // and a missing option fails before the colour write.
             // #1535: the exact spelling is retrieved first; a case variant resolves to the stored name.
             RetrieveOptionSetResponse retrieveResponse;
             (optionSetName, retrieveResponse) = await WithGlobalChoiceNameAsync(optionSetName, "OptionSetName", async name =>
@@ -2263,23 +2258,15 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 $"Failed to retrieve global choice '{optionSetName}' to apply color.", ex);
         }
 
-        var target = optionSet?.Options?.FirstOrDefault(o => o.Value == value)
+        _ = optionSet?.Options?.FirstOrDefault(o => o.Value == value)
             ?? throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
                 $"Option {value} not found in global choice '{optionSetName}'.", "Value");
-
-        target.Color = color;
 
         await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
         {
             try
             {
-                // The whole draft set is re-sent with every language; MergeLabels keeps a trimmed payload safe too.
-                await client.ExecuteAsync(new UpdateOptionSetRequest
-                {
-                    OptionSet = optionSet,
-                    MergeLabels = true,
-                    SolutionUniqueName = solutionUniqueName
-                }, ct).ConfigureAwait(false);
+                await client.ExecuteAsync(ColorOnlyUpdate(value, color, solutionUniqueName, optionSetName, null, null), ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
             {
@@ -2331,27 +2318,19 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             ?? throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
                 $"Attribute '{attributeLogicalName}' on '{entityLogicalName}' has no option set to color.", "ColumnLogicalName");
 
-        var target = optionSet.Options?.FirstOrDefault(o => o.Value == value)
+        _ = optionSet.Options?.FirstOrDefault(o => o.Value == value)
             ?? throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
                 $"Option {value} not found on '{entityLogicalName}.{attributeLogicalName}'.", "Value");
 
-        target.Color = color;
+        if (enumAttribute is not (StatusAttributeMetadata or StateAttributeMetadata or MultiSelectPicklistAttributeMetadata or PicklistAttributeMetadata))
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                $"Unsupported choice attribute type for option color update: {enumAttribute.GetType().Name}", "ColumnLogicalName");
 
-        // Send a MINIMAL attribute carrying only the modified option set — never the full retrieved attribute.
-        // Re-posting all retrieved attribute-level managed properties can reset them on the platform (#1009,
-        // e.g. RequiredLevel); a fresh attribute leaves every unset property null, so the platform changes only
-        // the option collection (and thus OptionMetadata.Color). Mirrors CreateUpdateAttribute on the column path.
-        var carrier = BuildOptionColorCarrierAttribute(enumAttribute, optionSet);
         await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
         {
             try
             {
-                await client.ExecuteAsync(new UpdateAttributeRequest
-                {
-                    EntityName = entityLogicalName,
-                    Attribute = carrier,
-                    SolutionUniqueName = solutionUniqueName
-                }, ct).ConfigureAwait(false);
+                await client.ExecuteAsync(ColorOnlyUpdate(value, color, solutionUniqueName, null, entityLogicalName, attributeLogicalName), ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
             {
@@ -2365,29 +2344,26 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     }
 
     /// <summary>
-    /// Builds a minimal enum attribute of the same SDK type that carries only the (modified) option set, for
-    /// re-sending option colors via UpdateAttribute without disturbing attribute-level managed properties (#1009).
-    /// Covers the choice/status families that expose an option set; mirrors <see cref="CreateUpdateAttribute"/>.
+    /// The colour write for an existing option: <c>UpdateOptionValue</c> with the <c>Color</c> parameter, no
+    /// <c>Label</c> and <c>MergeLabels = true</c>. A global choice is named by <paramref name="optionSetName"/>; a
+    /// local option or status reason by <paramref name="entityLogicalName"/> + <paramref name="attributeLogicalName"/>.
     /// </summary>
-    private static EnumAttributeMetadata BuildOptionColorCarrierAttribute(EnumAttributeMetadata source, OptionSetMetadata optionSet)
+    private static SdkUpdateOptionValueRequest ColorOnlyUpdate(
+        int value, string color, string? solutionUniqueName, string? optionSetName, string? entityLogicalName, string? attributeLogicalName)
     {
-        EnumAttributeMetadata fresh = source switch
-        {
-            StatusAttributeMetadata => new StatusAttributeMetadata(),
-            StateAttributeMetadata => new StateAttributeMetadata(),
-            MultiSelectPicklistAttributeMetadata => new MultiSelectPicklistAttributeMetadata(),
-            PicklistAttributeMetadata => new PicklistAttributeMetadata(),
-            _ => throw new MetadataValidationException(
-                MetadataErrorCodes.InvalidConstraint,
-                $"Unsupported choice attribute type for option color update: {source.GetType().Name}",
-                "ColumnLogicalName")
-        };
-
-        fresh.LogicalName = source.LogicalName;
-        fresh.SchemaName = source.SchemaName;
-        fresh.OptionSet = optionSet;
-        return fresh;
+        var request = new SdkUpdateOptionValueRequest { Value = value, MergeLabels = true, SolutionUniqueName = solutionUniqueName };
+        if (optionSetName is not null)
+            request.OptionSetName = optionSetName;
+        if (entityLogicalName is not null)
+            request["EntityLogicalName"] = entityLogicalName;
+        if (attributeLogicalName is not null)
+            request["AttributeLogicalName"] = attributeLogicalName;
+        request[ColorParameter] = color;
+        return request;
     }
+
+    /// <summary>The <c>Color</c> parameter of the option-value messages (not exposed as an SDK property).</summary>
+    internal const string ColorParameter = "Color";
 
     /// <summary>
     /// Builds an inline (column-scoped) option set. IsGlobal MUST be explicitly false and

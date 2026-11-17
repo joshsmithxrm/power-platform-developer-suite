@@ -186,7 +186,7 @@ public sealed class MetadataAddOptionValueLeaseContractTests
                     {
                         Microsoft.Xrm.Sdk.Messages.InsertOptionValueRequest => "insert",
                         Microsoft.Xrm.Sdk.Messages.RetrieveOptionSetRequest => "global-color-read",
-                        Microsoft.Xrm.Sdk.Messages.UpdateOptionSetRequest => "global-color-write",
+                        Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest u when u.Parameters.ContainsKey("Color") => "global-color-write",
                         _ => throw new InvalidOperationException("Unexpected SDK operation")
                     };
                     sdkCalls.Add(current);
