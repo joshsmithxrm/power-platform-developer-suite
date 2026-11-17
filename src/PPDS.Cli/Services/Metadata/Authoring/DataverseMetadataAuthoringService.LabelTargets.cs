@@ -60,7 +60,10 @@ public partial class DataverseMetadataAuthoringService
     /// change it. Asserted live (OptionColorPersistenceLiveTests for a global option;
     /// MetadataGlobalChoiceLiveTests.ColourMechanisms_LocalOptionStatusReasonAndStateValue for a local option and a
     /// status reason): an UpdateOptionValue without a Label leaves the English label unchanged, so a colour- or
-    /// description-only update never rewrites it. Other languages are not observed (English-only organisation).
+    /// description-only update never rewrites it. Asserted live 2026-11-17 with French (1036) provisioned
+    /// (MetadataGlobalChoiceLiveTests.*_KeepsTheSecondLanguage): a requested 1033 label with MergeLabels keeps the
+    /// French label of a global option, a local option and a status reason, and an empty 1033 description keeps the
+    /// French one. Not observed: an organisation whose base language is not 1033.
     /// </summary>
     private static Label? OptionLabelForUpdate(string? requested)
         => requested == null ? null : new Label(requested, 1033);
@@ -69,7 +72,11 @@ public partial class DataverseMetadataAuthoringService
     /// Notices for requested labels that are written for English only while the label Dataverse shows the caller (its
     /// user-localised label) is in another language, so that label is left as it was. The user-localised label is the
     /// caller's UI language when the target has one, otherwise a fallback (believed to be the organisation's base
-    /// language; unconfirmed live), so the message names its LCID rather than claiming it is "your language". No notice
+    /// language), so the message names its LCID rather than claiming it is "your language". Observed live 2026-11-17
+    /// for a caller whose UI language is the base language 1033: the user-localised label is the 1033 entry even when
+    /// its text is empty (no fallback to French), and a create-time label given only in French is stored under 1033 too
+    /// (MetadataGlobalChoiceLiveTests.UserLocalizedLabel_WithoutALabelInTheCallersLanguage_IsRecorded). Not observed: the
+    /// fallback for a caller whose UI language differs from the base language. No notice
     /// when that label already reads the requested text. Surfaces show them as warnings; without them a caller could
     /// see no change in their own listing after a successful update.
     /// </summary>
