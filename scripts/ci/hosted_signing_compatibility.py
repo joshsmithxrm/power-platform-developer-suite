@@ -66,7 +66,8 @@ def checkpoint(phase):
 
 
 class StageCommandError(ValueError):
-    def __init__(self, code, refusal=None, hresult=None, operation=None, status=None, index=None):
+    def __init__(self, code, refusal=None, hresult=None, operation=None, status=None, index=None,
+                 diagnostic=None):
         super().__init__("Hosted stage command failed")
         self.code = code
         self.refusal = refusal
@@ -74,6 +75,7 @@ class StageCommandError(ValueError):
         self.operation = operation
         self.status = status
         self.index = index
+        self.diagnostic = diagnostic
 
 
 DRIVER_MODULE = "ppds_hosted_compat_driver"
@@ -107,6 +109,15 @@ def command_operation_index(stdout, stderr):
     except Exception:
         return None
     return driver_line(stdout + "\n" + stderr, "OPERATION_INDEX", lambda value: re.fullmatch(pattern, value) is not None)
+
+
+def command_diagnostic(stdout, stderr):
+    # Which check of the release inspector failed: one of the driver's fixed codes, else nothing.
+    try:
+        codes = frozenset((sys.modules.get(DRIVER_MODULE) or load_driver()).DIAGNOSTIC_CODES)
+    except Exception:
+        return None
+    return driver_line(stdout + "\n" + stderr, "DIAGNOSTIC", lambda value: value in codes)
 
 
 def command_status(stdout, stderr):
@@ -232,7 +243,8 @@ def execute(command, *, cwd, env, timeout):
         raise StageCommandError(result.returncode, command_refusal(result.stdout, result.stderr), hresult,
                                 command_operation(result.stdout, result.stderr),
                                 command_status(result.stdout, result.stderr),
-                                command_operation_index(result.stdout, result.stderr))
+                                command_operation_index(result.stdout, result.stderr),
+                                command_diagnostic(result.stdout, result.stderr))
     return result.stdout.strip()
 
 
@@ -585,6 +597,8 @@ def main(argv=None):
                 diagnostic["driver_status"] = ex.status
             if ex.index is not None:
                 diagnostic["driver_operation_index"] = ex.index
+            if ex.diagnostic is not None:
+                diagnostic["driver_diagnostic"] = ex.diagnostic
         print(json.dumps(diagnostic), file=sys.stderr, flush=True)
         print("Hosted compatibility refused or failed; no passing claim. Private diagnostics omitted.", file=sys.stderr)
         return 1

@@ -108,9 +108,15 @@ sources; what restore actually used is checked afterwards, as below.
 
 The VERIFY `packaged-metadata` child (PowerShell running the release
 inspector, which itself launches `sn.exe -vf`) additionally gets
-`PATHEXT=.EXE`. Without it PowerShell does not run the `.exe` at all,
-`$LASTEXITCODE` stays empty and the inspector fails; hosted run r12 stopped
-there. No other child gets `PATHEXT`.
+`PATHEXT=.EXE`. Without it PowerShell does not run the `.exe` at all: on the
+PowerShell 7 used here the call returns silently (even under
+`$ErrorActionPreference = 'Stop'`, no command-not-found error was observed) and
+`$LASTEXITCODE` stays `$null`. Hosted run r12 stopped there. The inspector now
+clears `$LASTEXITCODE` first and treats an unset value, or a command-not-found
+error, as "the tool did not run", failing with a fixed message that names a
+missing `PATHEXT` as the likely cause (no environment contents are printed).
+No other child gets `PATHEXT`; a test pins that the only call site asking for
+it is `packaged-metadata`.
 
 ### What PREPARE binds for build dependencies
 
@@ -149,8 +155,14 @@ hashes of its `mscorlib.dll` and `System.dll`). The receipt must carry exactly
 one of the two; it must match the recorded `TargetFrameworkDirectory`, the
 targeting-pack directory must be exactly
 `C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.6.2`,
-and the delay and public builds must record the same source. The other reference-assembly files in a targeting pack are not
-hashed.
+and the delay and public builds must record the same source. Every
+`TargetFrameworkDirectory` entry must be the first one or its `Facades` folder.
+For the package form SIGN and VERIFY also bind the first entry, lexically, to
+`<PREPARE output>\temp\packages\<id>\<version>\build\.NETFramework\v4.6.2`,
+taking `<PREPARE output>` from the parent of the recorded key-file overlay item
+(they cannot see PREPARE's disk). The comparison is case-, separator- and
+`..`-insensitive, as PREPARE's own. The other reference-assembly files in a
+targeting pack are not hashed.
 
 This proves that each archive the build resolved carries a valid repository
 signature, chaining to a trusted root, over content whose hash the resolved
@@ -212,9 +224,15 @@ stage fails after a tool call it also prints `PPDS_COMPAT_OPERATION=<name>`
 for the last call. That is the last tool call recorded, which need not be the
 cause: a refusal after a successful call reports that call with status 0.
 `PPDS_COMPAT_OPERATION_INDEX=<n>` says which call of that name it was
-(1-based, bounded integer; passed through as `driver_operation_index`). The
-coordinator passes through only registry codes, listed
-operation names and that status pattern, as `command_refusal`,
-`driver_operation` and `driver_status` in its failure JSON, and VERIFY prints
+(1-based, bounded integer; passed through as `driver_operation_index`). When
+the failed call is `packaged-metadata`, the driver also classifies the release
+inspector's stderr against the inspector's fixed failure messages and prints
+`PPDS_COMPAT_DIAGNOSTIC=<code>` (`inspector-sn-not-run`, `inspector-public-key`,
+`inspector-framework`, ... or `inspector-unclassified`); the raw output is
+searched for those phrases but never printed or stored. The coordinator passes
+through only registry codes, listed operation names, that status pattern, a
+bounded index and the driver's fixed diagnostic codes, as `command_refusal`,
+`driver_operation`, `driver_status`, `driver_operation_index` and
+`driver_diagnostic` in its failure JSON, and VERIFY prints
 a checkpoint after each download, the plan, custody and context checks, the
 driver, the case check and the evidence upload.
