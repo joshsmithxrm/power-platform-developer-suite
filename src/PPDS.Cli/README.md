@@ -214,7 +214,7 @@ Options:
 - `--environment`, `-env` - Override environment URL
 - `--parallel` - Max concurrent entity exports (default: CPU * 2)
 - `--batch-size` - Records per API request (default: 5000)
-- `--output-format`, `-o` - Output format (Text or Json)
+- `--output-format`, `-f` - Output format (Text or Json)
 - `--verbose`, `-v` - Verbose logging
 - `--debug` - Diagnostic logging
 
@@ -235,7 +235,7 @@ Options:
 - `--bypass-plugins` - Bypass plugins: sync, async, or all
 - `--bypass-flows` - Bypass Power Automate flows
 - `--continue-on-error` - Continue on individual record failures
-- `--output-format`, `-o` - Output format (Text or Json)
+- `--output-format`, `-f` - Output format (Text or Json)
 - `--verbose`, `-v` - Verbose logging
 - `--debug` - Diagnostic logging
 
@@ -267,7 +267,7 @@ ppds data schema --entities account,contact --output schema.xml
 ```
 
 Options:
-- `--entities`, `-e` (required) - Entity logical names (comma-separated)
+- `--entities` (required) - Entity logical names (comma-separated). `-e` still works but is deprecated for entities and prints a notice on stderr; use `--entities`
 - `--output`, `-o` (required) - Output schema file path
 - `--include-audit-fields` - Include createdon, createdby, etc.
 - `--disable-plugins` - Set disableplugins=true on all entities
@@ -293,7 +293,7 @@ Options:
 - `--source-profile`, `-sp` - Profile for source (default: active)
 - `--target-profile`, `-tp` - Profile for target (default: active)
 - `--analyze` - Preview without generating file
-- `--output-format`, `-o` - Output format (Text or Json)
+- `--output-format`, `-f` - Output format (Text or Json)
 
 Use the mapping file with import:
 ```bash
@@ -309,7 +309,7 @@ ppds data load --entity account --file accounts.csv
 ```
 
 Options:
-- `--entity`, `-e` (required) - Target entity logical name
+- `--entity` (required) - Target entity logical name. `-e` still works but is deprecated for entities; use `--entity`
 - `--file`, `-f` (required) - Path to CSV file
 - `--key`, `-k` - Alternate key field(s) for upsert (comma-separated for composite)
 - `--mapping`, `-m` - Path to column mapping JSON file
@@ -353,7 +353,7 @@ ppds data update --entity account --filter "statecode eq 0" --set "description=U
 ```
 
 Options:
-- `--entity`, `-e` (required) - Target entity logical name
+- `--entity` (required) - Target entity logical name. `-e` still works but is deprecated for entities; use `--entity`
 - `--id` - Single record GUID to update
 - `--key`, `-k` - Alternate key for lookup (field=value, comma-separated for composite)
 - `--file` - Path to CSV file containing IDs and values to update
@@ -370,7 +370,7 @@ Options:
 - `--continue-on-error` - Continue on individual record failures
 - `--profile`, `-p` - Profile name
 - `--environment`, `-env` - Override environment URL
-- `--output-format`, `-o` - Output format (Text or Json)
+- `--output-format`, `-f` - Output format (Text or Json)
 
 **Safety Features:**
 - All updates require confirmation by default (type `update N` where N is the count)
@@ -402,7 +402,7 @@ ppds data delete --entity account --filter "name like '%test%'" --force --limit 
 ```
 
 Options:
-- `--entity`, `-e` (required) - Target entity logical name
+- `--entity` (required) - Target entity logical name. `-e` still works but is deprecated for entities; use `--entity`
 - `--id` - Single record GUID to delete
 - `--key`, `-k` - Alternate key for lookup (field=value, comma-separated for composite)
 - `--file` - Path to file containing record IDs (JSON array or CSV)
@@ -417,7 +417,7 @@ Options:
 - `--continue-on-error` - Continue on individual record failures
 - `--profile`, `-p` - Profile name
 - `--environment`, `-env` - Override environment URL
-- `--output-format`, `-o` - Output format (Text or Json)
+- `--output-format`, `-f` - Output format (Text or Json)
 
 **Safety Features:**
 - All deletes require confirmation by default (type `delete N` where N is the count)
@@ -444,7 +444,7 @@ ppds data truncate --entity account --batch-size 500 --force
 ```
 
 Options:
-- `--entity`, `-e` (required) - Target entity logical name
+- `--entity` (required) - Target entity logical name. `-e` still works but is deprecated for entities; use `--entity`
 - `--dry-run` - Preview record count without deleting
 - `--force` - Skip confirmation prompt (required for non-interactive)
 - `--batch-size` - Records per delete batch (default: 1000, max: 1000)
@@ -453,7 +453,7 @@ Options:
 - `--continue-on-error` - Continue on individual record failures
 - `--profile`, `-p` - Profile name
 - `--environment`, `-env` - Override environment URL
-- `--output-format`, `-o` - Output format (Text or Json)
+- `--output-format`, `-f` - Output format (Text or Json)
 
 **Safety Features:**
 - Requires typing `TRUNCATE <entity> <count>` to confirm (e.g., `TRUNCATE account 5000`)
@@ -494,7 +494,7 @@ ppds query fetch --file query.xml -f csv > results.csv
 ```
 
 Options:
-- `--file`, `-f` - Read FetchXML from file
+- `--file` - Read FetchXML from file
 - `--stdin` - Read FetchXML from stdin
 - `--profile`, `-p` - Profile name
 - `--environment`, `-env` - Override environment URL
@@ -502,7 +502,7 @@ Options:
 - `--page` - Page number (1-based)
 - `--paging-cookie` - Paging cookie for continuation
 - `--count`, `-c` - Include total record count
-- `--output-format` - Output format (Text, Json, or Csv)
+- `--output-format`, `-f` - Output format (Text, Json, or Csv)
 
 #### SQL
 
@@ -538,7 +538,7 @@ ppds query sql "UPDATE contact SET jobtitle = 'Senior Developer' WHERE jobtitle 
 ```
 
 Options:
-- `--file`, `-f` - Read SQL from file
+- `--file` - Read SQL from file
 - `--stdin` - Read SQL from stdin
 - `--show-fetchxml` - Output the transpiled FetchXML instead of executing
 - `--explain` - Show the execution plan without executing
@@ -552,7 +552,7 @@ Options:
 - `--page` - Page number (1-based)
 - `--paging-cookie` - Paging cookie for continuation
 - `--count`, `-c` - Include total record count
-- `--output-format` - Output format (Text, Json, or Csv); DML dry-run plans support Text or Json
+- `--output-format`, `-f` - Output format (Text, Json, or Csv); DML dry-run plans support Text or Json
 
 #### Supported SQL Syntax
 
@@ -639,7 +639,7 @@ Options:
 - `--filter` - Filter by name pattern (supports `*` wildcard, e.g., `*account*`)
 - `--custom-only` - Show only custom entities/attributes
 - `--type` - Filter attributes by type (String, Lookup, DateTime, etc.)
-- `--output-format`, `-o` - Output format (Text or Json)
+- `--output-format`, `-f` - Output format (Text or Json)
 
 ### `ppds solutions`
 
@@ -831,10 +831,10 @@ Options:
 - `--async-only` - Show only asynchronous traces
 - `--recursive` - Show only nested traces (depth > 1)
 - `--record` - Filter by record (entity name)
-- `--filter`, `-f` - Path to filter file (JSON)
+- `--filter` - Path to filter file (JSON)
 - `--top`, `-n` - Maximum results (default: 50)
 - `--profile`, `-p` - Profile name
-- `--environment`, `-e` - Override environment URL
+- `--environment`, `-env` - Override environment URL
 
 #### Get
 
@@ -985,11 +985,18 @@ These options are available on all commands:
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--output-format` | `-o` | Output format: `text` (default) or `json` |
+| `--output-format` | `-f` | Output format: `text` (default) or `json`. On `data load`, `-f` is `--file`, so use `-o` there. On commands where `-f` belongs to another option (`--force` on `plugins unregister`, `plugins extract`, `plugins download assembly`/`package`, `custom-apis unregister`, `service-endpoints unregister`, `query history clear`; `--file` on `deployment-settings sync`) use the long form `--output-format` |
 | `--quiet` | `-q` | Show only warnings and errors |
-| `--verbose` | `-v` | Show debug messages |
+| `--verbose` | `-v` | Show debug messages. On the `views` commands that take `--view` (`-v`), use the long form `--verbose` |
 | `--debug` | | Show trace-level diagnostics |
 | `--correlation-id` | | Correlation ID for distributed tracing |
+
+### Short alias for `--environment`
+
+Use `-env` as the short form of `--environment` on every command that accepts it. `-e` keeps its existing
+meaning per command for now (entity, entity list, or environment depending on the command); using `-e` to
+select an entity is deprecated and prints a notice on stderr, so prefer `--entity`, `--entities` and
+`--environment` in scripts. `-e` will be standardized for environments only in CLI 2.0.
 
 ---
 
