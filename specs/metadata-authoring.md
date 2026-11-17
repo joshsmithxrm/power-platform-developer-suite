@@ -768,6 +768,14 @@ The synthetic global-color read/write cases verify the real service -> MCP tool 
 
 These fault-code tests invoke real services with fake SDK responses and the existing CLI/MCP error serializers. They do not invoke a live endpoint or claim an MCP tool exists for the status/local-column operations. The numeric code provides an underlying platform identifier; arbitrary platform fault messages remain deliberately withheld, so the literal underlying-message criterion in issue #1531 is not claimed complete.
 
+### Updates preserve unpublished and unrequested values
+
+An update changes only what the caller asked to change. `optionset update` re-sends the whole global choice through `UpdateOptionSet`, so it reads the choice as-if-published: a property the request does not set (display name, description and the other choice-level settings) keeps its current unpublished value instead of reverting to the published copy. The other update paths already avoid this: table and column updates send a fresh minimal payload carrying only the requested fields, and option, status-reason and color updates resolve their targets from draft metadata (#1531). This does not make concurrent edits by another user safe: the read and the update are separate requests.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-141 | `optionset update` reads the global choice as-if-published for both an exact and a case-variant name, so an unpublished description survives a display-name-only update and the update carries the stored name | `GlobalChoiceNameResolutionTests.ChoiceUpdate_ReadsDraft_SoUnrequestedPropertiesKeepTheirUnpublishedValues` | ✅ |
+
 ### Create-option presence and publisher warnings
 
 Local Choice/Choices creation and global-choice creation distinguish an omitted numeric value from an explicitly supplied zero. The existing public `int OptionDefinition.Value` getter/setter and parameterless constructor remain; the additive read-only `[JsonIgnore] HasExplicitValue` property records whether the setter was used. Callers wanting allocation must omit the setter/property. `Value = 0` now deliberately means zero, rather than requesting allocation.
@@ -1063,6 +1071,7 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 | 2026-11-09 | Prepare the approved finite State/Status/GUID column-label transition, strict identity/minimal-payload/editability policy and lifecycle/privacy safeguards; preserve the common224 BEFORE proof and hold fixed validation (AC-123 through AC-130). |
 | 2026-11-09 | Add strict dependency preview/recheck, safe read recovery classification and truthful wider scope with AC-114–AC-122; 277 focused cases and both corrected combined-workflow regressions passed, with composed ordinary unit validation. |
 | 2026-11-12 | Add bounded typed Dataverse fault codes to status/local-option insertion errors without exposing server text; verify service, CLI JSON and MCP helper privacy (AC-131–132). Literal issue #1531 underlying-message criterion remains qualified. |
+| 2026-11-17 | `optionset update` reads the choice as-if-published so unrequested properties keep their unpublished values (AC-141). |
 | 2026-11-16 | Follow-ups for #1530/#1531/#1535: global choice names resolve to the stored name on a not-found fault only, preserving every previous failure outcome except case ambiguity; delete confirms and deletes exactly the previewed stored name; update/remove targeting and global color readback read drafts, with a published/draft label agreement check; legacy `--options` accepts bare labels and rejects malformed or conflicting inputs for Choice columns; add-option dry-run marks omitted values unallocated (AC-133-AC-140, AC-72 amended). |
 | 2026-11-09 | Bound sixteen SDK/catalog user-message paths to service-owned action/target text; retain diagnostic causes and classifications, verify synthetic MCP privacy and update the intentional CLI message contract (AC-103 through AC-105). |
 | 2026-11-08 | Preserve covered color cancellation and normalize the selected acquisition boundaries with unchanged CLI exits; protect authentication diagnostic details at the MCP error boundary (AC-97 through AC-102). |

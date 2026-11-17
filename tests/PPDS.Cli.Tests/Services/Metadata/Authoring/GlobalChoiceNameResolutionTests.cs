@@ -375,6 +375,28 @@ public sealed class GlobalChoiceNameResolutionTests
         Assert.Equal(GlobalChoiceServerFake.ChoiceId, preview.TargetObjectId);
     }
 
+    [Theory]
+    [InlineData(Stored)]
+    [InlineData(Typed)]
+    [Trait("AC", "AC-141")]
+    public async Task ChoiceUpdate_ReadsDraft_SoUnrequestedPropertiesKeepTheirUnpublishedValues(string name)
+    {
+        // The description was edited and not yet published. 'optionset update --display-name' must not revert it
+        // by re-sending the published copy.
+        using var f = new GlobalChoiceServerFake
+        {
+            DraftDescription = new Label("Unpublished description", 1033),
+            PublishedDescription = new Label("Published description", 1033)
+        };
+        await f.Run("choice-update", name);
+        Assert.All(f.Requests.OfType<RetrieveOptionSetRequest>(), r => Assert.True(r.RetrieveAsIfPublished));
+        var update = Assert.Single(f.Requests.OfType<UpdateOptionSetRequest>());
+        Assert.Equal(Stored, update.OptionSet.Name);
+        Assert.Equal("Unpublished description", Assert.Single(update.OptionSet.Description.LocalizedLabels).Label);
+        Assert.Equal("Renamed", Assert.Single(update.OptionSet.DisplayName.LocalizedLabels).Label);
+        f.AssertLeases();
+    }
+
     [Fact]
     [Trait("AC", "AC-135")]
     public async Task AddOptionWithColor_ReadsDraftAndResendsTheDraftSetWithTheNewColor()
@@ -582,6 +604,10 @@ internal sealed class GlobalChoiceServerFake : IDisposable
     internal List<(int Value, string Label)>? Draft { get; init; }
     internal List<(int Value, string Label)>? Published { get; init; }
 
+    /// <summary>Choice-level description in the draft (as-if-published) and published reads.</summary>
+    internal Label? DraftDescription { get; init; }
+    internal Label? PublishedDescription { get; init; }
+
     internal FaultException<OrganizationServiceFault> NotFoundFault(string name) =>
         (FaultException<OrganizationServiceFault>)Fault(string.Format(System.Globalization.CultureInfo.InvariantCulture, NotFoundTemplate, name), 0x80040217);
 
@@ -678,6 +704,8 @@ internal sealed class GlobalChoiceServerFake : IDisposable
     private OptionSetMetadata Read(OptionSetMetadata stored, bool asIfPublished)
     {
         var choice = Choice(stored.Name, stored.MetadataId);
+        if ((asIfPublished ? DraftDescription : PublishedDescription) is { } description)
+            choice.Description = description;
         if ((asIfPublished ? Draft : Published) is { } labels)
         {
             choice.Options.Clear();

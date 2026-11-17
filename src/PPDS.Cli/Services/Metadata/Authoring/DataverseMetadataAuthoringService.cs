@@ -840,8 +840,10 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         reporter?.ReportPhase("Retrieving existing choice");
 
         // #1535: the exact spelling is retrieved first; a case variant resolves to the stored name.
-        // The retrieve lease is returned before the update acquires its own.
-        var (_, retrieveResponse) = await RetrieveGlobalChoiceAsync(request.Name, "Name", retrieveAsIfPublished: false, ct).ConfigureAwait(false);
+        // The retrieve lease is returned before the update acquires its own. The choice is read as-if-published:
+        // UpdateOptionSet re-sends every property, so a published read would revert unpublished edits to the
+        // properties this request does not change.
+        var (_, retrieveResponse) = await RetrieveGlobalChoiceAsync(request.Name, "Name", retrieveAsIfPublished: true, ct).ConfigureAwait(false);
 
         reporter?.ReportPhase("Updating global choice", request.Name);
 
