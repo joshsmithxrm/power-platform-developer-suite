@@ -104,8 +104,14 @@ public sealed record AddFieldsResult(
     /// <summary>Already-present fields whose stored binding differs from the metadata logical name only by case. Null when not reported.</summary>
     public IReadOnlyList<NonCanonicalBinding>? NonCanonicalBindings { get; init; }
 
+    /// <summary>The control <c>id</c> given to each added placement, in add order. Null when not reported.</summary>
+    public IReadOnlyList<AddedFieldControl>? AddedControls { get; init; }
+
     public bool CountsKnown => AddedFields is not null && AlreadyPresentFields is not null && DuplicateRequests is not null;
 }
+
+/// <summary>A newly added field control: the column logical name and the control <c>id</c> written for it (<c>name</c>, <c>name1</c>, …).</summary>
+public sealed record AddedFieldControl(string Field, string ControlId);
 
 /// <summary>A field that is also placed elsewhere on the form; Locations are "Tab / Section" labels.</summary>
 public sealed record FieldPlacementNotice(string Field, IReadOnlyList<string> Locations);
