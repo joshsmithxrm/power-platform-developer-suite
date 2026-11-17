@@ -5,6 +5,10 @@ import type { DaemonClient } from '../daemonClient.js';
 import type { QueryResultResponse } from '../types.js';
 import { isAuthError } from '../utils/errorUtils.js';
 import { showErrorWithReport } from '../utils/errorNotify.js';
+import {
+    UNCONFIRMED_DML_SAFETY, confirmDmlExecution, describeDmlFailure, dmlMayHaveApplied, dmlRefusalMessage, dmlServerMessage, dmlWriteTargets, isDmlConfirmationRequired,
+    DML_SUBMITTED_MAY_HAVE_APPLIED as SUBMITTED_MAY_HAVE_APPLIED, DML_SUBMITTED_THEN_CANCELLED as SUBMITTED_THEN_CANCELLED,
+} from '../utils/dmlSafety.js';
 
 import { renderResultsHtml } from './notebookResultRenderer.js';
 
@@ -44,6 +48,11 @@ interface CellExecutionState {
     readonly run: NotebookRun;
     readonly abort: AbortController;
     readonly cts: CancellationTokenSource;
+}
+
+/** stop names why the rest of the run must not execute (shown on each skipped cell). */
+interface CellOutcome {
+    readonly stop?: string;
 }
 
 interface CachedCellResult {
@@ -261,9 +270,14 @@ export class DataverseNotebookController implements vscode.Disposable {
                         if (initialBinding === bindingUrl(state.notebook)) state.acknowledgement = key;
                     }
                     this.updateStatusBarVisibility(vscode.window.activeNotebookEditor);
-                    for (const cell of pending.cells) {
+                    for (const [index, cell] of pending.cells.entries()) {
                         if (!this.ownsRun(state, run) || run.cancelled || state.notebook.isClosed) break;
-                        await this.executeCell(cell, state, run, run.context);
+                        const outcome = await this.executeCell(cell, state, run, run.context);
+                        if (outcome.stop) {
+                            // A declined, refused, failed or cancelled DML cell stops the rest of this run (Run All included).
+                            await this.markNotRun(pending.cells.slice(index + 1), state, run, run.context, outcome.stop);
+                            break;
+                        }
                     }
                 } catch (error) {
                     const cell = pending.cells[0];
@@ -308,7 +322,7 @@ export class DataverseNotebookController implements vscode.Disposable {
         return new vscode.NotebookCellOutput([vscode.NotebookCellOutputItem.error(error instanceof Error ? error : new Error(String(error)))]);
     }
 
-    private async executeCell(cell: vscode.NotebookCell, state: NotebookState, run: NotebookRun, context: NotebookExecutionContext): Promise<void> {
+    private async executeCell(cell: vscode.NotebookCell, state: NotebookState, run: NotebookRun, context: NotebookExecutionContext): Promise<CellOutcome> {
         const execution = this.controller.createNotebookCellExecution(cell);
         execution.executionOrder = ++this.executionOrder;
         const startedAt = Date.now();
@@ -323,55 +337,151 @@ export class DataverseNotebookController implements vscode.Disposable {
             entry.cts.cancel();
         });
         const ownsExecution = (): boolean => this.ownsRun(state, run) && this.activeExecutions.get(cellUri) === entry;
-        const writeOutput = async (output: vscode.NotebookCellOutput): Promise<void> => {
-            if (ownsExecution()) await execution.replaceOutput([...this.contextOutputs(context, executedAt), output]);
+        const writeOutputs = async (outputs: vscode.NotebookCellOutput[]): Promise<void> => {
+            if (ownsExecution()) await execution.replaceOutput([...this.contextOutputs(context, executedAt), ...outputs]);
         };
+        const writeOutput = (output: vscode.NotebookCellOutput): Promise<void> => writeOutputs([output]);
         const textOutput = (text: string): vscode.NotebookCellOutput =>
             new vscode.NotebookCellOutput([vscode.NotebookCellOutputItem.text(text, 'text/plain')]);
         let success = false;
+        /** Set once the daemon has said this cell is DML; any non-success after that stops the run. */
+        let isDml = false;
+        let confirmedDml = false;
+        const completed: CellOutcome = {};
+        const stopIfDml = (reason: string): CellOutcome => isDml ? { stop: reason } : completed;
         try {
+            // Read once: the modal and the confirmed request use exactly this text and this run's context.
             const content = cell.document.getText().trim();
             if (!content) {
                 await writeOutput(textOutput('Empty query'));
                 success = true;
-                return;
+                return completed;
             }
             const isFetchXml = ['fetchxml', 'xml'].includes(cell.document.languageId) || this.looksLikeFetchXml(content);
             const target = { environmentUrl: context.environmentUrl, profileName: context.profileName, profileIdentity: context.profileIdentity };
-            const result = isFetchXml
-                ? await this.daemon.queryFetch({ fetchXml: content, ...target }, entry.cts.token)
-                : await this.daemon.querySql({ sql: content, ...target }, entry.cts.token);
-            if (entry.abort.signal.aborted || run.cancelled) {
-                await writeOutput(textOutput('Query cancelled'));
-                return;
+            const cancelled = (): boolean => entry.abort.signal.aborted || run.cancelled;
+            let result: QueryResultResponse;
+            if (isFetchXml) {
+                result = await this.daemon.queryFetch({ fetchXml: content, ...target }, entry.cts.token);
+            } else {
+                // Same flow as the Data Explorer: always send unconfirmed safety options so the
+                // daemon's DML guard runs; confirm only when the daemon says the statement needs it.
+                try {
+                    result = await this.daemon.querySql({ sql: content, ...target, dmlSafety: { ...UNCONFIRMED_DML_SAFETY } }, entry.cts.token);
+                } catch (error) {
+                    if (cancelled() || !isDmlConfirmationRequired(error)) throw error;
+                    isDml = true;
+                    const refusal = await this.awaitDmlConfirmation(content, context, error, entry, cancelled, ownsExecution, writeOutput);
+                    if (refusal) return refusal;
+                    // One confirmed request for this text and target. A second confirmation-required
+                    // answer is not re-prompted; it surfaces as an error below.
+                    confirmedDml = true;
+                    result = await this.daemon.querySql({ sql: content, ...target, dmlSafety: { isConfirmed: true } }, entry.cts.token);
+                }
             }
-            if (!ownsExecution()) return;
+            if (cancelled() && !confirmedDml) {
+                await writeOutput(textOutput('Query cancelled'));
+                return stopIfDml('an earlier DML cell was cancelled');
+            }
+            if (!ownsExecution()) return completed;
             this.cellResults.set(cellUri, { result, context, executedAt });
-            await writeOutput(new vscode.NotebookCellOutput([
+            const table = new vscode.NotebookCellOutput([
                 vscode.NotebookCellOutputItem.text(renderResultsHtml(result, context.environmentUrl), 'text/html'),
-            ]));
-            success = result.success;
+            ]);
+            const dmlFailure = describeDmlFailure(result, { confirmedDml });
+            const failureOutputs = dmlFailure ? [this.errorOutput(new Error(dmlFailure))] : [];
+            if (cancelled()) {
+                // The confirmed request had already been answered: keep what came back.
+                await writeOutputs([textOutput(`${SUBMITTED_THEN_CANCELLED} The daemon's response is shown below.`), ...failureOutputs, table]);
+                return { stop: 'an earlier DML cell was cancelled after it was submitted' };
+            }
+            await writeOutputs([...failureOutputs, table]);
+            success = result.success && !dmlFailure;
+            if (dmlFailure) return { stop: 'rows failed in an earlier DML cell' };
+            if (!success) return stopIfDml('an earlier DML cell did not succeed');
         } catch (error) {
             if (entry.abort.signal.aborted || run.cancelled) {
-                await writeOutput(textOutput('Query cancelled'));
-                return;
+                await writeOutput(textOutput(confirmedDml ? `${SUBMITTED_THEN_CANCELLED} Check the data before running it again.` : 'Query cancelled'));
+                return stopIfDml('an earlier DML cell was cancelled');
             }
-            if (!ownsExecution()) return;
+            if (!ownsExecution()) return completed;
+            const refusal = dmlRefusalMessage(error);
+            if (refusal) {
+                await writeOutput(this.errorOutput(new Error(refusal)));
+                return { stop: 'the DML safety guard refused an earlier cell' };
+            }
             if (isAuthError(error)) {
                 // Name/index may have been reused since this run captured its profile.
                 // Recovery must never invalidate whichever profile now owns that alias.
                 const message = error instanceof Error ? error.message : String(error);
                 await writeOutput(this.errorOutput(new Error(
-                    `${message}\nAuthentication failed for the profile captured by this run (${context.profileName}) on ${context.environmentName}. Confirm the intended profile in PPDS Profiles, re-authenticate it, then run the cell again.`,
+                    `${message}\nAuthentication failed for the profile captured by this run (${context.profileName}) on ${context.environmentName}. Confirm the intended profile in PPDS Profiles, re-authenticate it, then run the cell again.`
+                    + (confirmedDml && dmlMayHaveApplied(error) ? `\n${SUBMITTED_MAY_HAVE_APPLIED}` : ''),
                 )));
-                return;
+                return stopIfDml('an earlier DML cell failed');
             }
-            await writeOutput(this.errorOutput(error));
+            await writeOutputs([this.errorOutput(error), ...(confirmedDml && dmlMayHaveApplied(error) ? [textOutput(SUBMITTED_MAY_HAVE_APPLIED)] : [])]);
+            return stopIfDml('an earlier DML cell failed');
         } finally {
             if (this.activeExecutions.get(cellUri) === entry) this.activeExecutions.delete(cellUri);
             tokenDisposable.dispose();
             entry.cts.dispose();
             execution.end(success, Date.now());
+        }
+        return completed;
+    }
+
+    /**
+     * Shows the DML confirmation for `content` on `context`. Resolves undefined only when the user
+     * chose Execute Anyway and the execution is still owned and not cancelled; otherwise the outcome.
+     */
+    private async awaitDmlConfirmation(
+        content: string, context: NotebookExecutionContext, error: unknown, entry: CellExecutionState,
+        cancelled: () => boolean, ownsExecution: () => boolean, write: (output: vscode.NotebookCellOutput) => Promise<void>,
+    ): Promise<CellOutcome | undefined> {
+        const text = (value: string): vscode.NotebookCellOutput => new vscode.NotebookCellOutput([vscode.NotebookCellOutputItem.text(value, 'text/plain')]);
+        if (!ownsExecution()) return {};
+        await write(text('Waiting for DML confirmation…'));
+        const options = { serverMessage: dmlServerMessage(error), writeTargets: dmlWriteTargets(error), signal: entry.abort.signal };
+        const answer = await confirmDmlExecution(content, context, options);
+        if (cancelled() || answer.kind === 'aborted') {
+            await write(text('Query cancelled. No records were changed.'));
+            return { stop: 'an earlier DML cell was cancelled' };
+        }
+        if (!ownsExecution()) return {};
+        if (answer.kind === 'confirmed') return undefined;
+        await write(answer.kind === 'declined' ? text(answer.message) : this.errorOutput(new Error(answer.message)));
+        return { stop: answer.kind === 'declined' ? 'a DML confirmation in an earlier cell was declined' : 'the DML confirmation in an earlier cell could not be completed' };
+    }
+
+    /**
+     * Marks the cells a run did not reach after a DML cell stopped it. Each cell is checked
+     * for ownership on its own, always ends its execution, and a failure on one cell is
+     * contained to that cell (it never reaches the run's generic error handler).
+     */
+    private async markNotRun(
+        cells: readonly vscode.NotebookCell[], state: NotebookState, run: NotebookRun, context: NotebookExecutionContext, reason: string,
+    ): Promise<void> {
+        const executedAt = new Date().toISOString();
+        for (const cell of cells) {
+            if (!this.ownsRun(state, run) || run.cancelled || state.notebook.isClosed) return;
+            this.cellResults.delete(cell.document.uri.toString());
+            let execution: vscode.NotebookCellExecution | undefined;
+            try {
+                execution = this.controller.createNotebookCellExecution(cell);
+                execution.start(Date.now());
+                await execution.replaceOutput([...this.contextOutputs(context, executedAt), new vscode.NotebookCellOutput([
+                    vscode.NotebookCellOutputItem.text(`Not run: this run stopped because ${reason}.`, 'text/plain'),
+                ])]);
+            } catch {
+                // The cell left the notebook or the notebook is closing; nothing to mark.
+            } finally {
+                try {
+                    execution?.end(false, Date.now());
+                } catch {
+                    // Already ended by VS Code (cell removed).
+                }
+            }
         }
     }
 

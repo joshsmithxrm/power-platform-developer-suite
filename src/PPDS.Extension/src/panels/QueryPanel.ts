@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { CancellationTokenSource, ResponseError } from 'vscode-jsonrpc/node';
+import { type CancellationToken, CancellationTokenSource, ResponseError } from 'vscode-jsonrpc/node';
 
 import type { DaemonClient } from '../daemonClient.js';
 import type { DiagnosticItem, QueryResultResponse } from '../types.js';
@@ -7,6 +7,11 @@ import { showQueryHistory } from '../commands/queryHistoryCommand.js';
 import { handleAuthError, isAuthError } from '../utils/errorUtils.js';
 import { showErrorWithReport } from '../utils/errorNotify.js';
 import { queryDefaultTop } from '../utils/config.js';
+import {
+    type DmlConfirmation, type DmlConfirmationOptions, type DmlTarget, UNCONFIRMED_DML_SAFETY, confirmDmlExecution, describeDmlFailure,
+    dmlMayHaveApplied, dmlRefusalMessage, dmlServerMessage, dmlWriteTargets, isDmlConfirmationRequired,
+    DML_SUBMITTED_MAY_HAVE_APPLIED as SUBMITTED_MAY_HAVE_APPLIED, DML_SUBMITTED_THEN_CANCELLED as SUBMITTED_THEN_CANCELLED,
+} from '../utils/dmlSafety.js';
 
 import { getNonce } from './webviewUtils.js';
 import { WebviewPanelBase } from './WebviewPanelBase.js';
@@ -18,6 +23,18 @@ interface CapturedQueryProfile {
     profileName: string;
     profileIdentity: string;
 }
+
+/** Environment and profile of one execution, frozen when it starts. */
+interface CapturedQueryTarget extends DmlTarget {
+    readonly environmentUrl?: string;
+    readonly profileName?: string;
+    readonly profileIdentity?: string;
+    /** True when the panel itself carries a notebook-captured profile identity. */
+    readonly capturedProfile: boolean;
+}
+
+const AUTH_RETRY_NOTICE = 'An earlier confirmed attempt of this statement failed with an authentication error after it was submitted, '
+    + 'so it may have partly applied. Check the data before confirming it again.';
 
 export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryPanelHostToWebview> {
     private static instances: QueryPanel[] = [];
@@ -61,6 +78,8 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
     private lastUseTds = false;
     /** Language used for the last query (for loadMore to use the same execution path). */
     private lastLanguage = 'sql';
+    /** True when the last result came from a confirmed (DML-capable) execution; such results are never paged. */
+    private lastWasConfirmedDml = false;
     protected readonly panelLabel = 'Data Explorer';
     private readonly initialSql: string | undefined;
     private profileIdentity: string | undefined;
@@ -327,12 +346,76 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
         this.updatePanelTitle(this.panelId, QueryPanel.instances.length > 1);
     }
 
-    private async executeQuery(sql: string, isRetry = false, useTds?: boolean, language?: string, isConfirmed = false): Promise<void> {
+    /** Target of one execution: captured once, used for its request, its modal and its confirmed request. */
+    private captureTarget(): CapturedQueryTarget {
+        return Object.freeze({
+            environmentUrl: this.environmentUrl, profileName: this.profileName, profileIdentity: this.profileIdentity,
+            environmentName: this.environmentDisplayName, environmentType: this.environmentType,
+            capturedProfile: this.profileIdentity !== undefined,
+        });
+    }
+
+    private static sameTarget(a: CapturedQueryTarget, b: CapturedQueryTarget): boolean {
+        return a.environmentUrl === b.environmentUrl && a.profileName === b.profileName && a.profileIdentity === b.profileIdentity;
+    }
+
+    /**
+     * True only when the daemon's own resolution of `profileName` (ProfileCollection.GetByNameOrIndex:
+     * "[N…]" and integers as an index, anything else as a case-insensitive name) is the active
+     * profile. No aliases such as "Profile N"; anything ambiguous is refused.
+     */
+    private static resolvesToActiveProfile(profileName: string, who: { index: number; name: string | null }): boolean {
+        const bracket = /^\[\s*([+-]?\d+)\s*\]/.exec(profileName);
+        if (profileName.startsWith('[')) return bracket !== null && QueryPanel.sameIndex(bracket[1], who.index);
+        if (/^\s*[+-]?\d+\s*$/.test(profileName)) return QueryPanel.sameIndex(profileName, who.index);
+        return who.name !== null && who.name.toUpperCase() === profileName.toUpperCase();
+    }
+
+    /** An integer string the daemon parses as an index (Int32 only; anything else is refused). */
+    private static sameIndex(value: string, index: number): boolean {
+        const parsed = Number(value.trim());
+        return Number.isSafeInteger(parsed) && parsed >= -2147483648 && parsed <= 2147483647 && parsed === index;
+    }
+
+    /**
+     * Pins the profile of a DML confirmation by its opaque identity, as notebooks do, so a renamed
+     * or re-pointed profile name cannot redirect the confirmed request. Returns why it cannot be
+     * pinned when the environment URL or the profile cannot be resolved.
+     */
+    private async pinTarget(target: CapturedQueryTarget): Promise<CapturedQueryTarget | string> {
+        if (!target.environmentUrl) return 'the environment URL of this panel is not known, so the statement cannot be confirmed. Select an environment, then run it again';
+        if (target.profileIdentity) return target;
+        if (!target.profileName) return 'the profile of this panel is not known yet, so the statement cannot be confirmed. Wait for the panel to show its profile, then run it again';
+        let who: Awaited<ReturnType<DaemonClient['authWho']>>;
+        try {
+            who = await this.daemon.authWho();
+        } catch (error) {
+            return `the profile ${target.profileName} could not be resolved (${error instanceof Error ? error.message : String(error)}), so the statement cannot be confirmed`;
+        }
+        if (!who.profileIdentity) return 'this daemon does not report a profile identity, so the statement cannot be pinned to a profile. Update the PPDS daemon, then run it again';
+        if (!QueryPanel.resolvesToActiveProfile(target.profileName, who)) {
+            return `the profile ${target.profileName} is not the active profile, and only the active profile can be pinned by identity. Make it the active profile in PPDS Profiles, then run the statement again`;
+        }
+        return Object.freeze({ ...target, profileIdentity: who.profileIdentity });
+    }
+
+    /**
+     * Executes one statement. `confirmedTarget` is set only by the confirmation below, for the
+     * target that the modal named; every other entry (Execute, refresh, re-authentication retry)
+     * starts unconfirmed with a freshly captured target, so a confirmation never outlives its request.
+     * `notice` is shown in that new attempt's confirmation (for example after a partial attempt).
+     */
+    private async executeQuery(
+        sql: string, isRetry = false, useTds?: boolean, language?: string, confirmedTarget?: CapturedQueryTarget, notice?: string,
+    ): Promise<void> {
         // Cancel any in-flight query and create a fresh token
         this.queryCts?.cancel();
         this.queryCts?.dispose();
         this.queryCts = new CancellationTokenSource();
         const token = this.queryCts.token;
+        const isConfirmed = confirmedTarget !== undefined;
+        const target = confirmedTarget ?? this.captureTarget();
+        const request = { environmentUrl: target.environmentUrl, profileName: target.profileName, profileIdentity: target.profileIdentity };
 
         try {
             this.postMessage({ command: 'executionStarted' });
@@ -341,61 +424,78 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 
             let result: QueryResultResponse;
             if (language === 'xml') {
-                result = await this.daemon.queryFetch({ fetchXml: sql, top: defaultTop, ...this.queryTarget }, token);
+                result = await this.daemon.queryFetch({ fetchXml: sql, top: defaultTop, ...request }, token);
             } else {
-                result = await this.daemon.querySql({ sql, top: defaultTop, useTds: tds, ...this.queryTarget, dmlSafety: { isConfirmed } }, token);
+                result = await this.daemon.querySql({ sql, top: defaultTop, useTds: tds, ...request, dmlSafety: { isConfirmed } }, token);
             }
             this.lastSql = sql;
             this.lastUseTds = tds;
             this.lastLanguage = language ?? 'sql';
+            // Only a confirmed execution can have run DML. Its result is never paged: load-more
+            // replays lastSql, and a DML statement must not be replayed outside this confirmation.
+            this.lastWasConfirmedDml = isConfirmed;
+            if (isConfirmed && result.moreRecords) {
+                result = {
+                    ...result, moreRecords: false, pagingCookie: null,
+                    warnings: [...(result.warnings ?? []), 'Load More is not available for the result of a DML statement. Run a SELECT to page through records.'],
+                };
+            }
             this.lastResult = result;
             this.allRecords = [...result.records];
+            const dmlFailure = describeDmlFailure(result, { confirmedDml: isConfirmed });
             this.postMessage({
                 command: 'queryResult',
                 data: result,
+                ...(dmlFailure ? { dmlFailure } : {}),
             });
         } catch (error) {
-            // If the token was cancelled, notify the webview and return early
             if (token.isCancellationRequested) {
-                this.postMessage({ command: 'queryCancelled' });
+                // A newer execution replaced this one: it owns the webview state now. A confirmed
+                // request that was replaced still says it was submitted, in a separate notice.
+                if (this.queryCts?.token !== token) {
+                    if (isConfirmed) void vscode.window.showWarningMessage(`Data Explorer: ${SUBMITTED_THEN_CANCELLED} A newer execution replaced it. Check the data before running it again.`);
+                    return;
+                }
+                if (isConfirmed) {
+                    this.postMessage({ command: 'queryError', error: `${SUBMITTED_THEN_CANCELLED} Check the data before running it again.` });
+                } else {
+                    this.postMessage({ command: 'queryCancelled' });
+                }
                 return;
             }
 
             // Check for DML safety errors from the daemon
             if (error instanceof ResponseError) {
-                const data = error.data as { dmlBlocked?: boolean; dmlConfirmationRequired?: boolean; message?: string; code?: string } | undefined;
-
-                // DML confirmation required — prompt the user
-                if (data?.dmlConfirmationRequired || data?.code === 'Query.DmlConfirmationRequired') {
-                    const choice = await vscode.window.showWarningMessage(
-                        data?.message || 'This DML operation requires confirmation.',
-                        { modal: true },
-                        'Execute Anyway'
-                    );
-                    if (choice === 'Execute Anyway') {
-                        await this.executeQuery(sql, isRetry, useTds, language, true);
-                    } else {
-                        this.postMessage({ command: 'queryCancelled' });
-                    }
+                // DML confirmation required — prompt the user (once per execution; a confirmed
+                // request that is still refused is shown as an error, never re-prompted).
+                if (!isConfirmed && isDmlConfirmationRequired(error)) {
+                    await this.confirmAndExecute(sql, isRetry, useTds, language, target, token, {
+                        serverMessage: dmlServerMessage(error), writeTargets: dmlWriteTargets(error), notice,
+                    });
                     return;
                 }
 
-                // DML blocked outright — show error
-                if (data?.dmlBlocked || data?.code === 'Query.DmlBlocked') {
-                    this.postMessage({ command: 'queryError', error: data?.message || 'DML operation blocked.' });
+                // DML refused (no WHERE, protected or cross-environment target, shakedown) — show error
+                const refusal = dmlRefusalMessage(error);
+                if (refusal) {
+                    this.postMessage({ command: 'queryError', error: refusal });
                     return;
                 }
             }
 
             const msg = error instanceof Error ? error.message : String(error);
+            const reachedExecution = isConfirmed && dmlMayHaveApplied(error);
+            const submittedNote = reachedExecution ? `\n${SUBMITTED_MAY_HAVE_APPLIED}` : '';
 
-            if (this.profileIdentity && isAuthError(error)) {
-                this.postMessage({ command: 'queryError', error: `${msg}\nAuthentication failed for the captured notebook profile on ${this.environmentUrl}. Confirm the intended profile in PPDS Profiles, re-authenticate it, then run the query again.` });
+            if (target.capturedProfile && isAuthError(error)) {
+                this.postMessage({ command: 'queryError', error: `${msg}\nAuthentication failed for the captured notebook profile on ${target.environmentUrl}. Confirm the intended profile in PPDS Profiles, re-authenticate it, then run the query again.${submittedNote}` });
                 return;
             }
 
+            // The retry is always unconfirmed: a DML statement goes back through the daemon's
+            // guard and a fresh modal for the target captured by that new attempt.
             if (await handleAuthError(this.daemon, error, isRetry, () =>
-                this.executeQuery(sql, true, useTds, language, isConfirmed)
+                this.executeQuery(sql, true, useTds, language, undefined, reachedExecution ? AUTH_RETRY_NOTICE : undefined)
             )) {
                 return;
             }
@@ -404,8 +504,69 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                 ? error.data as { diagnostics?: DiagnosticItem[] } | undefined
                 : undefined;
             const diagnostics = Array.isArray(errorData?.diagnostics) ? errorData.diagnostics : undefined;
-            this.postMessage({ command: 'queryError', error: msg, diagnostics });
+            this.postMessage({ command: 'queryError', error: msg + submittedNote, diagnostics });
         }
+    }
+
+    /** Asks for one confirmation for `sql` on `target`, then sends the one confirmed request for that pair. */
+    private async confirmAndExecute(
+        sql: string, isRetry: boolean, useTds: boolean | undefined, language: string | undefined,
+        target: CapturedQueryTarget, token: CancellationToken, options: Omit<DmlConfirmationOptions, 'signal'>,
+    ): Promise<void> {
+        const superseded = (): boolean => this.abortSignal.aborted || this.queryCts?.token !== token;
+        const pinned = await this.pinTarget(target);
+        if (superseded()) return;
+        if (token.isCancellationRequested) {
+            this.postMessage({ command: 'queryCancelled', message: 'Query cancelled. No records were changed.' });
+            return;
+        }
+        if (typeof pinned === 'string') {
+            this.postMessage({ command: 'queryError', error: `Not executed: ${pinned}. No records were changed.` });
+            return;
+        }
+        const abort = new AbortController();
+        const onDispose = (): void => abort.abort();
+        this.abortSignal.addEventListener('abort', onDispose, { once: true });
+        const cancellation = token.onCancellationRequested(() => abort.abort());
+        let answer: DmlConfirmation;
+        try {
+            answer = await confirmDmlExecution(sql, pinned, { ...options, signal: abort.signal });
+        } finally {
+            cancellation.dispose();
+            this.abortSignal.removeEventListener('abort', onDispose);
+        }
+        // A superseded confirmation never posts over the newer execution.
+        if (superseded()) return;
+        if (token.isCancellationRequested) {
+            this.postMessage({ command: 'queryCancelled', message: 'Query cancelled. No records were changed.' });
+            return;
+        }
+        switch (answer.kind) {
+            case 'confirmed':
+                break;
+            case 'aborted':
+                this.postMessage({ command: 'queryCancelled', message: 'Query cancelled. No records were changed.' });
+                return;
+            case 'declined':
+                this.postMessage({ command: 'queryCancelled', message: answer.message });
+                return;
+            case 'failed':
+                this.postMessage({ command: 'queryError', error: answer.message });
+                return;
+            default: {
+                const unexpected: never = answer;
+                this.postMessage({ command: 'queryError', error: `Not executed: unexpected confirmation result ${JSON.stringify(unexpected)}. No records were changed.` });
+                return;
+            }
+        }
+        if (!QueryPanel.sameTarget(target, this.captureTarget())) {
+            this.postMessage({
+                command: 'queryError',
+                error: `Not executed: the panel's environment or profile changed while the confirmation for ${target.environmentName || target.environmentUrl || 'the previous environment'} was open. No records were changed. Run the statement again to confirm it for the current environment.`,
+            });
+            return;
+        }
+        await this.executeQuery(sql, isRetry, useTds, language, pinned);
     }
 
     private async showFetchXml(sql: string): Promise<void> {
@@ -446,6 +607,10 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 
     private async loadMore(pagingCookie: string, page: number): Promise<void> {
         if (!this.lastResult || !this.lastSql) return;
+        if (this.lastWasConfirmedDml) {
+            this.postMessage({ command: 'queryError', error: 'Load More is not available for the result of a DML statement. Run a SELECT to page through records.' });
+            return;
+        }
         try {
             this.postMessage({ command: 'executionStarted' });
 
@@ -464,6 +629,8 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                     pagingCookie,
                     useTds: this.lastUseTds,
                     ...this.queryTarget,
+                    // Never confirmed: a page request must not be able to execute DML.
+                    dmlSafety: { ...UNCONFIRMED_DML_SAFETY },
                 });
             }
 
@@ -683,6 +850,8 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
 <div class="transpile-warning-banner" id="transpile-warning-banner" style="display:none"></div>
 
 <div class="data-source-banner" id="data-source-banner" style="display:none"></div>
+
+<div class="dml-failure-banner error-state" id="dml-failure-banner" role="alert" style="display:none"></div>
 
 <div class="results-wrapper" id="results-wrapper">
     <div class="empty-state" id="empty-state">Run a query to see results</div>
