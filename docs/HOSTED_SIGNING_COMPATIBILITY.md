@@ -86,13 +86,70 @@ an npm install or a clean test run is not an advisory review. Do not apply a
 suggested package downgrade without checking the required raw-transfer APIs.
 
 The compatibility plan now uses schema 2 and binds the admitted Windows common
-application-data directory. The constrained child environment supplies only
+application-data directory. Every constrained child environment supplies
 `PROGRAMDATA` and `ALLUSERSPROFILE` for that directory in addition to the existing
 OS/temp values. Machine-based Strong Name key containers require this Windows
 context; dropping it made common-data resolution empty on the hosted image.
 The coordinator refuses missing, different, non-local or linked directory
 values before generating a key. No CSP configuration, permission, profile or
 verification policy is changed. Old schema-1 plans must not be replayed.
+
+Only the PREPARE `dotnet restore`, `build`, `pack`, `msbuild` and
+`nuget verify` children also receive `APPDATA` and `LOCALAPPDATA` (NuGet fails
+with a null-path error without them) and a fixed English CLI language. Both
+folders are inside the driver's owned temporary directory. Git children, the
+`sn.exe` children and every driver process the coordinator launches, including
+the SIGN driver that handles the key, get neither; tests pin each set exactly.
+The owned user-level NuGet configuration is written by the driver and only
+clears fallback package folders. NuGet still reads `NuGet.Config` files in the
+owned source copy and its ancestors and the machine-wide configuration under
+`ProgramFiles(x86)`. The repository `NuGet.config` clears inherited package
+sources; what restore actually used is checked afterwards, as below.
+
+### What PREPARE binds for build dependencies
+
+For each package in `project.assets.json`, PREPARE requires and records:
+
+- restore used no fallback folder and exactly one package folder, the owned
+  one (a fallback folder is refused by name, not as a missing file);
+- `.nupkg.metadata` `source` equals the single source declared in the owned
+  copy's `NuGet.config` (`https://api.nuget.org/v3/index.json`);
+- the assets `sha512` and the metadata `contentHash` are both base64 SHA-512
+  and equal;
+- the SHA-512 of the `.nupkg` file equals NuGet's `<name>.nupkg.sha512`;
+- the pinned `dotnet nuget verify --all` succeeds for the archive, reports the
+  nuget.org repository signature (service index above; its certificate SHA-256
+  is recorded) and reports a content hash equal to the assets `sha512`;
+- a direct reference with a central version equals its `Directory.Packages.props`
+  pin; the SDK's implicit `Microsoft.NETFramework.ReferenceAssemblies` and
+  transitive packages have no repository pin and are recorded as such.
+
+This proves that each archive the build resolved carries a valid nuget.org
+repository signature over the content hash that the resolved graph names, that
+the sidecars agree with it, and that direct pins were honoured. It does not
+prove that a reviewer expected that hash for that id/version (there is no lock
+file; NuGet's trust policy is the default store with no `trustedSigners`),
+that the extracted files MSBuild loaded (targets, task and tool DLLs) match the
+archive, or that the repository certificate is a specific pinned one. The
+stronger follow-up is a committed `packages.lock.json` restored in locked mode,
+with the same change in the publish workflow; this experiment does not change
+the production build.
+
+### Version properties
+
+Production lets MinVer derive every version property from the `Plugins-v` tag:
+`AssemblyVersion` `{Major}.0.0.0`, `FileVersion` `{Major}.{Minor}.{Patch}.0`,
+`PackageVersion`/`Version` and `InformationalVersion`, to which the SDK appends
+`+<SourceRevisionId>` from SourceLink. The owned copy has no `.git`, so PREPARE
+passes `MinVerVersionOverride=<candidate>`: MinVer's own target still runs and
+applies the production rule, and `SourceRevisionId` is supplied explicitly. No
+explicit version property, `MinVerSkip` or source-revision switch is accepted in
+the overlay. PREPARE reads the properties after `GetAssemblyAttributes` runs and
+checks the built DLL's assembly version, file version and product version in
+PREPARE and again in VERIFY. The hosted version `0.0.0-compat.<run id>` gives
+`0.0.0.0` under every rule; offline tests use non-zero versions. Not covered:
+MinVer's tag discovery and height calculation, and SourceLink's repository
+discovery.
 
 The disposable test-key generator uses a 1024-bit AT_SIGNATURE RSA key with
 `CspProviderFlags.CreateEphemeralKey`, exports the owned SNK with CreateNew,
@@ -110,3 +167,15 @@ also fails, the original bounded wait and cleanup remain. No failed job is
 retried, and a subsequent experiment requires fresh hosts and a new identity.
 Fixed phase/refusal codes distinguish transport from driver failures without
 publishing captured command output, exception text, paths or runtime tokens.
+
+Every constant refusal reason in the driver and the coordinator has its own
+fixed code; a test parses both sources and fails if a reason is missing or two
+share a code. Other driver refusals print `unregistered`; other exceptions print
+only their class from a fixed list, otherwise `exception-other`. When a driver
+stage fails after a tool call it also prints `PPDS_COMPAT_OPERATION=<name>`
+(a fixed operation name) and `PPDS_COMPAT_STATUS=<exit code|timeout|launch-failure>`
+for the last call. The coordinator passes through only registry codes, listed
+operation names and that status pattern, as `command_refusal`,
+`driver_operation` and `driver_status` in its failure JSON, and VERIFY prints
+a checkpoint after each download, the plan, custody and context checks, the
+driver, the case check and the evidence upload.

@@ -404,7 +404,7 @@ The stages are separate:
 
 | Stage | Inputs and result |
 |---|---|
-| `prepare` | Exact source and public experiment plan; build the actual net462 project with a test-public-key/version overlay in an owned copy, preserve delay-signed and public-signed controls, and produce a bound public handoff. No private-key argument is accepted. |
+| `prepare` | Exact source and public experiment plan; build the actual net462 project with a test-public-key/source overlay in an owned copy, letting MinVer derive the version properties from `MinVerVersionOverride`, verify each restored package's nuget.org repository signature and source, preserve delay-signed and public-signed controls, and produce a bound public handoff. No private-key argument is accepted. |
 | `sign` | The public handoff plus a later-authorized disposable key and owner approval reference; use only pinned `sn.exe`, remove the owned key copy, and retain the signed DLL and receipt. No restore, build, pack or source command runs. |
 | `verify` | The prepared and signed public handoffs; independently verify the signature and signature-only transform, run negative controls, repack, and apply the existing local package rules. No private key is accepted. |
 
@@ -412,12 +412,13 @@ The JSON plan has exactly these fields:
 
 | Field | Required value |
 |---|---|
-| `schema`, `kind` | `1`, `ppds-signing-compatibility-plan` |
+| `schema`, `kind` | `2`, `ppds-signing-compatibility-plan` |
 | `experiment` | Owner-selected identifier, letters/digits/underscore/hyphen, at most 80 characters |
 | `source`, `tree` | The reviewed driver checkout's full Git commit and tree IDs |
 | `version` | Candidate SemVer without build metadata; no Git tag is created |
 | `public_key_sha256` | Accepted disposable public input's hash, distinct from production |
 | `windows_directory` | Explicit Windows installation directory, for example `C:/Windows` |
+| `windows_common_data_directory` | Explicit Windows common application-data directory (`PROGRAMDATA`/`ALLUSERSPROFILE`), for example `C:/ProgramData` |
 | `tools` | Exactly `git`, `dotnet`, `pwsh`, `sn`, each with absolute `path`, SHA-256 `sha256`, and observed file product `version` |
 
 The accepted `sn` path is
