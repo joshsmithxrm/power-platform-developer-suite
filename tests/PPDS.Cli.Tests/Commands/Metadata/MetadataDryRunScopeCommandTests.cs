@@ -179,7 +179,7 @@ public sealed class MetadataDryRunScopeCommandTests(ITestOutputHelper output)
                 {
                     Assert.False(preview.GetProperty("serverFeasibilityChecked").GetBoolean());
                     Assert.False(preview.GetProperty("changesPersisted").GetBoolean());
-                    if (method == "AddOptionValueAsync") { Assert.False(data.TryGetProperty("value", out _)); Assert.Contains("SDK assignment", preview.GetProperty("optionValueAllocation").GetString()); }
+                    if (method == "AddOptionValueAsync") { Assert.False(data.TryGetProperty("value", out _)); Assert.StartsWith("unallocated", preview.GetProperty("optionValueAllocation").GetString()); } // #1530: no --value
                     if (scope == "option-data-and-draft-value") { Assert.Equal(1000001, data.GetProperty("value").GetInt32()); Assert.Equal("provisional", preview.GetProperty("optionValueAllocation").GetString()); }
                 }
                 if (method.StartsWith("Create", StringComparison.Ordinal)) Assert.True(data.GetProperty("wasDryRun").GetBoolean());

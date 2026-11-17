@@ -1,6 +1,7 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Commands.Metadata.Attribute;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Authoring;
@@ -107,7 +108,7 @@ public static class ColumnCommandGroup
 
         var optionsOption = new Option<string?>("--options")
         {
-            Description = "Option definitions for Choice/Choices columns: \"Label1=1,Label2=2\""
+            Description = "Option definitions for Choice/Choices columns: \"Label1=1,Label2=2\"; a bare Label's value is derived from --solution. Labels cannot contain ',' or '=' in this form; use 'attribute create --option' or '--options-file' for such labels"
         };
 
         var defaultValueOption = new Option<int?>("--default-value")
@@ -190,7 +191,34 @@ public static class ColumnCommandGroup
             var environmentVal = parseResult.GetValue(MetadataCommandGroup.EnvironmentOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            var options = AttributeCommandGroup.ParseOptionDefinitions(optionsRaw);
+            // --option-set-name attaches a GLOBAL option set and is mutually exclusive with the local --options,
+            // matching 'metadata attribute create' (#1530). Only Choice/Choices columns are affected; on other
+            // column types both inputs are ignored, as before.
+            var isChoice = type is SchemaColumnType.Choice or SchemaColumnType.Choices;
+            if (isChoice && !string.IsNullOrWhiteSpace(optionSetName) && !string.IsNullOrWhiteSpace(optionsRaw))
+            {
+                ServiceFactory.CreateOutputWriter(globalOptions).WriteError(StructuredError.Create(
+                    "INVALID_CONSTRAINT",
+                    "--option-set-name attaches an existing global option set and cannot be combined with --options (which defines a local option set)."));
+                return ExitCodes.ValidationError;
+            }
+
+            // Bare labels become label-only options (value allocated like --option "Label"); a malformed
+            // entry is rejected rather than silently dropped (#1530), matching 'metadata attribute create'.
+            // Other column types ignore option definitions and keep the previous parse.
+            OptionDefinition[]? options;
+            try
+            {
+                options = type is SchemaColumnType.Choice or SchemaColumnType.Choices
+                    ? AttributeCommandGroup.ParseOptionDefinitions(optionsRaw)
+                    : AttributeCommandGroup.ParseOptionDefinitionsPreviousBehavior(optionsRaw);
+            }
+            catch (FormatException ex)
+            {
+                ServiceFactory.CreateOutputWriter(globalOptions)
+                    .WriteError(StructuredError.Create("INVALID_CONSTRAINT", ex.Message));
+                return ExitCodes.ValidationError;
+            }
 
             DeprecationWarning.Write("ppds metadata column create", "ppds metadata attribute create");
             return await AttributeCommandGroup.ExecuteCreateAsync(

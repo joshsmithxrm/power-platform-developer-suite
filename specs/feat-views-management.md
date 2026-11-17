@@ -194,6 +194,8 @@ Every XML write reads back the unpublished draft up to three times and compares 
 
 All nine writers enforce the shared [environment confirmation](./environment-confirmation.md) policy before acquiring a client, including no-op edits. The shakedown guard remains effective. Each CLI writer accepts `--confirm-env <resolved-url>`, separately from target selection, `--solution` and `--publish`; the acknowledgement and write use the same provider's captured profile/target. Read-only sessions always reject writing. Missing context fails closed. List/get remain acknowledgement-free.
 
+An environment with no saved type (`Unknown`) deliberately counts as protected: it resolves to Production, so writers demand `--confirm-env <resolved-url>` until its type is recorded with `ppds env config <url> --type <Production|Sandbox|Development|Test|Trial>`. The error message names this fix; see AC-08 in [environment confirmation](./environment-confirmation.md).
+
 The existing four-parameter ViewService constructor remains available for readers; writers require the additional confirmation service. No IViewService method or result shape changes. Publication remains entity-scoped with the existing solution-before-publication order.
 
 ### View writer safety acceptance criteria

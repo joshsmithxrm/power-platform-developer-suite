@@ -298,6 +298,9 @@ public sealed partial class MetadataLeaseLifetimeTests
             if (stage is "status-target" or "local-target")
                 return fault == "cancel" ? null : MetadataErrorCodes.EntityNotFound; // Existing list readers wrap coded errors too.
             if (fault == "coded") return null;
+            // Status/local update and remove writes let cancellation propagate (CONSTITUTION R2) rather than
+            // reporting it as SDK_OPERATION_FAILED.
+            if (fault == "cancel" && stage is "option-update" or "option-remove") return null;
             return stage.Contains("color", StringComparison.Ordinal) || stage is "option-update" or "option-remove" or "status-insert"
                 ? MetadataErrorCodes.SdkOperationFailed : null;
         }
@@ -418,14 +421,14 @@ public sealed partial class MetadataLeaseLifetimeTests
             {
                 case RetrieveOptionSetRequest r:
                     Assert.Equal(Global, r.Name);
-                    Assert.Equal(stage == "global-target", r.RetrieveAsIfPublished);
+                    Assert.True(r.RetrieveAsIfPublished); // Target and color reads both see drafts (#1531).
                     response = new RetrieveOptionSetResponse { Results = new ParameterCollection { ["OptionSetMetadata"] = Options(false) } };
                     break;
                 case RetrieveAttributeRequest r:
                     Assert.Equal(Table, r.EntityLogicalName);
                     Assert.Equal(_route.StartsWith("status", StringComparison.Ordinal) ? "statuscode" : Column, r.LogicalName);
-                    var readsDrafts = stage == "local-color-read" || _route is "status-add" or "column-add";
-                    Assert.Equal(readsDrafts, r.RetrieveAsIfPublished); // Existing #1538 draft allocation/color reads; update/remove targeting stays published.
+                    // #1538 draft allocation/color reads; #1531 update/remove targeting also reads drafts.
+                    Assert.True(r.RetrieveAsIfPublished);
                     EnumAttributeMetadata attribute = r.LogicalName == "statuscode" ? new StatusAttributeMetadata() : new PicklistAttributeMetadata();
                     attribute.LogicalName = r.LogicalName; attribute.SchemaName = r.LogicalName;
                     attribute.OptionSet = Options(r.LogicalName == "statuscode");

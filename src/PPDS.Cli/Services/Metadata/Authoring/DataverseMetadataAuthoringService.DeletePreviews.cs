@@ -37,13 +37,36 @@ public partial class DataverseMetadataAuthoringService
             });
     }
 
-    private async Task EnsureDeleteAllowedAsync(MetadataDeleteTarget target, CancellationToken ct)
+    /// <summary>
+    /// The pre-delete recheck inspects exactly the requested name and never resolves case variants (#1535):
+    /// the caller deletes what its own preview showed and the user confirmed, and a target renamed in between
+    /// fails here instead of being re-resolved to another object.
+    /// </summary>
+    private async Task EnsureDeleteAllowedAsync(MetadataDeleteTarget target, CancellationToken ct, Guid? expectedObjectId = null)
     {
-        var preview = await InspectDeleteAsync(target, ct).ConfigureAwait(false);
+        var preview = await InspectDeleteCoreAsync(target, null, ct).ConfigureAwait(false);
         if (!preview.IsClear) throw preview.Refusal();
+        if (expectedObjectId.HasValue && preview.TargetObjectId != expectedObjectId)
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                $"'{target.Name}' no longer identifies the component that was previewed and confirmed; nothing was deleted. Preview again.",
+                "Name");
     }
 
     private async Task<MetadataDeletePreviewResult> InspectDeleteAsync(MetadataDeleteTarget target, CancellationToken ct)
+    {
+        if (target.Kind != MetadataDeleteKind.GlobalChoice)
+            return await InspectDeleteCoreAsync(target, null, ct).ConfigureAwait(false);
+
+        // #1535: the exact spelling is read first; only an "option set not found" fault falls back to the
+        // stored name. The preview reports that stored name so the caller can confirm and delete exactly it.
+        var (storedName, read) = await WithGlobalChoiceNameAsync(target.Name!, "Name",
+            name => ExecuteDeleteReadAsync(new RetrieveOptionSetRequest { Name = name, RetrieveAsIfPublished = true }, ct),
+            response => (response.Results.TryGetValue("OptionSetMetadata", out var raw) ? raw as OptionSetMetadataBase : null)?.Name,
+            ct).ConfigureAwait(false);
+        return await InspectDeleteCoreAsync(target with { Name = storedName }, read, ct).ConfigureAwait(false);
+    }
+
+    private async Task<MetadataDeletePreviewResult> InspectDeleteCoreAsync(MetadataDeleteTarget target, OrganizationResponse? targetRead, CancellationToken ct)
     {
         var result = new MetadataDeletePreviewResult();
         (OrganizationRequest request, string key, int type) requestInfo = target.Kind switch
@@ -56,7 +79,7 @@ public partial class DataverseMetadataAuthoringService
             _ => throw new ArgumentOutOfRangeException(nameof(target))
         };
         var (request, key, type) = requestInfo;
-        var response = await ExecuteDeleteReadAsync(request, ct).ConfigureAwait(false);
+        var response = targetRead ?? await ExecuteDeleteReadAsync(request, ct).ConfigureAwait(false);
         var expectedResponse = target.Kind switch
         {
             MetadataDeleteKind.Table => response is RetrieveEntityResponse,
@@ -80,6 +103,8 @@ public partial class DataverseMetadataAuthoringService
         if (!expectedResponse || !identityMatches || metadata?.MetadataId is not { } id || id == Guid.Empty)
             return Incomplete(result, "Target metadata did not establish the requested identity.");
         result.TargetExistenceChecked = true; result.TargetObjectId = id; result.TargetComponentType = type;
+        if (raw is OptionSetMetadataBase inspectedChoice && target.Kind == MetadataDeleteKind.GlobalChoice)
+            result.TargetName = inspectedChoice.Name;
 
         var dependencies = await ExecuteDeleteReadAsync(new RetrieveDependenciesForDeleteRequest { ObjectId = id, ComponentType = type }, ct).ConfigureAwait(false);
         if (dependencies is not RetrieveDependenciesForDeleteResponse || !dependencies.Results.TryGetValue("EntityCollection", out var collection) || collection is not EntityCollection rows)

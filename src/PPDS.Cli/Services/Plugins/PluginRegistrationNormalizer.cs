@@ -14,9 +14,79 @@ internal static class PluginRegistrationNormalizer
     };
     private static readonly HashSet<string> ImageResets = new(StringComparer.Ordinal) { "attributes", "description" };
 
-    internal static IReadOnlyDictionary<string, object?> NormalizeStep(PluginStepConfig config, RegistrationOperationIntent intent)
+    /// <summary>Optional step fields version 2.0 resets on omission (and that resetFields may name).</summary>
+    internal static IReadOnlyCollection<string> ResettableStepFields => StepResets;
+
+    /// <summary>Optional image fields version 2.0 resets on omission (and that resetFields may name).</summary>
+    internal static IReadOnlyCollection<string> ResettableImageFields => ImageResets;
+
+    // Fields PPDS CLI 1.4.2 compared for every matched step/image, set or not. Diff keeps comparing
+    // them against "none" when a missing/1.0 file omits them, so upgrading never turns that drift gate green.
+    private static readonly string[] LegacyComparedStepFields = ["filteringAttributes"];
+    private static readonly string[] LegacyComparedImageFields = ["attributes"];
+
+    internal static IReadOnlyDictionary<string, object?> NormalizeStep(PluginStepConfig config, RegistrationOperationIntent intent) =>
+        NormalizeStepCore(config, intent, rejectUnknownFields: true);
+
+    /// <summary>
+    /// For a missing/1.0 step, the 1.4.2-compared fields the legacy plan leaves unmanaged (omitted, null or
+    /// empty, and not in resetFields). Diff compares each against "none"; deploy still preserves them.
+    /// Empty for version 2.0, which manages every resettable field.
+    /// </summary>
+    internal static IReadOnlyList<string> LegacyComparedOmissions(PluginStepConfig config)
     {
-        RejectUnknownFields(config.ExtensionData?.Count ?? 0, "step", intent);
+        if (config.OperationIntent == RegistrationOperationIntent.Reconcile) return [];
+        var legacy = NormalizeStep(config, RegistrationOperationIntent.Deploy);
+        return LegacyComparedStepFields.Where(f => !legacy.ContainsKey(f)).ToList();
+    }
+
+    /// <summary>
+    /// Image counterpart of <see cref="LegacyComparedOmissions(PluginStepConfig)"/>. Like diff, the
+    /// step's file contract selects the image plan.
+    /// </summary>
+    internal static IReadOnlyList<string> LegacyComparedOmissions(PluginStepConfig step, PluginImageConfig config)
+    {
+        if (step.OperationIntent == RegistrationOperationIntent.Reconcile) return [];
+        var legacy = NormalizeImage(config, step.Message, RegistrationOperationIntent.Deploy);
+        return LegacyComparedImageFields.Where(f => !legacy.ContainsKey(f)).ToList();
+    }
+
+    /// <summary>Whether a supplied non-empty filteringAttributes is accepted for this step message.</summary>
+    internal static bool SupportsFilteringAttributes(string? message) =>
+        string.Equals(message, "Update", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(message, "UpdateMultiple", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether diff compares this omitted legacy field (and so reports it as drift, not advisory).</summary>
+    internal static bool IsLegacyComparedField(string field, bool onImage) =>
+        (onImage ? LegacyComparedImageFields : LegacyComparedStepFields).Contains(field, StringComparer.Ordinal);
+
+    /// <summary>
+    /// For a legacy (missing/1.0) step, the optional nonsecret fields the legacy contract leaves
+    /// unmanaged (and therefore preserves on update) that registration version 2.0 would write,
+    /// with the value 2.0 would write. Read-only advisory input; it never changes the legacy plan.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, object?> Version2ValuesForLegacyOmissions(PluginStepConfig config)
+    {
+        var legacy = NormalizeStep(config, RegistrationOperationIntent.Deploy);
+        // Unknown fields are preserved under 1.0; this advisory must not reject them.
+        var version2 = NormalizeStepCore(config, RegistrationOperationIntent.Reconcile, rejectUnknownFields: false);
+        return version2.Where(p => StepResets.Contains(p.Key) && !legacy.ContainsKey(p.Key))
+            .ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+    }
+
+    /// <summary>Image counterpart of <see cref="Version2ValuesForLegacyOmissions(PluginStepConfig)"/>.</summary>
+    internal static IReadOnlyDictionary<string, object?> Version2ValuesForLegacyOmissions(PluginImageConfig config, string message)
+    {
+        var legacy = NormalizeImage(config, message, RegistrationOperationIntent.Deploy);
+        var version2 = NormalizeImageCore(config, message, RegistrationOperationIntent.Reconcile, rejectUnknownFields: false);
+        return version2.Where(p => ImageResets.Contains(p.Key) && !legacy.ContainsKey(p.Key))
+            .ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+    }
+
+    private static IReadOnlyDictionary<string, object?> NormalizeStepCore(PluginStepConfig config, RegistrationOperationIntent intent,
+        bool rejectUnknownFields)
+    {
+        if (rejectUnknownFields) RejectUnknownFields(config.ExtensionData?.Count ?? 0, "step", intent);
         ValidateResets(config, StepResets);
         if (config.Images == null) throw Invalid("images must be an array; use an empty array to configure no images.");
         if (config.Name != null && string.IsNullOrWhiteSpace(config.Name)) throw Invalid("A supplied step name must not be empty.");
@@ -52,15 +122,18 @@ internal static class PluginRegistrationNormalizer
             fields.Remove("asyncAutoDelete"); // false/default is not applicable to synchronous steps
         }
         if (fields.TryGetValue("filteringAttributes", out var attributes) && !string.IsNullOrWhiteSpace(attributes as string) &&
-            !string.Equals(config.Message, "Update", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(config.Message, "UpdateMultiple", StringComparison.OrdinalIgnoreCase))
+            !SupportsFilteringAttributes(config.Message))
             throw Invalid("filteringAttributes requires Update or UpdateMultiple.");
         return fields;
     }
 
-    internal static IReadOnlyDictionary<string, object?> NormalizeImage(PluginImageConfig config, string message, RegistrationOperationIntent intent)
+    internal static IReadOnlyDictionary<string, object?> NormalizeImage(PluginImageConfig config, string message, RegistrationOperationIntent intent) =>
+        NormalizeImageCore(config, message, intent, rejectUnknownFields: true);
+
+    private static IReadOnlyDictionary<string, object?> NormalizeImageCore(PluginImageConfig config, string message,
+        RegistrationOperationIntent intent, bool rejectUnknownFields)
     {
-        RejectUnknownFields(config.ExtensionData?.Count ?? 0, "image", intent);
+        if (rejectUnknownFields) RejectUnknownFields(config.ExtensionData?.Count ?? 0, "image", intent);
         ValidateResets(config, ImageResets);
         if (string.IsNullOrWhiteSpace(config.Name)) throw Invalid("Image name is required.");
         var messageProperty = PluginRegistrationService.GetDefaultImagePropertyName(message)

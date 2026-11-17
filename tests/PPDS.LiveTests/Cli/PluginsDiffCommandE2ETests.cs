@@ -91,7 +91,27 @@ public class PluginsDiffCommandE2ETests(ITestOutputHelper output) : CliE2ETestBa
 
     [CliE2EWithCredentials]
     [Trait("Category", "DestructiveE2E")]
-    public async Task Diff_AfterDeploy_ShowsNoDrift()
+    public Task Diff_AfterDeploy_ShowsNoDrift() => AssertDiffAfterDeployShowsNoDriftAsync(TestRegistrationsPath, deploySelfVerifies: false);
+
+    /// <summary>
+    /// #1520 criterion 7 under the reconcile contract: the same fixture with "version": "2.0" (the assembly path
+    /// made absolute so the copy can live in a temp location). Deploy also self-verifies through diff under 2.0.
+    /// Never executed: no live environment was available when it was written.
+    /// </summary>
+    [CliE2EWithCredentials]
+    [Trait("Category", "DestructiveE2E")]
+    public Task Diff_AfterVersion2Deploy_ShowsNoDrift()
+    {
+        var config = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(TestRegistrationsPath))!;
+        config["version"] = "2.0";
+        foreach (var assembly in config["assemblies"]!.AsArray())
+            assembly!["path"] = Path.Combine(TestDataDir, assembly["path"]!.GetValue<string>());
+        var path = GenerateTempFilePath(".json");
+        File.WriteAllText(path, config.ToJsonString());
+        return AssertDiffAfterDeployShowsNoDriftAsync(path, deploySelfVerifies: true);
+    }
+
+    private async Task AssertDiffAfterDeployShowsNoDriftAsync(string registrationsPath, bool deploySelfVerifies)
     {
         var profileName = GenerateTestProfileName();
         await RunCliAsync(
@@ -111,15 +131,20 @@ public class PluginsDiffCommandE2ETests(ITestOutputHelper output) : CliE2ETestBa
             // Deploy the plugin first
             var deployResult = await RunCliAsync(
                 "plugins", "deploy",
-                "--config", TestRegistrationsPath);
+                "--config", registrationsPath);
 
-            deployResult.ExitCode.Should().Be(0, $"Deploy failed: {deployResult.StdErr}");
+            // A 2.0 deploy runs its own diff straight after the writes, so propagation lag can make it
+            // report drift (exit 1). Accept that here; the poll below establishes the no-drift result.
+            if (deploySelfVerifies)
+                deployResult.ExitCode.Should().BeOneOf([0, 1], $"Deploy failed: {deployResult.StdErr}");
+            else
+                deployResult.ExitCode.Should().Be(0, $"Deploy failed: {deployResult.StdErr}");
 
             // Deploy is async server-side; poll until diff shows no drift or timeout
             var maxWait = PropagationWait.TimeoutFromEnvironment(
                 Environment.GetEnvironmentVariable("PPDS_TEST_PROPAGATION_TIMEOUT_SECONDS"));
             var poll = await PropagationWait.UntilAsync(
-                token => RunCliWithCancellationAsync(token, "plugins", "diff", "--config", TestRegistrationsPath,
+                token => RunCliWithCancellationAsync(token, "plugins", "diff", "--config", registrationsPath,
                     "--output-format", "json"),
                 result => result.ExitCode == 0,
                 maxWait, TimeSpan.FromSeconds(2));

@@ -430,6 +430,8 @@ public sealed partial class FormService : IFormService
             var added = new List<string>();
             var alreadyPresent = new List<string>();
             var duplicateRequests = new List<string>();
+            var otherPlacements = new List<FieldPlacementNotice>();
+            var nonCanonical = new List<NonCanonicalBinding>();
 
             foreach (var field in request.FieldLogicalNames)
             {
@@ -442,11 +444,16 @@ public sealed partial class FormService : IFormService
                     duplicateRequests.Add(field);
                     continue;
                 }
-                if (FormXmlEditor.ContainsField(section, attr.LogicalName))
+                if (FormXmlEditor.FindStoredBinding(section, attr.LogicalName) is { } stored)
                 {
                     alreadyPresent.Add(attr.LogicalName);
+                    if (!string.Equals(stored, attr.LogicalName, StringComparison.Ordinal))
+                        nonCanonical.Add(new NonCanonicalBinding(stored, attr.LogicalName));
                     continue;
                 }
+                var elsewhere = FormXmlEditor.FindPlacementsOutside(doc, section, attr.LogicalName);
+                if (elsewhere.Count > 0)
+                    otherPlacements.Add(new FieldPlacementNotice(attr.LogicalName, elsewhere));
                 var classId = ClassIdResolver.ResolveForField(attr.AttributeType);
                 FormXmlEditor.AddField(doc, request.SectionLabel, attr.LogicalName, classId,
                     string.IsNullOrWhiteSpace(attr.DisplayName) ? attr.LogicalName : attr.DisplayName);
@@ -468,7 +475,11 @@ public sealed partial class FormService : IFormService
                 await ApplySideEffectsAsync(formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
             }
             return new(added.ToArray(), alreadyPresent.ToArray(), duplicateRequests.ToArray(), added.Count > 0,
-                request.SolutionUniqueName is not null, request.Publish);
+                request.SolutionUniqueName is not null, request.Publish)
+            {
+                OtherPlacements = otherPlacements.ToArray(),
+                NonCanonicalBindings = nonCanonical.ToArray()
+            };
         }
         catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
@@ -504,6 +515,9 @@ public sealed partial class FormService : IFormService
     }
 
     public async Task ReorderFieldsAsync(ReorderFieldsRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
+        => await ReorderFieldsWithResultAsync(request, reporter, ct).ConfigureAwait(false);
+
+    public async Task<ReorderFieldsResult> ReorderFieldsWithResultAsync(ReorderFieldsRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
     {
         await _confirmation.EnsureConfirmedAsync("forms mutation", cancellationToken: ct).ConfigureAwait(false);
         if (request.FieldLogicalNames.Length == 0)
@@ -527,10 +541,22 @@ public sealed partial class FormService : IFormService
             }
 
             var doc = XDocument.Parse(formXmlStr!);
+            // Existing bindings are retained untouched; report those that differ from metadata only by case.
+            var reorderSection = FormXmlEditor.RequireSection(doc, request.SectionLabel);
+            var nonCanonical = new List<NonCanonicalBinding>();
+            foreach (var field in request.FieldLogicalNames)
+            {
+                var stored = FormXmlEditor.FindStoredBinding(reorderSection, field);
+                if (stored is not null && attributesByName.TryGetValue(stored, out var meta)
+                    && !string.Equals(stored, meta.LogicalName, StringComparison.Ordinal)
+                    && !nonCanonical.Any(n => n.StoredName == stored))
+                    nonCanonical.Add(new NonCanonicalBinding(stored, meta.LogicalName));
+            }
             FormXmlEditor.ReorderFields(doc, request.SectionLabel, request.FieldLogicalNames, ResolveNewField);
 
             reporter?.ReportPhase("Writing", $"Reordering fields in section '{request.SectionLabel}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
+            return new ReorderFieldsResult(nonCanonical.ToArray());
         }
         catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }

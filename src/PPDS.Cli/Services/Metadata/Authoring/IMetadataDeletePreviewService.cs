@@ -55,6 +55,11 @@ public sealed class MetadataDeletePreviewResult
     public string Status { get; internal set; } = "incomplete";
     /// <summary>Canonical target identifier.</summary>
     public Guid? TargetObjectId { get; internal set; }
+    /// <summary>
+    /// Stored name of the inspected global choice, which can differ from the requested spelling by case (#1535).
+    /// Null for other component kinds. A deletion must target exactly this name.
+    /// </summary>
+    public string? TargetName { get; internal set; }
     /// <summary>Target solution component type.</summary>
     public int? TargetComponentType { get; internal set; }
     /// <summary>Every returned dependency row, with no orphan/type filtering.</summary>

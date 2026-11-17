@@ -32,7 +32,13 @@ public static class CleanCommand
             DefaultValueFactory = _ => false
         };
 
-        var command = new Command("clean", "Version 1: legacy parent cleanup; version 2: prune owned images on configured steps")
+        var command = new Command("clean",
+            "Remove registrations that are not in the configuration. Version 1.0/missing: delete orphaned steps and " +
+            "now-empty unconfigured types. Version 2.0: delete only owned images not listed on configured steps (every " +
+            "configured step needs an explicit images list); steps and types are never deleted, and orphaned steps stay " +
+            "drift (deploy verification exits 1) until removed with 'ppds plugins unregister step <step-id>' (add --force if it has images). " +
+            "Secure configuration of configured steps is never read or changed; version 1.0 removes an orphaned step's " +
+            "secure configuration record together with that step.")
         {
             configOption,
             PluginsCommandGroup.ProfileOption,
@@ -158,8 +164,12 @@ public static class CleanCommand
 
                 if (imageOnly)
                 {
-                    var count = results.Sum(r => r.ImageCleanup!.Plan.Images.Count);
-                    Console.Error.WriteLine(dryRun ? $"Would delete {count} owned image(s); parent registrations are retained."
+                    var planned = results.SelectMany(r => r.ImageCleanup!.Plan.Images).ToList();
+                    var count = planned.Count;
+                    if (dryRun)
+                        foreach (var line in PluginImagePruningService.DescribePlannedDeletions(planned))
+                            Console.Error.WriteLine(line);
+                    Console.Error.WriteLine(dryRun ? $"Would delete {count} owned image(s) (planned, not performed); parent registrations are retained."
                         : $"Deleted {results.Sum(r => r.ImageCleanup!.ImagesDeleted)} planned owned image(s); parent registrations are retained.");
                 }
                 else if (totalOrphans == 0)

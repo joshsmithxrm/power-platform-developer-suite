@@ -13,4 +13,10 @@ public sealed class DeleteGlobalChoiceRequest
 
     /// <summary>Gets or sets whether this is a dry-run (validation only, no changes persisted).</summary>
     public bool DryRun { get; set; }
+
+    /// <summary>
+    /// Gets or sets the metadata id a preview resolved and the user confirmed. When set, the deletion is refused
+    /// unless the pre-delete recheck finds exactly this object under <see cref="Name"/>.
+    /// </summary>
+    public System.Guid? ExpectedMetadataId { get; set; }
 }

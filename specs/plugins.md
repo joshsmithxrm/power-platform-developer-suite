@@ -658,15 +658,15 @@ Explicit extraction/output serialization redacts secure values and reports exclu
 | Field | Legacy v1 deployment | Version 2 desired state |
 | --- | --- | --- |
 | runAsUser | Omission/null/empty preserves; explicit CallingUser clears | Omission/null/empty defaults CallingUser; explicit GUID/domain/email resolves uniquely |
-| filteringAttributes | Omission/null/empty preserves | Omission/null/empty clears; applicable Update/UpdateMultiple attribute sets are canonical |
+| filteringAttributes | Omission/null/empty preserves on deploy; diff still compares it against none (1.4.2 parity) | Omission/null/empty clears; applicable Update/UpdateMultiple attribute sets are canonical |
 | unsecureConfiguration, step/image description | Omission/null/empty preserves | Omission/null/empty clears; supplied nonempty text remains exact |
 | asyncAutoDelete | Omission/null preserves; supplied false/true writes where applicable | Omission/null defaults false for async; true on synchronous is invalid |
 | canBeBypassed | Omission/null preserves; supplied booleans write | Omission/null uses the explicit PPDS true default |
 | canUseReadOnlyConnection | Omission/null preserves; supplied booleans require target Create/Update capability | Omission/null uses the explicit PPDS false desired default; target Create/Update capability governs writes |
-| image attributes | Omission/null/empty preserves | Omission/null/empty means all attributes; preview must make this broadening visible |
+| image attributes | Omission/null/empty preserves on deploy; diff still compares it against none (1.4.2 parity) | Omission/null/empty means all attributes; preview must make this broadening visible |
 | deployment, invocationSource, enabled, executionOrder | Existing defaults ServerOnly, Parent, true, 1 | Same explicit defaults |
 | image alias/message property | Existing image-name/message-specific defaults | Same explicit defaults |
-| secureConfiguration | Omitted/null preserves; non-null including empty is write-only input | Same write request; secure equality is unknown, never part of verified convergence |
+| secureConfiguration | Omitted/null preserves; non-null including empty is write-only input | Same write request; a supplied value is listed as excluded (write-only, never read back), is never compared and never makes the comparison incomplete |
 
 Operation-specific capability checks govern the writes supported by the target.
 For `canUseReadOnlyConnection`, Create requires explicit target create capability;
@@ -697,13 +697,48 @@ Assembly/package content, solutions and Custom APIs are outside nonsecret equali
 
 Diff reads all pages and reports checked/unmanaged/unsupported/excluded coverage.
 Hidden records are counted and default to incomplete until `--include-hidden`, which
-adds no mutation permission. Missing capabilities and supplied secure values cannot
-become clean equality. Secure values/hashes and ordinary configuration contents are
+adds no mutation permission. Missing capabilities cannot become clean equality. A
+supplied secure value is listed per step as excluded (write-only, never read back);
+it is neither compared nor counted as incomplete, so it never changes status,
+success or the exit code. Secure values/hashes and ordinary configuration contents are
 not emitted. Version-1 envelope data[] remains; additive metadata and per-assembly
 coverage distinguish match/drift/incomplete. Incomplete comparison has success=false;
 completed drift has success=true as a completed comparison, but exit 1. Exit 0 means
 complete match, 1 complete drift, 2 incomplete even with known drift; specific coded
-errors retain precedence. Consumers must use status/completeness and exit code.
+errors retain precedence. Consumers must use status/completeness and exit code: exit 2
+is shared by an incomplete comparison and general failures, so scripts must read
+`metadata.status` (an error result has an `error` object and no comparison metadata).
+
+For missing/1.0 files, diff always compares step `filteringAttributes` and image
+`attributes`, as CLI 1.4.2 did. When the file omits one of them (or supplies null/empty)
+and it is not listed in `resetFields`, the stored value is compared against none using
+the same attribute-set normalisation as a supplied value (trimmed, case-insensitive,
+de-duplicated, order-insensitive; empty means none). A non-empty stored value is drift:
+a modified-step or modified-image change with expected `(none)` and the normalised stored
+value as actual, so `hasDrift` is true and the exit code is 1 (2 when the comparison is
+also incomplete). Deploy under 1.0 still preserves the value and runs no verification, so
+diff adds guidance: once per text run on stderr, and in JSON as an entry in that
+assembly's `data[].warnings`. It says the stored value is not in the file and is preserved
+by 1.0 deploy, and offers only the options that apply to the drift found: setting the
+property to match (for `filteringAttributes` only on Update/UpdateMultiple steps, since
+another message rejects a non-empty value); removing the property from the step or image,
+including an explicit null or empty value (`resetFields` is rejected while the property is
+present), and listing it in that object's `resetFields` (`"resetFields": ["filteringAttributes"]`
+on the step, `"resetFields": ["attributes"]` on the image; a 1.0 deploy then clears it, and a
+cleared image list selects all attributes); or adopting version 2.0 (the shared adoption text).
+A field already listed in `resetFields` is managed, so it is compared once as an ordinary
+reset and gets no compared-omission guidance. Non-Update steps are compared too (1.4.2 parity).
+
+Every other omitted optional property under missing/1.0 is not compared. Diff and deploy
+report those that are preserved but differ from what 2.0 would write: diff prints a
+labelled stderr notice and adds `data[].preservedLegacyValues`; deploy (real and dry-run)
+prints one stderr notice and adds `data[].preservedLegacyValues` from the rows it already
+read. Diff does not repeat `filteringAttributes` or image `attributes` there, because it
+reports them as drift; deploy's notice still lists them, under a separate heading stating
+they are preserved by deploy but reported as drift by `plugins diff` (deploy's exit code is
+unaffected; the JSON items are unchanged). Items carry path, property,
+stored and version2Value; unsecure configuration is redacted and secure configuration is
+never listed. This notice is advisory only: 1.0 writes, status and exit codes are unchanged.
 
 Real v2 deployment performs read-only verification after acknowledged writes; drift
 or incomplete coverage yields overall non-success and retained mutation outcomes.
@@ -732,6 +767,12 @@ globally non-updatable or change its default or Diff semantics.
 | AC-124 | Explicit direct invocation-source Update reports success only after a fresh exact-row typed match; a retained different value fails without retry, and CLI/RPC propagate the coded failure. | `ExplicitInvocationSource_PersistedValueSucceedsAfterFreshRead`, `ExplicitInvocationSource_RetainedValueFailsWithAcknowledgement`, `CliUpdateStep_VerificationFailureIsNonSuccess`, `RpcUpdateStep_VerificationFailureIsNonSuccess` | Passed offline (net10.0) |
 | AC-125 | Missing/malformed stored evidence, read failure and cancellation preserve acknowledged service effects and safe diagnostics; CLI shows the cancellation warning while RPC wire cancellation retains its standard response without a mutation receipt. Omission preserves established single-write behavior. | `ExplicitInvocationSource_InvalidReadbackIsUnverified`, `ExplicitInvocationSource_ReadFailureIsSafeAndRetainsAcknowledgement`, `ExplicitInvocationSource_CancellationRetainsTokenAndAcknowledgement`, `OmittedInvocationSource_DoesNotAddVerification`, `CliUpdateStep_CancelledVerificationReportsAcknowledgedUnverifiedFailure`, `RpcUpdateStep_CancelledVerificationPreservesExceptionTokenAndAcknowledgement`, `RpcUpdateStep_CancelledWireResponseDoesNotExposeMutationReceipt` | Passed offline (net10.0) |
 | AC-126 | Real v2 command orchestration treats acknowledged Parent write followed by stored Child as drift/non-success with its acknowledgement retained and no retry or deletion. | `Version2_AcknowledgedParentWriteRetainingChildIsDriftWithoutRetry` | Passed offline (net10.0) |
+| AC-133 | For each #1519 step/image property, a 2.0 deploy with a value followed by a 2.0 deploy without it leaves the stored row at the PPDS default, deploy self-verification matches and diff exits 0; the same sequence under 1.0 preserves the value and, for every property except `filteringAttributes` and image `attributes` (AC-138), diff exits 0 and the preserved-value notice lists it. Runs the actual command pipelines and step/image service code against a stateful in-memory row store that honours each query's ColumnSet and link entities, not Dataverse. | `PluginRoundTripConvergenceTests.Version2_ValueThenOmission_ConvergesStoredRowToDefaultAndDiffMatches`, `PluginRoundTripConvergenceTests.Version1_ValueThenOmission_PreservesStoredValueDiffMatchesAndNoticeListsIt` | Passed offline; live convergence unobserved |
+| AC-134 | Supplied secure configuration is written, preserved when later omitted, never printed, and does not make a 2.0 deploy or diff non-success. | `SecureConfiguration_SuppliedThenOmitted_IsPreservedAndNeverMakesVerificationFail`, `Version2_SuppliedSecureConfiguration_DeploySucceedsAndVerificationIsComplete`, `RealCommand_SuppliedSecureConfiguration_DoesNotChangeStatusOrExit` | Passed offline |
+| AC-135 | Missing/1.0 diff and deploy report preserved values that differ from 2.0 defaults (text notice and additive `preservedLegacyValues`) without changing status or exit code, redacting unsecure configuration; deploy uses no additional reads, and the advisory is computed outside the write path so a failure in it only omits the notice. | `LegacyOmittedValues_AreReportedAsPreservedNoticeWithoutChangingExit`, `LegacyNotice_IsAbsentWhenStoredValuesEqualVersion2DefaultsAndForVersion2Files`, `Version1_TextAndJson_ReportPreservedValuesThatVersion2WouldChange`, `Version1_AdvisoryFailure_NeverChangesWritesSuccessOrExit`, `EveryVersion2ResettableField_HasASharedStoredValueMappingAndIsReported`, `TryCollect_FailureOmitsTheAdvisoryInsteadOfThrowing`, `StepPaths_IncludeTheAssemblySoSameNamedStepsStayDistinct` | Passed offline |
+| AC-138 | Missing/1.0 diff compares an unset (absent, null or empty) step `filteringAttributes` and image `attributes` against none as CLI 1.4.2 did, for every message: a non-empty stored value (after attribute-set normalisation) is a modified entry with expected `(none)`, exit 1 and `success=true`/`status=drift`, and is not repeated in diff's `preservedLegacyValues`. Resolution guidance is printed once per text run on stderr (nothing on the real stdout), even across assemblies, and per assembly in `data[].warnings` in JSON; it offers only options the validator accepts (set-to-match only for Update/UpdateMultiple steps and images; remove the property, including an explicit null/empty, then list it in `resetFields`; or 2.0). A stored empty value matches; supplied equal-after-normalisation sets match; a field already in `resetFields` is one ordinary change without the guidance; property plus `resetFields` is still rejected; other omitted properties stay advisory; 2.0 is unchanged; incomplete coverage still yields exit 2. 1.0 deploy still preserves the value, exits 0 and lists it under a separate "reported as drift by diff" heading; following the guidance clears it so diff then matches. Help for diff and deploy states the rule. | `PluginDiffReconciliationTests.OmittedOptionalFields_FilteringAttributesIsComparedAsIn142DescriptionIsNot`, `OmittedDescription_AloneIsPreservedNotComparedAndNotDrift`, `RealCommand_Version1UnsetAttributeSet_StoredValueIsDriftWithGuidanceOnStderr`, `RealCommand_Version1AbsentAttributeSets_StoredEmptyIsMatch`, `RealCommand_Version1SetAttributeSets_EqualAfterNormalisationMatch`, `RealCommand_Version1NonUpdateStep_StoredFilteringAttributesIsDriftAndGuidanceOffersOnlyAcceptedOptions`, `RealCommand_Version1ResetFieldsWithStoredValue_IsOneManagedChangeWithoutComparedOmissionGuidance`, `RealCommand_Version1ResetFieldsWithExplicitNullOrEmptyProperty_IsStillRejected`, `RealCommand_TwoDriftingAssemblies_PrintGuidanceOnceWithTheUnionOfOptions`, `RealCommand_Version2SameData_IsUnchangedDriftWithoutLegacyGuidance`, `RealCommand_Version1UnknownPropertyWithComparedOmissionDrift_RemainsIncomplete`, `PluginDiffConsoleStdoutTests.RealCommand_TextMode_ComparedOmissionGuidanceIsOnStderrAndNothingReachesStdout`, `PluginRoundTripConvergenceTests.Version1_ValueThenOmission_ComparedAttributeSetIsPreservedAndDiffReportsDriftWithGuidance`, `PluginRoundTripConvergenceTests.Version1_ResetFields_ClearsComparedAttributeSetAndDiffMatches`, `PluginRoundTripConvergenceTests.Version1_ExplicitNullAttributeSet_FollowingTheGuidanceClearsTheStoredValue`, `DeployReconciliationVerificationTests.Version1_Notice_ListsDiffComparedValuesUnderTheirOwnHeadingWithoutChangingExit`, `PluginsCommandGroupTests.DiffAndDeployHelp_DescribeTheTwoPropertiesAlwaysComparedUnderVersion1` | Passed offline |
+| AC-136 | Dry-run text output of `deploy --clean` and `plugins clean` (2.0) lists each planned image deletion and a planned total without deleting; JSON is unchanged. | `Version2_DryRunCleanText_ListsPlannedImageDeletionsWithPlannedCount`, `ActualCleanCommand_DryRunText_ListsEachPlannedImageWithoutDeleting`, `Version2_CleanPlansBeforeWritesAndPrunesOnlyImages` | Passed offline |
+| AC-137 | The 2.0 orphaned-step warning and deploy/clean help name `ppds plugins unregister step <step-id>` (which parses) and state that verification exits 1 until removal. | `OrphanStepWarning_UsesCleanupGuidanceForTheSelectedFileVersion`, `OrphanedStepGuidance_NamesACommandThatParses`, `DeployCleanAndExtractHelp_DescribeVersionsAndSecureConfiguration` | Passed offline |
 
 ## CLI Commands
 
@@ -762,7 +803,7 @@ ppds plugins deploy registrations.json --clean --dry-run
 
 | Option | Description |
 |--------|-------------|
-| `--clean` | Version 1: legacy orphan-step cleanup. Version 2: prune unlisted owned images on configured steps with explicit complete image lists; retain parent registrations. |
+| `--clean` | Version 1: legacy orphan-step cleanup. Version 2: prune unlisted owned images on configured steps with explicit complete image lists; retain parent registrations. An orphaned step stays drift (real deploy verification exits 1) until removed with `ppds plugins unregister step <step-id>` (`--force` also deletes its images). |
 | `--dry-run` | Preview changes without applying |
 
 ### ppds plugins diff
@@ -849,7 +890,16 @@ ppds plugins unregister image <id>
 
 ### ppds plugins clean
 
-Standalone orphan cleanup (separate from `deploy --clean`).
+Standalone cleanup (separate from `deploy --clean`); the registration file version selects the scope.
+
+- **Missing/1.0:** deletes environment steps that match no configured step (by functional identity), and
+  then plugin types that have no configured steps, are not in `allTypeNames` and have no remaining steps.
+  Deleting a step also deletes its images and its secure configuration record.
+- **2.0:** prunes only owned images that are not listed on configured steps, using the same planner as
+  `deploy --clean` (every configured step needs an explicit `images` list; see "Explicit version 2 image
+  cleanup"). Steps, types and assemblies are never deleted, and secure configuration is never touched. An
+  orphaned step stays drift until removed with `ppds plugins unregister step <step-id>` (`--force` also
+  deletes its images).
 
 ```bash
 ppds plugins clean --config registrations.json
@@ -859,7 +909,7 @@ ppds plugins clean --config registrations.json --dry-run
 | Option | Description |
 |--------|-------------|
 | `--config` | Path to registrations.json |
-| `--dry-run` | Preview orphans without deleting |
+| `--dry-run` | Preview without deleting. 1.0 lists the orphaned steps/types it would delete; 2.0 lists each planned image deletion (image name and ID, step identity and ID) and a planned total. JSON lists the plan under `imageCleanup.plan.images`, with `imagesDeleted` counting performed deletes only (0 in a preview). |
 
 ### ppds plugins enable / disable
 
@@ -1176,7 +1226,7 @@ The dialog accepts a configurable `impactSummary` string populated from `Unregis
 | AC-78 | Comparison reads every managed nonsecret step/image field with nullable capability-aware DTOs; unreadable or unsupported requested fields cannot default into a clean match. | `ListReads_AllManagedNonsecretColumns_MapsValuesAndPages`, `MissingNonnullableReadValues_AreUnavailable_NotAssumedDefaults`, `UnavailableManagedField_IsIncompleteRatherThanEqualDefault` | ✅ |
 | AC-79 | Application-service drift uses the shared managed-state normalizer and functional identity, compares all requested applicable nonsecret settings and retains cancellation; missing/orphaned rows remain visible. | `ManagedProperties_ReportDifferences`, `ManagedFieldEquality_IsCheckedAndComplete`, `RealCommand_EachManagedFieldDifference_ReportsExpectedActualAndDriftExit`, `IdentityAliases_UseSharedCanonicalState`, `DuplicateImageNames_RetainMissingOrphanedAndUniqueImageDrift` | ✅ |
 | AC-80 | Comparison reports checked, intentionally unmanaged, unsupported/unverifiable fields and excluded records; unknown supplied registration properties cannot be silently verified, while documented metadata is outside server equality. | `KnownMetadataAndScope_DoNotInventServerEquality`, `UnavailableManagedField_IsIncompleteRatherThanEqualDefault`, `IdentityCollision_IsIncompleteEvenWhenPositionalPairsMatch` | ✅ |
-| AC-81 | Secure null/omission preserves and is visibly excluded; supplied secure values are unknown/incomplete rather than verified by reference presence; secret values/hashes and unsecure configuration contents are absent from comparison output. | `SecureConfig_NullPreserves_EmptyStringWritesWithoutRetrievingValue`, `SecureConfiguration_UnknownWhenSupplied_AlwaysExcluded`, `RealCommand_UnsecureChange_RedactsAllOutput` | ✅ |
+| AC-81 | Secure null/omission preserves and is visibly excluded; a supplied secure value is listed as excluded and not compared, never verified by reference presence, and never makes the comparison incomplete; secret values/hashes and unsecure configuration contents are absent from comparison output. | `SecureConfig_NullPreserves_EmptyStringWritesWithoutRetrievingValue`, `SecureConfiguration_SuppliedOrOmitted_IsExcludedWithoutMakingComparisonIncomplete`, `RealCommand_SuppliedSecureConfiguration_DoesNotChangeStatusOrExit`, `RealCommand_UnsecureChange_RedactsAllOutput` | ✅ |
 | AC-82 | Profile-free actual command JSON/text paths return 0 only for complete matching managed comparisons, 1 for completed drift and 2 for incomplete comparison including drift plus unknown coverage; existing specific errors retain their codes. | `RealCommand_JsonAndExitCode_ReportTruthfulStatus`, `RealCommand_TextMatch_DoesNotClaimWholeEnvironmentEquality`, `RealCommand_SpecificErrorsRetainPrecedence` | ✅ |
 | AC-83 | Paged comparison inventory reports total/hidden/excluded counts and offers a reversible include-hidden read option; visibility does not authorize new writes or deletes. | `ListReads_AllManagedNonsecretColumns_MapsValuesAndPages`, `HiddenInventory_IsCountedAndReversibleWithoutWrites`, `RealCommand_IncludeHidden_ReversesReadExclusion` | ✅ |
 | AC-84 | Ordinary comparison reports retained-step extra images without independently deleting them. Version 1 cleanup retains its legacy contract; explicit version 2 image pruning is separately scoped below. No assembly/package/solution/Custom API equality is claimed. | `ExtraImages_AreDriftWithoutIndependentDeletion`, `KnownMetadataAndScope_DoNotInventServerEquality` | ✅ |
@@ -1695,8 +1745,8 @@ claims secret equality, whole-environment equality, ownership receipts or rollba
 | AC-90 | Original public update-record constructor/Deconstruct signatures and old interface implementors remain usable; positional RPC target/profile slots and register synchronous-default behavior remain compatible. | `StepUpdateRequest_OriginalEightParameterConstructorRemainsCallable`, `StepUpdateRequest_OriginalEightParameterDeconstructRemainsCallable`, `ImageUpdateRequest_OriginalTwoParameterConstructorRemainsCallable`, `ImageUpdateRequest_OriginalTwoParameterDeconstructRemainsCallable`, `NewResolver_DoesNotAddAnAbstractObligationToExistingImplementors`, `RpcLegacyPositionalArray_PreservesExplicitTargetAndProfile`, `RpcRegisterStep_EmptyLegacyModeCreatesWithSynchronousDefault` | ✅ |
 | AC-91 | Version 2 normalizes every applicable declared nonsecret field/default consistently across preview, write and diff; v1 does not adopt these omission resets. Real v2 deployment reads back stored nonsecret state and reports drift/incomplete as non-success; dry-run remains preview-only. | `VersionTwo_OmissionAndNullReconcileDeclaredDefaults`, `VersionTwoOmission_WritesNonsecretDefaultsWithoutTouchingSecureConfiguration`, `Version2_PostApplyReadControlsEnvelopeAndExitCode`, `Version2_DryRunIsPreviewOnlyWithoutWritesOrPostApplyVerification`, `Version1_DoesNotAddPostApplyVerification`, `Plan_ExposesBroadDefaultsWithoutOrdinaryOrSecureValues` | ✅ |
 | AC-92 | Version 2 extraction uses fresh source/default intent without sticky legacy overrides; v1 retains its established overlay behavior. | `ExtractionVersion_ControlsLegacyOverlayAndResetInheritance`, `ExtractionExplicitVersion_CanOptIntoFreshDefaultsWithoutRewritingInput`, `UnsupportedExistingVersion_CannotBeBypassedWithExtractionOverride`, `ExtractionUpgrade_RejectsUnknownEvenInUnmatchedSourceBeforeMerge` | ✅ |
-| AC-93 | Machine-readable comparison keeps existing data[] shape, reports truthful complete/drift/incomplete status and never presents unknown coverage as verified equality. | `ActualDiff_RetainsArrayAndMakesIncompleteVerificationUnsuccessful`, `RealCommand_JsonAndExitCode_ReportTruthfulStatus`, `RealCommand_TextMatch_DoesNotClaimWholeEnvironmentEquality` | ✅ |
-| AC-94 | Secret input/output/equality boundaries remain explicit, unknown fields/capabilities fail closed for requested reconciliation, and messages contain no configuration secrets. | `Version2_UnknownFieldsRejectBeforeConnectionOrDefaultClears`, `DirectReconcileUnknownFields_RejectsBeforeClientCheckout`, `UnknownFields_VersionTwoRejectsAllScopesWithoutStamping_LegacyPreserves`, `SecureConfiguration_UnknownWhenSupplied_AlwaysExcluded`, `UnavailableManagedField_IsIncompleteRatherThanEqualDefault`, `RealCommand_UnsecureChange_RedactsAllOutput` | ✅ |
+| AC-93 | Machine-readable comparison keeps existing data[] shape, reports truthful complete/drift/incomplete status and never presents unknown coverage as verified equality. | `ActualDiff_RetainsArrayAndReportsTruthfulSuccessStatusAndExit` (unknown property: exit 2, success=false, incomplete), `RealCommand_IncludeHidden_ReversesReadExclusion`, `RealCommand_JsonAndExitCode_ReportTruthfulStatus`, `RealCommand_TextMatch_DoesNotClaimWholeEnvironmentEquality` | ✅ |
+| AC-94 | Secret input/output/equality boundaries remain explicit, unknown fields/capabilities fail closed for requested reconciliation, and messages contain no configuration secrets. | `Version2_UnknownFieldsRejectBeforeConnectionOrDefaultClears`, `DirectReconcileUnknownFields_RejectsBeforeClientCheckout`, `UnknownFields_VersionTwoRejectsAllScopesWithoutStamping_LegacyPreserves`, `SecureConfiguration_SuppliedOrOmitted_IsExcludedWithoutMakingComparisonIncomplete`, `UnavailableManagedField_IsIncompleteRatherThanEqualDefault`, `RealCommand_UnsecureChange_RedactsAllOutput` | ✅ |
 | AC-95 | Ordinary reconciliation never independently prunes images; v2 cleanup requires explicit image-list authority and never expands parent deletion. Missing authority is rejected before connection; parent orphans remain visible drift. | `Version2_ExtraStoredImageIsDriftWithoutIndependentDeletion`, `Version2_CleanOmittedImagesIsRejectedBeforeConnectingOrMutating`, `OrphanStepWarning_UsesCleanupGuidanceForTheSelectedFileVersion`, `ExtraImages_AreDriftWithoutIndependentDeletion` | ✅ |
 | AC-96 | Failures/cancellation preserve acknowledged/unknown nonsecret outcomes without implying ownership, persisted convergence, rollback or successful cleanup. | `FailedFollowOn_RetainsAcknowledgedRowAndUnknownPhase`, `SecureWriteThenRowFailure_RetainsSecureAcknowledgementWithoutPlaintextOrFalseRowCount`, `StateCancellation_PreservesOriginalExceptionAndAcknowledgedRow`, `DeployFollowOnFailure_CountsAcknowledgedRow_AndCancellationRetainsPreviousAssembly`, `Plan_CancellationStopsBeforeReadingFieldValues` | ✅ |
 
@@ -1714,7 +1764,7 @@ Persisted release acceptance remains incomplete: report #1519 criteria 5–6 req
 
 Version 2 cleanup requires an explicitly supplied complete `images` list on every
 configured step. `images: []` authorizes clearing that step's owned images; omission
-or duplicate/case-variant list properties cannot silently become clear authority.
+or a duplicated `images` key (in any casing) cannot silently become clear authority; property names bind case-insensitively, so a single `"Images": []` is an explicit empty list.
 Generic model JSON preserves this distinction and input secrets; explicit output
 still redacts secrets. Nonempty imperative image lists remain serializable.
 

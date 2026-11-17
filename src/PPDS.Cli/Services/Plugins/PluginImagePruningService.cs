@@ -272,6 +272,15 @@ internal static class PluginImagePruningService
 
     internal static PluginImagePruningResult? InterruptedResult(Exception ex) => ex.Data[ResultKey] as PluginImagePruningResult;
 
+    /// <summary>Human-readable preview lines for a frozen plan. Preview only: nothing here is a performed delete.</summary>
+    internal static IEnumerable<string> DescribePlannedDeletions(IReadOnlyCollection<PluginImagePruningTarget> images)
+    {
+        if (images.Count == 0) yield break;
+        yield return $"Planned image deletions (dry-run; not performed): {images.Count}";
+        foreach (var image in images)
+            yield return $"  [Dry-Run] Would delete image '{image.ImageName}' ({image.ImageId:D}) on step {image.Scope.Identity} ({image.Scope.StepId:D})";
+    }
+
     private static async Task VerifyUniquenessAsync(IPluginRegistrationService service, PluginImagePruningScope scope, CancellationToken ct)
     {
         if (scope.PackageId is { } packageId)
