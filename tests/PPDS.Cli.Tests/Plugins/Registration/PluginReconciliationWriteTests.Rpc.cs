@@ -117,7 +117,8 @@ public partial class PluginReconciliationWriteTests
         using var rpc = new JsonRpc(new HeaderDelimitedMessageHandler(server, server, new SystemTextJsonFormatter()));
         rpc.AddLocalRpcTarget(fixture.Handler);
         rpc.StartListening();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        // A backstop, not a performance bound: the test finishes as soon as the RPC answers (loaded CI runners took 13 s).
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
         var payload = JsonSerializer.SerializeToUtf8Bytes(new
         {
             jsonrpc = "2.0", id = 1, method = "plugins/updateStep",
@@ -175,7 +176,8 @@ public partial class PluginReconciliationWriteTests
         using var rpc = new JsonRpc(new HeaderDelimitedMessageHandler(server, server, new SystemTextJsonFormatter()));
         rpc.AddLocalRpcTarget(fixture.Handler);
         rpc.StartListening();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        // A backstop, not a performance bound: the test finishes as soon as the RPC answers (loaded CI runners took 13 s).
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
         var payload = JsonSerializer.SerializeToUtf8Bytes(new { jsonrpc = "2.0", id = 1, method = "plugins/" + method, @params = args });
         await client.WriteAsync(Encoding.ASCII.GetBytes($"Content-Length: {payload.Length}\r\n\r\n"), timeout.Token);
         await client.WriteAsync(payload, timeout.Token);
