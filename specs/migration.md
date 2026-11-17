@@ -1016,7 +1016,7 @@ private static readonly Dictionary<string, string> MatchFields = new()
 | `PageLevelParallelism` | int | No | 0 (auto) | GUID range partitions per entity (0=auto, 1=disabled) |
 | `PageLevelParallelismThreshold` | int | No | 5000 | Minimum records before page-level parallelism activates |
 | `IncludeFileData` | bool | No | false | Download and include file column binary data |
-| `MaxRecordsPerEntity` | int? | No | null (unlimited) | Positive primary-row cap per entity; fails closed instead of truncating and disables counts, partitioning and relationship/binary expansion |
+| `MaxRecordsPerEntity` | int? | No | null (unlimited) | Positive primary-row cap per entity; fails closed instead of truncating and skips counts and partitioning; relationship schemas, binary/file expansion and non-plain FetchXML filters are refused before export starts |
 
 ### ImportOptions
 
