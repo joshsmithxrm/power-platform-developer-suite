@@ -673,7 +673,7 @@ public static class AttributeCommandGroup
                 Publish = publish
             };
 
-            await authoringService.UpdateColumnAsync(request, ct: cancellationToken);
+            var labelResult = await authoringService.UpdateColumnAsync(request, ct: cancellationToken);
 
             var publishHint = $"ppds metadata publish {entity}";
 
@@ -686,7 +686,8 @@ public static class AttributeCommandGroup
                     updated = true,
                     dryRun,
                     requiresPublish = !dryRun && !publish,
-                    publishHint = dryRun || publish ? null : publishHint
+                    publishHint = dryRun || publish ? null : publishHint,
+                    validationMessages = MetadataLabelNotices.ForJson(labelResult)
                 });
             }
             else if (dryRun)
@@ -695,10 +696,12 @@ public static class AttributeCommandGroup
             }
             else if (publish)
             {
+                MetadataLabelNotices.WriteWarnings(labelResult);
                 Console.Error.WriteLine($"Attribute '{column}' on '{entity}' updated and published.");
             }
             else
             {
+                MetadataLabelNotices.WriteWarnings(labelResult);
                 Console.Error.WriteLine($"Attribute '{column}' on '{entity}' updated. Run '{publishHint}' to publish changes.");
             }
 

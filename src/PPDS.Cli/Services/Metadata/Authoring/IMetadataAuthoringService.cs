@@ -16,8 +16,8 @@ public interface IMetadataAuthoringService
     /// <summary>Creates a new Dataverse table (entity) in the specified solution.</summary>
     Task<CreateTableResult> CreateTableAsync(CreateTableRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
 
-    /// <summary>Updates an existing Dataverse table (entity).</summary>
-    Task UpdateTableAsync(UpdateTableRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
+    /// <summary>Updates an existing Dataverse table (entity). Labels are written for English (LCID 1033) and merged with the other languages; the result says when the label Dataverse shows the caller is in another language and was not changed.</summary>
+    Task<MetadataLabelWriteResult> UpdateTableAsync(UpdateTableRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
 
     /// <summary>Deletes a Dataverse table (entity).</summary>
     Task DeleteTableAsync(DeleteTableRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
@@ -27,8 +27,8 @@ public interface IMetadataAuthoringService
     /// <summary>Creates a new column (attribute) on a Dataverse table.</summary>
     Task<CreateColumnResult> CreateColumnAsync(CreateColumnRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
 
-    /// <summary>Updates an existing column (attribute) on a Dataverse table.</summary>
-    Task UpdateColumnAsync(UpdateColumnRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
+    /// <summary>Updates an existing column (attribute) on a Dataverse table. Labels are written for English (LCID 1033) and merged with the other languages; the result says when the label Dataverse shows the caller is in another language and was not changed.</summary>
+    Task<MetadataLabelWriteResult> UpdateColumnAsync(UpdateColumnRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
 
     /// <summary>Deletes a column (attribute) from a Dataverse table.</summary>
     Task DeleteColumnAsync(DeleteColumnRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);

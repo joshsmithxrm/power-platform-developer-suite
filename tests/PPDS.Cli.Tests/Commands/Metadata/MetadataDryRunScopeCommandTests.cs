@@ -115,11 +115,11 @@ public sealed class MetadataDryRunScopeCommandTests(ITestOutputHelper output)
         service.Setup(s => s.CreateTableAsync(It.IsAny<CreateTableRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))
             .Returns((CreateTableRequest r, IMetadataAuthoringProgressReporter? _, CancellationToken t) => Reply(r, t, new CreateTableResult { LogicalName = "new_table", WasDryRun = true, ValidationMessages = [] }));
         service.Setup(s => s.UpdateTableAsync(It.IsAny<UpdateTableRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))
-            .Returns((UpdateTableRequest r, IMetadataAuthoringProgressReporter? _, CancellationToken t) => Done(r, t));
+            .Returns((UpdateTableRequest r, IMetadataAuthoringProgressReporter? _, CancellationToken t) => Reply(r, t, MetadataLabelWriteResult.None));
         service.Setup(s => s.CreateColumnAsync(It.IsAny<CreateColumnRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))
             .Returns((CreateColumnRequest r, IMetadataAuthoringProgressReporter? _, CancellationToken t) => Reply(r, t, new CreateColumnResult { LogicalName = "new_column", WasDryRun = true, ValidationMessages = [] }));
         service.Setup(s => s.UpdateColumnAsync(It.IsAny<UpdateColumnRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))
-            .Returns((UpdateColumnRequest r, IMetadataAuthoringProgressReporter? _, CancellationToken t) => Done(r, t));
+            .Returns((UpdateColumnRequest r, IMetadataAuthoringProgressReporter? _, CancellationToken t) => Reply(r, t, MetadataLabelWriteResult.None));
         service.Setup(s => s.CreateOneToManyAsync(It.IsAny<CreateOneToManyRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))
             .Returns((CreateOneToManyRequest r, IMetadataAuthoringProgressReporter? _, CancellationToken t) => Reply(r, t, new CreateRelationshipResult { SchemaName = "new_rel", WasDryRun = true, ValidationMessages = [] }));
         service.Setup(s => s.CreateManyToManyAsync(It.IsAny<CreateManyToManyRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))

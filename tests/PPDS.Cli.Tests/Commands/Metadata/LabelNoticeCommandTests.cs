@@ -37,7 +37,12 @@ public sealed class LabelNoticeCommandTests
         "optionset update-option --solution Sol --name new_choice --value 1 --new-label Ferme --dry-run",
         "attribute update-option --solution Sol --entity new_table --column new_pick --value 1 --new-label Ferme",
         "entity update-statusreason --solution Sol --entity new_table --value 1 --new-label Ferme",
-        "optionset update --solution Sol --name new_choice --display-name Renamed"
+        "optionset update --solution Sol --name new_choice --display-name Renamed",
+        // AC-147: table and column label updates report the same notice.
+        "entity update --solution Sol --entity new_table --display-name Renamed",
+        "table update --solution Sol --entity new_table --display-name Renamed --publish",
+        "attribute update --solution Sol --entity new_table --column new_text --display-name Renamed",
+        "column update --solution Sol --entity new_table --column new_text --description Renamed"
     };
 
     [Theory]
@@ -112,6 +117,15 @@ public sealed class LabelNoticeCommandTests
         Assert.StartsWith("Choice updated: new_choice Warning: Only the English (LCID 1033) label is written.", status);
     }
 
+    [Fact]
+    [Trait("AC", "AC-147")]
+    public void Tui_ColumnUpdateStatus_ShowsTheNotice()
+    {
+        Assert.Equal("Column updated: new_text", PPDS.Cli.Tui.Screens.MetadataExplorerScreen.UpdatedStatus("Column", "new_text", MetadataLabelWriteResult.None));
+        Assert.StartsWith("Column updated: new_text Warning: Only the English (LCID 1033) label is written.",
+            PPDS.Cli.Tui.Screens.MetadataExplorerScreen.UpdatedStatus("Column", "new_text", Notice));
+    }
+
     private static async Task<(int Exit, string Stdout, string Stderr)> Invoke(string command, MetadataLabelWriteResult result)
     {
         var service = new Mock<IMetadataAuthoringService>(MockBehavior.Strict);
@@ -119,6 +133,8 @@ public sealed class LabelNoticeCommandTests
         service.Setup(s => s.UpdateColumnOptionAsync(It.IsAny<UpdateColumnOptionRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(result);
         service.Setup(s => s.UpdateStatusReasonAsync(It.IsAny<UpdateStatusReasonRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(result);
         service.Setup(s => s.UpdateGlobalChoiceAsync(It.IsAny<UpdateGlobalChoiceRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>())).ReturnsAsync(result);
+        service.Setup(s => s.UpdateTableAsync(It.IsAny<UpdateTableRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>())).ReturnsAsync(result);
+        service.Setup(s => s.UpdateColumnAsync(It.IsAny<UpdateColumnRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>())).ReturnsAsync(result);
 
         Task<ServiceProvider> Provider(CancellationToken _) => Task.FromResult(new ServiceCollection()
             .AddSingleton(service.Object)

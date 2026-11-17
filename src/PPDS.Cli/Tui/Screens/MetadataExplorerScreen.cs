@@ -583,14 +583,15 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
             var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
             var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IMetadataAuthoringService>();
-            await service.UpdateColumnAsync(request, reporter, ScreenCancellation);
-
-            Application.MainLoop?.Invoke(() =>
-            {
-                _statusLabel.Text = $"Column updated: {request.ColumnLogicalName}";
-            });
+            var labelResult = await service.UpdateColumnAsync(request, reporter, ScreenCancellation);
 
             await LoadEntityDetailAsync(_selectedEntity!.LogicalName);
+
+            // Set after the reload, which writes its own status, so a label notice stays visible.
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusLabel.Text = UpdatedStatus("Column", request.ColumnLogicalName, labelResult);
+            });
         }
         catch (Exception ex)
         {
@@ -607,8 +608,12 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
     /// language's label learns why the list still shows the old text.
     /// </summary>
     internal static string ChoiceUpdatedStatus(string name, MetadataLabelWriteResult? result)
+        => UpdatedStatus("Choice", name, result);
+
+    /// <summary>Status text after a label-writing update, with any English-only label notices appended.</summary>
+    internal static string UpdatedStatus(string what, string name, MetadataLabelWriteResult? result)
     {
-        var status = $"Choice updated: {name}";
+        var status = $"{what} updated: {name}";
         foreach (var notice in result?.ValidationMessages ?? [])
             status += $" Warning: {notice.Message}";
         return status;

@@ -148,7 +148,7 @@ public partial class RpcMethodHandler
             var service = sp.GetRequiredService<IMetadataAuthoringService>();
             try
             {
-                await service.UpdateTableAsync(new Authoring.UpdateTableRequest
+                var labelResult = await service.UpdateTableAsync(new Authoring.UpdateTableRequest
                 {
                     SolutionUniqueName = solutionUniqueName,
                     EntityLogicalName = entityLogicalName,
@@ -163,6 +163,8 @@ public partial class RpcMethodHandler
                     Success = true,
                     LogicalName = entityLogicalName,
                     WasDryRun = dryRun,
+                    // English-only label notices; omitted when there are none.
+                    ValidationMessages = labelResult.ValidationMessages.Count == 0 ? null : labelResult.ValidationMessages.Select(MapValidationMessage).ToList(),
                     RequiresPublish = !dryRun,
                     PublishHint = dryRun ? null : $"ppds metadata publish {entityLogicalName}",
                 };
@@ -330,7 +332,7 @@ public partial class RpcMethodHandler
             var service = sp.GetRequiredService<IMetadataAuthoringService>();
             try
             {
-                await service.UpdateColumnAsync(new Authoring.UpdateColumnRequest
+                var labelResult = await service.UpdateColumnAsync(new Authoring.UpdateColumnRequest
                 {
                     SolutionUniqueName = solutionUniqueName,
                     EntityLogicalName = entityLogicalName,
@@ -347,6 +349,8 @@ public partial class RpcMethodHandler
                     Success = true,
                     LogicalName = columnLogicalName,
                     WasDryRun = dryRun,
+                    // English-only label notices; omitted when there are none.
+                    ValidationMessages = labelResult.ValidationMessages.Count == 0 ? null : labelResult.ValidationMessages.Select(MapValidationMessage).ToList(),
                     RequiresPublish = !dryRun,
                     PublishHint = dryRun ? null : $"ppds metadata publish {entityLogicalName}",
                 };

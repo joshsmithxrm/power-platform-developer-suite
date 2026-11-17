@@ -198,7 +198,8 @@ public sealed partial class TableUpdateLeaseTests
         var coded = Assert.IsAssignableFrom<PpdsException>(actual);
         Assert.Same(h.Injected, coded.InnerException);
         AssertCli(coded, ExceptionMapper.Map(h.Injected!).Code, ExceptionMapper.ToExitCode(h.Injected!));
-        Assert.Equal(boundary == "publish-checkout" ? new[] { "update" } : [], h.SuccessfulSdk);
+        // AC-147: the table's labels are read before the update.
+        Assert.Equal(boundary == "publish-checkout" ? new[] { "read", "update" } : ["read"], h.SuccessfulSdk);
         Assert.Equal(boundary == "publish-checkout" ? "Changed" : "Existing", h.StoredLabel);
         Assert.Empty(h.Infos);
         h.AssertReturned();

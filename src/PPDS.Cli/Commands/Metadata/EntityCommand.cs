@@ -606,7 +606,7 @@ public static class EntityCommand
                 Publish = publish
             };
 
-            await authoringService.UpdateTableAsync(request, ct: cancellationToken);
+            var labelResult = await authoringService.UpdateTableAsync(request, ct: cancellationToken);
 
             var publishHint = $"ppds metadata publish {entity}";
 
@@ -618,7 +618,8 @@ public static class EntityCommand
                     updated = true,
                     dryRun,
                     requiresPublish = !dryRun && !publish,
-                    publishHint = dryRun || publish ? null : publishHint
+                    publishHint = dryRun || publish ? null : publishHint,
+                    validationMessages = MetadataLabelNotices.ForJson(labelResult)
                 });
             }
             else if (dryRun)
@@ -627,10 +628,12 @@ public static class EntityCommand
             }
             else if (publish)
             {
+                MetadataLabelNotices.WriteWarnings(labelResult);
                 Console.Error.WriteLine($"Table '{entity}' updated and published.");
             }
             else
             {
+                MetadataLabelNotices.WriteWarnings(labelResult);
                 Console.Error.WriteLine($"Table '{entity}' updated. Run '{publishHint}' to publish changes.");
             }
 

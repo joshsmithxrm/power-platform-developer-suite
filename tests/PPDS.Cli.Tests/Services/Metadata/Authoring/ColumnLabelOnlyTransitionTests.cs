@@ -295,7 +295,8 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
         var request = Request("both");
         await h.UpdateAsync(request);
         var update = Assert.Single(h.Requests.OfType<UpdateAttributeRequest>());
-        Assert.Equal(new UpdateAttributeRequest().MergeLabels, update.MergeLabels);
+        // Amended (AC-128/AC-147): the 1033-only labels are merged so other languages keep their text.
+        Assert.True(update.MergeLabels);
         var expected = ColumnLabelHarness.Fresh(type);
         expected.LogicalName = ColumnLabelHarness.Column; expected.SchemaName = ColumnLabelHarness.Schema;
         RequestedLabels(expected, request);
@@ -361,7 +362,7 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
         var constructor = Assert.Single(typeof(DataverseMetadataAuthoringService).GetConstructors());
         Assert.Equal(5, constructor.GetParameters().Length);
         var method = typeof(IMetadataAuthoringService).GetMethod(nameof(IMetadataAuthoringService.UpdateColumnAsync))!;
-        Assert.Equal(typeof(Task), method.ReturnType);
+        Assert.Equal(typeof(Task<MetadataLabelWriteResult>), method.ReturnType); // AC-147: English-only label notices.
         Assert.Equal(new[] { typeof(UpdateColumnRequest), typeof(IMetadataAuthoringProgressReporter), typeof(CancellationToken) }, method.GetParameters().Select(p => p.ParameterType));
         Assert.Equal(new[] { "AutoNumberFormat", "ColumnLogicalName", "Description", "DisplayName", "DryRun", "EntityLogicalName", "Format", "IsAuditEnabled",
             "IsSecured", "IsValidForAdvancedFind", "MaxLength", "MaxValue", "MinValue", "Precision", "Publish", "RequiredLevel", "SolutionUniqueName" },

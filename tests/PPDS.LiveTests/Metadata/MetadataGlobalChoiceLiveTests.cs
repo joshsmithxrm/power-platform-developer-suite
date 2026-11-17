@@ -20,7 +20,7 @@ namespace PPDS.LiveTests.Metadata;
 
 /// <summary>
 /// Live checks of the Dataverse behaviour the pre-release metadata fixes assume (specs/metadata-authoring.md AC-133,
-/// AC-134, AC-141, AC-142, AC-145 and "Label languages"). Run against a DEVELOPMENT environment only:
+/// AC-134, AC-141, AC-142, AC-145, AC-146, AC-147, "Option colours" and "Label languages"). Run against a DEVELOPMENT environment only:
 /// <code>
 /// dotnet test tests/PPDS.LiveTests/PPDS.LiveTests.csproj -f net8.0 --filter "FullyQualifiedName~MetadataGlobalChoiceLiveTests" --logger "console;verbosity=detailed"
 /// </code>
@@ -33,7 +33,7 @@ namespace PPDS.LiveTests.Metadata;
 /// tests, which are reported as skipped without it. The detailed console logger is needed to see the "OBSERVED" lines
 /// (fault codes, messages, label languages); xunit hides the output of passing tests otherwise.
 /// <para>
-/// Each test creates its own uniquely named throwaway global choice (the local/status tests a throwaway custom table)
+/// Each test creates its own uniquely named throwaway global choice (the local/status and table/column tests a throwaway custom table)
 /// in PPDS_TEST_SOLUTION, prints its name before creating it, and deletes it in a finally block. A failed delete
 /// fails the test with the leftover name (or, when the test already failed, is written to the output without masking
 /// that failure). Only the generated choices are published (PublishXml naming them); nothing pre-existing is touched.
@@ -194,6 +194,95 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
             var after = await ReasonAsync(pool, entity, reason.Value!.Value);
             Text(after.Label, English).Should().Be("Live");
             Text(after.Label, second).Should().Be("Actif", "MergeLabels must keep the other language's status label");
+        });
+    }
+
+    // AC-147 (English part): table and typed-column label updates write the requested English label only and leave
+    // every unrequested label alone.
+    [MetadataLiveFact]
+    public async Task TableAndColumnLabelUpdates_WriteEnglish_AndLeaveUnrequestedLabelsAlone()
+    {
+        var (pool, service) = await ConnectAsync();
+        await WithTableAsync(pool, Labels("Open", null), async (entity, column) =>
+        {
+            var tableBefore = await RetrieveTableAsync(pool, entity);
+            var tableResult = await service.UpdateTableAsync(new UpdateTableRequest { SolutionUniqueName = Solution, EntityLogicalName = entity, DisplayName = "PPDS label live test renamed" });
+            var table = await RetrieveTableAsync(pool, entity);
+            _output.WriteLine($"OBSERVED table after display-name update: display {string.Join(", ", Pairs(table.DisplayName))}; plural {string.Join(", ", Pairs(table.DisplayCollectionName))}; description {string.Join(", ", Pairs(table.Description))}; notices {tableResult.ValidationMessages.Count}");
+            Text(table.DisplayName, English).Should().Be("PPDS label live test renamed");
+            Pairs(table.DisplayCollectionName).Should().BeEquivalentTo(Pairs(tableBefore.DisplayCollectionName), "the plural name was not requested");
+            Pairs(table.Description).Should().BeEquivalentTo(Pairs(tableBefore.Description), "the description was not requested");
+
+            await service.UpdateTableAsync(new UpdateTableRequest { SolutionUniqueName = Solution, EntityLogicalName = entity, PluralDisplayName = "PPDS renamed tests", Description = "Changed description" });
+            table = await RetrieveTableAsync(pool, entity);
+            Text(table.DisplayName, English).Should().Be("PPDS label live test renamed", "the display name was not requested this time");
+            Text(table.DisplayCollectionName, English).Should().Be("PPDS renamed tests");
+            Text(table.Description, English).Should().Be("Changed description");
+
+            var columnBefore = await RetrieveColumnAsync(pool, entity, column);
+            var columnResult = await service.UpdateColumnAsync(new UpdateColumnRequest { SolutionUniqueName = Solution, EntityLogicalName = entity, ColumnLogicalName = column, Description = "Pick description" });
+            var after = await RetrieveColumnAsync(pool, entity, column);
+            _output.WriteLine($"OBSERVED column after description update: display {string.Join(", ", Pairs(after.DisplayName))}; description {string.Join(", ", Pairs(after.Description))}; notices {columnResult.ValidationMessages.Count}");
+            Text(after.Description, English).Should().Be("Pick description");
+            Pairs(after.DisplayName).Should().BeEquivalentTo(Pairs(columnBefore.DisplayName), "the display name was not requested");
+
+            await service.UpdateColumnAsync(new UpdateColumnRequest { SolutionUniqueName = Solution, EntityLogicalName = entity, ColumnLogicalName = column, DisplayName = "Pick renamed" });
+            after = await RetrieveColumnAsync(pool, entity, column);
+            Text(after.DisplayName, English).Should().Be("Pick renamed");
+            Text(after.Description, English).Should().Be("Pick description", "the description was not requested this time");
+        });
+    }
+
+    // AC-147 (MergeLabels): table and typed-column label updates keep the second language's labels.
+    [MetadataLiveMultiLanguageFact]
+    public async Task TableAndColumnLabelUpdates_KeepTheSecondLanguage()
+    {
+        var (pool, service) = await ConnectAsync();
+        var second = await RequireSecondLanguageAsync(pool);
+        await WithTableAsync(pool, Labels("Open", null), async (entity, column) =>
+        {
+            // Give the table and the column explicit second-language labels first.
+            await ExecuteAsync(pool, new UpdateEntityRequest
+            {
+                Entity = new EntityMetadata
+                {
+                    LogicalName = entity,
+                    DisplayName = Labels("PPDS label live test", (second, "Test " + second)),
+                    DisplayCollectionName = Labels("PPDS label live tests", (second, "Tests " + second)),
+                    Description = Labels("Temporary metadata. Safe to delete.", (second, "Description " + second))
+                },
+                MergeLabels = true, SolutionUniqueName = Solution
+            });
+            await ExecuteAsync(pool, new UpdateAttributeRequest
+            {
+                EntityName = entity, MergeLabels = true, SolutionUniqueName = Solution,
+                Attribute = new PicklistAttributeMetadata
+                {
+                    LogicalName = column, DisplayName = Labels("Pick", (second, "Choix " + second)), Description = Labels("Pick description", (second, "Choix description " + second))
+                }
+            });
+            var table = await RetrieveTableAsync(pool, entity);
+            Text(table.DisplayName, second).Should().Be("Test " + second, "precondition: the table carries a second-language label");
+
+            await service.UpdateTableAsync(new UpdateTableRequest
+            {
+                SolutionUniqueName = Solution, EntityLogicalName = entity,
+                DisplayName = "Renamed", PluralDisplayName = "Renamed plural", Description = "Renamed description"
+            });
+            table = await RetrieveTableAsync(pool, entity);
+            Text(table.DisplayName, English).Should().Be("Renamed");
+            Text(table.DisplayName, second).Should().Be("Test " + second, "MergeLabels must keep the table's other-language display name");
+            Text(table.DisplayCollectionName, second).Should().Be("Tests " + second, "MergeLabels must keep the table's other-language plural name");
+            Text(table.Description, second).Should().Be("Description " + second, "MergeLabels must keep the table's other-language description");
+
+            await service.UpdateColumnAsync(new UpdateColumnRequest
+            {
+                SolutionUniqueName = Solution, EntityLogicalName = entity, ColumnLogicalName = column, DisplayName = "Pick renamed", Description = "Changed"
+            });
+            var after = await RetrieveColumnAsync(pool, entity, column);
+            Text(after.DisplayName, English).Should().Be("Pick renamed");
+            Text(after.DisplayName, second).Should().Be("Choix " + second, "MergeLabels must keep the column's other-language display name");
+            Text(after.Description, second).Should().Be("Choix description " + second, "MergeLabels must keep the column's other-language description");
         });
     }
 
@@ -536,6 +625,14 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
     private static async Task<OptionSetMetadata> RetrieveChoiceAsync(IDataverseConnectionPool pool, string name, bool asIfPublished)
         => (OptionSetMetadata)((RetrieveOptionSetResponse)await ExecuteAsync(pool,
             new RetrieveOptionSetRequest { Name = name, RetrieveAsIfPublished = asIfPublished })).OptionSetMetadata;
+
+    private static async Task<EntityMetadata> RetrieveTableAsync(IDataverseConnectionPool pool, string entity)
+        => ((RetrieveEntityResponse)await ExecuteAsync(pool,
+            new RetrieveEntityRequest { LogicalName = entity, EntityFilters = EntityFilters.Entity, RetrieveAsIfPublished = true })).EntityMetadata;
+
+    private static async Task<AttributeMetadata> RetrieveColumnAsync(IDataverseConnectionPool pool, string entity, string attribute)
+        => ((RetrieveAttributeResponse)await ExecuteAsync(pool,
+            new RetrieveAttributeRequest { EntityLogicalName = entity, LogicalName = attribute, RetrieveAsIfPublished = true })).AttributeMetadata;
 
     private static async Task<IReadOnlyList<OptionMetadata>> RetrieveOptionsAsync(IDataverseConnectionPool pool, string entity, string attribute)
     {

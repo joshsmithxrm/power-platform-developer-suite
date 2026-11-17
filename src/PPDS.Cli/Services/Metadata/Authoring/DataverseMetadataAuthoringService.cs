@@ -164,7 +164,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     }
 
     /// <inheritdoc />
-    public async Task UpdateTableAsync(
+    public async Task<MetadataLabelWriteResult> UpdateTableAsync(
         UpdateTableRequest request,
         IMetadataAuthoringProgressReporter? reporter = null,
         CancellationToken ct = default)
@@ -179,7 +179,20 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         if (request.DryRun)
         {
             _logger?.LogInformation("Dry-run: UpdateTable {Entity} validated successfully", request.EntityLogicalName);
-            return;
+            return MetadataLabelWriteResult.None;
+        }
+
+        // Labels are written for LCID 1033 only. The table's current labels are read (only when a label is
+        // requested) so the update can say when the label Dataverse shows the caller is in another language.
+        var notices = MetadataLabelWriteResult.None;
+        if (request.DisplayName != null || request.PluralDisplayName != null || request.Description != null)
+        {
+            reporter?.ReportPhase("Retrieving existing table labels", request.EntityLogicalName);
+            var existing = await ReadTableLabelsAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+            notices = EnglishOnlyNotices(
+                ("DisplayName", "display name", request.DisplayName, existing?.DisplayName),
+                ("PluralDisplayName", "plural name", request.PluralDisplayName, existing?.DisplayCollectionName),
+                ("Description", "description", request.Description, existing?.Description));
         }
 
         reporter?.ReportPhase("Updating table", request.EntityLogicalName);
@@ -224,6 +237,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         var sdkRequest = new UpdateEntityRequest
         {
             Entity = entityMetadata,
+            MergeLabels = true, // The request carries only LCID 1033 labels. Preserve other translations.
             SolutionUniqueName = request.SolutionUniqueName
         };
 
@@ -243,6 +257,28 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             ? $"Table '{request.EntityLogicalName}' updated and published."
             : $"Table '{request.EntityLogicalName}' updated. Changes must be published to take effect.");
         _logger?.LogInformation("Updated table {Entity}", request.EntityLogicalName);
+        return notices;
+    }
+
+    /// <summary>Reads a table's entity-level metadata (labels) as-if-published, on its own lease.</summary>
+    private async Task<EntityMetadata?> ReadTableLabelsAsync(string entityLogicalName, CancellationToken ct)
+    {
+        try
+        {
+            await using var client = await GetMetadataClientAsync(ct).ConfigureAwait(false);
+            var response = await client.ExecuteAsync(new RetrieveEntityRequest
+            {
+                LogicalName = entityLogicalName,
+                EntityFilters = EntityFilters.Entity,
+                RetrieveAsIfPublished = true
+            }, ct).ConfigureAwait(false);
+            return (response as RetrieveEntityResponse)?.EntityMetadata;
+        }
+        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
+        {
+            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                $"Could not read table '{entityLogicalName}' before updating its labels.", ex);
+        }
     }
 
     /// <inheritdoc />
@@ -361,7 +397,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     }
 
     /// <inheritdoc />
-    public async Task UpdateColumnAsync(
+    public async Task<MetadataLabelWriteResult> UpdateColumnAsync(
         UpdateColumnRequest request,
         IMetadataAuthoringProgressReporter? reporter = null,
         CancellationToken ct = default)
@@ -380,7 +416,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         {
             _logger?.LogInformation("Dry-run: UpdateColumn {Column} on {Entity} validated",
                 request.ColumnLogicalName, request.EntityLogicalName);
-            return;
+            return MetadataLabelWriteResult.None;
         }
 
         reporter?.ReportPhase("Retrieving existing column metadata");
@@ -395,10 +431,13 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         // Keep the existing typed and exact-base primary-ID contracts separate from
         // the finite, identity-checked State/Status/GUID label-only transition.
+        var notices = EnglishOnlyNotices(
+            ("DisplayName", "display name", request.DisplayName, existingAttr.DisplayName),
+            ("Description", "description", request.Description, existingAttr.Description));
         if (IsFiniteLabelOnlyColumn(existingAttr))
         {
             await UpdateFiniteColumnLabelsAsync(request, existingAttr, reporter, ct).ConfigureAwait(false);
-            return;
+            return notices;
         }
 
         var primaryIdLabels = existingAttr.GetType() == typeof(AttributeMetadata)
@@ -435,11 +474,9 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         {
             EntityName = request.EntityLogicalName,
             Attribute = updateAttr,
+            MergeLabels = true, // The request carries only LCID 1033 labels. Preserve other translations.
             SolutionUniqueName = request.SolutionUniqueName
         };
-
-        if (primaryIdLabels)
-            sdkRequest.MergeLabels = true; // The request carries only LCID 1033. Preserve other translations.
 
         await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
         {
@@ -456,6 +493,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             ? $"Column '{request.ColumnLogicalName}' updated on '{request.EntityLogicalName}' and published."
             : $"Column '{request.ColumnLogicalName}' updated on '{request.EntityLogicalName}'. Changes must be published to take effect.");
         _logger?.LogInformation("Updated column {Column} on {Entity}", request.ColumnLogicalName, request.EntityLogicalName);
+        return notices;
     }
 
     /// <inheritdoc />
