@@ -56,6 +56,24 @@ public static class FormErrorCodes
     /// <summary>The form's iscustomizable flag is false; mutations are silently ignored by Dataverse.</summary>
     public const string FormNotCustomizable = "Forms.FormNotCustomizable";
 
+    /// <summary>A binding repair was submitted but reading the form back did not confirm it.</summary>
+    public const string RepairNotVerified = "Forms.RepairNotVerified";
+
+    /// <summary>A binding repair could not be planned (nothing was written) and the failure has no more specific code.</summary>
+    public const string RepairFailed = "Forms.RepairFailed";
+
+    /// <summary>A binding repair's form XML update did not complete; whether it was applied is unknown.</summary>
+    public const string RepairWriteOutcomeUnknown = "Forms.RepairWriteOutcomeUnknown";
+
+    /// <summary>The organisation service answered a binding repair's form XML update with a fault; that request did not change the form.</summary>
+    public const string RepairWriteRejected = "Forms.RepairWriteRejected";
+
+    /// <summary>An explicitly requested solution association failed after the form XML step.</summary>
+    public const string SolutionAssociationFailed = "Forms.SolutionAssociationFailed";
+
+    /// <summary>An explicitly requested publication failed after the form XML step.</summary>
+    public const string PublicationFailed = "Forms.PublicationFailed";
+
     /// <summary>A tab with the same generated name already exists in the form.</summary>
     public const string DuplicateTabName = "Forms.DuplicateTabName";
 

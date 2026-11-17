@@ -197,7 +197,7 @@ internal static partial class FormXmlEditor
         {
             if (ReferenceEquals(other, section) || !ContainsField(other, fieldLogicalName)) continue;
             var tab = other.Ancestors("tab").FirstOrDefault();
-            var location = tab is null ? Describe(other) : $"{Describe(tab)} / {Describe(other)}";
+            var location = tab is null ? DescribeElement(other) : $"{DescribeElement(tab)} / {DescribeElement(other)}";
             if (!result.Contains(location, StringComparer.Ordinal)) result.Add(location);
         }
         // Header and footer hold rows/cells directly (no sections).
@@ -205,12 +205,13 @@ internal static partial class FormXmlEditor
             if ((area.Name.LocalName is "header" or "footer") && ContainsField(area, fieldLogicalName))
                 result.Add(area.Name.LocalName == "header" ? "Header" : "Footer");
         return result;
-
-        static string Describe(XElement element)
-            => (string?)element.Element("labels")?.Element("label")?.Attribute("description")
-                is { Length: > 0 } label ? label
-                : (string?)element.Attribute("name") ?? (string?)element.Attribute("id") ?? "(unnamed)";
     }
+
+    /// <summary>The first label of a tab or section, else its <c>name</c>, else its <c>id</c>.</summary>
+    private static string DescribeElement(XElement element)
+        => (string?)element.Element("labels")?.Element("label")?.Attribute("description")
+            is { Length: > 0 } label ? label
+            : (string?)element.Attribute("name") ?? (string?)element.Attribute("id") ?? "(unnamed)";
 
     // XDocument-returning form of AddFieldControl, kept for the existing editor tests' fluent style; production code calls
     // AddFieldControl so it can report the assigned id.
