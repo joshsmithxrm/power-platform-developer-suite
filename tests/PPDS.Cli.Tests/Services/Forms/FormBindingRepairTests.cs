@@ -62,13 +62,19 @@ public sealed class FormBindingRepairTests
     public async Task Repair_RewritesOnlyMisCasedBindings_InSectionsHeaderAndFooter_AndReadsBack()
     {
         using var cts = new CancellationTokenSource();
-        var h = new ContributorFormHarness(cts.Token, transform: MisCasedEverywhere);
+        // Look-alike text that must not be touched: a comment repeating a mis-cased binding.
+        var h = new ContributorFormHarness(cts.Token, transform: doc =>
+        {
+            MisCasedEverywhere(doc);
+            ContributorFormFixture.Section(doc, "General").AddFirst(new XComment(" datafieldname=\"Name\" "));
+        });
 
         var result = await h.Service.RepairBindingsAsync(new("account", "Fixture"), ct: cts.Token);
 
         Assert.False(result.DryRun);
         Assert.True(result.FormXmlChanged);
         Assert.True(result.ReadBackVerified);
+        Assert.Empty(result.ReadBackRepairable);
         Assert.Equal(new[]
         {
             ("authored_name_control", "Name", "name", "My Tab / General"),
@@ -84,9 +90,14 @@ public sealed class FormBindingRepairTests
 
         // One XML update: the stored text with only those four attribute values replaced.
         var written = Assert.Single(h.Writes);
-        var expected = h.Original.Replace("\"Name\"", "\"name\"").Replace("\"TELEPHONE1\"", "\"telephone1\"")
-            .Replace("\"Mayo_PriorityScore\"", $"\"{ContributorFormFixture.Priority}\"").Replace("\"NAME\"", "\"name\"");
-        Assert.Equal(expected, written);
+        // Expected: the same document with exactly those four attributes changed (the comment keeps its 'Name').
+        var expectedDoc = XDocument.Parse(h.Original);
+        Control(expectedDoc, "Name").SetAttributeValue("datafieldname", "name");
+        Control(expectedDoc, "TELEPHONE1").SetAttributeValue("datafieldname", "telephone1");
+        Control(expectedDoc, "Mayo_PriorityScore").SetAttributeValue("datafieldname", ContributorFormFixture.Priority);
+        Control(expectedDoc, "NAME").SetAttributeValue("datafieldname", "name");
+        Assert.Equal(expectedDoc.ToString(SaveOptions.DisableFormatting), written);
+        Assert.Contains("<!-- datafieldname=\"Name\" -->", written);
         FormXmlValidator.Validate(XDocument.Parse(written));
         Assert.Equal(2, h.ReadRequests); // the plan read and the read-back
         Assert.Equal(0, h.SolutionRequests + h.PublishRequests);
@@ -108,20 +119,23 @@ public sealed class FormBindingRepairTests
         // Not pre-normalised: XML declaration, comment, CRLF and tab indentation, a CDATA section with CRLF inside, a
         // whitespace-only element value, a single-quoted binding with spaces around '=', a character reference in a label,
         // and attributes in a non-default order.
+        // The two real bindings are written as markers; the expectation replaces only the markers, so a rewrite of any
+        // look-alike (comment, CDATA, other attribute) would make the comparison fail.
         var doc = XDocument.Parse(ContributorFormFixture.Build("base"));
-        Control(doc, "name").SetAttributeValue("datafieldname", "Name");
-        Control(doc, "telephone1").SetAttributeValue("datafieldname", "TELEPHONE1");
+        Control(doc, "name").SetAttributeValue("datafieldname", "MARKER_A");
+        Control(doc, "telephone1").SetAttributeValue("datafieldname", "MARKER_B");
         var notes = doc.Descendants("control").Single(c => (string?)c.Attribute("id") == "notescontrol").Element("parameters")!;
         notes.Element("UClientActivities")!.Value = "WHITESPACE_ONLY";
-        notes.Element("UClientActivityCardMap")!.ReplaceNodes(new XCData("{\"email\":\r\n{\"title\":\"subject\"}}"));
+        notes.Element("UClientActivityCardMap")!.ReplaceNodes(new XCData("{\"email\":\r\n{\"title\":\"subject\"}} datafieldname=\"Name\""));
         var pretty = doc.ToString().Replace("\r\n", "\n").Replace("\n", "\r\n").Replace("  ", "\t");
-        var raw = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n<!-- exported by hand -->\r\n" + pretty
-            .Replace("datafieldname=\"Name\"", "datafieldname = 'Name'")
+        var template = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n<!-- exported by hand; datafieldname='Name' -->\r\n" + pretty
+            .Replace("datafieldname=\"MARKER_A\"", "datafieldname = 'MARKER_A'")
             .Replace("description=\"Authored account label\"", "description=\"Authored &#97;ccount label\"")
             .Replace("WHITESPACE_ONLY", "   ") + "\r\n";
-        Assert.Contains("datafieldname = 'Name'", raw);
-        Assert.Contains("<![CDATA[", raw);
-        Assert.Contains("<UClientActivities>   </UClientActivities>", raw);
+        Assert.Contains("datafieldname = 'MARKER_A'", template);
+        Assert.Contains("<![CDATA[", template);
+        Assert.Contains("<UClientActivities>   </UClientActivities>", template);
+        var raw = template.Replace("MARKER_A", "Name").Replace("MARKER_B", "TELEPHONE1");
 
         using var cts = new CancellationTokenSource();
         var h = new ContributorFormHarness(cts.Token, rawXml: raw);
@@ -129,8 +143,7 @@ public sealed class FormBindingRepairTests
 
         Assert.Equal(2, result.Repaired.Count);
         Assert.True(result.ReadBackVerified);
-        var expected = raw.Replace("datafieldname = 'Name'", "datafieldname = 'name'")
-            .Replace("datafieldname=\"TELEPHONE1\"", "datafieldname=\"telephone1\"");
+        var expected = template.Replace("MARKER_A", "name").Replace("MARKER_B", "telephone1");
         Assert.Equal(expected, Assert.Single(h.Writes)); // byte-for-byte apart from the two values
     }
 
@@ -233,7 +246,7 @@ public sealed class FormBindingRepairTests
     }
 
     [Fact]
-    [Trait("AC", "AC-74")]
+    [Trait("AC", "AC-73")]
     public void Editor_DescribesTabHeaderAndFooterLocations()
     {
         var doc = XDocument.Parse(ContributorFormFixture.Build("base"));

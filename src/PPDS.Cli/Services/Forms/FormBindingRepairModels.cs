@@ -18,7 +18,8 @@ public sealed record RepairBindingsRequest(
 /// <param name="ControlId">The control <c>id</c>, unchanged; null when the control has none.</param>
 /// <param name="OldBinding">The stored <c>datafieldname</c> before the repair.</param>
 /// <param name="NewBinding">The column's logical name from metadata.</param>
-/// <param name="Location">"Tab / Section" labels, "Header" or "Footer".</param>
+/// <param name="Location">One of the layout values of <see cref="BindingLocations"/>: "&lt;Tab&gt; / &lt;Section&gt;" labels,
+/// "&lt;Tab&gt; / Tab header", "&lt;Tab&gt; / Tab footer", "Header" or "Footer".</param>
 /// <param name="SectionId">The containing section's <c>id</c>; null outside sections (form or tab header/footer).</param>
 /// <param name="ControlIdCaseDiffers">True when the control <c>id</c> also spells the logical name in another case; ids are never rewritten.</param>
 public sealed record RepairedBinding(string? ControlId, string OldBinding, string NewBinding, string Location, string? SectionId,
@@ -28,16 +29,39 @@ public sealed record RepairedBinding(string? ControlId, string OldBinding, strin
 /// <param name="ControlId">The control <c>id</c> (for an event, its <c>control</c>; for hidden data, its <c>id</c>); null when absent.</param>
 /// <param name="Binding">The stored value as read.</param>
 /// <param name="Reason">One of <see cref="BindingRepairReasons"/>.</param>
-/// <param name="Location">"Tab / Section" labels, "Header" or "Footer".</param>
+/// <param name="Location">A layout location as on <see cref="RepairedBinding.Location"/>, or "Control descriptions",
+/// "Event '&lt;name&gt;'", "Hidden controls" or "Outside form layout" (see <see cref="BindingLocations"/>).</param>
 /// <param name="SectionId">The containing section's <c>id</c>; null outside sections.</param>
-/// <param name="CanonicalName">The column's logical name when one matches; null for <see cref="BindingRepairReasons.NoMatchingColumn"/>.</param>
+/// <param name="CanonicalName">The column's logical name when exactly one matches; null for no match or an ambiguous match.</param>
 public sealed record UnchangedBinding(string? ControlId, string Binding, string Reason, string Location, string? SectionId, string? CanonicalName);
+
+/// <summary>Fixed location values used by binding repair (tab and section labels are added around the first three).</summary>
+public static class BindingLocations
+{
+    /// <summary>Suffix for a control in a tab header: "&lt;Tab&gt; / Tab header".</summary>
+    public const string TabHeader = "Tab header";
+    /// <summary>Suffix for a control in a tab footer: "&lt;Tab&gt; / Tab footer".</summary>
+    public const string TabFooter = "Tab footer";
+    /// <summary>The form header.</summary>
+    public const string Header = "Header";
+    /// <summary>The form footer.</summary>
+    public const string Footer = "Footer";
+    /// <summary>A custom-control parameter whose control is not on the form layout.</summary>
+    public const string ControlDescriptions = "Control descriptions";
+    /// <summary>A <c>hiddencontrols/data</c> entry.</summary>
+    public const string HiddenControls = "Hidden controls";
+    /// <summary>A <c>cell/control</c> that is not on the form's own layout path (for example inside custom-control parameters).</summary>
+    public const string OutsideFormLayout = "Outside form layout";
+}
 
 /// <summary>Reasons a bound control is reported but left unchanged by binding repair.</summary>
 public static class BindingRepairReasons
 {
     /// <summary>The <c>datafieldname</c> matches no column of the form's table, even ignoring case.</summary>
     public const string NoMatchingColumn = "no-matching-column";
+
+    /// <summary>The binding matches more than one column name ignoring case (and none exactly), so the target is ambiguous.</summary>
+    public const string AmbiguousColumn = "ambiguous-column";
 
     /// <summary>The binding is already exact but the control <c>id</c> spells the column's logical name in a different case. Control ids are never rewritten.</summary>
     public const string ControlIdCaseDiffers = "control-id-case-differs";
@@ -47,6 +71,9 @@ public static class BindingRepairReasons
 
     /// <summary>A case-variant binding whose stored text uses character or entity references; only plain-text values are rewritten.</summary>
     public const string BindingNotPlainText = "binding-not-plain-text";
+
+    /// <summary>A case-variant <c>cell/control</c> binding that is not on the form's own layout path; never rewritten.</summary>
+    public const string OutsideFormLayout = "outside-form-layout";
 
     /// <summary>A custom-control <c>datafieldname</c> parameter in <c>controlDescriptions</c> spells a column name in a different case.</summary>
     public const string CustomControlParameterCaseDiffers = "custom-control-parameter-case-differs";
@@ -66,10 +93,11 @@ public static class BindingRepairReasons
 /// <param name="FormName">The resolved form name.</param>
 /// <param name="DryRun">True when nothing was written or requested.</param>
 /// <param name="Repaired">Controls whose binding was (or would be) rewritten, in document order.</param>
-/// <param name="Unchanged">Controls reported but not changed, in document order.</param>
+/// <param name="Unchanged">Entries reported but not changed.</param>
 /// <param name="FormXmlChanged">True when the form XML update was submitted; always false on a dry run.</param>
-/// <param name="ReadBackVerified">True when, after the update, the unpublished form was read back and no control binding
-/// differed from its column's logical name only by case. False on a dry run and when nothing was submitted.</param>
+/// <param name="ReadBackVerified">True when, after the update, the unpublished form was read back and every control this run
+/// rewrote was found at its position with the same id and the new binding. It says nothing about entries in
+/// <see cref="Unchanged"/>. False on a dry run and when nothing was submitted.</param>
 /// <param name="SolutionAssociationRequested">True when the explicit solution association request completed.</param>
 /// <param name="PublicationRequested">True when the explicit publication request completed.</param>
 public sealed record RepairBindingsResult(
@@ -81,4 +109,12 @@ public sealed record RepairBindingsResult(
     bool FormXmlChanged,
     bool ReadBackVerified,
     bool SolutionAssociationRequested,
-    bool PublicationRequested);
+    bool PublicationRequested)
+{
+    /// <summary>
+    /// Bindings that the read-back form shows as repairable although this run did not rewrite them (for example because
+    /// the server changed how a value is spelled). Reported for a follow-up run; not a verification failure. Empty when
+    /// nothing was read back.
+    /// </summary>
+    public IReadOnlyList<RepairedBinding> ReadBackRepairable { get; init; } = [];
+}

@@ -280,6 +280,14 @@ internal sealed class ContributorFormHarness
     internal int FormType { get; init; } = 2;
     /// <summary>The synthetic server acknowledges updates but keeps its previous form XML (read-back shows the old text).</summary>
     internal bool DiscardWrites { get; init; }
+    /// <summary>When set, a read after the first update throws this exception (a failed read-back).</summary>
+    internal Func<Exception>? FailReadBackWith { get; init; }
+    /// <summary>When set, the explicit solution association request throws this exception.</summary>
+    internal Func<Exception>? FailSolutionWith { get; init; }
+    /// <summary>When set, the explicit publication request throws this exception.</summary>
+    internal Func<Exception>? FailPublishWith { get; init; }
+    /// <summary>Replaces the read-back text returned after the first update (simulates a server that stores something else).</summary>
+    internal Func<string, string>? ReadBackTransform { get; init; }
     private readonly IEnvironmentConfirmationService? _confirmationOverride;
     internal Action? BeforeMetadata { get; init; }
 
@@ -342,21 +350,29 @@ internal sealed class ContributorFormHarness
                 {
                     Assert.Equal(FormId, association.ComponentId); Assert.Equal(60, association.ComponentType);
                     Assert.Equal("fixture_solution", association.SolutionUniqueName); Assert.False(association.AddRequiredComponents);
-                    SolutionRequests++; Journal.Add("explicit-solution-request"); return Task.FromResult(new OrganizationResponse());
+                    SolutionRequests++; Journal.Add("explicit-solution-request");
+                    if (FailSolutionWith is not null) return Task.FromException<OrganizationResponse>(FailSolutionWith());
+                    return Task.FromResult(new OrganizationResponse());
                 }
                 if (request is PublishXmlRequest publication)
                 {
                     Assert.Equal("<importexportxml><entities><entity>account</entity></entities></importexportxml>", publication.ParameterXml);
-                    PublishRequests++; Journal.Add("explicit-publication-request"); return Task.FromResult(new OrganizationResponse());
+                    PublishRequests++; Journal.Add("explicit-publication-request");
+                    if (FailPublishWith is not null) return Task.FromException<OrganizationResponse>(FailPublishWith());
+                    return Task.FromResult(new OrganizationResponse());
                 }
                 ReadRequests++; Journal.Add("read-unpublished");
+                if (Writes.Count > 0 && FailReadBackWith is not null) return Task.FromException<OrganizationResponse>(FailReadBackWith());
                 var query = Assert.IsType<QueryExpression>(((RetrieveUnpublishedMultipleRequest)request).Query);
                 Assert.Equal("systemform", query.EntityName);
                 Assert.Equal(2, query.TopCount);
                 Assert.Contains(query.Criteria.Conditions, c => c.AttributeName == "objecttypecode" && (string)c.Values.Single() == "account");
-                Assert.Contains(query.Criteria.Conditions, c => c.AttributeName == "name" && (string)c.Values.Single() == "Fixture");
+                // Forms are selected by name, or by the resolved form ID (binding repair reads back by ID).
+                Assert.Contains(query.Criteria.Conditions, c => (c.AttributeName == "name" && (string)c.Values.Single() == "Fixture")
+                    || (c.AttributeName == "formid" && c.Values.Single() is Guid id && id == FormId));
+                var stateXml = Writes.Count > 0 && ReadBackTransform is not null ? ReadBackTransform(StateXml) : StateXml;
                 var state = new Entity("systemform", FormId) { ["formid"] = FormId, ["name"] = "Fixture", ["type"] = new OptionSetValue(FormType),
-                    ["ismanaged"] = IsManaged, ["iscustomizable"] = new BooleanManagedProperty(IsCustomizable), ["formxml"] = StateXml };
+                    ["ismanaged"] = IsManaged, ["iscustomizable"] = new BooleanManagedProperty(IsCustomizable), ["formxml"] = stateXml };
                 return Task.FromResult<OrganizationResponse>(new RetrieveUnpublishedMultipleResponse
                     { Results = new ParameterCollection { ["EntityCollection"] = new EntityCollection([state]) } });
             });
