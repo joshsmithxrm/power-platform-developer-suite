@@ -109,11 +109,43 @@ def test_driver_operation_and_status_pass_only_fixed_values(text, operation, sta
     assert h.command_status("PRIVATE_STDOUT", text) == status
 
 
+@pytest.mark.parametrize("text,index", [
+    ("PPDS_COMPAT_OPERATION_INDEX=2", "2"), ("PPDS_COMPAT_OPERATION_INDEX=9999", "9999"),
+    ("PPDS_COMPAT_OPERATION_INDEX=0", None), ("PPDS_COMPAT_OPERATION_INDEX=10000", None),
+    ("PPDS_COMPAT_OPERATION_INDEX=C:/PRIVATE", None), ("PPDS_COMPAT_OPERATION_INDEX=1\nPPDS_COMPAT_OPERATION_INDEX=2", None),
+])
+def test_driver_operation_index_passes_only_a_bounded_integer(text, index):
+    h.load_driver()
+    assert h.command_operation_index("PRIVATE", text) == index
+
+
+def test_pwsh_needs_pathext_to_launch_a_native_tool_under_the_driver_environment(tmp_path):
+    # Real-process regression for hosted run r12: under the driver's minimal environment pwsh did
+    # not run `& <full path to .exe>` at all ($LASTEXITCODE stayed $null) until PATHEXT was set.
+    pwsh = shutil.which("pwsh")
+    if os.name != "nt" or not pwsh:
+        pytest.skip("Windows PowerShell 7 host required for this real-process regression")
+    driver = h.load_driver()
+    plan = {"windows_directory": os.environ["SYSTEMROOT"], "windows_common_data_directory": os.environ["PROGRAMDATA"],
+            "tools": {}}
+    script = tmp_path / "native.ps1"
+    script.write_text("& (Join-Path $env:SYSTEMROOT 'System32\\cmd.exe') /c exit 3\n'code=' + $LASTEXITCODE\n",
+                      encoding="utf-8")
+    outcomes = {}
+    for native in (False, True):
+        result = subprocess.run([pwsh, "-NoProfile", "-File", str(script)], cwd=tmp_path,
+                                env=driver.environment(plan, tmp_path, native=native), stdin=subprocess.DEVNULL,
+                                capture_output=True, text=True, timeout=60, check=False)
+        outcomes[native] = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
+    assert outcomes[True] == "code=3"
+    assert outcomes[False] != "code=3"  # The defect the native setting exists to avoid.
+
+
 @pytest.mark.parametrize("stage", ["prepare", "sign", "verify"])
 def test_driver_failure_diagnostic_carries_fixed_codes_only(monkeypatch, capsys, tmp_path, stage):
     h.load_driver()
     stderr = ("C:/Users/PRIVATE/secret.snk\nPPDS_COMPAT_REFUSAL=package-content-hash\n"
-              "PPDS_COMPAT_OPERATION=package-signature-verification\nPPDS_COMPAT_STATUS=0\nPRIVATE_TRACE")
+              "PPDS_COMPAT_OPERATION=package-signature-verification\nPPDS_COMPAT_STATUS=0\nPPDS_COMPAT_OPERATION_INDEX=3\nPRIVATE_TRACE")
     monkeypatch.setattr(h, "admit_host", lambda *a: {})
     monkeypatch.setattr(h.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=1, stdout="PRIVATE_OUT", stderr=stderr))
     monkeypatch.setattr(h, "Hosted", lambda *a: h.execute(["PRIVATE_COMMAND"], cwd=tmp_path, env={}, timeout=1))
@@ -124,7 +156,8 @@ def test_driver_failure_diagnostic_carries_fixed_codes_only(monkeypatch, capsys,
     diagnostic = json.loads(captured.err.splitlines()[0])
     assert diagnostic == {"hosted_compatibility_failure": "command", "refusal": "stage-command", "exit_code": 1,
                           "command_refusal": "driver-package-content-hash",
-                          "driver_operation": "package-signature-verification", "driver_status": "0"}
+                          "driver_operation": "package-signature-verification", "driver_status": "0",
+                          "driver_operation_index": "3"}
     assert "PRIVATE" not in captured.out + captured.err
 
 

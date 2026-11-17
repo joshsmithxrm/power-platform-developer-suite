@@ -342,9 +342,16 @@ class Runtime:
         Path(owned).unlink()
 
 
-def environment(plan, temporary, *, build=False, nuget=False):
+def environment(plan, temporary, *, build=False, nuget=False, native=False):
     # No os.environ, PATH inheritance, token lookup or secret API.
     require(build or not nuget, "NuGet folders are only for build children")
+    if native:
+        # A PowerShell child that itself launches a native tool by full path (the release
+        # inspector's `& sn.exe -vf`) needs PATHEXT. Without it pwsh does not treat the .exe as an
+        # application: nothing runs, $LASTEXITCODE stays $null and the inspector throws. Observed
+        # locally and as hosted run r12's packaged-metadata failure. Only .EXE is admitted.
+        require(not build, "Native-launch setting is only for PowerShell children")
+        return {**environment(plan, temporary), "PATHEXT": ".EXE"}
     result = {"SYSTEMROOT": plan["windows_directory"], "WINDIR": plan["windows_directory"],
               "PROGRAMDATA": plan["windows_common_data_directory"], "ALLUSERSPROFILE": plan["windows_common_data_directory"],
               "TEMP": str(temporary), "TMP": str(temporary),
@@ -378,11 +385,13 @@ def pin(plan, names):
                 "Pinned tool bytes differ")
 
 
-def invoke(rt, plan, tool, args, output, operation, *, zero=True, build=False, nuget=False, timeout=120, cwd=None):
+def invoke(rt, plan, tool, args, output, operation, *, zero=True, build=False, nuget=False, native=False,
+           timeout=120, cwd=None):
     pin(plan, [tool])
     require(tool == "dotnet" or not nuget, "NuGet folders are only for build children")
+    require(tool == "pwsh" or not native, "Native-launch setting is only for PowerShell children")
     result = rt.run([plan["tools"][tool]["path"], *map(str, args)], cwd=cwd or output,
-                    environment=environment(plan, output / "temp", build=build, nuget=nuget),
+                    environment=environment(plan, output / "temp", build=build, nuget=nuget, native=native),
                     operation=operation, timeout=timeout)
     require((result.returncode == 0) if zero else (result.returncode != 0),
             "Candidate tool result differs from the required outcome")
@@ -1129,7 +1138,7 @@ def package_adapter(rt, plan, output, public_key):
         for dll in directory.glob("*.dll"):
             invoke(rt, plan, "sn", ["-vf", dll], output, "packaged-forced-verification")
         result = invoke(rt, plan, "pwsh", ["-NoProfile", "-File", inspector, "-Directory", directory,
-                         "-ExpectedPublicKey", public_key], output, "packaged-metadata")
+                         "-ExpectedPublicKey", public_key], output, "packaged-metadata", native=True)
         rows = json.loads(result)
         require(isinstance(rows, list) and rows, "Real package inspection required")
         return rows
@@ -1329,6 +1338,7 @@ REFUSALS = {
     "Reference assemblies differ from the installed targeting pack": "reference-assemblies-targeting-pack",
     "Prepared package source differs from the repository source": "verify-package-source",
     "Reference assembly sources differ between builds": "reference-assemblies-builds",
+    "Native-launch setting is only for PowerShell children": "native-scope",
     "Assembly/PDB observations missing": "assembly-observation-missing",
     "Assembly observation identity differs": "assembly-observation-identity",
     "PDB observation identity differs": "pdb-observation-identity",
@@ -1431,6 +1441,7 @@ EXCEPTION_CLASSES = ("FileNotFoundError", "FileExistsError", "PermissionError", 
 REFUSAL_CODES = frozenset(REFUSALS.values()) | {UNREGISTERED_REFUSAL, "exception-other"} | {
     "exception-" + name.lower() for name in EXCEPTION_CLASSES}
 STATUS_PATTERN = r"(0|-?[1-9][0-9]{0,9}|timeout|launch-failure)"
+INDEX_PATTERN = r"[1-9][0-9]{0,3}"
 # Refusals raised by this driver and by the release-input helpers it calls (strict_version).
 REFUSAL_TYPES = (Error, release.Error)
 
@@ -1454,7 +1465,9 @@ def last_operation(calls):
         str(row["exit_code"]) if type(row.get("exit_code")) is int else None)
     if operation is None or status is None or re.fullmatch(STATUS_PATTERN, status) is None:
         return None
-    return operation, status
+    # Which call of that name it was (1-based), e.g. the second packaged-forced-verification.
+    index = sum(1 for call in calls if isinstance(call, dict) and call.get("operation") == operation)
+    return operation, status, str(min(index, 9999))
 
 
 def main(argv=None, *, runtime=None):
@@ -1487,6 +1500,7 @@ def main(argv=None, *, runtime=None):
         if last is not None:
             print("PPDS_COMPAT_OPERATION=" + last[0], file=sys.stderr)
             print("PPDS_COMPAT_STATUS=" + last[1], file=sys.stderr)
+            print("PPDS_COMPAT_OPERATION_INDEX=" + last[2], file=sys.stderr)
         print("Candidate experiment refused or failed; no passing compatibility claim is available.", file=sys.stderr)
         return 1
 

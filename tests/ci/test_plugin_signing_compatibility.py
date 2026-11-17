@@ -1032,6 +1032,27 @@ def test_main_retains_only_owned_public_failure_receipt(monkeypatch, tmp_path, p
                                              "PPDS_COMPAT_STATUS=timeout"]
 
 
+def test_native_launch_setting_is_only_pathext_for_powershell_children(monkeypatch, tmp_path, plan):
+    child = d.environment(plan, tmp_path, native=True)
+    assert child == {**d.environment(plan, tmp_path), "PATHEXT": ".EXE"}
+    with pytest.raises(d.Error, match="only for PowerShell children"):
+        d.environment(plan, tmp_path, build=True, native=True)
+    monkeypatch.setattr(d, "pin", lambda *args: None)
+    for tool in ("sn", "dotnet", "git"):
+        with pytest.raises(d.Error, match="only for PowerShell children"):
+            d.invoke(SimpleNamespace(run=lambda *a, **kw: pytest.fail("launched")), plan, tool, [], tmp_path,
+                     "metadata", native=True)
+
+
+def test_failure_names_which_call_of_an_operation_failed(monkeypatch, tmp_path, plan, capsys):
+    calls = [{"operation": "packaged-forced-verification", "exit_code": 0},
+             {"operation": "packaged-metadata", "exit_code": 0},
+             {"operation": "packaged-forced-verification", "exit_code": 1}]
+    assert d.last_operation(calls) == ("packaged-forced-verification", "1", "2")
+    assert d.last_operation(calls[:2]) == ("packaged-metadata", "0", "1")
+    assert re.fullmatch(d.INDEX_PATTERN, d.last_operation(calls)[2])
+
+
 def diagnostic_lines(err):
     return [line for line in err.splitlines() if line.startswith("PPDS_COMPAT_")]
 
@@ -1039,15 +1060,15 @@ def diagnostic_lines(err):
 @pytest.mark.parametrize("stage,failure,expected", [
     # A tool ran and exited non-zero; its private output never appears.
     ("prepare", "tool-exit", ["PPDS_COMPAT_REFUSAL=tool-result", "PPDS_COMPAT_OPERATION=delay-restore",
-                              "PPDS_COMPAT_STATUS=17"]),
+                              "PPDS_COMPAT_STATUS=17", "PPDS_COMPAT_OPERATION_INDEX=1"]),
     # A tool succeeded, then a validation built from a private value refused.
     ("prepare", "dynamic-reason", ["PPDS_COMPAT_REFUSAL=unregistered", "PPDS_COMPAT_OPERATION=evaluated-properties",
-                                   "PPDS_COMPAT_STATUS=0"]),
+                                   "PPDS_COMPAT_STATUS=0", "PPDS_COMPAT_OPERATION_INDEX=1"]),
     # A file read failed with a private path in the exception.
     ("sign", "missing-file", ["PPDS_COMPAT_REFUSAL=exception-filenotfounderror", "PPDS_COMPAT_OPERATION=sign",
-                              "PPDS_COMPAT_STATUS=0"]),
+                              "PPDS_COMPAT_STATUS=0", "PPDS_COMPAT_OPERATION_INDEX=1"]),
     ("verify", "launch", ["PPDS_COMPAT_REFUSAL=tool-incomplete", "PPDS_COMPAT_OPERATION=fresh-forced-verification",
-                          "PPDS_COMPAT_STATUS=launch-failure"]),
+                          "PPDS_COMPAT_STATUS=launch-failure", "PPDS_COMPAT_OPERATION_INDEX=1"]),
     # Refused before any tool call: no operation or status line at all.
     ("verify", "before-tools", ["PPDS_COMPAT_REFUSAL=exception-other"]),
 ])
@@ -1145,6 +1166,14 @@ def test_package_adapter_checks_real_bytes(monkeypatch, tmp_path, plan):
             operation = options["operation"]
             assert options["environment"]["ProgramFiles(x86)"] == "C:\\Program Files (x86)"
             assert "PATH" not in options["environment"]
+            # The inspector launches sn.exe from PowerShell: that child needs PATHEXT=.EXE, or pwsh
+            # never runs sn and the inspector fails (hosted run r12). Nothing else is added.
+            base = set(d.environment(plan, tmp_path / "temp"))
+            if operation == "packaged-metadata":
+                assert set(options["environment"]) == base | {"PATHEXT"}
+                assert options["environment"]["PATHEXT"] == ".EXE"
+            else:
+                assert set(options["environment"]) == base
             if operation == "packaged-forced-verification":
                 actual = Path(command[2]).read_bytes()
                 observed.append((operation, actual))

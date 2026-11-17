@@ -106,6 +106,12 @@ owned source copy and its ancestors and the machine-wide configuration under
 `ProgramFiles(x86)`. The repository `NuGet.config` clears inherited package
 sources; what restore actually used is checked afterwards, as below.
 
+The VERIFY `packaged-metadata` child (PowerShell running the release
+inspector, which itself launches `sn.exe -vf`) additionally gets
+`PATHEXT=.EXE`. Without it PowerShell does not run the `.exe` at all,
+`$LASTEXITCODE` stays empty and the inspector fails; hosted run r12 stopped
+there. No other child gets `PATHEXT`.
+
 ### What PREPARE binds for build dependencies
 
 For each package in `project.assets.json`, PREPARE requires and records:
@@ -204,7 +210,9 @@ only their class from a fixed list, otherwise `exception-other`. When a driver
 stage fails after a tool call it also prints `PPDS_COMPAT_OPERATION=<name>`
 (a fixed operation name) and `PPDS_COMPAT_STATUS=<exit code|timeout|launch-failure>`
 for the last call. That is the last tool call recorded, which need not be the
-cause: a refusal after a successful call reports that call with status 0. The
+cause: a refusal after a successful call reports that call with status 0.
+`PPDS_COMPAT_OPERATION_INDEX=<n>` says which call of that name it was
+(1-based, bounded integer; passed through as `driver_operation_index`). The
 coordinator passes through only registry codes, listed
 operation names and that status pattern, as `command_refusal`,
 `driver_operation` and `driver_status` in its failure JSON, and VERIFY prints
