@@ -7,19 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Security
+## [1.5.0] - Unreleased
 
-- Sixteen metadata SDK/catalog failure paths now report fixed action and target context without appending provider diagnostics. CLI error codes, exit codes and original inner causes are preserved; scripts should use error codes rather than SDK message text. This is bounded to the named authoring paths, with no general log-redaction guarantee.
+### Added
+
+- **Bounded cloud-flow activation** - `flows enable` and `flows disable` accept one ID/unique name or all eligible definitions in a named solution. Write-free plans report blockers, exclusions and a plan hash; execution verifies per-flow outcomes and retains partial or uncertain results without blindly retrying submissions. `--max-flows` defaults to 100; `--timeout` defaults to 60 seconds per flow (#1214).
+- **Shared target acknowledgement** - existing form mutations and new flow writes use a resolved-context service guard. Protected targets require `--confirm-env <resolved-url>`; read-only sessions reject the covered writes (#1015, partial).
+- Optional `data export --max-records-per-entity` bounds primary rows per entity. Exceeding the positive limit fails before writing output instead of truncating. Bounded mode requires paging cookies and skips relationship/binary expansion; the default remains unlimited (#1575).
 
 ### Changed
 
-- Native release executables use self-contained .NET 10, retaining all five platform targets. NuGet libraries and CLI/MCP tool framework assets remain unchanged. Linux native glibc minimum is 2.27; OS vendor support is a separate requirement. Native and VSIX candidate artifacts receive source/runtime/extraction checks before release.
+- Native release executables use self-contained .NET 10.0.15, retaining all five platform targets. NuGet libraries and CLI/MCP tool framework assets remain unchanged. Linux native glibc minimum is 2.27; OS vendor support is a separate requirement. Native and VSIX candidate artifacts receive source/runtime/extraction checks before release.
 
 - Every existing `--environment` option also accepts `-env`. Existing `-e` meanings remain unchanged; entity/entity-list uses emit one value-free deprecation notice on stderr and help recommends `--entity`/`--entities`. A future CLI 2.0 reassignment waits at least 90 days after the first stable release with the complete replacement/deprecation guidance (#1536).
 - Schema-delete previews read unpublished target identity and deletion dependencies. Blockers and incomplete checks return nonzero with retained component identities; actual deletion rechecks after confirmation. Read failures retain safe auth/timeout recovery codes and original internal causes. Other metadata dry-runs state their completed checks and provisional/unallocated values while preserving existing JSON data fields. A clear preview does not establish server delete feasibility (#1532).
 - Legacy `forms reorder-fields` is deprecated, with a stderr-only warning and unchanged JSON shape. Removal is planned for CLI 2.0, no earlier than 90 days after stable replacements. It retains authoritative add/drop behavior but now rejects repeated inputs, ambiguous selected bindings and silent cross-section copying.
 - `forms reorder-fields-strict` permutes existing fields without additions/removals; `forms move-field` relocates an existing cell with preserved IDs, authored labels and nested content. Unsafe/ambiguous layouts fail before a final single XML update; explicit solution/publication remains separate.
 - All nine existing `views` writers now enforce the shared target-confirmation policy. Scripts targeting protected environments must pass `--confirm-env <resolved-url>`; read-only sessions reject writes, including no-op edits. `views list` and `views get` remain acknowledgement-free. The original four-argument `ViewService` constructor remains available for readers, but direct writers must supply a resolved confirmation service (#1015, partial).
+- When `--confirm-env` is required because the environment has no saved type, the error now adds that the environment is treated as Production and gives the `ppds env config <url> --type <type>` command that records it. The error code and the rest of the message are unchanged (#1533).
+- Help no longer lists a short alias on `--output-format` or `--verbose` where the command's own option already owns it, for example `-f` on `plugins unregister` (`--force`) and `-v` on the `views` commands (`--view`). Which option each alias selects is unchanged on every command. Guard tests now fail when a new short-alias clash is added (#1536).
+- `plugins deploy`, `clean` and `extract` help describes registration versions 1.0 and 2.0 and how secure configuration is handled. A deploy dry-run, for every registration version, now ends with "Dry-run complete (planned, not performed)" instead of "Deployment complete" (#1519).
+- Under registration version 2.0, the orphaned-step warning from `plugins deploy --clean` and `plugins clean` gives each step id and `ppds plugins unregister step <step-id>`, and says deploy verification reports drift (exit 1) until the step is removed. Steps are still never deleted under 2.0 (#1519).
+- For 1.0 or unversioned registration files, `plugins diff` and `plugins deploy` (real and dry-run) print a stderr notice and add an additive `preservedLegacyValues` JSON field listing omitted properties whose stored value differs from what version 2.0 would write, with how to adopt 2.0. What 1.0 writes is unchanged; the notice cannot change writes or exit codes. Unsecure configuration values are shown as `(redacted)` (#1519).
+
+- Refreshed System.CommandLine 2.0.9 to 2.0.14, Nerdbank.Streams 2.13.16 to 2.14.411 and direct Microsoft.Extensions dependencies to 10.0.14; consumed the coordinated Auth/Dataverse/Migration/Query/Plugins releases and their JWT/build-tool servicing (#1499, #1500, #1501, #1502).
+- **Compatibility exception for this release only** - Josh approved CLI 1.5.0 and MCP 1.3.0 on 2026-11-01 despite stricter protected-write behavior and incompatible CLI/MCP implementation signatures. Update scripts with required acknowledgements and custom embedders with the documented signature changes. This is not a blanket backward-compatibility claim or a permanent version-policy waiver; see the [scoped exception and migration guide](https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/docs/releases/v1.8.0.md#one-release-compatibility-exception).
 
 ### Fixed
 
@@ -46,25 +58,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Return the table-update connection before cache invalidation and optional publication, allowing an update followed by publication with one available pooled connection. Existing payload, dry-run and SDK contracts remain; scoped checkout normalization is listed above. Separate requests can still complete partially after a later failure.
 - Return metadata authoring connections before option-color or publication follow-ups, and use separate connections for color read/update and publisher-prefix queries. This lets the covered option/status/table-create workflows complete with one available pooled connection. The scoped cancellation and acquisition changes are listed above; separate requests can still complete partially if a later operation fails.
 
-## [1.5.0] - 2026-11-01
-
-### Added
-
-- **Bounded cloud-flow activation** - `flows enable` and `flows disable` accept one ID/unique name or all eligible definitions in a named solution. Write-free plans report blockers, exclusions and a plan hash; execution verifies per-flow outcomes and retains partial or uncertain results without blindly retrying submissions. `--max-flows` defaults to 100; `--timeout` defaults to 60 seconds per flow (#1214).
-- **Shared target acknowledgement** - existing form mutations and new flow writes use a resolved-context service guard. Protected targets require `--confirm-env <resolved-url>`; read-only sessions reject the covered writes (#1015, partial).
-
-### Changed
-
-- Refreshed System.CommandLine 2.0.9 to 2.0.14, Nerdbank.Streams 2.13.16 to 2.14.411 and direct Microsoft.Extensions dependencies to 10.0.14; consumed the coordinated Auth/Dataverse/Migration/Query/Plugins releases and their JWT/build-tool servicing (#1499, #1500, #1501, #1502).
-- **Compatibility exception for this release only** - Josh approved CLI 1.5.0 and MCP 1.3.0 on 2026-11-01 despite stricter protected-write behavior and incompatible CLI/MCP implementation signatures. Update scripts with required acknowledgements and custom embedders with the documented signature changes. This is not a blanket backward-compatibility claim or a permanent version-policy waiver; see the [scoped exception and migration guide](https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/docs/releases/v1.8.0.md#one-release-compatibility-exception).
-
-### Fixed
-
 - Plugin deployment retains earlier step errors when a later operation fails, and secondary-only message-filter diagnostics identify the actual secondary-entity requirement (#1360).
 - Plugin diff propagates cancellation through every drift-collection and comparison stage (#1317).
 - Web-resource creation reports missing or mismatched publisher-prefix warnings in structured results and stderr without renaming the resource. Missing-resource update guidance uses the literal `<file>` placeholder (#1236).
 - Query RPCs and history retain the captured authentication identity and executed environment during concurrent profile/environment changes (#1218).
 - Form tab/section selectors prioritize stable IDs and reject ambiguity while retaining unique legacy GUID-valued name selectors. Form listings page all results, inspection includes draft hash/state, and operation cancellation propagates accurately.
+- Plugin updates respect readable/createable/updateable field capabilities: omit already-equal non-updatable values and refuse requested mismatches before other mutations. Direct invocation-source updates verify persistence. Package targeting refuses ambiguous identities and reads package bytes from the Dataverse file column (#1572, #1573, #1581).
+- A supplied `secureConfiguration` no longer makes `plugins diff` incomplete. It is write-only and never read back, so it is now reported under `coverage.excluded` ("supplied but not compared") instead of `coverage.unsupported`. `plugins diff` returns 0 or 1 instead of 2 for that reason alone, and a successful version 2.0 `plugins deploy` that supplies it now exits 0. Other causes of incomplete coverage still return 2. No secure value is printed (#1520).
+- `plugins diff` on 1.0 or unversioned files keeps reporting a stored step `filteringAttributes` or image `attributes` that the file omits, or sets to null or empty, as drift (exit 1), as CLI 1.4.2 did. Guidance printed once per run on stderr, and in each assembly's JSON `warnings`, explains how to resolve it. Other omitted properties are listed in the advisory notice, not compared (#1519, #1520).
+- `plugins deploy --dry-run --clean` and `plugins clean --dry-run` under version 2.0 list each image that would be deleted and show the correct planned count in text output. JSON output is unchanged (#1519).
+- `forms add-field` reports when a field it adds already exists in another section, tab, header or footer (stderr notice and additive `otherPlacements` JSON field). `forms add-field` and legacy `forms reorder-fields` warn when an existing control's binding differs from the column logical name only by case (additive `nonCanonicalBindings` JSON field). No existing control is rewritten (#1527, #1528).
+- Global choice names that differ from the stored name only by case now work on `optionset get`, `optionset update`, `add-option`, `update-option`, `remove-option`, `reorder`, option colour and the delete preview, not only on column create. The exact name is tried first; the stored name is looked up only when Dataverse reports the option set as not found. Other errors and existing not-found results are unchanged. A name that matches several stored names by case fails with `INVALID_CONSTRAINT`. Recognition uses the English server message (#1535).
+- `optionset delete` shows and asks for confirmation of the stored name when the typed casing differs, reports it in `name` with the typed name in a new `requestedName` JSON field, and deletes only the previewed object. It refuses if that choice was renamed or recreated after the preview (#1535).
+- Status-reason and choice-option update/remove can target an option that was added but not yet published. Targeting by `--label` is refused when the published and unpublished labels disagree about which option it means, including on `optionset update-option` and `remove-option`; `--value` is unaffected. Global option colour applies to just-added options. Failures show the Dataverse fault code, and a cancelled update/remove is reported as cancelled (#1531).
+- For Choice columns, legacy comma-separated `--options` on `attribute create` and `column create` accepts bare labels (values allocated as with `--option`) and rejects malformed entries instead of dropping them. Using more than one of `--option`, `--options` and `--options-file` is a validation error. `optionset add-option --dry-run` marks an omitted value as unallocated (#1530).
+
+### Security
+
+- Sixteen metadata SDK/catalog failure paths now report fixed action and target context without appending provider diagnostics. CLI error codes, exit codes and original inner causes are preserved; scripts should use error codes rather than SDK message text. This is bounded to the named authoring paths, with no general log-redaction guarantee.
 
 ### Validation
 

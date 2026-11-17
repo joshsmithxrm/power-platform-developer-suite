@@ -7,12 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - Unreleased
+
+The first published 1.4.x version. 1.4.0 was tagged but never published to NuGet, so this release also carries the 1.4.0 changes listed below. Upgrading from 1.3.2 gets both.
+
+### Added
+
+- `DeleteGlobalChoiceRequest.ExpectedMetadataId` (default null). When set, the delete is refused unless the pre-delete check finds exactly that object under the requested name. Existing callers are unaffected (#1535).
+- A `MetadataValidationException(string errorCode, string message, string? field, Exception? innerException)` constructor that keeps the inner exception (#1535).
+
 ### Changed
 
 - Keep the public int OptionDefinition.Value accessors and add a read-only HasExplicitValue presence getter. System.Text.Json preserves omission versus explicit zero across roundtrips; omit Value to request allocation. This is an additive public API change (#1530).
+- Refreshed MSAL and its cache extensions from 4.90.1 to 4.92.0 (#1513).
 
+### Fixed
+
+- `DataverseMetadataQueryService.GetOptionSetAsync` finds a global choice whose stored name differs from the requested name only by case. The exact name is always tried first. Only when Dataverse reports that option set as not found does the service list global choices and retry once under a single case-insensitive match. Other faults, no match and several matches rethrow the original error unchanged. Recognition uses the English server message; a localized message keeps the old behavior (#1535).
 
 ## [1.4.0] - 2026-11-01
+
+Tagged as `Dataverse-v1.4.0` but not published to NuGet. These changes first ship in 1.4.1; the 1.4.0 tag is not reused.
 
 ### Changed
 

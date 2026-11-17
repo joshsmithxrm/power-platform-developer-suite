@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.1] - Unreleased
+
+The first published 3.1.x version. 3.1.0 was tagged but never published to NuGet, so this release carries the 3.1.0 changes listed below. Upgrading from 3.0.1 gets them.
+
+### Changed
+
+- Release builds are delay-signed and the strong-name signature is applied by a separate signing job (#1567). The production signing policy for that job has not been selected yet, so this version cannot be published until it is. Attributes, enums, the net462 target and the strong-name identity are unchanged. Plugin deployment, diff and image-update fixes in this release are CLI changes.
+
 ## [3.1.0] - 2026-11-01
+
+Tagged as `Plugins-v3.1.0` but not published to NuGet. These changes first ship in 3.1.1; the 3.1.0 tag is not reused.
 
 ### Changed
 

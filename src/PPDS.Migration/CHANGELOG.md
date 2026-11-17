@@ -7,12 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.3.0] - 2026-11-01
+## [1.3.0] - Unreleased
+
+### Added
+
+- Add nullable `ExportOptions.MaxRecordsPerEntity` for opt-in bounded primary-row exports. The positive limit is checked before output, never silently truncates, requires paging cookies, and skips relationship/binary expansion. The default remains unlimited (#1575).
 
 ### Changed
 
-- Aligned with PPDS.Dataverse 1.4.0 in the coordinated release and refreshed direct Microsoft.Extensions dependencies to 10.0.14 (#1501, #1502).
-- Updated SourceLink build tooling to 10.0.403 (#1498). Migration source and public APIs are unchanged; this release carries dependency servicing and version alignment.
+- Aligned with PPDS.Dataverse 1.4.1 in the coordinated release and refreshed direct Microsoft.Extensions dependencies to 10.0.14 (#1501, #1502). Refreshed the MSAL cache extension from 4.90.1 to 4.92.0 (#1513).
+- Updated SourceLink build tooling to 10.0.403 (#1498). The bounded-export property is an additive public API change; dependency servicing and version alignment are also included.
 
 ## [1.2.2] - 2026-10-30
 
