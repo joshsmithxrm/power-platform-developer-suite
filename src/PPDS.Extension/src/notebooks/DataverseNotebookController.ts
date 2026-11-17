@@ -6,7 +6,8 @@ import type { QueryResultResponse } from '../types.js';
 import { isAuthError } from '../utils/errorUtils.js';
 import { showErrorWithReport } from '../utils/errorNotify.js';
 import {
-    UNCONFIRMED_DML_SAFETY, confirmDmlExecution, describeDmlFailure, dmlRefusalMessage, dmlServerMessage, isDmlConfirmationRequired,
+    UNCONFIRMED_DML_SAFETY, confirmDmlExecution, describeDmlFailure, dmlRefusalMessage, dmlServerMessage, dmlWriteTargets, isDmlConfirmationRequired,
+    DML_SUBMITTED_MAY_HAVE_APPLIED as SUBMITTED_MAY_HAVE_APPLIED, DML_SUBMITTED_THEN_CANCELLED as SUBMITTED_THEN_CANCELLED,
 } from '../utils/dmlSafety.js';
 
 import { renderResultsHtml } from './notebookResultRenderer.js';
@@ -370,8 +371,7 @@ export class DataverseNotebookController implements vscode.Disposable {
                 } catch (error) {
                     if (cancelled() || !isDmlConfirmationRequired(error)) throw error;
                     isDml = true;
-                    const refusal = await this.awaitDmlConfirmation(content, context, error, entry, cancelled, ownsExecution,
-                        text => writeOutput(textOutput(text)));
+                    const refusal = await this.awaitDmlConfirmation(content, context, error, entry, cancelled, ownsExecution, writeOutput);
                     if (refusal) return refusal;
                     // One confirmed request for this text and target. A second confirmation-required
                     // answer is not re-prompted; it surfaces as an error below.
@@ -379,7 +379,7 @@ export class DataverseNotebookController implements vscode.Disposable {
                     result = await this.daemon.querySql({ sql: content, ...target, dmlSafety: { isConfirmed: true } }, entry.cts.token);
                 }
             }
-            if (cancelled()) {
+            if (cancelled() && !confirmedDml) {
                 await writeOutput(textOutput('Query cancelled'));
                 return stopIfDml('an earlier DML cell was cancelled');
             }
@@ -389,13 +389,19 @@ export class DataverseNotebookController implements vscode.Disposable {
                 vscode.NotebookCellOutputItem.text(renderResultsHtml(result, context.environmentUrl), 'text/html'),
             ]);
             const dmlFailure = describeDmlFailure(result, { confirmedDml });
-            await writeOutputs(dmlFailure ? [this.errorOutput(new Error(dmlFailure)), table] : [table]);
+            const failureOutputs = dmlFailure ? [this.errorOutput(new Error(dmlFailure))] : [];
+            if (cancelled()) {
+                // The confirmed request had already been answered: keep what came back.
+                await writeOutputs([textOutput(`${SUBMITTED_THEN_CANCELLED} The daemon's response is shown below.`), ...failureOutputs, table]);
+                return { stop: 'an earlier DML cell was cancelled after it was submitted' };
+            }
+            await writeOutputs([...failureOutputs, table]);
             success = result.success && !dmlFailure;
             if (dmlFailure) return { stop: 'rows failed in an earlier DML cell' };
             if (!success) return stopIfDml('an earlier DML cell did not succeed');
         } catch (error) {
             if (entry.abort.signal.aborted || run.cancelled) {
-                await writeOutput(textOutput('Query cancelled'));
+                await writeOutput(textOutput(confirmedDml ? `${SUBMITTED_THEN_CANCELLED} Check the data before running it again.` : 'Query cancelled'));
                 return stopIfDml('an earlier DML cell was cancelled');
             }
             if (!ownsExecution()) return completed;
@@ -409,11 +415,12 @@ export class DataverseNotebookController implements vscode.Disposable {
                 // Recovery must never invalidate whichever profile now owns that alias.
                 const message = error instanceof Error ? error.message : String(error);
                 await writeOutput(this.errorOutput(new Error(
-                    `${message}\nAuthentication failed for the profile captured by this run (${context.profileName}) on ${context.environmentName}. Confirm the intended profile in PPDS Profiles, re-authenticate it, then run the cell again.`,
+                    `${message}\nAuthentication failed for the profile captured by this run (${context.profileName}) on ${context.environmentName}. Confirm the intended profile in PPDS Profiles, re-authenticate it, then run the cell again.`
+                    + (confirmedDml ? `\n${SUBMITTED_MAY_HAVE_APPLIED}` : ''),
                 )));
                 return stopIfDml('an earlier DML cell failed');
             }
-            await writeOutput(this.errorOutput(error));
+            await writeOutputs([this.errorOutput(error), ...(confirmedDml ? [textOutput(SUBMITTED_MAY_HAVE_APPLIED)] : [])]);
             return stopIfDml('an earlier DML cell failed');
         } finally {
             if (this.activeExecutions.get(cellUri) === entry) this.activeExecutions.delete(cellUri);
@@ -430,23 +437,21 @@ export class DataverseNotebookController implements vscode.Disposable {
      */
     private async awaitDmlConfirmation(
         content: string, context: NotebookExecutionContext, error: unknown, entry: CellExecutionState,
-        cancelled: () => boolean, ownsExecution: () => boolean, writeText: (text: string) => Promise<void>,
+        cancelled: () => boolean, ownsExecution: () => boolean, write: (output: vscode.NotebookCellOutput) => Promise<void>,
     ): Promise<CellOutcome | undefined> {
+        const text = (value: string): vscode.NotebookCellOutput => new vscode.NotebookCellOutput([vscode.NotebookCellOutputItem.text(value, 'text/plain')]);
         if (!ownsExecution()) return {};
-        await writeText('Waiting for DML confirmation…');
-        const confirmed = await confirmDmlExecution(content, context, {
-            serverMessage: dmlServerMessage(error), signal: entry.abort.signal,
-        });
-        if (cancelled()) {
-            await writeText('Query cancelled. No records were changed.');
+        await write(text('Waiting for DML confirmation…'));
+        const options = { serverMessage: dmlServerMessage(error), writeTargets: dmlWriteTargets(error), signal: entry.abort.signal };
+        const answer = await confirmDmlExecution(content, context, options);
+        if (cancelled() || answer.kind === 'aborted') {
+            await write(text('Query cancelled. No records were changed.'));
             return { stop: 'an earlier DML cell was cancelled' };
         }
         if (!ownsExecution()) return {};
-        if (!confirmed) {
-            await writeText('Not executed: DML confirmation was declined. No records were changed.');
-            return { stop: 'a DML confirmation in an earlier cell was declined' };
-        }
-        return undefined;
+        if (answer.kind === 'confirmed') return undefined;
+        await write(answer.kind === 'declined' ? text(answer.message) : this.errorOutput(new Error(answer.message)));
+        return { stop: answer.kind === 'declined' ? 'a DML confirmation in an earlier cell was declined' : 'the DML confirmation in an earlier cell could not be completed' };
     }
 
     /**

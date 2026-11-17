@@ -129,6 +129,24 @@ export interface QueryResultResponse {
     dmlError?: string | null;
 }
 
+/** One environment a DML request writes to, from daemons that send `dmlTargets` (read defensively). */
+export interface DmlWriteTarget {
+    label?: string | null;
+    url?: string | null;
+    type?: string | null;
+    protection?: string | null;
+}
+
+/** `ResponseError.data` of DML safety errors (`Query.DmlConfirmationRequired`, `Query.DmlBlocked`, …). */
+export interface DmlSafetyErrorData {
+    code?: string;
+    message?: string;
+    dmlBlocked?: boolean;
+    dmlConfirmationRequired?: boolean;
+    /** Additive (newer daemons): every environment the request will write to. */
+    dmlTargets?: DmlWriteTarget[];
+}
+
 export interface QueryPlanDescription {
     nodeType: string;
     description: string;

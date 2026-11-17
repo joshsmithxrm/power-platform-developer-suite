@@ -4,7 +4,7 @@ import { ResponseError } from 'vscode-jsonrpc/node';
 vi.mock('vscode', () => ({ window: { showWarningMessage: vi.fn() } }));
 
 import type { QueryResultResponse } from '../../types.js';
-import { describeDmlFailure, dmlRefusalMessage, isDmlConfirmationRequired, previewStatement } from '../../utils/dmlSafety.js';
+import { describeDmlFailure, dmlRefusalMessage, dmlWriteTargets, isDmlConfirmationRequired, previewStatement, visibleText } from '../../utils/dmlSafety.js';
 
 function response(overrides: Partial<QueryResultResponse> = {}): QueryResultResponse {
     return {
@@ -43,19 +43,21 @@ describe('dmlSafety helpers', () => {
 
     it('shows a short statement whole', () => {
         const preview = previewStatement('DELETE FROM account WHERE name = 1');
-        expect(preview).toMatchObject({ truncated: false, text: 'DELETE FROM account WHERE name = 1', hiddenChars: 0 });
+        expect(preview).toMatchObject({ truncated: false, text: 'DELETE FROM account WHERE name = 1', hiddenChars: 0, hiddenLines: 0 });
     });
 
-    it('shows the start and end of a long statement and counts exactly what is hidden', () => {
+    it.each([['LF', '\n'], ['CRLF', '\r\n']])('counts exactly what is hidden in a long %s statement', (_label, eol) => {
         const lines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
-        const preview = previewStatement(lines.join('\n'));
-        expect(preview.truncated).toBe(true);
-        expect(preview.text.startsWith('line 0\n')).toBe(true);
-        expect(preview.text.endsWith('line 39')).toBe(true);
+        const preview = previewStatement(lines.join(eol));
+        const head = lines.slice(0, 14).join('\n');
+        const tail = lines.slice(32).join('\n');
         const hidden = lines.slice(14, 32).join('\n');
-        expect(preview.hiddenChars).toBe(hidden.length + 2);
-        expect(preview.text).toContain(`${preview.hiddenChars} character(s)`);
-        expect(preview.text).not.toContain('line 20');
+        expect(preview).toMatchObject({ truncated: true, totalLines: 40, hiddenLines: 18, hiddenChars: hidden.length });
+        expect(preview.totalChars).toBe(lines.join('\n').length);
+        // Shown + hidden + the two line breaks that separate them add up to the whole statement.
+        expect(head.length + tail.length + preview.hiddenChars + 2).toBe(preview.totalChars);
+        expect(14 + 8 + preview.hiddenLines).toBe(preview.totalLines);
+        expect(preview.text).toBe(`${head}\n… ${hidden.length} character(s) on 18 line(s) not shown …\n${tail}`);
     });
 
     it('cuts a single very long line by characters at both ends', () => {
@@ -65,5 +67,21 @@ describe('dmlSafety helpers', () => {
         expect(preview.text.startsWith('UPDATE account SET name')).toBe(true);
         expect(preview.text.endsWith('WHERE accountid = 1')).toBe(true);
         expect(preview.hiddenChars).toBe(statement.length - 900 - 500);
+        expect(preview.hiddenLines).toBe(1);
+    });
+
+    it('reads dmlTargets defensively', () => {
+        const error = (dmlTargets: unknown) => new ResponseError(1, 'x', { code: 'Query.DmlConfirmationRequired', dmlTargets });
+        expect(dmlWriteTargets(error(undefined))).toBeUndefined();
+        expect(dmlWriteTargets(error('PROD'))).toBeUndefined();
+        expect(dmlWriteTargets(error([]))).toBeUndefined();
+        expect(dmlWriteTargets(error([{ label: 1 }]))).toBeUndefined();
+        expect(dmlWriteTargets(error([{ label: 'PROD', url: 'https://p', type: 'Production', protection: 5 }])))
+            .toEqual([{ label: 'PROD', url: 'https://p', type: 'Production', protection: undefined }]);
+    });
+
+    it('makes control and bidirectional characters visible and keeps line breaks', () => {
+        expect(visibleText('a‮b\nc\u0007')).toEqual({ text: 'a<U+202E>b\nc<U+0007>', changed: true });
+        expect(visibleText('plain\ttext')).toEqual({ text: 'plain\ttext', changed: false });
     });
 });

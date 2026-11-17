@@ -1,8 +1,8 @@
-import { ResponseError } from 'vscode-jsonrpc/node';
+import { CancellationTokenSource, ResponseError } from 'vscode-jsonrpc/node';
 import * as vscode from 'vscode';
 
 import { ExplainDocumentProvider } from '../providers/explainDocumentProvider.js';
-import type { QueryResultResponse } from '../types.js';
+import type { DmlSafetyErrorData, DmlWriteTarget, QueryResultResponse } from '../types.js';
 
 /**
  * Shared DML safety flow for every surface that sends user SQL to `query/sql`
@@ -15,14 +15,21 @@ import type { QueryResultResponse } from '../types.js';
  * an explicit "Execute Anyway" leads to one request with `isConfirmed: true`, for the
  * same statement and the same captured target. A confirmation is never reused: any
  * retry (re-authentication, refresh, re-run) starts again from the unconfirmed attempt.
+ *
+ * Dialog buttons: the VS Code API documents that a modal message is modal and resolves to
+ * the chosen item, or undefined when dismissed; it does not document which button is the
+ * default. "Show Full Statement" is listed first because current VS Code makes the first
+ * action the primary one. The rules that do not depend on that: a statement longer than the
+ * dialog shows cannot be executed before it has been opened, and Escape or close never executes.
  */
 
-/** Destructive, never-default button of every DML confirmation (Data Explorer wording). */
+/** Destructive button of every DML confirmation (Data Explorer wording); never listed first. */
 export const DML_CONFIRM_ACTION = 'Execute Anyway';
-/** First (and therefore default) button: opens the exact text read-only, then asks again. */
+/** Listed first: opens the exact text in an editor, then asks again. */
 export const DML_SHOW_ACTION = 'Show Full Statement';
-/** Non-modal step after the full statement is open, so it can be read before the modal returns. */
+/** Review step after the full statement is open; a quick pick that stays until answered. */
 export const DML_CONTINUE_ACTION = 'Continue to Confirmation';
+const DML_REVIEW_CANCEL = 'Cancel';
 
 /** Safety options for a request the user has not confirmed. Sent on every first attempt and on every load-more. */
 export const UNCONFIRMED_DML_SAFETY = Object.freeze({ isConfirmed: false });
@@ -43,12 +50,9 @@ const HEAD_CHARS = 900;
 const TAIL_LINES = 8;
 const TAIL_CHARS = 500;
 
-interface DmlErrorData {
-    code?: string;
-    message?: string;
-    dmlBlocked?: boolean;
-    dmlConfirmationRequired?: boolean;
-}
+/** Control, zero-width and bidirectional formatting characters, made visible in dialogs. */
+const HIDDEN_IN_TEXT = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F؜​-‏‪-‮⁠-⁩﻿]/g;
+const HIDDEN_IN_LINE = /[\u0000-\u001F\u007F-\u009F؜​-‏‪-‮⁠-⁩﻿]/g;
 
 export interface DmlTarget {
     readonly environmentName?: string | null;
@@ -60,20 +64,35 @@ export interface DmlTarget {
 export interface DmlConfirmationOptions {
     /** The daemon's confirmation text; shown only when it is not the CLI-only "--confirm" wording. */
     readonly serverMessage?: string;
-    /** Aborting (interrupt, cancel, close) resolves the confirmation as declined. */
+    /** Every environment the request writes to, from daemons that send `dmlTargets`. */
+    readonly writeTargets?: readonly DmlWriteTarget[];
+    /** Shown first in the dialog, for example after an earlier attempt may have partly applied. */
+    readonly notice?: string;
+    /** Aborting (interrupt, cancel, close) resolves the confirmation as aborted and closes the review prompt. */
     readonly signal?: AbortSignal;
 }
+
+/** Result of one confirmation. Only `confirmed` may lead to a confirmed request. */
+export type DmlConfirmation =
+    | { readonly kind: 'confirmed' }
+    | { readonly kind: 'declined'; readonly message: string }
+    | { readonly kind: 'failed'; readonly message: string }
+    | { readonly kind: 'aborted' };
 
 export interface StatementPreview {
     readonly text: string;
     readonly truncated: boolean;
+    /** Lines of the statement (CRLF, LF and CR each end one line). */
     readonly totalLines: number;
+    /** Characters of the statement with each line break counted as one character. */
     readonly totalChars: number;
+    /** Characters not shown, excluding the line breaks that separate them from the shown parts. */
     readonly hiddenChars: number;
+    /** Lines with at least one character not shown. */
     readonly hiddenLines: number;
 }
 
-function dmlErrorData(error: unknown): DmlErrorData | undefined {
+function dmlErrorData(error: unknown): DmlSafetyErrorData | undefined {
     if (!(error instanceof ResponseError)) return undefined;
     const data: unknown = error.data;
     if (!data || typeof data !== 'object') return undefined;
@@ -92,6 +111,26 @@ export function dmlServerMessage(error: unknown): string | undefined {
     return typeof message === 'string' && message.trim() ? message.trim() : undefined;
 }
 
+const optionalString = (value: unknown): string | undefined => typeof value === 'string' && value.trim() ? value.trim() : undefined;
+
+/**
+ * Environments the request writes to, read defensively from `dmlTargets` (daemons that report
+ * them). Undefined when the daemon does not send the field or it is malformed.
+ */
+export function dmlWriteTargets(error: unknown): DmlWriteTarget[] | undefined {
+    const raw: unknown = dmlErrorData(error)?.dmlTargets;
+    if (!Array.isArray(raw) || raw.length === 0) return undefined;
+    const targets: DmlWriteTarget[] = [];
+    for (const item of raw as unknown[]) {
+        if (!item || typeof item !== 'object') return undefined;
+        const entry = item as Record<string, unknown>;
+        const target = { label: optionalString(entry.label), url: optionalString(entry.url), type: optionalString(entry.type), protection: optionalString(entry.protection) };
+        if (!target.label && !target.url) return undefined;
+        targets.push(target);
+    }
+    return targets;
+}
+
 /**
  * When the daemon's safety guard refused the statement (no WHERE, protected or
  * cross-environment target, shakedown, row cap), returns a user-facing message; otherwise undefined.
@@ -103,118 +142,227 @@ export function dmlRefusalMessage(error: unknown): string | undefined {
     return `Not executed: the DML safety guard refused this statement.\n${reason}`;
 }
 
-/** The modal text for a statement: whole, or its start and end with what is hidden counted. */
+const escapeChar = (char: string): string => `<U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}>`;
+
+/** Multi-line text for a dialog with hidden characters made visible; `changed` says whether any were. */
+export function visibleText(text: string): { text: string; changed: boolean } {
+    const escaped = text.replace(HIDDEN_IN_TEXT, escapeChar);
+    return { text: escaped, changed: escaped !== text };
+}
+
+function visibleLine(text: string, changed: { value: boolean }): string {
+    const escaped = text.replace(HIDDEN_IN_LINE, escapeChar);
+    if (escaped !== text) changed.value = true;
+    return escaped;
+}
+
+/** The modal text for a statement: whole, or its start and end with exactly what is hidden counted. */
 export function previewStatement(statement: string): StatementPreview {
-    const lines = statement.split(/\r?\n/);
-    const totalChars = statement.length;
-    const base = { totalLines: lines.length, totalChars };
-    if (lines.length <= MAX_PREVIEW_LINES && totalChars <= MAX_PREVIEW_CHARS) {
-        return { ...base, text: statement, truncated: false, hiddenChars: 0, hiddenLines: 0 };
+    const lines = statement.split(/\r\n|\n|\r/);
+    const normalised = lines.join('\n');
+    const base = { totalLines: lines.length, totalChars: normalised.length };
+    if (lines.length <= MAX_PREVIEW_LINES && normalised.length <= MAX_PREVIEW_CHARS) {
+        return { ...base, text: normalised, truncated: false, hiddenChars: 0, hiddenLines: 0 };
     }
     const head = lines.slice(0, HEAD_LINES).join('\n').slice(0, HEAD_CHARS);
     const tailLines = lines.slice(-TAIL_LINES).join('\n');
     const tail = tailLines.slice(Math.max(0, tailLines.length - TAIL_CHARS));
-    // Offsets in the normalised text, so the hidden part is exactly what lies between head and tail.
-    const normalised = lines.join('\n');
-    const hidden = normalised.slice(head.length, normalised.length - tail.length);
-    const hiddenLines = hidden.split('\n').length;
+    let hidden = normalised.slice(head.length, normalised.length - tail.length);
+    // A cut on a line boundary leaves the separating line breaks at the ends; they are not hidden content.
+    if (hidden.startsWith('\n')) hidden = hidden.slice(1);
+    if (hidden.endsWith('\n')) hidden = hidden.slice(0, -1);
+    const hiddenLines = hidden.length === 0 ? 0 : hidden.split('\n').length;
     return {
         ...base, truncated: true, hiddenChars: hidden.length, hiddenLines,
         text: `${head}\n… ${hidden.length} character(s) on ${hiddenLines} line(s) not shown …\n${tail}`,
     };
 }
 
-function raceAbort<T>(promise: Thenable<T>, signal: AbortSignal | undefined): Promise<T | undefined> {
-    if (!signal) return Promise.resolve(promise);
-    if (signal.aborted) return Promise.resolve(undefined);
-    return new Promise<T | undefined>(resolve => {
-        const onAbort = (): void => resolve(undefined);
-        signal.addEventListener('abort', onAbort, { once: true });
+const describeError = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+/** Resolves the dialog's answer, `aborted` on abort, or throws the dialog's own failure. */
+function raceAbort<T>(promise: Thenable<T>, signal: AbortSignal | undefined): Promise<{ value?: T; aborted: boolean }> {
+    if (signal?.aborted) return Promise.resolve({ aborted: true });
+    return new Promise((resolve, reject) => {
+        const onAbort = (): void => resolve({ aborted: true });
+        signal?.addEventListener('abort', onAbort, { once: true });
         Promise.resolve(promise).then(value => {
-            signal.removeEventListener('abort', onAbort);
-            resolve(value);
-        }, () => {
-            signal.removeEventListener('abort', onAbort);
-            resolve(undefined);
+            signal?.removeEventListener('abort', onAbort);
+            resolve({ value, aborted: false });
+        }, (error: unknown) => {
+            signal?.removeEventListener('abort', onAbort);
+            reject(error instanceof Error ? error : new Error(String(error)));
         });
     });
 }
 
-/** Opens the exact text that will run in a read-only editor. */
-async function showFullStatement(statement: string): Promise<void> {
+/**
+ * Opens the exact text that will run. Read-only through the extension's virtual document
+ * provider; if that provider is not available, an untitled copy that says edits are not executed.
+ */
+async function showFullStatement(statement: string): Promise<'read-only' | 'copy'> {
     if (ExplainDocumentProvider.instance) {
         await ExplainDocumentProvider.instance.show(statement, 'sql', 'DML to confirm');
-        return;
+        return 'read-only';
     }
     const doc = await vscode.workspace.openTextDocument({ content: statement, language: 'sql' });
     await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.Beside, preview: true });
+    return 'copy';
 }
 
-function targetLabel(target: DmlTarget): { name: string; type: string } {
+function targetLabel(target: DmlTarget, changed: { value: boolean }): { name: string; type: string } {
     return {
-        name: target.environmentName || target.environmentUrl || 'the selected environment',
-        type: target.environmentType || 'type unknown',
+        name: visibleLine(target.environmentName || target.environmentUrl || 'the selected environment', changed),
+        type: visibleLine(target.environmentType || 'type unknown', changed),
     };
 }
 
-function confirmationDetail(preview: StatementPreview, target: DmlTarget, mustReview: boolean, serverMessage?: string): string {
-    const { name, type } = targetLabel(target);
+const normalisedUrl = (url: string | null | undefined): string | undefined => url?.trim().replace(/\/+$/, '').toLowerCase() || undefined;
+
+const isProtected = (target: DmlWriteTarget): boolean =>
+    [target.protection, target.type].some(value => value?.toLowerCase() === 'production');
+
+function writeTargetLines(target: DmlTarget, writeTargets: readonly DmlWriteTarget[] | undefined, changed: { value: boolean }): string[] {
+    if (!writeTargets) {
+        return ['Other environments: SQL that names another environment (for example [LABEL].account) also writes there. '
+            + 'This daemon does not report those targets before execution, so other named environments are not listed here.'];
+    }
+    const bound = normalisedUrl(target.environmentUrl);
+    return [`Writes to ${writeTargets.length} environment(s):`, ...writeTargets.map(item => {
+        const marks = [
+            normalisedUrl(item.url) === bound ? 'this environment' : 'OTHER ENVIRONMENT',
+            ...(isProtected(item) ? ['PRODUCTION / PROTECTED'] : []),
+        ];
+        const kind = [item.type, item.protection && item.protection !== item.type ? `protection ${item.protection}` : undefined].filter(Boolean).join(', ');
+        return `  - ${visibleLine(item.label ?? item.url ?? '', changed)}${kind ? ` (${visibleLine(kind, changed)})` : ''}`
+            + `${item.url ? ` ${visibleLine(item.url, changed)}` : ''} [${marks.join('; ')}]`;
+    })];
+}
+
+function otherTargetCount(target: DmlTarget, writeTargets: readonly DmlWriteTarget[] | undefined): number {
+    const bound = normalisedUrl(target.environmentUrl);
+    return writeTargets?.filter(item => normalisedUrl(item.url) !== bound).length ?? 0;
+}
+
+interface DialogText {
+    readonly title: string;
+    readonly detail: string;
+}
+
+function confirmationDialog(preview: StatementPreview, target: DmlTarget, mustReview: boolean, options: DmlConfirmationOptions): DialogText {
+    const changed = { value: false };
+    const { name, type } = targetLabel(target, changed);
+    const others = otherTargetCount(target, options.writeTargets);
+    const where = `${name} (${type})${others > 0 ? ` and ${others} other environment(s)` : ''}`;
+    const statement = visibleText(preview.text);
+    if (statement.changed) changed.value = true;
+    const serverMessage = options.serverMessage && !options.serverMessage.includes('--confirm') ? options.serverMessage : undefined;
     const lines = [
+        ...(options.notice ? [visibleLine(options.notice, changed), ''] : []),
         `Environment: ${name} (${type})`,
-        `URL: ${target.environmentUrl || 'not available'}`,
-        ...(target.profileName ? [`Profile: ${target.profileName}`] : []),
-        'Other environments: SQL that names another environment (for example [LABEL].account) also writes there. '
-            + 'The daemon does not report those targets before execution, so they are not listed here.',
-        ...(serverMessage && !serverMessage.includes('--confirm') ? [`Daemon: ${serverMessage}`] : []),
+        `URL: ${visibleLine(target.environmentUrl || 'not available', changed)}`,
+        ...(target.profileName ? [`Profile: ${visibleLine(target.profileName, changed)}`] : []),
+        ...writeTargetLines(target, options.writeTargets, changed),
+        ...(serverMessage ? [`Daemon: ${visibleLine(serverMessage, changed)}`] : []),
         '',
-        `Statement: ${preview.totalLines} line(s), ${preview.totalChars} character(s). This confirmation covers all of it, every statement in the script.`,
-        preview.text,
+        `Statement: ${preview.totalLines} line(s), ${preview.totalChars} character(s) (a line break counts as one). `
+            + 'This confirmation covers all of it, every statement in the script.',
+        statement.text,
         '',
     ];
     if (preview.truncated) {
         lines.push(`Only the start and the end are shown here: ${preview.hiddenChars} character(s) on ${preview.hiddenLines} line(s) are hidden.`);
     }
+    if (changed.value) {
+        lines.push('Some characters that are invisible or reorder text are shown as <U+XXXX>. The statement that runs is unchanged.');
+    }
     lines.push(mustReview
         ? `${DML_CONFIRM_ACTION} is offered after you have opened the full statement with ${DML_SHOW_ACTION}.`
-        : `Nothing runs unless you choose ${DML_CONFIRM_ACTION}. ${DML_SHOW_ACTION} (the default) opens the exact text read-only.`);
-    return lines.join('\n');
+        : `Nothing runs unless you choose ${DML_CONFIRM_ACTION}. ${DML_SHOW_ACTION} opens the exact text that will run in an editor; edits there are not executed.`);
+    return {
+        title: mustReview ? `Review the full SQL before running it on ${where}` : `Run SQL that changes data on ${where}?`,
+        detail: lines.join('\n'),
+    };
+}
+
+/** Review prompt that stays until answered (focus may move to the opened document). */
+async function reviewStep(name: string, opened: 'read-only' | 'copy', signal: AbortSignal | undefined): Promise<{ value?: string; aborted: boolean }> {
+    // Closing the quick pick on abort keeps no abandoned prompt on screen.
+    const cts = new CancellationTokenSource();
+    const onAbort = (): void => cts.cancel();
+    signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+        const copyNote = opened === 'copy' ? ' The opened editor is a copy for reading only: edits there are not executed.' : '';
+        const pick = await raceAbort(vscode.window.showQuickPick([
+            { label: DML_CONTINUE_ACTION, description: 'Show the confirmation again. Nothing runs yet.' },
+            { label: DML_REVIEW_CANCEL, description: 'Do not run the statement.' },
+        ], {
+            title: `Review the full SQL for ${name}`,
+            placeHolder: `Read the statement in the editor, then continue to the confirmation.${copyNote}`,
+            ignoreFocusOut: true,
+        }, cts.token), signal);
+        return { value: pick.value?.label, aborted: pick.aborted };
+    } finally {
+        signal?.removeEventListener('abort', onAbort);
+        cts.dispose();
+    }
+}
+
+const DECLINED = 'Not executed: DML confirmation was declined. No records were changed.';
+
+/** Shown when a cancel arrives after the confirmed request was sent. */
+export const DML_SUBMITTED_THEN_CANCELLED = 'Cancelled after the confirmed statement was submitted: records may already have been changed.';
+/** Shown when a confirmed request failed after it was sent. */
+export const DML_SUBMITTED_MAY_HAVE_APPLIED = 'The confirmed statement had been submitted, so it may have partly applied. Check the data before running it again.';
+
+/** Opens the full statement and runs the review prompt; `continue` means show the modal again with Execute. */
+async function openAndReview(statement: string, name: string, signal: AbortSignal | undefined): Promise<DmlConfirmation | 'continue'> {
+    let opened: 'read-only' | 'copy';
+    try {
+        opened = await showFullStatement(statement);
+    } catch (error) {
+        return { kind: 'failed', message: `Not executed: the full statement could not be opened (${describeError(error)}). No records were changed.` };
+    }
+    let review: { value?: string; aborted: boolean };
+    try {
+        review = await reviewStep(name, opened, signal);
+    } catch (error) {
+        return { kind: 'failed', message: `Not executed: the review prompt could not be shown (${describeError(error)}). No records were changed.` };
+    }
+    if (review.aborted || signal?.aborted) return { kind: 'aborted' };
+    if (review.value === DML_CONTINUE_ACTION) return 'continue';
+    if (review.value === DML_REVIEW_CANCEL) return { kind: 'declined', message: 'Not executed: cancelled at the review step. No records were changed.' };
+    return { kind: 'declined', message: 'Not executed: the review prompt was dismissed, which counts as declining. No records were changed.' };
 }
 
 /**
- * Modal confirmation for one DML execution of exactly `statement` on exactly `target`.
+ * Confirmation for one DML execution of exactly `statement` on exactly `target`.
  *
- * The default (first) button is the non-destructive "Show Full Statement". When the statement
- * is longer than the modal shows, "Execute Anyway" is offered only after the full text has been
- * opened. Returns true only for an explicit "Execute Anyway"; Escape, close, Cancel, a failed
- * dialog or an abort return false. Never remembered.
+ * "Show Full Statement" is listed first and opens the exact text, then a review prompt that stays
+ * until answered, then the modal again. When the statement is longer than the modal shows,
+ * "Execute Anyway" is offered only after the full text has been opened. Only an explicit
+ * "Execute Anyway" yields `confirmed`; Escape, close, Cancel or a dismissed review yield
+ * `declined`, a dialog or document failure yields `failed`, an abort yields `aborted`. Never throws.
  */
-export async function confirmDmlExecution(statement: string, target: DmlTarget, options: DmlConfirmationOptions = {}): Promise<boolean> {
+export async function confirmDmlExecution(statement: string, target: DmlTarget, options: DmlConfirmationOptions = {}): Promise<DmlConfirmation> {
     const preview = previewStatement(statement);
-    const { name, type } = targetLabel(target);
+    const name = targetLabel(target, { value: false }).name;
     let reviewed = false;
     for (;;) {
-        if (options.signal?.aborted) return false;
         const mustReview = preview.truncated && !reviewed;
-        const title = mustReview
-            ? `Review the full SQL before running it on ${name} (${type})`
-            : `Run SQL that changes data on ${name} (${type})?`;
+        const dialog = confirmationDialog(preview, target, mustReview, options);
         const buttons = mustReview ? [DML_SHOW_ACTION] : [DML_SHOW_ACTION, DML_CONFIRM_ACTION];
-        const choice = await raceAbort(vscode.window.showWarningMessage(
-            title, { modal: true, detail: confirmationDetail(preview, target, mustReview, options.serverMessage) }, ...buttons,
-        ), options.signal);
-        if (options.signal?.aborted) return false;
-        if (choice === DML_CONFIRM_ACTION) return !mustReview;
-        if (choice !== DML_SHOW_ACTION) return false;
+        let choice: { value?: string; aborted: boolean };
         try {
-            await showFullStatement(statement);
-        } catch {
-            return false;
+            choice = await raceAbort(vscode.window.showWarningMessage(dialog.title, { modal: true, detail: dialog.detail }, ...buttons), options.signal);
+        } catch (error) {
+            return { kind: 'failed', message: `Not executed: the DML confirmation could not be shown (${describeError(error)}). No records were changed.` };
         }
-        const next = await raceAbort(vscode.window.showWarningMessage(
-            `Review the full SQL for ${name} in the editor, then choose ${DML_CONTINUE_ACTION}. Nothing has run.`,
-            DML_CONTINUE_ACTION, 'Cancel',
-        ), options.signal);
-        if (next !== DML_CONTINUE_ACTION) return false;
+        if (choice.aborted || options.signal?.aborted) return { kind: 'aborted' };
+        if (choice.value === DML_CONFIRM_ACTION) return mustReview ? { kind: 'declined', message: DECLINED } : { kind: 'confirmed' };
+        if (choice.value !== DML_SHOW_ACTION) return { kind: 'declined', message: DECLINED };
+        const review = await openAndReview(statement, name, options.signal);
+        if (review !== 'continue') return review;
         reviewed = true;
     }
 }

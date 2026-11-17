@@ -74,6 +74,7 @@ vi.mock('vscode', () => ({
 vi.mock('../../utils/errorNotify.js', () => ({ showErrorWithReport: vi.fn() }));
 
 import { DataverseNotebookController } from '../DataverseNotebookController.js';
+import { ExplainDocumentProvider } from '../../providers/explainDocumentProvider.js';
 
 const A = 'https://a.crm.dynamics.com';
 const B = 'https://b.crm.dynamics.com';
@@ -563,14 +564,23 @@ describe('DataverseNotebookController DML safety', () => {
     const modalCalls = (): any[][] => host.window.showWarningMessage.mock.calls.filter(call => call[1]?.modal === true && call[0] !== undefined
         && !String(call[0]).startsWith('Run this notebook'));
 
-    /** Answers DML modals with `modal` (a value or per-call function) and the review toast with `review`. */
+    const confirmedCalls = (daemon: ReturnType<typeof setup>['daemon']): any[] =>
+        daemon.querySql.mock.calls.map(call => call[0]).filter(request => request.dmlSafety?.isConfirmed === true);
+
+    /** The review step is a quick pick; answer it with the item whose label is `label` (undefined = dismissed). */
+    function answerReview(label: string | undefined) {
+        host.window.showQuickPick.mockImplementation(async (items: any[]) => items.find(item => item.label === label));
+    }
+
+    /** Answers DML modals with `modal` (a value or per-call function) and the review quick pick with `review`. */
     function answerDml(modal: string | undefined | ((call: number) => string | undefined), review: string | undefined = CONTINUE) {
         let count = 0;
         host.window.showWarningMessage.mockImplementation(async (message: string, options?: any) => {
             if (String(message).startsWith('Run this notebook')) return 'Run on this environment';
             if (options?.modal) return typeof modal === 'function' ? modal(count++) : modal;
-            return review;
+            return undefined;
         });
+        answerReview(review);
     }
 
     function executionsFor(nb: vscode.NotebookDocument, index: number): any[] {
@@ -590,12 +600,12 @@ describe('DataverseNotebookController DML safety', () => {
     function holdModal() {
         const answer = deferred<string | undefined>();
         const opened = deferred<void>();
-        host.window.showWarningMessage.mockImplementation((message: string, options?: any) => {
+        host.window.showWarningMessage.mockImplementation((message: string) => {
             if (String(message).startsWith('Run this notebook')) return Promise.resolve('Run on this environment');
-            if (!options?.modal) return Promise.resolve(CONTINUE);
             opened.resolve();
             return answer.promise;
         });
+        answerReview(CONTINUE);
         return { answer, opened };
     }
 
@@ -619,7 +629,7 @@ describe('DataverseNotebookController DML safety', () => {
         expect(prompt[1].detail).toContain(first.sql);
         expect(prompt[1].detail).toContain('also writes there');
         expect(prompt[1].detail).not.toContain('--confirm');
-        // The first (default) button never executes.
+        // The action listed first never executes.
         expect(prompt.slice(2)).toEqual([SHOW, CONFIRM]);
         endedWith(nb, 0, true);
         controller.dispose();
@@ -654,7 +664,7 @@ describe('DataverseNotebookController DML safety', () => {
         controller.dispose();
     });
 
-    it('choosing the default Show Full Statement opens the exact text and asks again before anything runs', async () => {
+    it('choosing Show Full Statement opens the exact text and asks again before anything runs', async () => {
         const { daemon, controller, run } = setup();
         guardLikeDaemon(daemon);
         answerDml(call => call === 0 ? SHOW : CONFIRM);
@@ -703,7 +713,7 @@ describe('DataverseNotebookController DML safety', () => {
         const nb = sqlNotebook('dml', ['DELETE FROM account WHERE name = 1']);
         await run(nb);
         expect(daemon.querySql.mock.calls.filter(call => call[0].dmlSafety.isConfirmed)).toHaveLength(0);
-        expect(cellText(nb, 0)).toContain('declined');
+        expect(cellText(nb, 0)).toContain('Not executed: cancelled at the review step');
         controller.dispose();
     });
 
@@ -816,7 +826,8 @@ describe('DataverseNotebookController DML safety', () => {
         await run(nb);
         expect(modalCalls()).toHaveLength(1);
         expect(daemon.querySql).toHaveBeenCalledTimes(2);
-        expect(executionsFor(nb, 0).at(-1).output.at(-1).items[0].mime).toBe('application/vnd.code.notebook.error');
+        expect(executionsFor(nb, 0).at(-1).output.some((output: any) => output.items[0].mime === 'application/vnd.code.notebook.error')).toBe(true);
+        expect(cellText(nb, 0)).toContain('may have partly applied');
         endedWith(nb, 0, false);
         controller.dispose();
     });
@@ -878,6 +889,227 @@ describe('DataverseNotebookController DML safety', () => {
         endedWith(nb, 0, true);
         expect(cellText(nb, 3)).toContain('Not run');
         endedWith(nb, 3, false);
+        controller.dispose();
+    });
+
+    it('keeps the review prompt open until answered and treats dismissing it as declining', async () => {
+        const { daemon, controller, run } = setup();
+        guardLikeDaemon(daemon);
+        answerDml(SHOW);
+        answerReview(undefined);
+        const nb = sqlNotebook('dml', ['DELETE FROM account WHERE name = 1', 'SELECT 2']);
+        await run(nb);
+        const [items, options, token] = host.window.showQuickPick.mock.calls.at(-1)!;
+        expect(items.map((item: any) => item.label)).toEqual([CONTINUE, 'Cancel']);
+        expect(options).toMatchObject({ ignoreFocusOut: true });
+        expect(token).toHaveProperty('isCancellationRequested');
+        expect(confirmedCalls(daemon)).toHaveLength(0);
+        expect(cellText(nb, 0)).toContain('review prompt was dismissed, which counts as declining');
+        expect(cellText(nb, 1)).toContain('Not run');
+        controller.dispose();
+    });
+
+    it('closes the review prompt when the run is interrupted', async () => {
+        const { daemon, controller, run, interrupt } = setup();
+        guardLikeDaemon(daemon);
+        answerDml(SHOW);
+        const opened = deferred<any>();
+        host.window.showQuickPick.mockImplementation((_items: any[], _options: any, token: any) => {
+            opened.resolve(token);
+            return new Promise(() => undefined);
+        });
+        const nb = sqlNotebook('dml', ['DELETE FROM account WHERE name = 1']);
+        const pending = run(nb);
+        const token = await opened.promise;
+        interrupt(nb);
+        await pending;
+        expect(token.isCancellationRequested).toBe(true);
+        expect(confirmedCalls(daemon)).toHaveLength(0);
+        expect(cellText(nb, 0)).toContain('Query cancelled. No records were changed.');
+        controller.dispose();
+    });
+
+    it('opens the full statement through the read-only document provider when it is registered', async () => {
+        const { daemon, controller, run } = setup();
+        guardLikeDaemon(daemon);
+        const show = vi.fn().mockResolvedValue(undefined);
+        ExplainDocumentProvider.instance = { show } as unknown as ExplainDocumentProvider;
+        try {
+            answerDml(call => call === 0 ? SHOW : CONFIRM);
+            const statement = 'UPDATE account SET name = 1 WHERE accountid = 1';
+            await run(sqlNotebook('dml', [statement]));
+            expect(show).toHaveBeenCalledWith(statement, 'sql', 'DML to confirm');
+            expect(host.openTextDocument).not.toHaveBeenCalled();
+            expect(host.window.showQuickPick.mock.calls.at(-1)![1].placeHolder).not.toContain('copy');
+            expect(confirmedCalls(daemon)).toHaveLength(1);
+        } finally {
+            ExplainDocumentProvider.instance = undefined;
+        }
+        controller.dispose();
+    });
+
+    it('says the fallback editor is a copy whose edits are not executed', async () => {
+        const { daemon, controller, run } = setup();
+        guardLikeDaemon(daemon);
+        answerDml(call => call === 0 ? SHOW : CONFIRM);
+        await run(sqlNotebook('dml', ['UPDATE account SET name = 1 WHERE accountid = 1']));
+        expect(host.window.showQuickPick.mock.calls.at(-1)![1].placeHolder).toContain('copy for reading only: edits there are not executed');
+        controller.dispose();
+    });
+
+    it('reports a failure to open the full statement as that failure, and runs nothing', async () => {
+        const { daemon, controller, run } = setup();
+        guardLikeDaemon(daemon);
+        answerDml(SHOW);
+        host.openTextDocument.mockRejectedValueOnce(new Error('no editor available'));
+        const nb = sqlNotebook('dml', ['DELETE FROM account WHERE name = 1', 'SELECT 2']);
+        await run(nb);
+        expect(confirmedCalls(daemon)).toHaveLength(0);
+        const error = executionsFor(nb, 0).at(-1).output.at(-1).items[0];
+        expect(error.mime).toBe('application/vnd.code.notebook.error');
+        expect(error.value).toContain('the full statement could not be opened (no editor available)');
+        expect(error.value).not.toContain('declined');
+        expect(cellText(nb, 1)).toContain('Not run: this run stopped because the DML confirmation in an earlier cell could not be completed');
+        controller.dispose();
+    });
+
+    it('reports a rejected confirmation dialog as a failure, and runs nothing', async () => {
+        const { daemon, controller, run } = setup();
+        guardLikeDaemon(daemon);
+        host.window.showWarningMessage.mockImplementation(async (message: string, options?: any) => {
+            if (String(message).startsWith('Run this notebook')) return 'Run on this environment';
+            if (options?.modal) throw new Error('dialog service unavailable');
+            return undefined;
+        });
+        const nb = sqlNotebook('dml', ['DELETE FROM account WHERE name = 1']);
+        await run(nb);
+        expect(confirmedCalls(daemon)).toHaveLength(0);
+        expect(cellText(nb, 0)).toContain('the DML confirmation could not be shown (dialog service unavailable)');
+        controller.dispose();
+    });
+
+    it('lists every reported write target, marking other and production environments', async () => {
+        const { daemon, controller, run } = setup();
+        daemon.querySql.mockImplementation(async (params: any) => {
+            if (params.dmlSafety?.isConfirmed) return result();
+            throw new ResponseError(-32000, 'confirm', {
+                code: 'Query.DmlConfirmationRequired', dmlConfirmationRequired: true,
+                dmlTargets: [
+                    { label: 'local', url: A + '/', type: 'Development', protection: 'Development' },
+                    { label: 'PROD', url: 'https://prod.crm.dynamics.com', type: 'Production', protection: 'Production' },
+                ],
+            });
+        });
+        answerDml(CONFIRM);
+        await run(sqlNotebook('cross', ['DELETE FROM PROD.account WHERE name = 1']));
+        const [prompt] = modalCalls();
+        expect(prompt[0]).toContain('and 1 other environment(s)');
+        expect(prompt[1].detail).toContain('Writes to 2 environment(s):');
+        expect(prompt[1].detail).toMatch(/local .*\[this environment\]/);
+        expect(prompt[1].detail).toMatch(/PROD .*https:\/\/prod\.crm\.dynamics\.com \[OTHER ENVIRONMENT; PRODUCTION \/ PROTECTED\]/);
+        expect(prompt[1].detail).not.toContain('are not listed here');
+        controller.dispose();
+    });
+
+    it('says other named environments are not listed when the daemon does not report write targets', async () => {
+        const { daemon, controller, run } = setup();
+        guardLikeDaemon(daemon);
+        answerDml(CONFIRM);
+        await run(sqlNotebook('dml', ['DELETE FROM account WHERE name = 1']));
+        expect(modalCalls()[0][1].detail).toContain('other named environments are not listed here');
+        controller.dispose();
+    });
+
+    it('shows control and bidirectional characters visibly but sends the captured text unchanged', async () => {
+        const { daemon, controller, run } = setup();
+        guardLikeDaemon(daemon);
+        answerDml(CONFIRM);
+        const statement = 'DELETE FROM account WHERE name = ‮1 = 1 --‬';
+        await run(sqlNotebook('bidi', [statement]));
+        const detail = modalCalls()[0][1].detail;
+        expect(detail).toContain('<U+202E>');
+        expect(detail).not.toContain('‮');
+        expect(detail).toContain('shown as <U+XXXX>. The statement that runs is unchanged.');
+        expect(confirmedCalls(daemon)[0].sql).toBe(statement);
+        controller.dispose();
+    });
+
+    it('keeps the result and says records may have changed when cancelled after the confirmed request returned', async () => {
+        const { daemon, controller, run, interrupt } = setup();
+        const nb = sqlNotebook('late', ['UPDATE account SET name = 1 WHERE statecode = 0', 'SELECT 2']);
+        guardLikeDaemon(daemon, () => {
+            interrupt(nb);
+            return { ...result(), columns: [], records: [{ affected_rows: 9000, failed_rows: 40 }] };
+        });
+        answerDml(CONFIRM);
+        await run(nb);
+        const text = cellText(nb, 0);
+        expect(text).toContain('Cancelled after the confirmed statement was submitted: records may already have been changed.');
+        expect(text).toContain('40 row(s) failed');
+        expect(executionsFor(nb, 0).at(-1).output.some((output: any) => output.items[0].mime === 'text/html')).toBe(true);
+        expect(controller.hasCellResults(nb.getCells()[0].document.uri.toString())).toBe(true);
+        // Interrupt ends the whole run: later cells are not touched (and not marked).
+        expect(executionsFor(nb, 1)).toHaveLength(0);
+        controller.dispose();
+    });
+
+    it('says records may have changed when the confirmed request is cancelled in flight', async () => {
+        const { daemon, controller, run, interrupt } = setup();
+        const nb = sqlNotebook('inflight', ['DELETE FROM account WHERE name = 1']);
+        guardLikeDaemon(daemon, () => {
+            interrupt(nb);
+            throw new Error('Request cancelled');
+        });
+        answerDml(CONFIRM);
+        await run(nb);
+        expect(cellText(nb, 0)).toContain('records may already have been changed. Check the data before running it again.');
+        controller.dispose();
+    });
+
+    it.each([
+        ['a generic error', () => { throw new Error('connection reset'); }, 'an earlier DML cell failed', 'may have partly applied'],
+        ['an authentication error', () => { throw new Error('token expired'); }, 'an earlier DML cell failed', 'may have partly applied'],
+        ['success: false without counts', () => ({ ...result(), success: false }), 'an earlier DML cell did not succeed', undefined],
+    ])('stops the run when the confirmed request ends with %s', async (_label, onConfirmed, reason, note) => {
+        const { daemon, controller, run } = setup();
+        guardLikeDaemon(daemon, onConfirmed as any);
+        answerDml(CONFIRM);
+        const nb = sqlNotebook('failing', ['DELETE FROM account WHERE name = 1', 'SELECT 2']);
+        await run(nb);
+        endedWith(nb, 0, false);
+        if (note) expect(cellText(nb, 0)).toContain(note);
+        expect(cellText(nb, 1)).toContain(`Not run: this run stopped because ${reason}`);
+        expect(daemon.querySql.mock.calls.map(call => call[0].sql)).not.toContain('SELECT 2');
+        controller.dispose();
+    });
+
+    it('stops the run when a DML cell is cancelled through its own execution token during the confirmation', async () => {
+        const { daemon, controller, run } = setup();
+        guardLikeDaemon(daemon);
+        const { answer, opened } = holdModal();
+        const nb = sqlNotebook('dml', ['DELETE FROM account WHERE name = 1', 'SELECT 2']);
+        const pending = run(nb);
+        await opened.promise;
+        executionsFor(nb, 0).at(-1).cancel();
+        answer.resolve(CONFIRM);
+        await pending;
+        expect(confirmedCalls(daemon)).toHaveLength(0);
+        expect(cellText(nb, 1)).toContain('Not run: this run stopped because an earlier DML cell was cancelled');
+        controller.dispose();
+    });
+
+    it('leaves later cells untouched when the notebook is interrupted during a DML confirmation', async () => {
+        const { daemon, controller, run, interrupt } = setup();
+        guardLikeDaemon(daemon);
+        const { answer, opened } = holdModal();
+        const nb = sqlNotebook('dml', ['DELETE FROM account WHERE name = 1', 'SELECT 2']);
+        const pending = run(nb);
+        await opened.promise;
+        interrupt(nb);
+        answer.resolve(CONFIRM);
+        await pending;
+        expect(executionsFor(nb, 1)).toHaveLength(0);
+        expect(daemon.querySql).toHaveBeenCalledTimes(1);
         controller.dispose();
     });
 });

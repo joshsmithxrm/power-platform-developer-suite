@@ -39,7 +39,11 @@ export class ExplainDocumentProvider implements vscode.TextDocumentContentProvid
         this.contents.set(uri.toString(), content);
         this._onDidChange.fire(uri);
         const doc = await vscode.workspace.openTextDocument(uri);
-        await vscode.languages.setTextDocumentLanguage(doc, languageId);
+        try {
+            await vscode.languages.setTextDocumentLanguage(doc, languageId);
+        } catch {
+            // Language not installed (e.g. built-in SQL disabled): show as plain text.
+        }
         await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.Beside, preview: true });
     }
 

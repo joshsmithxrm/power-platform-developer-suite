@@ -6,12 +6,12 @@ import type { DaemonClient } from '../../daemonClient.js';
 import { QueryPanel } from '../../panels/QueryPanel.js';
 import type { QueryResultResponse } from '../../types.js';
 
-const host = vi.hoisted(() => ({ panels: [] as any[], warning: vi.fn(), error: vi.fn() }));
+const host = vi.hoisted(() => ({ panels: [] as any[], warning: vi.fn(), error: vi.fn(), quickPick: vi.fn() }));
 vi.mock('vscode', () => ({
     ViewColumn: { One: 1, Beside: 2 },
     Uri: { joinPath: (...parts: unknown[]) => parts.join('/'), parse: (value: string) => ({ scheme: new URL(value).protocol.replace(':', '') }) },
     window: {
-        showWarningMessage: host.warning, showErrorMessage: host.error, showTextDocument: vi.fn(),
+        showWarningMessage: host.warning, showErrorMessage: host.error, showQuickPick: host.quickPick, showTextDocument: vi.fn(),
         createWebviewPanel: vi.fn(() => {
             const panel = { reveal: vi.fn(), dispose: vi.fn(), onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
                 webview: { asWebviewUri: (uri: string) => uri, cspSource: 'test:', postMessage: vi.fn(),
@@ -49,7 +49,7 @@ function setupPanel(captured = true): { panel: any; daemon: any; posted: () => a
     const daemon = {
         onDidReconnect: vi.fn(() => ({ dispose: vi.fn() })),
         authList: vi.fn().mockResolvedValue({ profiles: [] }),
-        authWho: vi.fn().mockResolvedValue({ name: 'p', index: 1 }),
+        authWho: vi.fn().mockResolvedValue({ name: 'p', index: 1, profileIdentity: 'id-p' }),
         profilesInvalidate: vi.fn().mockResolvedValue({}),
         envConfigGet: vi.fn().mockResolvedValue({ resolvedType: 'Production' }),
         querySql: vi.fn().mockResolvedValue(response()), queryFetch: vi.fn().mockResolvedValue(response()),
@@ -57,6 +57,8 @@ function setupPanel(captured = true): { panel: any; daemon: any; posted: () => a
     const panel: any = QueryPanel.show('test:' as unknown as vscode.Uri, daemon as unknown as DaemonClient, undefined, ENV, 'Target Env',
         captured ? { profileName: 'p', profileIdentity: 'id' } : undefined);
     panel.environmentType = 'Production';
+    // initEnvironment is not run in these tests; a non-captured panel shows the active profile's name.
+    if (!captured) panel.profileName = 'p';
     panels.push(panel);
     const webview = host.panels.at(-1).webview;
     return { panel, daemon, posted: () => webview.postMessage.mock.calls.map((call: any[]) => call[0]) };
@@ -82,6 +84,7 @@ afterEach(() => {
     // mockReset, not clearAllMocks: answers from one test must not leak into the next.
     host.warning.mockReset();
     host.error.mockReset();
+    host.quickPick.mockReset();
     vi.clearAllMocks();
 });
 
@@ -106,7 +109,7 @@ describe('Data Explorer DML safety', () => {
         guardLike(daemon);
         await panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
         expect(daemon.querySql).toHaveBeenCalledTimes(1);
-        expect(posted()).toContainEqual({ command: 'queryCancelled' });
+        expect(posted()).toContainEqual({ command: 'queryCancelled', message: expect.stringContaining('DML confirmation was declined') });
     });
 
     it('does not send the confirmed request when the environment changed while the modal was open', async () => {
@@ -146,6 +149,8 @@ describe('Data Explorer DML safety', () => {
         expect(requests[3].environmentUrl).toBe(OTHER);
         expect(modals()).toHaveLength(2);
         expect(modals()[1][1].detail).toContain(OTHER);
+        expect(modals()[1][1].detail).toContain('may have partly applied');
+        expect(requests[3].profileIdentity).toBe('id-p');
     });
 
     it('refresh of a confirmed DML asks again', async () => {
@@ -219,5 +224,108 @@ describe('Data Explorer DML safety', () => {
         expect(daemon.querySql).toHaveBeenCalledTimes(2);
         expect(confirmed(daemon)).toHaveLength(1);
         expect(daemon.querySql.mock.calls.every((call: any[]) => call[0].page === undefined)).toBe(true);
+    });
+
+    it('pins a non-captured profile by identity for the confirmed request', async () => {
+        const { panel, daemon } = setupPanel(false);
+        guardLike(daemon);
+        host.warning.mockResolvedValue(CONFIRM);
+        await panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
+        const [first, second] = daemon.querySql.mock.calls.map((call: any[]) => call[0]);
+        expect(first.profileIdentity).toBeUndefined();
+        expect(second).toMatchObject({ profileName: 'p', profileIdentity: 'id-p', dmlSafety: { isConfirmed: true } });
+        expect(modals()[0][1].detail).toContain('Profile: p');
+    });
+
+    it.each([
+        ['the profile is not the active one', (panel: any, daemon: any) => { daemon.authWho.mockResolvedValue({ name: 'other', index: 2, profileIdentity: 'id-o' }); }, 'not the active profile'],
+        ['the profile is not known yet', (panel: any) => { panel.profileName = undefined; }, 'profile of this panel is not known'],
+        ['the environment URL is not known', (panel: any) => { panel.environmentUrl = undefined; }, 'environment URL of this panel is not known'],
+        ['the daemon reports no identity', (panel: any, daemon: any) => { daemon.authWho.mockResolvedValue({ name: 'p', index: 1 }); }, 'does not report a profile identity'],
+    ])('refuses without offering Execute when %s', async (_label, arrange, message) => {
+        const { panel, daemon, posted } = setupPanel(false);
+        guardLike(daemon);
+        arrange(panel, daemon);
+        host.warning.mockResolvedValue(CONFIRM);
+        await panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
+        expect(modals()).toHaveLength(0);
+        expect(confirmed(daemon)).toHaveLength(0);
+        expect(posted()).toContainEqual({ command: 'queryError', error: expect.stringContaining(message) });
+    });
+
+    it.each([
+        ['profile name', (panel: any) => { panel.profileName = 'renamed'; }],
+        ['profile identity', (panel: any) => { panel.profileIdentity = 'other-identity'; }],
+    ])('does not send the confirmed request when the %s changed while the modal was open', async (_label, change) => {
+        const { panel, daemon, posted } = setupPanel();
+        guardLike(daemon);
+        host.warning.mockImplementation(async () => { change(panel); return CONFIRM; });
+        await panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
+        expect(confirmed(daemon)).toHaveLength(0);
+        expect(posted()).toContainEqual({ command: 'queryError', error: expect.stringContaining('changed while the confirmation') });
+    });
+
+    it('runs the review loop: Show Full Statement, continue, then Execute', async () => {
+        const { panel, daemon } = setupPanel();
+        guardLike(daemon);
+        let modal = 0;
+        host.warning.mockImplementation(async () => (modal++ === 0 ? SHOW : CONFIRM));
+        host.quickPick.mockImplementation(async (items: any[]) => items[0]);
+        await panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
+        expect(host.quickPick).toHaveBeenCalledTimes(1);
+        expect(host.quickPick.mock.calls[0][1]).toMatchObject({ ignoreFocusOut: true });
+        expect(modals()).toHaveLength(2);
+        expect(confirmed(daemon)).toHaveLength(1);
+    });
+
+    it('sends nothing when the target changes during the review step', async () => {
+        const { panel, daemon, posted } = setupPanel();
+        guardLike(daemon);
+        let modal = 0;
+        host.warning.mockImplementation(async () => (modal++ === 0 ? SHOW : CONFIRM));
+        host.quickPick.mockImplementation(async (items: any[]) => { panel.environmentUrl = OTHER; return items[0]; });
+        await panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
+        expect(confirmed(daemon)).toHaveLength(0);
+        expect(posted()).toContainEqual({ command: 'queryError', error: expect.stringContaining('changed while the confirmation') });
+    });
+
+    it('a dismissed review step says so and runs nothing', async () => {
+        const { panel, daemon, posted } = setupPanel();
+        guardLike(daemon);
+        host.warning.mockResolvedValue(SHOW);
+        host.quickPick.mockResolvedValue(undefined);
+        await panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
+        expect(confirmed(daemon)).toHaveLength(0);
+        expect(posted()).toContainEqual({ command: 'queryCancelled', message: expect.stringContaining('review prompt was dismissed') });
+    });
+
+    it('a superseded confirmation neither sends nor posts over the newer execution', async () => {
+        const { panel, daemon, posted } = setupPanel();
+        guardLike(daemon);
+        let answer!: (value: string) => void;
+        const opened = new Promise<void>(resolve => {
+            host.warning.mockImplementation(() => { resolve(); return new Promise<string>(accept => { answer = accept; }); });
+        });
+        const first = panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
+        await opened;
+        await panel.handleMessage({ command: 'executeQuery', sql: 'SELECT name FROM account', language: 'sql' });
+        const afterSecond = posted().length;
+        answer(CONFIRM);
+        await first;
+        expect(confirmed(daemon)).toHaveLength(0);
+        expect(posted().slice(afterSecond)).toEqual([]);
+        expect(posted().at(-1).command).toBe('queryResult');
+    });
+
+    it('says records may have changed when cancelled after the confirmed request was sent', async () => {
+        const { panel, daemon, posted } = setupPanel();
+        guardLike(daemon, () => {
+            void panel.handleMessage({ command: 'cancelQuery' });
+            throw new Error('Request cancelled');
+        });
+        host.warning.mockResolvedValue(CONFIRM);
+        await panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
+        expect(posted()).toContainEqual({ command: 'queryError', error: expect.stringContaining('Cancelled after the confirmed statement was submitted: records may already have been changed.') });
+        expect(posted()).not.toContainEqual({ command: 'queryCancelled' });
     });
 });

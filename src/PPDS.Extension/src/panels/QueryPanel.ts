@@ -8,8 +8,9 @@ import { handleAuthError, isAuthError } from '../utils/errorUtils.js';
 import { showErrorWithReport } from '../utils/errorNotify.js';
 import { queryDefaultTop } from '../utils/config.js';
 import {
-    type DmlTarget, UNCONFIRMED_DML_SAFETY, confirmDmlExecution, describeDmlFailure, dmlRefusalMessage, dmlServerMessage,
-    isDmlConfirmationRequired,
+    type DmlConfirmation, type DmlConfirmationOptions, type DmlTarget, UNCONFIRMED_DML_SAFETY, confirmDmlExecution, describeDmlFailure,
+    dmlRefusalMessage, dmlServerMessage, dmlWriteTargets, isDmlConfirmationRequired,
+    DML_SUBMITTED_MAY_HAVE_APPLIED as SUBMITTED_MAY_HAVE_APPLIED, DML_SUBMITTED_THEN_CANCELLED as SUBMITTED_THEN_CANCELLED,
 } from '../utils/dmlSafety.js';
 
 import { getNonce } from './webviewUtils.js';
@@ -28,7 +29,12 @@ interface CapturedQueryTarget extends DmlTarget {
     readonly environmentUrl?: string;
     readonly profileName?: string;
     readonly profileIdentity?: string;
+    /** True when the panel itself carries a notebook-captured profile identity. */
+    readonly capturedProfile: boolean;
 }
+
+const AUTH_RETRY_NOTICE = 'An earlier confirmed attempt of this statement failed with an authentication error after it was submitted, '
+    + 'so it may have partly applied. Check the data before confirming it again.';
 
 export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryPanelHostToWebview> {
     private static instances: QueryPanel[] = [];
@@ -345,6 +351,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
         return Object.freeze({
             environmentUrl: this.environmentUrl, profileName: this.profileName, profileIdentity: this.profileIdentity,
             environmentName: this.environmentDisplayName, environmentType: this.environmentType,
+            capturedProfile: this.profileIdentity !== undefined,
         });
     }
 
@@ -353,11 +360,37 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
     }
 
     /**
+     * Pins the profile of a DML confirmation by its opaque identity, as notebooks do, so a renamed
+     * or re-pointed profile name cannot redirect the confirmed request. Returns why it cannot be
+     * pinned when the environment URL or the profile cannot be resolved.
+     */
+    private async pinTarget(target: CapturedQueryTarget): Promise<CapturedQueryTarget | string> {
+        if (!target.environmentUrl) return 'the environment URL of this panel is not known, so the statement cannot be confirmed. Select an environment, then run it again';
+        if (target.profileIdentity) return target;
+        if (!target.profileName) return 'the profile of this panel is not known yet, so the statement cannot be confirmed. Wait for the panel to show its profile, then run it again';
+        let who: Awaited<ReturnType<DaemonClient['authWho']>>;
+        try {
+            who = await this.daemon.authWho();
+        } catch (error) {
+            return `the profile ${target.profileName} could not be resolved (${error instanceof Error ? error.message : String(error)}), so the statement cannot be confirmed`;
+        }
+        if (!who.profileIdentity) return 'this daemon does not report a profile identity, so the statement cannot be pinned to a profile. Update the PPDS daemon, then run it again';
+        const activeNames = [who.name, `Profile ${who.index}`, String(who.index)];
+        if (!activeNames.includes(target.profileName)) {
+            return `the profile ${target.profileName} is not the active profile, and only the active profile can be pinned by identity. Make it the active profile in PPDS Profiles, then run the statement again`;
+        }
+        return Object.freeze({ ...target, profileIdentity: who.profileIdentity });
+    }
+
+    /**
      * Executes one statement. `confirmedTarget` is set only by the confirmation below, for the
      * target that the modal named; every other entry (Execute, refresh, re-authentication retry)
      * starts unconfirmed with a freshly captured target, so a confirmation never outlives its request.
+     * `notice` is shown in that new attempt's confirmation (for example after a partial attempt).
      */
-    private async executeQuery(sql: string, isRetry = false, useTds?: boolean, language?: string, confirmedTarget?: CapturedQueryTarget): Promise<void> {
+    private async executeQuery(
+        sql: string, isRetry = false, useTds?: boolean, language?: string, confirmedTarget?: CapturedQueryTarget, notice?: string,
+    ): Promise<void> {
         // Cancel any in-flight query and create a fresh token
         this.queryCts?.cancel();
         this.queryCts?.dispose();
@@ -399,9 +432,14 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                 ...(dmlFailure ? { dmlFailure } : {}),
             });
         } catch (error) {
-            // If the token was cancelled, notify the webview and return early
             if (token.isCancellationRequested) {
-                this.postMessage({ command: 'queryCancelled' });
+                // A newer execution replaced this one: it owns the webview state now.
+                if (this.queryCts?.token !== token) return;
+                if (isConfirmed) {
+                    this.postMessage({ command: 'queryError', error: `${SUBMITTED_THEN_CANCELLED} Check the data before running it again.` });
+                } else {
+                    this.postMessage({ command: 'queryCancelled' });
+                }
                 return;
             }
 
@@ -410,7 +448,9 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                 // DML confirmation required — prompt the user (once per execution; a confirmed
                 // request that is still refused is shown as an error, never re-prompted).
                 if (!isConfirmed && isDmlConfirmationRequired(error)) {
-                    await this.confirmAndExecute(sql, isRetry, useTds, language, target, token, dmlServerMessage(error));
+                    await this.confirmAndExecute(sql, isRetry, useTds, language, target, token, {
+                        serverMessage: dmlServerMessage(error), writeTargets: dmlWriteTargets(error), notice,
+                    });
                     return;
                 }
 
@@ -423,16 +463,17 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             }
 
             const msg = error instanceof Error ? error.message : String(error);
+            const submittedNote = isConfirmed ? `\n${SUBMITTED_MAY_HAVE_APPLIED}` : '';
 
-            if (target.profileIdentity && isAuthError(error)) {
-                this.postMessage({ command: 'queryError', error: `${msg}\nAuthentication failed for the captured notebook profile on ${target.environmentUrl}. Confirm the intended profile in PPDS Profiles, re-authenticate it, then run the query again.` });
+            if (target.capturedProfile && isAuthError(error)) {
+                this.postMessage({ command: 'queryError', error: `${msg}\nAuthentication failed for the captured notebook profile on ${target.environmentUrl}. Confirm the intended profile in PPDS Profiles, re-authenticate it, then run the query again.${submittedNote}` });
                 return;
             }
 
             // The retry is always unconfirmed: a DML statement goes back through the daemon's
             // guard and a fresh modal for the target captured by that new attempt.
             if (await handleAuthError(this.daemon, error, isRetry, () =>
-                this.executeQuery(sql, true, useTds, language)
+                this.executeQuery(sql, true, useTds, language, undefined, isConfirmed ? AUTH_RETRY_NOTICE : undefined)
             )) {
                 return;
             }
@@ -441,32 +482,45 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
                 ? error.data as { diagnostics?: DiagnosticItem[] } | undefined
                 : undefined;
             const diagnostics = Array.isArray(errorData?.diagnostics) ? errorData.diagnostics : undefined;
-            this.postMessage({ command: 'queryError', error: msg, diagnostics });
+            this.postMessage({ command: 'queryError', error: msg + submittedNote, diagnostics });
         }
     }
 
     /** Asks for one confirmation for `sql` on `target`, then sends the one confirmed request for that pair. */
     private async confirmAndExecute(
         sql: string, isRetry: boolean, useTds: boolean | undefined, language: string | undefined,
-        target: CapturedQueryTarget, token: CancellationToken, serverMessage: string | undefined,
+        target: CapturedQueryTarget, token: CancellationToken, options: Omit<DmlConfirmationOptions, 'signal'>,
     ): Promise<void> {
+        const superseded = (): boolean => this.abortSignal.aborted || this.queryCts?.token !== token;
+        const pinned = await this.pinTarget(target);
+        if (superseded()) return;
+        if (typeof pinned === 'string') {
+            this.postMessage({ command: 'queryError', error: `Not executed: ${pinned}. No records were changed.` });
+            return;
+        }
         const abort = new AbortController();
         const onDispose = (): void => abort.abort();
         this.abortSignal.addEventListener('abort', onDispose, { once: true });
         const cancellation = token.onCancellationRequested(() => abort.abort());
-        let confirmed = false;
+        let answer: DmlConfirmation;
         try {
-            confirmed = await confirmDmlExecution(sql, target, { serverMessage, signal: abort.signal });
-        } catch (error) {
-            this.postMessage({ command: 'queryError', error: `Not executed: the DML confirmation could not be shown. ${error instanceof Error ? error.message : String(error)}` });
-            return;
+            answer = await confirmDmlExecution(sql, pinned, { ...options, signal: abort.signal });
         } finally {
             cancellation.dispose();
             this.abortSignal.removeEventListener('abort', onDispose);
         }
-        if (this.abortSignal.aborted) return;
-        if (token.isCancellationRequested || !confirmed) {
-            this.postMessage({ command: 'queryCancelled' });
+        // A superseded confirmation never posts over the newer execution.
+        if (superseded()) return;
+        if (token.isCancellationRequested || answer.kind === 'aborted') {
+            this.postMessage({ command: 'queryCancelled', message: 'Query cancelled. No records were changed.' });
+            return;
+        }
+        if (answer.kind === 'declined') {
+            this.postMessage({ command: 'queryCancelled', message: answer.message });
+            return;
+        }
+        if (answer.kind === 'failed') {
+            this.postMessage({ command: 'queryError', error: answer.message });
             return;
         }
         if (!QueryPanel.sameTarget(target, this.captureTarget())) {
@@ -476,7 +530,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             });
             return;
         }
-        await this.executeQuery(sql, isRetry, useTds, language, target);
+        await this.executeQuery(sql, isRetry, useTds, language, pinned);
     }
 
     private async showFetchXml(sql: string): Promise<void> {

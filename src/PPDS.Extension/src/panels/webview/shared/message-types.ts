@@ -39,7 +39,8 @@ export type QueryPanelHostToWebview =
     | { command: 'executionStarted' }
     /** dmlFailure: set when a DML execution reported failed rows (counts and reason, shown as an error). */
     | { command: 'queryResult'; data: QueryResultResponse; dmlFailure?: string }
-    | { command: 'queryCancelled' }
+    /** message: why nothing ran (declined, review dismissed); the webview shows it instead of the default text. */
+    | { command: 'queryCancelled'; message?: string }
     | { command: 'queryError'; error: string; diagnostics?: Array<{ start: number; length: number; severity: string; message: string }> }
     | { command: 'appendResults'; data: QueryResultResponse }
     | { command: 'clipboardContent'; text: string }

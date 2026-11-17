@@ -910,7 +910,7 @@ window.addEventListener('message', (event: MessageEvent<QueryPanelHostToWebview>
             executeBtn.style.display = '';
             showDmlFailure(undefined);
             statusText.textContent = 'Query cancelled';
-            resultsWrapper.innerHTML = '<div class="empty-state">Query cancelled</div>';
+            resultsWrapper.innerHTML = '<div class="empty-state">' + escapeHtml(msg.message ?? 'Query cancelled') + '</div>';
             break;
         case 'completionResult': {
             const pending = pendingCompletions.get(msg.requestId);
