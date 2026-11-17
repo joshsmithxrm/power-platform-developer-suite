@@ -43,13 +43,13 @@ public sealed partial class FormService
                 ?? throw new PpdsException(FormErrorCodes.ColumnNotFound, $"Column '{request.FieldLogicalName}' not found on '{request.EntityLogicalName}'.");
             var classId = ClassIdResolver.ResolveForField(attribute.AttributeType);
             var present = FormXmlEditor.ContainsField(section, attribute.LogicalName);
-            if (!present)
-                FormXmlEditor.AddField(doc, request.SectionId.ToString(), attribute.LogicalName, classId, attribute.DisplayName);
+            var controlId = present ? null : FormXmlEditor.AddFieldControl(doc, request.SectionId.ToString(), attribute.LogicalName,
+                classId, attribute.DisplayName, attributes.Select(a => a.LogicalName));
             FormXmlValidator.Validate(doc);
             var associate = await NeedsSolutionAssociationAsync(request.FormId, request.SolutionUniqueName, ct).ConfigureAwait(false);
             var result = NewResult(request.EntityLogicalName, request.FormId) with
             {
-                DryRun = request.DryRun, SectionId = request.SectionId, FieldLogicalName = attribute.LogicalName,
+                DryRun = request.DryRun, SectionId = request.SectionId, FieldLogicalName = attribute.LogicalName, ControlId = controlId,
                 SolutionUniqueName = request.SolutionUniqueName, DraftHash = ComputeDraftHash(xml),
                 DraftWrite = new(present ? "unchanged" : "not-attempted"),
                 SolutionAssociation = new(associate ? "not-attempted" : "unchanged")
@@ -89,6 +89,8 @@ public sealed partial class FormService
                 catch (Exception ex)
                 {
                     result.DraftWrite = SubmissionFailure(ex);
+                    // A definite failure means the control is not on the form; an unknown outcome keeps the submitted id.
+                    if (result.DraftWrite.Status == "failed") result.ControlId = null;
                     result.Status = "partial";
                     return result;
                 }
