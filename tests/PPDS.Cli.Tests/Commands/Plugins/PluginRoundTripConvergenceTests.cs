@@ -305,6 +305,8 @@ public sealed class PluginRoundTripConvergenceTests
 
         public Guid UserId { get; } = Guid.NewGuid();
         public int Deletes { get; private set; }
+        /// <summary>Creates and updates that reached the store.</summary>
+        public int Writes { get; private set; }
         public string LastDeployOutput { get; private set; } = "";
 
         public InMemoryRegistrationStore(string version)
@@ -353,14 +355,16 @@ public sealed class PluginRoundTripConvergenceTests
 
         public string? StoredSecureValue(Guid id) => _tables["sdkmessageprocessingstepsecureconfig"][id].GetAttributeValue<string>("secureconfig");
 
-        /// <summary>Sets the configured name of the step's single image.</summary>
-        public void SetConfiguredImageName(string name) => Image["name"] = name;
+        /// <summary>Adds another configured image (same settings as the first) to the step.</summary>
+        public void AddConfiguredImage(string name) =>
+            Step["images"]!.AsArray().Add(new JsonObject { ["name"] = name, ["imageType"] = "PreImage" });
 
-        /// <summary>Renames the stored image row, or adds another stored image row on the same step.</summary>
+        /// <summary>Renames the single stored image row.</summary>
         public void SetStoredImageName(string name) =>
             _tables["sdkmessageprocessingstepimage"].Values.Single()["name"] = name;
 
-        public void AddStoredImage(string name)
+        /// <summary>Adds another stored image row on the same step and returns its ID.</summary>
+        public Guid AddStoredImage(string name)
         {
             var image = new Entity("sdkmessageprocessingstepimage", Guid.NewGuid())
             {
@@ -369,6 +373,7 @@ public sealed class PluginRoundTripConvergenceTests
                 ["messagepropertyname"] = "Target", ["ismanaged"] = false
             };
             _tables["sdkmessageprocessingstepimage"][image.Id] = image;
+            return image.Id;
         }
 
         public IReadOnlyList<string> StoredImageNames() =>
@@ -452,6 +457,7 @@ public sealed class PluginRoundTripConvergenceTests
             _client.Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
                 .Callback<Entity, CancellationToken>((entity, _) =>
                 {
+                    Writes++;
                     var row = _tables[entity.LogicalName][entity.Id]; // an unknown row throws, like a missing record
                     foreach (var attribute in entity.Attributes) row[attribute.Key] = attribute.Value; // unsent attributes keep their value
                 })
@@ -459,6 +465,7 @@ public sealed class PluginRoundTripConvergenceTests
             _client.Setup(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Entity entity, CancellationToken _) =>
                 {
+                    Writes++;
                     var row = new Entity(entity.LogicalName, Guid.NewGuid());
                     foreach (var attribute in entity.Attributes) row[attribute.Key] = attribute.Value;
                     _tables[entity.LogicalName][row.Id] = row;

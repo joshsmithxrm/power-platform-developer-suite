@@ -25,6 +25,7 @@ internal static class PluginRegistrationPlanningService
                 _ = PluginRegistrationNormalizer.NormalizeImage(image, step.Message, step.OperationIntent);
             }
         }
+        PluginImageNames.EnsureUniqueConfigured(assembly);
     }
 
     /// <summary>

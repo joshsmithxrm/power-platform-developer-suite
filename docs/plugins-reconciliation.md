@@ -49,9 +49,16 @@ use one shared image-only planner. What the code enforces:
   case, the same rule deploy (update versus create), `plugins diff` and 2.0 deploy
   verification use. A case-only difference is never a deletion candidate: deploy
   updates that row and writes the configured name, and diff reports it beforehand as a
-  modified-image `name` change, not as a missing image plus an orphaned one. Configured
-  or stored names that collide ignoring case are ambiguous: cleanup refuses the plan
-  and diff reports the step's images as incomplete.
+  modified-image `name` change, not as a missing image plus an orphaned one. Only case
+  is covered: if the environment's collation also equates other differences (for
+  example accents or trailing spaces), the write can update a row this rule does not
+  pair, and cleanup may plan that row for deletion; this is not established for
+  Dataverse and is a known unpaired case.
+- Configured image names on one step that collide ignoring case are rejected as a file
+  error (exit 3) before connecting. If a configured step's stored images have names
+  that collide ignoring case, cleanup refuses the whole plan before any mutation and
+  names the stored images and their IDs; remove the extra one with
+  `ppds plugins unregister image <image-id>`.
 - Hidden, managed, non-customizable, unavailable or ambiguous targets fail the whole
   plan visibly instead of being skipped. The complete plan for every configured
   scope is built before the first mutation; `deploy --clean` applies it only after

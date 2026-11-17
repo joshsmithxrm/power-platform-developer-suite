@@ -139,12 +139,15 @@ internal static class PluginExtractionMergeService
 
         foreach (var image in fresh.Images)
         {
-            // Image identity is exact name, consistent with deploy/diff. Never attach metadata from
-            // a differently cased sibling or pick the first duplicate.
-            var oldImage = Unique(existing.Images.Where(i => string.Equals(i.Name, image.Name, StringComparison.Ordinal)),
-                "image name");
+            // Image identity follows PluginImageNames (case-insensitive), as deploy and diff do, so a
+            // case-only rename keeps its inherited settings. An exact-case counterpart still wins over a
+            // differently cased sibling; otherwise exactly one counterpart is required, never the first
+            // of several.
+            var candidates = existing.Images.Where(i => PluginImageNames.Same(i.Name, image.Name)).ToList();
+            var exact = candidates.Where(i => string.Equals(i.Name, image.Name, StringComparison.Ordinal)).ToList();
+            var oldImage = exact.Count == 1 ? exact[0] : Unique(candidates, "image name");
             if (oldImage is null) continue;
-            if (fresh.Images.Count(i => string.Equals(i.Name, image.Name, StringComparison.Ordinal)) != 1)
+            if (fresh.Images.Count(i => PluginImageNames.Same(i.Name, image.Name)) != 1)
                 throw Ambiguous("fresh image name");
             operations.Add(() =>
             {

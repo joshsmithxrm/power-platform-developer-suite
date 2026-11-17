@@ -6,11 +6,11 @@ using Store = PPDS.Cli.Tests.Commands.Plugins.PluginRoundTripConvergenceTests.In
 namespace PPDS.Cli.Tests.Commands.Plugins;
 
 /// <summary>
-/// AC-139: deploy (update-versus-create), image pruning, diff and the 2.0 post-deploy verification pair a
-/// configured image with a stored image by one rule (<see cref="PluginImageNames"/>): names that differ only
-/// by case are the same image. Runs the actual command pipelines and step/image service code against the
-/// round-trip row store, which evaluates string conditions case-insensitively as Dataverse's default
-/// collation does. This does not prove Dataverse server behavior.
+/// AC-139: deploy (update-versus-create), image pruning, diff, the 2.0 post-deploy verification and the 1.0
+/// preserved-value advisory pair a configured image with a stored image by one rule
+/// (<see cref="PluginImageNames"/>): names that differ only by case are the same image. Runs the actual
+/// command pipelines and step/image service code against the round-trip row store, which evaluates string
+/// conditions case-insensitively as Dataverse does by default. This does not prove Dataverse server behavior.
 /// </summary>
 [Trait("Category", "Unit")]
 [Trait("AC", "AC-139")]
@@ -92,10 +92,63 @@ public sealed class PluginImageNameMatchingTests
     }
 
     [Fact]
-    public async Task StoredNamesDifferingOnlyByCase_AreAmbiguous_NotMissingOrOrphaned_AndCleanDeletesNothing()
+    public async Task Version1_CaseOnlyNameDifference_PreservedValueAdvisoryStillPairsTheImage()
+    {
+        using var store = new Store("1.0");
+        var spec = PluginRoundTripConvergenceTests.PropertySpec.For("imageDescription", store.UserId);
+        store.SetConfigured(spec, include: true);
+        Assert.Equal(0, await store.DeployAsync());
+        store.SetConfigured(spec, include: false); // 1.0 preserves the stored description
+        store.SetStoredImageName(StoredName);
+
+        var (exit, output) = await store.DiffAsync(json: true);
+        Assert.Equal(1, exit); // the name change
+        using var diff = JsonDocument.Parse(output);
+        var preserved = diff.RootElement.GetProperty("data")[0].GetProperty("preservedLegacyValues").EnumerateArray().ToList();
+        Assert.Contains(preserved, v => v.GetProperty("path").GetString() == spec.Path(store) &&
+            v.GetProperty("property").GetString() == spec.Field);
+    }
+
+    [Theory]
+    [InlineData("2.0", "Before")]
+    [InlineData("2.0", "BEFORE")]
+    [InlineData("1.0", "before")]
+    public async Task ConfiguredNamesCollidingIgnoringCase_AreRejectedBeforeAnyWrite_ByDeployAndDiff(string version, string second)
+    {
+        using var store = new Store(version);
+        store.AddConfiguredImage(second);
+
+        Assert.Equal(3, await store.DeployAsync());
+        Assert.Contains("equal ignoring case", store.LastDeployOutput);
+        Assert.Contains(Store.StepName, store.LastDeployOutput);
+        Assert.Equal(0, store.Writes);
+
+        var (diffExit, diffOutput) = await store.DiffAsync(json: true);
+        Assert.Equal(3, diffExit);
+        using (var diff = JsonDocument.Parse(diffOutput))
+        {
+            Assert.False(diff.RootElement.TryGetProperty("metadata", out var metadata) && metadata.ValueKind != JsonValueKind.Null,
+                "a validation error carries no comparison status");
+            var error = diff.RootElement.GetProperty("error");
+            Assert.Equal("Validation.InvalidValue", error.GetProperty("code").GetString());
+            var message = error.GetProperty("message").GetString()!;
+            Assert.Contains($"'{Store.ImageName}', '{second}'", message);
+            Assert.Contains($"Step '{Store.StepName}'", message);
+        }
+
+        if (version == "2.0")
+        {
+            Assert.Equal(3, await store.DeployAsync(clean: true));
+            Assert.Equal(0, store.Writes);
+            Assert.Equal(0, store.Deletes);
+        }
+    }
+
+    [Fact]
+    public async Task StoredNamesCollidingWithAConfiguredName_AreIncompleteWithIds_AndCleanRefusesBeforeAnyWrite()
     {
         using var store = new Store("2.0");
-        store.AddStoredImage("BEFORE"); // stored: "Before" and "BEFORE"
+        var extraId = store.AddStoredImage("BEFORE"); // stored: "Before" and "BEFORE"
 
         var (diffExit, diffOutput) = await store.DiffAsync(json: true);
         Assert.Equal(2, diffExit);
@@ -105,19 +158,47 @@ public sealed class PluginImageNameMatchingTests
             var assembly = diff.RootElement.GetProperty("data")[0];
             Assert.Empty(assembly.GetProperty("missingImages").EnumerateArray());
             Assert.Empty(assembly.GetProperty("orphanedImages").EnumerateArray());
+            var reason = Assert.Single(assembly.GetProperty("coverage").GetProperty("unsupported").EnumerateArray(),
+                u => u.GetProperty("field").GetString()!.StartsWith("duplicate image names", StringComparison.Ordinal))
+                .GetProperty("field").GetString()!;
+            Assert.Contains("in the environment", reason);
+            Assert.Contains($"'BEFORE' ({extraId:D})", reason);
+            Assert.Contains($"configured image '{Store.ImageName}'", reason);
+            Assert.Contains("ppds plugins unregister image <image-id>", reason);
         }
 
+        // The plan is refused before any write, naming the stored rows.
         Assert.NotEqual(0, await store.DeployAsync(clean: true));
+        Assert.Contains("cannot select duplicate image names within a step", store.LastDeployOutput);
+        Assert.Contains(extraId.ToString("D"), store.LastDeployOutput);
+        Assert.Equal(0, store.Writes);
         Assert.Equal(0, store.Deletes);
         Assert.Equal(2, store.StoredImageNames().Count);
     }
 
     [Fact]
-    public void OneSharedRule_IsOrdinalCaseInsensitive()
+    public async Task StoredNamesCollidingOnlyWithEachOther_AreOrdinaryOrphans()
+    {
+        using var store = new Store("2.0");
+        store.AddStoredImage("Extra");
+        store.AddStoredImage("EXTRA");
+
+        var (diffExit, diffOutput) = await store.DiffAsync(json: true);
+        Assert.Equal(1, diffExit);
+        using var diff = JsonDocument.Parse(diffOutput);
+        Assert.Equal("drift", diff.RootElement.GetProperty("metadata").GetProperty("status").GetString());
+        var orphans = diff.RootElement.GetProperty("data")[0].GetProperty("orphanedImages").EnumerateArray()
+            .Select(o => o.GetProperty("imageName").GetString()).Order(StringComparer.Ordinal).ToList();
+        Assert.Equal(["EXTRA", "Extra"], orphans);
+    }
+
+    [Fact]
+    public void SharedRule_PairsCaseOnlyDifferencesAndNothingElse()
     {
         Assert.True(PluginImageNames.Same("PreImage", "preimage"));
         Assert.False(PluginImageNames.Same("PreImage", "PostImage"));
-        Assert.Same(StringComparer.OrdinalIgnoreCase, PluginImageNames.Comparer);
+        // Known unpaired case (see PluginImageNames remarks): other collation-equal differences are not paired.
+        Assert.False(PluginImageNames.Same("Pré", "Pre"));
     }
 
     private static void AssertImageCounts(string output, int created, int updated)

@@ -11,6 +11,8 @@ internal static class PluginImagePruningService
 {
     private const string ResultKey = "PPDS.PluginImagePruningResult";
     private static readonly PluginListOptions InventoryOptions = new(IncludeHidden: true, IncludeMicrosoft: true);
+    // Same-row identity rechecks (a row kept its name between reads) and assembly/type/package names.
+    // Pairing a configured image with a stored one uses PluginImageNames instead; keep the two separate.
     private static readonly StringComparer Names = StringComparer.OrdinalIgnoreCase;
 
     internal static void ValidateAuthority(IReadOnlyList<PluginAssemblyConfig> assemblies, CancellationToken ct)
@@ -27,6 +29,8 @@ internal static class PluginImagePruningService
                 "Image cleanup requires a supported assembly or NuGet configuration type.");
             Require(assembly.Types.Select(t => t.TypeName).Distinct(Names).Count() == assembly.Types.Count,
                 "Image cleanup cannot select duplicate configured type names.");
+            // Same file rule as deploy and diff, with the step and names in the message.
+            PluginImageNames.EnsureUniqueConfigured(assembly);
             foreach (var type in assembly.Types)
             {
                 Require(!string.IsNullOrWhiteSpace(type.TypeName), "Image cleanup requires a configured type name.");
@@ -346,8 +350,12 @@ internal static class PluginImagePruningService
     {
         UniqueIds(images.Select(i => i.Id));
         foreach (var image in images) ValidateImageIdentity(image);
-        Require(images.Select(i => i.Name).Distinct(PluginImageNames.Comparer).Count() == images.Count,
-            "Image cleanup cannot select duplicate image names within a step.");
+        var collisions = images.GroupBy(i => i.Name, PluginImageNames.Comparer).Where(g => g.Count() > 1).ToList();
+        Require(collisions.Count == 0,
+            "Image cleanup cannot select duplicate image names within a step. In the environment, these stored images " +
+            "on one step have names equal ignoring case: " +
+            string.Join("; ", collisions.Select(g => string.Join(", ", g.Select(i => $"'{i.Name}' ({i.Id:D})")))) +
+            ". Remove the extra image with 'ppds plugins unregister image <image-id>'; no cleanup was dispatched.");
     }
 
     private static void ValidateImageIdentity(PluginImageInfo image)

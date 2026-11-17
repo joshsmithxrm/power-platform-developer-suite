@@ -766,7 +766,7 @@ public static class DeployCommand
                     var existingImages = isNew
                         ? []
                         : await service.ListImagesForStepAsync(stepId, cancellationToken);
-                    // Same pairing rule as diff and pruning (and as the write path's server-side name lookup).
+                    // Same pairing rule as diff and pruning; the write path's server-side lookup also ignores case.
                     var existingImageNames = existingImages.Select(i => i.Name).ToHashSet(PluginImageNames.Comparer);
 
                     // Legacy files preserve omitted optional values. Only capture the rows already read here;

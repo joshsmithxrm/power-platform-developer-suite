@@ -225,6 +225,31 @@ public sealed class PluginExtractionMergeTests
     }
 
     [Fact]
+    [Trait("AC", "AC-139")]
+    public void ImageIdentity_CaseOnlyRenameKeepsInheritedResetsAndMetadata()
+    {
+        var previous = Step();
+        previous.Images.Add(new() { Name = "preimage", ResetFields = ["description"], ExtensionData = Metadata("owner", "kept") });
+        var fresh = Step(); fresh.Images.Add(new() { Name = "PreImage", ImageType = "PreImage" });
+        Merge(Assembly(fresh), Existing(previous));
+        Assert.Equal("PreImage", fresh.Images[0].Name); // the fresh name wins; only settings are inherited
+        Assert.Contains("description", fresh.Images[0].ResetFields);
+        Assert.Equal("kept", fresh.Images[0].ExtensionData!["owner"].GetString());
+    }
+
+    [Fact]
+    [Trait("AC", "AC-139")]
+    public void ImageIdentity_SeveralCaseVariantsWithoutExactMatchRefuseArbitraryInheritance()
+    {
+        var previous = Step();
+        previous.Images.Add(new() { Name = "PRE", ResetFields = ["attributes"] });
+        previous.Images.Add(new() { Name = "pre", ResetFields = ["description"] });
+        var fresh = Step(); fresh.Images.Add(new() { Name = "Pre", ImageType = "PreImage" });
+        Assert.Throws<PpdsException>(() => Merge(Assembly(fresh), Existing(previous)));
+        Assert.Empty(fresh.Images[0].ResetFields);
+    }
+
+    [Fact]
     public void DuplicateImageName_RefusesArbitraryResetInheritance()
     {
         var previous = Step();

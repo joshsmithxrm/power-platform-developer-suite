@@ -63,6 +63,8 @@ public static class DiffCommand
                 return ExitCodes.InvalidArguments;
             }
             config.Validate();
+            // File rules that need no environment are checked before connecting, as deploy does.
+            foreach (var assembly in config.Assemblies) PluginImageNames.EnsureUniqueConfigured(assembly);
             if (service is null)
             {
                 provider = await ProfileServiceFactory.CreateFromProfilesAsync(profile, environment,
