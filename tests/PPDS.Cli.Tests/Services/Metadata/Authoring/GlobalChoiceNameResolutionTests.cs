@@ -532,14 +532,15 @@ public sealed class GlobalChoiceDeleteCommandTests
         if (mode != null) args.Add(mode);
         if (json) args.AddRange(["--output-format", "json"]);
         using var stdout = new StringWriter(); using var stderr = new StringWriter();
+        using var stdin = input != null ? new StringReader(input) : null;
         var oldOut = Console.Out; var oldError = Console.Error; var oldIn = Console.In;
         var oldRedirected = OptionSetCommand.IsInputRedirected;
         try
         {
             Console.SetOut(stdout); Console.SetError(stderr);
-            if (input != null)
+            if (stdin != null)
             {
-                Console.SetIn(new StringReader(input));
+                Console.SetIn(stdin);
                 OptionSetCommand.IsInputRedirected = () => false;
             }
             var parsed = MetadataCommandGroup.Create(Provider).Parse(args.ToArray());

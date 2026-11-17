@@ -155,7 +155,7 @@ public sealed class MetadataDraftOptionReadTests
         using var f = new Fixture(kind);
         if (remove) await f.RemoveAsync(10001); else await f.UpdateAsync(10001);
         Assert.True(Assert.Single(f.Reads).RetrieveAsIfPublished);
-        if (remove) Assert.Equal(10001, (int)Assert.Single(f.Requests.OfType<SdkDeleteOption>()).Value);
+        if (remove) Assert.Equal(10001, Assert.Single(f.Requests.OfType<SdkDeleteOption>()).Value);
         else
         {
             var update = Assert.Single(f.Requests.OfType<SdkUpdateOption>());
@@ -180,7 +180,7 @@ public sealed class MetadataDraftOptionReadTests
         Assert.Equal(10002, added);
         if (remove) await f.RemoveAsync(added); else await f.UpdateAsync(added);
         Assert.DoesNotContain(f.Requests, r => r.RequestName == "PublishXml");
-        if (remove) Assert.Equal(added, (int)Assert.Single(f.Requests.OfType<SdkDeleteOption>()).Value);
+        if (remove) Assert.Equal(added, Assert.Single(f.Requests.OfType<SdkDeleteOption>()).Value);
         else Assert.Equal(added, Assert.Single(f.Requests.OfType<SdkUpdateOption>()).Value);
         Assert.All(f.Reads, r => Assert.True(r.RetrieveAsIfPublished));
         f.AssertRoutingAndCancellation();
