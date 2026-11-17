@@ -224,6 +224,10 @@ public sealed class SqlQueryService : ISqlQueryService
         {
             result = await _planExecutor.ExecuteAsync(planResult, context, cancellationToken);
         }
+        catch (Exception ex) when (RecordCommittedOutcome(ex, context))
+        {
+            throw; // never reached: the filter only attaches what already ran and returns false
+        }
         catch (Exception ex) when (
             request.UseTdsEndpoint
             && ContainsTdsScanNode(planResult.RootNode)
@@ -259,6 +263,18 @@ public sealed class SqlQueryService : ISqlQueryService
             ExecutionMode = DetectExecutionMode(planResult.RootNode),
             DmlOutcome = DmlOutcome.From(context.Statistics.DmlOutcomes)
         };
+    }
+
+    /// <summary>
+    /// Exception filter: when a script is interrupted (error, cancellation) after some DML statements already
+    /// ran, attaches their outcomes to the exception so callers can report what was changed. Always false.
+    /// </summary>
+    private static bool RecordCommittedOutcome(Exception exception, QueryPlanContext context)
+    {
+        var outcome = DmlOutcome.From(context.Statistics.DmlOutcomes);
+        if (outcome != null)
+            DmlOutcome.Attach(exception, outcome);
+        return false;
     }
 
     /// <inheritdoc />
@@ -394,6 +410,10 @@ public sealed class SqlQueryService : ISqlQueryService
                     if (!await streamEnumerator.MoveNextAsync().ConfigureAwait(false))
                         break;
                     row = streamEnumerator.Current;
+                }
+                catch (Exception ex) when (RecordCommittedOutcome(ex, context))
+                {
+                    throw; // never reached: the filter only attaches what already ran and returns false
                 }
                 catch (Exception ex) when (
                     request.UseTdsEndpoint

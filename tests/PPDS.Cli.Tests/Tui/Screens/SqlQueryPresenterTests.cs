@@ -454,7 +454,7 @@ public sealed class SqlQueryPresenterTests : IDisposable
 
         var status = SqlQueryPresenter.FormatCompletionStatus(1, 12, " via Dataverse", outcome);
 
-        Assert.StartsWith("DML failed: all 2 row(s) failed.", status);
+        Assert.StartsWith("DML failed (DELETE account): all 2 row(s) failed.", status);
         Assert.DoesNotContain("Returned", status);
     }
 

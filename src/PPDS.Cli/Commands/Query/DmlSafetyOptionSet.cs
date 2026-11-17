@@ -19,7 +19,7 @@ internal sealed class DmlSafetyOptionSet
     {
         Confirm = new Option<bool>("--confirm")
         {
-            Description = "Confirm DML execution without interactive prompt"
+            Description = "Confirm DML execution (required to run INSERT, UPDATE or DELETE; there is no interactive prompt)"
         };
 
         DryRun = new Option<bool>("--dry-run")
@@ -50,11 +50,18 @@ internal sealed class DmlSafetyOptionSet
         command.Options.Add(NoLimit);
     }
 
-    /// <summary>Reads the parsed options into the service-level safety options (same defaults everywhere).</summary>
-    public DmlSafetyOptions GetOptions(ParseResult parseResult) => new()
+    /// <summary>
+    /// Reads the guard options a command was parsed with into the service-level safety options (same
+    /// defaults everywhere). Looks the options up on <paramref name="command"/> so it works for any command
+    /// that called <see cref="AddTo"/>, and fails loudly for one that did not.
+    /// </summary>
+    public static DmlSafetyOptions Read(Command command, ParseResult parseResult) => new()
     {
-        IsConfirmed = parseResult.GetValue(Confirm),
-        IsDryRun = parseResult.GetValue(DryRun),
-        NoLimit = parseResult.GetValue(NoLimit)
+        IsConfirmed = parseResult.GetValue(Find(command, "--confirm")),
+        IsDryRun = parseResult.GetValue(Find(command, "--dry-run")),
+        NoLimit = parseResult.GetValue(Find(command, "--no-limit"))
     };
+
+    private static Option<bool> Find(Command command, string name)
+        => command.Options.OfType<Option<bool>>().Single(o => o.Name == name);
 }

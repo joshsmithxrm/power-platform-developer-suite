@@ -126,8 +126,10 @@ public static class SqlCommand
             if (format == OutputFormat.Csv)
             {
                 result.AddError(
-                    "CSV output is not supported with --explain or --show-fetchxml. Use --output-format Json or Text. " +
-                    "The same restriction applies to --dry-run.");
+                    result.GetValue(showFetchXmlOption) || result.GetValue(explainOption)
+                        ? "CSV output is not supported with --explain or --show-fetchxml. Use --output-format Json or Text. " +
+                          "The same restriction applies to --dry-run."
+                        : DmlSafetyOptionSet.DryRunCsvError);
             }
         });
 
@@ -139,9 +141,7 @@ public static class SqlCommand
             var showFetchXml = parseResult.GetValue(showFetchXmlOption);
             var explain = parseResult.GetValue(explainOption);
             var useTds = parseResult.GetValue(tdsOption);
-            var confirm = parseResult.GetValue(confirmOption);
-            var dryRun = parseResult.GetValue(dryRunOption);
-            var noLimit = parseResult.GetValue(noLimitOption);
+            var dmlSafetyOptions = DmlSafetyOptionSet.Read(command, parseResult);
             var profile = parseResult.GetValue(QueryCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(QueryCommandGroup.EnvironmentOption);
             var top = parseResult.GetValue(QueryCommandGroup.TopOption);
@@ -152,7 +152,7 @@ public static class SqlCommand
 
             return await ExecuteAsync(
                 sql, file, stdin, showFetchXml, explain, useTds,
-                confirm, dryRun, noLimit,
+                dmlSafetyOptions,
                 profile, environment,
                 top, page, pagingCookie, count,
                 globalOptions, cancellationToken);
@@ -168,9 +168,7 @@ public static class SqlCommand
         bool showFetchXml,
         bool explain,
         bool useTds,
-        bool confirm,
-        bool dryRun,
-        bool noLimit,
+        DmlSafetyOptions dmlSafety,
         string? profile,
         string? environment,
         int? top,
@@ -231,6 +229,13 @@ public static class SqlCommand
                     serviceProvider.GetRequiredService<ResolvedConnectionInfo>().EnvironmentUrl,
                     cancellationToken);
             }
+            else
+            {
+                // The guard configuration is mandatory: a service that cannot be configured must not run DML.
+                throw new PpdsException(
+                    ErrorCodes.Query.ExecutionFailed,
+                    "The SQL query service cannot apply DML safety settings, so the query was not executed.");
+            }
 
             // If --explain, show execution plan without executing
             if (explain)
@@ -283,24 +288,10 @@ public static class SqlCommand
                 var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
                 ConsoleHeader.WriteConnectedAs(connectionInfo);
                 Console.Error.WriteLine();
-                Console.Error.WriteLine(dryRun ? "Building DML preview..." : "Executing query...");
+                Console.Error.WriteLine(dmlSafety.IsDryRun ? "Building DML preview..." : "Executing query...");
             }
 
-            var request = new SqlQueryRequest
-            {
-                Sql = query,
-                TopOverride = top,
-                PageNumber = page,
-                PagingCookie = pagingCookie,
-                IncludeCount = count,
-                UseTdsEndpoint = useTds,
-                DmlSafety = new DmlSafetyOptions
-                {
-                    IsConfirmed = confirm,
-                    IsDryRun = dryRun,
-                    NoLimit = noLimit
-                }
-            };
+            var request = BuildRequest(query, top, page, pagingCookie, count, useTds, dmlSafety);
 
             var queryResult = await sqlQueryService.ExecuteAsync(request, cancellationToken);
 
@@ -343,6 +334,7 @@ public static class SqlCommand
         {
             var error = ExceptionMapper.Map(ex, context: "executing SQL query", debug: globalOptions.Debug);
             writer.WriteError(error);
+            WriteCommittedNote(ex);
             return ExceptionMapper.ToExitCode(ex);
         }
         finally
@@ -406,6 +398,30 @@ public static class SqlCommand
         public string? FetchXml { get; init; }
         public int RowCap { get; init; }
         public bool RequiresConfirmationForExecution { get; init; }
+    }
+
+    /// <summary>Builds the service request for 'ppds query sql'; DML safety is always explicit.</summary>
+    internal static SqlQueryRequest BuildRequest(
+        string sql, int? top, int? page, string? pagingCookie, bool count, bool useTds, DmlSafetyOptions dmlSafety) => new()
+    {
+        Sql = sql,
+        TopOverride = top,
+        PageNumber = page,
+        PagingCookie = pagingCookie,
+        IncludeCount = count,
+        UseTdsEndpoint = useTds,
+        DmlSafety = dmlSafety
+    };
+
+    /// <summary>
+    /// When a script was interrupted (error or cancellation) after some DML statements had already run,
+    /// say what they did on stderr. They are not rolled back.
+    /// </summary>
+    internal static void WriteCommittedNote(Exception exception)
+    {
+        var committed = DmlOutcome.From(exception);
+        if (committed != null)
+            Console.Error.WriteLine(committed.DescribeCommitted());
     }
 
     /// <summary>

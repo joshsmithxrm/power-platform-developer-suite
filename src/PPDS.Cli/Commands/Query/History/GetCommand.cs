@@ -126,7 +126,7 @@ public static class GetCommand
         Console.WriteLine();
         Console.WriteLine("SQL:");
         Console.WriteLine(new string('-', 40));
-        Console.WriteLine(entry.Sql);
+        Console.WriteLine(TerminalText.Sanitize(entry.Sql));
     }
 
 }

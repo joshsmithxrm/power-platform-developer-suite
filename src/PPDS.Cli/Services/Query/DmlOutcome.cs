@@ -54,19 +54,49 @@ public sealed class DmlOutcome
     public static DmlOutcome? From(IReadOnlyList<DmlStatementOutcome> statements)
         => statements.Count == 0 ? null : new DmlOutcome(statements);
 
+    private const string ExceptionDataKey = "PPDS.DmlOutcome";
+
+    /// <summary>Remembers the outcomes of statements that already ran on an exception that interrupted the run.</summary>
+    internal static void Attach(Exception exception, DmlOutcome outcome)
+    {
+        try { exception.Data[ExceptionDataKey] = outcome; }
+        catch (ArgumentException) { /* Data rejects non-serializable values on some runtimes; the outcome is best-effort. */ }
+        catch (NotSupportedException) { }
+    }
+
+    /// <summary>The outcomes of statements that ran before <paramref name="exception"/> interrupted the script, if any.</summary>
+    public static DmlOutcome? From(Exception exception)
+        => exception.Data.Contains(ExceptionDataKey) ? exception.Data[ExceptionDataKey] as DmlOutcome : null;
+
+    /// <summary>
+    /// For a run that was interrupted (error or cancellation): what the statements that already ran did.
+    /// They are not rolled back.
+    /// </summary>
+    public string DescribeCommitted()
+    {
+        var parts = Statements.Take(MaxStatementsListed).Select((s, i) =>
+            $"{Label(s, i + 1)}: {s.AffectedRows} affected, {s.FailedRows} failed");
+        var more = Statements.Count > MaxStatementsListed ? $"; and {Statements.Count - MaxStatementsListed} more" : string.Empty;
+        return $"Statements that already ran before the interruption were not rolled back: {string.Join("; ", parts)}{more}.";
+    }
+
+    private static string Label(DmlStatementOutcome s, int executionIndex)
+        => $"#{s.Position ?? executionIndex.ToString()} {s.Operation.ToString().ToUpperInvariant()} {s.EntityLogicalName}";
+
     private string BuildMessage()
     {
         var failed = Statements
-            .Select((s, i) => (Statement: s, Number: i + 1))
+            .Select((s, i) => (Statement: s, Index: i + 1))
             .Where(x => x.Statement.FailedRows > 0)
             .ToList();
 
         if (Statements.Count == 1)
         {
             var only = failed[0].Statement;
+            var what = $"{only.Operation.ToString().ToUpperInvariant()} {only.EntityLogicalName}";
             var head = only.AffectedRows > 0
-                ? $"DML partially succeeded: {only.AffectedRows} row(s) affected, {only.FailedRows} row(s) failed."
-                : $"DML failed: all {only.FailedRows} row(s) failed.";
+                ? $"DML partially succeeded ({what}): {only.AffectedRows} row(s) affected, {only.FailedRows} row(s) failed."
+                : $"DML failed ({what}): all {only.FailedRows} row(s) failed.";
             return head + ErrorSuffix(only.ErrorMessage, " Example error: ");
         }
 
@@ -74,8 +104,7 @@ public sealed class DmlOutcome
             ? $"DML failed across {Statements.Count} statements: all {FailedRows} row(s) failed."
             : $"DML partially succeeded across {Statements.Count} statements: {AffectedRows} row(s) affected, {FailedRows} row(s) failed.";
         var details = failed.Take(MaxStatementsListed).Select(x =>
-            $"#{x.Number} {x.Statement.Operation.ToString().ToUpperInvariant()} {x.Statement.EntityLogicalName}: " +
-            $"{x.Statement.AffectedRows} affected, {x.Statement.FailedRows} failed" +
+            $"{Label(x.Statement, x.Index)}: {x.Statement.AffectedRows} affected, {x.Statement.FailedRows} failed" +
             ErrorSuffix(x.Statement.ErrorMessage, " (example error: ", ")"));
         var more = failed.Count > MaxStatementsListed ? $"; and {failed.Count - MaxStatementsListed} more" : string.Empty;
         return $"{summary} Failed statements: {string.Join("; ", details)}{more}.";

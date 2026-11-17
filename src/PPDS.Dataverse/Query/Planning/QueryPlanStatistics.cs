@@ -41,6 +41,24 @@ public sealed class QueryPlanStatistics
     /// <summary>Records the outcome of one executed DML statement.</summary>
     public void AddDmlOutcome(DmlStatementOutcome outcome) => _dmlOutcomes.Enqueue(outcome);
 
+    // Script statements run sequentially, so the position stack needs no synchronisation.
+    private readonly List<int> _statementPath = new();
+
+    /// <summary>Enters statement <paramref name="position"/> (1-based) of the script block being executed.</summary>
+    public void PushStatement(int position) => _statementPath.Add(position);
+
+    /// <summary>Leaves the statement entered by the matching <see cref="PushStatement"/>.</summary>
+    public void PopStatement()
+    {
+        if (_statementPath.Count > 0) _statementPath.RemoveAt(_statementPath.Count - 1);
+    }
+
+    /// <summary>
+    /// Position of the executing statement within its script ("3", or "2.1" inside a block), or null when
+    /// the plan is not a script.
+    /// </summary>
+    public string? CurrentStatementPosition => _statementPath.Count == 0 ? null : string.Join(".", _statementPath);
+
     // Paging metadata: only valid for single-scan-node plans (Phase 0).
     // Phase 4 parallel partitioning will need a different approach since each
     // partition has its own paging state. Not protected by Interlocked.
@@ -114,9 +132,11 @@ public sealed class NodeStatistics
 /// A representative error message when <paramref name="FailedRows"/> is greater than zero. Batches may run in
 /// parallel, so this is not necessarily the error of the first row.
 /// </param>
+/// <param name="Position">Position of the statement in its script ("3", "2.1" in a block); null outside scripts.</param>
 public sealed record DmlStatementOutcome(
     Nodes.DmlOperation Operation,
     string EntityLogicalName,
     long AffectedRows,
     long FailedRows,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    string? Position = null);

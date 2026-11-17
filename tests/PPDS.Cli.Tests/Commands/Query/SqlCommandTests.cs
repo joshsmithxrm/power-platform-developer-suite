@@ -537,7 +537,7 @@ public class SqlCommandTests
         var (exit, stdout, stderr) = Run(DmlQueryResult(Stmt(DmlOperation.Delete, "account", 0, 2, "plugin threw")), format);
 
         Assert.Equal(ExitCodes.Failure, exit);
-        Assert.Contains("Error: DML failed: all 2 row(s) failed.", stderr);
+        Assert.Contains("Error: DML failed (DELETE account): all 2 row(s) failed.", stderr);
         Assert.Contains("plugin threw", stderr);
         Assert.DoesNotContain("plugin threw", stdout);
         Assert.Contains("affected_rows", stdout);

@@ -203,6 +203,14 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         yield return new QueryRow(values, EntityLogicalName);
     }
 
+    /// <summary>A statement that matched no rows still counts as an executed DML statement (keeps positions real).</summary>
+    private (long Success, long Failure) NoRows(QueryPlanContext context)
+    {
+        context.Statistics.AddDmlOutcome(new DmlStatementOutcome(
+            Operation, EntityLogicalName, 0, 0, null, context.Statistics.CurrentStatementPosition));
+        return (0, 0);
+    }
+
     private (long Success, long Failure) Summarize(
         QueryPlanContext context,
         BulkOperationResult result)
@@ -216,7 +224,8 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         }
 
         context.Statistics.AddDmlOutcome(new DmlStatementOutcome(
-            Operation, EntityLogicalName, result.SuccessCount, result.FailureCount, message));
+            Operation, EntityLogicalName, result.SuccessCount, result.FailureCount, message,
+            context.Statistics.CurrentStatementPosition));
         return (result.SuccessCount, result.FailureCount);
     }
 
@@ -300,7 +309,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             entities.Add(entity);
         }
 
-        if (entities.Count == 0) return (0, 0);
+        if (entities.Count == 0) return NoRows(context);
 
         var progress = CreateProgressAdapter(context);
         var result = await context.BulkOperationExecutor!.CreateMultipleAsync(
@@ -346,7 +355,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             entities.Add(entity);
         }
 
-        if (entities.Count == 0) return (0, 0);
+        if (entities.Count == 0) return NoRows(context);
 
         var progress = CreateProgressAdapter(context);
         var result = await context.BulkOperationExecutor!.UpdateMultipleAsync(
@@ -381,7 +390,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             ids.Add(recordId);
         }
 
-        if (ids.Count == 0) return (0, 0);
+        if (ids.Count == 0) return NoRows(context);
 
         var progress = CreateProgressAdapter(context);
         var result = await context.BulkOperationExecutor!.DeleteMultipleAsync(

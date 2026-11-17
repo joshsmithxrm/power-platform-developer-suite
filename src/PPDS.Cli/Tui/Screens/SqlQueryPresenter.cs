@@ -285,8 +285,15 @@ internal sealed class SqlQueryPresenter : IDisposable
     /// </summary>
     internal static string FormatCompletionStatus(int totalRows, long elapsedMs, string modeText, DmlOutcome? dmlOutcome)
         => dmlOutcome is { HasFailures: true }
-            ? $"{dmlOutcome.Message} ({elapsedMs}ms{modeText})"
+            ? $"{OneLine(dmlOutcome.Message!, 160)} ({elapsedMs}ms{modeText})"
             : $"Returned {totalRows:N0} rows in {elapsedMs}ms{modeText}";
+
+    // The status line is a single line; server error text can contain newlines and be long.
+    private static string OneLine(string text, int maxLength)
+    {
+        var collapsed = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
+        return collapsed.Length <= maxLength ? collapsed : collapsed[..(maxLength - 3)] + "...";
+    }
 
     public async Task ExecuteFetchXmlAsync(string fetchXml, CancellationToken screenCancellation)
     {

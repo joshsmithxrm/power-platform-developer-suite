@@ -311,10 +311,17 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
     {
         List<QueryRow>? lastResultRows = null;
 
+        var position = 0;
         foreach (var statement in statements)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            // Track the statement's position in the script (e.g. "3" or "2.1" inside a block) so DML
+            // outcomes can say which statement they belong to.
+            position++;
+            context.Statistics.PushStatement(position);
+            try
+            {
             switch (statement)
             {
                 case DeclareVariableStatement declare:
@@ -406,6 +413,11 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
                     lastResultRows = await ExecuteDataStatementAsync(
                         statement, scope, context, cancellationToken);
                     break;
+            }
+            }
+            finally
+            {
+                context.Statistics.PopStatement();
             }
         }
 

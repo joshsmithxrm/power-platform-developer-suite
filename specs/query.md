@@ -1,7 +1,7 @@
 # Query
 
 **Status:** Implemented
-**Last Updated:** 2026-03-18
+**Last Updated:** 2026-11-17
 **Surfaces:** CLI, TUI, Extension, MCP
 **Code:** [src/PPDS.Dataverse/Query/](../src/PPDS.Dataverse/Query/), [src/PPDS.Dataverse/Sql/](../src/PPDS.Dataverse/Sql/), [src/PPDS.Cli/Services/Query/](../src/PPDS.Cli/Services/Query/), [src/PPDS.Cli/Services/History/](../src/PPDS.Cli/Services/History/), [src/PPDS.Cli/Commands/Serve/Handlers/](../src/PPDS.Cli/Commands/Serve/Handlers/), [src/PPDS.Extension/src/](../src/PPDS.Extension/src/)
 
@@ -363,7 +363,11 @@ public enum QueryExecutionMode
 
 Manages per-environment query history with deduplication.
 
-**Replaying history (`ppds query history execute <id>`).** History can contain DML (the daemon and TUI record every executed statement), so replay is guarded exactly like `ppds query sql`: the request always carries `DmlSafety`, built from the same `--confirm`, `--dry-run` and `--no-limit` options (defined once in `DmlSafetyOptionSet` and shared by both commands), and the same environment safety settings are applied through `SqlCommand.ConfigureDmlSafetyAsync`. Replayed DML therefore needs `--confirm` (exit code 11 otherwise), honours the no-WHERE block, the 10,000-row cap and environment protection (Production and Test require `--confirm`), and `--dry-run` previews the plan without executing. The statement text is echoed to stderr before anything runs or is refused, so the user sees what is about to execute. SELECT replay is unchanged. `--dry-run` rejects CSV output, as in `query sql`.
+**Replaying history (`ppds query history execute <id>`).** History can contain DML (the daemon and TUI record every executed statement), so replay is guarded exactly like `ppds query sql`: the request always carries `DmlSafety`, built from the same `--confirm`, `--dry-run` and `--no-limit` options (defined once in `DmlSafetyOptionSet` and shared by both commands), and the same environment safety settings are applied through `SqlCommand.ConfigureDmlSafetyAsync`. Every DML statement needs `--confirm` at every protection level (exit code 11 otherwise); once confirmed, the protection level adds no further gate. The no-WHERE block and the 10,000-row cap apply, and `--dry-run` previews the plan without executing. The statement text is echoed to stderr before anything runs or is refused, with control characters escaped (`TerminalText.Sanitize`) so the terminal cannot show something different from what runs. SELECT replay is unchanged. `--dry-run` rejects CSV output, as in `query sql`.
+
+**`--top` and DML.** `--top` (`TopOverride`) and the `MAX_ROWS` hint limit result sets only. They never change which rows a DML statement affects: the service ignores them for any request containing DML, and the CLI says so on stderr ("--top is ignored for DML statements"). This is the same for `query sql`, `query history execute`, RPC `query/sql` and the TUI.
+
+**Fail-closed guard.** A `SqlQueryRequest` whose `DmlSafety` is null is checked with the default options (not confirmed, not dry-run, default row cap), so DML without explicit options is refused with `Query.DmlConfirmationRequired`. RPC `query/sql` without `dmlSafety` therefore refuses DML with error code `Query.DmlConfirmationRequired` and error data `{ code, message, dmlConfirmationRequired: true }`; TUI load-more passes explicit unconfirmed options and can never run DML.
 
 ```csharp
 public interface IQueryHistoryService
@@ -546,7 +550,14 @@ public sealed class SqlParseException : Exception
 - [ ] DML `--dry-run` succeeds without `--confirm`, executes no mutations, and leaves hard DML safety blocks intact
 - [ ] Daemon `query/sql` DML dry-run responses include the preview plan, FetchXML, row cap, and execution-confirmation requirement
 - [ ] Streaming DML dry-run completion chunks include the preview plan and DML safety metadata without dispatching an executor
-- [ ] `query history execute` of DML is refused without `--confirm` (exit 11), runs with it, `--dry-run` executes nothing, and Production/Test protection, the no-WHERE block and the row cap match `query sql`
+- [ ] `query history execute` of DML is refused without `--confirm` (exit 11), runs with it, `--dry-run` executes nothing, and environment protection, the no-WHERE block and the row cap match `query sql` (`HistoryExecuteCommandTests.Replay_*`, `BothCommands_*`)
+- [ ] The replayed statement is echoed to stderr before any refusal or execution with control characters escaped (`HistoryExecuteCommandTests.Replay_EscapesControlCharactersInTheEchoedStatement`, `TerminalTextTests`)
+- [ ] A request with no `DmlSafety` refuses DML, including via RPC `query/sql` and streaming; SELECT is unaffected (`DmlGuardFailClosedTests`)
+- [ ] `TopOverride` never limits a DML statement, single or in a script (`DmlTopOverrideTests`; CLI note: `SqlCommandTests.WriteTopIgnoredNote_*`)
+- [ ] Any failed row of any executed DML statement is not a success: CLI exit 1 (partial, `Operation.PartialFailure`) or 2 (none succeeded, `Query.ExecutionFailed`), JSON `success=false` with unchanged `data`, a top-level `error` and a `results[]` entry, stderr `Error:` for text/CSV (`SqlCommandTests.WriteResult_*`, `DmlOutcomeTests`)
+- [ ] DML outcomes cover every statement of a script with its real position (`#3`, `#2.1` inside a block), name the operation and entity, include statements that matched no rows, and tie the representative error to its statement (`DmlScriptReportingTests`, `DmlOutcomeTests`)
+- [ ] When a script is interrupted after some DML ran, the CLI reports what already ran and was not rolled back (`DmlScriptReportingTests.Script_Interrupted*`, `HistoryExecuteCommandTests.Replay_ScriptInterrupted*`)
+- [ ] RPC `query/sql` returns `success=false` with additive `affectedRows`, `failedRows` and `dmlError` when DML rows failed; the TUI status line and the streaming final chunk (`DmlOutcome`) report the same outcome (`RpcMethodHandlerTests.MapToResponse_Dml*`, `SqlQueryServiceTests.ExecuteStreamingAsync_DmlRowsFail_*`, `SqlQueryPresenterTests.FormatCompletionStatus_*`)
 
 ### Edge Cases
 

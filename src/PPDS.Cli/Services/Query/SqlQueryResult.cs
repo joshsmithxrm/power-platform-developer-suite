@@ -57,7 +57,7 @@ public sealed class SqlQueryResult
 
     /// <summary>
     /// Outcome of the DML statements that executed, covering every statement of a script (not only the
-    /// last one). Null when no DML executed (SELECT, dry-run) or no DML statement touched any row.
+    /// last one). Null when no DML statement executed (SELECT, dry-run).
     /// </summary>
     public DmlOutcome? DmlOutcome { get; init; }
 }
