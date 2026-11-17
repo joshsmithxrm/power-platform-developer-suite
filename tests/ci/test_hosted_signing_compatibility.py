@@ -70,6 +70,87 @@ def test_command_refusal_is_fixed_enum_not_private_diagnostics(diagnostic, expec
     assert h.command_refusal("private-prefix " + diagnostic, "private-suffix") == expected
 
 
+def test_command_refusal_accepts_exactly_the_driver_registry_codes():
+    driver = h.load_driver()
+    assert driver.REFUSAL_CODES >= set(driver.REFUSALS.values())
+    for code in driver.REFUSAL_CODES:
+        assert h.command_refusal("PRIVATE_OUTPUT", "PRIVATE\nPPDS_COMPAT_REFUSAL=" + code + "\nPRIVATE") == "driver-" + code
+    for unknown in ("unclassified", "C:/PRIVATE/path", "tool-hash PRIVATE", "TOOL-HASH", ""):
+        assert h.command_refusal("", "PPDS_COMPAT_REFUSAL=" + unknown) is None
+    # Two refusal lines are ambiguous; neither is passed through.
+    assert h.command_refusal("", "PPDS_COMPAT_REFUSAL=tool-hash\nPPDS_COMPAT_REFUSAL=plan-hash") is None
+
+
+@pytest.mark.parametrize("text,operation,status", [
+    ("PPDS_COMPAT_OPERATION=delay-restore\nPPDS_COMPAT_STATUS=17", "delay-restore", "17"),
+    ("PPDS_COMPAT_OPERATION=package-signature-verification\r\nPPDS_COMPAT_STATUS=0\r\n", "package-signature-verification", "0"),
+    ("PPDS_COMPAT_OPERATION=sign\nPPDS_COMPAT_STATUS=timeout", "sign", "timeout"),
+    ("PPDS_COMPAT_OPERATION=sign\nPPDS_COMPAT_STATUS=launch-failure", "sign", "launch-failure"),
+    ("PPDS_COMPAT_OPERATION=-3221225477\nPPDS_COMPAT_STATUS=-1073741819", None, "-1073741819"),
+    ("PPDS_COMPAT_OPERATION=C:/PRIVATE/argv\nPPDS_COMPAT_STATUS=PRIVATE", None, None),
+    ("PPDS_COMPAT_OPERATION=unlisted-operation\nPPDS_COMPAT_STATUS=017", None, None),
+    ("PPDS_COMPAT_OPERATION=sign PRIVATE\nPPDS_COMPAT_STATUS=1 PRIVATE", None, None),
+    ("no diagnostic lines at all", None, None),
+])
+def test_driver_operation_and_status_pass_only_fixed_values(text, operation, status):
+    assert h.command_operation("PRIVATE_STDOUT", text) == operation
+    assert h.command_status("PRIVATE_STDOUT", text) == status
+
+
+@pytest.mark.parametrize("stage", ["prepare", "sign", "verify"])
+def test_driver_failure_diagnostic_carries_fixed_codes_only(monkeypatch, capsys, tmp_path, stage):
+    h.load_driver()
+    stderr = ("C:/Users/PRIVATE/secret.snk\nPPDS_COMPAT_REFUSAL=package-content-hash\n"
+              "PPDS_COMPAT_OPERATION=package-signature-verification\nPPDS_COMPAT_STATUS=0\nPRIVATE_TRACE")
+    monkeypatch.setattr(h, "admit_host", lambda *a: {})
+    monkeypatch.setattr(h.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=1, stdout="PRIVATE_OUT", stderr=stderr))
+    monkeypatch.setattr(h, "Hosted", lambda *a: h.execute(["PRIVATE_COMMAND"], cwd=tmp_path, env={}, timeout=1))
+    monkeypatch.setattr(h, "load_driver", lambda: object())
+    assert h.main(["--stage", stage, "--source", "a" * 40, "--experiment", "offline", "--authorization", "offline-only",
+                   "--admit-network-connected-disposable-signing"]) == 1
+    captured = capsys.readouterr()
+    diagnostic = json.loads(captured.err.splitlines()[0])
+    assert diagnostic == {"hosted_compatibility_failure": "command", "refusal": "stage-command", "exit_code": 1,
+                          "command_refusal": "driver-package-content-hash",
+                          "driver_operation": "package-signature-verification", "driver_status": "0"}
+    assert "PRIVATE" not in captured.out + captured.err
+
+
+def test_coordinator_registry_covers_every_reason_with_a_distinct_code():
+    import ast
+    tree = ast.parse((ROOT / "scripts/ci/hosted_signing_compatibility.py").read_text(encoding="utf-8"))
+    reasons, dynamic = set(), []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "require" and len(node.args) >= 2:
+            argument = node.args[1]
+            if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+                reasons.add(argument.value)
+            else:
+                dynamic.append(node.lineno)
+    assert len(reasons) > 20 and sorted(reasons - set(h.REFUSALS)) == [] and dynamic == []
+    codes = list(h.REFUSALS.values())
+    assert len(codes) == len(set(codes))
+    assert h.REFUSALS[str(h.StageCommandError(1))] == "stage-command"
+
+
+@pytest.mark.parametrize("error,expected", [
+    (ValueError("Clean exact reviewed source required"), "source-state"),
+    (ValueError("Clean exact reviewed source required PRIVATE"), "exception-valueerror"),
+    (OSError(5, "Access is denied", "C:/PRIVATE/key.snk"), "exception-oserror"),
+    (json.JSONDecodeError("PRIVATE", "PRIVATE", 0), "exception-jsondecodeerror"),
+    (KeyError("PRIVATE"), "exception-keyerror"),
+    (type("PrivateError", (Exception,), {})("PRIVATE"), "exception-other"),
+])
+def test_coordinator_refusal_codes_never_carry_exception_text(error, expected):
+    assert h.refusal_code(error) == expected
+
+
+def test_coordinator_maps_driver_refusals_through_the_driver_registry():
+    driver = h.load_driver()
+    assert h.refusal_code(driver.Error("Linked input/output refused")) == "driver-linked-path"
+    assert h.refusal_code(driver.Error("Linked C:/PRIVATE refused")) == "driver-unregistered"
+
+
 def test_default_refuses_before_environment_files_or_tools(monkeypatch):
     class ForbiddenEnvironment:
         def get(self, *args):
@@ -261,7 +342,7 @@ def test_upload_stages_only_closed_public_inventory(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("fault", [None, "cleanup", "job", "plan", "mocked", "missing-case"])
-def test_verify_only_publishes_complete_bound_real_evidence(tmp_path, fault):
+def test_verify_only_publishes_complete_bound_real_evidence(tmp_path, fault, capsys):
     obj = h.Hosted.__new__(h.Hosted)
     obj.args, obj.root = args("verify"), tmp_path
     obj.binding, obj.tree, obj.tools = h.admit_host(obj.args, environment()), "b" * 40, {}
@@ -300,13 +381,54 @@ def test_verify_only_publishes_complete_bound_real_evidence(tmp_path, fault):
         h.json_write(output / "compatibility-receipt.json", {"cases": cases,
                      "evidence_class": "process-double" if fault == "mocked" else "real-process"})
     obj.driver = driver
+    phases = lambda: [json.loads(line)["hosted_compatibility_phase"] for line in capsys.readouterr().out.splitlines()]
+    expected = ["verify-plan-download-completed", "verify-prepare-download-completed", "verify-sign-download-completed",
+                "verify-plan-validated", "verify-custody-validated", "verify-context-validated",
+                "verify-driver-completed", "verify-cases-validated", "verify-evidence-uploaded"]
     if fault:
         with pytest.raises((ValueError, pure_driver.Error)):
             obj.verify()
         assert uploaded == []
+        # The last marker names the phase that completed before the refusal.
+        stop = {"cleanup": "verify-plan-validated", "plan": "verify-plan-validated",
+                "job": "verify-custody-validated", "mocked": "verify-driver-completed",
+                "missing-case": "verify-driver-completed"}[fault]
+        assert phases() == expected[:expected.index(stop) + 1]
     else:
         obj.verify()
         assert uploaded == ["evidence"]
+        assert phases() == expected
+
+
+# Exactly the environment every coordinator-launched driver process had before NuGet folders were
+# added for build children (commit 1524e4192). The sign driver handles the disposable key.
+DRIVER_LAUNCH_ENVIRONMENT = {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "ProgramFiles(x86)", "PROGRAMDATA",
+                             "ALLUSERSPROFILE", "DOTNET_CLI_HOME", "NUGET_PACKAGES", "DOTNET_CLI_TELEMETRY_OPTOUT",
+                             "DOTNET_NOLOGO", "DOTNET_SKIP_FIRST_TIME_EXPERIENCE",
+                             "DOTNET_GENERATE_ASPNET_CERTIFICATE", "PATH"}
+
+
+@pytest.mark.parametrize("stage,extras", [
+    ("sign", ["--prepared", "C:/fixture/prepared", "--disposable-key", "C:/fixture/never-read.snk",
+              "--key-use-authorization", "offline-only"]),
+    ("prepare", ["--source-root", "C:/fixture/source", "--public-key", "C:/fixture/public.bin"]),
+    ("verify", ["--source-root", "C:/fixture/source", "--prepared", "C:/fixture/p", "--signed", "C:/fixture/s"]),
+])
+def test_driver_launch_environment_is_exact_and_has_no_nuget_folders(tmp_path, monkeypatch, stage, extras):
+    obj = h.Hosted.__new__(h.Hosted)
+    obj.root, obj.d = tmp_path, h.load_driver()
+    obj.plan_directory, obj.plan_hash = tmp_path / "plan", "c" * 64
+    obj.plan_value = {"windows_directory": "C:/Windows", "windows_common_data_directory": "C:/ProgramData",
+                      "tools": {name: {"path": f"C:/fixture/{name}/{name}.exe"} for name in ("git", "dotnet", "pwsh")}
+                      | {"sn": {"path": obj.d.FIXED_SIGNER}}}
+    launched = []
+    monkeypatch.setattr(h, "execute", lambda command, **kwargs: launched.append((command, kwargs)))
+    obj.driver(stage, tmp_path / "out", *extras)
+    (command, kwargs), = launched
+    assert command[:5] == [h.sys.executable, "-I", "-B", str(h.DRIVER), stage]
+    assert set(kwargs["env"]) == DRIVER_LAUNCH_ENVIRONMENT
+    assert not {"APPDATA", "LOCALAPPDATA", "DOTNET_CLI_UI_LANGUAGE", "ACTIONS_RUNTIME_TOKEN"} & set(kwargs["env"])
+    assert kwargs["env"]["TEMP"] == str(tmp_path / "temp")
 
 
 def test_workflow_is_manual_read_only_and_has_no_deadlock_or_unfinished_outputs():

@@ -22,6 +22,7 @@ import stat
 import struct
 import subprocess
 import sys
+from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -42,6 +43,36 @@ HELPERS = (
     "tests/compatibility/plugin_signing_compatibility.py",
 )
 Error = h.Error
+# Git's object ID for a zero-byte blob. An empty tracked file is copied only when the index
+# records exactly this blob, so a non-empty file truncated in the worktree is not admitted.
+EMPTY_BLOB = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+# Written as the owned user-level NuGet configuration before the first restore. NuGet otherwise
+# loads the machine-wide Visual Studio fallback-folder configuration (found through
+# ProgramFiles(x86)), and a package served from a fallback folder is never extracted into the
+# owned package folder. A global -p:RestoreFallbackFolders=clear is not usable: NuGet treats a
+# command-line value as a path override and resolves "clear" as a directory name.
+NUGET_USER_CONFIG = (b'<?xml version="1.0" encoding="utf-8"?>\n<configuration>\n'
+                     b'  <fallbackPackageFolders>\n    <clear />\n  </fallbackPackageFolders>\n</configuration>\n')
+# Every operation name a tool call can carry. Runtime.run refuses any other name, and a failure
+# reports only one of these names, never argv, paths, output or exception text.
+OPERATIONS = frozenset({
+    "inventory-git", "inventory-dotnet", "inventory-pwsh", "inventory-sn", "source-identity",
+    "delay-restore", "delay-build", "delay-pack", "public-restore", "public-build",
+    "evaluated-properties", "selected-sdk", "compiler-product-version", "package-signature-verification",
+    "metadata", "delay-forced-rejection", "sign", "signed-forced-verification", "signature-only-comparison",
+    "fresh-forced-verification", "fresh-signature-comparison", "corrupt-signature-rejection",
+    "non-signature-change-rejection", "packaged-forced-verification", "packaged-metadata",
+})
+PUBLIC_DIAGNOSTIC_OPERATIONS = frozenset({
+    "delay-forced-rejection", "signed-forced-verification", "signature-only-comparison",
+    "fresh-forced-verification", "fresh-signature-comparison", "corrupt-signature-rejection",
+    "non-signature-change-rejection", "packaged-forced-verification", "package-signature-verification",
+})
+BASE64_SHA512 = r"[A-Za-z0-9+/]{86}=="
+# Global properties that would replace or skip MinVer's derivation of the version properties.
+EXPLICIT_VERSION_PROPERTIES = tuple("-p:" + name.lower() + "=" for name in (
+    "Version", "VersionPrefix", "VersionSuffix", "PackageVersion", "AssemblyVersion", "FileVersion",
+    "InformationalVersion", "MinVerSkip", "MinVerVersion", "IncludeSourceRevisionInInformationalVersion"))
 
 # This trusted, metadata-only probe never loads target code. Its bytes are bound
 # in receipts. All parameters are passed separately, not interpolated as code.
@@ -112,6 +143,7 @@ try {
     public_key_sha256=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($identity.GetPublicKey())).ToLowerInvariant()
     mvid=$reader.GetGuid($reader.GetModuleDefinition().Mvid).ToString()
     framework=$frameworks[0]; informational_version=[Diagnostics.FileVersionInfo]::GetVersionInfo($Dll).ProductVersion
+    file_version=[Diagnostics.FileVersionInfo]::GetVersionInfo($Dll).FileVersion
     codeview=$debug[0]; pdb=@{guid=$pdbGuid; stamp=$pdbStamp}; mutation=$mutation
   } | ConvertTo-Json -Depth 5 -Compress
 } finally {
@@ -137,10 +169,12 @@ def read(path, limit=h.MAX_PACKAGE):
     return h.regular_bytes(path, limit)
 
 
-def read_source(path):
+def read_source(path, blob):
     # Tracked source can legitimately be empty (.gitkeep, package __init__.py). A handoff
     # file must not be, so the empty case is admitted here only, with every other
-    # regular-file property still required: no link, no reparse point, a single name.
+    # regular-file property still required: no link, no reparse point, a single name. The
+    # index must also record the empty blob for that path, so a tracked non-empty file that
+    # was truncated (and hidden from status by assume-unchanged/skip-worktree) is refused.
     path = Path(path)
     local_path(path)
     info = path.lstat()
@@ -148,6 +182,7 @@ def read_source(path):
         return h.regular_bytes(path, h.MAX_PACKAGE)
     require(stat.S_ISREG(info.st_mode) and not path.is_symlink() and info.st_nlink == 1
             and not getattr(info, "st_file_attributes", 0) & 0x400, "Regular tracked source file required")
+    require(blob == EMPTY_BLOB, "Empty source file is not an empty tracked blob")
     require(path.read_bytes() == b"", "Tracked source file changed while reading")
     return b""
 
@@ -268,6 +303,7 @@ class Runtime:
             self.calls = []
 
     def run(self, command, *, cwd, environment, operation, timeout=120):
+        require(operation in OPERATIONS, "Unlisted tool operation")
         started = utc()
         try:
             result = subprocess.run(command, cwd=cwd, env=environment, stdin=subprocess.DEVNULL,
@@ -282,9 +318,7 @@ class Runtime:
         row = {"operation": operation, "exit_code": result.returncode, "started_utc": started, "completed_utc": utc()}
         # Retain public verification diagnostics only. Never retain signing argv,
         # exception text or private-key-operation output, even on success.
-        if self.key_cleanup == "not_used" and operation in {"delay-forced-rejection", "signed-forced-verification", "signature-only-comparison",
-                         "fresh-forced-verification", "fresh-signature-comparison", "corrupt-signature-rejection",
-                         "non-signature-change-rejection", "packaged-forced-verification"}:
+        if self.key_cleanup == "not_used" and operation in PUBLIC_DIAGNOSTIC_OPERATIONS:
             diagnostics = result.stdout + result.stderr
             row.update(public_diagnostics=diagnostics[:8192], omitted_diagnostic_characters=max(0, len(diagnostics)-8192))
         elif self.key_cleanup != "not_used" or operation == "sign":
@@ -303,24 +337,33 @@ class Runtime:
         Path(owned).unlink()
 
 
-def environment(plan, temporary, *, build=False):
+def environment(plan, temporary, *, build=False, nuget=False):
     # No os.environ, PATH inheritance, token lookup or secret API.
+    require(build or not nuget, "NuGet folders are only for build children")
     result = {"SYSTEMROOT": plan["windows_directory"], "WINDIR": plan["windows_directory"],
               "PROGRAMDATA": plan["windows_common_data_directory"], "ALLUSERSPROFILE": plan["windows_common_data_directory"],
               "TEMP": str(temporary), "TMP": str(temporary),
               "ProgramFiles(x86)": str(PureWindowsPath(*PureWindowsPath(FIXED_SIGNER).parts[:2]))}
     if build:
-        # NuGet resolves its configuration and cache folders from APPDATA and LOCALAPPDATA and
-        # fails restore with a null-path error when either is absent. Both point inside the
-        # owned temporary directory, so no user profile or ambient NuGet state is read.
         result.update(DOTNET_CLI_HOME=str(temporary / "dotnet-home"),
                       NUGET_PACKAGES=str(temporary / "packages"),
-                      APPDATA=str(temporary / "appdata"), LOCALAPPDATA=str(temporary / "localappdata"),
                       DOTNET_CLI_TELEMETRY_OPTOUT="1", DOTNET_NOLOGO="1",
                       DOTNET_SKIP_FIRST_TIME_EXPERIENCE="1",
                       DOTNET_GENERATE_ASPNET_CERTIFICATE="false")
         result["PATH"] = ";".join(dict.fromkeys(str(PureWindowsPath(tool["path"]).parent)
                                                 for tool in plan["tools"].values()))
+    if nuget:
+        # Only the dotnet restore/build/pack/msbuild and package-verification children get these.
+        # NuGet resolves its user configuration and cache folders from APPDATA and LOCALAPPDATA
+        # and fails with a null-path error when either is absent. Both point inside the owned
+        # temporary directory, so the user-level config and caches are owned; the driver writes
+        # that user config itself (NUGET_USER_CONFIG). NuGet still reads NuGet.Config files in
+        # the owned source copy and its ancestors and the machine-wide configuration under
+        # ProgramFiles(x86); the repository NuGet.config clears inherited package sources, the
+        # owned user config clears fallback folders, and build_evidence checks what restore used.
+        # The CLI language is fixed so that package verification output is parsed in English.
+        result.update(APPDATA=str(temporary / "appdata"), LOCALAPPDATA=str(temporary / "localappdata"),
+                      DOTNET_CLI_UI_LANGUAGE="en-US")
     return result
 
 
@@ -330,10 +373,11 @@ def pin(plan, names):
                 "Pinned tool bytes differ")
 
 
-def invoke(rt, plan, tool, args, output, operation, *, zero=True, build=False, timeout=120, cwd=None):
+def invoke(rt, plan, tool, args, output, operation, *, zero=True, build=False, nuget=False, timeout=120, cwd=None):
     pin(plan, [tool])
+    require(tool == "dotnet" or not nuget, "NuGet folders are only for build children")
     result = rt.run([plan["tools"][tool]["path"], *map(str, args)], cwd=cwd or output,
-                    environment=environment(plan, output / "temp", build=build),
+                    environment=environment(plan, output / "temp", build=build, nuget=nuget),
                     operation=operation, timeout=timeout)
     require((result.returncode == 0) if zero else (result.returncode != 0),
             "Candidate tool result differs from the required outcome")
@@ -382,7 +426,7 @@ def expected_files(plan, stage):
     return {"input.dll", "signed.dll"}
 
 
-def required_operation_counts(stage):
+def required_operation_counts(stage, packages=0):
     if stage == "sign":
         return {name: 1 for name in ("sign", "signed-forced-verification", "signature-only-comparison")}
     require(stage == "prepare", "Unexpected observation stage")
@@ -391,26 +435,48 @@ def required_operation_counts(stage):
                                       "public-build", "delay-forced-rejection")})
     counts.update({"source-identity": 5, "evaluated-properties": 2, "selected-sdk": 2,
                    "compiler-product-version": 4, "metadata": 2})
+    # One signature verification per recorded package row, in each of the two builds.
+    require(type(packages) is int and packages > 0, "Package verification count required")
+    counts["package-signature-verification"] = packages
     return counts
 
 
+def version_rule(version):
+    # MinVer's production derivation (MinVer.targets): AssemblyVersion {Major}.0.0.0 and
+    # FileVersion {Major}.{Minor}.{Patch}.0, for the version without pre-release/build parts.
+    numbers = release.strict_version(version).split("-")[0].split(".")
+    require(len(numbers) == 3 and all(n.isdigit() and int(n) <= 65534 for n in numbers),
+            "Assembly version component bound")
+    major, minor, patch = numbers
+    return {"assembly_version": f"{major}.0.0.0", "file_version": f"{major}.{minor}.{patch}.0"}
+
+
+def base64_sha512(value):
+    return isinstance(value, str) and re.fullmatch(BASE64_SHA512, value) is not None
+
+
 def validate_build_record(value, plan, control):
-    require(isinstance(value, dict) and {"sdk", "evaluated_properties", "binaries", "assets_sha256", "packages"} <= value.keys(),
-            "Required build observations missing")
+    require(isinstance(value, dict) and {"sdk", "evaluated_properties", "binaries", "assets_sha256", "packages",
+            "restore"} <= value.keys(), "Required build observations missing")
     props = value["evaluated_properties"]
+    rule = version_rule(plan["version"])
     expected = {"NETCoreSdkVersion": value["sdk"], "TargetFramework": "net462", "SignAssembly": "true",
                 "PublicSign": str(control).lower(), "DelaySign": str(not control).lower(),
-                "Configuration": "Release", "PackageVersion": plan["version"],
+                "Configuration": "Release", "PackageVersion": plan["version"], "MinVerVersion": plan["version"],
+                "AssemblyVersion": rule["assembly_version"], "FileVersion": rule["file_version"],
                 "InformationalVersion": plan["version"] + "+" + plan["source"]}
     require(isinstance(value["sdk"], str) and value["sdk"] and isinstance(props, dict)
             and all(props.get(k) == v for k, v in expected.items()) and props.get("MSBuildVersion")
-            and props.get("AssemblyOriginatorKeyFile") and props.get("AssemblyVersion") and props.get("FileVersion"),
-            "Required evaluated build observations differ")
+            and props.get("AssemblyOriginatorKeyFile"), "Required evaluated build observations differ")
     require(check_hex(value["assets_sha256"]) and set(value["binaries"]) == {"msbuild", "roslyn"},
             "Actual assets/compiler observations missing")
     for row in value["binaries"].values():
         require(isinstance(row, dict) and check_hex(row.get("sha256")) and row.get("bytes", 0) > 0
                 and row.get("path") and product_version(row.get("product_version")), "Compiler observation incomplete")
+    restore = value["restore"]
+    require(isinstance(restore, dict) and restore.get("fallback_folders") == [] and restore.get("package_folders") == 1
+            and isinstance(restore.get("source"), str) and restore["source"].startswith("https://"),
+            "Restore folder/source observation differs")
     packages = value["packages"]
     require(isinstance(packages, list) and 0 < len(packages) <= 1000, "Resolved dependency observations missing")
     ids = set()
@@ -418,8 +484,18 @@ def validate_build_record(value, plan, control):
         require(isinstance(row, dict) and isinstance(row.get("id"), str) and row["id"]
                 and isinstance(row.get("version"), str) and row["version"] and check_hex(row.get("sha256")),
                 "Resolved dependency observation incomplete")
-        require(all(isinstance(row.get(key), str) and re.fullmatch(r"[A-Za-z0-9+/]{86}==", row[key])
-                    for key in ("sha512", "content_sha512")), "Resolved dependency content hash missing")
+        require(base64_sha512(row.get("sha512")) and base64_sha512(row.get("content_sha512")),
+                "Resolved dependency content hash missing")
+        require(row.get("source") == restore["source"], "Resolved dependency source differs")
+        reference = row.get("reference")
+        require(reference in {"direct-pinned", "direct-sdk-implicit", "transitive"}
+                and (row.get("pin") == row["version"] if reference == "direct-pinned" else row.get("pin") is None),
+                "Resolved dependency pin observation differs")
+        signature = row.get("signature")
+        require(isinstance(signature, dict) and signature.get("content_sha512") == row["content_sha512"]
+                and signature.get("repository_service_index") == restore["source"]
+                and check_hex(signature.get("repository_certificate_sha256")),
+                "Resolved dependency signature observation incomplete")
         require(row["id"].lower() not in ids, "Duplicate resolved dependency observation")
         ids.add(row["id"].lower())
     require({"minver", "microsoft.sourcelink.github", "microsoft.netframework.referenceassemblies.net462"} <= ids,
@@ -428,7 +504,14 @@ def validate_build_record(value, plan, control):
 
 def validate_observations(value, stage, plan):
     require(isinstance(value.get("commands"), list), "Required command observations missing")
-    expected = required_operation_counts(stage)
+    if stage == "prepare":
+        builds = value.get("build_evidence")
+        require(isinstance(builds, dict) and set(builds) == {"delay", "public"}
+                and all(isinstance(row, dict) and isinstance(row.get("packages"), list) for row in builds.values()),
+                "Both build observations required")
+        expected = required_operation_counts(stage, sum(len(row["packages"]) for row in builds.values()))
+    else:
+        expected = required_operation_counts(stage)
     counts = {}
     for command in value["commands"]:
         require(isinstance(command, dict) and command.get("operation") in expected
@@ -460,17 +543,22 @@ def validate_observations(value, stage, plan):
             "Both build observations required")
     for name in ("delay", "public"):
         validate_build_record(value["build_evidence"][name], plan, name == "public")
-    require(isinstance(value.get("build_overlay"), list) and {"-p:SignAssembly=true", "-p:DebugType=portable",
-            "-p:Version=" + plan["version"], "-p:InformationalVersion=" + plan["version"] + "+" + plan["source"]}
-            <= set(value["build_overlay"]), "Public build overlay observation incomplete")
+    overlay = value.get("build_overlay")
+    require(isinstance(overlay, list) and all(isinstance(item, str) for item in overlay)
+            and {"-p:SignAssembly=true", "-p:DebugType=portable", "-p:MinVerVersionOverride=" + plan["version"],
+                 "-p:SourceRevisionId=" + plan["source"]} <= set(overlay), "Public build overlay observation incomplete")
+    require(not any(item.lower().startswith(prefix) for item in overlay for prefix in EXPLICIT_VERSION_PROPERTIES),
+            "Build overlay must not bypass MinVer's version derivation")
+    rule = version_rule(plan["version"])
     for field in ("metadata", "control_metadata"):
         row = value.get(field)
-        require(isinstance(row, dict) and {"name", "assembly_version", "culture", "public_key_sha256", "mvid",
-                "framework", "informational_version", "codeview", "pdb", "mutation"} <= row.keys(),
+        require(isinstance(row, dict) and {"name", "assembly_version", "file_version", "culture", "public_key_sha256",
+                "mvid", "framework", "informational_version", "codeview", "pdb", "mutation"} <= row.keys(),
                 "Assembly/PDB observations missing")
         require(row["name"] == "PPDS.Plugins" and row["public_key_sha256"] == plan["public_key_sha256"]
                 and row["framework"] == ".NETFramework,Version=v4.6.2"
-                and row["informational_version"] == plan["version"] + "+" + plan["source"],
+                and row["informational_version"] == plan["version"] + "+" + plan["source"]
+                and row["assembly_version"] == rule["assembly_version"] and row["file_version"] == rule["file_version"],
                 "Assembly observation identity differs")
         require(isinstance(row["pdb"], dict) and isinstance(row["codeview"], dict)
                 and row["pdb"].get("guid") and row["pdb"].get("guid") == row["codeview"].get("guid")
@@ -522,9 +610,11 @@ def metadata(rt, plan, output, probe, dll, pdb):
     raw = invoke(rt, plan, "pwsh", ["-NoProfile", "-File", probe, "-Dll", dll, "-Pdb", pdb],
                  output, "metadata")
     value = h.decode(raw.encode())
+    rule = version_rule(plan["version"])
     require(value["name"] == "PPDS.Plugins" and value["framework"] == ".NETFramework,Version=v4.6.2"
             and value["public_key_sha256"] == plan["public_key_sha256"]
-            and value["informational_version"] == plan["version"] + "+" + plan["source"],
+            and value["informational_version"] == plan["version"] + "+" + plan["source"]
+            and value["assembly_version"] == rule["assembly_version"] and value["file_version"] == rule["file_version"],
             "Actual assembly metadata differs from candidate identity")
     return value
 
@@ -603,12 +693,17 @@ def source_copy(rt, plan, source, output):
             not git(["status", "--porcelain"]).strip(), "Clean exact source required")
     copied = output / "source"
     copied.mkdir()
-    names = git(["ls-files", "-z"]).split("\0")
+    # "<mode> <blob> <stage>\t<name>" per index entry; the blob admits empty files (read_source).
+    entries = []
+    for entry in filter(None, git(["ls-files", "-s", "-z"]).split("\0")):
+        match = re.fullmatch(r"(100644|100755) ([0-9a-f]{40}) 0\t(.+)", entry, re.DOTALL)
+        require(match is not None, "Unexpected source index entry")
+        entries.append((match[3], match[2]))
     inputs = {}
-    for name in filter(None, names):
+    for name, blob in entries:
         require(not Path(name).is_absolute() and "\\" not in name and ".." not in Path(name).parts
                 and Path(name).suffix.lower() != ".snk", "Unsafe source inventory")
-        data = read_source(source / name)
+        data = read_source(source / name, blob)
         target = copied / name
         target.parent.mkdir(parents=True, exist_ok=True)
         write(target, data)
@@ -619,29 +714,87 @@ def source_copy(rt, plan, source, output):
     return copied, inputs
 
 
-def canonical_tool_path(reported):
+def canonical_tool_path(reported, root):
     # The SDK reports RoslynTargetsPath as "<sdk>/Sdks/Microsoft.NET.Sdk/targets/../../../Roslyn".
-    # Collapse the parent segments lexically, then require that the result is the same file the
-    # reported path names once links are resolved, so a link among the collapsed segments cannot
-    # redirect the recorded compiler. The collapsed path still goes through the link/reparse and
-    # traversal checks when it is read.
+    # Collapse the parent segments lexically. On Windows that is the guarantee: Win32 resolves
+    # ".." lexically before following any link, so the collapsed path is the file dotnet opens,
+    # and the realpath comparison below cannot fail there (ntpath.realpath normalises first). On
+    # POSIX a link before a ".." is followed first, and the comparison refuses that case. The
+    # collapsed path must also sit under the pinned dotnet root, and it still goes through the
+    # link/reparse and traversal checks when it is read. The dropped segments are not link-checked.
     collapsed = Path(os.path.normpath(str(reported)))
     require(os.path.realpath(str(collapsed)) == os.path.realpath(str(reported)),
             "Reported compiler path does not resolve to its canonical form")
+    require(collapsed.is_relative_to(Path(os.path.normpath(str(root)))), "Compiler is outside the pinned dotnet root")
     return collapsed
+
+
+def repository_source(source):
+    # The single package source the reviewed NuGet.config declares, read from the owned copy.
+    root = ElementTree.fromstring(read(source / "NuGet.config", 65536))
+    sources = root.findall("packageSources")
+    require(root.tag == "configuration" and len(sources) == 1, "Repository package source required")
+    children = list(sources[0])
+    require(len(children) == 2 and children[0].tag == "clear" and children[1].tag == "add"
+            and re.fullmatch(r"https://[^\s<>\"']+", children[1].get("value", "")) is not None,
+            "Repository package source required")
+    return children[1].get("value")
+
+
+def central_pins(source):
+    # Directory.Packages.props in the owned copy; central package management pins versions only.
+    root = ElementTree.fromstring(read(source / "Directory.Packages.props", 1024**2))
+    pins = {}
+    for item in root.iter("PackageVersion"):
+        name, version = item.get("Include"), item.get("Version")
+        require(isinstance(name, str) and isinstance(version, str) and name.lower() not in pins,
+                "Central package pin required")
+        pins[name.lower()] = version
+    require(pins, "Central package pin required")
+    return pins
+
+
+def signature_verification(text, package_id, version, source_url):
+    # Parse `dotnet nuget verify --all` output (English CLI language is fixed in the environment).
+    # NuGet computes the content hash from the archive, and a successful verification means the
+    # repository signature over that hash is valid. Only these fixed fields are kept.
+    lines = [line.strip() for line in text.splitlines()]
+    hashes = [line[len("Content hash: "):] for line in lines if line.startswith("Content hash: ")]
+    require(len(hashes) == 1 and base64_sha512(hashes[0]), "Package signature verification incomplete")
+    require(sum(line.lower() == f"successfully verified package '{package_id}.{version}'.".lower()
+                for line in lines) == 1, "Package signature verification incomplete")
+    repository = [n for n, line in enumerate(lines) if line == "Signature type: Repository"]
+    require(len(repository) == 1 and repository[0] + 1 < len(lines)
+            and lines[repository[0] + 1] == "Service index: " + source_url, "Package repository signature differs")
+    certificate = None
+    for n in range(repository[0], len(lines)):
+        if re.fullmatch(r"Verifying the repository (primary signature|countersignature) with certificate:", lines[n]):
+            following = [line for line in lines[n + 1:n + 6] if line.startswith("SHA256 hash: ")]
+            certificate = following[0][len("SHA256 hash: "):].lower() if following else None
+            break
+    require(check_hex(certificate), "Package repository signature differs")
+    return {"content_sha512": hashes[0], "repository_service_index": source_url,
+            "repository_certificate_sha256": certificate}
 
 
 def build_evidence(rt, plan, output, source, project, work, props, probe, control):
     fields = ("NETCoreSdkVersion", "MSBuildVersion", "MSBuildBinPath", "RoslynTargetsPath",
               "CscToolPath", "CscToolExe", "TargetFramework", "SignAssembly", "PublicSign",
               "DelaySign", "AssemblyOriginatorKeyFile", "AssemblyVersion", "FileVersion",
-              "InformationalVersion", "PackageVersion", "Configuration")
-    result = invoke(rt, plan, "dotnet", ["msbuild", project, "-getProperty:" + ",".join(fields), "-p:Configuration=Release", *props],
-                    output, "evaluated-properties", build=True, cwd=source)
+              "InformationalVersion", "PackageVersion", "MinVerVersion", "Configuration")
+    # MinVer and the SDK set the version properties inside targets, so evaluation alone reports
+    # the SDK defaults. Running GetAssemblyAttributes (MinVer runs before GetAssemblyVersion; the
+    # SDK then appends SourceRevisionId) reports the values the compiler was given.
+    result = invoke(rt, plan, "dotnet", ["msbuild", project, "-getProperty:" + ",".join(fields),
+                    "-t:GetAssemblyAttributes", "-p:Configuration=Release", *props],
+                    output, "evaluated-properties", build=True, nuget=True, cwd=source)
     observed = h.decode(result.encode())["Properties"]
     require(set(fields) <= observed.keys(), "Evaluated build evidence incomplete")
+    rule = version_rule(plan["version"])
     expected = {"TargetFramework": "net462", "SignAssembly": "true", "PublicSign": str(control).lower(),
                 "DelaySign": str(not control).lower(), "PackageVersion": plan["version"],
+                "MinVerVersion": plan["version"], "AssemblyVersion": rule["assembly_version"],
+                "FileVersion": rule["file_version"],
                 "InformationalVersion": plan["version"] + "+" + plan["source"], "Configuration": "Release"}
     require(all(observed[key] == value for key, value in expected.items()), "Evaluated signing/version properties differ")
     require(PureWindowsPath(observed["AssemblyOriginatorKeyFile"]) == PureWindowsPath(str(output / "test-public.bin")),
@@ -651,9 +804,10 @@ def build_evidence(rt, plan, output, source, project, work, props, probe, contro
     compiler = (Path(observed["CscToolPath"]) if observed["CscToolPath"] else
                 Path(observed["RoslynTargetsPath"]) / "bincore") / (observed["CscToolExe"] or "csc.dll")
     binaries = {}
+    dotnet_root = Path(plan["tools"]["dotnet"]["path"]).parent
     for name, reported in {"msbuild": Path(observed["MSBuildBinPath"]) / "MSBuild.dll", "roslyn": compiler}.items():
         require(reported.is_absolute(), "Actual compiler path required")
-        path = canonical_tool_path(reported)
+        path = canonical_tool_path(reported, dotnet_root)
         version = invoke(rt, plan, "pwsh", ["-NoProfile", "-File", probe, "-Tool", path],
                          output, "compiler-product-version").rstrip("\r\n")
         require(version, "Actual compiler product version missing")
@@ -661,6 +815,19 @@ def build_evidence(rt, plan, output, source, project, work, props, probe, contro
     assets_path = work / "obj/project.assets.json"
     assets_raw = read(assets_path, 16 * 1024**2)
     assets = h.decode(assets_raw)
+    restore = assets["project"]["restore"]
+    # A package served from a fallback folder is not extracted into the owned package folder.
+    require(not restore.get("fallbackFolders"), "Restore used a NuGet fallback folder")
+    folders = list(assets["packageFolders"])
+    owned_packages = os.path.normcase(os.path.normpath(str(output / "temp/packages")))
+    require(len(folders) == 1 and os.path.normcase(os.path.normpath(folders[0])) == owned_packages,
+            "Restore used a package folder other than the owned one")
+    source_url = repository_source(source)
+    pins = central_pins(source)
+    require(set(assets["project"]["frameworks"]) == {"net462"}, "Unexpected restore frameworks")
+    direct = {key.lower(): row for key, row in assets["project"]["frameworks"]["net462"]["dependencies"].items()}
+    require(set(direct) <= {key.split("/", 1)[0].lower() for key in assets["libraries"]},
+            "Direct build dependency unresolved")
     packages = []
     for name, library in sorted(assets["libraries"].items()):
         require(library["type"] == "package", "Unexpected non-package build dependency")
@@ -674,21 +841,42 @@ def build_evidence(rt, plan, output, source, project, work, props, probe, contro
         sha512 = base64.b64encode(hashlib.sha512(data).digest()).decode()
         # project.assets.json records NuGet's content hash, which leaves out the repository
         # signature every nuget.org package carries, so it never equals the hash of the file.
-        # NuGet writes both values beside the package: the content hash in .nupkg.metadata and
-        # the hash of the downloaded file in <name>.nupkg.sha512. Bind the resolved entry to
-        # the first and the bytes actually used to the second, and record both.
-        metadata = h.decode(read(folder / ".nupkg.metadata", 65536))
-        require(isinstance(metadata, dict) and metadata.get("contentHash") == library["sha512"],
-                "Resolved package content hash differs")
+        # The content hash is bound three ways: assets == .nupkg.metadata (both written by
+        # NuGet), and assets == the content hash `dotnet nuget verify` computes from the archive
+        # while validating its nuget.org repository signature. The file hash is bound to the
+        # <name>.nupkg.sha512 sidecar NuGet wrote at extraction.
+        require(base64_sha512(library.get("sha512")), "Resolved package content hash differs")
+        sidecar = h.decode(read(folder / ".nupkg.metadata", 65536))
+        require(isinstance(sidecar, dict) and base64_sha512(sidecar.get("contentHash"))
+                and sidecar["contentHash"] == library["sha512"], "Resolved package content hash differs")
+        require(sidecar.get("source") == source_url, "Resolved package source differs")
         recorded = read(folder / (archive.name + ".sha512"), 4096).decode("ascii", "replace").strip()
         require(recorded == sha512, "Resolved package file hash differs")
+        dependency = direct.get(package_id.lower())
+        if dependency is None:
+            reference, pin = "transitive", None
+        elif dependency.get("versionCentrallyManaged") is True:
+            reference, pin = "direct-pinned", pins.get(package_id.lower())
+            require(pin == version and dependency.get("version") == "[" + pin + ", )",
+                    "Resolved package differs from its central pin")
+        else:
+            require(dependency.get("autoReferenced") is True, "Unpinned direct build dependency")
+            reference, pin = "direct-sdk-implicit", None
+        signature = signature_verification(
+            invoke(rt, plan, "dotnet", ["nuget", "verify", "--all", archive], output,
+                   "package-signature-verification", build=True, nuget=True, cwd=source),
+            package_id, version, source_url)
+        require(signature["content_sha512"] == library["sha512"], "Verified package content hash differs")
         packages.append({"id": package_id, "version": version, "sha256": digest(data), "sha512": sha512,
-                         "content_sha512": library["sha512"]})
+                         "content_sha512": library["sha512"], "source": source_url, "reference": reference,
+                         "pin": pin, "signature": signature})
     ids = {row["id"].lower() for row in packages}
     require({"minver", "microsoft.sourcelink.github", "microsoft.netframework.referenceassemblies.net462"} <= ids,
             "Required resolved build inputs missing")
     return {"sdk": sdk, "evaluated_properties": observed, "binaries": binaries,
-            "assets_sha256": digest(assets_raw), "packages": packages}
+            "assets_sha256": digest(assets_raw), "packages": packages,
+            "restore": {"fallback_folders": [], "package_folders": 1, "source": source_url,
+                        "sources": sorted(restore.get("sources", {}))}}
 
 
 def prepare(args, plan, rt):
@@ -702,26 +890,25 @@ def prepare(args, plan, rt):
     require(digest(public) == plan["public_key_sha256"], "Test public identity mismatch")
     write(output / "test-public.bin", public)
     source, inputs = source_copy(rt, plan, args.source_root, output)
-    # Owned copy only. Global properties provide an explicit version/source overlay;
-    # no Git tag or activated signing policy is fabricated.
+    # Owned copy only. Global properties provide an explicit source/public-key overlay; no Git
+    # tag or activated signing policy is fabricated.
     project = source / "src/PPDS.Plugins/PPDS.Plugins.csproj"
-    version_numbers = plan["version"].split("-")[0].split(".")
-    require(all(int(x) <= 65534 for x in version_numbers), "Assembly version component bound")
+    version_rule(plan["version"])
     overlay = [
         "-p:SignAssembly=true", "-p:AssemblyOriginatorKeyFile=" + str(output / "test-public.bin"),
-        "-p:Version=" + plan["version"], "-p:PackageVersion=" + plan["version"],
-        "-p:AssemblyVersion=" + ".".join(version_numbers) + ".0",
-        "-p:FileVersion=" + ".".join(version_numbers) + ".0",
-        "-p:InformationalVersion=" + plan["version"] + "+" + plan["source"],
-        "-p:IncludeSourceRevisionInInformationalVersion=false", "-p:RepositoryCommit=" + plan["source"],
-        "-p:SourceRevisionId=" + plan["source"], "-p:ContinuousIntegrationBuild=true",
-        "-p:DebugType=portable",
-        # MinVer computes the version from Git tags inside a build target and overwrites the
-        # version properties above. The owned copy has no .git, so it would stamp its
-        # 0.0.0-alpha.0 fallback on the assembly and the package. Skip it so the explicit
-        # candidate version is the one that is built, packed and then verified.
-        "-p:MinVerSkip=true"
+        # Production lets MinVer derive Version, PackageVersion, AssemblyVersion ({Major}.0.0.0),
+        # FileVersion ({Major}.{Minor}.{Patch}.0) and InformationalVersion from the Git tag. The
+        # owned copy has no .git, so MinVer's own target is given the candidate version instead
+        # of a tag; it still runs and derives every property by the production rule. The SDK
+        # then appends SourceRevisionId to InformationalVersion as SourceLink does in production.
+        "-p:MinVerVersionOverride=" + plan["version"],
+        "-p:RepositoryCommit=" + plan["source"], "-p:SourceRevisionId=" + plan["source"],
+        "-p:ContinuousIntegrationBuild=true", "-p:DebugType=portable",
     ]
+    # Owned user-level NuGet configuration (see NUGET_USER_CONFIG); APPDATA points here for
+    # NuGet children only.
+    (output / "temp/appdata/NuGet").mkdir(parents=True)
+    write(output / "temp/appdata/NuGet/NuGet.Config", NUGET_USER_CONFIG)
     build_records = {}
     for control in (False, True):
         name = "public" if control else "delay"
@@ -730,9 +917,10 @@ def prepare(args, plan, rt):
         props = overlay + ["-p:PublicSign=" + str(control).lower(), "-p:DelaySign=" + str(not control).lower(),
                            "-p:BaseOutputPath=" + str(work / "bin") + "/",
                            "-p:BaseIntermediateOutputPath=" + str(work / "obj") + "/"]
-        invoke(rt, plan, "dotnet", ["restore", project, *props], output, name+"-restore", build=True, timeout=600, cwd=source)
+        invoke(rt, plan, "dotnet", ["restore", project, *props], output, name+"-restore", build=True, nuget=True,
+               timeout=600, cwd=source)
         invoke(rt, plan, "dotnet", ["build", project, "--configuration", "Release", "--no-restore", *props],
-               output, name+"-build", build=True, timeout=600, cwd=source)
+               output, name+"-build", build=True, nuget=True, timeout=600, cwd=source)
         build_records[name] = build_evidence(rt, plan, output, source, project, work, props, probe, control)
         built = work / "bin/Release/net462"
         write(output / (name+".dll"), read(built / DLL))
@@ -741,7 +929,8 @@ def prepare(args, plan, rt):
         if not control:
             write(output / "PPDS.Plugins.pdb", read(built / "PPDS.Plugins.pdb"))
             invoke(rt, plan, "dotnet", ["pack", project, "--configuration", "Release", "--no-build",
-                   "--output", output / "packages", *props], output, "delay-pack", build=True, timeout=600, cwd=source)
+                   "--output", output / "packages", *props], output, "delay-pack", build=True, nuget=True,
+                   timeout=600, cwd=source)
     packages = output / "packages"
     expected = {f"PPDS.Plugins.{plan['version']}.{suffix}" for suffix in ("nupkg", "snupkg")}
     require({x.name for x in packages.iterdir()} == expected, "Exact package/symbol pair required")
@@ -767,7 +956,7 @@ def prepare(args, plan, rt):
     result = common(plan, args.plan_sha256, "prepare", rt)
     result.update(metadata=before, control_metadata=public_meta, source_inputs=inputs,
                   tool_product_versions=versions, build_evidence=build_records,
-                  build_overlay=overlay, source_copy_note="Tracked source bytes copied; .git omitted; explicit version/source properties",
+                  build_overlay=overlay, source_copy_note="Tracked source bytes copied; .git omitted; MinVer version override; explicit source properties",
                   files=bind_files(output, expected | {"test-public.bin", "delay.dll", "public.dll", "public.pdb", "PPDS.Plugins.pdb"}))
     result["cases"] = {"COMPAT-01": "PASS", "COMPAT-03": "PASS"}
     json_write(output / "prepare-receipt.json", result)
@@ -960,21 +1149,195 @@ def authorize(args):
             windows_path(str(value))
 
 
+# Every constant reason this driver passes to require(...) or raises as Error("..."), plus the
+# helper-module reasons a stage commonly reaches, each with its own fixed code. A test parses
+# this file and fails when a reason is missing or two reasons share a code. Only these codes
+# (and the fixed buckets below) are ever printed; the reason text itself never is.
+REFUSALS = {
+    "Regular tracked source file required": "source-file-type",
+    "Empty source file is not an empty tracked blob": "source-empty-blob",
+    "Tracked source file changed while reading": "source-file-changed",
+    "Absolute local Windows path required": "windows-path",
+    "Parent traversal refused": "parent-traversal",
+    "Linked input/output refused": "linked-path",
+    "Plan hash mismatch": "plan-hash",
+    "Unexpected plan fields": "plan-fields",
+    "Candidate plan v2 required": "plan-schema",
+    "Experiment ID required": "plan-experiment",
+    "Source identity required": "plan-source",
+    "Distinct disposable public identity required": "plan-public-identity",
+    "Exact tool inventory required": "plan-tool-inventory",
+    "Exact tool identity required": "plan-tool-identity",
+    "Tool hash/version required": "plan-tool-hash-version",
+    "Unexpected tool executable": "plan-tool-executable",
+    "Inspector and accepted signer must use the same fixed binary": "plan-signer-path",
+    "Representative public-key shape required": "public-shape",
+    "Windows host required": "windows-host",
+    "Unknown native Windows architecture": "host-architecture",
+    "Unlisted tool operation": "operation-unlisted",
+    "Candidate tool did not complete": "tool-incomplete",
+    "Disposable key input bound": "key-bound",
+    "NuGet folders are only for build children": "nuget-scope",
+    "Pinned tool bytes differ": "tool-hash",
+    "Candidate tool result differs from the required outcome": "tool-result",
+    "Absolute output required": "output-absolute",
+    "Candidate output must be outside the source checkout": "output-location",
+    "Unexpected handoff stage": "handoff-stage",
+    "Unexpected observation stage": "observation-stage",
+    "Package verification count required": "package-verification-count",
+    "Assembly version component bound": "version-component",
+    "Required build observations missing": "build-record-missing",
+    "Required evaluated build observations differ": "build-record-properties",
+    "Actual assets/compiler observations missing": "build-record-compiler",
+    "Compiler observation incomplete": "build-record-compiler-row",
+    "Restore folder/source observation differs": "build-record-restore",
+    "Resolved dependency observations missing": "build-record-packages",
+    "Resolved dependency observation incomplete": "build-record-package-row",
+    "Resolved dependency content hash missing": "build-record-package-hash",
+    "Resolved dependency source differs": "build-record-package-source",
+    "Resolved dependency pin observation differs": "build-record-package-pin",
+    "Resolved dependency signature observation incomplete": "build-record-package-signature",
+    "Duplicate resolved dependency observation": "build-record-package-duplicate",
+    "Required build dependencies missing": "build-record-required-packages",
+    "Required command observations missing": "commands-missing",
+    "Unexpected/missing command observation": "command-unexpected",
+    "Failed command observation cannot pass": "command-failed",
+    "Command timestamps missing": "command-time-missing",
+    "Command timestamps invalid": "command-time-invalid",
+    "Required command observations incomplete": "commands-incomplete",
+    "Runtime observations missing": "runtime-observations",
+    "Windows host observations incomplete": "host-observations",
+    "Signing observations incomplete": "sign-observations",
+    "Prepared case/tool observations incomplete": "prepare-observations",
+    "Both build observations required": "build-records",
+    "Public build overlay observation incomplete": "overlay-incomplete",
+    "Build overlay must not bypass MinVer's version derivation": "overlay-version-bypass",
+    "Assembly/PDB observations missing": "assembly-observation-missing",
+    "Assembly observation identity differs": "assembly-observation-identity",
+    "PDB observation identity differs": "pdb-observation-identity",
+    "Wrong candidate receipt": "receipt-kind",
+    "Candidate receipt identity mismatch": "receipt-identity",
+    "Candidate receipt source/tool mismatch": "receipt-source-tool",
+    "Candidate helper/inspector source mismatch": "receipt-helpers",
+    "Prepared source differs from executed helper source": "receipt-source-inputs",
+    "Process-double evidence cannot admit real signing": "receipt-process-double",
+    "Exact receipt inventory required": "receipt-inventory",
+    "Unsafe receipt file": "receipt-file-name",
+    "Candidate artifact hash mismatch": "receipt-artifact-hash",
+    "Tool product version mismatch": "tool-version",
+    "Actual assembly metadata differs from candidate identity": "assembly-metadata",
+    "PE header required": "pe-header",
+    "PE signature required": "pe-signature",
+    "Ambiguous PE address": "pe-address",
+    "Metadata root required": "pe-metadata-root",
+    "Metadata string heap required": "pe-string-heap",
+    "Signature reservation required": "pe-signature-reservation",
+    "Valid metadata name mutation required": "mutation-name",
+    "Mutation must be outside signature": "mutation-location",
+    "Source root must be the reviewed driver checkout": "source-root",
+    "Source inspection failed": "source-inspection",
+    "Clean exact source required": "source-clean",
+    "Unexpected source index entry": "source-index-entry",
+    "Unsafe source inventory": "source-inventory",
+    "Source changed during copy": "source-changed",
+    "Source copy differs from executing helpers": "source-helpers",
+    "Reported compiler path does not resolve to its canonical form": "compiler-path-canonical",
+    "Compiler is outside the pinned dotnet root": "compiler-path-root",
+    "Repository package source required": "nuget-config-source",
+    "Central package pin required": "central-pins",
+    "Package signature verification incomplete": "package-verification-output",
+    "Package repository signature differs": "package-repository-signature",
+    "Evaluated build evidence incomplete": "properties-incomplete",
+    "Evaluated signing/version properties differ": "properties-differ",
+    "Build used a different public-key input": "properties-public-key",
+    "Actual SDK/MSBuild identity incomplete": "sdk-identity",
+    "Actual compiler path required": "compiler-path-absolute",
+    "Actual compiler product version missing": "compiler-version",
+    "Restore used a NuGet fallback folder": "restore-fallback-folder",
+    "Restore used a package folder other than the owned one": "restore-package-folder",
+    "Unexpected restore frameworks": "restore-frameworks",
+    "Direct build dependency unresolved": "restore-direct-unresolved",
+    "Unexpected non-package build dependency": "package-type",
+    "Resolved package path differs": "package-path",
+    "Resolved package content hash differs": "package-content-hash",
+    "Resolved package source differs": "package-source",
+    "Resolved package file hash differs": "package-file-hash",
+    "Resolved package differs from its central pin": "package-pin",
+    "Unpinned direct build dependency": "package-unpinned",
+    "Verified package content hash differs": "package-verified-content-hash",
+    "Required resolved build inputs missing": "packages-required",
+    "Test public identity mismatch": "public-identity",
+    "Exact package/symbol pair required": "pack-inventory",
+    "Pack must use the inspected build": "pack-build",
+    "Actual public-sign control reservation differs": "control-reservation",
+    "Public-sign control failed for a different reason": "control-reason",
+    "Public-sign control was admitted": "control-admitted",
+    "Prepared cases incomplete": "prepared-cases",
+    "Prepared signer version mismatch": "prepared-signer-version",
+    "Prepared public identity mismatch": "prepared-public-identity",
+    "Owned key cleanup failed; discard worker and outputs": "key-cleanup",
+    "Real package inspection required": "package-inspection",
+    "All six real cases must pass": "cases-incomplete",
+    "Signing chain/cleanup mismatch": "signing-chain",
+    "Input changed across stages": "input-changed",
+    "Public identity mismatch": "verify-public-identity",
+    "Assembly/PDB identity changed by signing": "signed-identity",
+    "Mutation must remain readable and alter the selected metadata name": "mutation-readable",
+    "Package and symbol pair required": "verify-package-pair",
+    "Verification source differs from prepared source": "verify-source",
+    "Symbol package changed": "symbol-package-changed",
+    "Package PDB differs from verified identity": "package-pdb",
+    "Packaged signed DLL differs": "packaged-dll",
+    "Explicit candidate stage and opt-in required": "admission-opt-in",
+    "Plan/hash and fresh output required": "admission-plan-output",
+    "Separate disposable-key authorization reference required": "admission-key-authorization",
+    "Sign admits only prepared public data and disposable key": "admission-sign-inputs",
+    "Key inputs are forbidden outside sign": "admission-key-outside-sign",
+    "Exact source required": "admission-source",
+    "Prepare accepts only source/public inputs": "admission-prepare-inputs",
+    "Verify requires both public handoffs": "admission-verify-inputs",
+    "Explicit Windows experiment required": "admission-windows",
+    # Helper-module reasons (scripts/ci/*) reached through this driver.
+    "Bounded regular handoff file required": "handoff-file",
+    "Handoff file changed while reading": "handoff-file-changed",
+    "JSON bound": "json-bound",
+    "Keyless input must be delay-signed, not public/fully signed": "delay-signed-input",
+    "Release tag/package versions must not contain build metadata": "version-build-metadata",
+}
+# A refusal whose text is not a registered constant (an f-string, a helper message) maps here.
+UNREGISTERED_REFUSAL = "unregistered"
+# Any other exception maps to its class name, only when the class is in this fixed list.
+EXCEPTION_CLASSES = ("FileNotFoundError", "FileExistsError", "PermissionError", "IsADirectoryError",
+                     "NotADirectoryError", "OSError", "KeyError", "IndexError", "TypeError", "ValueError",
+                     "JSONDecodeError", "UnicodeDecodeError", "AttributeError", "StopIteration", "BadZipFile",
+                     "ParseError", "TimeoutExpired", "error")
+REFUSAL_CODES = frozenset(REFUSALS.values()) | {UNREGISTERED_REFUSAL, "exception-other"} | {
+    "exception-" + name.lower() for name in EXCEPTION_CLASSES}
+STATUS_PATTERN = r"(0|-?[1-9][0-9]{0,9}|timeout|launch-failure)"
+# Refusals raised by this driver and by the release-input helpers it calls (strict_version).
+REFUSAL_TYPES = (Error, release.Error)
+
+
 def safe_refusal(error):
-    # Only exact, fixed validation reasons leave the process. Unknown exception
-    # text can contain paths, URLs or private values and is never returned.
-    known = {
-        "Pinned tool bytes differ": "tool-hash",
-        "Tool product version mismatch": "tool-version",
-        "Representative public-key shape required": "public-shape",
-        "Test public identity mismatch": "public-identity",
-        "Candidate tool result differs from the required outcome": "tool-result",
-        "Candidate output must be outside the source checkout": "output-location",
-        "Plan hash mismatch": "plan-hash",
-        "Unexpected plan fields": "plan-schema",
-        "Candidate plan v2 required": "plan-schema",
-    }
-    return known.get(str(error), "unclassified")
+    # Only fixed codes leave the process. Exception text can contain paths, URLs or private
+    # values and is never returned; an unknown reason or exception class maps to a bucket.
+    if isinstance(error, REFUSAL_TYPES):
+        return REFUSALS.get(str(error), UNREGISTERED_REFUSAL)
+    name = type(error).__name__
+    return "exception-" + name.lower() if name in EXCEPTION_CLASSES else "exception-other"
+
+
+def last_operation(calls):
+    # The last recorded tool call: its fixed operation name and exit code or status.
+    if not calls or not isinstance(calls[-1], dict):
+        return None
+    row = calls[-1]
+    operation = row.get("operation") if row.get("operation") in OPERATIONS else None
+    status = row.get("status") if row.get("status") in {"timeout", "launch-failure"} else (
+        str(row["exit_code"]) if type(row.get("exit_code")) is int else None)
+    if operation is None or status is None or re.fullmatch(STATUS_PATTERN, status) is None:
+        return None
+    return operation, status
 
 
 def main(argv=None, *, runtime=None):
@@ -1003,6 +1366,10 @@ def main(argv=None, *, runtime=None):
             except Exception:
                 pass  # Never replace failure with success if even the failure record cannot be retained.
         print("PPDS_COMPAT_REFUSAL=" + safe_refusal(error), file=sys.stderr)
+        last = last_operation(rt.calls) if rt is not None else None
+        if last is not None:
+            print("PPDS_COMPAT_OPERATION=" + last[0], file=sys.stderr)
+            print("PPDS_COMPAT_STATUS=" + last[1], file=sys.stderr)
         print("Candidate experiment refused or failed; no passing compatibility claim is available.", file=sys.stderr)
         return 1
 

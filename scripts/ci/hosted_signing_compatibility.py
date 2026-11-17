@@ -66,11 +66,43 @@ def checkpoint(phase):
 
 
 class StageCommandError(ValueError):
-    def __init__(self, code, refusal=None, hresult=None):
+    def __init__(self, code, refusal=None, hresult=None, operation=None, status=None):
         super().__init__("Hosted stage command failed")
         self.code = code
         self.refusal = refusal
         self.hresult = hresult
+        self.operation = operation
+        self.status = status
+
+
+DRIVER_MODULE = "ppds_hosted_compat_driver"
+
+
+def driver_vocabulary():
+    # The driver's own refusal codes and operation names: the only values passed through.
+    # Loaded lazily (default invocation refuses before file access); empty if unavailable.
+    try:
+        driver = sys.modules.get(DRIVER_MODULE) or load_driver()
+        return frozenset(driver.REFUSAL_CODES), frozenset(driver.OPERATIONS), driver.STATUS_PATTERN
+    except Exception:
+        return frozenset(), frozenset(), None
+
+
+def driver_line(text, name, allowed):
+    # One exact "PPDS_COMPAT_<NAME>=<value>" line whose value is in the fixed allowed set.
+    values = re.findall(r"(?m)^PPDS_COMPAT_" + name + r"=([A-Za-z0-9-]{1,64})\r?$", text)
+    return values[0] if len(values) == 1 and allowed(values[0]) else None
+
+
+def command_operation(stdout, stderr):
+    _, operations, _ = driver_vocabulary()
+    return driver_line(stdout + "\n" + stderr, "OPERATION", lambda value: value in operations)
+
+
+def command_status(stdout, stderr):
+    _, _, pattern = driver_vocabulary()
+    return driver_line(stdout + "\n" + stderr, "STATUS",
+                       lambda value: pattern is not None and re.fullmatch(pattern, value) is not None)
 
 
 def command_refusal(stdout, stderr):
@@ -81,10 +113,10 @@ def command_refusal(stdout, stderr):
                   "wait-timeout", "unclassified"):
         if re.search(r"(?m)^ppds_artifact_refusal=" + label + r"\s*$", text):
             return "transport-" + label
-    for label in ("tool-hash", "tool-version", "public-shape", "public-identity", "tool-result",
-                  "output-location", "plan-hash", "plan-schema", "unclassified"):
-        if re.search(r"(?m)^ppds_compat_refusal=" + label + r"\s*$", text):
-            return "driver-" + label
+    codes, _, _ = driver_vocabulary()
+    code = driver_line(stdout + "\n" + stderr, "REFUSAL", lambda value: value in codes)
+    if code is not None:
+        return "driver-" + code
     known = (("artifact transport failed; no successful result was written", "artifact-transport"),
              ("candidate experiment refused or failed; no passing compatibility claim is available", "candidate-driver"),
              ("access is denied", "access-denied"),
@@ -100,6 +132,55 @@ def command_refusal(stdout, stderr):
 def require(ok, reason):
     if not ok:
         raise ValueError(reason)
+
+
+# Every constant reason this coordinator passes to require(...), each with its own fixed code.
+# A test parses this file and fails when one is missing or two share a code. Driver refusals
+# raised inside the coordinator map through the driver's registry instead.
+REFUSALS = {
+    "Explicit hosted-network disposable-key admission required": "admission",
+    "Exact source required": "admission-source",
+    "Experiment required": "admission-experiment",
+    "Applicable execution authority reference required": "admission-authority",
+    "Fresh hosted manual first attempt required": "host-admission",
+    "Run identity required": "run-identity",
+    "Current-run artifact action context required": "runtime-context",
+    "Unexpected public stage": "public-stage",
+    "Original key cleanup unproven": "key-cleanup",
+    "Windows common-data paths disagree": "common-data-disagree",
+    "Windows common-data directory required": "common-data-missing",
+    "Reviewed Windows checkout required": "checkout",
+    "External stage root required": "stage-root",
+    "External trusted adapter required": "adapter-location",
+    "Required tool unavailable": "missing-tool",
+    "Clean exact reviewed source required": "source-state",
+    "Staged transport source differs": "transport-source",
+    "Trusted bootstrap bytes changed": "bootstrap-bytes",
+    "Exact public handoff inventory required": "handoff-inventory",
+    "Artifact identity missing": "artifact-identity",
+    "Local tool/source identity differs from authoritative plan": "plan-identity",
+    "Public identity differs": "public-identity",
+    "Disposable generator bytes changed": "generator-bytes",
+    "Driver-owned copy cleanup unproven": "driver-key-cleanup",
+    "Completed job artifact binding required": "job-binding",
+    "Original/copy key custody evidence required": "custody",
+    "Hosted stage context binding differs": "context-binding",
+    "Hosted stage command failed": "stage-command",
+}
+EXCEPTION_CLASSES = ("FileNotFoundError", "FileExistsError", "PermissionError", "IsADirectoryError",
+                     "NotADirectoryError", "OSError", "KeyError", "IndexError", "TypeError", "ValueError",
+                     "JSONDecodeError", "UnicodeDecodeError", "AttributeError", "TimeoutExpired")
+
+
+def refusal_code(error):
+    # A fixed code only: never the exception text, which can hold paths or private values.
+    if isinstance(error, ValueError) and type(error) in (ValueError, StageCommandError) and str(error) in REFUSALS:
+        return REFUSALS[str(error)]
+    driver = sys.modules.get(DRIVER_MODULE)
+    if driver is not None and isinstance(error, getattr(driver, "REFUSAL_TYPES", ())):
+        return "driver-" + driver.safe_refusal(error)
+    name = type(error).__name__
+    return "exception-" + name.lower() if name in EXCEPTION_CLASSES else "exception-other"
 
 
 def authorize(args):
@@ -124,7 +205,7 @@ def admit_host(args, env):
 
 
 def load_driver():
-    spec = importlib.util.spec_from_file_location("ppds_hosted_compat_driver", DRIVER)
+    spec = importlib.util.spec_from_file_location(DRIVER_MODULE, DRIVER)
     driver = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = driver
     spec.loader.exec_module(driver)
@@ -138,7 +219,9 @@ def execute(command, *, cwd, env, timeout):
     if result.returncode != 0:
         match = re.search(r"(?m)^Disposable key generation failed HRESULT=(-?[0-9]{1,10})\s*$", result.stderr)
         hresult = int(match[1]) if match and -(2**31) <= int(match[1]) < 2**31 else None
-        raise StageCommandError(result.returncode, command_refusal(result.stdout, result.stderr), hresult)
+        raise StageCommandError(result.returncode, command_refusal(result.stdout, result.stderr), hresult,
+                                command_operation(result.stdout, result.stderr),
+                                command_status(result.stdout, result.stderr))
     return result.stdout.strip()
 
 
@@ -415,11 +498,14 @@ class Hosted:
                     and re.fullmatch(r"sha256:[0-9a-f]{64}", expected["digest"]), "Completed job artifact binding required")
             inputs[stage] = self.root / stage
             self.transfer("download", stage, inputs[stage], expected=expected)
+            checkpoint("verify-" + stage + "-download-completed")
         self.plan(inputs["plan"])
+        checkpoint("verify-plan-validated")
         custody = json.loads(self.d.read(inputs["sign"] / "custody.json", 65536))
         require(custody["binding"] == self.binding and custody["plan_sha256"] == self.plan_hash
                 and custody["original_key_cleanup"] == custody["driver_copy_cleanup"] == "completed",
                 "Original/copy key custody evidence required")
+        checkpoint("verify-custody-validated")
         prepared_context = json.loads(self.d.read(inputs["prepare"] / "prepare-context.json", 65536))
         plan_context = json.loads(self.d.read(inputs["plan"] / "context.json", 65536))
         for context, job in ((plan_context, "sign"), (custody["context"], "sign"),
@@ -429,10 +515,13 @@ class Hosted:
                     and context.get("job") == job and context.get("runner")
                     and context.get("network_connected_disposable_signer_admitted") is True,
                     "Hosted stage context binding differs")
+        checkpoint("verify-context-validated")
         output = self.root / "verified"
         self.driver("verify", output, "--source-root", ROOT, "--prepared", inputs["prepare"], "--signed", inputs["sign"])
+        checkpoint("verify-driver-completed")
         receipt = json.loads(self.d.read(output / "compatibility-receipt.json"))
         self.d.complete_cases(receipt["cases"], receipt["evidence_class"])
+        checkpoint("verify-cases-validated")
         json_write(output / "hosted-receipt.json", {"schema": 1, "result": "PASS", "binding": self.binding,
                    "plan_sha256": self.plan_hash, "context": self.context, "prepare_context": prepared_context,
                    "custody": custody,
@@ -440,6 +529,7 @@ class Hosted:
                    "nonclaims": ["Not production signing/release authorization", "Not an independently administered rebuild",
                                  "Hosted networking/provider remnants trusted; no air-gap or secure-erasure claim"]})
         self.transfer("upload", "evidence", output)
+        checkpoint("verify-evidence-uploaded")
 
 
 def parser():
@@ -470,23 +560,18 @@ def main(argv=None):
         return 0
     except Exception as ex:
         category = "command" if isinstance(ex, StageCommandError) else "filesystem" if isinstance(ex, OSError) else "validation"
-        diagnostic = {"hosted_compatibility_failure": category}
-        safe_refusals = {"Fresh hosted manual first attempt required": "host-admission",
-                         "Current-run artifact action context required": "runtime-context",
-                         "Reviewed Windows checkout required": "checkout",
-                         "Linked input/output refused": "linked-path",
-                         "Required tool unavailable": "missing-tool",
-                         "Clean exact reviewed source required": "source-state",
-                         "Tool hash/version required": "tool-identity",
-                         "Original key cleanup unproven": "key-cleanup"}
-        if str(ex) in safe_refusals:
-            diagnostic["refusal"] = safe_refusals[str(ex)]
+        diagnostic = {"hosted_compatibility_failure": category, "refusal": refusal_code(ex)}
         if isinstance(ex, StageCommandError):
             diagnostic["exit_code"] = ex.code
             if ex.refusal:
                 diagnostic["command_refusal"] = ex.refusal
             if ex.hresult is not None:
                 diagnostic["hresult"] = ex.hresult
+            # Already validated against the driver's fixed operation names and status pattern.
+            if ex.operation is not None:
+                diagnostic["driver_operation"] = ex.operation
+            if ex.status is not None:
+                diagnostic["driver_status"] = ex.status
         print(json.dumps(diagnostic), file=sys.stderr, flush=True)
         print("Hosted compatibility refused or failed; no passing claim. Private diagnostics omitted.", file=sys.stderr)
         return 1
