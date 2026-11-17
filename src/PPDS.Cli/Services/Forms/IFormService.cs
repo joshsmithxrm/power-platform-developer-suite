@@ -62,6 +62,16 @@ public interface IFormService
 
     Task ReorderFieldsAsync(ReorderFieldsRequest request, IProgressReporter? reporter = null, CancellationToken ct = default);
 
+    /// <summary>
+    /// Legacy reorder that also reports retained controls whose binding differs from the column logical name by case.
+    /// The default implementation calls <see cref="ReorderFieldsAsync"/> once and returns a null (unknown) list.
+    /// </summary>
+    async Task<ReorderFieldsResult> ReorderFieldsWithResultAsync(ReorderFieldsRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
+    {
+        await ReorderFieldsAsync(request, reporter, ct).ConfigureAwait(false);
+        return new ReorderFieldsResult(null);
+    }
+
     /// <summary>Reorders a complete permutation of existing fields without adding or removing cells.</summary>
     Task ReorderFieldsStrictAsync(ReorderFieldsRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
         => Task.FromException(new NotSupportedException("This service does not implement strict field reorder."));
@@ -88,8 +98,23 @@ public sealed record AddFieldsResult(
     bool SolutionAssociationRequested,
     bool PublicationRequested)
 {
+    /// <summary>Requested fields that were added here but already exist in another tab/section of the form. Null when not reported.</summary>
+    public IReadOnlyList<FieldPlacementNotice>? OtherPlacements { get; init; }
+
+    /// <summary>Already-present fields whose stored binding differs from the metadata logical name only by case. Null when not reported.</summary>
+    public IReadOnlyList<NonCanonicalBinding>? NonCanonicalBindings { get; init; }
+
     public bool CountsKnown => AddedFields is not null && AlreadyPresentFields is not null && DuplicateRequests is not null;
 }
+
+/// <summary>A field that is also placed elsewhere on the form; Locations are "Tab / Section" labels.</summary>
+public sealed record FieldPlacementNotice(string Field, IReadOnlyList<string> Locations);
+
+/// <summary>An existing control whose <c>datafieldname</c> differs from the column logical name by case. Reported in #1527 to stop the control rendering; not verified against Dataverse here.</summary>
+public sealed record NonCanonicalBinding(string StoredName, string CanonicalName);
+
+/// <summary>Outcome of a legacy reorder; null collections mean the implementation did not report them.</summary>
+public sealed record ReorderFieldsResult(IReadOnlyList<NonCanonicalBinding>? NonCanonicalBindings);
 
 public sealed record FormInfo(
     Guid Id,
