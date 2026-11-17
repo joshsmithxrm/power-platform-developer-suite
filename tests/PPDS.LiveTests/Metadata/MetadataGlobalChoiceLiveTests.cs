@@ -414,14 +414,32 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
         var name = NewName("ull");
         await WithChoiceAsync(pool, name, "User label test", new Label("User label test", English), [new Label("Only", onlyLanguage)], async () =>
         {
+            async Task<Label> Read(bool asIfPublished) => (await RetrieveChoiceAsync(pool, name, asIfPublished)).Options.Single().Label;
+            void Show(string step, Label label) => _output.WriteLine($"OBSERVED UserLocalizedLabel ({step}): " +
+                (label.UserLocalizedLabel is { } shown ? $"LCID {shown.LanguageCode} '{shown.Label}'" : "null") + $"; localized labels: {string.Join(", ", Pairs(label))}");
+
+            // 1. Created with a label only in the other language.
+            var created = await Read(asIfPublished: true);
+            Show("created with an only-" + onlyLanguage + " label, as-if-published", created);
+            // Observed 2026-11-17: Dataverse stores a create-time label given only in a non-base language under the
+            // caller's/base language, so the caller always has a label after create.
+            Text(created, effectiveUi).Should().Be("Only", "a create-time label in another language only is stored under the caller's (base) language");
+
+            // 2. Give the caller's language empty text and the other language real text, then read what is shown.
+            var value = (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single().Value!.Value;
+            var relabel = new Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest
+            {
+                OptionSetName = name, Value = value, MergeLabels = false, SolutionUniqueName = Solution,
+                Label = new Label(new LocalizedLabel("", effectiveUi), new[] { new LocalizedLabel("", effectiveUi), new LocalizedLabel("Seulement", onlyLanguage) })
+            };
+            var rejected = await Record.ExceptionAsync(() => ExecuteAsync(pool, relabel));
+            _output.WriteLine($"OBSERVED UpdateOptionValue with empty {effectiveUi} text and {onlyLanguage} text: {(rejected is null ? "accepted" : rejected.Message)}");
             foreach (var asIfPublished in new[] { true, false })
             {
                 if (!asIfPublished) await PublishChoiceAsync(pool, name);
-                var label = (await RetrieveChoiceAsync(pool, name, asIfPublished)).Options.Single().Label;
-                var shown = label.UserLocalizedLabel;
-                _output.WriteLine($"OBSERVED UserLocalizedLabel ({(asIfPublished ? "as-if-published" : "published")}): " +
-                    (shown is null ? "null" : $"LCID {shown.LanguageCode} '{shown.Label}'") + $"; localized labels: {string.Join(", ", Pairs(label))}");
-                if (shown is not null)
+                var label = await Read(asIfPublished);
+                Show((asIfPublished ? "as-if-published" : "published") + $", empty {effectiveUi} text", label);
+                if (label.UserLocalizedLabel is { } shown)
                     label.LocalizedLabels.Select(l => l.LanguageCode).Should().Contain(shown.LanguageCode,
                         "a user-localised label must be one of the option's own labels");
             }

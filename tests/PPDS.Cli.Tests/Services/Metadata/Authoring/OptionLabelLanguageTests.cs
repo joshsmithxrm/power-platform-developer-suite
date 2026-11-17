@@ -25,7 +25,7 @@ public sealed class OptionLabelLanguageTests
     /// <summary>
     /// An update that does not ask to change the label sends no Label at all, whatever the existing label holds, so
     /// it cannot replace the English text with the caller's user-language text. Asserted live: an UpdateOptionValue
-    /// without a Label leaves the English label unchanged (other languages not observed).
+    /// without a Label leaves the English label unchanged; a requested English label keeps the French one.
     /// </summary>
     [Theory]
     [MemberData(nameof(UnrequestedCases))]
