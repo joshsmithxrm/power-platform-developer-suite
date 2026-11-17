@@ -6,6 +6,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
+using PPDS.Auth.Profiles;
 using PPDS.Cli.Commands;
 using PPDS.Cli.Commands.Plugins;
 using PPDS.Cli.Infrastructure;
@@ -305,6 +306,10 @@ public sealed class PluginRoundTripConvergenceTests
 
         public Guid UserId { get; } = Guid.NewGuid();
         public int Deletes { get; private set; }
+        /// <summary>Creates and updates that reached the store, plus assembly upload and type upsert calls.</summary>
+        public int Writes { get; private set; }
+        /// <summary>Times deploy or diff created its Dataverse connection.</summary>
+        public int Connections { get; private set; }
         public string LastDeployOutput { get; private set; } = "";
 
         public InMemoryRegistrationStore(string version)
@@ -353,19 +358,84 @@ public sealed class PluginRoundTripConvergenceTests
 
         public string? StoredSecureValue(Guid id) => _tables["sdkmessageprocessingstepsecureconfig"][id].GetAttributeValue<string>("secureconfig");
 
-        public async Task<int> DeployAsync()
+        /// <summary>Adds another configured image (same settings as the first) to the step.</summary>
+        public void AddConfiguredImage(string name, string imageType = "PreImage") =>
+            Step["images"]!.AsArray().Add(new JsonObject { ["name"] = name, ["imageType"] = imageType });
+
+        public string LastCleanOutput { get; private set; } = "";
+
+        /// <summary>Runs the actual <c>plugins clean</c> pipeline (JSON) against this store.</summary>
+        public async Task<int> CleanAsync(bool dryRun = false)
         {
             var path = WriteConfig();
             using var output = new StringWriter();
-            var exit = await DeployCommand.ExecuteAsync(new FileInfo(path), null, null, null, clean: false, dryRun: false,
+            var exit = await CleanCommand.ExecuteAsync(new FileInfo(path), null, null, dryRun,
                 new GlobalOptionValues { OutputFormat = OutputFormat.Json }, CancellationToken.None,
-                serviceProviderFactory: _ => Task.FromResult(new ServiceCollection()
-                    .AddSingleton(_service.Object)
-                    .AddSingleton(new Mock<ICustomApiService>(MockBehavior.Strict).Object)
-                    .BuildServiceProvider()),
+                serviceProviderFactory: _ =>
+                {
+                    Connections++;
+                    return Task.FromResult(new ServiceCollection().AddSingleton(_service.Object).BuildServiceProvider());
+                },
                 outputWriter: new JsonOutputWriter(output));
+            LastCleanOutput = output.ToString();
+            return exit;
+        }
+
+        /// <summary>Renames the single stored image row.</summary>
+        public void SetStoredImageName(string name) =>
+            _tables["sdkmessageprocessingstepimage"].Values.Single()["name"] = name;
+
+        /// <summary>Adds another stored image row on the same step and returns its ID.</summary>
+        public Guid AddStoredImage(string name)
+        {
+            var image = new Entity("sdkmessageprocessingstepimage", Guid.NewGuid())
+            {
+                ["sdkmessageprocessingstepid"] = new EntityReference("sdkmessageprocessingstep", _stepId),
+                ["name"] = name, ["imagetype"] = new OptionSetValue(0), ["entityalias"] = ImageName,
+                ["messagepropertyname"] = "Target", ["ismanaged"] = false
+            };
+            _tables["sdkmessageprocessingstepimage"][image.Id] = image;
+            return image.Id;
+        }
+
+        public IReadOnlyList<string> StoredImageNames() =>
+            _tables["sdkmessageprocessingstepimage"].Values.Select(i => i.GetAttributeValue<string>("name")).ToList();
+
+        public async Task<int> DeployAsync(bool clean = false, bool dryRun = false, bool json = true)
+        {
+            var path = WriteConfig();
+            using var output = new StringWriter();
+            var exit = await DeployCommand.ExecuteAsync(new FileInfo(path), null, null, null, clean: clean, dryRun: dryRun,
+                new GlobalOptionValues { OutputFormat = json ? OutputFormat.Json : OutputFormat.Text }, CancellationToken.None,
+                serviceProviderFactory: _ =>
+                {
+                    Connections++;
+                    return Task.FromResult(new ServiceCollection()
+                        .AddSingleton(_service.Object)
+                        .AddSingleton(new Mock<ICustomApiService>(MockBehavior.Strict).Object)
+                        .AddSingleton(new ResolvedConnectionInfo
+                        {
+                            Profile = new AuthProfile { Name = "offline-fixture" }, EnvironmentUrl = "https://fixture.example.test"
+                        })
+                        .BuildServiceProvider());
+                },
+                outputWriter: json ? new JsonOutputWriter(output) : null);
             LastDeployOutput = output.ToString();
             return exit;
+        }
+
+        /// <summary>Text-mode deploy, capturing stderr; callers must be in the console-capture collection.</summary>
+        public async Task<(int Exit, string Error)> DeployTextAsync(bool clean = false)
+        {
+            using var error = new StringWriter();
+            var previous = Console.Error;
+            try
+            {
+                Console.SetError(error);
+                var exit = await DeployAsync(clean: clean, json: false);
+                return (exit, error.ToString());
+            }
+            finally { Console.SetError(previous); }
         }
 
         public async Task<(int Exit, string Output)> DiffAsync(bool json)
@@ -375,7 +445,11 @@ public sealed class PluginRoundTripConvergenceTests
             using var error = new StringWriter();
             var args = new List<string> { "--config", path };
             if (json) args.AddRange(["--output-format", "json"]);
-            var parsed = DiffCommand.CreateForTesting(_service.Object, output, error).Parse(args.ToArray());
+            var parsed = DiffCommand.CreateForTesting(_ =>
+            {
+                Connections++;
+                return Task.FromResult(_service.Object);
+            }, output, error).Parse(args.ToArray());
             Assert.Empty(parsed.Errors);
             var exit = await parsed.InvokeAsync();
             return (exit, json ? output.ToString() : error.ToString());
@@ -431,6 +505,7 @@ public sealed class PluginRoundTripConvergenceTests
             _client.Setup(c => c.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
                 .Callback<Entity, CancellationToken>((entity, _) =>
                 {
+                    Writes++;
                     var row = _tables[entity.LogicalName][entity.Id]; // an unknown row throws, like a missing record
                     foreach (var attribute in entity.Attributes) row[attribute.Key] = attribute.Value; // unsent attributes keep their value
                 })
@@ -438,6 +513,7 @@ public sealed class PluginRoundTripConvergenceTests
             _client.Setup(c => c.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Entity entity, CancellationToken _) =>
                 {
+                    Writes++;
                     var row = new Entity(entity.LogicalName, Guid.NewGuid());
                     foreach (var attribute in entity.Attributes) row[attribute.Key] = attribute.Value;
                     _tables[entity.LogicalName][row.Id] = row;
@@ -514,6 +590,9 @@ public sealed class PluginRoundTripConvergenceTests
                 BooleanManagedProperty managed => managed.Value,
                 _ => actual
             };
+            // Dataverse evaluates string equality under its default case-insensitive collation.
+            if (actual is string text && condition.Values[0] is string value)
+                return string.Equals(text, value, StringComparison.OrdinalIgnoreCase);
             return Equals(actual, condition.Values[0]);
         }
 
@@ -530,8 +609,9 @@ public sealed class PluginRoundTripConvergenceTests
             _service.Setup(s => s.ListTypesForAssemblyAsync(_assemblyId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync([new PluginTypeInfo { Id = _typeId, TypeName = TypeName, AssemblyId = _assemblyId }]);
             _service.Setup(s => s.UpsertAssemblyAsync(AssemblyName, It.IsAny<byte[]>(), null, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(_assemblyId);
-            _service.Setup(s => s.UpsertPluginTypeAsync(_assemblyId, TypeName, null, It.IsAny<CancellationToken>())).ReturnsAsync(_typeId);
+                .ReturnsAsync(() => { Writes++; return _assemblyId; });
+            _service.Setup(s => s.UpsertPluginTypeAsync(_assemblyId, TypeName, null, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => { Writes++; return _typeId; });
             _service.Setup(s => s.GetSdkMessageIdAsync("Update", It.IsAny<CancellationToken>())).ReturnsAsync(_messageId);
             _service.Setup(s => s.GetSdkMessageFilterIdAsync(_messageId, "account", null, It.IsAny<CancellationToken>())).ReturnsAsync(_filterId);
 
@@ -554,6 +634,29 @@ public sealed class PluginRoundTripConvergenceTests
             _service.Setup(s => s.UpsertImageAsync(It.IsAny<Guid>(), It.IsAny<PluginImageConfig>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .Returns((Guid step, PluginImageConfig config, string message, CancellationToken ct) =>
                     real.UpsertImageAsync(step, config, message, ct));
+
+            // Version 2 image cleanup (--clean): ownership reads are stubs; step/image reads and deletes are real.
+            _service.Setup(s => s.ListAssembliesAsync(AssemblyName, It.IsAny<PluginListOptions?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync([assembly]);
+            _service.Setup(s => s.GetPluginTypeByNameOrIdAsync(_typeId.ToString("D"), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PluginTypeInfo { Id = _typeId, TypeName = TypeName, AssemblyId = _assemblyId });
+            _service.Setup(s => s.GetStepByNameOrIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns(async (string id, CancellationToken ct) =>
+                {
+                    var steps = await real.ListStepsForTypeAsync(_typeId, new PluginListOptions(IncludeHidden: true), ct);
+                    var step = steps.SingleOrDefault(s => s.Id.ToString("D") == id);
+                    if (step is not null) step.PluginTypeId ??= _typeId;
+                    return step;
+                });
+            _service.Setup(s => s.GetImageByNameOrIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns(async (string id, CancellationToken ct) =>
+                {
+                    var image = (await real.ListImagesForStepAsync(_stepId, ct)).SingleOrDefault(i => i.Id.ToString("D") == id);
+                    if (image is not null) image.StepId ??= _stepId;
+                    return image;
+                });
+            _service.Setup(s => s.DeleteImageAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .Returns((Guid id, CancellationToken ct) => real.DeleteImageAsync(id, ct));
         }
     }
 }

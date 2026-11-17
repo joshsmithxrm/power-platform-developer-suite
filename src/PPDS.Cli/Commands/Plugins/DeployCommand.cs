@@ -277,7 +277,11 @@ public static class DeployCommand
                 else
                     Console.Error.WriteLine($"Deployment complete: {totalCreated} created, {totalUpdated} updated, {totalDeleted} deleted");
                 if (verification is not null)
+                {
                     Console.Error.WriteLine($"Nonsecret reconciliation verification: {verification.Status}; no rollback was attempted.");
+                    foreach (var line in DescribeVerificationGaps(verification, configFile.Name))
+                        Console.Error.WriteLine(line);
+                }
                 foreach (var line in PluginLegacyPreservationService.DescribeNotice(
                              results.SelectMany(r => r.PreservedLegacyValues ?? []).ToList(), includeValues: false))
                     Console.Error.WriteLine(line);
@@ -319,7 +323,8 @@ public static class DeployCommand
         IReadOnlyList<PluginAssemblyConfig>? assemblies,
         string configDir,
         CancellationToken cancellationToken,
-        Func<string, CancellationToken, Task<byte[]>>? packageContentReader = null)
+        Func<string, CancellationToken, Task<byte[]>>? packageContentReader = null,
+        bool checkImageNames = true)
     {
         if (assemblies == null || assemblies.Count == 0)
             return [];
@@ -334,7 +339,7 @@ public static class DeployCommand
         foreach (var assembly in assemblies)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            PluginRegistrationPlanningService.ValidateAssembly(assembly, cancellationToken);
+            PluginRegistrationPlanningService.ValidateAssembly(assembly, cancellationToken, checkImageNames);
             var assemblyPath = ResolveAssemblyPath(assembly, configDir);
             if (assemblyPath == null || !File.Exists(assemblyPath))
             {
@@ -766,7 +771,8 @@ public static class DeployCommand
                     var existingImages = isNew
                         ? []
                         : await service.ListImagesForStepAsync(stepId, cancellationToken);
-                    var existingImageNames = existingImages.Select(i => i.Name).ToHashSet();
+                    // Same pairing rule as diff and pruning; the write path's server-side lookup also ignores case.
+                    var existingImageNames = existingImages.Select(i => i.Name).ToHashSet(PluginImageNames.Comparer);
 
                     // Legacy files preserve omitted optional values. Only capture the rows already read here;
                     // the advisory is computed after every write for this assembly, fully isolated.
@@ -917,6 +923,31 @@ public static class DeployCommand
             if (!result.Outcomes.Any(o => o.EventId == outcome.EventId)) result.Outcomes.Add(outcome);
         result.Status = result.Success ? "completed" : "failed";
         return result;
+    }
+
+    /// <summary>
+    /// Text-mode reasons for a version 2.0 verification that is not a match: what drifted (property names only,
+    /// never expected or stored values) and every unsupported/unverifiable coverage item, then a pointer to diff.
+    /// </summary>
+    internal static IEnumerable<string> DescribeVerificationGaps(PluginDiffResult verification, string configFileName)
+    {
+        if (verification.Status == "match") yield break;
+        foreach (var assembly in verification.Assemblies)
+        {
+            yield return $"  Assembly: {assembly.AssemblyName}";
+            if (assembly.AssemblyMissing) yield return "    [MISSING] Assembly not registered in environment";
+            foreach (var item in assembly.MissingSteps) yield return $"    [+] Missing step: {item.StepName}";
+            foreach (var item in assembly.OrphanedSteps) yield return $"    [-] Orphaned step: {item.StepName}";
+            foreach (var item in assembly.ModifiedSteps)
+                yield return $"    [~] Modified step: {item.StepName} ({string.Join(", ", item.Changes.Select(c => c.Property))})";
+            foreach (var item in assembly.MissingImages) yield return $"    [+] Missing image: {item.ImageName} on step {item.StepName}";
+            foreach (var item in assembly.OrphanedImages) yield return $"    [-] Orphaned image: {item.ImageName} on step {item.StepName}";
+            foreach (var item in assembly.ModifiedImages)
+                yield return $"    [~] Modified image: {item.ImageName} on step {item.StepName} ({string.Join(", ", item.Changes.Select(c => c.Property))})";
+            foreach (var item in assembly.Coverage.Unsupported) yield return $"    Unknown: {item.Path}: {item.Field}";
+        }
+        foreach (var item in verification.Coverage.Unsupported) yield return $"  Unknown: {item.Path}: {item.Field}";
+        yield return $"  Run 'ppds plugins diff --config {configFileName}' for the full comparison, including expected and stored values.";
     }
 
     private static void WriteRetainedOutcomes(IReadOnlyList<DeploymentResult> results)

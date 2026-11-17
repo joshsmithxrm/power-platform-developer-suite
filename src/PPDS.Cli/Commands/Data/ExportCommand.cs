@@ -72,7 +72,8 @@ public static class ExportCommand
 
         var maxRecordsPerEntityOption = new Option<int?>("--max-records-per-entity")
         {
-            Description = "Fail before writing if any entity exceeds this positive primary-row cap; requires paging cookies and disables count/partition reads and relationship/binary expansion (default: unlimited)"
+            Description = "Fail before writing if any entity exceeds this positive primary-row cap; requires paging cookies and skips count/partition reads. " +
+                "Schemas with relationships or image, binary or file columns, and filters other than plain filter/condition/value XML, are refused before export starts (default: unlimited)"
         };
         maxRecordsPerEntityOption.Validators.Add(result =>
         {

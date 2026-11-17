@@ -1845,7 +1845,7 @@ public sealed class AssemblyExtractor : IDisposable
                     step.StepId = value?.ToString();
                     break;
                 case "Deployment":
-                    // Only write non-default value (default is ServerOnly = 0)
+                    // An explicitly declared value is written even when it is the default (ServerOnly = 0).
                     var deploymentStr = MapDeploymentValue(value);
                     step.Deployment = deploymentStr;
                     break;
@@ -1859,7 +1859,7 @@ public sealed class AssemblyExtractor : IDisposable
                     step.CanUseReadOnlyConnection = value is true;
                     break;
                 case "InvocationSource":
-                    // Default is Parent = 0 — only write when Child (non-default)
+                    // An explicitly declared value is written even when it is the default (Parent = 0).
                     var invocationStr = MapInvocationSourceValue(value);
                     step.InvocationSource = invocationStr;
                     break;

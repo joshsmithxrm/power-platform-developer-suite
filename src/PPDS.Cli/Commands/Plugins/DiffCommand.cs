@@ -14,13 +14,20 @@ namespace PPDS.Cli.Commands.Plugins;
 public static class DiffCommand
 {
 
-    public static Command Create() => CreateCore(null, null, null);
+    public static Command Create() => CreateCore(null, null, null, null);
 
     // The real parse/action/output pipeline, with only connection creation replaced for offline tests.
     internal static Command CreateForTesting(IPluginRegistrationService service, TextWriter output, TextWriter error) =>
-        CreateCore(service, output, error);
+        CreateCore(service, output, error, null);
 
-    private static Command CreateCore(IPluginRegistrationService? service, TextWriter? output, TextWriter? error)
+    // As above, but the connection is made on demand through the given factory, so a test can observe
+    // whether the command connects at all.
+    internal static Command CreateForTesting(Func<CancellationToken, Task<IPluginRegistrationService>> connect,
+        TextWriter output, TextWriter error) =>
+        CreateCore(null, output, error, connect);
+
+    private static Command CreateCore(IPluginRegistrationService? service, TextWriter? output, TextWriter? error,
+        Func<CancellationToken, Task<IPluginRegistrationService>>? connect)
     {
         var configOption = new Option<FileInfo>("--config", "-c")
         {
@@ -41,12 +48,13 @@ public static class DiffCommand
         command.SetAction(async (parse, ct) => await ExecuteAsync(
             parse.GetValue(configOption)!, parse.GetValue(PluginsCommandGroup.ProfileOption),
             parse.GetValue(PluginsCommandGroup.EnvironmentOption), GlobalOptions.GetValues(parse),
-            parse.GetValue(hiddenOption), service, output, error ?? Console.Error, ct));
+            parse.GetValue(hiddenOption), service, connect, output, error ?? Console.Error, ct));
         return command;
     }
 
     private static async Task<int> ExecuteAsync(FileInfo file, string? profile, string? environment,
         GlobalOptionValues options, bool includeHidden, IPluginRegistrationService? service,
+        Func<CancellationToken, Task<IPluginRegistrationService>>? connect,
         TextWriter? output, TextWriter error, CancellationToken ct)
     {
         var jsonWriter = options.IsJsonMode ? new JsonOutputWriter(output, options.Debug) : null;
@@ -63,6 +71,10 @@ public static class DiffCommand
                 return ExitCodes.InvalidArguments;
             }
             config.Validate();
+            // File rules that need no environment are checked before connecting, as deploy does.
+            foreach (var assembly in config.Assemblies) PluginImageNames.EnsureUniqueConfigured(assembly);
+            if (service is null && connect is not null)
+                service = await connect(ct);
             if (service is null)
             {
                 provider = await ProfileServiceFactory.CreateFromProfilesAsync(profile, environment,
