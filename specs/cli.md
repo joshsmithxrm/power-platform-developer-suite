@@ -274,8 +274,31 @@ for the deprecated entity aliases identifies the replacement long option.
 
 The future CLI 2.0 transition will standardize `-e` for environments only after
 at least 90 days from the first stable release containing the complete replacement
-aliases and deprecation guidance. This release does not reassign or remove an
-alias, and no transition date is set here.
+aliases and deprecation guidance. This release does not reassign or remove any working
+alias (the only aliases removed are the dead shared-option aliases described below), and no transition date is set here.
+
+Other short aliases (for example `-f` for `--output-format`, `--file` or `--force`) also differ between
+commands today. `CliEnvironmentAliasTests.CompleteTree_ShortAliasesDoNotClashAcrossCommandsBeyondLegacyAllowlist`
+records this cross-command state as an exact allowlist: it aggregates every short alias over the whole tree and
+fails when an alias gains a new long name or a new clashing alias appears. It does not detect a new command that
+reuses an already-listed alias and long-name pair.
+
+Same-command clashes are gone (#1536). Previously 18 commands bound one short alias to both a command-specific
+option and a shared option (`-f`: `--force` or `--file` vs `--output-format`; `-v`: `--view` vs `--verbose`); the
+command-specific option won at parse time and the shared alias was dead but still shown in `--help`.
+`ShortAliasShadowPolicy.Apply` (run from `Program.CreateRootCommand` after `EnvironmentAliasPolicy.Apply`) walks
+the whole tree and, on any command that uses the shared `GlobalOptions` instances and where a command-specific
+option registered before the shared option owns a short alias the shared option also carries, replaces the shared
+option with a per-command twin that has the long name only. (System.CommandLine gives a duplicated alias to the
+first-registered option, so when the shared option is registered first the policy leaves both in place and the
+same-command guard test fails.) Commands that build their own `--output-format`/`--verbose` instead of using the
+shared instances are not changed by the policy; a same-command clash there is not fixed automatically and fails
+`EveryCommand_ShortAliasesAreNeverBoundTwice`. The shared options
+are single static instances (`GlobalOptions.Verbose`, `OutputFormat`, ...), so the alias cannot be removed from the
+instance; `GlobalOptions.GetValues` and the mutual-exclusion validator resolve the twin by long name. No alias
+changes meaning, and the long forms (`--output-format`, `--verbose`) work everywhere. The generated CLI reference
+pages (`scripts/docs-gen/cli-reflect`) build each command group through its factory, so the generator applies
+`EnvironmentAliasPolicy` and `ShortAliasShadowPolicy` to what it builds and the pages match `--help`.
 
 `Program.CreateRootCommand(bool includeInternal)` constructs the complete command
 tree without running startup diagnostics, command actions, authentication, or
@@ -295,6 +318,8 @@ nonpublic token members or use global string-based option lookup.
 | AC-ALIAS-07 | Pure construction preserves the optional internal group and all registrations | CliEnvironmentAliasTests.PureFactory_ExistsAndControlsInternalGroup; registration source comparison | Pending validation |
 | AC-ALIAS-08 | Help and guidance state replacements and the minimum stable transition window | CliEnvironmentAliasTests.HelpMigration_IsVisible; source review of this section | Pending validation |
 | AC-ALIAS-09 | Reapplying the policy preserves names, aliases, descriptions and unsupported short forms | EnvironmentAliasPolicyTests.Apply_IsIdempotentAndRetainsUnsupportedShortAlias | Pending validation |
+| AC-ALIAS-10 | Across the whole tree, a short alias is bound only to its allowlisted set of long options (legacy clashes scheduled for CLI 2.0: `-e` plus `-a -c -f -i -l -m -n -o -p -s -t -u -v`); a new clashing alias or a new long name for a listed alias fails | CliEnvironmentAliasTests.CompleteTree_ShortAliasesDoNotClashAcrossCommandsBeyondLegacyAllowlist | ✅ |
+| AC-ALIAS-11 | No command binds one short alias to more than one of its own options (empty allowlist). The shared option's shadowed alias is removed on exactly the 18 formerly clashing commands (exact `command|alias|owner|shared` keys, derived from the pre-policy tree); the command-specific option still owns the alias, parsing is identical before and after the policy, the long forms still work, a shared option registered first is left alone, and rendered help and generated reference pages list each short alias once | CliEnvironmentAliasTests.EveryCommand_ShortAliasesAreNeverBoundTwice, ShadowedAliasRemoval_CoversExactlyTheFormerSameCommandClashes, ShadowedAliasRemoval_DoesNotChangeParsing_ComparedWithPrePolicyTree, TwinOnViews_KeepsMutualExclusionAndOtherSharedOptions, TwinOnPluginsUnregister_KeepsOutputFormatValidationAndDefault, ShortAliasShadowPolicy_AppliedTwice_ChangesNothing, RenderedHelp_ListsEachShortAliasOnce, DoubleBoundShortAlias_ParserOutcome_IsCharacterized; ShortAliasShadowPolicyTests (QuietTwin_IsBuiltWhenCommandSpecificOptionOwnsMinusQ, CsvCapableOutputFormatTwin_KeepsCsvAndResolvesThroughHelpers, OwnerRegisteredBeforeSharedOption_SharedAliasIsStripped, SharedOptionRegisteredBeforeOwner_IsLeftAloneSoTheGuardCanFail, TwinLeafUnderParentCarryingSharedOptions_ReadsTheLeafsOutputFormat); CliReflectRealAssemblyTests.GeneratedPage_ListsEachShortAliasOnce | ✅ |
 
 ---
 

@@ -23,18 +23,12 @@ public static class GlobalOptions
     /// <summary>
     /// Show only warnings and errors. Mutually exclusive with --verbose and --debug.
     /// </summary>
-    public static readonly Option<bool> Quiet = new("--quiet", "-q")
-    {
-        Description = "Show only warnings and errors"
-    };
+    public static readonly Option<bool> Quiet = CreateQuietOption();
 
     /// <summary>
     /// Show debug-level messages. Mutually exclusive with --quiet and --debug.
     /// </summary>
-    public static readonly Option<bool> Verbose = new("--verbose", "-v")
-    {
-        Description = "Show detailed output including debug messages"
-    };
+    public static readonly Option<bool> Verbose = CreateVerboseOption();
 
     /// <summary>
     /// Show trace-level diagnostic output. Mutually exclusive with --quiet and --verbose.
@@ -65,45 +59,55 @@ public static class GlobalOptions
         Description = "Correlation ID for distributed tracing"
     };
 
+    private static Option<bool> CreateQuietOption(bool withShortAlias = true) =>
+        withShortAlias
+            ? new Option<bool>("--quiet", "-q") { Description = "Show only warnings and errors" }
+            : new Option<bool>("--quiet") { Description = "Show only warnings and errors" };
+
+    private static Option<bool> CreateVerboseOption(bool withShortAlias = true) =>
+        withShortAlias
+            ? new Option<bool>("--verbose", "-v") { Description = "Show detailed output including debug messages" }
+            : new Option<bool>("--verbose") { Description = "Show detailed output including debug messages" };
+
     /// <summary>
     /// Creates an --output-format option with a clean parse error for invalid values (#1076)
     /// and, unless <paramref name="supportsCsv"/> is set, a validator rejecting CSV (#1078).
     /// Help usage label and shell completions advertise only the instance's valid set (#1336).
     /// </summary>
     /// <param name="supportsCsv">Whether the owning command implements CSV rendering.</param>
-    /// <param name="shortAlias">Short alias — "-f" everywhere except data load, where -f belongs to --file.</param>
-    public static Option<OutputFormat> CreateOutputFormatOption(bool supportsCsv = false, string shortAlias = "-f")
+    /// <param name="shortAlias">Short alias — "-f" everywhere except data load, where -f belongs to --file.
+    /// <c>null</c> registers the long name only (used when a command-specific option owns the alias).</param>
+    public static Option<OutputFormat> CreateOutputFormatOption(bool supportsCsv = false, string? shortAlias = "-f")
     {
         string[] validValueNames = supportsCsv
             ? [nameof(Commands.OutputFormat.Text), nameof(Commands.OutputFormat.Json), nameof(Commands.OutputFormat.Csv)]
             : [nameof(Commands.OutputFormat.Text), nameof(Commands.OutputFormat.Json)];
         var validValues = string.Join(", ", validValueNames);
 
-        var option = new Option<OutputFormat>("--output-format", shortAlias)
+        var option = shortAlias is null
+            ? new Option<OutputFormat>("--output-format") { Description = "Output format" }
+            : new Option<OutputFormat>("--output-format", shortAlias) { Description = "Output format" };
+        // Without an explicit HelpName, System.CommandLine derives the usage label from the
+        // enum type and advertises <Csv|Json|Text> even where the validator below rejects
+        // Csv (#1336). Pin the label to this instance's actual valid set instead.
+        option.HelpName = string.Join("|", validValueNames);
+        option.DefaultValueFactory = _ => Commands.OutputFormat.Text;
+        option.CustomParser = result =>
         {
-            Description = "Output format",
-            // Without an explicit HelpName, System.CommandLine derives the usage label from the
-            // enum type and advertises <Csv|Json|Text> even where the validator below rejects
-            // Csv (#1336). Pin the label to this instance's actual valid set instead.
-            HelpName = string.Join("|", validValueNames),
-            DefaultValueFactory = _ => Commands.OutputFormat.Text,
-            CustomParser = result =>
+            if (result.Tokens.Count == 0)
             {
-                if (result.Tokens.Count == 0)
-                {
-                    return Commands.OutputFormat.Text; // Missing value is reported by arity enforcement.
-                }
-
-                var token = result.Tokens[^1].Value;
-                if (Enum.TryParse<OutputFormat>(token, ignoreCase: true, out var format)
-                    && Enum.IsDefined(format))
-                {
-                    return format;
-                }
-
-                result.AddError($"Invalid value '{token}' for --output-format. Valid values: {validValues}.");
-                return Commands.OutputFormat.Text;
+                return Commands.OutputFormat.Text; // Missing value is reported by arity enforcement.
             }
+
+            var token = result.Tokens[^1].Value;
+            if (Enum.TryParse<OutputFormat>(token, ignoreCase: true, out var format)
+                && Enum.IsDefined(format))
+            {
+                return format;
+            }
+
+            result.AddError($"Invalid value '{token}' for --output-format. Valid values: {validValues}.");
+            return Commands.OutputFormat.Text;
         };
 
         // Replace the enum-derived completion source (Csv|Json|Text) so shell completions offer
@@ -180,9 +184,11 @@ public static class GlobalOptions
         // Add validator for mutually exclusive verbosity options
         command.Validators.Add(result =>
         {
-            var quiet = result.GetValue(Quiet);
-            var verbose = result.GetValue(Verbose);
-            var debug = result.GetValue(Debug);
+            // Resolve through the command's own instances: ShortAliasShadowPolicy may have swapped a
+            // shared option for an alias-less per-command twin.
+            var quiet = result.GetValue(Resolve(result.Command, Quiet));
+            var verbose = result.GetValue(Resolve(result.Command, Verbose));
+            var debug = result.GetValue(Resolve(result.Command, Debug));
 
             var count = (quiet ? 1 : 0) + (verbose ? 1 : 0) + (debug ? 1 : 0);
             if (count > 1)
@@ -201,13 +207,59 @@ public static class GlobalOptions
     {
         return new GlobalOptionValues
         {
-            Quiet = parseResult.GetValue(Quiet),
-            Verbose = parseResult.GetValue(Verbose),
-            Debug = parseResult.GetValue(Debug),
+            Quiet = parseResult.GetValue(Resolve(parseResult.CommandResult.Command, Quiet)),
+            Verbose = parseResult.GetValue(Resolve(parseResult.CommandResult.Command, Verbose)),
+            Debug = parseResult.GetValue(Resolve(parseResult.CommandResult.Command, Debug)),
             OutputFormat = GetOutputFormatValue(parseResult),
-            CorrelationId = parseResult.GetValue(CorrelationId)
+            CorrelationId = parseResult.GetValue(Resolve(parseResult.CommandResult.Command, CorrelationId))
         };
     }
+
+    /// <summary>
+    /// Returns the instance of a shared option that <paramref name="command"/> actually carries:
+    /// the shared static itself, or the alias-less per-command twin installed by
+    /// <see cref="ShortAliasShadowPolicy"/> (matched by long name).
+    /// </summary>
+    private static Option<T> Resolve<T>(Command command, Option<T> shared)
+    {
+        foreach (var option in command.Options)
+        {
+            if (ReferenceEquals(option, shared))
+            {
+                return shared;
+            }
+        }
+
+        foreach (var option in command.Options)
+        {
+            if (option is Option<T> twin && option.Name == shared.Name)
+            {
+                return twin;
+            }
+        }
+
+        return shared;
+    }
+
+    /// <summary>
+    /// Builds a fresh twin of a shared option without the given short aliases, or <c>null</c> if
+    /// <paramref name="shared"/> cannot be rebuilt.
+    /// </summary>
+    internal static Option? CreateTwinWithoutAliases(Option shared, ISet<string> droppedAliases)
+    {
+        var kept = shared.Aliases.FirstOrDefault(a => !droppedAliases.Contains(a));
+        if (ReferenceEquals(shared, Quiet)) return CreateQuietOption(kept is not null);
+        if (ReferenceEquals(shared, Verbose)) return CreateVerboseOption(kept is not null);
+        if (ReferenceEquals(shared, OutputFormat)) return CreateOutputFormatOption(false, kept);
+        if (ReferenceEquals(shared, CsvCapableOutputFormat)) return CreateOutputFormatOption(true, kept);
+        return null;
+    }
+
+    /// <summary>True if <paramref name="option"/> is one of the shared static instances.</summary>
+    internal static bool IsShared(Option option) =>
+        ReferenceEquals(option, Quiet) || ReferenceEquals(option, Verbose) || ReferenceEquals(option, Debug)
+        || ReferenceEquals(option, OutputFormat) || ReferenceEquals(option, CsvCapableOutputFormat)
+        || ReferenceEquals(option, CorrelationId);
 
     /// <summary>
     /// Reads the output format from whichever --output-format instance the command carries:
@@ -216,6 +268,17 @@ public static class GlobalOptions
     /// </summary>
     private static OutputFormat GetOutputFormatValue(System.CommandLine.ParseResult parseResult)
     {
+        // Leaf-first: the selected command's own --output-format (shared static, per-command twin made by
+        // ShortAliasShadowPolicy, or a command-local instance) wins over anything an ancestor carries.
+        foreach (var option in parseResult.CommandResult.Command.Options)
+        {
+            if (option.Name == "--output-format" && parseResult.GetResult(option) is { } localResult)
+            {
+                return localResult.GetValueOrDefault<OutputFormat>();
+            }
+        }
+
+        // Then the shared statics parse-wide (e.g. registered on an ancestor).
         if (parseResult.GetResult(CsvCapableOutputFormat) is { } csvCapableResult)
         {
             return csvCapableResult.GetValueOrDefault<OutputFormat>();
@@ -226,14 +289,23 @@ public static class GlobalOptions
             return result.GetValueOrDefault<OutputFormat>();
         }
 
-        // Fallback for commands that declare their own local --output-format option
-        // instead of the shared statics — resolve it by name so we never silently
-        // fall through to Text.
-        foreach (var option in parseResult.CommandResult.Command.Options)
+        return Commands.OutputFormat.Text;
+    }
+
+    /// <summary>
+    /// Returns the effective <c>--output-format</c> for a command result, twin-aware: reads whichever
+    /// <c>--output-format</c> instance the command carries (shared static, per-command twin, or local).
+    /// Throws <see cref="InvalidOperationException"/> if that option failed to parse, like
+    /// <c>GetValue</c>. Use instead of <c>GetValue(GlobalOptions.OutputFormat)</c>, which silently reads the
+    /// default when the command carries a twin.
+    /// </summary>
+    public static OutputFormat GetOutputFormat(CommandResult commandResult)
+    {
+        foreach (var option in commandResult.Command.Options)
         {
-            if (option.Name == "--output-format" && parseResult.GetResult(option) is { } localResult)
+            if (option is Option<OutputFormat> typed && option.Name == "--output-format")
             {
-                return localResult.GetValueOrDefault<OutputFormat>();
+                return commandResult.GetValue(typed);
             }
         }
 

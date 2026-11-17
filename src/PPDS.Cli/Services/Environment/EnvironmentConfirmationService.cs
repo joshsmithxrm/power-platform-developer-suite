@@ -89,7 +89,11 @@ public sealed class EnvironmentConfirmationService : IEnvironmentConfirmationSer
         if (protection is ProtectionLevel.Production or ProtectionLevel.Test && !acknowledged)
             throw new PpdsException(EnvironmentConfirmationErrorCodes.Required,
                 $"Confirm '{operation}' against '{target}' (type: {type}, protection: {protection}) " +
-                $"with --confirm-env {target} or confirmEnvironment before writing.");
+                $"with --confirm-env {target} or confirmEnvironment before writing." +
+                (type == EnvironmentType.Unknown && config?.Protection is null
+                    ? $" This environment has no saved type, so it is treated as Production; " +
+                      $"record its type with 'ppds env config {target} --type <Production|Sandbox|Development|Test|Trial>'."
+                    : string.Empty));
     }
 
     /// <summary>Canonicalizes only harmless URL variations, without fuzzy environment matching.</summary>

@@ -82,7 +82,9 @@ public sealed class CliEnvironmentAliasTests(ITestOutputHelper output)
             .Select(o => (Path: n.Path, Option: o))).ToArray();
         Assert.NotEmpty(definitions);
         foreach (var definition in definitions)
+        {
             Assert.True(definition.Option.Aliases.Contains("-env"), "Missing -env at " + definition.Path);
+        }
     }
 
     [Fact]
@@ -90,12 +92,322 @@ public sealed class CliEnvironmentAliasTests(ITestOutputHelper output)
     public void CompleteTree_MigrationAliasesHaveUniqueBindings()
     {
         foreach (var node in Walk(Root()))
-        foreach (var alias in new[] { "-e", "-env", "--environment", "--entity", "--entities" })
         {
-            var bound = node.Command.Options.Where(o => o.Name == alias || o.Aliases.Contains(alias)).Distinct().ToArray();
-            Assert.True(bound.Length <= 1, "Ambiguous " + alias + " at " + node.Path);
+            foreach (var alias in new[] { "-e", "-env", "--environment", "--entity", "--entities" })
+            {
+                var bound = node.Command.Options.Where(o => o.Name == alias || o.Aliases.Contains(alias)).Distinct().ToArray();
+                Assert.True(bound.Length <= 1, "Ambiguous " + alias + " at " + node.Path);
+            }
         }
     }
+
+    // Legacy cross-command short-alias clashes scheduled for CLI 2.0 (#1536). Exact: alias plus the precise
+    // set of long names, aggregated over the whole tree. A new clashing alias, or a new long name for an
+    // allowlisted alias, fails. Not covered here: a new command re-using an already-listed (alias, long name)
+    // pair; one command binding an alias twice is covered by EveryCommand_ShortAliasesAreNeverBoundTwice.
+    private static readonly Dictionary<string, string[]> LegacyAliasClashes = new(StringComparer.Ordinal)
+    {
+        // -e: entity / entity list / environment; reassigned to environment only in CLI 2.0.
+        ["-e"] = ["--entities", "--entity", "--environment"],
+        // Other legacy short aliases found by the inventory; each is bound to different long options in
+        // different commands (e.g. -f is --output-format on most commands but --file on data load and
+        // deployment-settings sync, and --force on several unregister/download/extract/clear commands).
+        ["-a"] = ["--assembly", "--include-attributes"],
+        ["-c"] = ["--color", "--column", "--config", "--correlation-id", "--count"],
+        ["-f"] = ["--file", "--force", "--output-format"],
+        ["-i"] = ["--include", "--index", "--input", "--interval"],
+        ["-l"] = ["--label", "--level", "--limit"],
+        ["-m"] = ["--include-managed", "--mapping", "--message", "--mode"],
+        ["-n"] = ["--lines", "--name", "--top"],
+        ["-o"] = ["--output", "--output-format"],
+        ["-p"] = ["--password", "--profile"],
+        ["-s"] = ["--schema", "--set", "--show", "--solution"],
+        ["-t"] = ["--tenant", "--timeout", "--top", "--type"],
+        ["-u"] = ["--user", "--user-mapping"],
+        ["-v"] = ["--verbose", "--view"],
+    };
+
+    [Fact]
+    [Trait("AC", "AC-ALIAS-10")]
+    public void CompleteTree_ShortAliasesDoNotClashAcrossCommandsBeyondLegacyAllowlist()
+    {
+        var bindings = Walk(Root()).SelectMany(n => n.Command.Options)
+            .SelectMany(o => ShortBindings(o))
+            .GroupBy(b => b.Alias, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Select(b => b.Long).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(), StringComparer.Ordinal);
+        var clashes = bindings.Where(b => b.Value.Length > 1).ToDictionary(b => b.Key, b => b.Value, StringComparer.Ordinal);
+        output.WriteLine("PPDS_ALIAS_CLASH_INVENTORY=" + JsonSerializer.Serialize(clashes.OrderBy(c => c.Key, StringComparer.Ordinal)));
+
+        var unexpected = clashes.Where(c => !LegacyAliasClashes.TryGetValue(c.Key, out var allowed) || !allowed.SequenceEqual(c.Value))
+            .Select(c => c.Key + " => " + string.Join(", ", c.Value)).ToArray();
+        Assert.True(unexpected.Length == 0, "Short alias bound to different long options across commands: " + string.Join("; ", unexpected));
+        var stale = LegacyAliasClashes.Keys.Where(k => !clashes.ContainsKey(k)).ToArray();
+        Assert.True(stale.Length == 0, "Allowlisted clash no longer exists; remove from allowlist: " + string.Join(", ", stale));
+    }
+
+    // Same-command double bindings: one short alias bound to two different options on one command.
+    // The allowlist is empty (#1536): ShortAliasShadowPolicy strips the shadowed short alias from the shared
+    // option on any command where a command-specific option owns it, so any remaining double binding fails.
+    [Fact]
+    [Trait("AC", "AC-ALIAS-11")]
+    public void EveryCommand_ShortAliasesAreNeverBoundTwice()
+    {
+        var found = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        foreach (var node in Walk(Root()))
+        {
+            foreach (var group in node.Command.Options.SelectMany(o => ShortBindings(o).Select(b => (b.Alias, Option: o)))
+                         .GroupBy(b => b.Alias, StringComparer.Ordinal))
+            {
+                var longs = group.Select(g => LongName(g.Option)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+                if (longs.Length > 1)
+                {
+                    found[(node.Path.Length == 0 ? "<root>" : node.Path) + "|" + group.Key] = longs;
+                }
+            }
+        }
+        Assert.True(found.Count == 0, "Short alias bound to more than one option on a single command: " +
+            string.Join("; ", found.Select(f => f.Key + " => " + string.Join(", ", f.Value))));
+    }
+
+    private static readonly string[] SharedLongNames = ["--output-format", "--verbose", "--quiet"];
+
+    // The 18 same-command clashes that existed before #1536: command|alias|owner|shared option.
+    private static readonly string[] ExpectedFormerClashes =
+    [
+        "custom-apis unregister|-f|--force|--output-format",
+        "deployment-settings sync|-f|--file|--output-format",
+        "plugins download assembly|-f|--force|--output-format",
+        "plugins download package|-f|--force|--output-format",
+        "plugins extract|-f|--force|--output-format",
+        "plugins unregister|-f|--force|--output-format",
+        "query history clear|-f|--force|--output-format",
+        "service-endpoints unregister|-f|--force|--output-format",
+        "views add-column|-v|--view|--verbose",
+        "views clear-filter|-v|--view|--verbose",
+        "views clear-sort|-v|--view|--verbose",
+        "views get|-v|--view|--verbose",
+        "views remove-column|-v|--view|--verbose",
+        "views reorder-columns|-v|--view|--verbose",
+        "views set-fetchxml|-v|--view|--verbose",
+        "views set-filter|-v|--view|--verbose",
+        "views set-sort|-v|--view|--verbose",
+        "views update-column|-v|--view|--verbose",
+    ];
+
+    // Un-policied tree: the same registrations production runs, without ShortAliasShadowPolicy.
+    private static RootCommand PrePolicyRoot() => Program.CreateRootCommand(includeInternal: true, shadowShortAliases: false);
+
+    // Computed from the pre-policy tree only: a shared-named option whose short alias is also bound by an option
+    // registered before it on the same command (the parser gives the alias to the earlier option).
+    private static string[] FormerClashKeys(RootCommand prePolicy)
+    {
+        var keys = new List<string>();
+        foreach (var node in Walk(prePolicy))
+        {
+            var options = node.Command.Options.ToList();
+            for (var i = 0; i < options.Count; i++)
+            {
+                var shared = options[i];
+                if (!SharedLongNames.Contains(shared.Name))
+                {
+                    continue;
+                }
+
+                foreach (var binding in ShortBindings(shared))
+                {
+                    foreach (var owner in options.Take(i).Where(o => o.Name != shared.Name && ShortBindings(o).Any(b => b.Alias == binding.Alias)))
+                    {
+                        keys.Add(node.Path + "|" + binding.Alias + "|" + LongName(owner) + "|" + shared.Name);
+                    }
+                }
+            }
+        }
+        return keys.Order(StringComparer.Ordinal).ToArray();
+    }
+
+    [Fact]
+    [Trait("AC", "AC-ALIAS-11")]
+    public void ShadowedAliasRemoval_CoversExactlyTheFormerSameCommandClashes()
+    {
+        var pre = PrePolicyRoot();
+        var post = Root();
+        var clashes = FormerClashKeys(pre);
+        Assert.NotEmpty(clashes);
+        Assert.Equal(ExpectedFormerClashes.Order(StringComparer.Ordinal), clashes);
+
+        var preNodes = Walk(pre).ToList();
+        var postNodes = Walk(post).ToList();
+        Assert.Equal(preNodes.Select(n => n.Path), postNodes.Select(n => n.Path));
+        var changed = new List<string>();
+        for (var n = 0; n < preNodes.Count; n++)
+        {
+            var before = preNodes[n].Command.Options.ToList();
+            var after = postNodes[n].Command.Options.ToList();
+            Assert.Equal(before.Select(o => o.Name), after.Select(o => o.Name)); // same options, same order
+            for (var i = 0; i < before.Count; i++)
+            {
+                Assert.Empty(after[i].Aliases.Except(before[i].Aliases));
+                foreach (var alias in before[i].Aliases.Except(after[i].Aliases))
+                {
+                    var owner = before.Take(i).Single(o => ShortBindings(o).Any(b => b.Alias == alias));
+                    changed.Add(preNodes[n].Path + "|" + alias + "|" + LongName(owner) + "|" + before[i].Name);
+                }
+            }
+        }
+        // No more, no fewer: aliases were removed on exactly the former clashes and nowhere else.
+        Assert.Equal(clashes, changed.Order(StringComparer.Ordinal));
+
+        // Where the shared --output-format keeps its short alias, it is -f (-o on data load).
+        var outputFormats = postNodes.SelectMany(n => n.Command.Options.Where(o => o.Name == "--output-format").Select(o => (n.Path, Option: o))).ToList();
+        Assert.NotEmpty(outputFormats);
+        foreach (var (path, option) in outputFormats.Where(x => !clashes.Any(c => c.StartsWith(x.Path + "|", StringComparison.Ordinal))))
+        {
+            Assert.Equal(path == "data load" ? new[] { "-o" } : new[] { "-f" }, option.Aliases.Where(a => a.Length == 2).ToArray());
+        }
+    }
+
+    [Fact]
+    [Trait("AC", "AC-ALIAS-11")]
+    public void ShadowedAliasRemoval_DoesNotChangeParsing_ComparedWithPrePolicyTree()
+    {
+        var pre = PrePolicyRoot();
+        var post = Root();
+        var clashes = FormerClashKeys(pre);
+        Assert.NotEmpty(clashes);
+        foreach (var key in clashes)
+        {
+            var parts = key.Split('|');
+            var path = parts[0].Split(' ');
+            var owner = Walk(pre).Single(n => n.Path == parts[0]).Command.Options.Single(o => LongName(o) == parts[2]);
+            var ownerArgs = owner.ValueType == typeof(bool) ? new[] { parts[1] } : new[] { parts[1], "x" };
+            var longForm = parts[3] == "--output-format" ? new[] { "--output-format", "json" } : new[] { "--verbose" };
+
+            foreach (var args in new[] { ownerArgs, longForm, ownerArgs.Concat(longForm).ToArray() })
+            {
+                var tokens = path.Concat(args).ToArray();
+                var before = pre.Parse(tokens);
+                var after = post.Parse(tokens);
+                Assert.Equal(Outcome(before), Outcome(after));
+                Assert.Equal(before.Errors.Select(e => e.Message), after.Errors.Select(e => e.Message));
+                Assert.Equal(GlobalOptions.GetValues(before).IsJsonMode, GlobalOptions.GetValues(after).IsJsonMode);
+                Assert.Equal(GlobalOptions.GetValues(before).Verbose, GlobalOptions.GetValues(after).Verbose);
+            }
+
+            // The command-specific option still owns the alias after the policy.
+            var owned = post.Parse(path.Concat(ownerArgs).ToArray());
+            Assert.Contains(owner.Name + "=", Outcome(owned).Select(o => o.Split('=')[0] + "="));
+            // The long form of the shared option still works.
+            var longParsed = GlobalOptions.GetValues(post.Parse(path.Concat(longForm).ToArray()));
+            Assert.True(parts[3] == "--output-format" ? longParsed.IsJsonMode : longParsed.Verbose, key);
+        }
+    }
+
+    // Explicitly bound options of the selected command as "name=value".
+    private static string[] Outcome(ParseResult parsed) =>
+        parsed.CommandResult.Children.OfType<OptionResult>().Where(r => !r.Implicit)
+            .Select(r => r.Option.Name + "=" + r.GetValueOrDefault<object?>()).Order(StringComparer.Ordinal).ToArray();
+
+    [Fact]
+    [Trait("AC", "AC-ALIAS-11")]
+    public void TwinOnViews_KeepsMutualExclusionAndOtherSharedOptions()
+    {
+        var root = Root();
+        string[] baseArgs = ["views", "get", "--entity", "account", "--view", "v1"];
+        foreach (var conflict in new[] { "--quiet", "--debug" })
+        {
+            Assert.Contains(root.Parse(baseArgs.Append("--verbose").Append(conflict).ToArray()).Errors,
+                e => e.Message.Contains("mutually exclusive", StringComparison.Ordinal));
+        }
+        Assert.DoesNotContain(root.Parse(baseArgs.Append("--verbose").ToArray()).Errors,
+            e => e.Message.Contains("mutually exclusive", StringComparison.Ordinal));
+
+        Assert.True(GlobalOptions.GetValues(root.Parse(baseArgs.Append("--quiet").ToArray())).Quiet);
+        Assert.True(GlobalOptions.GetValues(root.Parse(baseArgs.Append("--debug").ToArray())).Debug);
+        Assert.True(GlobalOptions.GetValues(root.Parse(baseArgs.Append("--verbose").ToArray())).Verbose);
+        Assert.Equal("corr-1", GlobalOptions.GetValues(root.Parse(baseArgs.Concat(new[] { "--correlation-id", "corr-1" }).ToArray())).CorrelationId);
+        var plain = GlobalOptions.GetValues(root.Parse(baseArgs));
+        Assert.False(plain.Verbose || plain.Quiet || plain.Debug);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-ALIAS-11")]
+    public void TwinOnPluginsUnregister_KeepsOutputFormatValidationAndDefault()
+    {
+        var root = Root();
+        string[] baseArgs = ["plugins", "unregister", "step", "00000000-0000-0000-0000-000000000001"];
+        Assert.Contains(root.Parse(baseArgs.Concat(new[] { "--output-format", "xml" }).ToArray()).Errors,
+            e => e.Message.Contains("Invalid value 'xml' for --output-format", StringComparison.Ordinal));
+        Assert.Contains(root.Parse(baseArgs.Concat(new[] { "--output-format", "csv" }).ToArray()).Errors,
+            e => e.Message.Contains("CSV output is not supported", StringComparison.Ordinal));
+        Assert.Equal(OutputFormat.Text, GlobalOptions.GetValues(root.Parse(baseArgs)).OutputFormat);
+        Assert.Equal(OutputFormat.Json, GlobalOptions.GetValues(root.Parse(baseArgs.Concat(new[] { "--output-format", "json" }).ToArray())).OutputFormat);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-ALIAS-11")]
+    public void ShortAliasShadowPolicy_AppliedTwice_ChangesNothing()
+    {
+        var root = Root();
+        var before = Walk(root).SelectMany(n => n.Command.Options.Select(o => (Option: o, Names: o.Aliases.Prepend(o.Name).ToArray()))).ToList();
+        ShortAliasShadowPolicy.Apply(root);
+        var after = Walk(root).SelectMany(n => n.Command.Options.Select(o => (Option: o, Names: o.Aliases.Prepend(o.Name).ToArray()))).ToList();
+        Assert.Equal(before.Count, after.Count);
+        for (var i = 0; i < before.Count; i++)
+        {
+            Assert.Same(before[i].Option, after[i].Option);
+            Assert.Equal(before[i].Names, after[i].Names);
+        }
+    }
+
+    [Theory]
+    [InlineData("plugins unregister step", "-f")]
+    [InlineData("views get", "-v")]
+    [Trait("AC", "AC-ALIAS-11")]
+    public void RenderedHelp_ListsEachShortAliasOnce(string path, string alias)
+    {
+        var root = Root();
+        var writer = new StringWriter();
+        root.Parse(path.Split(' ').Append("--help").ToArray()).Invoke(new InvocationConfiguration { Output = writer, Error = writer });
+        var help = writer.ToString();
+        output.WriteLine(help);
+        var pattern = new System.Text.RegularExpressions.Regex(@"(^|[\s,])" + alias + @"(,|\s)", System.Text.RegularExpressions.RegexOptions.Multiline);
+        var lines = help.Split('\n').Where(l => pattern.IsMatch(l.TrimStart())).ToArray();
+        Assert.True(lines.Length == 1, "Expected " + alias + " once, found: " + string.Join(" || ", lines));
+        Assert.Contains("--output-format", help);
+        Assert.Contains("--verbose", help);
+    }
+
+    // Characterizes which option owns a formerly double-bound short alias: the command-specific option (unchanged by #1536).
+    [Theory]
+    [InlineData("deployment-settings sync|-f", "deployment-settings sync -f json", "--file")]
+    [InlineData("views get|-v", "views get --entity account -v x", "--view")]
+    [InlineData("plugins unregister|-f", "plugins unregister -f json", "--force")]
+    [Trait("AC", "AC-ALIAS-11")]
+    public void DoubleBoundShortAlias_ParserOutcome_IsCharacterized(string key, string commandLine, string winner)
+    {
+        var path = key.Split('|')[0]; var alias = key.Split('|')[1];
+        var root = Root();
+        var command = Walk(root).Single(n => n.Path == path).Command;
+        var parsed = root.Parse(commandLine.Split(' '));
+        var bound = command.Options.Where(o => ShortBindings(o).Any(b => b.Alias == alias))
+            .Select(o => o.Name + "=" + (parsed.GetResult(o) is OptionResult r && !r.Implicit ? "BOUND" : "unbound")).Order(StringComparer.Ordinal);
+        output.WriteLine("PPDS_ALIAS_DOUBLE_PARSE " + key + " :: " + string.Join(", ", bound) +
+            " :: errors=[" + string.Join(" | ", parsed.Errors.Select(e => e.Message)) + "]");
+        // The command-specific option (added first) takes the alias; the shared option is silently shadowed.
+        foreach (var option in command.Options.Where(o => ShortBindings(o).Any(b => b.Alias == alias)))
+        {
+            Assert.Equal(option.Name == winner, parsed.GetResult(option) is OptionResult { Implicit: false });
+        }
+    }
+
+    // Single-dash names/aliases of an option, including options declared short-first (Name is single-dash).
+    private static IEnumerable<(string Alias, string Long)> ShortBindings(Option option) =>
+        option.Aliases.Append(option.Name).Distinct(StringComparer.Ordinal)
+            .Where(a => a.Length > 1 && a[0] == '-' && a[1] != '-').Select(a => (a, LongName(option)));
+
+    private static string LongName(Option option) =>
+        option.Name.StartsWith("--", StringComparison.Ordinal) ? option.Name
+        : option.Aliases.FirstOrDefault(a => a.StartsWith("--", StringComparison.Ordinal)) ?? option.Name;
 
     [Theory]
     [InlineData("metadata-entity", "--entity", "account")]
@@ -315,7 +627,12 @@ public sealed class CliEnvironmentAliasTests(ITestOutputHelper output)
     {
         yield return new Node(command, path);
         foreach (var child in command.Subcommands)
-        foreach (var node in Walk(child, (path.Length == 0 ? "" : path + " ") + child.Name)) yield return node;
+        {
+            foreach (var node in Walk(child, (path.Length == 0 ? "" : path + " ") + child.Name))
+            {
+                yield return node;
+            }
+        }
     }
     private static RootCommand BaselineRoot(bool includeInternal)
     {

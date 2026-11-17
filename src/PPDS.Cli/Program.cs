@@ -140,7 +140,15 @@ public static class Program
     }
 
     /// <summary>Constructs the command tree without invoking startup or command actions.</summary>
-    internal static RootCommand CreateRootCommand(bool includeInternal)
+    internal static RootCommand CreateRootCommand(bool includeInternal) =>
+        CreateRootCommand(includeInternal, shadowShortAliases: true);
+
+    /// <param name="includeInternal">Whether to register the internal command group.</param>
+    /// <param name="shadowShortAliases">
+    /// Whether to apply <see cref="ShortAliasShadowPolicy"/>. <c>false</c> yields the pre-policy tree so tests can
+    /// compare parsing before and after the policy (#1536); production always passes <c>true</c>.
+    /// </param>
+    internal static RootCommand CreateRootCommand(bool includeInternal, bool shadowShortAliases)
     {
         var rootCommand = new RootCommand(
             "PPDS CLI - Power Platform Developer Suite command-line tool" + Environment.NewLine +
@@ -189,6 +197,10 @@ public static class Program
         }
 
         EnvironmentAliasPolicy.Apply(rootCommand);
+        if (shadowShortAliases)
+        {
+            ShortAliasShadowPolicy.Apply(rootCommand);
+        }
 
         // Prepend [Required] to required option descriptions for scannability
         HelpCustomization.ApplyRequiredOptionStyle(rootCommand);
