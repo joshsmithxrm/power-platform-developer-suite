@@ -30,7 +30,9 @@ namespace PPDS.LiveTests.Metadata;
 /// TENANT_ID settings: the token is acquired silently through the product's profile store and credential provider, the
 /// run fails rather than prompting when a sign-in would be needed, and the connected organisation must equal
 /// DATAVERSE_URL before anything is written (<see cref="LiveTestProfileConnectionSource"/>). Optional PPDS_TEST_SECOND_LCID (a provisioned language other than 1033) for the multi-language
-/// tests, which are reported as skipped without it. The detailed console logger is needed to see the "OBSERVED" lines
+/// tests, which are reported as skipped without it. The FrenchCaller_ tests (MetadataGlobalChoiceLiveTests.FrenchCaller.cs)
+/// also need the opt-in PPDS_TEST_SWITCH_UI_LANGUAGE=1, because they switch the calling user's UI language for the
+/// duration of each test; run them on their own. The detailed console logger is needed to see the "OBSERVED" lines
 /// (fault codes, messages, label languages); xunit hides the output of passing tests otherwise.
 /// <para>
 /// Each test creates its own uniquely named throwaway global choice (the local/status and table/column tests a throwaway custom table)
@@ -42,7 +44,7 @@ namespace PPDS.LiveTests.Metadata;
 /// </para>
 /// </summary>
 [Trait("Category", "Integration")]
-public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
+public sealed partial class MetadataGlobalChoiceLiveTests : LiveTestBase
 {
     private const int English = 1033;
     private const int ObjectDoesNotExist = unchecked((int)0x80040217);

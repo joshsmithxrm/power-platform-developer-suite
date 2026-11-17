@@ -232,9 +232,39 @@ public sealed class MetadataLiveMultiLanguageFactAttribute : FactAttribute
     }
 }
 
+/// <summary>
+/// <see cref="MetadataLiveMultiLanguageFactAttribute"/> plus the explicit opt-in PPDS_TEST_SWITCH_UI_LANGUAGE=1. These
+/// tests temporarily switch the CALLING user's Dataverse UI language (usersettings.uilanguageid, nothing else) to
+/// PPDS_TEST_SECOND_LCID and restore it afterwards (<see cref="CallerUiLanguageSwitch"/>). Without the opt-in they are
+/// reported as skipped, never as passed.
+/// </summary>
+public sealed class MetadataLiveSwitchUiLanguageFactAttribute : FactAttribute
+{
+    private static readonly LiveTestConfiguration Configuration = new();
+
+    /// <summary>
+    /// Initializes a new instance that skips when prerequisites are missing.
+    /// </summary>
+    public MetadataLiveSwitchUiLanguageFactAttribute()
+    {
+        Skip = MetadataLivePrerequisites.MissingReason(Configuration)
+            ?? (MetadataLivePrerequisites.SecondLanguage is null
+                ? "UI-language metadata test requires PPDS_TEST_SECOND_LCID: the LCID (other than 1033) of a language provisioned in the target organisation, e.g. 1036."
+                : null)
+            ?? (MetadataLivePrerequisites.SwitchUiLanguage
+                ? null
+                : "UI-language metadata test requires the opt-in PPDS_TEST_SWITCH_UI_LANGUAGE=1: it temporarily sets the calling user's " +
+                  "Dataverse UI language (usersettings.uilanguageid) to PPDS_TEST_SECOND_LCID and restores the original value afterwards. " +
+                  "Run these tests on their own (filter FullyQualifiedName~MetadataGlobalChoiceLiveTests.FrenchCaller_).");
+    }
+}
+
 /// <summary>Shared prerequisite checks for the metadata live-test attributes.</summary>
 public static class MetadataLivePrerequisites
 {
+    /// <summary>True only when PPDS_TEST_SWITCH_UI_LANGUAGE is exactly "1".</summary>
+    public static bool SwitchUiLanguage => Environment.GetEnvironmentVariable("PPDS_TEST_SWITCH_UI_LANGUAGE")?.Trim() == "1";
+
     /// <summary>PPDS_TEST_SECOND_LCID parsed, or null when unset, invalid or 1033.</summary>
     public static int? SecondLanguage =>
         int.TryParse(Environment.GetEnvironmentVariable("PPDS_TEST_SECOND_LCID"), out var lcid) && lcid > 0 && lcid != 1033 ? lcid : null;
