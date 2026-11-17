@@ -559,14 +559,15 @@ public class DmlSafetyGuardTests
     }
 
     [Fact]
-    public void Check_Merge_PreservesDryRunClassification()
+    public void Check_Merge_IsBlocked_BecauseTheEngineWouldNotChangeAnyRows()
     {
         var result = _guard.Check(
             Parse("MERGE INTO account AS target USING source_table AS src ON target.accountid = src.id WHEN NOT MATCHED THEN INSERT (name) VALUES (src.name);"),
             new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true });
 
         Assert.True(result.ContainsDml);
-        Assert.True(result.IsDryRun);
+        Assert.True(result.IsBlocked);
+        Assert.Contains("MERGE is not supported", result.BlockReason);
     }
 
     [Fact]

@@ -48,12 +48,25 @@ public sealed class DmlSafetyGuard
         DmlSafetyOptions options,
         QuerySafetySettings settings)
     {
+        // A clause the engine cannot honour (TOP on UPDATE/DELETE, OUTPUT, MERGE, impersonation, ...) would be dropped
+        // and change what the statement affects, so it is refused here, before any confirmation is asked for.
+        var unsupported = PPDS.Query.Planning.DmlStatementSupport.FindUnsupported(statement);
+        if (unsupported != null)
+        {
+            return new DmlSafetyResult
+            {
+                IsBlocked = true,
+                ContainsDml = statement is not (ExecuteAsStatement or RevertStatement),
+                BlockReason = unsupported,
+                ErrorCode = ErrorCodes.Query.DmlBlocked
+            };
+        }
+
         return statement switch
         {
             DeleteStatement delete => CheckDelete(delete, options, settings),
             UpdateStatement update => CheckUpdate(update, options, settings),
             InsertStatement => CheckRowCap(options),
-            MergeStatement => CheckRowCap(options),
             SelectStatement => new DmlSafetyResult { IsBlocked = false },
             BeginEndBlockStatement block => CheckStatements(block.StatementList.Statements, options, settings),
             IfStatement ifStmt => CheckIf(ifStmt, options, settings),

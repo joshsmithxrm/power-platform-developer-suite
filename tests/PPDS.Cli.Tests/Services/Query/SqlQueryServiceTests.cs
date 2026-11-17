@@ -426,7 +426,7 @@ public class SqlQueryServiceTests
         var dataSource = Assert.Single(result.DataSources!);
         Assert.Equal("Local", dataSource.Label);
         Assert.False(dataSource.IsRemote);
-        Assert.Equal(["BATCH_SIZE"], result.AppliedHints);
+        Assert.Null(result.AppliedHints); // BATCH_SIZE is parsed but never applied, so it is not reported
 
         // Verify executor was never called
         mockExecutor.Verify(
@@ -444,7 +444,6 @@ public class SqlQueryServiceTests
     [InlineData("BEGIN UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END", "DmlExecuteNode", "<fetch")]
     [InlineData("WHILE 1 = 0 UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
     [InlineData("BEGIN TRY UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END TRY BEGIN CATCH DELETE FROM account WHERE accountid = '00000000-0000-0000-0000-000000000001' END CATCH", "DmlExecuteNode", "<fetch")]
-    [InlineData("MERGE INTO account AS target USING source_table AS src ON target.accountid = src.id WHEN NOT MATCHED THEN INSERT (name) VALUES (src.name);", "MergeNode", "-- MERGE")]
     [InlineData("DECLARE @preview int; SELECT @preview = 1; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
     [InlineData("SELECT 1; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
     [InlineData("SELECT name INTO #accounts FROM account; SELECT * FROM #accounts; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
@@ -487,7 +486,6 @@ public class SqlQueryServiceTests
     [InlineData("BEGIN UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END", "DmlExecuteNode", "<fetch")]
     [InlineData("WHILE 1 = 0 UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
     [InlineData("BEGIN TRY UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END TRY BEGIN CATCH DELETE FROM account WHERE accountid = '00000000-0000-0000-0000-000000000001' END CATCH", "DmlExecuteNode", "<fetch")]
-    [InlineData("MERGE INTO account AS target USING source_table AS src ON target.accountid = src.id WHEN NOT MATCHED THEN INSERT (name) VALUES (src.name);", "MergeNode", "-- MERGE")]
     [InlineData("DECLARE @preview int; SELECT @preview = 1; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
     [InlineData("SELECT 1; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
     [InlineData("SELECT name INTO #accounts FROM account; SELECT * FROM #accounts; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
@@ -662,7 +660,7 @@ public class SqlQueryServiceTests
         var dataSource = Assert.Single(result.DataSources!);
         Assert.Equal("Local", dataSource.Label);
         Assert.False(dataSource.IsRemote);
-        Assert.Equal(["BATCH_SIZE"], result.AppliedHints);
+        Assert.Null(result.AppliedHints); // BATCH_SIZE is parsed but never applied, so it is not reported
         Assert.Null(result.ExecutionMode);
         mockExecutor.VerifyNoOtherCalls();
     }
@@ -1600,8 +1598,8 @@ public class SqlQueryServiceTests
         var exception = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
 
         Assert.Equal(ErrorCodes.Query.DmlBlocked, exception.ErrorCode);
-        Assert.Contains("[PROD]", exception.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("read-only", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[DEV]", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not supported", exception.Message, StringComparison.OrdinalIgnoreCase);
         mockExecutor.VerifyNoOtherCalls();
         mockBulkExecutor.VerifyNoOtherCalls();
     }
@@ -1695,7 +1693,7 @@ public class SqlQueryServiceTests
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task ExecuteAsync_CompoundCrossEnvDmlDryRun_ReportsEveryPlannedSource()
+    public async Task ExecuteAsync_CompoundCrossEnvDmlDryRun_RefusesTheFirstRemoteWriteTarget()
     {
         var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
         var mockBulkExecutor = new Mock<IBulkOperationExecutor>(MockBehavior.Strict);
@@ -1738,11 +1736,11 @@ public class SqlQueryServiceTests
             DmlSafety = new DmlSafetyOptions { IsDryRun = true }
         };
 
-        var result = await service.ExecuteAsync(request);
+        var exception = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
 
-        Assert.Equal(["Local", "DEV", "QA"], result.DataSources!.Select(source => source.Label));
-        Assert.Equal(2, CountNodeType(result.DryRunPlan!, "DmlExecuteNode"));
-        Assert.Equal(2, CountOccurrences(result.TranspiledFetchXml!, "<!-- client-side join -->"));
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, exception.ErrorCode);
+        Assert.Contains("[DEV]", exception.Message);
+        Assert.Contains("not supported", exception.Message);
         mockExecutor.VerifyNoOtherCalls();
         mockBulkExecutor.VerifyNoOtherCalls();
     }
@@ -1867,7 +1865,7 @@ public class SqlQueryServiceTests
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task ExecuteAsync_CrossEnvDml_PromptPolicy_DryRunBypassesOnlyExecutionConfirmation()
+    public async Task ExecuteAsync_CrossEnvDml_PromptPolicy_IsRefusedBeforeConfirmationOrPreview()
     {
         var mockExecutor = new Mock<IQueryExecutor>();
         var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
@@ -1896,23 +1894,19 @@ public class SqlQueryServiceTests
             DmlSafety = new DmlSafetyOptions { IsDryRun = true }
         };
 
-        var result = await service.ExecuteAsync(request);
-
-        Assert.True(result.DmlSafetyResult?.IsDryRun);
-
-        var executionRequest = request with
+        foreach (var options in new[] { new DmlSafetyOptions { IsDryRun = true }, new DmlSafetyOptions(), new DmlSafetyOptions { IsConfirmed = true } })
         {
-            DmlSafety = new DmlSafetyOptions()
-        };
-        var exception = await Assert.ThrowsAsync<PpdsException>(
-            () => service.ExecuteAsync(executionRequest));
-        Assert.Equal(ErrorCodes.Query.DmlConfirmationRequired, exception.ErrorCode);
-        Assert.Contains("require --confirm", exception.Message, StringComparison.OrdinalIgnoreCase);
+            var exception = await Assert.ThrowsAsync<PpdsException>(
+                () => service.ExecuteAsync(request with { DmlSafety = options }));
+            Assert.Equal(ErrorCodes.Query.DmlBlocked, exception.ErrorCode);
+            Assert.Contains("[QA]", exception.Message);
+            Assert.Contains("not supported", exception.Message);
+        }
     }
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task ExecuteAsync_CrossEnvDml_AllowPolicy_WithConfirm_Passes()
+    public async Task ExecuteAsync_CrossEnvDml_AllowPolicy_WithConfirm_IsRefusedAsUnsupported()
     {
         // Arrange: service with Allow cross-env DML policy + confirmed + dry-run
         // Dry-run verifies the safety checks pass without requiring BulkOperationExecutor.
@@ -1944,13 +1938,12 @@ public class SqlQueryServiceTests
             DmlSafety = new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true }
         };
 
-        // Act — should pass because Allow policy + confirmed + Development target
-        var result = await service.ExecuteAsync(request);
+        // Act: the planner would send the write to the connected environment, so even an allowed target is refused.
+        var exception = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
 
-        // Assert: dry-run returns the plan without executing
-        Assert.NotNull(result);
-        Assert.NotNull(result.DmlSafetyResult);
-        Assert.True(result.DmlSafetyResult.IsDryRun);
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, exception.ErrorCode);
+        Assert.Contains("[DEV]", exception.Message);
+        Assert.Contains("not supported", exception.Message);
     }
 
     [Fact]

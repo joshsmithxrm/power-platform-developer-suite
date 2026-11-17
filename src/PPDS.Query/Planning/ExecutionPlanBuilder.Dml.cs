@@ -28,6 +28,7 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private QueryPlanResult PlanInsert(InsertStatement insert, QueryPlanOptions options)
     {
+        DmlStatementSupport.ThrowIfUnsupported(insert);
         var targetEntity = GetInsertTargetEntity(insert);
         var columns = GetInsertColumns(insert);
 
@@ -94,6 +95,7 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private QueryPlanResult PlanUpdate(UpdateStatement update, QueryPlanOptions options)
     {
+        DmlStatementSupport.ThrowIfUnsupported(update);
         // Extract entity name directly from ScriptDom
         if (update.UpdateSpecification.Target is not NamedTableReference targetNamed)
             throw new QueryParseException("UPDATE target must be a named table.");
@@ -186,6 +188,7 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private QueryPlanResult PlanDelete(DeleteStatement delete, QueryPlanOptions options)
     {
+        DmlStatementSupport.ThrowIfUnsupported(delete);
         // Extract entity name directly from ScriptDom
         if (delete.DeleteSpecification.Target is not NamedTableReference targetNamed)
             throw new QueryParseException("DELETE target must be a named table.");

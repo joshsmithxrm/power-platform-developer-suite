@@ -181,11 +181,10 @@ public sealed class SqlQueryService : ISqlQueryService
         SqlQueryRequest request,
         CancellationToken cancellationToken = default)
     {
-        var (fragment, planResult, safetyResult, executionOptions, hints) =
+        var (fragment, planResult, safetyResult, executionOptions, appliedHints) =
             await PrepareExecutionAsync(request, cancellationToken).ConfigureAwait(false);
 
         var dataSources = CollectDataSources(planResult.RootNode, "Local");
-        var appliedHints = CollectAppliedHints(hints);
 
         // Dry-run: return the plan without executing. The planner is side-effect-free,
         // so running it gives the user the FetchXML and execution plan for review.
@@ -343,6 +342,10 @@ public sealed class SqlQueryService : ISqlQueryService
         {
             throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
         }
+        catch (DmlSafetyRefusalException ex)
+        {
+            throw new PpdsException(ex.ErrorCode, ex.Message, ex);
+        }
 
         var description = QueryPlanDescription.FromNode(planResult.RootNode);
 
@@ -361,11 +364,10 @@ public sealed class SqlQueryService : ISqlQueryService
     {
         if (chunkSize <= 0) chunkSize = 100;
 
-        var (fragment, planResult, safetyResult, executionOptions, hints) =
+        var (fragment, planResult, safetyResult, executionOptions, streamAppliedHints) =
             await PrepareExecutionAsync(request, cancellationToken).ConfigureAwait(false);
 
         var streamDataSources = CollectDataSources(planResult.RootNode, "Local");
-        var streamAppliedHints = CollectAppliedHints(hints);
 
         // Dry-run: yield empty completion chunk
         if (safetyResult is { ContainsDml: true, IsDryRun: true })
@@ -510,7 +512,7 @@ public sealed class SqlQueryService : ISqlQueryService
     /// Shared setup for <see cref="ExecuteAsync"/> and <see cref="ExecuteStreamingAsync"/>:
     /// parse, DML safety check, aggregate metadata, plan build, cross-env check.
     /// </summary>
-    private async Task<(TSqlFragment fragment, QueryPlanResult planResult, DmlSafetyResult? safetyResult, QueryExecutionOptions? executionOptions, QueryHintOverrides hints)>
+    private async Task<(TSqlFragment fragment, QueryPlanResult planResult, DmlSafetyResult? safetyResult, QueryExecutionOptions? executionOptions, List<string>? appliedHints)>
         PrepareExecutionAsync(SqlQueryRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -579,7 +581,17 @@ public sealed class SqlQueryService : ISqlQueryService
 
         // An explicit --top limits returned rows only. Refuse it for DML rather than silently dropping it
         // (which would turn "delete 5 rows" into "delete every matching row"). A default top the caller did
-        // not ask for (RPC clients, the MAX_ROWS hint) is not marked explicit and is simply ignored for DML.
+        // not ask for (the extension's default top over RPC) is not marked explicit and is simply ignored for DML.
+        // The MAX_ROWS hint is text the user wrote, so ignoring it would change what the statement affects. The engine
+        // cannot apply a row limit to DML, so the request is refused instead (on every surface, before anything runs).
+        if (safetyResult.ContainsDml && hints.MaxResultRows.HasValue)
+        {
+            throw new PpdsValidationException(
+                "MAX_ROWS",
+                "The -- ppds:MAX_ROWS hint limits returned rows only and does not apply to INSERT, UPDATE or DELETE, so " +
+                "nothing was executed. Remove the hint, and put the limit in the statement's WHERE clause instead.");
+        }
+
         if (safetyResult.ContainsDml && request.TopIsUserSpecified && request.TopOverride.HasValue)
         {
             throw new PpdsValidationException(
@@ -594,6 +606,10 @@ public sealed class SqlQueryService : ISqlQueryService
                 safetyResult.ErrorCode ?? ErrorCodes.Query.DmlBlocked,
                 safetyResult.BlockReason ?? "DML operation blocked by safety guard.");
         }
+
+        // Writes to another environment are refused here, before any confirmation is asked for: confirming
+        // cannot make them run where the statement says.
+        CheckCrossEnvironmentDmlPolicy(fragment, safetyResult);
 
         // A dry-run is the confirmation preview, not an execution attempt. Keep the
         // confirmation requirement on the result so callers know actual execution is
@@ -669,11 +685,17 @@ public sealed class SqlQueryService : ISqlQueryService
         {
             throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
         }
+        catch (DmlSafetyRefusalException ex)
+        {
+            throw new PpdsException(ex.ErrorCode, ex.Message, ex);
+        }
 
-        // Check cross-environment DML policy after planning
-        CheckCrossEnvironmentDmlPolicy(fragment, planResult, dmlSafety, safetyResult);
+        // MAX_ROWS is reported as applied only when it limited the plan: not when the statement has its own TOP,
+        // and not for scripts, whose statements are planned one at a time without the limit.
+        var maxRowsApplied = hints.MaxResultRows.HasValue && effectiveMaxRows.HasValue
+            && planResult.RootNode is not ScriptExecutionNode;
 
-        return (fragment, planResult, safetyResult, executionOptions, hints);
+        return (fragment, planResult, safetyResult, executionOptions, CollectAppliedHints(hints, maxRowsApplied));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -907,17 +929,17 @@ public sealed class SqlQueryService : ISqlQueryService
     /// Collects the names of query hints that were actively applied.
     /// Returns null when no hints were active.
     /// </summary>
-    private static List<string>? CollectAppliedHints(QueryHintOverrides hints)
+    private static List<string>? CollectAppliedHints(QueryHintOverrides hints, bool maxRowsApplied)
     {
         var applied = new List<string>();
         if (hints.UseTdsEndpoint == true) applied.Add("USE_TDS");
         if (hints.NoLock == true) applied.Add("NOLOCK");
         if (hints.BypassPlugins == true) applied.Add("BYPASS_PLUGINS");
         if (hints.BypassFlows == true) applied.Add("BYPASS_FLOWS");
-        if (hints.MaxResultRows.HasValue) applied.Add("MAX_ROWS");
+        if (maxRowsApplied) applied.Add("MAX_ROWS");
         if (hints.MaxParallelism.HasValue) applied.Add("MAXDOP");
         if (hints.ForceClientAggregation == true) applied.Add("HASH_GROUP");
-        if (hints.DmlBatchSize.HasValue) applied.Add("BATCH_SIZE");
+        // BATCH_SIZE is parsed but the bulk executor does not take a per-query batch size, so it is never applied.
         return applied.Count > 0 ? applied : null;
     }
 
@@ -1106,13 +1128,12 @@ public sealed class SqlQueryService : ISqlQueryService
     }
 
     /// <summary>
-    /// Checks cross-environment DML policy after planning. Throws if blocked or requires unconfirmed confirmation.
+    /// Refuses every DML statement that writes to another environment (<c>[LABEL].entity</c>, or an alias bound to
+    /// one). The planner sends every write to the connected environment, so such a statement cannot do what it says:
+    /// a target whose policy is read-only gets that policy's message, every other target is refused as unsupported.
+    /// Runs before the confirmation check and for dry-runs, so neither confirmation nor a preview can lead to it.
     /// </summary>
-    private void CheckCrossEnvironmentDmlPolicy(
-        TSqlFragment fragment,
-        QueryPlanResult planResult,
-        DmlSafetyOptions dmlSafety,
-        DmlSafetyResult? safetyResult)
+    private void CheckCrossEnvironmentDmlPolicy(TSqlFragment fragment, DmlSafetyResult safetyResult)
     {
         var plannedStatement = ExtractPlannedStatement(fragment);
         foreach (var targetLabel in DetectCrossEnvironmentDmlTargets(fragment, safetyResult))
@@ -1136,15 +1157,11 @@ public sealed class SqlQueryService : ISqlQueryService
                     crossEnvResult.BlockReason ?? "Cross-environment DML blocked.");
             }
 
-            // Prompt/Production policies gate cross-environment execution, not its
-            // side-effect-free preview. ReadOnly remains a hard block above.
-            if (crossEnvResult.RequiresConfirmation && !dmlSafety.IsConfirmed && !dmlSafety.IsDryRun)
-            {
-                throw new PpdsException(
-                    ErrorCodes.Query.DmlBlocked,
-                    crossEnvResult.ConfirmationMessage
-                        ?? "Cross-environment DML requires confirmation.");
-            }
+            throw new PpdsException(
+                ErrorCodes.Query.DmlBlocked,
+                $"Writing to another environment ([{targetLabel}]) is not supported: the statement would not run against " +
+                $"[{targetLabel}]. Nothing was executed. Connect to that environment and run the statement there; reading " +
+                "from another environment (for example INSERT ... SELECT ... FROM [LABEL].entity) is supported.");
         }
     }
 

@@ -395,6 +395,15 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
                 case ContinueStatement:
                     throw new ContinueException();
 
+                // Planned as a one-statement script, so the default arm would plan them again forever.
+                case CreateTableStatement createTable:
+                    ExecuteCreateTempTable(createTable);
+                    break;
+
+                case DropTableStatement dropTable:
+                    ExecuteDropTempTable(dropTable);
+                    break;
+
                 case BeginEndBlockStatement block:
                     var blockStatements = block.StatementList.Statements
                         .Cast<TSqlStatement>().ToList();
@@ -766,6 +775,56 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         if (sourceRows.Count > 0)
         {
             session.InsertIntoTempTable(tempTableName, sourceRows);
+        }
+    }
+
+    /// <summary>
+    /// CREATE TABLE #name (...): creates a session temp table. Dataverse tables cannot be created here.
+    /// </summary>
+    private void ExecuteCreateTempTable(CreateTableStatement createTable)
+    {
+        var name = createTable.SchemaObjectName?.BaseIdentifier?.Value ?? string.Empty;
+        if (!name.StartsWith("#", StringComparison.Ordinal))
+        {
+            throw new QueryExecutionException(
+                QueryErrorCode.ExecutionFailed,
+                $"CREATE TABLE {name} is not supported: only temporary tables (#name) can be created.");
+        }
+
+        var session = _session ?? throw new QueryExecutionException(
+            QueryErrorCode.ExecutionFailed,
+            $"CREATE TABLE {name} needs temporary table support, which is not available here.");
+
+        var columns = createTable.Definition?.ColumnDefinitions
+            .Select(c => c.ColumnIdentifier.Value)
+            .ToList() ?? new List<string>();
+        session.CreateTempTable(name, columns);
+    }
+
+    /// <summary>
+    /// DROP TABLE #name: drops session temp tables. Dataverse tables are never dropped here.
+    /// </summary>
+    private void ExecuteDropTempTable(DropTableStatement dropTable)
+    {
+        var names = dropTable.Objects.Select(o => o.BaseIdentifier?.Value ?? string.Empty).ToList();
+        var notTemp = names.FirstOrDefault(n => !n.StartsWith("#", StringComparison.Ordinal));
+        if (notTemp != null)
+        {
+            throw new QueryExecutionException(
+                QueryErrorCode.ExecutionFailed,
+                $"DROP TABLE {notTemp} is not supported: only temporary tables (#name) can be dropped.");
+        }
+
+        var session = _session ?? throw new QueryExecutionException(
+            QueryErrorCode.ExecutionFailed,
+            "DROP TABLE needs temporary table support, which is not available here.");
+
+        foreach (var name in names)
+        {
+            if (session.TempTableExists(name))
+                session.DropTempTable(name);
+            else if (!dropTable.IsIfExists)
+                throw new QueryExecutionException(QueryErrorCode.ExecutionFailed, $"Temporary table {name} does not exist.");
         }
     }
 
