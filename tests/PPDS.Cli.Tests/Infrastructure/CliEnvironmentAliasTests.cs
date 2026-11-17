@@ -97,6 +97,128 @@ public sealed class CliEnvironmentAliasTests(ITestOutputHelper output)
         }
     }
 
+    // Legacy cross-command short-alias clashes scheduled for CLI 2.0 (#1536). Exact: alias plus the precise
+    // set of long names, aggregated over the whole tree. A new clashing alias, or a new long name for an
+    // allowlisted alias, fails. Not covered here: a new command re-using an already-listed (alias, long name)
+    // pair, and one command binding an alias twice (see LegacySameCommandDoubleBindings).
+    private static readonly Dictionary<string, string[]> LegacyAliasClashes = new(StringComparer.Ordinal)
+    {
+        // -e: entity / entity list / environment; reassigned to environment only in CLI 2.0.
+        ["-e"] = ["--entities", "--entity", "--environment"],
+        // Other legacy short aliases found by the inventory; each is bound to different long options in
+        // different commands (e.g. -f is --output-format on most commands but --file on data load and
+        // deployment-settings sync, and --force on several unregister/download/extract/clear commands).
+        ["-a"] = ["--assembly", "--include-attributes"],
+        ["-c"] = ["--color", "--column", "--config", "--correlation-id", "--count"],
+        ["-f"] = ["--file", "--force", "--output-format"],
+        ["-i"] = ["--include", "--index", "--input", "--interval"],
+        ["-l"] = ["--label", "--level", "--limit"],
+        ["-m"] = ["--include-managed", "--mapping", "--message", "--mode"],
+        ["-n"] = ["--lines", "--name", "--top"],
+        ["-o"] = ["--output", "--output-format"],
+        ["-p"] = ["--password", "--profile"],
+        ["-s"] = ["--schema", "--set", "--show", "--solution"],
+        ["-t"] = ["--tenant", "--timeout", "--top", "--type"],
+        ["-u"] = ["--user", "--user-mapping"],
+        ["-v"] = ["--verbose", "--view"],
+    };
+
+    [Fact]
+    [Trait("AC", "AC-ALIAS-10")]
+    public void CompleteTree_ShortAliasesDoNotClashAcrossCommandsBeyondLegacyAllowlist()
+    {
+        var bindings = Walk(Root()).SelectMany(n => n.Command.Options)
+            .SelectMany(o => ShortBindings(o))
+            .GroupBy(b => b.Alias, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Select(b => b.Long).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(), StringComparer.Ordinal);
+        var clashes = bindings.Where(b => b.Value.Length > 1).ToDictionary(b => b.Key, b => b.Value, StringComparer.Ordinal);
+        output.WriteLine("PPDS_ALIAS_CLASH_INVENTORY=" + JsonSerializer.Serialize(clashes.OrderBy(c => c.Key, StringComparer.Ordinal)));
+
+        var unexpected = clashes.Where(c => !LegacyAliasClashes.TryGetValue(c.Key, out var allowed) || !allowed.SequenceEqual(c.Value))
+            .Select(c => c.Key + " => " + string.Join(", ", c.Value)).ToArray();
+        Assert.True(unexpected.Length == 0, "Short alias bound to different long options across commands: " + string.Join("; ", unexpected));
+        var stale = LegacyAliasClashes.Keys.Where(k => !clashes.ContainsKey(k)).ToArray();
+        Assert.True(stale.Length == 0, "Allowlisted clash no longer exists; remove from allowlist: " + string.Join(", ", stale));
+    }
+
+    // Same-command double bindings: one short alias bound to two different options on one command
+    // (e.g. a command-specific -f plus the global --output-format -f). Exact allowlist keyed by
+    // "command path|alias" with the precise set of long names; recorded by inventory, behaviour unchanged.
+    private static readonly Dictionary<string, string[]> LegacySameCommandDoubleBindings = new(StringComparer.Ordinal)
+    {
+        // -f: command-specific option shadows --output-format (parser: the first-added option wins).
+        // -v: --view shadows the global --verbose on every views writer/reader.
+        ["custom-apis unregister|-f"] = ["--force", "--output-format"],
+        ["deployment-settings sync|-f"] = ["--file", "--output-format"],
+        ["plugins download assembly|-f"] = ["--force", "--output-format"],
+        ["plugins download package|-f"] = ["--force", "--output-format"],
+        ["plugins extract|-f"] = ["--force", "--output-format"],
+        ["plugins unregister|-f"] = ["--force", "--output-format"],
+        ["query history clear|-f"] = ["--force", "--output-format"],
+        ["service-endpoints unregister|-f"] = ["--force", "--output-format"],
+        ["views add-column|-v"] = ["--verbose", "--view"],
+        ["views clear-filter|-v"] = ["--verbose", "--view"],
+        ["views clear-sort|-v"] = ["--verbose", "--view"],
+        ["views get|-v"] = ["--verbose", "--view"],
+        ["views remove-column|-v"] = ["--verbose", "--view"],
+        ["views reorder-columns|-v"] = ["--verbose", "--view"],
+        ["views set-fetchxml|-v"] = ["--verbose", "--view"],
+        ["views set-filter|-v"] = ["--verbose", "--view"],
+        ["views set-sort|-v"] = ["--verbose", "--view"],
+        ["views update-column|-v"] = ["--verbose", "--view"],
+    };
+
+    [Fact]
+    [Trait("AC", "AC-ALIAS-11")]
+    public void EveryCommand_ShortAliasesAreNotBoundTwiceBeyondLegacyAllowlist()
+    {
+        var found = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        foreach (var node in Walk(Root()))
+        foreach (var group in node.Command.Options.SelectMany(o => ShortBindings(o).Select(b => (b.Alias, Option: o)))
+                     .GroupBy(b => b.Alias, StringComparer.Ordinal))
+        {
+            var longs = group.Select(g => LongName(g.Option)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+            if (longs.Length > 1) found[(node.Path.Length == 0 ? "<root>" : node.Path) + "|" + group.Key] = longs;
+        }
+        output.WriteLine("PPDS_ALIAS_DOUBLE_BINDINGS=" + JsonSerializer.Serialize(found.OrderBy(f => f.Key, StringComparer.Ordinal)));
+
+        var unexpected = found.Where(f => !LegacySameCommandDoubleBindings.TryGetValue(f.Key, out var allowed) || !allowed.SequenceEqual(f.Value))
+            .Select(f => f.Key + " => " + string.Join(", ", f.Value)).ToArray();
+        Assert.True(unexpected.Length == 0, "Short alias bound to more than one option on a single command: " + string.Join("; ", unexpected));
+        var stale = LegacySameCommandDoubleBindings.Keys.Where(k => !found.ContainsKey(k)).ToArray();
+        Assert.True(stale.Length == 0, "Allowlisted double binding no longer exists; remove from allowlist: " + string.Join(", ", stale));
+    }
+
+    // Characterizes what the parser does today with a same-command double binding (detection only; no alias changes).
+    [Theory]
+    [InlineData("deployment-settings sync|-f", "deployment-settings sync -f json", "--file")]
+    [InlineData("views get|-v", "views get --entity account -v x", "--view")]
+    [InlineData("plugins unregister|-f", "plugins unregister -f json", "--force")]
+    [Trait("AC", "AC-ALIAS-11")]
+    public void DoubleBoundShortAlias_ParserOutcome_IsCharacterized(string key, string commandLine, string winner)
+    {
+        var path = key.Split('|')[0]; var alias = key.Split('|')[1];
+        var root = Root();
+        var command = Walk(root).Single(n => n.Path == path).Command;
+        var parsed = root.Parse(commandLine.Split(' '));
+        var bound = command.Options.Where(o => ShortBindings(o).Any(b => b.Alias == alias))
+            .Select(o => o.Name + "=" + (parsed.GetResult(o) is OptionResult r && !r.Implicit ? "BOUND" : "unbound")).Order(StringComparer.Ordinal);
+        output.WriteLine("PPDS_ALIAS_DOUBLE_PARSE " + key + " :: " + string.Join(", ", bound) +
+            " :: errors=[" + string.Join(" | ", parsed.Errors.Select(e => e.Message)) + "]");
+        // The command-specific option (added first) takes the alias; the shared option is silently shadowed.
+        foreach (var option in command.Options.Where(o => ShortBindings(o).Any(b => b.Alias == alias)))
+            Assert.Equal(option.Name == winner, parsed.GetResult(option) is OptionResult { Implicit: false });
+    }
+
+    // Single-dash names/aliases of an option, including options declared short-first (Name is single-dash).
+    private static IEnumerable<(string Alias, string Long)> ShortBindings(Option option) =>
+        option.Aliases.Append(option.Name).Distinct(StringComparer.Ordinal)
+            .Where(a => a.Length > 1 && a[0] == '-' && a[1] != '-').Select(a => (a, LongName(option)));
+
+    private static string LongName(Option option) =>
+        option.Name.StartsWith("--", StringComparison.Ordinal) ? option.Name
+        : option.Aliases.FirstOrDefault(a => a.StartsWith("--", StringComparison.Ordinal)) ?? option.Name;
+
     [Theory]
     [InlineData("metadata-entity", "--entity", "account")]
     [InlineData("data-entity", "--entity", "account")]

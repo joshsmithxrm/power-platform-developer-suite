@@ -41,6 +41,33 @@ public sealed class EnvironmentConfirmationServiceTests
         else await action.Should().NotThrowAsync();
     }
 
+    [Theory]
+    [InlineData(null, null, true)]
+    [InlineData(EnvironmentType.Unknown, null, true)]
+    [InlineData(EnvironmentType.Unknown, ProtectionLevel.Production, false)]
+    [InlineData(EnvironmentType.Unknown, ProtectionLevel.Test, false)]
+    [InlineData(EnvironmentType.Production, null, false)]
+    [InlineData(EnvironmentType.Test, ProtectionLevel.Production, false)]
+    [Trait("AC", "AC-08")]
+    public async Task RequiredMessage_GuidesUnconfiguredEnvironmentsOnly(EnvironmentType? type, ProtectionLevel? protection, bool guidance)
+    {
+        var (service, _) = Create(type, protection);
+        var action = () => service.EnsureConfirmedAsync("write");
+        var ex = (await action.Should().ThrowAsync<PpdsException>()).Which;
+        ex.ErrorCode.Should().Be(EnvironmentConfirmationErrorCodes.Required);
+        var shownType = type ?? EnvironmentType.Unknown;
+        var shownProtection = protection ?? ProtectionLevel.Production;
+        var original = $"Confirm 'write' against '{Target}' (type: {shownType}, protection: {shownProtection}) " +
+                       $"with --confirm-env {Target} or confirmEnvironment before writing.";
+        ex.Message.Should().StartWith(original);
+        if (guidance)
+        {
+            ex.Message.Should().Be(original + " This environment has no saved type, so it is treated as Production; " +
+                $"record its type with 'ppds env config {Target} --type <Production|Sandbox|Development|Test|Trial>'.");
+        }
+        else ex.Message.Should().Be(original);
+    }
+
     [Fact]
     public async Task ExactTarget_AcknowledgementIsReusedAndHarmlessUrlVariationsMatch()
     {

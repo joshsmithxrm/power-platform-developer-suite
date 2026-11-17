@@ -277,6 +277,14 @@ at least 90 days from the first stable release containing the complete replaceme
 aliases and deprecation guidance. This release does not reassign or remove an
 alias, and no transition date is set here.
 
+Other short aliases (for example `-f` for `--output-format`, `--file` or `--force`) also differ between
+commands today. Two tests record this as exact allowlists in `CliEnvironmentAliasTests`: one aggregates every
+short alias over the whole tree and fails when an alias gains a new long name or a new clashing alias appears;
+the other fails when any single command binds one short alias to two of its own options (for example
+`--file -f` plus the shared `--output-format -f`; the command-specific option wins and the shared one is
+shadowed). Neither test detects a new command that reuses an already-listed alias and long-name pair on a
+command with no other binding of that alias. No aliases are changed here.
+
 `Program.CreateRootCommand(bool includeInternal)` constructs the complete command
 tree without running startup diagnostics, command actions, authentication, or
 profile access. Main passes the existing `PPDS_INTERNAL=1` condition, applies the
@@ -295,6 +303,8 @@ nonpublic token members or use global string-based option lookup.
 | AC-ALIAS-07 | Pure construction preserves the optional internal group and all registrations | CliEnvironmentAliasTests.PureFactory_ExistsAndControlsInternalGroup; registration source comparison | Pending validation |
 | AC-ALIAS-08 | Help and guidance state replacements and the minimum stable transition window | CliEnvironmentAliasTests.HelpMigration_IsVisible; source review of this section | Pending validation |
 | AC-ALIAS-09 | Reapplying the policy preserves names, aliases, descriptions and unsupported short forms | EnvironmentAliasPolicyTests.Apply_IsIdempotentAndRetainsUnsupportedShortAlias | Pending validation |
+| AC-ALIAS-10 | Across the whole tree, a short alias is bound only to its allowlisted set of long options (legacy clashes scheduled for CLI 2.0: `-e` plus `-a -c -f -i -l -m -n -o -p -s -t -u -v`); a new clashing alias or a new long name for a listed alias fails | CliEnvironmentAliasTests.CompleteTree_ShortAliasesDoNotClashAcrossCommandsBeyondLegacyAllowlist | ✅ |
+| AC-ALIAS-11 | No single command binds one short alias to more than one of its own options, except an exact command+alias allowlist of 18 legacy double bindings; the parser outcome (command-specific option wins) is characterized | CliEnvironmentAliasTests.EveryCommand_ShortAliasesAreNotBoundTwiceBeyondLegacyAllowlist, DoubleBoundShortAlias_ParserOutcome_IsCharacterized | ✅ |
 
 ---
 
