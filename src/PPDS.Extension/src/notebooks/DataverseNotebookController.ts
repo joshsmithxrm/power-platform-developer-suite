@@ -6,7 +6,7 @@ import type { QueryResultResponse } from '../types.js';
 import { isAuthError } from '../utils/errorUtils.js';
 import { showErrorWithReport } from '../utils/errorNotify.js';
 import {
-    UNCONFIRMED_DML_SAFETY, confirmDmlExecution, describeDmlFailure, dmlRefusalMessage, isDmlConfirmationRequired,
+    UNCONFIRMED_DML_SAFETY, confirmDmlExecution, describeDmlFailure, dmlRefusalMessage, dmlServerMessage, isDmlConfirmationRequired,
 } from '../utils/dmlSafety.js';
 
 import { renderResultsHtml } from './notebookResultRenderer.js';
@@ -47,6 +47,11 @@ interface CellExecutionState {
     readonly run: NotebookRun;
     readonly abort: AbortController;
     readonly cts: CancellationTokenSource;
+}
+
+/** stop names why the rest of the run must not execute (shown on each skipped cell). */
+interface CellOutcome {
+    readonly stop?: string;
 }
 
 interface CachedCellResult {
@@ -266,9 +271,10 @@ export class DataverseNotebookController implements vscode.Disposable {
                     this.updateStatusBarVisibility(vscode.window.activeNotebookEditor);
                     for (const [index, cell] of pending.cells.entries()) {
                         if (!this.ownsRun(state, run) || run.cancelled || state.notebook.isClosed) break;
-                        if (await this.executeCell(cell, state, run, run.context) === 'declined') {
-                            // Declining one DML cell stops the rest of this run (Run All included).
-                            if (this.ownsRun(state, run) && !run.cancelled) await this.markNotRun(pending.cells.slice(index + 1), run.context);
+                        const outcome = await this.executeCell(cell, state, run, run.context);
+                        if (outcome.stop) {
+                            // A declined, refused, failed or cancelled DML cell stops the rest of this run (Run All included).
+                            await this.markNotRun(pending.cells.slice(index + 1), state, run, run.context, outcome.stop);
                             break;
                         }
                     }
@@ -315,7 +321,7 @@ export class DataverseNotebookController implements vscode.Disposable {
         return new vscode.NotebookCellOutput([vscode.NotebookCellOutputItem.error(error instanceof Error ? error : new Error(String(error)))]);
     }
 
-    private async executeCell(cell: vscode.NotebookCell, state: NotebookState, run: NotebookRun, context: NotebookExecutionContext): Promise<'completed' | 'declined'> {
+    private async executeCell(cell: vscode.NotebookCell, state: NotebookState, run: NotebookRun, context: NotebookExecutionContext): Promise<CellOutcome> {
         const execution = this.controller.createNotebookCellExecution(cell);
         execution.executionOrder = ++this.executionOrder;
         const startedAt = Date.now();
@@ -337,12 +343,18 @@ export class DataverseNotebookController implements vscode.Disposable {
         const textOutput = (text: string): vscode.NotebookCellOutput =>
             new vscode.NotebookCellOutput([vscode.NotebookCellOutputItem.text(text, 'text/plain')]);
         let success = false;
+        /** Set once the daemon has said this cell is DML; any non-success after that stops the run. */
+        let isDml = false;
+        let confirmedDml = false;
+        const completed: CellOutcome = {};
+        const stopIfDml = (reason: string): CellOutcome => isDml ? { stop: reason } : completed;
         try {
+            // Read once: the modal and the confirmed request use exactly this text and this run's context.
             const content = cell.document.getText().trim();
             if (!content) {
                 await writeOutput(textOutput('Empty query'));
                 success = true;
-                return 'completed';
+                return completed;
             }
             const isFetchXml = ['fetchxml', 'xml'].includes(cell.document.languageId) || this.looksLikeFetchXml(content);
             const target = { environmentUrl: context.environmentUrl, profileName: context.profileName, profileIdentity: context.profileIdentity };
@@ -357,44 +369,40 @@ export class DataverseNotebookController implements vscode.Disposable {
                     result = await this.daemon.querySql({ sql: content, ...target, dmlSafety: { ...UNCONFIRMED_DML_SAFETY } }, entry.cts.token);
                 } catch (error) {
                     if (cancelled() || !isDmlConfirmationRequired(error)) throw error;
-                    if (!ownsExecution()) return 'completed';
-                    await writeOutput(textOutput('Waiting for DML confirmation…'));
-                    const confirmed = await confirmDmlExecution(content, context);
-                    if (cancelled()) {
-                        await writeOutput(textOutput('Query cancelled'));
-                        return 'completed';
-                    }
-                    if (!ownsExecution()) return 'completed';
-                    if (!confirmed) {
-                        await writeOutput(textOutput('Not executed: DML confirmation was declined. No records were changed.'));
-                        return 'declined';
-                    }
-                    // A second confirmation-required answer is not re-prompted; it surfaces as an error below.
+                    isDml = true;
+                    const refusal = await this.awaitDmlConfirmation(content, context, error, entry, cancelled, ownsExecution,
+                        text => writeOutput(textOutput(text)));
+                    if (refusal) return refusal;
+                    // One confirmed request for this text and target. A second confirmation-required
+                    // answer is not re-prompted; it surfaces as an error below.
+                    confirmedDml = true;
                     result = await this.daemon.querySql({ sql: content, ...target, dmlSafety: { isConfirmed: true } }, entry.cts.token);
                 }
             }
             if (cancelled()) {
                 await writeOutput(textOutput('Query cancelled'));
-                return 'completed';
+                return stopIfDml('an earlier DML cell was cancelled');
             }
-            if (!ownsExecution()) return 'completed';
+            if (!ownsExecution()) return completed;
             this.cellResults.set(cellUri, { result, context, executedAt });
             const table = new vscode.NotebookCellOutput([
                 vscode.NotebookCellOutputItem.text(renderResultsHtml(result, context.environmentUrl), 'text/html'),
             ]);
-            const dmlFailure = describeDmlFailure(result);
+            const dmlFailure = describeDmlFailure(result, { confirmedDml });
             await writeOutputs(dmlFailure ? [this.errorOutput(new Error(dmlFailure)), table] : [table]);
             success = result.success && !dmlFailure;
+            if (dmlFailure) return { stop: 'rows failed in an earlier DML cell' };
+            if (!success) return stopIfDml('an earlier DML cell did not succeed');
         } catch (error) {
             if (entry.abort.signal.aborted || run.cancelled) {
                 await writeOutput(textOutput('Query cancelled'));
-                return 'completed';
+                return stopIfDml('an earlier DML cell was cancelled');
             }
-            if (!ownsExecution()) return 'completed';
+            if (!ownsExecution()) return completed;
             const refusal = dmlRefusalMessage(error);
             if (refusal) {
                 await writeOutput(this.errorOutput(new Error(refusal)));
-                return 'completed';
+                return { stop: 'the DML safety guard refused an earlier cell' };
             }
             if (isAuthError(error)) {
                 // Name/index may have been reused since this run captured its profile.
@@ -403,29 +411,72 @@ export class DataverseNotebookController implements vscode.Disposable {
                 await writeOutput(this.errorOutput(new Error(
                     `${message}\nAuthentication failed for the profile captured by this run (${context.profileName}) on ${context.environmentName}. Confirm the intended profile in PPDS Profiles, re-authenticate it, then run the cell again.`,
                 )));
-                return 'completed';
+                return stopIfDml('an earlier DML cell failed');
             }
             await writeOutput(this.errorOutput(error));
+            return stopIfDml('an earlier DML cell failed');
         } finally {
             if (this.activeExecutions.get(cellUri) === entry) this.activeExecutions.delete(cellUri);
             tokenDisposable.dispose();
             entry.cts.dispose();
             execution.end(success, Date.now());
         }
-        return 'completed';
+        return completed;
     }
 
-    /** Marks cells a Run All did not reach because the user declined a DML confirmation. */
-    private async markNotRun(cells: readonly vscode.NotebookCell[], context: NotebookExecutionContext): Promise<void> {
+    /**
+     * Shows the DML confirmation for `content` on `context`. Resolves undefined only when the user
+     * chose Execute Anyway and the execution is still owned and not cancelled; otherwise the outcome.
+     */
+    private async awaitDmlConfirmation(
+        content: string, context: NotebookExecutionContext, error: unknown, entry: CellExecutionState,
+        cancelled: () => boolean, ownsExecution: () => boolean, writeText: (text: string) => Promise<void>,
+    ): Promise<CellOutcome | undefined> {
+        if (!ownsExecution()) return {};
+        await writeText('Waiting for DML confirmation…');
+        const confirmed = await confirmDmlExecution(content, context, {
+            serverMessage: dmlServerMessage(error), signal: entry.abort.signal,
+        });
+        if (cancelled()) {
+            await writeText('Query cancelled. No records were changed.');
+            return { stop: 'an earlier DML cell was cancelled' };
+        }
+        if (!ownsExecution()) return {};
+        if (!confirmed) {
+            await writeText('Not executed: DML confirmation was declined. No records were changed.');
+            return { stop: 'a DML confirmation in an earlier cell was declined' };
+        }
+        return undefined;
+    }
+
+    /**
+     * Marks the cells a run did not reach after a DML cell stopped it. Each cell is checked
+     * for ownership on its own, always ends its execution, and a failure on one cell is
+     * contained to that cell (it never reaches the run's generic error handler).
+     */
+    private async markNotRun(
+        cells: readonly vscode.NotebookCell[], state: NotebookState, run: NotebookRun, context: NotebookExecutionContext, reason: string,
+    ): Promise<void> {
         const executedAt = new Date().toISOString();
         for (const cell of cells) {
+            if (!this.ownsRun(state, run) || run.cancelled || state.notebook.isClosed) return;
             this.cellResults.delete(cell.document.uri.toString());
-            const execution = this.controller.createNotebookCellExecution(cell);
-            execution.start(Date.now());
-            await execution.replaceOutput([...this.contextOutputs(context, executedAt), new vscode.NotebookCellOutput([
-                vscode.NotebookCellOutputItem.text('Not run: this run stopped because a DML confirmation in an earlier cell was declined.', 'text/plain'),
-            ])]);
-            execution.end(false, Date.now());
+            let execution: vscode.NotebookCellExecution | undefined;
+            try {
+                execution = this.controller.createNotebookCellExecution(cell);
+                execution.start(Date.now());
+                await execution.replaceOutput([...this.contextOutputs(context, executedAt), new vscode.NotebookCellOutput([
+                    vscode.NotebookCellOutputItem.text(`Not run: this run stopped because ${reason}.`, 'text/plain'),
+                ])]);
+            } catch {
+                // The cell left the notebook or the notebook is closing; nothing to mark.
+            } finally {
+                try {
+                    execution?.end(false, Date.now());
+                } catch {
+                    // Already ended by VS Code (cell removed).
+                }
+            }
         }
     }
 
