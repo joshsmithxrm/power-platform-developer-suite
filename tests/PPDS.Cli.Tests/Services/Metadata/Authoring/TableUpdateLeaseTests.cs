@@ -28,12 +28,13 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
         {
             await operation;
             Assert.Equal("Changed", h.StoredLabel);
-            Assert.Equal(new[] { "update", "publish" }, h.SuccessfulSdk);
+            Assert.Equal(new[] { "read", "update", "publish" }, h.SuccessfulSdk);
             Assert.Equal(new[]
             {
-                "checkout:update", "acquired:1", "sdk:update:1", "success:update:1", "dispose:1",
-                "cache:list", "cache:entity", "checkout:publish", "acquired:2", "sdk:publish:2",
-                "success:publish:2", "dispose:2", "info"
+                "checkout:read", "acquired:1", "sdk:read:1", "success:read:1", "dispose:1",
+                "checkout:update", "acquired:2", "sdk:update:2", "success:update:2", "dispose:2",
+                "cache:list", "cache:entity", "checkout:publish", "acquired:3", "sdk:publish:3",
+                "success:publish:3", "dispose:3", "info"
             }, h.Events.Select(e => e.Action));
             h.AssertSequentialOwnership();
         }
@@ -49,10 +50,11 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
         try
         {
             await operation;
-            Assert.Equal(new[] { "update" }, h.SuccessfulSdk);
+            Assert.Equal(new[] { "read", "update" }, h.SuccessfulSdk);
             Assert.Equal(new[]
             {
-                "checkout:update", "acquired:1", "sdk:update:1", "success:update:1", "dispose:1",
+                "checkout:read", "acquired:1", "sdk:read:1", "success:read:1", "dispose:1",
+                "checkout:update", "acquired:2", "sdk:update:2", "success:update:2", "dispose:2",
                 "cache:list", "cache:entity", "info"
             }, h.Events.Select(e => e.Action));
             h.AssertSequentialOwnership();
@@ -71,7 +73,7 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
         {
             await operation;
             Assert.Equal("Changed", h.StoredLabel);
-            Assert.Equal(new[] { "update", "publish" }, h.SuccessfulSdk);
+            Assert.Equal(new[] { "read", "update", "publish" }, h.SuccessfulSdk);
             Assert.Equal(new[] { "list", "entity" }, h.Cache.Select(e => e.Name));
             Assert.Single(h.Infos);
             h.AssertReturned();
@@ -123,16 +125,85 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
             Assert.Equal(afterUpdate ? new[] { "list", "entity" } : [], h.Cache.Select(e => e.Name));
             Assert.Equal(boundary switch
             {
-                "update-checkout" => Array.Empty<string>(),
-                "publish-sdk" => ["update", "publish"],
-                _ => ["update"]
+                "update-checkout" => new[] { "read" },
+                "publish-sdk" => ["read", "update", "publish"],
+                _ => ["read", "update"]
             }, h.AttemptedSdk);
-            Assert.Equal(afterUpdate ? new[] { "update" } : [], h.SuccessfulSdk);
+            Assert.Equal(afterUpdate ? new[] { "read", "update" } : ["read"], h.SuccessfulSdk);
             Assert.Empty(h.Infos);
             Assert.All(h.AttemptedSdk.GroupBy(s => s), group => Assert.Single(group));
             h.AssertReturned();
         }
         finally { output.WriteLine(h.Snapshot(operation)); }
+    }
+
+    public static IEnumerable<object[]> ReadFailures()
+    {
+        foreach (var kind in new[] { "ordinary", "coded", "cancel", "timeout", "auth", "connection" })
+            yield return ["read-sdk", kind];
+        foreach (var kind in new[] { "ordinary", "coded", "cancel", "timeout", "pool", "auth" })
+            yield return ["read-checkout", kind];
+    }
+
+    /// <summary>
+    /// AC-147: the pre-write table read keeps the classification the update stage has: checkout failures follow the
+    /// shared acquisition rule, SDK timeouts stay Connection.Timeout (exit 4), auth failures stay auth errors with the
+    /// re-authentication signal, coded and cancellation failures propagate as themselves; nothing is written.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ReadFailures))]
+    [Trait("AC", "AC-147")]
+    public async Task LabelReadFailure_KeepsItsClassification_AndStopsBeforeTheUpdate(string boundary, string kind)
+    {
+        using var h = new Harness(publish: true, capacity: 2, failureBoundary: boundary, failureKind: kind);
+        var operation = h.Invoke();
+        try
+        {
+            var error = await Record.ExceptionAsync(() => operation);
+            Assert.NotNull(error);
+            if (kind is "coded" or "cancel") Assert.Same(h.Injected, error);
+            else Assert.Same(h.Injected, Assert.IsAssignableFrom<PpdsException>(error).InnerException);
+            Assert.Equal(kind == "cancel", operation.IsCanceled);
+            var (expectedCode, expectedExit) = (boundary, kind) switch
+            {
+                (_, "coded") => ("Synthetic.Coded", 2),
+                (_, "cancel") => ("Operation.Cancelled", 2),
+                (_, "timeout" or "pool") => ("Connection.Timeout", 4),
+                (_, "auth") => (ExceptionMapper.Map(h.Injected!).Code, 5),
+                (_, "connection") => (ExceptionMapper.Map(h.Injected!).Code, 4),
+                ("read-sdk", _) => (MetadataErrorCodes.SdkOperationFailed, 1),
+                _ => ("Operation.Internal", 2)
+            };
+            if (boundary == "read-sdk" && kind == "ordinary")
+            {
+                Assert.Equal(MetadataErrorCodes.SdkOperationFailed, Assert.IsType<PpdsException>(error).ErrorCode);
+                Assert.Equal(ExceptionMapper.ToExitCode(new PpdsException(MetadataErrorCodes.SdkOperationFailed, "x")), ExceptionMapper.ToExitCode(error));
+            }
+            else AssertCli(error, expectedCode, expectedExit);
+            if (kind == "auth")
+                Assert.True(Assert.IsType<PpdsAuthException>(error).RequiresReauthentication);
+            Assert.Equal("Existing", h.StoredLabel);
+            Assert.Equal(boundary == "read-sdk" ? new[] { "read" } : [], h.AttemptedSdk);
+            Assert.Empty(h.SuccessfulSdk);
+            Assert.Empty(h.Cache);
+            Assert.Empty(h.Infos);
+            h.AssertReturned();
+        }
+        finally { output.WriteLine(h.Snapshot(operation)); }
+    }
+
+    /// <summary>AC-147: a read that returns no table metadata stops the update with a coded error.</summary>
+    [Fact]
+    [Trait("AC", "AC-147")]
+    public async Task LabelReadWithoutTableMetadata_StopsBeforeTheUpdate()
+    {
+        using var h = new Harness(publish: false, capacity: 2, emptyRead: true);
+        var error = await Assert.ThrowsAsync<PpdsException>(() => h.Invoke());
+        Assert.Equal(MetadataErrorCodes.SdkOperationFailed, error.ErrorCode);
+        Assert.Equal(new[] { "read" }, h.AttemptedSdk);
+        Assert.Equal("Existing", h.StoredLabel);
+        Assert.Empty(h.Cache);
+        h.AssertReturned();
     }
 
     [Theory]
@@ -148,7 +219,7 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() => operation);
             Assert.Same(h.Injected, error);
             Assert.Equal("Changed", h.StoredLabel);
-            Assert.Equal(new[] { "update" }, h.AttemptedSdk);
+            Assert.Equal(new[] { "read", "update" }, h.AttemptedSdk);
             Assert.Equal(boundary == "cache-list" ? new[] { "list" } : ["list", "entity"], h.Cache.Select(e => e.Name));
             Assert.Empty(h.Infos);
             Assert.All(h.Cache, e => Assert.Equal(0, e.Active));
@@ -193,6 +264,8 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
         await h.Invoke();
         var sdk = Assert.IsType<UpdateEntityRequest>(h.UpdateRequest);
         Assert.Equal(Harness.Solution, sdk.SolutionUniqueName);
+        Assert.True(sdk.MergeLabels); // AC-147: 1033-only labels are merged with the other languages.
+        Assert.NotNull(h.ReadRequest);
         var entity = sdk.Entity;
         Assert.Equal(Harness.Table, entity.LogicalName);
         Assert.Equal("Changed", Assert.Single(entity.DisplayName.LocalizedLabels).Label);
@@ -252,6 +325,7 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
         internal int PeakActive { get; private set; }
         internal Exception? Injected { get; private set; }
         internal Exception? ModeledTimeout { get; private set; }
+        internal OrganizationRequest? ReadRequest { get; private set; }
         internal OrganizationRequest? UpdateRequest { get; private set; }
         internal OrganizationRequest? PublishRequest { get; private set; }
         internal List<Trace> Events { get; } = [];
@@ -261,8 +335,11 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
         internal List<string> SuccessfulSdk { get; } = [];
         private int Active => _capacity - _slots.CurrentCount;
 
-        internal Harness(bool publish, int capacity = 1, string? failureBoundary = null, string? failureKind = null, bool blocked = false)
+        private readonly bool _emptyRead;
+
+        internal Harness(bool publish, int capacity = 1, string? failureBoundary = null, string? failureKind = null, bool blocked = false, bool emptyRead = false)
         {
+            _emptyRead = emptyRead;
             _capacity = capacity;
             _slots = new SemaphoreSlim(capacity, capacity);
             _failureBoundary = failureBoundary; _failureKind = failureKind;
@@ -309,6 +386,8 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
                 "coded" => new PpdsException("Synthetic.Coded", "Coded fixture failure"),
                 "timeout" => new TimeoutException("SDK/acquisition timeout fixture"),
                 "pool" => new PoolExhaustedException(Active, _capacity, TimeSpan.FromMilliseconds(40)),
+                "auth" => new PPDS.Dataverse.Resilience.DataverseAuthenticationException("Synthetic expired sign-in", requiresReauthentication: true),
+                "connection" => new PPDS.Dataverse.Security.DataverseConnectionException("Synthetic dropped connection"),
                 "cancel" => Cancel(),
                 _ => new InvalidOperationException("Ordinary fixture failure")
             };
@@ -325,7 +404,7 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
         private async Task<IPooledClient> Acquire()
         {
             var id = ++Checkouts;
-            var stage = id switch { 1 => "update", 2 => "publish", _ => throw new InvalidOperationException("Unexpected retry checkout") };
+            var stage = id switch { 1 => "read", 2 => "update", 3 => "publish", _ => throw new InvalidOperationException("Unexpected retry checkout") };
             Record("checkout:" + stage);
             MaybeFail(stage + "-checkout");
             if (!await _slots.WaitAsync(TimeSpan.FromMilliseconds(40), Token))
@@ -348,21 +427,37 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
                     Assert.False(disposed); Assert.Equal(Token, token);
                     var sdkStage = request switch
                     {
-                        UpdateEntityRequest => "update", PublishXmlRequest => "publish",
+                        RetrieveEntityRequest => "read", UpdateEntityRequest => "update", PublishXmlRequest => "publish",
                         _ => throw new InvalidOperationException("Unexpected SDK operation")
                     };
                     Assert.Equal(stage, sdkStage);
                     AttemptedSdk.Add(sdkStage); Record("sdk:" + sdkStage + ":" + id, id);
                     await Task.Yield(); // Fault/cancel after an asynchronous boundary while the actual service awaits SDK work.
                     MaybeFail(sdkStage + "-sdk");
-                    if (request is UpdateEntityRequest update)
+                    if (request is RetrieveEntityRequest read)
+                    {
+                        // AC-147: the current (published) labels are read before a label update, like the column read.
+                        Assert.Equal(Table, read.LogicalName);
+                        Assert.False(read.RetrieveAsIfPublished);
+                        ReadRequest = read;
+                    }
+                    else if (request is UpdateEntityRequest update)
                     {
                         UpdateRequest = update;
                         StoredLabel = Assert.Single(update.Entity.DisplayName.LocalizedLabels).Label;
                     }
                     else PublishRequest = request;
                     SuccessfulSdk.Add(sdkStage); Record("success:" + sdkStage + ":" + id, id);
-                    return request is UpdateEntityRequest ? new UpdateEntityResponse() : new PublishXmlResponse();
+                    return request switch
+                    {
+                        RetrieveEntityRequest when _emptyRead => new OrganizationResponse(),
+                        RetrieveEntityRequest => new RetrieveEntityResponse { Results = new ParameterCollection
+                        {
+                            ["EntityMetadata"] = new Microsoft.Xrm.Sdk.Metadata.EntityMetadata { LogicalName = Table, DisplayName = new Label("Existing", 1033) }
+                        } },
+                        UpdateEntityRequest => new UpdateEntityResponse(),
+                        _ => new PublishXmlResponse()
+                    };
                 });
             return client.Object;
         }

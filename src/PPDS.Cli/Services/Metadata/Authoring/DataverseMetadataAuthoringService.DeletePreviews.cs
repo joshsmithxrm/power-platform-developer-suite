@@ -57,8 +57,8 @@ public partial class DataverseMetadataAuthoringService
         if (target.Kind != MetadataDeleteKind.GlobalChoice)
             return await InspectDeleteCoreAsync(target, null, ct).ConfigureAwait(false);
 
-        // #1535: the exact spelling is read first; only an "option set not found" fault falls back to the
-        // stored name. The preview reports that stored name so the caller can confirm and delete exactly it.
+        // #1535: the exact spelling is read first; only a not-found fault (ObjectDoesNotExist code, or the English
+        // wording) falls back to the stored name. The preview reports that stored name so the caller can confirm and delete exactly it.
         var (storedName, read) = await WithGlobalChoiceNameAsync(target.Name!, "Name",
             name => ExecuteDeleteReadAsync(new RetrieveOptionSetRequest { Name = name, RetrieveAsIfPublished = true }, ct),
             response => (response.Results.TryGetValue("OptionSetMetadata", out var raw) ? raw as OptionSetMetadataBase : null)?.Name,

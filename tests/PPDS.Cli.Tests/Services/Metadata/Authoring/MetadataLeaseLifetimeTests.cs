@@ -75,14 +75,17 @@ public sealed partial class MetadataLeaseLifetimeTests
     [InlineData("column-add")]
     [InlineData("status-update")]
     [Trait("AC", "AC-84")]
-    public async Task ColorRead_MissingTarget_PreventsWriteAndPublication(string route)
+    public async Task ColorRead_MissingTarget_ReportsWriteNotConfirmed_AndSkipsPublication(string route)
     {
+        // The write that carried the colour is committed; the read-back cannot find the option.
         using var h = new Harness(route, true, true, capacity: 8, missingColorTarget: true);
-        var error = await Assert.ThrowsAsync<MetadataValidationException>(() => h.Run());
-        Assert.Equal(MetadataErrorCodes.OptionNotFound, error.ErrorCode);
+        var error = await Assert.ThrowsAsync<PpdsException>(() => h.Run());
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.Equal(MetadataErrorCodes.OptionNotFound, Assert.IsType<MetadataValidationException>(error.InnerException).ErrorCode);
+        Assert.NotEmpty(h.CacheEvents); // invalidated right after the committed write
         var colorRead = Array.FindIndex(h.ExpectedStages, s => s.EndsWith("color-read", StringComparison.Ordinal));
         h.AssertFinished(h.ExpectedStages.Take(colorRead + 1));
-        Assert.DoesNotContain(h.AttemptedStages, s => s.EndsWith("color-write", StringComparison.Ordinal) || s == "publish");
+        Assert.DoesNotContain(h.AttemptedStages, s => s == "publish");
         h.AssertIndividualLeases();
     }
 
@@ -119,57 +122,134 @@ public sealed partial class MetadataLeaseLifetimeTests
         Assert.Equal(h.ExpectedStages.Take(stageIndex), h.SuccessfulStages);
         Assert.DoesNotContain(h.AttemptedStages.Skip(stageIndex + 1), _ => true);
         var expectedCode = Harness.ExpectedFailureCode(route, stage, fault);
-        if (expectedCode != null)
+        if (expectedCode == Harness.PublishAfterWrite)
+        {
+            // The write is committed: a publish failure keeps its own code and says what is saved but not published.
+            Assert.Contains("is saved but not published", error.Message);
+            Assert.True(ReferenceEquals(h.Injected, error.InnerException) || ReferenceEquals(h.Injected, error.InnerException?.InnerException));
+            Assert.Equal(ExceptionMapper.Map(error.InnerException!).Code, ExceptionMapper.Map(error).Code);
+            Assert.Equal(ExceptionMapper.ToExitCode(error.InnerException!), ExceptionMapper.ToExitCode(error));
+        }
+        else if (expectedCode == MetadataErrorCodes.WriteNotConfirmed)
+        {
+            // After a committed write every read-back failure says so; the cause is kept (directly, or under the
+            // shared acquisition wrapper for a checkout failure).
+            var coded = Assert.IsAssignableFrom<PpdsException>(error);
+            Assert.Equal(expectedCode, coded.ErrorCode);
+            Assert.True(ReferenceEquals(h.Injected, coded.InnerException) || ReferenceEquals(h.Injected, coded.InnerException?.InnerException));
+            Assert.Contains(" was ", coded.Message);
+        }
+        else if (expectedCode != null)
         {
             Assert.Equal(expectedCode, Assert.IsAssignableFrom<PpdsException>(error).ErrorCode);
             Assert.Same(h.Injected, error.InnerException);
         }
         else Assert.Same(h.Injected, error);
-        Assert.Equal(fault.Contains("cancel", StringComparison.Ordinal) && expectedCode == null, operation.IsCanceled);
+        Assert.Equal(fault.Contains("cancel", StringComparison.Ordinal) && expectedCode is null, operation.IsCanceled);
         // No successful publication or later SDK operation after a failed stage; preceding writes are never replayed.
         Assert.All(h.AttemptedStages.GroupBy(s => s), group => Assert.Single(group));
     }
 
-    [Theory]
-    [InlineData("global-add", "global-color-read", "sdk")]
-    [InlineData("global-add", "global-color-write", "sdk")]
-    [InlineData("column-add", "local-color-read", "sdk")]
-    [InlineData("column-add", "local-color-write", "sdk")]
-    [InlineData("global-add", "global-color-read", "cancel")]
-    [InlineData("global-add", "global-color-write", "cancel")]
-    [InlineData("column-add", "local-color-read", "cancel")]
-    [InlineData("column-add", "local-color-write", "cancel")]
-    [Trait("AC", "AC-87")]
-    public async Task ColorSdkFaults_PreserveSdkFaultAndCancellationCliEnvelope(string route, string stage, string fault)
+    public static IEnumerable<object[]> ReadBackFailures()
     {
-        using var h = new Harness(route, true, false, stage, fault, capacity: 8);
+        foreach (var (route, stage, publish) in new[]
+        {
+            ("global-add", "global-color-read", false), ("global-update", "global-color-read", false),
+            ("generic-local-add", "local-color-read", false), ("status-add", "local-color-read", true),
+            ("status-update", "local-color-read", true), ("column-add", "local-color-read", true),
+            ("column-update", "local-color-read", true)
+        })
+        foreach (var fault in new[] { "sdk", "cancel", "coded", "checkout" })
+            yield return [route, stage, publish, fault];
+    }
+
+    /// <summary>
+    /// AC-146: once the insert/update that carried the colour is committed, every read-back failure (SDK fault,
+    /// cancellation, coded error, checkout failure) is WRITE_NOT_CONFIRMED, says what was written and, when requested,
+    /// that publication was not attempted; the cause is the inner exception; the cache was invalidated after the write.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ReadBackFailures))]
+    [Trait("AC", "AC-87")]
+    [Trait("AC", "AC-146")]
+    public async Task ColorReadBackFailure_AfterTheWrite_IsWriteNotConfirmed(string route, string stage, bool publish, string fault)
+    {
+        using var h = new Harness(route, true, publish, stage, fault, capacity: 8);
         var operation = h.Run();
-        var error = await Record.ExceptionAsync(() => operation);
-        // All four color stages now preserve cancellation; ordinary SDK faults stay coded.
-        if (fault == "cancel")
-        {
-            var canceled = Assert.IsType<OperationCanceledException>(error);
-            Assert.Same(h.Injected, canceled);
-            Assert.Equal(h.Token, canceled.CancellationToken);
-            Assert.True(operation.IsCanceled);
-            AssertCliEnvelope(canceled, "Operation.Cancelled", 2);
-        }
-        else
-        {
-            var wrapped = Assert.IsType<PpdsException>(error);
-            Assert.Same(h.Injected, wrapped.InnerException);
-            Assert.True(operation.IsFaulted);
-            Assert.Equal("SDK_OPERATION_FAILED", wrapped.ErrorCode);
-            AssertCliEnvelope(wrapped, "SDK_OPERATION_FAILED", 2);
-        }
+        var error = Assert.IsType<PpdsException>(await Record.ExceptionAsync(() => operation));
+        Assert.True(operation.IsFaulted);
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.True(ReferenceEquals(h.Injected, error.InnerException) || ReferenceEquals(h.Injected, error.InnerException?.InnerException));
+        Assert.Contains(route.EndsWith("add", StringComparison.Ordinal) ? "was added with value 77" : "was updated (", error.Message);
+        Assert.Equal(publish, error.Message.Contains("Publication (--publish) was not attempted", StringComparison.Ordinal));
+        Assert.DoesNotContain("Synthetic SDK fault", error.Message); // a raw (non-PPDS) cause's text is never quoted
+        Assert.NotEmpty(h.CacheEvents);
+        Assert.DoesNotContain(h.AttemptedStages, s => s == "publish");
+        AssertCliEnvelope(error, MetadataErrorCodes.WriteNotConfirmed, 2);
+        h.AssertReturned();
+    }
+
+    /// <summary>
+    /// A read-back that fails because the sign-in expired is WRITE_NOT_CONFIRMED (exit 2) but keeps the
+    /// re-authentication signal: Context["requiresReauthentication"] is true and the inner chain holds the auth failure.
+    /// </summary>
+    [Theory]
+    [InlineData("global-add", "global-color-read")]
+    [InlineData("status-update", "local-color-read")]
+    [InlineData("column-add", "local-color-read")]
+    [Trait("AC", "AC-146")]
+    public async Task ColorReadBackAuthFailure_KeepsTheReauthenticationSignal(string route, string stage)
+    {
+        using var h = new Harness(route, true, route != "global-add", stage, "auth", capacity: 8);
+        var error = Assert.IsType<PpdsException>(await Record.ExceptionAsync(() => h.Run()));
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.Equal(true, error.Context!["requiresReauthentication"]);
+        var cause = error.InnerException;
+        while (cause != null && cause is not PPDS.Dataverse.Resilience.DataverseAuthenticationException) cause = cause.InnerException;
+        Assert.Same(h.Injected, cause);
+        AssertCliEnvelope(error, MetadataErrorCodes.WriteNotConfirmed, 2);
+        h.AssertReturned();
+    }
+
+    /// <summary>A publish failure after a confirmed option write keeps the auth classification and signal.</summary>
+    [Theory]
+    [InlineData("status-update")]
+    [InlineData("column-add")]
+    [Trait("AC", "AC-146")]
+    public async Task PublishAuthFailure_AfterTheWrite_KeepsItsCodeExitAndSignal(string route)
+    {
+        using var h = new Harness(route, true, true, "publish", "auth", capacity: 8);
+        var error = Assert.IsType<PpdsAuthException>(await Record.ExceptionAsync(() => h.Run()));
+        Assert.True(error.RequiresReauthentication);
+        Assert.Same(h.Injected, error.InnerException);
+        Assert.Contains("is saved but not published", error.Message);
+        Assert.Contains("ppds metadata publish new_table", error.Message);
+        Assert.Equal(5, ExceptionMapper.ToExitCode(error));
         h.AssertReturned();
     }
 
     [Theory]
-    [InlineData("global-add", "global-color-read")]
-    [InlineData("global-add", "global-color-write")]
-    [InlineData("column-add", "local-color-read")]
-    [InlineData("column-add", "local-color-write")]
+    [InlineData("global-add")]
+    [InlineData("global-update")]
+    [InlineData("status-add")]
+    [InlineData("status-update")]
+    [InlineData("column-add")]
+    [InlineData("column-update")]
+    [InlineData("generic-local-add")]
+    [Trait("AC", "AC-146")]
+    public async Task ColorNotStored_AfterTheWrite_IsWriteNotConfirmed_OnEveryPath(string route)
+    {
+        using var h = new Harness(route, true, route.StartsWith("status", StringComparison.Ordinal) || route.StartsWith("column", StringComparison.Ordinal), capacity: 8, ignoreColor: true);
+        var error = await Assert.ThrowsAsync<PpdsException>(() => h.Run());
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.Contains("did not store its color: requested '#123456', stored 'none'", error.Message);
+        Assert.Contains(route.EndsWith("add", StringComparison.Ordinal) ? "was added with value 77" : "was updated (", error.Message);
+        Assert.NotEmpty(h.CacheEvents);
+        Assert.DoesNotContain(h.AttemptedStages, s => s == "publish");
+        h.AssertReturned();
+    }
+
+    [Theory]
     [InlineData("status-update", "publish")]
     [InlineData("table-create", "publisher")]
     [InlineData("table-create", "table-create")]
@@ -179,7 +259,7 @@ public sealed partial class MetadataLeaseLifetimeTests
     {
         using var h = new Harness(route, route != "table-create", true, stage, "checkout", capacity: 8);
         var error = Assert.IsAssignableFrom<PpdsException>(await Record.ExceptionAsync(() => h.Run()));
-        Assert.Same(h.Injected, error.InnerException);
+        Assert.True(ReferenceEquals(h.Injected, error.InnerException) || ReferenceEquals(h.Injected, error.InnerException?.InnerException));
         AssertCliEnvelope(error, "Connection.Timeout", 4);
         h.AssertReturned();
     }
@@ -219,7 +299,7 @@ public sealed partial class MetadataLeaseLifetimeTests
         private readonly SemaphoreSlim _slots;
         private readonly CancellationTokenSource _cts = new();
         private readonly string _route;
-        private readonly bool _color, _publish, _missingColorTarget;
+        private readonly bool _color, _publish, _missingColorTarget, _ignoreColor;
         private readonly string? _failStage, _fault;
         private readonly int _capacity;
         private readonly bool _delayFault;
@@ -244,8 +324,9 @@ public sealed partial class MetadataLeaseLifetimeTests
         internal int Acquired => _acquired.Count;
         internal int PeakActive { get; private set; }
 
-        internal Harness(string route, bool color, bool publish, string? failStage = null, string? fault = null, int capacity = 1, bool missingColorTarget = false, bool delayFault = false, Func<Exception>? faultFactory = null)
+        internal Harness(string route, bool color, bool publish, string? failStage = null, string? fault = null, int capacity = 1, bool missingColorTarget = false, bool delayFault = false, Func<Exception>? faultFactory = null, bool ignoreColor = false)
         {
+            _ignoreColor = ignoreColor;
             _route = route; _color = color; _publish = publish; _failStage = failStage; _fault = fault;
             _missingColorTarget = missingColorTarget; _delayFault = delayFault; _faultFactory = faultFactory;
             _capacity = capacity; _slots = new SemaphoreSlim(capacity, capacity);
@@ -281,7 +362,7 @@ public sealed partial class MetadataLeaseLifetimeTests
             if (color)
             {
                 var prefix = route is "global-add" or "global-update" ? "global" : "local";
-                stages.Add(prefix + "-color-read"); stages.Add(prefix + "-color-write");
+                stages.Add(prefix + "-color-read"); // The colour rides on the insert/update; this read confirms it.
             }
             if (publish && route is not ("global-add" or "global-update" or "generic-local-add")) stages.Add("publish");
             return stages.ToArray();
@@ -289,19 +370,20 @@ public sealed partial class MetadataLeaseLifetimeTests
 
         internal static string? ExpectedFailureCode(string route, string stage, string fault)
         {
+            if (stage.Contains("color", StringComparison.Ordinal)) return MetadataErrorCodes.WriteNotConfirmed; // After the committed write (AC-146).
+            if (stage == "publish" && IsOptionWriteRoute(route)) return PublishAfterWrite;
             if (route == "column-add" && stage == "insert")
                 return fault == "coded" ? null : MetadataErrorCodes.SdkOperationFailed; // Existing try also owns checkout.
             if (fault == "checkout" && CodedAcquisitionBoundaries().Any(row => (string)row[0] == route && (string)row[1] == stage))
                 return ErrorCodes.Connection.Timeout;
             if (fault.StartsWith("checkout", StringComparison.Ordinal)) return null;
-            if (stage.Contains("color", StringComparison.Ordinal) && fault == "cancel") return null; // Approved color cancellation contract.
             if (stage is "status-target" or "local-target")
                 return fault == "cancel" ? null : MetadataErrorCodes.EntityNotFound; // Existing list readers wrap coded errors too.
             if (fault == "coded") return null;
             // Status/local update and remove writes let cancellation propagate (CONSTITUTION R2) rather than
             // reporting it as SDK_OPERATION_FAILED.
             if (fault == "cancel" && stage is "option-update" or "option-remove") return null;
-            return stage.Contains("color", StringComparison.Ordinal) || stage is "option-update" or "option-remove" or "status-insert"
+            return stage is "option-update" or "option-remove" or "status-insert"
                 ? MetadataErrorCodes.SdkOperationFailed : null;
         }
 
@@ -317,6 +399,7 @@ public sealed partial class MetadataLeaseLifetimeTests
             {
                 "coded" => new PpdsException("Synthetic.Coded", "Already coded SDK fault"),
                 "checkout" => new PoolExhaustedException(0, _capacity, TimeSpan.FromMilliseconds(40)),
+                "auth" => new PPDS.Dataverse.Resilience.DataverseAuthenticationException("Synthetic expired sign-in", requiresReauthentication: true),
                 _ => new InvalidOperationException("Synthetic SDK fault")
             };
         }
@@ -384,9 +467,7 @@ public sealed partial class MetadataLeaseLifetimeTests
         private bool IsDelayedFaultRequest(OrganizationRequest request) => request switch
         {
             RetrieveOptionSetRequest => _mutated && _failStage == "global-color-read",
-            UpdateOptionSetRequest => _failStage == "global-color-write",
             RetrieveAttributeRequest => _mutated && _failStage == "local-color-read",
-            UpdateAttributeRequest => _failStage == "local-color-write",
             _ => false
         };
 
@@ -411,7 +492,6 @@ public sealed partial class MetadataLeaseLifetimeTests
                 RetrieveAttributeRequest a => _mutated ? "local-color-read" : a.LogicalName == "statuscode" ? "status-target" : "local-target",
                 InsertOptionValueRequest => "insert", InsertStatusValueRequest => "status-insert",
                 SdkUpdateOption => "option-update", SdkDeleteOption => "option-remove",
-                UpdateOptionSetRequest => "global-color-write", UpdateAttributeRequest => "local-color-write",
                 CreateEntityRequest => "table-create", PublishXmlRequest => "publish",
                 _ => throw new InvalidOperationException("Unexpected SDK request: " + request.RequestName)
             };
@@ -438,33 +518,25 @@ public sealed partial class MetadataLeaseLifetimeTests
                     break;
                 case InsertOptionValueRequest r:
                     Assert.Equal(Value, r.Value); Assert.Equal("Added", Assert.Single(r.Label.LocalizedLabels).Label);
-                    Assert.Equal(Solution, r.SolutionUniqueName); Assert.False(r.Parameters.Contains("Color"));
+                    Assert.Equal(Solution, r.SolutionUniqueName); AssertColorParameter(r);
                     StoredLabel = "Added";
                     response = new InsertOptionValueResponse { Results = new ParameterCollection { ["NewOptionValue"] = Value } };
                     break;
                 case InsertStatusValueRequest r:
-                    Assert.Equal(Value, r.Value); Assert.Equal(0, r.StateCode); Assert.Equal(Solution, r.SolutionUniqueName);
+                    Assert.Equal(Value, r.Value); Assert.Equal(0, r.StateCode); Assert.Equal(Solution, r.SolutionUniqueName); AssertColorParameter(r);
                     StoredLabel = "Added";
                     response = new InsertStatusValueResponse { Results = new ParameterCollection { ["NewOptionValue"] = Value } };
                     break;
                 case SdkUpdateOption r:
-                    Assert.Equal(Value, r.Value); Assert.Equal(Solution, r.SolutionUniqueName);
+                    // One request carries the label and, when requested, the Color parameter (live-observed).
+                    Assert.Equal(Value, r.Value); Assert.Equal(Solution, r.SolutionUniqueName); Assert.True(r.MergeLabels);
+                    AssertColorParameter(r);
                     StoredLabel = Assert.Single(r.Label.LocalizedLabels).Label; Assert.Equal("Changed", StoredLabel);
                     response = new UpdateOptionValueResponse();
                     break;
                 case SdkDeleteOption r:
                     Assert.Equal(Value, r.Value); Assert.Equal(Solution, r.SolutionUniqueName);
                     response = new DeleteOptionValueResponse();
-                    break;
-                case UpdateOptionSetRequest r:
-                    Assert.Equal(Solution, r.SolutionUniqueName); VerifyOptions(Assert.IsType<OptionSetMetadata>(r.OptionSet));
-                    response = new UpdateOptionSetResponse();
-                    break;
-                case UpdateAttributeRequest r:
-                    Assert.Equal(Table, r.EntityName); Assert.Equal(Solution, r.SolutionUniqueName);
-                    Assert.Null(r.Attribute.RequiredLevel); Assert.Null(r.Attribute.Description);
-                    VerifyOptions(Assert.IsAssignableFrom<EnumAttributeMetadata>(r.Attribute).OptionSet);
-                    response = new UpdateAttributeResponse();
                     break;
                 case CreateEntityRequest r:
                     Assert.Equal("new_Table", r.Entity.SchemaName); Assert.Equal(Solution, r.SolutionUniqueName);
@@ -490,21 +562,22 @@ public sealed partial class MetadataLeaseLifetimeTests
                 OptionMetadata target = status ? new StatusOptionMetadata { State = 0 } : new OptionMetadata();
                 target.Value = Value; target.Label = new Label(StoredLabel, 1033);
                 target.Label.LocalizedLabels.Add(new LocalizedLabel("Existant", 1036));
+                target.Color = _mutated && _color && !_ignoreColor ? Color : null; // Dataverse stores the Color parameter (asserted live).
                 options.Options.Add(target);
             }
             options.Options.Add(new OptionMetadata(new Label("Other", 1033), 88));
             return options;
         }
 
-        private void VerifyOptions(OptionSetMetadata options)
+        /// <summary>Marker: a publish failure after a committed option write (message names what was written).</summary>
+        internal const string PublishAfterWrite = "publish-after-write";
+
+        internal static bool IsOptionWriteRoute(string route) => route is "status-add" or "status-update" or "column-add" or "column-update";
+
+        private void AssertColorParameter(OrganizationRequest request)
         {
-            Assert.Equal(Global, options.Name);
-            Assert.Equal(2, options.Options.Count);
-            var target = Assert.Single(options.Options, o => o.Value == Value);
-            Assert.Equal(Color, target.Color);
-            Assert.Equal(StoredLabel, Assert.Single(target.Label.LocalizedLabels, l => l.LanguageCode == 1033).Label);
-            Assert.Equal("Existant", Assert.Single(target.Label.LocalizedLabels, l => l.LanguageCode == 1036).Label);
-            Assert.Equal("Other", Assert.Single(Assert.Single(options.Options, o => o.Value == 88).Label.LocalizedLabels).Label);
+            if (_color) Assert.Equal(Color, request[DataverseMetadataAuthoringService.ColorParameter]);
+            else Assert.False(request.Parameters.Contains(DataverseMetadataAuthoringService.ColorParameter));
         }
 
         internal CreateTableRequest TableRequest(bool dryRun = false) => new()

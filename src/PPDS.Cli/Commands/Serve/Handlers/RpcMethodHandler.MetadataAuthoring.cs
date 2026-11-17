@@ -148,7 +148,7 @@ public partial class RpcMethodHandler
             var service = sp.GetRequiredService<IMetadataAuthoringService>();
             try
             {
-                await service.UpdateTableAsync(new Authoring.UpdateTableRequest
+                var labelResult = await service.UpdateTableAsync(new Authoring.UpdateTableRequest
                 {
                     SolutionUniqueName = solutionUniqueName,
                     EntityLogicalName = entityLogicalName,
@@ -163,6 +163,8 @@ public partial class RpcMethodHandler
                     Success = true,
                     LogicalName = entityLogicalName,
                     WasDryRun = dryRun,
+                    // English-only label notices; omitted when there are none.
+                    ValidationMessages = MapLabelNotices(labelResult),
                     RequiresPublish = !dryRun,
                     PublishHint = dryRun ? null : $"ppds metadata publish {entityLogicalName}",
                 };
@@ -330,7 +332,7 @@ public partial class RpcMethodHandler
             var service = sp.GetRequiredService<IMetadataAuthoringService>();
             try
             {
-                await service.UpdateColumnAsync(new Authoring.UpdateColumnRequest
+                var labelResult = await service.UpdateColumnAsync(new Authoring.UpdateColumnRequest
                 {
                     SolutionUniqueName = solutionUniqueName,
                     EntityLogicalName = entityLogicalName,
@@ -347,6 +349,8 @@ public partial class RpcMethodHandler
                     Success = true,
                     LogicalName = columnLogicalName,
                     WasDryRun = dryRun,
+                    // English-only label notices; omitted when there are none.
+                    ValidationMessages = MapLabelNotices(labelResult),
                     RequiresPublish = !dryRun,
                     PublishHint = dryRun ? null : $"ppds metadata publish {entityLogicalName}",
                 };
@@ -777,6 +781,13 @@ public partial class RpcMethodHandler
 
     private static ValidationMessageDto MapValidationMessage(Authoring.ValidationMessage vm) =>
         new() { Field = vm.Field, Rule = vm.Rule, Message = vm.Message };
+
+    /// <summary>
+    /// English-only label notices of a table or column update for <c>validationMessages</c>; null (omitted from the
+    /// response) when there are none or no result.
+    /// </summary>
+    internal static List<ValidationMessageDto>? MapLabelNotices(PPDS.Cli.Services.Metadata.Authoring.MetadataLabelWriteResult? result) =>
+        result?.ValidationMessages is { Count: > 0 } notices ? notices.Select(MapValidationMessage).ToList() : null;
 
     #endregion
 }

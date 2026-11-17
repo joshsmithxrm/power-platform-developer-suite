@@ -313,7 +313,7 @@ public sealed class PrimaryIdLabelUpdateTests : IDisposable
         var update = Assert.IsType<UpdateAttributeRequest>(_requests[1]);
         Assert.NotSame(_attribute, update.Attribute);
         Assert.Equal(90, Assert.IsType<StringAttributeMetadata>(update.Attribute).MaxLength);
-        Assert.Equal(new UpdateAttributeRequest().MergeLabels, update.MergeLabels);
+        Assert.True(update.MergeLabels); // AC-147: typed updates merge their 1033-only labels.
     }
 
     [Theory]
