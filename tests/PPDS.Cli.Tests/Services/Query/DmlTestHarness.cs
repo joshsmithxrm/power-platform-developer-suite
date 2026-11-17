@@ -143,6 +143,15 @@ internal sealed class DmlTestHarness
     /// <summary>Set to true in a test to make <see cref="Faithful"/> true for that test's async flow.</summary>
     public static readonly AsyncLocal<bool> FaithfulMode = new();
 
+    private static int CompareValues(object? a, object? b) => (a, b) switch
+    {
+        (null, null) => 0,
+        (null, _) => -1,
+        (_, null) => 1,
+        (string x, string y) => string.Compare(x, y, StringComparison.OrdinalIgnoreCase),
+        _ => Convert.ToDecimal(a, System.Globalization.CultureInfo.InvariantCulture).CompareTo(Convert.ToDecimal(b, System.Globalization.CultureInfo.InvariantCulture))
+    };
+
     private static QueryResult With(QueryResult result, IReadOnlyDictionary<string, QueryValue>[] records) => new()
     {
         PageNumber = result.PageNumber, EntityLogicalName = result.EntityLogicalName, Columns = result.Columns,
@@ -165,6 +174,14 @@ internal sealed class DmlTestHarness
         {
             // Like Dataverse: the filter selects the rows, count/top limits them.
             records = records.Where(r => entity.Elements("filter").All(f => FetchXmlFilter.Matches(f, r)));
+            foreach (var order in entity.Elements("order").Reverse())
+            {
+                var attribute = (string)order.Attribute("attribute")!;
+                object? Key(IReadOnlyDictionary<string, QueryValue> r) => r.TryGetValue(attribute, out var v) ? v.Value : null;
+                records = (string?)order.Attribute("descending") == "true"
+                    ? records.OrderByDescending(Key, Comparer<object?>.Create(CompareValues))
+                    : records.OrderBy(Key, Comparer<object?>.Create(CompareValues));
+            }
             var limit = (string?)doc.Root.Attribute("count") ?? (string?)doc.Root.Attribute("top");
             if (limit != null)
                 records = records.Take(int.Parse(limit, System.Globalization.CultureInfo.InvariantCulture));

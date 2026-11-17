@@ -127,7 +127,9 @@ public sealed class FetchXmlGenerator
         // Filter (WHERE)
         if (querySpec.WhereClause is not null)
         {
+            var filterStart = lines.Count;
             EmitFilter(querySpec.WhereClause.SearchCondition, lines, "    ");
+            ExcludeNullsFromNegatedConditions(lines, filterStart);
         }
 
         // Order (ORDER BY)
@@ -147,6 +149,40 @@ public sealed class FetchXmlGenerator
             FetchXml = string.Join("\n", lines),
             VirtualColumns = virtualColumns
         };
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex NegatedCondition = new(
+        "^(?<indent>\\s*)<condition attribute=\"(?<attr>[^\"]+)\"(?<entity> entityname=\"[^\"]+\")? operator=\"(ne|not-in|not-like|not-begin-with|not-end-with)\"(?<rest>.*)$");
+
+    /// <summary>
+    /// In SQL, <c>col &lt;&gt; v</c>, <c>NOT IN</c> and <c>NOT LIKE</c> never match a row whose column is NULL. Dataverse's
+    /// ne, not-in, not-like, not-begin-with and not-end-with do match NULL rows (observed live, specs/query.md), so each such
+    /// condition is paired with not-null on the same attribute. not-between already excludes NULL rows.
+    /// </summary>
+    private static void ExcludeNullsFromNegatedConditions(List<string> lines, int start)
+    {
+        for (var i = start; i < lines.Count; i++)
+        {
+            var match = NegatedCondition.Match(lines[i]);
+            if (!match.Success)
+                continue;
+
+            var indent = match.Groups["indent"].Value;
+            var end = i;
+            if (!match.Groups["rest"].Value.TrimEnd().EndsWith("/>", StringComparison.Ordinal))
+            {
+                while (end < lines.Count && lines[end].Trim() != "</condition>")
+                    end++;
+            }
+
+            var notNull = $"{indent}  <condition attribute=\"{match.Groups["attr"].Value}\"{match.Groups["entity"].Value} operator=\"not-null\" />";
+            for (var j = i; j <= end; j++)
+                lines[j] = "  " + lines[j];
+            lines.Insert(end + 1, $"{indent}</filter>");
+            lines.Insert(end + 1, notNull);
+            lines.Insert(i, $"{indent}<filter type=\"and\">");
+            i = end + 3;
+        }
     }
 
     #region AST Extraction

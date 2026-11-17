@@ -32,7 +32,7 @@ internal static class DmlColumnValidator
                     var columns = await ColumnsAsync(metadata, table, ct);
                     foreach (var set in spec.SetClauses.OfType<AssignmentSetClause>())
                     {
-                        Written(columns, table, set.Column, forCreate: false);
+                        WrittenValue(Written(columns, table, set.Column, forCreate: false), table, set.NewValue);
                         Read(columns, table, set.NewValue);
                     }
                     if (spec.WhereClause?.SearchCondition != null)
@@ -53,21 +53,30 @@ internal static class DmlColumnValidator
                     var spec = insert.InsertSpecification;
                     var table = TableName((NamedTableReference)spec.Target);
                     var columns = await ColumnsAsync(metadata, table, ct);
-                    foreach (var column in spec.Columns)
-                        Written(columns, table, column, forCreate: true);
+                    var targets = spec.Columns.Select(column => Written(columns, table, column, forCreate: true)).ToList();
 
                     if (spec.InsertSource is ValuesInsertSource values)
                     {
-                        foreach (var value in values.RowValues.SelectMany(r => r.ColumnValues))
-                            Read(columns, table, value);
+                        foreach (var row in values.RowValues)
+                        {
+                            for (var i = 0; i < row.ColumnValues.Count && i < targets.Count; i++)
+                            {
+                                WrittenValue(targets[i], table, row.ColumnValues[i]);
+                                Read(columns, table, row.ColumnValues[i]);
+                            }
+                        }
                     }
                     else if (spec.InsertSource is SelectInsertSource { Select: QuerySpecification select }
                              && select.FromClause?.TableReferences.FirstOrDefault() is NamedTableReference source)
                     {
                         var sourceTable = TableName(source);
                         var sourceColumns = await ColumnsAsync(metadata, sourceTable, ct);
-                        foreach (var element in select.SelectElements)
-                            Read(sourceColumns, sourceTable, element);
+                        for (var i = 0; i < select.SelectElements.Count; i++)
+                        {
+                            if (select.SelectElements[i] is SelectScalarExpression item && i < targets.Count)
+                                WrittenValue(targets[i], table, item.Expression);
+                            Read(sourceColumns, sourceTable, select.SelectElements[i]);
+                        }
                         if (select.WhereClause?.SearchCondition != null)
                             Read(sourceColumns, sourceTable, select.WhereClause.SearchCondition);
                         if (select.OrderByClause != null)
@@ -110,11 +119,22 @@ internal static class DmlColumnValidator
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
     }
 
-    private static void Written(Dictionary<string, AttributeMetadataDto> columns, string table, ColumnReferenceExpression column, bool forCreate)
+    private static AttributeMetadataDto Written(Dictionary<string, AttributeMetadataDto> columns, string table, ColumnReferenceExpression column, bool forCreate)
     {
         var attribute = Column(columns, table, column);
         if (forCreate ? !attribute.IsValidForCreate : !attribute.IsValidForUpdate)
             throw Refuse($"The column {table}.{attribute.LogicalName} cannot be set by {(forCreate ? "INSERT" : "UPDATE")}.");
+        return attribute;
+    }
+
+    /// <summary>
+    /// Writing a date/time value is not proven (time zone handling was not verified live), so a date/time column can only
+    /// be set to NULL.
+    /// </summary>
+    private static void WrittenValue(AttributeMetadataDto target, string table, ScalarExpression value)
+    {
+        if (string.Equals(target.AttributeType, "DateTime", StringComparison.OrdinalIgnoreCase) && value is not NullLiteral)
+            throw Refuse($"Setting the date/time column {table}.{target.LogicalName} to a value is not supported (only NULL).");
     }
 
     private static void Read(Dictionary<string, AttributeMetadataDto> columns, string table, TSqlFragment fragment)
@@ -130,6 +150,11 @@ internal static class DmlColumnValidator
         fragment.Accept(arithmetic);
         if (arithmetic.Problem != null)
             throw Refuse(arithmetic.Problem);
+
+        var dates = new DateLiteralCheck(columns);
+        fragment.Accept(dates);
+        if (dates.Problem != null)
+            throw Refuse(dates.Problem);
     }
 
     private static AttributeMetadataDto Column(Dictionary<string, AttributeMetadataDto> columns, string table, ColumnReferenceExpression column)
@@ -170,6 +195,43 @@ internal static class DmlColumnValidator
 
         public override void ExplicitVisit(ScalarSubquery node)
         {
+        }
+    }
+
+    /// <summary>
+    /// Dataverse reads a date/time literal without an offset in the calling user's time zone (observed live), while SQL has
+    /// no time zone, so a comparison with one is refused unless the literal ends with Z or +hh:mm / -hh:mm.
+    /// </summary>
+    private sealed class DateLiteralCheck(Dictionary<string, AttributeMetadataDto> columns) : TSqlFragmentVisitor
+    {
+        private static readonly System.Text.RegularExpressions.Regex Offset = new(@"(Z|[+-]\d{2}:\d{2})$");
+
+        public string? Problem { get; private set; }
+
+        public override void Visit(BooleanComparisonExpression node) => Check(node.FirstExpression, node.SecondExpression);
+
+        public override void Visit(BooleanTernaryExpression node)
+        {
+            Check(node.FirstExpression, node.SecondExpression);
+            Check(node.FirstExpression, node.ThirdExpression);
+        }
+
+        public override void Visit(InPredicate node)
+        {
+            foreach (var value in node.Values)
+                Check(node.Expression, value);
+        }
+
+        private void Check(ScalarExpression left, ScalarExpression right)
+        {
+            if (left is ColumnReferenceExpression column
+                && columns.TryGetValue(column.MultiPartIdentifier.Identifiers.Last().Value, out var attribute)
+                && string.Equals(attribute.AttributeType, "DateTime", StringComparison.OrdinalIgnoreCase)
+                && right is StringLiteral literal && !Offset.IsMatch(literal.Value.Trim()))
+            {
+                Problem ??= $"The date/time literal '{literal.Value}' has no time zone; Dataverse would read it in your time zone. " +
+                            "Add Z (UTC) or an offset such as +01:00.";
+            }
         }
     }
 

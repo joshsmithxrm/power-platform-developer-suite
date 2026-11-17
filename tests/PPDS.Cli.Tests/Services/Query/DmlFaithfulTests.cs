@@ -40,6 +40,10 @@ public sealed class DmlFaithfulTests : IDisposable
     [InlineData("description IS NULL", 2)]
     [InlineData("name = 'n0' OR name = 'n1' AND revenue > 5000", 1)]
     [InlineData("(name = 'n0' OR name = 'n1') AND revenue > 500", 1)]
+    // SQL: <>, NOT IN, NOT LIKE never match NULL (Dataverse would; the generator adds not-null).
+    [InlineData("description <> 'd1'", 1)]
+    [InlineData("description NOT IN ('d1')", 1)]
+    [InlineData("description NOT LIKE 'd1%'", 1)]
     public async Task Where_SelectsExactlyTheMatchingRows(string where, int expected)
     {
         var h = await Run($"UPDATE account SET name = 'hit' WHERE {where}");
@@ -57,6 +61,45 @@ public sealed class DmlFaithfulTests : IDisposable
         var h = await Run(sql);
 
         Assert.Equal(new[] { ("Create", "account", 2) }, h.Writes);
+    }
+
+    [Fact]
+    public async Task InsertSelect_HonoursItsWhereAndOrderBy_WithComputedItems()
+    {
+        var h = await Run("INSERT INTO account (name, description) SELECT name AS n, UPPER(name) AS d FROM account WHERE name = 'n1'");
+
+        Assert.Equal(new object?[] { "n1" }, Values(h, "name"));
+        Assert.Equal(new object?[] { "N1" }, Values(h, "description"));
+    }
+
+    [Fact]
+    public async Task InsertSelectTopDescending_TakesTheHighestRows()
+    {
+        var h = await Run("INSERT INTO account (name) SELECT TOP (2) name FROM account WHERE revenue > 0 ORDER BY revenue DESC");
+
+        Assert.Equal(new object?[] { "n3", "n2" }, Values(h, "name"));
+    }
+
+    [Theory]
+    [InlineData("DELETE FROM account WHERE createdon < '2024-01-01'", "no time zone")]
+    [InlineData("DELETE FROM account WHERE createdon BETWEEN '2024-01-01' AND '2024-02-01Z'", "no time zone")]
+    [InlineData("UPDATE account SET followupby = '2024-01-01T00:00:00Z' WHERE revenue > 0", "date/time column")]
+    [InlineData("INSERT INTO account (name, followupby) VALUES ('a', '2024-01-01Z')", "date/time column")]
+    public async Task DateLiteralsWithoutAnOffset_AndDateWrites_AreRefused(string sql, string named)
+    {
+        var h = DmlTestHarness.Create(rows: 4);
+
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
+
+        Assert.Contains(named, ex.Message);
+        h.AssertNothingChanged();
+    }
+
+    [Fact]
+    public async Task DateLiteralWithAnOffset_IsAllowed()
+    {
+        var h = await Run("UPDATE account SET name = 'x' WHERE createdon < '2024-01-01T00:00:00Z'");
+        Assert.NotNull(h);
     }
 
     [Fact]

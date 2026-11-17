@@ -108,4 +108,21 @@ public class FetchXmlGeneratorFidelityTests
         var fetch = Fetch(sql);
         fetch.Should().Contain($"<attribute name=\"{first}\"").And.Contain($"<attribute name=\"{second}\"");
     }
+
+    [Theory]
+    [InlineData("SELECT name FROM account WHERE name <> 'x'", "ne")]
+    [InlineData("SELECT name FROM account WHERE name NOT IN ('x', 'y')", "not-in")]
+    [InlineData("SELECT name FROM account WHERE name NOT LIKE '%x%'", "not-like")]
+    [InlineData("SELECT name FROM account WHERE name NOT LIKE 'x%'", "not-begin-with")]
+    public void NegatedConditions_AlsoRequireNotNull_LikeSql(string sql, string op)
+    {
+        var fetch = Fetch(sql);
+        fetch.Should().Contain($"operator=\"{op}\"");
+        fetch.Should().Contain("<condition attribute=\"name\" operator=\"not-null\" />");
+        System.Xml.Linq.XDocument.Parse(fetch); // still well-formed
+    }
+
+    [Fact]
+    public void NotBetween_IsNotPaired_DataverseAlreadyExcludesNull()
+        => Fetch("SELECT name FROM account WHERE revenue NOT BETWEEN 1 AND 2").Should().NotContain("not-null");
 }

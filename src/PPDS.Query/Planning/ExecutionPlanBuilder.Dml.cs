@@ -39,9 +39,8 @@ public sealed partial class ExecutionPlanBuilder
         if (selectSource != null)
         {
             // INSERT SELECT: render the source SELECT as SQL, parse, and plan via ScriptDom path
-            var generator = s_scriptGenerator;
-            generator.GenerateScript(selectSource, out var selectSql);
-            var sourceResult = ParseAndPlanSyntheticSelect(selectSql, options);
+            // Planned from the parsed tree: re-rendering the SELECT to text and parsing it again lost its WHERE and ORDER BY.
+            var sourceResult = PlanSelect(new SelectStatement { QueryExpression = selectSource }, selectSource, options);
             EnsureDataverseEvaluatesTheSource(sourceResult.RootNode, "INSERT ... SELECT", allowProjection: true);
 
             var sourceColumns = ExtractSelectColumnNamesFromQuerySpec(selectSource);

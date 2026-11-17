@@ -11,7 +11,7 @@ namespace PPDS.Cli.Tests.Services.Query;
 /// <summary>
 /// Evaluates a FetchXML &lt;filter&gt; against an in-memory row the way Dataverse does, as observed in the live
 /// differential run (DmlLiveDifferentialTests): string comparison is case-insensitive; a NULL attribute matches only
-/// null / not-null... and the negated operators ne, not-in, not-like, not-begin-with, not-end-with and not-between,
+/// null / not-null and the negated operators ne, not-in, not-like, not-begin-with and not-end-with,
 /// which Dataverse also matches when the attribute is NULL (unlike SQL).
 /// </summary>
 internal static class FetchXmlFilter
@@ -41,9 +41,10 @@ internal static class FetchXmlFilter
             case "not-null": return actual is not null;
         }
 
-        var negated = op is "ne" or "not-in" or "not-like" or "not-begin-with" or "not-end-with" or "not-between";
+        // Observed live (2026-11-17): ne, not-in, not-like (and the begin/end forms) also match NULL rows; not-between does not.
+        var negated = op is "ne" or "not-in" or "not-like" or "not-begin-with" or "not-end-with";
         if (actual is null)
-            return negated; // Dataverse: a negated operator also matches NULL rows
+            return negated;
 
         int Cmp(string value) => actual switch
         {
@@ -92,7 +93,7 @@ internal static class TestMetadata
             A("accountid", "Uniqueidentifier", update: false), A("name", "String"), A("description", "Memo"),
             A("revenue", "Money"), A("statecode", "State"), A("parentaccountid", "Lookup"), A("ownerid", "Owner"),
             A("owneridname", "String", create: false, update: false, attributeOf: "ownerid"), A("domainname", "String"),
-            A("contactid", "Lookup"), A("createdon", "DateTime", create: false, update: false)
+            A("contactid", "Lookup"), A("createdon", "DateTime", create: false, update: false), A("followupby", "DateTime")
         ],
         ["contact"] =
         [
