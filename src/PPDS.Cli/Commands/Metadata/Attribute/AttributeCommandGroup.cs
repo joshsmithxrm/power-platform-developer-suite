@@ -552,12 +552,12 @@ public static class AttributeCommandGroup
 
         var displayNameOption = new Option<string?>("--display-name")
         {
-            Description = "Updated display name"
+            Description = "Updated display name (English, LCID 1033)"
         };
 
         var descriptionOption = new Option<string?>("--description")
         {
-            Description = "Updated description"
+            Description = "Updated description (English, LCID 1033)"
         };
 
         var requiredLevelOption = new Option<string?>("--required-level")
@@ -1022,7 +1022,7 @@ public static class AttributeCommandGroup
         var columnOption = new Option<string>("--column", "-c") { Description = "Logical name of the Choice/Choices column", Required = true };
         var valueOption = new Option<int?>("--value") { Description = "Target option by value (mutually exclusive with --label)" };
         var labelOption = new Option<string?>("--label") { Description = "Target option by current label (mutually exclusive with --value)" };
-        var newLabelOption = new Option<string?>("--new-label") { Description = "New label to apply" };
+        var newLabelOption = new Option<string?>("--new-label") { Description = "New label to apply (English, LCID 1033)" };
         var colorOption = new Option<string?>("--color") { Description = "New hex color (e.g. #FF0000)" };
         var publishOption = new Option<bool>("--publish") { Description = "Publish the entity after the change", DefaultValueFactory = _ => false };
         var dryRunOption = new Option<bool>("--dry-run") { Description = MetadataDryRunScope.OptionHelp, DefaultValueFactory = _ => false };
@@ -1077,7 +1077,7 @@ public static class AttributeCommandGroup
                     Console.Error.WriteLine($"Updating option on '{entity}.{column}'...");
                 }
 
-                await authoringService.UpdateColumnOptionAsync(new UpdateColumnOptionRequest
+                var labelResult = await authoringService.UpdateColumnOptionAsync(new UpdateColumnOptionRequest
                 {
                     EntityLogicalName = entity,
                     ColumnLogicalName = column,
@@ -1091,11 +1091,17 @@ public static class AttributeCommandGroup
                 }, cancellationToken);
 
                 if (globalOptions.IsJsonMode)
-                    MetadataDryRunScope.Option.WriteSuccess(writer, dryRun, new { entity, column, updated = true, dryRun });
-                else if (dryRun)
-                    MetadataDryRunScope.Option.WriteDiagnostic();
+                {
+                    MetadataDryRunScope.Option.WriteSuccess(writer, dryRun, new { entity, column, updated = true, dryRun, validationMessages = MetadataLabelNotices.ForJson(labelResult) });
+                }
                 else
-                    Console.Error.WriteLine($"Option on '{entity}.{column}' updated successfully.");
+                {
+                    MetadataLabelNotices.WriteWarnings(labelResult);
+                    if (dryRun)
+                        MetadataDryRunScope.Option.WriteDiagnostic();
+                    else
+                        Console.Error.WriteLine($"Option on '{entity}.{column}' updated successfully.");
+                }
 
                 return ExitCodes.Success;
             }

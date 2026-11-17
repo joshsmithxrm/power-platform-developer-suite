@@ -59,7 +59,8 @@ public partial class DataverseMetadataAuthoringService
     /// every PPDS label write targets; the request also sets MergeLabels, so other languages keep their text. When
     /// the caller did not ask to change the label, every existing translation (as read from draft metadata) is
     /// re-sent unchanged, so the update cannot replace the English label with the caller's user-language text.
-    /// Null (no label sent) only when the option has no label text at all.
+    /// Translations with empty text are not re-sent (MergeLabels keeps them anyway). Null when there is no label
+    /// text to re-send; the caller then leaves the request's Label unset instead of sending a null or empty label.
     /// </summary>
     private static Label? OptionLabelForUpdate(string? requested, Label? existing)
     {
@@ -67,10 +68,10 @@ public partial class DataverseMetadataAuthoringService
             return new Label(requested, 1033);
 
         var current = (existing?.LocalizedLabels ?? [])
-            .Where(l => l?.Label != null)
+            .Where(l => !string.IsNullOrEmpty(l?.Label))
             .Select(l => new LocalizedLabel(l.Label, l.LanguageCode))
             .ToList();
-        if (current.Count == 0 && existing?.UserLocalizedLabel is { Label: not null } user)
+        if (current.Count == 0 && existing?.UserLocalizedLabel is { } user && !string.IsNullOrEmpty(user.Label))
             current.Add(new LocalizedLabel(user.Label, user.LanguageCode));
         if (current.Count == 0)
             return null;
@@ -79,6 +80,30 @@ public partial class DataverseMetadataAuthoringService
         foreach (var localized in current)
             label.LocalizedLabels.Add(localized);
         return label;
+    }
+
+    /// <summary>
+    /// Notices for requested labels that are written for English only while the target's label in the caller's own
+    /// language (its user-localised label) is in another language, so that label is left as it was. The CLI shows
+    /// them as warnings; without them a caller would see no change in their own listing after a successful update.
+    /// </summary>
+    private static MetadataLabelWriteResult EnglishOnlyNotices(params (string Field, string Noun, string? Requested, Label? Existing)[] labels)
+    {
+        var notices = new List<ValidationMessage>();
+        foreach (var (field, noun, requested, existing) in labels)
+        {
+            if (requested == null || existing?.UserLocalizedLabel is not { } user || user.LanguageCode == 1033)
+                continue;
+            notices.Add(new ValidationMessage
+            {
+                Field = field,
+                Rule = MetadataLabelWriteResult.EnglishLabelOnlyRule,
+                Message = $"Only the English (LCID 1033) {noun} is written. The {noun} in your language " +
+                    $"(LCID {user.LanguageCode}) is not changed and still reads '{user.Label}'."
+            });
+        }
+
+        return notices.Count == 0 ? MetadataLabelWriteResult.None : new MetadataLabelWriteResult { ValidationMessages = notices };
     }
 
     /// <summary>Resolves a local column option from draft metadata, applying the label safety check.</summary>

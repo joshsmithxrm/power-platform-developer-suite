@@ -348,12 +348,12 @@ public static class OptionSetCommand
 
         var displayNameOption = new Option<string?>("--display-name")
         {
-            Description = "Updated display name"
+            Description = "Updated display name (English, LCID 1033)"
         };
 
         var descriptionOption = new Option<string?>("--description")
         {
-            Description = "Updated description"
+            Description = "Updated description (English, LCID 1033)"
         };
 
         var dryRunOption = new Option<bool>("--dry-run")
@@ -437,7 +437,7 @@ public static class OptionSetCommand
                 DryRun = dryRun
             };
 
-            await authoringService.UpdateGlobalChoiceAsync(request, ct: cancellationToken);
+            var labelResult = await authoringService.UpdateGlobalChoiceAsync(request, ct: cancellationToken);
 
             // Global option sets aren't entity-bound; suggest publish --all.
             const string publishHint = "ppds publish --all";
@@ -451,7 +451,8 @@ public static class OptionSetCommand
                     updated = true,
                     dryRun,
                     requiresPublish = !dryRun,
-                    publishHint = dryRun ? null : publishHint
+                    publishHint = dryRun ? null : publishHint,
+                    validationMessages = MetadataLabelNotices.ForJson(labelResult)
                 });
             }
             else if (dryRun)
@@ -460,6 +461,7 @@ public static class OptionSetCommand
             }
             else
             {
+                MetadataLabelNotices.WriteWarnings(labelResult);
                 Console.Error.WriteLine($"Global option set '{name}' updated. Run '{publishHint}' to publish changes.");
             }
 
@@ -854,7 +856,7 @@ public static class OptionSetCommand
 
         var newLabelOption = new Option<string?>("--new-label")
         {
-            Description = "New label to apply"
+            Description = "New label to apply (English, LCID 1033)"
         };
 
         var colorOption = new Option<string?>("--color")
@@ -966,19 +968,19 @@ public static class OptionSetCommand
                 DryRun = dryRun
             };
 
-            await authoringService.UpdateOptionValueAsync(request, ct: cancellationToken);
+            var labelResult = await authoringService.UpdateOptionValueAsync(request, ct: cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {
-                MetadataDryRunScope.Option.WriteSuccess(writer, dryRun, new { optionSetName = name, updated = true, dryRun });
-            }
-            else if (dryRun)
-            {
-                MetadataDryRunScope.Option.WriteDiagnostic();
+                MetadataDryRunScope.Option.WriteSuccess(writer, dryRun, new { optionSetName = name, updated = true, dryRun, validationMessages = MetadataLabelNotices.ForJson(labelResult) });
             }
             else
             {
-                Console.Error.WriteLine($"Option on '{name}' updated successfully.");
+                MetadataLabelNotices.WriteWarnings(labelResult);
+                if (dryRun)
+                    MetadataDryRunScope.Option.WriteDiagnostic();
+                else
+                    Console.Error.WriteLine($"Option on '{name}' updated successfully.");
             }
 
             return ExitCodes.Success;

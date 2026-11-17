@@ -67,10 +67,10 @@ public sealed class GlobalChoiceDryRunScopeTests
 
     private static JsonElement Preview(string stdout)
     {
+        // Dry-run previews of these routes are written to metadata.preview, never into data.
         var root = JsonDocument.Parse(stdout).RootElement;
-        return root.TryGetProperty("metadata", out var meta) && meta.TryGetProperty("preview", out var p)
-            ? p.Clone()
-            : root.GetProperty("data").GetProperty("preview").Clone();
+        Assert.False(root.GetProperty("data").TryGetProperty("preview", out _));
+        return root.GetProperty("metadata").GetProperty("preview").Clone();
     }
 
     private static async Task<(int Exit, string Stdout, string Stderr)> Invoke(string command)
@@ -78,7 +78,7 @@ public sealed class GlobalChoiceDryRunScopeTests
         var service = new Mock<IMetadataAuthoringService>(MockBehavior.Strict);
         service.Setup(s => s.UpdateGlobalChoiceAsync(It.IsAny<UpdateGlobalChoiceRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))
             .Callback<UpdateGlobalChoiceRequest, IMetadataAuthoringProgressReporter?, CancellationToken>((r, _, _) => Assert.True(r.DryRun))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(MetadataLabelWriteResult.None);
         service.Setup(s => s.AddOptionValueAsync(It.IsAny<AddOptionValueRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((AddOptionValueRequest r, CancellationToken _) => { Assert.True(r.DryRun); return r.Value ?? 0; });
         service.Setup(s => s.CreateColumnAsync(It.IsAny<CreateColumnRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))

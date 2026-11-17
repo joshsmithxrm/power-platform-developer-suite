@@ -233,6 +233,54 @@ public sealed class GlobalChoiceNameResolutionTests
     }
 
     [Theory]
+    [InlineData("option-add")]
+    [InlineData("option-reorder")]
+    [Trait("AC", "AC-134")]
+    public async Task ObjectDoesNotExist_ForTheExactStoredName_ListsOnce_AndNeverResendsTheWrite(string operation)
+    {
+        // The requested spelling is itself stored, so no other spelling exists to retry: exactly one write, one
+        // listing, and the original fault.
+        using var f = new GlobalChoiceServerFake { FailFirstNamedRequestWith = () => GlobalChoiceServerFake.Fault("Could not find solution with name Sol") };
+        var ex = await Assert.ThrowsAsync<FaultException<OrganizationServiceFault>>(() => f.Run(operation, Stored));
+        Assert.Same(f.InjectedFault, ex);
+        Assert.Single(f.Requests, r => r is RetrieveAllOptionSetsRequest);
+        Assert.Single(f.Requests, GlobalChoiceServerFake.IsWrite);
+        f.AssertLeases();
+    }
+
+    public static TheoryData<string, string> NearMissesWithObjectDoesNotExist
+    {
+        get
+        {
+            var data = new TheoryData<string, string>();
+            foreach (var operation in new[] { "option-add", "option-reorder" })
+                foreach (var message in new[]
+                {
+                    "Could not find solution with name SharedOptionSets",
+                    "Could not find an optionset with name mayo_other",
+                    "Could not find option value 5 in optionset mayo_AIRequestType",
+                    "Could not find publisher for solution SharedOptionSet_mayo_AIRequestType"
+                })
+                    data.Add(operation, message);
+            return data;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(NearMissesWithObjectDoesNotExist))]
+    [Trait("AC", "AC-134")]
+    public async Task NearMissText_WithObjectDoesNotExist_ListsOnce_AndRetriesOnceUnderTheStoredName(string operation, string message)
+    {
+        // The code decides, not the text: one listing, one retry under the single stored case variant, and the
+        // retry's own outcome stands (here it succeeds; FailingRetry_SurfacesTheRetryFailure covers failure).
+        using var f = new GlobalChoiceServerFake { FailFirstNamedRequestWith = () => GlobalChoiceServerFake.Fault(message) };
+        await f.Run(operation, Typed);
+        Assert.Single(f.Requests, r => r is RetrieveAllOptionSetsRequest);
+        Assert.Equal(new[] { Typed, Stored }, f.Requests.Where(GlobalChoiceServerFake.IsWrite).Select(GlobalChoiceServerFake.NameOf));
+        f.AssertLeases();
+    }
+
+    [Theory]
     [InlineData("Could not find an optionset with name {0}")]      // recorded server wording
     [InlineData("Could not find an option set with name '{0}'.")]  // spaced variant
     [InlineData("Could not find an option set with specified name")] // wording quoted in #1535; echoes no name

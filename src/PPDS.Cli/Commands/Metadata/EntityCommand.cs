@@ -468,7 +468,7 @@ public static class EntityCommand
 
         var displayNameOption = new Option<string?>("--display-name")
         {
-            Description = "Updated display name"
+            Description = "Updated display name (English, LCID 1033)"
         };
 
         var pluralNameOption = new Option<string?>("--plural-name")
@@ -478,7 +478,7 @@ public static class EntityCommand
 
         var descriptionOption = new Option<string?>("--description")
         {
-            Description = "Updated description"
+            Description = "Updated description (English, LCID 1033)"
         };
 
         var iconSmallOption = new Option<string?>("--icon-small")
@@ -1178,7 +1178,7 @@ public static class EntityCommand
 
         var newLabelOption = new Option<string?>("--new-label")
         {
-            Description = "New label to apply to the status reason"
+            Description = "New label to apply to the status reason (English, LCID 1033)"
         };
 
         var colorOption = new Option<string?>("--color")
@@ -1306,7 +1306,7 @@ public static class EntityCommand
                 Publish = publish
             };
 
-            await authoringService.UpdateStatusReasonAsync(request, cancellationToken);
+            var labelResult = await authoringService.UpdateStatusReasonAsync(request, cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {
@@ -1314,11 +1314,13 @@ public static class EntityCommand
                 {
                     entity,
                     target = value.HasValue ? (object)value.Value : label!,
-                    updated = true
+                    updated = true,
+                    validationMessages = MetadataLabelNotices.ForJson(labelResult)
                 });
             }
             else
             {
+                MetadataLabelNotices.WriteWarnings(labelResult);
                 Console.Error.WriteLine($"Status reason ({target}) on '{entity}' updated successfully.");
             }
 

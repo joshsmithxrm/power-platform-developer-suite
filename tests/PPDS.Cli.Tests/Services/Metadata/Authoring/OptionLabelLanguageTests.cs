@@ -85,6 +85,86 @@ public sealed class OptionLabelLanguageTests
         Assert.Equal(new[] { (1033, "Live") }, Pairs(update.Label));
     }
 
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    [Trait("AC", "AC-145")]
+    public async Task RequestedLabel_ForANonEnglishUser_SaysOnlyTheEnglishLabelIsWritten(string kind)
+    {
+        var f = new Fixture();
+        var result = await f.UpdateAsync(kind, value: 1, newLabel: "Fermé");
+        var notice = Assert.Single(result.ValidationMessages);
+        Assert.Equal(MetadataLabelWriteResult.EnglishLabelOnlyRule, notice.Rule);
+        Assert.Equal("NewLabel", notice.Field);
+        Assert.Contains("English (LCID 1033)", notice.Message);
+        Assert.Contains("LCID 1036", notice.Message);
+        Assert.Contains("'Ouvert'", notice.Message);
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    [Trait("AC", "AC-145")]
+    public async Task NoNotice_WhenNoLabelIsRequested_OrTheUserLanguageIsEnglish(string kind)
+    {
+        Assert.Empty((await new Fixture().UpdateAsync(kind, value: 1, newLabel: null)).ValidationMessages);
+        Assert.Empty((await new Fixture { UserLanguage = 1033 }.UpdateAsync(kind, value: 1, newLabel: "Closed")).ValidationMessages);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-145")]
+    public async Task ChoiceUpdate_ForANonEnglishUser_SaysOnlyTheEnglishDisplayNameIsWritten()
+    {
+        var f = new Fixture();
+        var result = await f.Service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = "Sol", Name = Fixture.ChoiceName, DisplayName = "Renamed" });
+        var notice = Assert.Single(result.ValidationMessages);
+        Assert.Equal("DisplayName", notice.Field);
+        Assert.Contains("'Nom français'", notice.Message);
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    [Trait("AC", "AC-142")]
+    public async Task UnrequestedLabel_SkipsEmptyTranslations_AndKeepsAnOptionWithoutEnglish(string kind)
+    {
+        // An empty-text translation is not re-sent (MergeLabels keeps it); no 1033 label is invented.
+        var withEmpty = new Fixture { OpenLabel = () => new Label(new LocalizedLabel("Open", 1033), new LocalizedLabel[] { new("Open", 1033), new("", 1036) }) };
+        await withEmpty.UpdateAsync(kind, value: 1, newLabel: null);
+        Assert.Equal(new[] { (1033, "Open") }, Pairs(Assert.Single(withEmpty.Requests.OfType<SdkUpdateOption>()).Label));
+
+        var noEnglish = new Fixture { OpenLabel = () => new Label("Ouvert", 1036) };
+        await noEnglish.UpdateAsync(kind, value: 1, newLabel: null);
+        Assert.Equal(new[] { (1036, "Ouvert") }, Pairs(Assert.Single(noEnglish.Requests.OfType<SdkUpdateOption>()).Label));
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    [Trait("AC", "AC-142")]
+    public async Task UnrequestedLabel_WithNoText_IsNotSent(string kind)
+    {
+        var f = new Fixture { OpenLabel = () => new Label(new LocalizedLabel("", 1033), new LocalizedLabel[] { new("", 1033) }) };
+        await f.UpdateAsync(kind, value: 1, newLabel: null);
+        var update = Assert.Single(f.Requests.OfType<SdkUpdateOption>());
+        Assert.False(update.Parameters.ContainsKey("Label"));
+        Assert.True(update.MergeLabels);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-142")]
+    public async Task UserLocalisedOnlyLabel_IsResentInItsOwnLanguage()
+    {
+        var f = new Fixture { OpenLabel = () => new Label { UserLocalizedLabel = new LocalizedLabel("Ouvert", 1036) } };
+        await f.UpdateAsync("global", value: 1, newLabel: null);
+        Assert.Equal(new[] { (1036, "Ouvert") }, Pairs(Assert.Single(f.Requests.OfType<SdkUpdateOption>()).Label));
+    }
+
+    [Fact]
+    [Trait("AC", "AC-142")]
+    public async Task ColorReadback_UpdateOptionSet_MergesLabels()
+    {
+        var f = new Fixture();
+        await f.Service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = Fixture.ChoiceName, Value = 1, Color = "#112233" });
+        Assert.True(Assert.Single(f.Requests.OfType<UpdateOptionSetRequest>()).MergeLabels);
+    }
+
     private static (int, string)[] Pairs(Label label)
         => label.LocalizedLabels.Select(l => (l.LanguageCode, l.Label)).OrderBy(p => p.LanguageCode).ToArray();
 
@@ -94,11 +174,17 @@ public sealed class OptionLabelLanguageTests
         public List<OrganizationRequest> Requests { get; } = [];
         public DataverseMetadataAuthoringService Service { get; }
 
-        private static Label French(string english, string french) => new(
-            new LocalizedLabel(french, 1036),
+        /// <summary>The caller's UI language: the language of every user-localised label.</summary>
+        public int UserLanguage { get; init; } = 1036;
+
+        /// <summary>Overrides the labels of option 1 (default: English 'Open', French 'Ouvert').</summary>
+        public Func<Label>? OpenLabel { get; init; }
+
+        private Label French(string english, string french) => new(
+            UserLanguage == 1033 ? new LocalizedLabel(english, 1033) : new LocalizedLabel(french, 1036),
             new LocalizedLabel[] { new(english, 1033), new(french, 1036) });
 
-        private static OptionSetMetadata OptionSet(bool status)
+        private OptionSetMetadata OptionSet(bool status)
         {
             var set = new OptionSetMetadata
             {
@@ -108,7 +194,7 @@ public sealed class OptionLabelLanguageTests
             };
             OptionMetadata open = status ? new StatusOptionMetadata { State = 0 } : new OptionMetadata();
             open.Value = 1;
-            open.Label = French("Open", "Ouvert");
+            open.Label = OpenLabel?.Invoke() ?? French("Open", "Ouvert");
             set.Options.Add(open);
             OptionMetadata other = status ? new StatusOptionMetadata { State = 0 } : new OptionMetadata();
             other.Value = 2;
@@ -148,14 +234,14 @@ public sealed class OptionLabelLanguageTests
             Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard());
         }
 
-        public Task UpdateAsync(string kind, int value, string? newLabel) => kind switch
+        public Task<MetadataLabelWriteResult> UpdateAsync(string kind, int value, string? newLabel) => kind switch
         {
             "global" => Service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = ChoiceName, Value = value, NewLabel = newLabel, Description = newLabel == null ? "Changed description" : null }),
             "local" => Service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = "new_table", ColumnLogicalName = "new_pick", Value = value, NewLabel = newLabel }),
             _ => Service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = "new_table", Value = value, NewLabel = newLabel })
         };
 
-        public Task UpdateByLabelAsync(string kind, string label) => kind switch
+        public Task<MetadataLabelWriteResult> UpdateByLabelAsync(string kind, string label) => kind switch
         {
             "global" => Service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = ChoiceName, Label = label, Description = "Changed description" }),
             "local" => Service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = "new_table", ColumnLogicalName = "new_pick", Label = label }),

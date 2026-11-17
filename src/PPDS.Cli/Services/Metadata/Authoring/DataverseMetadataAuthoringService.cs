@@ -819,7 +819,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     }
 
     /// <inheritdoc />
-    public async Task UpdateGlobalChoiceAsync(
+    public async Task<MetadataLabelWriteResult> UpdateGlobalChoiceAsync(
         UpdateGlobalChoiceRequest request,
         IMetadataAuthoringProgressReporter? reporter = null,
         CancellationToken ct = default)
@@ -834,7 +834,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         if (request.DryRun)
         {
             _logger?.LogInformation("Dry-run: UpdateGlobalChoice {Name} validated", request.Name);
-            return;
+            return MetadataLabelWriteResult.None;
         }
 
         reporter?.ReportPhase("Retrieving existing choice");
@@ -848,6 +848,9 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         reporter?.ReportPhase("Updating global choice", request.Name);
 
         var existingOs = retrieveResponse.OptionSetMetadata;
+        var notices = EnglishOnlyNotices(
+            ("DisplayName", "display name", request.DisplayName, existingOs.DisplayName),
+            ("Description", "description", request.Description, existingOs.Description));
 
         if (request.DisplayName != null)
             existingOs.DisplayName = new Label(request.DisplayName, 1033);
@@ -871,6 +874,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         reporter?.ReportInfo($"Global choice '{request.Name}' updated. Changes must be published to take effect.");
         _logger?.LogInformation("Updated global choice {Name}", request.Name);
+        return notices;
     }
 
     /// <inheritdoc />
@@ -972,7 +976,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     }
 
     /// <inheritdoc />
-    public async Task UpdateOptionValueAsync(PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest request, CancellationToken ct = default)
+    public async Task<MetadataLabelWriteResult> UpdateOptionValueAsync(PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         _guard.EnsureCanMutate("metadata.option.update");
@@ -990,21 +994,23 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         // #1170: resolve the target by value or label; the current label is preserved when
         // NewLabel is omitted (e.g. color-only updates), mirroring the local column-option variant.
         var target = await ResolveGlobalOptionAsync(request.OptionSetName, request.Value, request.Label, ct).ConfigureAwait(false);
+        var notices = EnglishOnlyNotices(("NewLabel", "label", request.NewLabel, target.Labels));
 
         if (request.DryRun)
         {
             _logger?.LogInformation("Dry-run: UpdateOptionValue {Value} in {OptionSet} validated", target.Value, request.OptionSetName);
-            return;
+            return notices;
         }
 
         var sdkRequest = new SdkUpdateOptionValueRequest
         {
             OptionSetName = target.OptionSetName,
             Value = target.Value,
-            Label = OptionLabelForUpdate(request.NewLabel, target.Labels),
             MergeLabels = true,
             SolutionUniqueName = request.SolutionUniqueName
         };
+        if (OptionLabelForUpdate(request.NewLabel, target.Labels) is { } globalLabel)
+            sdkRequest.Label = globalLabel;
 
         if (!string.IsNullOrEmpty(request.Description))
             sdkRequest.Description = new Label(request.Description, 1033);
@@ -1025,6 +1031,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 target.Value, request.Color, request.SolutionUniqueName, ct).ConfigureAwait(false);
 
         _logger?.LogInformation("Updated option value {Value} in {OptionSet}", target.Value, request.OptionSetName);
+        return notices;
     }
 
     /// <inheritdoc />
@@ -1485,7 +1492,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     }
 
     /// <inheritdoc />
-    public async Task UpdateStatusReasonAsync(UpdateStatusReasonRequest request, CancellationToken ct = default)
+    public async Task<MetadataLabelWriteResult> UpdateStatusReasonAsync(UpdateStatusReasonRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         _guard.EnsureCanMutate("metadata.statusReason.update");
@@ -1547,13 +1554,15 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             currentLabels = statusEntries.First(entry => ReferenceEquals(entry.Info, labelMatches[0])).Labels;
         }
 
+        var notices = EnglishOnlyNotices(("NewLabel", "label", request.NewLabel, currentLabels));
         var sdkRequest = new SdkUpdateOptionValueRequest
         {
             Value = targetValue,
-            Label = OptionLabelForUpdate(request.NewLabel, currentLabels),
             MergeLabels = true,
             SolutionUniqueName = request.SolutionUniqueName
         };
+        if (OptionLabelForUpdate(request.NewLabel, currentLabels) is { } statusLabel)
+            sdkRequest.Label = statusLabel;
 
         sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
         sdkRequest["AttributeLogicalName"] = "statuscode";
@@ -1581,6 +1590,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         if (request.Publish)
             await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+        return notices;
     }
 
     /// <inheritdoc />
@@ -1804,7 +1814,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     }
 
     /// <inheritdoc />
-    public async Task UpdateColumnOptionAsync(UpdateColumnOptionRequest request, CancellationToken ct = default)
+    public async Task<MetadataLabelWriteResult> UpdateColumnOptionAsync(UpdateColumnOptionRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         _guard.EnsureCanMutate("metadata.columnOption.update");
@@ -1818,19 +1828,21 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         // #1531: resolve the target (and its current label) from draft metadata so an unpublished option is visible.
         var (target, targetLabels) = await ResolveDraftColumnOptionAsync(request.EntityLogicalName, request.ColumnLogicalName, request.Value, request.Label, ct).ConfigureAwait(false);
 
+        var notices = EnglishOnlyNotices(("NewLabel", "label", request.NewLabel, targetLabels));
         if (request.DryRun)
         {
             _logger?.LogInformation("Dry-run: UpdateColumnOption (value {Value}) on '{Entity}.{Column}' validated", target.Value, request.EntityLogicalName, request.ColumnLogicalName);
-            return;
+            return notices;
         }
 
         var sdkRequest = new SdkUpdateOptionValueRequest
         {
             Value = target.Value,
-            Label = OptionLabelForUpdate(request.NewLabel, targetLabels),
             MergeLabels = true,
             SolutionUniqueName = request.SolutionUniqueName
         };
+        if (OptionLabelForUpdate(request.NewLabel, targetLabels) is { } columnLabel)
+            sdkRequest.Label = columnLabel;
         sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
         sdkRequest["AttributeLogicalName"] = request.ColumnLogicalName;
 
@@ -1854,6 +1866,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
 
         _logger?.LogInformation("Updated local option {Value} on {Entity}.{Column}", target.Value, request.EntityLogicalName, request.ColumnLogicalName);
+        return notices;
     }
 
     /// <inheritdoc />
@@ -2260,9 +2273,11 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         {
             try
             {
+                // The whole draft set is re-sent with every language; MergeLabels keeps a trimmed payload safe too.
                 await client.ExecuteAsync(new UpdateOptionSetRequest
                 {
                     OptionSet = optionSet,
+                    MergeLabels = true,
                     SolutionUniqueName = solutionUniqueName
                 }, ct).ConfigureAwait(false);
             }

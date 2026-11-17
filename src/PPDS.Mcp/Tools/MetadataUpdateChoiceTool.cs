@@ -37,8 +37,8 @@ public sealed class MetadataUpdateChoiceTool : McpToolBase
     public async Task<MetadataUpdateChoiceResult> ExecuteAsync(
         [Description("Unique name of the solution containing the global choice.")] string solution,
         [Description("Name of the global choice to update.")] string name,
-        [Description("Updated display name (optional).")] string? displayName = null,
-        [Description("Updated description (optional).")] string? description = null,
+        [Description("Updated display name (optional; English, LCID 1033).")] string? displayName = null,
+        [Description("Updated description (optional; English, LCID 1033).")] string? description = null,
         [Description("If true, validates without persisting changes.")] bool dryRun = false,
         CancellationToken cancellationToken = default)
     {
@@ -53,7 +53,7 @@ public sealed class MetadataUpdateChoiceTool : McpToolBase
 
             var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
-            await service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest
+            var labelResult = await service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest
             {
                 SolutionUniqueName = solution,
                 Name = name,
@@ -65,7 +65,10 @@ public sealed class MetadataUpdateChoiceTool : McpToolBase
             return new MetadataUpdateChoiceResult
             {
                 Success = true,
-                WasDryRun = dryRun
+                WasDryRun = dryRun,
+                // An input-only dry run does not look the choice name up (#1535), so it cannot vouch for it.
+                GlobalChoiceNameChecked = dryRun ? false : null,
+                ValidationMessages = labelResult?.ValidationMessages.ToArray() ?? []
             };
         }
         catch (PpdsException ex)
@@ -93,4 +96,16 @@ public sealed class MetadataUpdateChoiceResult
     /// <summary>Whether the operation was a dry run.</summary>
     [JsonPropertyName("wasDryRun")]
     public bool WasDryRun { get; set; }
+
+    /// <summary>
+    /// False on a dry run: the choice name was not looked up, so a mis-cased or unknown name is resolved or rejected
+    /// only when changes are applied. Omitted otherwise.
+    /// </summary>
+    [JsonPropertyName("globalChoiceNameChecked")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? GlobalChoiceNameChecked { get; set; }
+
+    /// <summary>Notices such as only the English (LCID 1033) label being written; empty when there are none.</summary>
+    [JsonPropertyName("validationMessages")]
+    public ValidationMessage[] ValidationMessages { get; set; } = [];
 }

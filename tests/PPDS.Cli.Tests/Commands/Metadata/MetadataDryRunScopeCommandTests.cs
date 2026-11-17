@@ -129,11 +129,11 @@ public sealed class MetadataDryRunScopeCommandTests(ITestOutputHelper output)
         service.Setup(s => s.CreateGlobalChoiceAsync(It.IsAny<CreateGlobalChoiceRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))
             .Returns((CreateGlobalChoiceRequest r, IMetadataAuthoringProgressReporter? _, CancellationToken t) => Reply(r, t, new CreateChoiceResult { Name = "new_choice", WasDryRun = true, ValidationMessages = [] }));
         service.Setup(s => s.UpdateGlobalChoiceAsync(It.IsAny<UpdateGlobalChoiceRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))
-            .Returns((UpdateGlobalChoiceRequest r, IMetadataAuthoringProgressReporter? _, CancellationToken t) => Done(r, t));
+            .Returns((UpdateGlobalChoiceRequest r, IMetadataAuthoringProgressReporter? _, CancellationToken t) => Reply(r, t, MetadataLabelWriteResult.None));
         service.Setup(s => s.AddOptionValueAsync(It.IsAny<AddOptionValueRequest>(), It.IsAny<CancellationToken>()))
             .Returns((AddOptionValueRequest r, CancellationToken t) => Reply(r, t, 0));
         service.Setup(s => s.UpdateOptionValueAsync(It.IsAny<UpdateOptionValueRequest>(), It.IsAny<CancellationToken>()))
-            .Returns((UpdateOptionValueRequest r, CancellationToken t) => Done(r, t));
+            .Returns((UpdateOptionValueRequest r, CancellationToken t) => Reply(r, t, MetadataLabelWriteResult.None));
         service.Setup(s => s.DeleteOptionValueAsync(It.IsAny<DeleteOptionValueRequest>(), It.IsAny<CancellationToken>()))
             .Returns((DeleteOptionValueRequest r, CancellationToken t) => Done(r, t));
         service.Setup(s => s.CreateKeyAsync(It.IsAny<CreateKeyRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))
@@ -143,7 +143,7 @@ public sealed class MetadataDryRunScopeCommandTests(ITestOutputHelper output)
         service.Setup(s => s.AddColumnOptionAsync(It.IsAny<AddColumnOptionRequest>(), It.IsAny<CancellationToken>()))
             .Returns((AddColumnOptionRequest r, CancellationToken t) => Reply(r, t, 1000001));
         service.Setup(s => s.UpdateColumnOptionAsync(It.IsAny<UpdateColumnOptionRequest>(), It.IsAny<CancellationToken>()))
-            .Returns((UpdateColumnOptionRequest r, CancellationToken t) => Done(r, t));
+            .Returns((UpdateColumnOptionRequest r, CancellationToken t) => Reply(r, t, MetadataLabelWriteResult.None));
         service.Setup(s => s.RemoveColumnOptionAsync(It.IsAny<RemoveColumnOptionRequest>(), It.IsAny<CancellationToken>()))
             .Returns((RemoveColumnOptionRequest r, CancellationToken t) => Done(r, t));
 
@@ -219,9 +219,9 @@ public sealed class MetadataDryRunScopeCommandTests(ITestOutputHelper output)
             return Task.CompletedTask;
         }
         service.Setup(s => s.AddOptionValueAsync(It.IsAny<AddOptionValueRequest>(), It.IsAny<CancellationToken>())).Returns(async (AddOptionValueRequest r, CancellationToken ct) => { await Done(r, ct); return 17; });
-        service.Setup(s => s.UpdateOptionValueAsync(It.IsAny<UpdateOptionValueRequest>(), It.IsAny<CancellationToken>())).Returns((UpdateOptionValueRequest r, CancellationToken ct) => Done(r, ct));
+        service.Setup(s => s.UpdateOptionValueAsync(It.IsAny<UpdateOptionValueRequest>(), It.IsAny<CancellationToken>())).Returns(async (UpdateOptionValueRequest r, CancellationToken ct) => { await Done(r, ct); return MetadataLabelWriteResult.None; });
         service.Setup(s => s.DeleteOptionValueAsync(It.IsAny<DeleteOptionValueRequest>(), It.IsAny<CancellationToken>())).Returns((DeleteOptionValueRequest r, CancellationToken ct) => Done(r, ct));
-        service.Setup(s => s.UpdateStatusReasonAsync(It.IsAny<UpdateStatusReasonRequest>(), It.IsAny<CancellationToken>())).Returns((UpdateStatusReasonRequest r, CancellationToken ct) => Done(r, ct));
+        service.Setup(s => s.UpdateStatusReasonAsync(It.IsAny<UpdateStatusReasonRequest>(), It.IsAny<CancellationToken>())).Returns(async (UpdateStatusReasonRequest r, CancellationToken ct) => { await Done(r, ct); return MetadataLabelWriteResult.None; });
         service.Setup(s => s.RemoveStatusReasonAsync(It.IsAny<RemoveStatusReasonRequest>(), It.IsAny<CancellationToken>())).Returns((RemoveStatusReasonRequest r, CancellationToken ct) => Done(r, ct));
         Task<ServiceProvider> Provider(CancellationToken ct) { actual = ct; providers++; return Task.FromResult(new ServiceCollection().AddSingleton(service.Object).BuildServiceProvider()); }
         var command = MetadataCommandGroup.Create(Provider);

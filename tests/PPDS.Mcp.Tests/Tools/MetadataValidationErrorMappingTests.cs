@@ -125,6 +125,27 @@ public sealed class MetadataValidationErrorMappingTests
         Assert.DoesNotContain("Could not find", ex.Message);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait("AC", "AC-143")]
+    [Trait("AC", "AC-145")]
+    public async Task UpdateChoiceTool_ReportsTheUncheckedNameOnDryRun_AndLabelNotices(bool dryRun)
+    {
+        var notice = new ValidationMessage { Field = "DisplayName", Rule = MetadataLabelWriteResult.EnglishLabelOnlyRule, Message = "Only the English (LCID 1033) display name is written." };
+        var service = new Mock<IMetadataAuthoringService>(MockBehavior.Strict);
+        service.Setup(s => s.UpdateGlobalChoiceAsync(It.IsAny<UpdateGlobalChoiceRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MetadataLabelWriteResult { ValidationMessages = [notice] });
+        using var fixture = await ToolFixture.CreateAsync(service.Object);
+
+        var result = await new MetadataUpdateChoiceTool(fixture.Context).ExecuteAsync("Sol", "mayo_Typo", displayName: "Renamed", dryRun: dryRun);
+
+        var json = JsonSerializer.SerializeToElement(result);
+        if (dryRun) Assert.False(json.GetProperty("globalChoiceNameChecked").GetBoolean());
+        else Assert.False(json.TryGetProperty("globalChoiceNameChecked", out _));
+        Assert.Equal(MetadataLabelWriteResult.EnglishLabelOnlyRule, Assert.Single(json.GetProperty("validationMessages").EnumerateArray()).GetProperty("Rule").GetString());
+    }
+
     /// <summary>An authoring service whose every method fails with the given exception.</summary>
     public class ThrowingAuthoringService : DispatchProxy
     {
@@ -156,6 +177,7 @@ public sealed class MetadataValidationErrorMappingTests
         private readonly ProfileStore _store;
         private readonly McpToolContext _context;
         private bool _disposed;
+        public McpToolContext Context => _context;
 
         private ToolFixture(IMetadataAuthoringService service)
         {

@@ -43,10 +43,14 @@ public partial class DataverseMetadataAuthoringService
     /// exception is rethrown unchanged.
     /// </summary>
     /// <remarks>
-    /// Any other failure (privilege, duplicate value, validation, unknown solution, managed property, plugin,
-    /// timeout, throttle, connection, cancellation) propagates untouched with no listing and no retry, so an
-    /// exact-name caller whose request fails for another reason sends nothing extra. A not-found fault means the
-    /// named option set was not located, so nothing was written under the first spelling.
+    /// Recognition is by fault code, so any ObjectDoesNotExist fault qualifies, including one about another object
+    /// (for example a missing solution). That costs one extra as-if-published catalog listing (every global choice
+    /// with its options) before the original error returns; the write is re-sent once only when a single stored
+    /// case variant of the requested name exists, and that retry's own failure surfaces. Every other failure
+    /// (privilege, duplicate value, validation, managed property, plugin, timeout, throttle, connection,
+    /// cancellation, and faults with other codes and no English not-found wording) propagates untouched with no
+    /// listing and no retry. The design assumes, pending live confirmation, that a not-found fault means nothing
+    /// was written under the first spelling.
     /// Each attempt and the catalog lookup acquire and release their own pooled lease.
     /// </remarks>
     /// <returns>The name the successful attempt used (the stored name when Dataverse reports it) and its result.</returns>
@@ -176,8 +180,10 @@ public partial class DataverseMetadataAuthoringService
             : requested;
 
     /// <summary>
-    /// Dataverse's language-independent "object not found" fault code (ObjectDoesNotExist, 0x80040217), which a
-    /// lookup by name returns for a name it does not know. Keep in step with DataverseMetadataQueryService.
+    /// Dataverse's language-independent "object not found" fault code (ObjectDoesNotExist, 0x80040217). ASSUMPTION,
+    /// pending live confirmation: Microsoft does not document which code an unknown global choice name returns; this
+    /// is the generic not-found code the offline fakes model (see the live test
+    /// MetadataGlobalChoiceLiveTests). Keep in step with DataverseMetadataQueryService.
     /// </summary>
     private const int ObjectDoesNotExistErrorCode = unchecked((int)0x80040217);
 

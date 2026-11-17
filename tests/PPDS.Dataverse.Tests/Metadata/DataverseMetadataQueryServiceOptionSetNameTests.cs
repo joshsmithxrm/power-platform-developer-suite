@@ -99,6 +99,22 @@ public sealed class DataverseMetadataQueryServiceOptionSetNameTests
         f.AssertLeases();
     }
 
+    [Theory]
+    [InlineData("Could not find solution with name SharedOptionSets")]
+    [InlineData("Could not find an optionset with name mayo_other")]
+    [InlineData("Could not find option value 5 in optionset mayo_AIRequestType")]
+    [Trait("AC", "AC-134")]
+    public async Task NearMissText_WithObjectDoesNotExist_ListsOnce_AndReadsTheStoredName(string message)
+    {
+        // The code decides, not the text: a read under the single stored case variant follows the one listing.
+        var f = new Fixture { NotFoundMessage = _ => message };
+        var result = await f.Service.GetOptionSetAsync("mayo_AIRequestType");
+        Assert.Equal(Stored, result.Name);
+        Assert.Single(f.Requests.OfType<RetrieveAllOptionSetsRequest>());
+        Assert.Equal(new[] { "mayo_AIRequestType", Stored }, f.Requests.OfType<RetrieveOptionSetRequest>().Select(r => r.Name));
+        f.AssertLeases();
+    }
+
     [Fact]
     [Trait("AC", "AC-133")]
     public async Task NonEnglishNotFoundFault_ResolvesByFaultCode()

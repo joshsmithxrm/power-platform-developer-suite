@@ -348,8 +348,8 @@ public class DataverseMetadataQueryService : IMetadataQueryService
         catch (Exception ex) when (ex is not OperationCanceledException && IsOptionSetNotFoundFault(ex, name))
         {
             // #1535: Dataverse stores global choice names in canonical (usually lower-case) form. The exact
-            // spelling is always tried first; only an "option set not found" fault lists the published catalog
-            // (any other failure propagates untouched). A single case-insensitive match is retried under its
+            // spelling is always tried first; only a not-found fault (the ObjectDoesNotExist code, whatever the
+            // object, or the English wording) lists the published catalog; any other failure propagates untouched. A single case-insensitive match is retried under its
             // stored name. Otherwise (no match, an ambiguous match, the exact spelling is itself stored, or the
             // listing fails) the original fault is rethrown, so existing not-found handling and the CLI's
             // not-found hint are unchanged.
@@ -424,8 +424,9 @@ public class DataverseMetadataQueryService : IMetadataQueryService
     }
 
     /// <summary>
-    /// Dataverse's language-independent "object not found" fault code (ObjectDoesNotExist, 0x80040217), which a
-    /// lookup by name returns for a name it does not know. Keep in step with the authoring service's copy.
+    /// Dataverse's language-independent "object not found" fault code (ObjectDoesNotExist, 0x80040217). ASSUMPTION,
+    /// pending live confirmation: Microsoft does not document which code an unknown global choice name returns.
+    /// Keep in step with the authoring service's copy.
     /// </summary>
     private const int ObjectDoesNotExistErrorCode = unchecked((int)0x80040217);
 
