@@ -4,10 +4,11 @@ param(
     [switch]$DelaySignedInput
 )
 $ErrorActionPreference = 'Stop'
-# Callers see the throw text as before. For the failures this script raises itself (a plain `throw`
-# of a fixed message, not a .NET or cmdlet error) the first line of the message is also written as
-# an anchored line, so a caller can classify the failure without parsing PowerShell's error
-# rendering, which includes the failing source line and terminal colour codes.
+# Callers see the throw text as before. For a plain `throw` (the failures this script raises itself;
+# the engine raises a few errors of the same exception type, which only ever match no known message)
+# the first line of the message is also written as an anchored line, so a caller can classify the
+# failure without parsing PowerShell's error rendering, which includes the failing source line and
+# terminal colour codes. .NET and cmdlet errors get no such line.
 trap {
     if ($_.Exception.GetType().FullName -ceq 'System.Management.Automation.RuntimeException') {
         [Console]::Error.WriteLine('PPDS_INSPECTOR_MESSAGE=' + ($_.Exception.Message -split '\r?\n')[0])

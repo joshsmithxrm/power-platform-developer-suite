@@ -19,6 +19,11 @@ permissions:
 #     workflow ran it, so a regression could merge with green CI (found while
 #     shipping PR #1351; see issue #1353).
 #
+# One extra job, `windows-tool-tests`, runs the few tests that drive real PowerShell 7 and the
+# Windows SDK sn.exe (the release inspector and the signer process boundary). It installs the
+# pinned SDK, builds a small delay-signed test assembly from the public key, and fails instead of
+# skipping when a required tool is missing.
+#
 # Rather than enumerate individual files a third time, this workflow now runs
 # the ENTIRE `tests/` Python suite, so any future test file added under
 # `tests/` is covered automatically. (The .NET test projects under `tests/`
@@ -60,6 +65,7 @@ jobs:
   windows-tool-tests:
     name: windows-tool-tests
     runs-on: windows-2025
+    timeout-minutes: 20
     env:
       PPDS_REQUIRE_WINDOWS_TOOLS: '1'
     steps:
@@ -67,6 +73,11 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          global-json-file: global.json
 
       - name: Setup Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
@@ -78,4 +89,4 @@ jobs:
 
       - name: Run inspector and PATHEXT tests
         shell: pwsh
-        run: python -m pytest tests/ci/test_inspect_release_assemblies.py "tests/ci/test_hosted_signing_compatibility.py::test_pwsh_needs_pathext_to_launch_a_native_tool_under_the_driver_environment" -q
+        run: python -m pytest tests/ci/test_inspect_release_assemblies.py "tests/ci/test_hosted_signing_compatibility.py::test_pwsh_needs_pathext_to_launch_a_native_tool_under_the_driver_environment" "tests/ci/test_plugin_signing.py::test_signer_process_preserves_common_data_without_inheriting_secrets" -q

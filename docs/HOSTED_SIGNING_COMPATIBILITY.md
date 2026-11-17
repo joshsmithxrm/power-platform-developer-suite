@@ -233,10 +233,12 @@ cause: a refusal after a successful call reports that call with status 0.
 `PPDS_COMPAT_OPERATION_INDEX=<n>` says which call of that name it was
 (1-based, bounded integer; passed through as `driver_operation_index`). When
 the failed call is `packaged-metadata`, the driver also classifies the release
-inspector's stderr against the inspector's fixed failure messages and prints
+inspector's fixed failure messages and prints
 `PPDS_COMPAT_DIAGNOSTIC=<code>` (`inspector-sn-no-result`, `inspector-public-key`,
-`inspector-framework`, ... or `inspector-unclassified`); the raw output is
-searched for those phrases but never printed or stored. The coordinator passes
+`inspector-framework`, ... or `inspector-unclassified`). Only the one anchored
+`PPDS_INSPECTOR_MESSAGE=` line the inspector writes for its own throws is read;
+the rest of the child's output is neither searched, printed nor stored. The
+coordinator passes
 through only registry codes, listed operation names, that status pattern, a
 bounded index and the driver's fixed diagnostic codes, as `command_refusal`,
 `driver_operation`, `driver_status`, `driver_operation_index` and

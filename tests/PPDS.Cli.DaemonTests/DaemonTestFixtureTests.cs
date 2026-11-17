@@ -549,7 +549,7 @@ public sealed class DaemonTestFixtureTests
                 if (drainCompleted && fixture.StderrCharactersDiscarded < expectedCharacters)
                 {
                     var faulted = fixture.StderrCompletion.IsFaulted;
-                    Assert.Fail($"The stderr drain {(faulted ? "faulted" : "reached end of stream")} after " +
+                    Assert.Fail($"The stderr drain {(faulted ? "faulted" : "ended")} after " +
                         $"{fixture.StderrCharactersDiscarded} of at least {expectedCharacters} expected characters.");
                 }
                 try { await Task.Delay(10, deadline.Token); }

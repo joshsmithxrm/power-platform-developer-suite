@@ -1198,6 +1198,9 @@ def inspector_throw_messages():
     not_run = re.findall(r"\$notRun = '([^']+)'", "\n".join(code_lines))
     messages = []
     for line in code_lines:
+        found = re.findall(r"\bthrow\b", line)
+        if len(found) > 1:
+            pytest.fail("More than one throw on a line of the inspector: " + line.strip())
         for found in re.finditer(r"\bthrow\b(.*)", line):
             rest = found[1].strip()
             if match := re.match(r"'([^']+)'", rest):
@@ -1230,6 +1233,14 @@ def test_inspector_throw_harvest_fails_loudly_on_a_form_it_cannot_read(monkeypat
     real = Path.read_text
     monkeypatch.setattr(Path, "read_text", lambda self, *a, **kw: real(self, *a, **kw) + "\nthrow $other\n")
     with pytest.raises(pytest.fail.Exception, match="Unreadable throw form"):
+        inspector_throw_messages()
+
+
+def test_inspector_throw_harvest_fails_on_two_throws_in_one_line(monkeypatch):
+    real = Path.read_text
+    monkeypatch.setattr(Path, "read_text", lambda self, *a, **kw: real(self, *a, **kw)
+                        + "\nif ($a) { throw 'x' } else { throw 'y' }\n")
+    with pytest.raises(pytest.fail.Exception, match="More than one throw"):
         inspector_throw_messages()
 
 
