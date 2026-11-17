@@ -48,9 +48,11 @@ public static class RepairBindingsCommand
         };
 
         var command = new Command("repair-bindings",
-            "Rewrite each control binding (datafieldname) that differs from a column's logical name only by case to the exact logical name, " +
-            "in tab sections, header and footer. Only the binding changes: control ids, cells and labels are kept. " +
-            "Bindings that match no column, and control ids that differ by case, are reported and left unchanged.")
+            "Rewrite every control binding (datafieldname) on a Main form that differs from a column's logical name only by case to the " +
+            "exact logical name, in tab sections, tab headers/footers and the form header/footer. Only those attribute values change: " +
+            "the rest of the stored form XML text (control ids, cells, labels, whitespace) is sent back as it was, and the form is read " +
+            "back to confirm the repair. Reported and left unchanged: bindings that match no column, control ids that differ by case, " +
+            "controls with a relationship or isunbound, and case-variant names in custom-control parameters, form events and hidden controls.")
         {
             entityOption,
             formOption,
@@ -71,11 +73,11 @@ public static class RepairBindingsCommand
                 parseResult.GetValue(formOption)!,
                 parseResult.GetValue(dryRunOption),
                 parseResult.GetValue(solutionOption),
-                parseResult.GetValue(publishOption));
+                parseResult.GetValue(publishOption),
+                parseResult.GetValue(FormsCommandGroup.ConfirmEnvironmentOption));
             return await ExecuteAsync(request,
                 parseResult.GetValue(FormsCommandGroup.ProfileOption),
                 parseResult.GetValue(FormsCommandGroup.EnvironmentOption),
-                parseResult.GetValue(FormsCommandGroup.ConfirmEnvironmentOption),
                 GlobalOptions.GetValues(parseResult), cancellationToken, providerFactory);
         });
 
@@ -86,7 +88,6 @@ public static class RepairBindingsCommand
         RepairBindingsRequest request,
         string? profile,
         string? environment,
-        string? confirmEnvironment,
         GlobalOptionValues globalOptions,
         CancellationToken cancellationToken,
         Func<string?, string?, GlobalOptionValues, CancellationToken, Task<ServiceProvider>>? providerFactory)
@@ -95,11 +96,9 @@ public static class RepairBindingsCommand
 
         try
         {
+            // Fast path before connecting; the service enforces the same rule for every caller.
             if (request.DryRun && (request.Publish || request.SolutionUniqueName is not null))
-            {
-                Console.Error.WriteLine("--dry-run cannot be combined with --publish or --solution.");
-                return ExitCodes.InvalidArguments;
-            }
+                throw new PpdsValidationException("dry-run", "--dry-run cannot be combined with --publish or --solution.");
 
             await using var serviceProvider = providerFactory is null
                 ? await ProfileServiceFactory.CreateFromProfilesAsync(
@@ -112,7 +111,7 @@ public static class RepairBindingsCommand
                 : await providerFactory(profile, environment, globalOptions, cancellationToken);
 
             if (!request.DryRun)
-                await FormsCommandGroup.ConfirmEnvironmentAsync(serviceProvider, confirmEnvironment, cancellationToken);
+                await FormsCommandGroup.ConfirmEnvironmentAsync(serviceProvider, request.ConfirmEnvironment, cancellationToken);
             var formService = serviceProvider.GetRequiredService<IFormService>();
 
             if (!globalOptions.IsJsonMode)
@@ -137,6 +136,7 @@ public static class RepairBindingsCommand
                     repairedCount = result.Repaired.Count,
                     unchangedCount = result.Unchanged.Count,
                     formXmlChanged = result.FormXmlChanged,
+                    readBackVerified = result.ReadBackVerified,
                     solutionAssociationRequested = result.SolutionAssociationRequested,
                     publicationRequested = result.PublicationRequested,
                     repaired = result.Repaired,
@@ -148,7 +148,8 @@ public static class RepairBindingsCommand
                 Console.Error.WriteLine(message);
                 foreach (var item in result.Repaired)
                     Console.Error.WriteLine($"  {(result.DryRun ? "Would repair" : "Repaired")}: control '{item.ControlId ?? "(no id)"}' ({item.Location}) " +
-                        $"binding '{item.OldBinding}' -> '{item.NewBinding}'.");
+                        $"binding '{item.OldBinding}' -> '{item.NewBinding}'." +
+                        (item.ControlIdCaseDiffers ? " Its id also differs from the logical name by case and was not changed." : ""));
                 foreach (var item in result.Unchanged)
                     Console.Error.WriteLine("  " + DescribeUnchanged(request.EntityLogicalName, item));
             }
@@ -166,18 +167,23 @@ public static class RepairBindingsCommand
     private static string DescribeResult(RepairBindingsResult result)
     {
         var messages = new List<string>();
+        var remaining = result.Unchanged.Count(u => BindingRepairReasons.IsRemainingCaseVariant(u.Reason));
+        var noMatch = result.Unchanged.Count - remaining;
         if (result.DryRun)
             messages.Add(result.Repaired.Count == 0
-                ? $"Dry run: no binding on form '{result.FormName}' differs from its column's logical name only by case. Nothing was written."
-                : $"Dry run: {result.Repaired.Count} binding(s) on form '{result.FormName}' would be repaired. Nothing was written.");
+                ? $"Dry run: no control binding on form '{result.FormName}' would be repaired. Nothing was written."
+                : $"Dry run: {result.Repaired.Count} control binding(s) on form '{result.FormName}' would be repaired. Nothing was written.");
         else
             messages.Add(result.Repaired.Count == 0
-                ? $"No binding on form '{result.FormName}' differs from its column's logical name only by case. The form XML was not updated."
-                : $"Repaired {result.Repaired.Count} binding(s) on form '{result.FormName}'.");
+                ? $"No control binding on form '{result.FormName}' needed repair. The form XML was not updated."
+                : $"Repaired {result.Repaired.Count} control binding(s) on form '{result.FormName}': the update was submitted and reading the form back " +
+                  "found no binding left that this command would repair.");
         if (result.FormXmlChanged && !result.PublicationRequested)
             messages.Add("The change is saved unpublished; publish the table (or rerun with --publish) to publish it.");
-        if (result.Unchanged.Count > 0)
-            messages.Add($"{result.Unchanged.Count} control(s) reported and left unchanged.");
+        if (remaining > 0)
+            messages.Add($"{remaining} case-variant reference(s) remain on the form and were not changed (listed below).");
+        if (noMatch > 0)
+            messages.Add($"{noMatch} binding(s) match no column and were left unchanged.");
         if (result.SolutionAssociationRequested) messages.Add("The explicit solution association request completed.");
         if (result.PublicationRequested) messages.Add("The explicit publication request completed.");
         return string.Join(" ", messages);
@@ -186,8 +192,23 @@ public static class RepairBindingsCommand
     private static string DescribeUnchanged(string entity, UnchangedBinding item)
     {
         var control = $"control '{item.ControlId ?? "(no id)"}' ({item.Location})";
-        return item.Reason == BindingRepairReasons.NoMatchingColumn
-            ? $"Left unchanged: {control} is bound to '{item.Binding}', which matches no column on '{entity}'."
-            : $"Left unchanged: {control} has an id that differs from the column's logical name '{item.CanonicalName}' by case; control ids are not rewritten.";
+        return item.Reason switch
+        {
+            BindingRepairReasons.NoMatchingColumn =>
+                $"Left unchanged: {control} is bound to '{item.Binding}', which matches no column on '{entity}'.",
+            BindingRepairReasons.ControlIdCaseDiffers =>
+                $"Left unchanged: {control} has an id that differs from the column's logical name '{item.CanonicalName}' by case; control ids are not rewritten.",
+            BindingRepairReasons.RelatedOrUnboundControl =>
+                $"Left unchanged: {control} is bound to '{item.Binding}' but has a relationship or isunbound, so its binding is not treated as a column of '{entity}'.",
+            BindingRepairReasons.BindingNotPlainText =>
+                $"Left unchanged: {control} is bound to '{item.Binding}', but the stored text spells it with character references; edit it with 'forms get --raw' and 'forms set-xml'.",
+            BindingRepairReasons.CustomControlParameterCaseDiffers =>
+                $"Left unchanged: a custom-control datafieldname parameter for {control} is '{item.Binding}', which differs from '{item.CanonicalName}' by case.",
+            BindingRepairReasons.EventAttributeCaseDiffers =>
+                $"Left unchanged: {item.Location} names attribute '{item.Binding}', which differs from '{item.CanonicalName}' by case.",
+            BindingRepairReasons.HiddenDataCaseDiffers =>
+                $"Left unchanged: hidden control '{item.ControlId ?? "(no id)"}' is bound to '{item.Binding}', which differs from '{item.CanonicalName}' by case.",
+            _ => $"Left unchanged: {control} ({item.Reason})."
+        };
     }
 }
