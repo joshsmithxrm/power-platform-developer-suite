@@ -723,17 +723,21 @@ public sealed partial class FormService : IFormService
         var xml = doc.ToString(SaveOptions.DisableFormatting);
         FormXmlValidator.Validate(XDocument.Parse(xml));
 
-        // D2: acquire, use, release — one client per operation
-        await using (var client = await _pool.GetClientAsync(cancellationToken: ct))
-        {
-            var entity = new Entity("systemform", formId)
-            {
-                ["formxml"] = xml
-            };
-            await client.UpdateAsync(entity, ct);
-        }
+        await SubmitFormXmlAsync(xml, formId, ct);
 
         await ApplySideEffectsAsync(formId, entityLogicalName, solutionUniqueName, publish, ct);
+    }
+
+    /// <summary>Sends <paramref name="xml"/> verbatim as the form's <c>formxml</c>. Callers validate first.</summary>
+    private async Task SubmitFormXmlAsync(string xml, Guid formId, CancellationToken ct)
+    {
+        // D2: acquire, use, release — one client per operation
+        await using var client = await _pool.GetClientAsync(cancellationToken: ct);
+        var entity = new Entity("systemform", formId)
+        {
+            ["formxml"] = xml
+        };
+        await client.UpdateAsync(entity, ct);
     }
 
     private async Task ApplySideEffectsAsync(
