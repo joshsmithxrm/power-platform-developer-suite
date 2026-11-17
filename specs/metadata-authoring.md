@@ -776,6 +776,16 @@ An update changes only what the caller asked to change. `optionset update` re-se
 |----|-----------|------|--------|
 | AC-141 | `optionset update` reads the global choice as-if-published for both an exact and a case-variant name, so an unpublished description survives a display-name-only update and the update carries the stored name | `GlobalChoiceNameResolutionTests.ChoiceUpdate_ReadsDraft_SoUnrequestedPropertiesKeepTheirUnpublishedValues` | ✅ |
 
+### Label languages
+
+Every label PPDS writes (`--label` on add/create, `--new-label`, `--display-name`, `--description`, state labels) is written for English, LCID 1033. `--label` used as a *selector* on update/remove matches the label in the caller's user language (the user-localised label, falling back to the first localised label), which is the label list commands display.
+
+Option value, status-reason, state-value and global-choice updates set `MergeLabels = true`, so a written 1033 label leaves the other languages' text in place. When an option or status-reason update does not supply `--new-label` (for example a color- or description-only update), it re-sends the option's current label in every language exactly as read from draft metadata, so the update cannot replace the English label with the caller's user-language text. `optionset update` re-sends unrequested choice labels from the draft read (AC-141) in every language. Table and typed column display-name/description updates keep their existing request contract (AC-128); this section does not change them.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-142 | For a caller whose user language is not 1033: global, local and status-reason option updates without `--new-label` (selected by value or by the user-language label) re-send the current label in every language with `MergeLabels`; `--new-label` is written as the single 1033 label with `MergeLabels`; `optionset update` and state-value updates merge their 1033 labels | `OptionLabelLanguageTests.UnrequestedLabel_IsResentUnchangedInEveryLanguage`, `RequestedLabel_IsWrittenInEnglishAndMergedWithOtherLanguages`, `LabelSelector_MatchesTheUserLanguageLabel_AndLeavesTheEnglishLabelAlone`, `ChoiceUpdate_MergesTheRequestedEnglishLabel_AndResendsOtherLabelsInEveryLanguage`, `StateValueUpdate_MergesTheEnglishLabel` | ✅ |
+
 ### Create-option presence and publisher warnings
 
 Local Choice/Choices creation and global-choice creation distinguish an omitted numeric value from an explicitly supplied zero. The existing public `int OptionDefinition.Value` getter/setter and parameterless constructor remain; the additive read-only `[JsonIgnore] HasExplicitValue` property records whether the setter was used. Callers wanting allocation must omit the setter/property. `Value = 0` now deliberately means zero, rather than requesting allocation.
@@ -1072,6 +1082,7 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 | 2026-11-09 | Add strict dependency preview/recheck, safe read recovery classification and truthful wider scope with AC-114–AC-122; 277 focused cases and both corrected combined-workflow regressions passed, with composed ordinary unit validation. |
 | 2026-11-12 | Add bounded typed Dataverse fault codes to status/local-option insertion errors without exposing server text; verify service, CLI JSON and MCP helper privacy (AC-131–132). Literal issue #1531 underlying-message criterion remains qualified. |
 | 2026-11-17 | `optionset update` reads the choice as-if-published so unrequested properties keep their unpublished values (AC-141). |
+| 2026-11-17 | State the label-language rule; option, status-reason, state-value and global-choice updates merge labels and re-send unrequested option labels in every language (AC-142). |
 | 2026-11-16 | Follow-ups for #1530/#1531/#1535: global choice names resolve to the stored name on a not-found fault only, preserving every previous failure outcome except case ambiguity; delete confirms and deletes exactly the previewed stored name; update/remove targeting and global color readback read drafts, with a published/draft label agreement check; legacy `--options` accepts bare labels and rejects malformed or conflicting inputs for Choice columns; add-option dry-run marks omitted values unallocated (AC-133-AC-140, AC-72 amended). |
 | 2026-11-09 | Bound sixteen SDK/catalog user-message paths to service-owned action/target text; retain diagnostic causes and classifications, verify synthetic MCP privacy and update the intentional CLI message contract (AC-103 through AC-105). |
 | 2026-11-08 | Preserve covered color cancellation and normalize the selected acquisition boundaries with unchanged CLI exits; protect authentication diagnostic details at the MCP error boundary (AC-97 through AC-102). |

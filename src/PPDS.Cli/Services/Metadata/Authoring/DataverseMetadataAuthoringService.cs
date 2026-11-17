@@ -854,9 +854,11 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         if (request.Description != null)
             existingOs.Description = new Label(request.Description, 1033);
 
+        // A requested label is written for LCID 1033 only; MergeLabels keeps the other languages' text.
         var sdkRequest = new UpdateOptionSetRequest
         {
             OptionSet = existingOs,
+            MergeLabels = true,
             SolutionUniqueName = request.SolutionUniqueName
         };
 
@@ -999,7 +1001,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         {
             OptionSetName = target.OptionSetName,
             Value = target.Value,
-            Label = new Label(request.NewLabel ?? target.Label, 1033),
+            Label = OptionLabelForUpdate(request.NewLabel, target.Labels),
+            MergeLabels = true,
             SolutionUniqueName = request.SolutionUniqueName
         };
 
@@ -1071,7 +1074,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     /// Retrieves a global option set (as-if-published, so unpublished edits are visible) and
     /// resolves the target option by value or label (#1169). Mirrors <see cref="ResolveColumnOption"/>.
     /// </summary>
-    private async Task<(int Value, string Label, string OptionSetName)> ResolveGlobalOptionAsync(
+    private async Task<(int Value, string Label, string OptionSetName, Label? Labels)> ResolveGlobalOptionAsync(
         string optionSetName, int? value, string? label, CancellationToken ct)
     {
         RetrieveOptionSetResponse retrieveResponse;
@@ -1108,7 +1111,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                     var matchedLabel = option.Label?.UserLocalizedLabel?.Label
                         ?? option.Label?.LocalizedLabels?.FirstOrDefault()?.Label
                         ?? "";
-                    return (value.Value, matchedLabel, optionSetName);
+                    return (value.Value, matchedLabel, optionSetName, option.Label);
                 }
             }
 
@@ -1119,7 +1122,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         // Label targeting: duplicate labels are legal in Dataverse. Collect every match and refuse to act when
         // more than one matches (#1235) — silently picking the first could mutate or delete the wrong option.
-        var labelMatches = new List<(int Value, string Label)>();
+        var labelMatches = new List<(int Value, string Label, Label? Labels)>();
         foreach (var option in optionSet.Options)
         {
             // An option without a concrete value can't be a selectable --value target; skip it so a null
@@ -1130,7 +1133,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 ?? option.Label?.LocalizedLabels?.FirstOrDefault()?.Label
                 ?? "";
             if (string.Equals(optionLabel, label, StringComparison.OrdinalIgnoreCase))
-                labelMatches.Add((optionValue, optionLabel));
+                labelMatches.Add((optionValue, optionLabel, option.Label));
         }
 
         // #1531 follow-up: 'optionset <name>' lists published labels, so a draft-resolved label must not act on
@@ -1150,7 +1153,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 $"(values: {string.Join(", ", labelMatches.Select(m => m.Value))}). " +
                 "Select the target option with --value instead.");
 
-        return (labelMatches[0].Value, labelMatches[0].Label, optionSetName);
+        return (labelMatches[0].Value, labelMatches[0].Label, optionSetName, labelMatches[0].Labels);
     }
 
     /// <inheritdoc />
@@ -1204,7 +1207,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             EntityLogicalName = request.EntityLogicalName,
             AttributeLogicalName = request.AttributeLogicalName,
             Value = request.Value,
-            Label = new Label(request.Label, 1033)
+            Label = new Label(request.Label, 1033),
+            MergeLabels = true // The request carries only LCID 1033. Preserve other translations.
         };
 
         await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
@@ -1420,6 +1424,12 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     // Allocation and write-target resolution need draft values (#1531); the public list remains published.
     private async Task<IReadOnlyList<StatusReasonInfo>> ReadStatusReasonsAsync(
         string entityLogicalName, bool retrieveAsIfPublished, CancellationToken ct)
+        => (await ReadStatusReasonEntriesAsync(entityLogicalName, retrieveAsIfPublished, ct).ConfigureAwait(false))
+            .Select(entry => entry.Info).ToList();
+
+    // Each reason with its full label (every language), so an update can re-send a label it does not change.
+    private async Task<IReadOnlyList<(StatusReasonInfo Info, Label? Labels)>> ReadStatusReasonEntriesAsync(
+        string entityLogicalName, bool retrieveAsIfPublished, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(entityLogicalName))
             throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField, "EntityLogicalName is required.", "EntityLogicalName");
@@ -1450,15 +1460,15 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         if (retrieveResponse is not RetrieveAttributeResponse retrieveAttrResponse
             || retrieveAttrResponse.AttributeMetadata is not StatusAttributeMetadata statusAttr
             || statusAttr.OptionSet?.Options == null)
-            return Array.Empty<StatusReasonInfo>();
+            return Array.Empty<(StatusReasonInfo, Label?)>();
 
-        var result = new List<StatusReasonInfo>();
+        var result = new List<(StatusReasonInfo Info, Label? Labels)>();
         foreach (var opt in statusAttr.OptionSet.Options)
         {
             if (opt is not StatusOptionMetadata statusOpt)
                 continue;
 
-            result.Add(new StatusReasonInfo
+            result.Add((new StatusReasonInfo
             {
                 Value = statusOpt.Value ?? 0,
                 Label = statusOpt.Label?.UserLocalizedLabel?.Label
@@ -1468,7 +1478,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 // Standard Dataverse entities use 0=Active, 1=Inactive; custom multi-state entities (state code >1) are out of scope for #1160
                 StateLabel = (statusOpt.State ?? 0) switch { 0 => "Active", 1 => "Inactive", var n => $"State{n}" },
                 Color = statusOpt.Color
-            });
+            }, statusOpt.Label));
         }
 
         return result;
@@ -1489,12 +1499,13 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 "Value");
 
         int targetValue;
-        string? currentLabel = null;
+        Label? currentLabels;
 
-        // Always read to get currentLabel — prevents blank-label clobber when NewLabel is null.
+        // Always read to get the current label — prevents blank-label clobber when NewLabel is null.
         // #1531: resolve the target from draft (as-if-published) metadata so a reason added moments earlier,
         // and its unpublished label, are visible. The public list stays published.
-        var statusReasons = await ReadStatusReasonsAsync(request.EntityLogicalName, retrieveAsIfPublished: true, ct).ConfigureAwait(false);
+        var statusEntries = await ReadStatusReasonEntriesAsync(request.EntityLogicalName, retrieveAsIfPublished: true, ct).ConfigureAwait(false);
+        var statusReasons = statusEntries.Select(entry => entry.Info).ToList();
 
         if (request.Value.HasValue)
         {
@@ -1505,7 +1516,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                     MetadataErrorCodes.OptionNotFound,
                     $"Status reason with value {targetValue} not found on '{request.EntityLogicalName}'.",
                     "Value");
-            currentLabel = valueMatch.Label;
+            currentLabels = statusEntries.First(entry => ReferenceEquals(entry.Info, valueMatch)).Labels;
         }
         else
         {
@@ -1533,15 +1544,14 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                     "Select the target status reason with --value instead.");
 
             targetValue = labelMatches[0].Value;
-            currentLabel = labelMatches[0].Label;
+            currentLabels = statusEntries.First(entry => ReferenceEquals(entry.Info, labelMatches[0])).Labels;
         }
-
-        var newLabel = request.NewLabel ?? currentLabel ?? "";
 
         var sdkRequest = new SdkUpdateOptionValueRequest
         {
             Value = targetValue,
-            Label = new Label(newLabel, 1033),
+            Label = OptionLabelForUpdate(request.NewLabel, currentLabels),
+            MergeLabels = true,
             SolutionUniqueName = request.SolutionUniqueName
         };
 
@@ -1670,6 +1680,12 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     // Draft-aware reads serve allocation and update/remove target resolution (#1531); the public list stays published.
     private async Task<IReadOnlyList<ColumnOptionInfo>> ReadColumnOptionsAsync(
         string entityLogicalName, string columnLogicalName, bool retrieveAsIfPublished, CancellationToken ct)
+        => (await ReadColumnOptionEntriesAsync(entityLogicalName, columnLogicalName, retrieveAsIfPublished, ct).ConfigureAwait(false))
+            .Select(entry => entry.Info).ToList();
+
+    // Each option with its full label (every language), so an update can re-send a label it does not change.
+    private async Task<IReadOnlyList<(ColumnOptionInfo Info, Label? Labels)>> ReadColumnOptionEntriesAsync(
+        string entityLogicalName, string columnLogicalName, bool retrieveAsIfPublished, CancellationToken ct)
     {
         _validator.ValidateRequiredString(entityLogicalName, "EntityLogicalName");
         _validator.ValidateRequiredString(columnLogicalName, "ColumnLogicalName");
@@ -1710,17 +1726,17 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 $"Attribute '{columnLogicalName}' on '{entityLogicalName}' is not a Choice/Choices column with a local option set.",
                 "ColumnLogicalName");
 
-        var result = new List<ColumnOptionInfo>();
+        var result = new List<(ColumnOptionInfo Info, Label? Labels)>();
         foreach (var opt in optionSet.Options)
         {
-            result.Add(new ColumnOptionInfo
+            result.Add((new ColumnOptionInfo
             {
                 Value = opt.Value ?? 0,
                 Label = opt.Label?.UserLocalizedLabel?.Label
                     ?? opt.Label?.LocalizedLabels?.FirstOrDefault()?.Label
                     ?? "",
                 Color = opt.Color
-            });
+            }, opt.Label));
         }
 
         return result;
@@ -1800,7 +1816,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 "Provide --value or --label to identify the target option.", "Value");
 
         // #1531: resolve the target (and its current label) from draft metadata so an unpublished option is visible.
-        var target = await ResolveDraftColumnOptionAsync(request.EntityLogicalName, request.ColumnLogicalName, request.Value, request.Label, ct).ConfigureAwait(false);
+        var (target, targetLabels) = await ResolveDraftColumnOptionAsync(request.EntityLogicalName, request.ColumnLogicalName, request.Value, request.Label, ct).ConfigureAwait(false);
 
         if (request.DryRun)
         {
@@ -1811,7 +1827,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         var sdkRequest = new SdkUpdateOptionValueRequest
         {
             Value = target.Value,
-            Label = new Label(request.NewLabel ?? target.Label, 1033),
+            Label = OptionLabelForUpdate(request.NewLabel, targetLabels),
+            MergeLabels = true,
             SolutionUniqueName = request.SolutionUniqueName
         };
         sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
@@ -1852,7 +1869,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 "Provide --value or --label to identify the target option.", "Value");
 
         // #1531: resolve the target from draft metadata so an unpublished option can be removed.
-        var target = await ResolveDraftColumnOptionAsync(request.EntityLogicalName, request.ColumnLogicalName, request.Value, request.Label, ct).ConfigureAwait(false);
+        var (target, _) = await ResolveDraftColumnOptionAsync(request.EntityLogicalName, request.ColumnLogicalName, request.Value, request.Label, ct).ConfigureAwait(false);
 
         if (request.DryRun)
         {

@@ -1,3 +1,4 @@
+using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
 using PPDS.Cli.Infrastructure.Errors;
@@ -53,11 +54,39 @@ public partial class DataverseMetadataAuthoringService
         EnsureLabelAgreesWithPublished(label, draftValues, publishedValues, $"options in option set '{optionSetName}'");
     }
 
+    /// <summary>
+    /// The label an option or status-reason update sends. A requested label is written for LCID 1033, the language
+    /// every PPDS label write targets; the request also sets MergeLabels, so other languages keep their text. When
+    /// the caller did not ask to change the label, every existing translation (as read from draft metadata) is
+    /// re-sent unchanged, so the update cannot replace the English label with the caller's user-language text.
+    /// Null (no label sent) only when the option has no label text at all.
+    /// </summary>
+    private static Label? OptionLabelForUpdate(string? requested, Label? existing)
+    {
+        if (requested != null)
+            return new Label(requested, 1033);
+
+        var current = (existing?.LocalizedLabels ?? [])
+            .Where(l => l?.Label != null)
+            .Select(l => new LocalizedLabel(l.Label, l.LanguageCode))
+            .ToList();
+        if (current.Count == 0 && existing?.UserLocalizedLabel is { Label: not null } user)
+            current.Add(new LocalizedLabel(user.Label, user.LanguageCode));
+        if (current.Count == 0)
+            return null;
+
+        var label = new Label();
+        foreach (var localized in current)
+            label.LocalizedLabels.Add(localized);
+        return label;
+    }
+
     /// <summary>Resolves a local column option from draft metadata, applying the label safety check.</summary>
-    private async Task<ColumnOptionInfo> ResolveDraftColumnOptionAsync(
+    private async Task<(ColumnOptionInfo Info, Label? Labels)> ResolveDraftColumnOptionAsync(
         string entityLogicalName, string columnLogicalName, int? value, string? label, CancellationToken ct)
     {
-        var drafts = await ReadColumnOptionsAsync(entityLogicalName, columnLogicalName, retrieveAsIfPublished: true, ct).ConfigureAwait(false);
+        var draftEntries = await ReadColumnOptionEntriesAsync(entityLogicalName, columnLogicalName, retrieveAsIfPublished: true, ct).ConfigureAwait(false);
+        var drafts = draftEntries.Select(entry => entry.Info).ToList();
         if (!value.HasValue)
         {
             var draftValues = drafts.Where(o => string.Equals(o.Label, label, StringComparison.OrdinalIgnoreCase)).Select(o => o.Value).ToList();
@@ -70,7 +99,8 @@ public partial class DataverseMetadataAuthoringService
             }
         }
 
-        return ResolveColumnOption(drafts, value, label, entityLogicalName, columnLogicalName);
+        var target = ResolveColumnOption(drafts, value, label, entityLogicalName, columnLogicalName);
+        return (target, draftEntries.First(entry => ReferenceEquals(entry.Info, target)).Labels);
     }
 
     /// <summary>
