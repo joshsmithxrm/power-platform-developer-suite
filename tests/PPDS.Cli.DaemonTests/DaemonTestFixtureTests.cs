@@ -543,11 +543,14 @@ public sealed class DaemonTestFixtureTests
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(120));
             while (fixture.StderrCharactersDiscarded < expectedCharacters)
             {
-                if (fixture.StderrCompletion.IsCompleted)
+                // Read completion first: the drain adds to the counter before it can complete, so a
+                // completed drain with the counter still short is a real shortfall, not a race.
+                var drainCompleted = fixture.StderrCompletion.IsCompleted;
+                if (drainCompleted && fixture.StderrCharactersDiscarded < expectedCharacters)
                 {
-                    // Stderr reached EOF (or faulted) before the full output was drained.
-                    Assert.Fail($"Stderr drain completed after {fixture.StderrCharactersDiscarded} of at least " +
-                        $"{expectedCharacters} expected characters; the child ended its stderr early.");
+                    var faulted = fixture.StderrCompletion.IsFaulted;
+                    Assert.Fail($"The stderr drain {(faulted ? "faulted" : "reached end of stream")} after " +
+                        $"{fixture.StderrCharactersDiscarded} of at least {expectedCharacters} expected characters.");
                 }
                 try { await Task.Delay(10, deadline.Token); }
                 catch (OperationCanceledException)
