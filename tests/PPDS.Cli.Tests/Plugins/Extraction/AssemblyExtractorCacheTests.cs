@@ -12,12 +12,21 @@ namespace PPDS.Cli.Tests.Plugins.Extraction;
 [Collection(nameof(ConsoleCaptureCollection))]
 public sealed class AssemblyExtractorCacheTests : IDisposable
 {
-    private readonly string _baseDir = Path.Combine(Path.GetTempPath(), $"ppds-cache-test-{Guid.NewGuid():N}");
+    // The cache base passes through the trust check, so it lives under protected storage rather than the
+    // shared temp directory. It is left uncreated, as before, so the code under test creates it.
+    private readonly string _root;
+    private readonly string _baseDir;
+
+    public AssemblyExtractorCacheTests()
+    {
+        _root = ProtectedTestDirectory.Create("ppds-cache-test-");
+        _baseDir = Path.Combine(_root, "base");
+    }
 
     public void Dispose()
     {
-        if (Directory.Exists(_baseDir))
-            Directory.Delete(_baseDir, recursive: true);
+        if (Directory.Exists(_root))
+            Directory.Delete(_root, recursive: true);
     }
 
     [Theory]

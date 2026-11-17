@@ -11,7 +11,7 @@ namespace PPDS.Cli.Tests.Plugins.Extraction;
 [Collection(nameof(ConsoleCaptureCollection))]
 public sealed class ReferenceCacheTrustTests : IDisposable
 {
-    private readonly string _root = Directory.CreateTempSubdirectory("ppds-trust-test-").FullName;
+    private readonly string _root = ProtectedTestDirectory.Create("ppds-trust-test-");
 
     [Theory]
     [InlineData("base")]
