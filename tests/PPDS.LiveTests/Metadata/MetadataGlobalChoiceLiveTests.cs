@@ -53,7 +53,15 @@ public sealed partial class MetadataGlobalChoiceLiveTests : LiveTestBase
     private DataverseConnectionPool? _pool;
     private IConnectionSource? _source;
 
-    public MetadataGlobalChoiceLiveTests(ITestOutputHelper output) => _output = output;
+    // Where the static helpers report customisation-lock retries. The tests of one class run one at a time, so the
+    // current test's output is the only one in use.
+    private static Action<string>? s_log;
+
+    public MetadataGlobalChoiceLiveTests(ITestOutputHelper output)
+    {
+        _output = output;
+        s_log = output.WriteLine;
+    }
 
     private static string Prefix => Environment.GetEnvironmentVariable("PPDS_TEST_PREFIX")!.Trim().ToLowerInvariant();
     private static string Solution => Environment.GetEnvironmentVariable("PPDS_TEST_SOLUTION")!.Trim();
@@ -925,11 +933,17 @@ public sealed partial class MetadataGlobalChoiceLiveTests : LiveTestBase
         return (ui, org.GetAttributeValue<int>("languagecode"));
     }
 
-    private static async Task<OrganizationResponse> ExecuteAsync(IDataverseConnectionPool pool, OrganizationRequest request)
-    {
-        await using var client = await pool.GetClientAsync();
-        return await client.ExecuteAsync(request);
-    }
+    /// <summary>
+    /// Sends one raw request (every fixture create, publish and delete goes through here). A request refused by the
+    /// organisation-wide customisation lock is retried for up to <see cref="CustomizationLockRetry.Budget"/>, so a busy
+    /// shared environment delays the test instead of failing setup or leaving components behind at cleanup.
+    /// </summary>
+    private static Task<OrganizationResponse> ExecuteAsync(IDataverseConnectionPool pool, OrganizationRequest request)
+        => CustomizationLockRetry.RunAsync(async () =>
+        {
+            await using var client = await pool.GetClientAsync();
+            return await client.ExecuteAsync(request);
+        }, request.RequestName, s_log);
 
     /// <summary>Sends a raw request and records its fault code and message, or that it was accepted.</summary>
     private static async Task<(string Operation, int? Code, string Outcome)> ObserveAsync(IDataverseConnectionPool pool, string operation, OrganizationRequest request)

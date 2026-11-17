@@ -39,7 +39,14 @@ namespace PPDS.LiveTests.Metadata;
 /// a published label that exists in both languages on it and on the pool opened before the switch, printing an
 /// OBSERVED line for each read, until the fresh pool serves the target language three reads in a row (up to 3 minutes).
 /// Every French-caller read and write then goes through that fresh pool. After the restore the same probe must serve
-/// the original language again, so a stale server cache cannot leak into the next test.
+/// the original language again, so a stale server cache cannot leak into the next test. Observed 2026-11-17: the
+/// connection opened before the switch served the new language at the first read (as did the fresh one), and both
+/// served 1033 again at the first read after the restore, so a new connection is not needed; the fresh pool is kept
+/// because it costs one connection and keeps the check independent of server caching.
+/// </para>
+/// <para>
+/// Every raw fixture create, publish and delete retries a customisation-lock refusal (<see cref="CustomizationLockRetry"/>),
+/// and the switch is applied only after the whole setup has succeeded.
 /// </para>
 /// </summary>
 public sealed partial class MetadataGlobalChoiceLiveTests
@@ -67,26 +74,26 @@ public sealed partial class MetadataGlobalChoiceLiveTests
             Shown($"choice description ({view})", choice.Description).Should().Be(((int?)fr, "Description FR"));
             Label OptionLabel(int value) => choice.Options.Single(o => o.Value == value).Label;
             Shown($"option with both labels ({view})", OptionLabel(scene.Open)).Should().Be(((int?)fr, "Ouvert"));
-            Text(OptionLabel(scene.EnglishOnly), fr).Should().BeNull("precondition: the English-only option has no French label");
-            Shown($"option with an English label only ({view})", OptionLabel(scene.EnglishOnly))
-                .Should().Be(((int?)English, "English only"), "without a label in the caller's language the base-language label is shown (the spec's believed fallback)");
+            // Fallback (stored labels are 1033 only, checked as the base caller before the switch): the spec states the
+            // base-language TEXT is shown; the LCID Dataverse stamps on it is recorded, not assumed (2026-11-17 run 2:
+            // a table description stored only in 1033 was shown to the French caller as LCID 1036).
+            Shown($"option with an English label only ({view})", OptionLabel(scene.EnglishOnly)).Text
+                .Should().Be("English only", "without a label in the caller's language the base-language text is shown");
             Shown($"option with French text and empty English text ({view})", OptionLabel(scene.FrenchOnly))
                 .Should().Be(((int?)fr, "Seulement"), "the caller's-language label is shown when it has text");
 
             var table = await ReadTableAsync(french.Pool, scene.Entity, asIfPublished);
             Shown($"table display name ({view})", table.DisplayName).Should().Be(((int?)fr, "Test FR"));
             Shown($"table plural name ({view})", table.DisplayCollectionName).Should().Be(((int?)fr, "Tests FR"));
-            Text(table.Description, fr).Should().BeNull("precondition: the table description has no French label");
-            Shown($"table description, English only ({view})", table.Description)
-                .Should().Be(((int?)English, "Temporary metadata. Safe to delete."), "without a label in the caller's language the base-language label is shown");
+            Shown($"table description, English only ({view})", table.Description).Text
+                .Should().Be("Temporary metadata. Safe to delete.", "without a label in the caller's language the base-language text is shown");
 
             var column = await ReadColumnAsync(french.Pool, scene.Entity, scene.Column, asIfPublished);
             Shown($"column display name ({view})", column.DisplayName).Should().Be(((int?)fr, "Choix FR"));
             Shown($"column description ({view})", column.Description).Should().Be(((int?)fr, "Choix description FR"));
             var nameColumn = await ReadColumnAsync(french.Pool, scene.Entity, scene.NameColumn, asIfPublished);
-            Text(nameColumn.DisplayName, fr).Should().BeNull("precondition: the primary name column has no French label");
-            Shown($"primary name column display name, English only ({view})", nameColumn.DisplayName)
-                .Should().Be(((int?)English, "Name"), "without a label in the caller's language the base-language label is shown");
+            Shown($"primary name column display name, English only ({view})", nameColumn.DisplayName).Text
+                .Should().Be("Name", "without a label in the caller's language the base-language text is shown");
 
             var local = (await RetrieveOptionsAsync(french.Pool, scene.Entity, scene.Column, asIfPublished)).Single(o => o.Value == scene.LocalOpen);
             Shown($"local option ({view})", local.Label).Should().Be(((int?)fr, "Ouvert"));
@@ -100,60 +107,94 @@ public sealed partial class MetadataGlobalChoiceLiveTests
     public Task FrenchCaller_EnglishLabelOnlyNotices_ThroughTheService() => FrenchSceneAsync(async (scene, french) =>
     {
         var (pool, service, fr) = (french.Pool, french.Service, french.Lcid);
+        Func<Task<Label?>> ChoiceOption(int value) => async () => (await RetrieveChoiceAsync(pool, scene.Choice, asIfPublished: true)).Options.Single(o => o.Value == value).Label;
+        Func<Task<Label?>> Choice(Func<OptionSetMetadata, Label?> pick) => async () => pick(await RetrieveChoiceAsync(pool, scene.Choice, asIfPublished: true));
+        Func<Task<Label?>> Table(Func<EntityMetadata, Label?> pick) => async () => pick(await ReadTableAsync(pool, scene.Entity, asIfPublished: true));
+        Func<Task<Label?>> Column(string column, Func<AttributeMetadata, Label?> pick) => async () => pick(await ReadColumnAsync(pool, scene.Entity, column, asIfPublished: true));
+
+        // Every call site is checked for a TRUE notice (spec AC-145: the notice says the shown label "is not changed and
+        // still reads" its text): with a notice, the caller must still be shown that text after the update; without one,
+        // the caller must now be shown the requested text. Labels with a real French translation must give the notice.
 
         // Global option: notice, then English written and French kept.
-        var result = await service.UpdateOptionValueAsync(new PpdsUpdateOptionValue { OptionSetName = scene.Choice, Value = scene.Open, NewLabel = "Closed", SolutionUniqueName = Solution });
+        var result = await UpdateAndCheckNoticesAsync("service update-option (global)",
+            () => service.UpdateOptionValueAsync(new PpdsUpdateOptionValue { OptionSetName = scene.Choice, Value = scene.Open, NewLabel = "Closed", SolutionUniqueName = Solution }),
+            new ShownField("NewLabel", "label", "Closed", ChoiceOption(scene.Open)));
         ExpectNotices("service update-option (global)", result, ("NewLabel", "label", "Ouvert"));
         await ExpectGlobalOptionAsync(pool, scene.Choice, scene.Open, "Closed", "Ouvert", fr);
 
         // Suppressed when the shown label already reads the requested text.
-        result = await service.UpdateOptionValueAsync(new PpdsUpdateOptionValue { OptionSetName = scene.Choice, Value = scene.Same, NewLabel = "Pareil", SolutionUniqueName = Solution });
+        result = await UpdateAndCheckNoticesAsync("service update-option (global), requested text equals the shown French label",
+            () => service.UpdateOptionValueAsync(new PpdsUpdateOptionValue { OptionSetName = scene.Choice, Value = scene.Same, NewLabel = "Pareil", SolutionUniqueName = Solution }),
+            new ShownField("NewLabel", "label", "Pareil", ChoiceOption(scene.Same)));
         ExpectNotices("service update-option (global), requested text equals the shown French label", result);
         await ExpectGlobalOptionAsync(pool, scene.Choice, scene.Same, "Pareil", "Pareil", fr);
 
+        // Global option whose only stored label is English (a fallback for the French caller): recorded and checked for truth.
+        await UpdateAndCheckNoticesAsync("service update-option (global), English-only option",
+            () => service.UpdateOptionValueAsync(new PpdsUpdateOptionValue { OptionSetName = scene.Choice, Value = scene.EnglishOnly, NewLabel = "English renamed", SolutionUniqueName = Solution }),
+            new ShownField("NewLabel", "label", "English renamed", ChoiceOption(scene.EnglishOnly)));
+
         // Global choice display name and description.
-        result = await service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = Solution, Name = scene.Choice, DisplayName = "Renamed", Description = "Changed" });
+        result = await UpdateAndCheckNoticesAsync("service optionset update",
+            () => service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = Solution, Name = scene.Choice, DisplayName = "Renamed", Description = "Changed" }),
+            new ShownField("DisplayName", "display name", "Renamed", Choice(c => c.DisplayName)),
+            new ShownField("Description", "description", "Changed", Choice(c => c.Description)));
         ExpectNotices("service optionset update", result, ("DisplayName", "display name", "Choix FR"), ("Description", "description", "Description FR"));
         var choice = await RetrieveChoiceAsync(pool, scene.Choice, asIfPublished: true);
         Text(choice.DisplayName, English).Should().Be("Renamed"); Text(choice.DisplayName, fr).Should().Be("Choix FR", "MergeLabels keeps the French display name");
         Text(choice.Description, English).Should().Be("Changed"); Text(choice.Description, fr).Should().Be("Description FR", "MergeLabels keeps the French description");
 
         // Local column option.
-        result = await service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = scene.Entity, ColumnLogicalName = scene.Column, Value = scene.LocalOpen, NewLabel = "Closed", SolutionUniqueName = Solution });
+        result = await UpdateAndCheckNoticesAsync("service attribute update-option",
+            () => service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = scene.Entity, ColumnLogicalName = scene.Column, Value = scene.LocalOpen, NewLabel = "Closed", SolutionUniqueName = Solution }),
+            new ShownField("NewLabel", "label", "Closed", async () => (await RetrieveOptionsAsync(pool, scene.Entity, scene.Column)).Single(o => o.Value == scene.LocalOpen).Label));
         ExpectNotices("service attribute update-option", result, ("NewLabel", "label", "Ouvert"));
         var local = (await RetrieveOptionsAsync(pool, scene.Entity, scene.Column)).Single(o => o.Value == scene.LocalOpen);
         Text(local.Label, English).Should().Be("Closed"); Text(local.Label, fr).Should().Be("Ouvert", "MergeLabels keeps the French local option label");
 
         // Status reason.
-        result = await service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = scene.Entity, Value = scene.Reason, NewLabel = "Live", SolutionUniqueName = Solution });
+        result = await UpdateAndCheckNoticesAsync("service entity update-statusreason",
+            () => service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = scene.Entity, Value = scene.Reason, NewLabel = "Live", SolutionUniqueName = Solution }),
+            new ShownField("NewLabel", "label", "Live", async () => (await ReasonAsync(pool, scene.Entity, scene.Reason)).Label));
         ExpectNotices("service entity update-statusreason", result, ("NewLabel", "label", "Actif"));
         var reason = await ReasonAsync(pool, scene.Entity, scene.Reason);
         Text(reason.Label, English).Should().Be("Live"); Text(reason.Label, fr).Should().Be("Actif", "MergeLabels keeps the French status label");
 
-        // Table: the description has no French label, so it is shown in English and gives no notice.
-        result = await service.UpdateTableAsync(new UpdateTableRequest
-        {
-            SolutionUniqueName = Solution, EntityLogicalName = scene.Entity, DisplayName = "Renamed", PluralDisplayName = "Renamed plural", Description = "Renamed description"
-        });
-        ExpectNotices("service table update", result, ("DisplayName", "display name", "Test FR"), ("PluralDisplayName", "plural name", "Tests FR"));
+        // Table. The display and plural names have French labels and must give notices. The description is stored in
+        // English only (run 2, 2026-11-17: it gave a notice naming LCID 1036 and the English text); whether that notice
+        // is true is decided by what the caller is shown afterwards.
+        result = await UpdateAndCheckNoticesAsync("service table update",
+            () => service.UpdateTableAsync(new UpdateTableRequest
+            {
+                SolutionUniqueName = Solution, EntityLogicalName = scene.Entity, DisplayName = "Renamed", PluralDisplayName = "Renamed plural", Description = "Renamed description"
+            }),
+            new ShownField("DisplayName", "display name", "Renamed", Table(t => t.DisplayName)),
+            new ShownField("PluralDisplayName", "plural name", "Renamed plural", Table(t => t.DisplayCollectionName)),
+            new ShownField("Description", "description", "Renamed description", Table(t => t.Description)));
+        result.ValidationMessages.Select(m => m.Field).Should().Contain(new[] { "DisplayName", "PluralDisplayName" }, "labels with a French translation give the notice");
         var table = await ReadTableAsync(pool, scene.Entity, asIfPublished: true);
         Text(table.DisplayName, English).Should().Be("Renamed"); Text(table.DisplayName, fr).Should().Be("Test FR", "MergeLabels keeps the French display name");
         Text(table.DisplayCollectionName, English).Should().Be("Renamed plural"); Text(table.DisplayCollectionName, fr).Should().Be("Tests FR");
         Text(table.Description, English).Should().Be("Renamed description");
 
         // Typed column.
-        result = await service.UpdateColumnAsync(new UpdateColumnRequest
-        {
-            SolutionUniqueName = Solution, EntityLogicalName = scene.Entity, ColumnLogicalName = scene.Column, DisplayName = "Pick renamed", Description = "Changed"
-        });
+        result = await UpdateAndCheckNoticesAsync("service column update",
+            () => service.UpdateColumnAsync(new UpdateColumnRequest
+            {
+                SolutionUniqueName = Solution, EntityLogicalName = scene.Entity, ColumnLogicalName = scene.Column, DisplayName = "Pick renamed", Description = "Changed"
+            }),
+            new ShownField("DisplayName", "display name", "Pick renamed", Column(scene.Column, c => c.DisplayName)),
+            new ShownField("Description", "description", "Changed", Column(scene.Column, c => c.Description)));
         ExpectNotices("service column update", result, ("DisplayName", "display name", "Choix FR"), ("Description", "description", "Choix description FR"));
         var column = await ReadColumnAsync(pool, scene.Entity, scene.Column, asIfPublished: true);
         Text(column.DisplayName, English).Should().Be("Pick renamed"); Text(column.DisplayName, fr).Should().Be("Choix FR");
         Text(column.Description, English).Should().Be("Changed"); Text(column.Description, fr).Should().Be("Choix description FR");
 
-        // A column whose only label is English is shown in English: no notice.
-        result = await service.UpdateColumnAsync(new UpdateColumnRequest { SolutionUniqueName = Solution, EntityLogicalName = scene.Entity, ColumnLogicalName = scene.NameColumn, DisplayName = "Name renamed" });
-        ExpectNotices("service column update, English-only label", result);
+        // A column whose only stored label is English: recorded and checked for truth.
+        await UpdateAndCheckNoticesAsync("service column update, English-only label",
+            () => service.UpdateColumnAsync(new UpdateColumnRequest { SolutionUniqueName = Solution, EntityLogicalName = scene.Entity, ColumnLogicalName = scene.NameColumn, DisplayName = "Name renamed" }),
+            new ShownField("DisplayName", "display name", "Name renamed", Column(scene.NameColumn, c => c.DisplayName)));
         Text((await ReadColumnAsync(pool, scene.Entity, scene.NameColumn, asIfPublished: true)).DisplayName, English).Should().Be("Name renamed");
     });
 
@@ -394,6 +435,21 @@ public sealed partial class MetadataGlobalChoiceLiveTests
                 Shown("base-language caller, choice display name before the switch", (await RetrieveChoiceAsync(pool, name, asIfPublished: false)).DisplayName)
                     .Should().Be(((int?)English, "Choice EN"), "precondition: before the switch the caller is served the base language");
 
+                // The STORED labels of the English-only targets, read by the base caller: 1033 only. A French caller's read
+                // is then compared with this, so a fallback the server stamps with the caller's LCID is told apart from a
+                // stored French copy.
+                var storedEnglishOnly = new (string What, Label? Label)[]
+                {
+                    ("option 'English only'", (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single(o => o.Value == englishOnly).Label),
+                    ("table description", (await ReadTableAsync(pool, entity, asIfPublished: true)).Description),
+                    ("primary name column display name", (await ReadColumnAsync(pool, entity, nameColumn, asIfPublished: true)).DisplayName)
+                };
+                foreach (var (what, label) in storedEnglishOnly)
+                {
+                    Shown($"base-language caller, stored labels of the {what}", label);
+                    Pairs(label).Select(p => p.Item1).Should().Equal(new[] { English }, $"precondition: the {what} is stored in English (1033) only");
+                }
+
                 await WithSwitchedUiLanguageAsync(pool, uiSwitch, name, french => body(scene, french));
             });
         });
@@ -515,6 +571,48 @@ public sealed partial class MetadataGlobalChoiceLiveTests
     /// <summary>The ENGLISH_LABEL_ONLY message the spec defines (AC-145).</summary>
     private static string EnglishOnlyMessage(string noun, int lcid, string shown)
         => $"Only the English (LCID 1033) {noun} is written. The {noun} Dataverse shows you (LCID {lcid}) is not changed and still reads '{shown}'.";
+
+    /// <summary>A requested label and how to read the target's current (as-if-published) label as the French caller.</summary>
+    private sealed record ShownField(string Field, string Noun, string Requested, Func<Task<Label?>> Read);
+
+    /// <summary>
+    /// Runs one update (retrying a customisation-lock refusal) and checks every requested label's notice against what
+    /// the caller is shown before and after: a notice must quote the label shown before, and the caller must still be
+    /// shown that text afterwards (the notice says it "is not changed and still reads" it); without a notice the caller
+    /// must now be shown the requested text. Prints the shown label before and after each field and the notices.
+    /// </summary>
+    private async Task<MetadataLabelWriteResult> UpdateAndCheckNoticesAsync(string what, Func<Task<MetadataLabelWriteResult>> update, params ShownField[] fields)
+    {
+        var before = new List<(int? Lcid, string? Text)>();
+        foreach (var field in fields)
+            before.Add(Shown($"{what}: {field.Noun} shown before", await field.Read()));
+
+        var result = await CustomizationLockRetry.RunAsync(update, what, _output.WriteLine);
+        _output.WriteLine($"OBSERVED {what}: {result.ValidationMessages.Count} notice(s)" +
+            string.Concat(result.ValidationMessages.Select(m => $"; [{m.Field} {m.Rule}] {m.Message}")));
+        result.ValidationMessages.Select(m => m.Field).Should().OnlyHaveUniqueItems(what)
+            .And.BeSubsetOf(fields.Select(f => f.Field), $"{what}: notices only for requested labels");
+
+        for (var i = 0; i < fields.Length; i++)
+        {
+            var field = fields[i];
+            var after = Shown($"{what}: {field.Noun} shown after", await field.Read());
+            var notice = result.ValidationMessages.SingleOrDefault(m => m.Field == field.Field);
+            if (notice is null)
+            {
+                after.Text.Should().Be(field.Requested, $"{what}: without a {field.Field} notice the caller must now be shown the requested {field.Noun}");
+                continue;
+            }
+
+            notice.Rule.Should().Be(MetadataLabelWriteResult.EnglishLabelOnlyRule, what);
+            notice.Message.Should().Be(EnglishOnlyMessage(field.Noun, before[i].Lcid ?? 0, before[i].Text ?? ""), $"{what}: the notice quotes the label shown before");
+            after.Text.Should().Be(before[i].Text,
+                $"{what}: the {field.Field} notice says the {field.Noun} Dataverse shows the caller (LCID {before[i].Lcid}) is not changed and still reads " +
+                $"'{before[i].Text}'; the caller is now shown LCID {after.Lcid} '{after.Text}', so the notice is false");
+        }
+
+        return result;
+    }
 
     private void ExpectNotices(string what, MetadataLabelWriteResult result, params (string Field, string Noun, string Shown)[] expected)
     {
