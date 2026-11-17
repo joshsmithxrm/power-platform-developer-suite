@@ -49,6 +49,33 @@ public sealed class FormAuthoringTests
     }
 
     [Fact]
+    [Trait("AC", "AC-72")]
+    public async Task AddField_SecondSectionPlacement_GetsSuffixedControlId_AndRetryIsUnchanged()
+    {
+        var sectionId = new Guid("55555555-5555-5555-5555-555555555555");
+        var doc = XDocument.Parse(TimelineFormFixture.Xml);
+        doc.Descendants("sections").Single().Add(new XElement("section", new XAttribute("name", "section_other"),
+            new XAttribute("id", $"{{{sectionId}}}"), new XAttribute("showlabel", "1"), new XAttribute("visible", "1"), new XAttribute("columns", "1"),
+            new XElement("labels", new XElement("label", new XAttribute("description", "Other"), new XAttribute("languagecode", "1033"))),
+            new XElement("rows")));
+        using var h = new Harness { Draft = doc.ToString(SaveOptions.DisableFormatting) };
+        var existing = XDocument.Parse(h.Draft).Descendants("control").Single(c => (string?)c.Attribute("datafieldname") == "name");
+
+        var result = await h.Service.AddFieldDraftAsync(h.Request() with { SectionId = sectionId, FieldLogicalName = "NAME", ExpectedDraftHash = FormService.ComputeDraftHash(h.Draft) });
+
+        result.Status.Should().Be("saved-unpublished");
+        var after = XDocument.Parse(h.Draft);
+        after.Descendants("control").Where(c => (string?)c.Attribute("datafieldname") == "name")
+            .Select(c => (string?)c.Attribute("id")).Should().Equal("name", "name1");
+        XNode.DeepEquals(existing, after.Descendants("control").First(c => (string?)c.Attribute("datafieldname") == "name")).Should().BeTrue();
+        FormXmlValidator.Validate(after);
+
+        var retry = await h.Service.AddFieldDraftAsync(h.Request() with { SectionId = sectionId, FieldLogicalName = "name", ExpectedDraftHash = FormService.ComputeDraftHash(h.Draft) });
+        retry.Status.Should().Be("unchanged");
+        h.Writes.Should().Be(1);
+    }
+
+    [Fact]
     public async Task RetryWithFreshHash_IsIdempotent_AndDoesNotAssociateTwice()
     {
         using var h = new Harness();

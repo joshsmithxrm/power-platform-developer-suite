@@ -216,7 +216,7 @@ internal static partial class FormXmlEditor
     {
         var section = RequireSection(formXml, sectionLabel);
         var rows = EnsureRows(section);
-        rows.Add(new XElement("row", BuildFieldCell(fieldLogicalName, classId, displayName)));
+        rows.Add(new XElement("row", BuildFieldCell(formXml, fieldLogicalName, classId, displayName)));
         return formXml;
     }
 
@@ -297,7 +297,8 @@ internal static partial class FormXmlEditor
                     .Any(other => ContainsField(other, metadata.LogicalName)))
                     throw new PpdsException(FormErrorCodes.FieldInAnotherSection,
                         $"Column '{metadata.LogicalName}' is already placed in another section. Reorder does not copy or move that control.");
-                cell = BuildFieldCell(metadata.LogicalName, metadata.ClassId, metadata.DisplayName);
+                // New cells are not attached until planning finishes, so earlier new cells are reserved explicitly.
+                cell = BuildFieldCell(formXml, metadata.LogicalName, metadata.ClassId, metadata.DisplayName, orderedCells);
             }
             orderedCells.Add(cell);
         }
@@ -541,18 +542,41 @@ internal static partial class FormXmlEditor
                 new XAttribute("description", description),
                 new XAttribute("languagecode", DefaultLanguageCode)));
 
-    private static XElement BuildFieldCell(string fieldLogicalName, string classId, string displayName)
+    private static XElement BuildFieldCell(XDocument formXml, string fieldLogicalName, string classId, string displayName,
+        IEnumerable<XElement>? pendingCells = null)
         => new("cell",
             new XAttribute("id", NewBraceGuid()),
             new XAttribute("showlabel", "1"),
             new XAttribute("locklevel", "0"),
             Labels(displayName),
             new XElement("control",
-                // control id is the field logical name (xs:string), not a GUID.
-                new XAttribute("id", fieldLogicalName),
+                // control id is a logical-name string (xs:string), not a GUID; see NextFieldControlId.
+                new XAttribute("id", NextFieldControlId(formXml, fieldLogicalName, pendingCells)),
                 new XAttribute("classid", classId),
                 new XAttribute("datafieldname", fieldLogicalName),
                 new XAttribute("disabled", "false")));
+
+    /// <summary>
+    /// Returns the control <c>id</c> for a new placement of <paramref name="fieldLogicalName"/>: the logical name
+    /// when no control on the form already uses it, otherwise <c>&lt;logicalname&gt;N</c> with the smallest
+    /// N ≥ 1 not in use. FormXml documents control <c>id</c> as uniquely identifying the control on the form, and
+    /// the Client API names repeated column controls <c>name</c>, <c>name1</c>, <c>name2</c>… Header controls
+    /// conventionally use a <c>header_</c> prefix and so do not occupy the bare name. Existing controls are never
+    /// renamed; comparison is case-insensitive.
+    /// </summary>
+    internal static string NextFieldControlId(XDocument formXml, string fieldLogicalName, IEnumerable<XElement>? pendingCells = null)
+    {
+        var used = new HashSet<string>(
+            formXml.Descendants("control").Concat(pendingCells?.Elements("control") ?? [])
+                .Select(c => (string?)c.Attribute("id")).OfType<string>(),
+            StringComparer.OrdinalIgnoreCase);
+        if (!used.Contains(fieldLogicalName)) return fieldLogicalName;
+        for (var n = 1; ; n++)
+        {
+            var candidate = fieldLogicalName + n.ToString(CultureInfo.InvariantCulture);
+            if (!used.Contains(candidate)) return candidate;
+        }
+    }
 
     private static string Bool(bool value) => value ? "1" : "0";
 
