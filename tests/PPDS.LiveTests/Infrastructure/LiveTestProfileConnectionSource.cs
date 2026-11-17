@@ -78,10 +78,11 @@ public sealed class LiveTestProfileConnectionSource : IConnectionSource
             {
                 client = await provider.CreateServiceClientAsync(expected);
             }
-            catch (OperationCanceledException ex)
+            catch (OperationCanceledException ex) when (ex is not TaskCanceledException)
             {
-                // Only the pre-auth Cancel above produces this here: silent acquisition failed and a prompt was needed.
-                // Network and service failures propagate as themselves.
+                // The pre-auth Cancel above throws a plain OperationCanceledException: silent acquisition failed and a
+                // prompt was needed. A TaskCanceledException (e.g. an HTTP timeout) and network or service failures
+                // propagate as themselves.
                 throw new InvalidOperationException(
                     $"Auth profile '{config.ProfileName}' has no usable cached sign-in; it would need an interactive sign-in. " +
                     "The live tests never prompt: sign in with the PPDS CLI yourself, then re-run.", ex);

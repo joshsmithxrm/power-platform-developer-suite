@@ -380,6 +380,8 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
         {
             var outcome = await ClearDescriptionAsync(pool, service, name);
             outcome.Should().Be("cleared", "an empty English description sent with MergeLabels clears the English text");
+            (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Description.LocalizedLabels
+                .Should().ContainSingle(l => l.LanguageCode == English && l.Label == "", "the 1033 entry stays, with empty text");
         });
     }
 
@@ -456,6 +458,7 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
             Task Publish() => ExecuteAsync(pool, new PublishXmlRequest { ParameterXml = $"<importexportxml><entities><entity>{entity}</entity></entities></importexportxml>" });
             async Task Carrier(string attribute, int value, string color)
             {
+                var unchanged = (await Opt(attribute, value, asIfPublished: false)).Color;
                 var read = (EnumAttributeMetadata)((RetrieveAttributeResponse)await ExecuteAsync(pool,
                     new RetrieveAttributeRequest { EntityLogicalName = entity, LogicalName = attribute, RetrieveAsIfPublished = true })).AttributeMetadata;
                 read.OptionSet.Options.Single(o => o.Value == value).Color = color;
@@ -465,7 +468,7 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
                 await Publish();
                 var published = (await Opt(attribute, value, asIfPublished: false)).Color;
                 _output.WriteLine($"OBSERVED {attribute} UpdateAttribute carrier {color}, then PublishXml: published color {published ?? "null"}");
-                published.Should().NotBe(color, "UpdateAttribute ignores an existing option's colour even after publishing");
+                published.Should().Be(unchanged, "UpdateAttribute ignores an existing option's colour even after publishing");
             }
 
             // Local option.
@@ -519,6 +522,47 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
             state["Color"] = "#D00001";
             await ExecuteAsync(pool, state);
             await Expect("statecode UpdateOptionValue Color only, no solution", "statecode", 0, "#D00001", "Active", null);
+
+            // Empty solution on the local and status messages: rejected with a fault, nothing written.
+            async Task RejectsEmptySolution(string what, OrganizationRequest request)
+            {
+                var fault = await Record.ExceptionAsync(() => ExecuteAsync(pool, request));
+                _output.WriteLine($"OBSERVED {what} with SolutionUniqueName \"\": {(fault is null ? "accepted" : fault.Message)}");
+                fault.Should().NotBeNull(what);
+                FindFault(fault!).Should().NotBeNull(what);
+                fault!.Message.Should().Contain("solution name is not valid", what);
+            }
+            var localDelete = new Microsoft.Xrm.Sdk.Messages.DeleteOptionValueRequest { Value = local + 1, SolutionUniqueName = "" };
+            localDelete["EntityLogicalName"] = entity; localDelete["AttributeLogicalName"] = column;
+            await RejectsEmptySolution("local DeleteOptionValue", localDelete);
+            (await RetrieveOptionsAsync(pool, entity, column)).Should().Contain(o => o.Value == local + 1);
+            await RejectsEmptySolution("InsertStatusValue", new InsertStatusValueRequest
+            {
+                EntityLogicalName = entity, AttributeLogicalName = "statuscode", StateCode = 0, Label = new Label("Empty", English), SolutionUniqueName = ""
+            });
+            var statusDelete = new Microsoft.Xrm.Sdk.Messages.DeleteOptionValueRequest { Value = local + 2, SolutionUniqueName = "" };
+            statusDelete["EntityLogicalName"] = entity; statusDelete["AttributeLogicalName"] = "statuscode";
+            await RejectsEmptySolution("status DeleteOptionValue", statusDelete);
+            (await RetrieveOptionsAsync(pool, entity, "statuscode")).Should().Contain(o => o.Value == local + 2);
+
+            // A multi-select (Choices) column: the Color parameter is stored there too.
+            var choices = $"{Prefix}_multi{Guid.NewGuid().ToString("N")[..6]}".ToLowerInvariant();
+            var multi = new OptionSetMetadata { IsGlobal = false, OptionSetType = OptionSetType.Picklist };
+            multi.Options.Add(new OptionMetadata(new Label("Red", English), null));
+            await ExecuteAsync(pool, new CreateAttributeRequest
+            {
+                EntityName = entity, SolutionUniqueName = Solution,
+                Attribute = new MultiSelectPicklistAttributeMetadata
+                {
+                    SchemaName = choices, DisplayName = new Label("Multi", English), OptionSet = multi,
+                    RequiredLevel = new AttributeRequiredLevelManagedProperty(AttributeRequiredLevel.None)
+                }
+            });
+            var multiValue = (await RetrieveOptionsAsync(pool, entity, choices)).Single().Value!.Value;
+            var multiColour = Update(choices, multiValue, null);
+            multiColour["Color"] = "#E00001";
+            await ExecuteAsync(pool, multiColour);
+            await Expect("multi-select UpdateOptionValue Color only, no solution", choices, multiValue, "#E00001", "Red", null);
         });
     }
 
@@ -535,7 +579,7 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
             var one = (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single().Value!.Value;
             async Task<OptionMetadata> Option(int value) => (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single(o => o.Value == value);
 
-            // update-option --description D --color C (CLI/MCP default SolutionUniqueName is "").
+            // Description + colour with the request DTO's default SolutionUniqueName (""), which is sent as none.
             await service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = name, Value = one, Description = "Kept description", Color = "#112233" });
             var option = await Option(one);
             _output.WriteLine($"OBSERVED service update-option --description --color, empty solution: color {option.Color}, label '{Text(option.Label, English)}', description '{Text(option.Description, English)}'");
@@ -569,7 +613,7 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
             _output.WriteLine($"OBSERVED service attribute update-option --color, no solution: color {option.Color}, label '{Text(option.Label, English)}', description '{Text(option.Description, English)}'");
             option.Color.Should().Be("#010203"); Text(option.Description, English).Should().Be("Local description"); Text(option.Label, English).Should().Be("Open");
 
-            var addedLocal = await service.AddColumnOptionAsync(new AddColumnOptionRequest { EntityLogicalName = entity, ColumnLogicalName = column, Label = "Second", Value = local + 1, Color = "#040506" });
+            var addedLocal = await service.AddColumnOptionAsync(new AddColumnOptionRequest { EntityLogicalName = entity, ColumnLogicalName = column, Label = "Second", Value = local + 1, Color = "#040506", SolutionUniqueName = " " });
             (await RetrieveOptionsAsync(pool, entity, column)).Single(o => o.Value == addedLocal).Color.Should().Be("#040506");
 
             var reason = (await ActiveReasonAsync(pool, entity)).Value!.Value;

@@ -20,7 +20,9 @@ namespace PPDS.LiveTests.Metadata;
 ///  3. the <c>Color</c> parameter of <c>UpdateOptionValue</c> is stored without a solution (null), alone or together
 ///     with a <c>Label</c> and/or <c>Description</c>; an omitted <c>Label</c> or <c>Description</c> leaves that text
 ///     unchanged and an omitted <c>Color</c> leaves the colour unchanged;
-///  4. an empty <c>SolutionUniqueName</c> is rejected with a fault and writes nothing;
+///  4. an empty <c>SolutionUniqueName</c> is rejected with a "solution name is not valid" fault and writes nothing,
+///     on UpdateOptionValue, InsertOptionValue, OrderOption and DeleteOptionValue;
+///  4b. an UpdateOptionValue with nothing to change is accepted and changes nothing; an empty 1033 description clears it;
 ///  5. the <c>Color</c> parameter of <c>InsertOptionValue</c> is stored with the new option and its description.
 /// The local-option, status-reason and state-value counterparts are in
 /// <see cref="MetadataGlobalChoiceLiveTests.ColourMechanisms_LocalOptionStatusReasonAndStateValue"/>.
@@ -113,6 +115,7 @@ public sealed class OptionColorPersistenceLiveTests : LiveTestBase
             var rejected = await Record.ExceptionAsync(() => client.ExecuteAsync(emptySolution, ct));
             _output.WriteLine($"OBSERVED UpdateOptionValue with SolutionUniqueName \"\": {(rejected is null ? "accepted" : $"{rejected.GetType().Name}: {rejected.Message}")}");
             rejected.Should().BeAssignableTo<FaultException<OrganizationServiceFault>>("an empty solution name is rejected");
+            rejected!.Message.Should().Contain("solution name is not valid");
             await Expect("after the rejected empty-solution request", "#A00004", "One", "D1");
 
             var labelAndColour = Update(solution);
@@ -141,6 +144,112 @@ public sealed class OptionColorPersistenceLiveTests : LiveTestBase
             inserted.Color.Should().Be("#A00008");
             Text(inserted.Description).Should().Be("DI");
             await Expect("the existing option after the insert", "#A00007", "One again", "D3");
+
+            // An UpdateOptionValue with no Label, Description or Color is accepted and changes nothing (the service
+            // refuses to send it; this pins why that is safe to refuse rather than required).
+            await client.ExecuteAsync(Update(null), ct);
+            await Expect("UpdateOptionValue with nothing to change", "#A00007", "One again", "D3");
+
+            // An empty English description clears it (the 1033 entry stays, with empty text).
+            var clear = Update(null);
+            clear.Description = new Label("", English);
+            await client.ExecuteAsync(clear, ct);
+            var cleared = await One();
+            _output.WriteLine($"OBSERVED UpdateOptionValue Description \"\": {string.Join(", ", cleared.Description.LocalizedLabels.Select(l => $"{l.LanguageCode}:'{l.Label}'"))}");
+            cleared.Description.LocalizedLabels.Should().ContainSingle(l => l.LanguageCode == English && l.Label == "", "an empty 1033 description clears the text");
+
+            // Every other option message that carries a solution also rejects "" and writes nothing.
+            async Task RejectsEmptySolution(string what, OrganizationRequest request, Func<Task> unchanged)
+            {
+                var fault = await Record.ExceptionAsync(() => client.ExecuteAsync(request, ct));
+                _output.WriteLine($"OBSERVED {what} with SolutionUniqueName \"\": {(fault is null ? "accepted" : fault.Message)}");
+                fault.Should().BeAssignableTo<FaultException<OrganizationServiceFault>>(what);
+                fault!.Message.Should().Contain("solution name is not valid", what);
+                await unchanged();
+            }
+            var before = (await Read()).Options.Select(o => o.Value).ToArray();
+            async Task SameOptions() => (await Read()).Options.Select(o => o.Value).Should().Equal(before);
+            await RejectsEmptySolution("InsertOptionValue", new InsertOptionValueRequest { OptionSetName = setName, Label = new Label("Empty", English), SolutionUniqueName = "" }, SameOptions);
+            await RejectsEmptySolution("OrderOption", new OrderOptionRequest { OptionSetName = setName, Values = Enumerable.Reverse(before).Select(v => v!.Value).ToArray(), SolutionUniqueName = "" }, SameOptions);
+            await RejectsEmptySolution("DeleteOptionValue", new DeleteOptionValueRequest { OptionSetName = setName, Value = added, SolutionUniqueName = "" }, SameOptions);
+        }
+        catch
+        {
+            bodyFailed = true;
+            throw;
+        }
+        finally
+        {
+            try
+            {
+                await client.ExecuteAsync(new DeleteOptionSetRequest { Name = setName }, ct);
+                _output.WriteLine($"Deleted global choice '{setName}'.");
+            }
+            catch (Exception ex)
+            {
+                var message = $"Cleanup failed: global choice '{setName}' was left in the environment; delete it manually. {ex.Message}";
+                _output.WriteLine(message);
+                if (!bodyFailed)
+                    throw new Xunit.Sdk.XunitException(message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// AC-146: the Color parameter (update and insert) and OptionMetadata.Color (create) are stored verbatim, with no
+    /// validation or normalisation, for every text tried; the service therefore neither rewrites nor rejects a colour
+    /// and confirms it by exact comparison.
+    /// </summary>
+    [MetadataLiveFact]
+    public async Task Colors_AreStoredVerbatim_WithoutValidation()
+    {
+        var prefix = Environment.GetEnvironmentVariable("PPDS_TEST_PREFIX")!.Trim().ToLowerInvariant();
+        var solution = Environment.GetEnvironmentVariable("PPDS_TEST_SOLUTION")!.Trim();
+        var setName = $"{prefix}_clv{Guid.NewGuid():N}".Substring(0, Math.Min(48, prefix.Length + 12));
+        string[] inputs = ["#ff0000", "#F00", "FF0000", "Red", " #00FF00 ", "notacolor", "#GGGGGG", "#FF0000FF"];
+        var ct = CancellationToken.None;
+
+        _source = Configuration.HasClientSecretCredentials
+            ? await LiveTestHelpers.CreateConnectionSourceAsync(Configuration, "OptionColorFormats", maxPoolSize: 3)
+            : await LiveTestProfileConnectionSource.CreateAsync(Configuration, "OptionColorFormats", maxPoolSize: 3);
+        _pool = LiveTestHelpers.CreateConnectionPool(new[] { _source });
+        await using var client = await _pool.GetClientAsync(cancellationToken: ct);
+
+        var optionSet = new OptionSetMetadata { Name = setName, DisplayName = new Label("PPDS colour format test", English), IsGlobal = true, OptionSetType = OptionSetType.Picklist };
+        for (var i = 0; i < inputs.Length; i++)
+            optionSet.Options.Add(new OptionMetadata(new Label("Option " + i, English), null) { Color = inputs[i] });
+        _output.WriteLine($"Creating global choice '{setName}' in solution '{solution}'.");
+        await client.ExecuteAsync(new CreateOptionSetRequest { OptionSet = optionSet, SolutionUniqueName = solution }, ct);
+
+        var bodyFailed = false;
+        try
+        {
+            async Task<OptionSetMetadata> Read() => (OptionSetMetadata)((RetrieveOptionSetResponse)await client.ExecuteAsync(
+                new RetrieveOptionSetRequest { Name = setName, RetrieveAsIfPublished = true }, ct)).OptionSetMetadata;
+            var created = (await Read()).Options.OrderBy(o => o.Value).ToList();
+            for (var i = 0; i < inputs.Length; i++)
+            {
+                _output.WriteLine($"OBSERVED create OptionMetadata.Color '{inputs[i]}': stored '{created[i].Color}'");
+                created[i].Color.Should().Be(inputs[i], "OptionMetadata.Color on create is stored verbatim");
+            }
+
+            var target = created[0].Value!.Value;
+            foreach (var input in inputs)
+            {
+                var update = new UpdateOptionValueRequest { OptionSetName = setName, Value = target, MergeLabels = true };
+                update["Color"] = input;
+                await client.ExecuteAsync(update, ct);
+                var stored = (await Read()).Options.Single(o => o.Value == target).Color;
+                _output.WriteLine($"OBSERVED UpdateOptionValue Color '{input}': stored '{stored}'");
+                stored.Should().Be(input, "the Color parameter of UpdateOptionValue is stored verbatim");
+
+                var insert = new InsertOptionValueRequest { OptionSetName = setName, Label = new Label("Inserted " + input.Trim(), English) };
+                insert["Color"] = input;
+                var added = ((InsertOptionValueResponse)await client.ExecuteAsync(insert, ct)).NewOptionValue;
+                var insertedColor = (await Read()).Options.Single(o => o.Value == added).Color;
+                _output.WriteLine($"OBSERVED InsertOptionValue Color '{input}': stored '{insertedColor}'");
+                insertedColor.Should().Be(input, "the Color parameter of InsertOptionValue is stored verbatim");
+            }
         }
         catch
         {
