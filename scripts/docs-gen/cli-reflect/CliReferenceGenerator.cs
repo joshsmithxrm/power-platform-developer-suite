@@ -130,6 +130,8 @@ public sealed class CliReferenceGenerator : IReferenceGenerator
 
             if (root is null) continue;
 
+            ApplyAliasPolicies(assembly, root, diagnostics);
+
             var groupName = GetString(root, "Name") ?? DeriveGroupNameFromType(type);
             var leaves = new List<DiscoveredCommand>();
             foreach (var subcommand in EnumerateChildren(root, "Subcommands"))
@@ -143,6 +145,53 @@ public sealed class CliReferenceGenerator : IReferenceGenerator
 
         return groups;
     }
+
+    /// <summary>
+    /// Production builds the tree through <c>Program.CreateRootCommand</c>, which runs alias policies after the
+    /// group factories. Per-group factories skip them, so reference pages would show aliases that production
+    /// <c>--help</c> does not (dead <c>-f</c>/<c>-v</c>, missing <c>-env</c>). When the target assembly declares
+    /// these policies, run them over the group tree here so generated docs match <c>--help</c>.
+    /// Assemblies without them (e.g. test fixtures) are left untouched.
+    /// </summary>
+    private static void ApplyAliasPolicies(Assembly assembly, object root, List<string> diagnostics)
+    {
+        foreach (var policyName in AliasPolicyTypeNames)
+        {
+            var policy = assembly.GetType(policyName);
+            var apply = policy?.GetMethod(
+                "Apply",
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                binder: null,
+                types: [FindCommandType(root.GetType())],
+                modifiers: null);
+            if (apply is null) continue;
+
+            try
+            {
+                apply.Invoke(null, [root]);
+            }
+            catch (Exception ex)
+            {
+                diagnostics.Add($"alias policy {policyName} threw: {ex.InnerException?.Message ?? ex.Message}");
+            }
+        }
+    }
+
+    private static Type FindCommandType(Type type)
+    {
+        for (var t = type; t is not null; t = t.BaseType)
+        {
+            if (t.FullName == CommandTypeFullName) return t;
+        }
+
+        return type;
+    }
+
+    private static readonly string[] AliasPolicyTypeNames =
+    [
+        "PPDS.Cli.Infrastructure.EnvironmentAliasPolicy",
+        "PPDS.Cli.Infrastructure.ShortAliasShadowPolicy",
+    ];
 
     private static DiscoveredCommand BuildCommandRecord(string groupName, object command)
     {
