@@ -17,7 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Captured startup authentication/target defaults. Allowed switches affect future calls in that session without changing global defaults; creating or replacing startup authentication requires a server restart.
 - Form writes require `confirmEnvironment` when effective protection requires acknowledgement. `--allowed-env` permits switching but does not authorize writes; `--read-only` rejects covered form mutations. Publication separately requires `confirmPublishEntity`, publishes all pending customizations for that table and verifies only the selected form (#1015, partial).
-- Updated to consume CLI 1.5.0 and the coordinated library/runtime dependency refresh, including Microsoft.Extensions.Hosting 10.0.14 (#1501).
+- Updated to consume CLI 1.5.0 and the coordinated library/runtime dependency refresh, including Microsoft.Extensions.Hosting 10.0.14 (#1501), MSAL 4.92.0 (#1513) and System.Text.Json 10.0.14 (#1565).
+- `ppds_metadata_update_table`, `ppds_metadata_create_table` and `ppds_metadata_add_option_value` share the CLI metadata service's earlier return of pooled connections before cache invalidation, option-colour and publication follow-ups, so these calls can complete with one available pooled connection. Separate requests can still complete partially if a later step fails.
+- `ppds_metadata_update_column` can change the display name and description of State, Status and unique-identifier (GUID) columns, including a table's primary ID; any other setting on these columns is rejected (#1550, #1559).
 - **Compatibility exception for this release only** - Josh approved CLI 1.5.0 and MCP 1.3.0 on 2026-11-01 with explicit protected-write/session migration and custom-embedder signature incompatibilities. This is not a blanket backward-compatibility claim or a permanent version-policy waiver; see the [scoped exception and migration guide](https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/docs/releases/v1.8.0.md#one-release-compatibility-exception).
 
 ### Fixed
@@ -32,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Metadata option-color failures keep their existing error code while structured MCP errors omit SDK diagnostic text from the bounded service-owned messages. Synthetic read/write checks cover fake ClientSecret and Bearer details; initial raw-failure fallback and covered cancellation/acquisition behavior remain. No repository-wide or log-privacy guarantee is implied.
+- The CLI metadata service's fixed, diagnostic-free messages for covered SDK/catalog read failures also reach MCP `userMessage` text through `ppds_metadata_add_option_value` and `ppds_metadata_update_column` (primary ID labels). Error codes are unchanged.
 
 - Rejected disallowed or malformed environment URLs before direct authenticated resolution. Name-based selection now uses discovery only, then enforces the session allowlist; final switching rechecks the resolved target.
 

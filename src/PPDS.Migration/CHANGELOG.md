@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Add nullable `ExportOptions.MaxRecordsPerEntity` for opt-in bounded primary-row exports. The positive limit is checked before output, never silently truncates, requires paging cookies, and skips relationship/binary expansion. The default remains unlimited (#1575).
+- Add nullable `ExportOptions.MaxRecordsPerEntity` for opt-in bounded primary-row exports. The positive limit is checked before output, never silently truncates and requires paging cookies. A bounded export throws before exporting when `IncludeFileData` is set, when any entity in the schema has relationships or file, image or binary fields, or when an entity's FetchXML filter contains anything other than `filter`, `condition` and `value` elements. The default remains unlimited (#1575).
 
 ### Changed
 
