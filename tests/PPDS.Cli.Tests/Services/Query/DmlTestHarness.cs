@@ -70,7 +70,8 @@ internal sealed class DmlTestHarness
         var harness = new DmlTestHarness
         {
             Bulk = bulk,
-            Service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard(), bulkOperationExecutor: bulk.Object)
+            Service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard(), bulkOperationExecutor: bulk.Object,
+                metadataProvider: TestMetadata.Provider)
             {
                 EnvironmentProtectionLevel = protection
             }
@@ -133,6 +134,21 @@ internal sealed class DmlTestHarness
 
     public void AssertNothingChanged() => Xunit.Assert.Empty(Writes);
 
+    /// <summary>
+    /// When true (set per test), the fake evaluates the FetchXML filter and count like Dataverse instead of returning every
+    /// row, so a dropped or loosened condition changes the rows a statement touches. Async-local: tests run in parallel.
+    /// </summary>
+    public static bool Faithful => FaithfulMode.Value;
+
+    /// <summary>Set to true in a test to make <see cref="Faithful"/> true for that test's async flow.</summary>
+    public static readonly AsyncLocal<bool> FaithfulMode = new();
+
+    private static QueryResult With(QueryResult result, IReadOnlyDictionary<string, QueryValue>[] records) => new()
+    {
+        PageNumber = result.PageNumber, EntityLogicalName = result.EntityLogicalName, Columns = result.Columns,
+        Records = records, Count = records.Length, MoreRecords = result.MoreRecords, PagingCookie = result.PagingCookie
+    };
+
     /// <summary>Every entity passed to a bulk create or update, in call order.</summary>
     public List<Microsoft.Xrm.Sdk.Entity> WrittenEntities { get; } = new();
 
@@ -142,20 +158,33 @@ internal sealed class DmlTestHarness
     /// </summary>
     public static QueryResult OnlyRequestedAttributes(QueryResult result, string fetchXml)
     {
-        if (fetchXml.Contains("<all-attributes", StringComparison.OrdinalIgnoreCase))
-            return result;
+        var doc = System.Xml.Linq.XDocument.Parse(fetchXml);
+        var entity = doc.Root!.Element("entity")!;
+        var records = result.Records.AsEnumerable();
+        if (Faithful)
+        {
+            // Like Dataverse: the filter selects the rows, count/top limits them.
+            records = records.Where(r => entity.Elements("filter").All(f => FetchXmlFilter.Matches(f, r)));
+            var limit = (string?)doc.Root.Attribute("count") ?? (string?)doc.Root.Attribute("top");
+            if (limit != null)
+                records = records.Take(int.Parse(limit, System.Globalization.CultureInfo.InvariantCulture));
+        }
 
-        var requested = System.Text.RegularExpressions.Regex.Matches(fetchXml, "<attribute name=\"([^\"]+)\"")
-            .Select(m => m.Groups[1].Value)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (entity.Element("all-attributes") != null)
+            return With(result, records.ToArray());
+
+        // Each attribute comes back under its alias when it has one, under its name otherwise (as Dataverse returns it).
+        var requested = entity.Elements("attribute")
+            .Select(a => (Name: (string)a.Attribute("name")!, Key: (string?)a.Attribute("alias") ?? (string)a.Attribute("name")!))
+            .ToList();
         return new QueryResult
         {
             PageNumber = result.PageNumber,
             EntityLogicalName = result.EntityLogicalName,
-            Columns = result.Columns.Where(c => requested.Contains(c.LogicalName)).ToArray(),
-            Records = result.Records
-                .Select(r => (IReadOnlyDictionary<string, QueryValue>)r.Where(kv => requested.Contains(kv.Key))
-                    .ToDictionary(kv => kv.Key, kv => kv.Value))
+            Columns = requested.Select(r => new QueryColumn { LogicalName = r.Key }).ToArray(),
+            Records = records
+                .Select(r => (IReadOnlyDictionary<string, QueryValue>)requested
+                    .ToDictionary(q => q.Key, q => r.TryGetValue(q.Name, out var v) ? v : QueryValue.Null, StringComparer.OrdinalIgnoreCase))
                 .ToArray(),
             Count = result.Count,
             MoreRecords = result.MoreRecords,

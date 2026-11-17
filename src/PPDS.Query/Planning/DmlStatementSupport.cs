@@ -46,6 +46,7 @@ internal static class DmlStatementSupport
     /// <summary>The refusal message for the first unsupported part of <paramref name="statement"/>, or null.</summary>
     public static string? FindUnsupported(TSqlStatement statement) => statement switch
     {
+        DeleteStatement or UpdateStatement or InsertStatement when DecorationCheck.Find(statement) is { } decoration => decoration,
         DeleteStatement delete => CheckDelete(delete),
         UpdateStatement update => CheckUpdate(update),
         InsertStatement insert => CheckInsert(insert),
@@ -99,8 +100,15 @@ internal static class DmlStatementSupport
         if (problem != null)
             return problem;
 
+        var setColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var setClause in spec.SetClauses)
         {
+            if (setClause is AssignmentSetClause { Column.MultiPartIdentifier.Identifiers: { Count: > 0 } ids }
+                && !setColumns.Add(ids[ids.Count - 1].Value))
+            {
+                return $"UPDATE ... SET names the column {ids[ids.Count - 1].Value} more than once." + NothingExecuted;
+            }
+
             switch (setClause)
             {
                 case AssignmentSetClause { Variable: not null }:
@@ -151,6 +159,10 @@ internal static class DmlStatementSupport
 
         if (columnCount == 0)
             return NoColumnList;
+        var badColumn = spec.Columns!.FirstOrDefault(c => c.MultiPartIdentifier.Identifiers.Count != 1
+            || !IsLogicalName(c.MultiPartIdentifier.Identifiers[0].Value));
+        if (badColumn != null)
+            return $"The INSERT column {Sql(badColumn)} must be a plain column name of the target table." + NothingExecuted;
         var duplicate = spec.Columns!
             .GroupBy(c => c.MultiPartIdentifier.Identifiers.Last().Value, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault(g => g.Count() > 1);
@@ -240,6 +252,9 @@ internal static class DmlStatementSupport
                        "position, and an unnamed expression cannot be mapped reliably." + NothingExecuted;
             }
 
+            if (!IsLogicalName(outputName))
+                return $"The SELECT alias {outputName} is not a valid name (letters, digits and underscores only)." + NothingExecuted;
+
             if (!outputNames.Add(outputName))
             {
                 return $"Two SELECT items are named {outputName}: give each a distinct alias (AS name) so the values map " +
@@ -253,6 +268,14 @@ internal static class DmlStatementSupport
             {
                 if (order.Expression is not ColumnReferenceExpression orderColumn || CheckColumn(orderColumn, names, "ORDER BY") != null)
                     return Unsupported($"ORDER BY {Sql(order.Expression)}", context);
+                // T-SQL orders by a same-named SELECT alias; Dataverse would order by the table's column.
+                var orderName = orderColumn.MultiPartIdentifier.Identifiers.Last().Value;
+                var shadowing = select.SelectElements.OfType<SelectScalarExpression>().FirstOrDefault(e =>
+                    string.Equals(e.ColumnName?.Value, orderName, StringComparison.OrdinalIgnoreCase)
+                    && !(e.Expression is ColumnReferenceExpression c
+                         && string.Equals(c.MultiPartIdentifier.Identifiers.Last().Value, orderName, StringComparison.OrdinalIgnoreCase)));
+                if (shadowing != null)
+                    return Unsupported($"ORDER BY {orderName}, which is also the alias of another SELECT item", context, " Order by a column that is not used as an alias.");
             }
         }
 
@@ -307,6 +330,8 @@ internal static class DmlStatementSupport
             return $"The {verb} {(reading ? "source" : "target")} must be a table name; {Sql(table)} is not supported." + NothingExecuted;
 
         var schemaObject = named.SchemaObject;
+        if (!IsLogicalName(schemaObject.BaseIdentifier.Value) || (named.Alias != null && !IsLogicalName(named.Alias.Value)))
+            return $"{Sql(named)} is not a valid Dataverse table name or alias." + NothingExecuted;
         var schema = schemaObject.SchemaIdentifier?.Value;
         if (schemaObject.ServerIdentifier != null || schemaObject.DatabaseIdentifier != null
             || (schema != null && !schema.Equals("dbo", StringComparison.OrdinalIgnoreCase)))
@@ -337,6 +362,8 @@ internal static class DmlStatementSupport
         var ids = column.MultiPartIdentifier?.Identifiers;
         if (column.ColumnType != ColumnType.Regular || ids == null || ids.Count == 0)
             return Unsupported(Sql(column), where);
+        if (ids.Any(id => !IsLogicalName(id.Value)))
+            return $"{Sql(column)} in {where} is not a valid Dataverse column name." + NothingExecuted;
         if (ids.Count > 2 || (ids.Count == 2 && (names == null || !names.Contains(ids[0].Value))))
             return $"The column {Sql(column)} in {where} does not belong to the statement's table." + NothingExecuted;
         return null;
@@ -423,8 +450,11 @@ internal static class DmlStatementSupport
                     : CheckColumn(column, columns, context);
             case VariableReference or GlobalVariableExpression:
                 return Unsupported($"the variable {Sql(expression)}", context, " Use a literal value instead.");
-            case UnaryExpression unary when unary.UnaryExpressionType != UnaryExpressionType.BitwiseNot:
+            case UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative } unary:
                 return CheckValue(unary.Expression, columns, context);
+            case BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add } add
+                when add.FirstExpression is StringLiteral || add.SecondExpression is StringLiteral:
+                return Unsupported($"{Sql(add)} (+ with text)", context, " Use CONCAT(...) to join text.");
             case BinaryExpression binary when binary.BinaryExpressionType is BinaryExpressionType.Add
                 or BinaryExpressionType.Subtract or BinaryExpressionType.Multiply or BinaryExpressionType.Divide
                 or BinaryExpressionType.Modulo:
@@ -450,12 +480,16 @@ internal static class DmlStatementSupport
                     .Concat(simple.WhenClauses.SelectMany(w => new[] { w.WhenExpression, w.ThenExpression })));
             case CastCall cast:
                 return CheckValue(cast.Parameter, columns, context);
+            case ConvertCall { Style: not null } convert:
+                return Unsupported($"{Sql(convert)} (a CONVERT style)", context, " Use CONVERT without a style, or CAST.");
             case ConvertCall convert:
-                return All([convert.Parameter, convert.Style]);
+                return CheckValue(convert.Parameter, columns, context);
             case TryCastCall tryCast:
                 return CheckValue(tryCast.Parameter, columns, context);
+            case TryConvertCall { Style: not null } tryConvert:
+                return Unsupported($"{Sql(tryConvert)} (a CONVERT style)", context, " Use TRY_CONVERT without a style, or TRY_CAST.");
             case TryConvertCall tryConvert:
-                return All([tryConvert.Parameter, tryConvert.Style]);
+                return CheckValue(tryConvert.Parameter, columns, context);
             case FunctionCall function when function.CallTarget == null && function.OverClause == null
                 && function.WithinGroupClause == null && function.UniqueRowFilter == UniqueRowFilter.NotSpecified
                 && AllowedFunctions.Contains(function.FunctionName.Value):
@@ -479,8 +513,9 @@ internal static class DmlStatementSupport
                 return CheckValuePredicate(binary.FirstExpression, columns, context) ?? CheckValuePredicate(binary.SecondExpression, columns, context);
             case BooleanParenthesisExpression paren:
                 return CheckValuePredicate(paren.Expression, columns, context);
-            case BooleanNotExpression not:
-                return CheckValuePredicate(not.Expression, columns, context);
+            case BooleanNotExpression:
+                // NOT over an unknown (NULL) comparison is unknown in SQL; the evaluator would make it true.
+                return Unsupported($"NOT ({Sql(predicate)})", context, " Write the condition without NOT.");
             case BooleanComparisonExpression comparison when IsComparison(comparison.ComparisonType):
                 return CheckValue(comparison.FirstExpression, columns, context) ?? CheckValue(comparison.SecondExpression, columns, context);
             case BooleanIsNullExpression isNull:
@@ -527,6 +562,41 @@ internal static class DmlStatementSupport
             return Unsupported($"OPTION ({Sql(hint)})", verb);
 
         return null;
+    }
+
+    /// <summary>A Dataverse logical name: letters, digits and underscores, not starting with a digit.</summary>
+    public static bool IsLogicalName(string name) => System.Text.RegularExpressions.Regex.IsMatch(name, "^[A-Za-z_][A-Za-z0-9_]*$");
+
+    /// <summary>
+    /// Decorations that the node-kind checks above would not notice, and that the engine does not apply: COLLATE on any
+    /// expression, ODBC escapes, LIKE ESCAPE, identity and $ACTION-style calls, ODBC literals.
+    /// </summary>
+    private sealed class DecorationCheck : TSqlFragmentVisitor
+    {
+        private string? _found;
+
+        public static string? Find(TSqlFragment fragment)
+        {
+            var check = new DecorationCheck();
+            fragment.Accept(check);
+            return check._found;
+        }
+
+        public override void Visit(PrimaryExpression node)
+        {
+            if (node.Collation != null)
+                _found ??= Unsupported($"COLLATE {node.Collation.Value}", "INSERT, UPDATE or DELETE", " Remove the COLLATE clause.");
+        }
+
+        public override void Visit(LikePredicate node)
+        {
+            if (node.EscapeExpression != null || node.OdbcEscape)
+                _found ??= Unsupported("LIKE ... ESCAPE", "INSERT, UPDATE or DELETE");
+        }
+
+        public override void Visit(OdbcLiteral node) => _found ??= Unsupported("an ODBC literal ({d ...})", "INSERT, UPDATE or DELETE");
+
+        public override void Visit(IdentityFunctionCall node) => _found ??= Unsupported("IDENTITY()", "INSERT, UPDATE or DELETE");
     }
 
     private static string Unsupported(string part, string context, string? howTo = null)

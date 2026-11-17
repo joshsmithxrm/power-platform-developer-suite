@@ -1,0 +1,114 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
+using Moq;
+using PPDS.Dataverse.Metadata;
+using PPDS.Dataverse.Metadata.Models;
+using PPDS.Dataverse.Query;
+
+namespace PPDS.Cli.Tests.Services.Query;
+
+/// <summary>
+/// Evaluates a FetchXML &lt;filter&gt; against an in-memory row the way Dataverse does, as observed in the live
+/// differential run (DmlLiveDifferentialTests): string comparison is case-insensitive; a NULL attribute matches only
+/// null / not-null... and the negated operators ne, not-in, not-like, not-begin-with, not-end-with and not-between,
+/// which Dataverse also matches when the attribute is NULL (unlike SQL).
+/// </summary>
+internal static class FetchXmlFilter
+{
+    public static bool Matches(XElement filter, IReadOnlyDictionary<string, QueryValue> row)
+    {
+        var or = string.Equals((string?)filter.Attribute("type"), "or", StringComparison.OrdinalIgnoreCase);
+        var results = filter.Elements().Select(e => e.Name.LocalName switch
+        {
+            "filter" => Matches(e, row),
+            "condition" => Condition(e, row),
+            _ => throw new NotSupportedException($"FetchXML element {e.Name.LocalName} in a filter")
+        }).ToList();
+        return or ? results.Any(r => r) : results.All(r => r);
+    }
+
+    private static bool Condition(XElement c, IReadOnlyDictionary<string, QueryValue> row)
+    {
+        var attribute = (string)c.Attribute("attribute")!;
+        var op = (string)c.Attribute("operator")!;
+        var actual = row.TryGetValue(attribute, out var qv) ? qv.Value : null;
+        var values = c.Attribute("value") is { } v ? new[] { v.Value } : c.Elements("value").Select(x => x.Value).ToArray();
+
+        switch (op)
+        {
+            case "null": return actual is null;
+            case "not-null": return actual is not null;
+        }
+
+        var negated = op is "ne" or "not-in" or "not-like" or "not-begin-with" or "not-end-with" or "not-between";
+        if (actual is null)
+            return negated; // Dataverse: a negated operator also matches NULL rows
+
+        int Cmp(string value) => actual switch
+        {
+            string s => string.Compare(s, value, StringComparison.OrdinalIgnoreCase),
+            _ => Convert.ToDecimal(actual, CultureInfo.InvariantCulture).CompareTo(decimal.Parse(value, CultureInfo.InvariantCulture))
+        };
+        bool Like(string pattern)
+            => Regex.IsMatch(actual.ToString()!, "^" + Regex.Escape(pattern).Replace("%", ".*").Replace("_", ".") + "$", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        return op switch
+        {
+            "eq" => Cmp(values[0]) == 0,
+            "ne" => Cmp(values[0]) != 0,
+            "lt" => Cmp(values[0]) < 0,
+            "gt" => Cmp(values[0]) > 0,
+            "le" => Cmp(values[0]) <= 0,
+            "ge" => Cmp(values[0]) >= 0,
+            "in" => values.Any(x => Cmp(x) == 0),
+            "not-in" => values.All(x => Cmp(x) != 0),
+            "like" => Like(values[0]),
+            "not-like" => !Like(values[0]),
+            "begins-with" => Like(values[0] + "%"),
+            "not-begin-with" => !Like(values[0] + "%"),
+            "ends-with" => Like("%" + values[0]),
+            "not-end-with" => !Like("%" + values[0]),
+            "between" => Cmp(values[0]) >= 0 && Cmp(values[1]) <= 0,
+            "not-between" => !(Cmp(values[0]) >= 0 && Cmp(values[1]) <= 0),
+            _ => throw new NotSupportedException($"FetchXML operator {op}")
+        };
+    }
+}
+
+/// <summary>Attribute metadata for the fake account and contact tables used by the DML tests.</summary>
+internal static class TestMetadata
+{
+    private static AttributeMetadataDto A(string name, string type, bool create = true, bool update = true, string? attributeOf = null) => new()
+    {
+        LogicalName = name, DisplayName = name, SchemaName = name, AttributeType = type,
+        IsValidForCreate = create, IsValidForUpdate = update, IsValidForRead = true, AttributeOf = attributeOf
+    };
+
+    private static readonly Dictionary<string, AttributeMetadataDto[]> Tables = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["account"] =
+        [
+            A("accountid", "Uniqueidentifier", update: false), A("name", "String"), A("description", "Memo"),
+            A("revenue", "Money"), A("statecode", "State"), A("parentaccountid", "Lookup"), A("ownerid", "Owner"),
+            A("owneridname", "String", create: false, update: false, attributeOf: "ownerid"), A("domainname", "String"),
+            A("contactid", "Lookup"), A("createdon", "DateTime", create: false, update: false)
+        ],
+        ["contact"] =
+        [
+            A("contactid", "Uniqueidentifier", update: false), A("lastname", "String"), A("fullname", "String"),
+            A("parentcustomerid", "Customer"), A("accountid", "Lookup"), A("name", "String")
+        ]
+    };
+
+    public static ICachedMetadataProvider Provider { get; } = Create();
+
+    private static ICachedMetadataProvider Create()
+    {
+        var mock = new Mock<ICachedMetadataProvider>(MockBehavior.Loose);
+        mock.Setup(m => m.GetAttributesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, CancellationToken _) =>
+                Tables.TryGetValue(table, out var a) ? a : Array.Empty<AttributeMetadataDto>());
+        return mock.Object;
+    }
+}

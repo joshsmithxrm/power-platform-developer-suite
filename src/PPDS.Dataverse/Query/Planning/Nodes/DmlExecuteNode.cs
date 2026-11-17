@@ -107,15 +107,31 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         string entityLogicalName,
         IQueryPlanNode sourceNode,
         IReadOnlyList<CompiledSetClause> setClauses,
-        int rowCap = int.MaxValue)
+        int rowCap = int.MaxValue,
+        IReadOnlyList<string>? requiredColumns = null)
     {
         return new DmlExecuteNode(
             DmlOperation.Update,
             entityLogicalName,
             sourceNode: sourceNode,
             setClauses: setClauses,
-            rowCap: rowCap);
+            rowCap: rowCap)
+        {
+            RequiredColumns = requiredColumns ?? Array.Empty<string>()
+        };
     }
+
+    /// <summary>
+    /// UPDATE: the columns the SET expressions read. Each must be present in every source row (the scan returns every
+    /// requested column, NULL included); a missing one is a mapping error and stops the statement before anything is
+    /// written, instead of evaluating as NULL.
+    /// </summary>
+    public IReadOnlyList<string> RequiredColumns { get; private init; } = Array.Empty<string>();
+
+    private static QueryExecutionException MissingSourceColumn(string column) => new(
+        QueryErrorCode.ExecutionFailed,
+        $"The value of '{column}' was not returned for a source row, so nothing was changed. The column may be " +
+        "computed by the query engine (such as a *name display column), which INSERT, UPDATE and DELETE cannot read.");
 
     /// <summary>
     /// Creates a DmlExecuteNode for DELETE.
@@ -387,14 +403,13 @@ public sealed class DmlExecuteNode : IQueryPlanNode
 
             if (SourceColumns != null && SourceColumns.Count == InsertColumns!.Count)
             {
-                // Ordinal mapping: map source column[i] value to insert column[i]
+                // Ordinal mapping: map source column[i] value to insert column[i]. A missing key is a mapping error.
                 for (var i = 0; i < InsertColumns.Count; i++)
                 {
                     var sourceKey = SourceColumns[i];
-                    if (row.Values.TryGetValue(sourceKey, out var qv))
-                    {
-                        entity[InsertColumns[i]] = CoerceForColumn(InsertColumns[i], qv.Value, attributeMap);
-                    }
+                    if (!row.Values.TryGetValue(sourceKey, out var qv))
+                        throw MissingSourceColumn(sourceKey);
+                    entity[InsertColumns[i]] = CoerceForColumn(InsertColumns[i], qv.Value, attributeMap);
                 }
             }
             else
@@ -403,10 +418,9 @@ public sealed class DmlExecuteNode : IQueryPlanNode
                 for (var i = 0; i < InsertColumns!.Count; i++)
                 {
                     var columnName = InsertColumns[i];
-                    if (row.Values.TryGetValue(columnName, out var qv))
-                    {
-                        entity[columnName] = CoerceForColumn(columnName, qv.Value, attributeMap);
-                    }
+                    if (!row.Values.TryGetValue(columnName, out var qv))
+                        throw MissingSourceColumn(columnName);
+                    entity[columnName] = CoerceForColumn(columnName, qv.Value, attributeMap);
                 }
             }
 
@@ -454,6 +468,12 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             seen.Add(recordId);
 
             var entity = new Microsoft.Xrm.Sdk.Entity(EntityLogicalName, recordId);
+
+            foreach (var required in RequiredColumns)
+            {
+                if (!row.Values.Keys.Any(k => string.Equals(k, required, StringComparison.OrdinalIgnoreCase)))
+                    throw MissingSourceColumn(required);
+            }
 
             // Evaluate compiled SET clauses against the source row values
             foreach (var clause in SetClauses!)

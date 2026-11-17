@@ -133,7 +133,7 @@ public sealed partial class ExecutionPlanBuilder
         {
             if (!selectCols.Contains($"[{colName}]", StringComparer.OrdinalIgnoreCase)
                 && !selectCols.Contains(colName, StringComparer.OrdinalIgnoreCase))
-                selectCols.Add($"[{colName}]");
+                selectCols.Add($"[{colName.Replace("]", "]]")}]");
         }
 
         var sb = new StringBuilder();
@@ -169,7 +169,8 @@ public sealed partial class ExecutionPlanBuilder
             entityName,
             selectResult.RootNode,
             compiledClauses,
-            rowCap: options.DmlRowCap ?? int.MaxValue);
+            rowCap: options.DmlRowCap ?? int.MaxValue,
+            requiredColumns: referencedColumnNames.Distinct(StringComparer.OrdinalIgnoreCase).ToList());
 
         return new QueryPlanResult
         {
@@ -202,7 +203,7 @@ public sealed partial class ExecutionPlanBuilder
         // Build a synthetic SELECT SQL string: SELECT [entityid] FROM target [JOINs] [WHERE ...]
         // Use baseName for columns (simple identifiers), ScriptDom for FROM (preserves multi-part names).
         var sb = new StringBuilder();
-        sb.Append("SELECT [").Append(baseName).Append("id]");
+        sb.Append("SELECT [").Append(baseName.Replace("]", "]]")).Append("id]");
 
         // Render FROM clause — use the DELETE's FROM clause if present (it may contain JOINs),
         // otherwise render the target table via ScriptDom (preserves multi-part names like [ENV].entity).
