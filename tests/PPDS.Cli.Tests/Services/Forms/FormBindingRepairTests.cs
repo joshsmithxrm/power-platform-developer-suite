@@ -256,7 +256,7 @@ public sealed class FormBindingRepairTests
             Area("tabheader", "{12121212-1212-1212-1212-121212121212}", "{13131313-1313-1313-1313-131313131313}", "th", "Name"),
             Area("tabfooter", "{14141414-1414-1414-1414-141414141414}", "{15151515-1515-1515-1515-151515151515}", "tf", "TELEPHONE1"));
         var plan = FormXmlEditor.PlanBindingRepair(doc.ToString(SaveOptions.DisableFormatting), ["name", "telephone1", ContributorFormFixture.Priority]);
-        Assert.Equal(new[] { ("My Tab / Tab header", (string?)null), ("My Tab / Tab footer", null) },
+        Assert.Equal(new (string, string?)[] { ("My Tab / Tab header", null), ("My Tab / Tab footer", null) },
             plan.Repaired.Select(r => (r.Location, r.SectionId)));
     }
 

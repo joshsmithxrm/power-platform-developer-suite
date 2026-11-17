@@ -86,10 +86,10 @@ public sealed class FormBindingRepairEdgeTests
             "<hiddencontrols><data id=\"h1\" datafieldname=\"Name\" relationship=\"rel\" /><data id=\"h2\" datafieldname=\"NAME\" /></hiddencontrols>");
         var plan = FormXmlEditor.PlanBindingRepair(raw, ["name"]);
         Assert.Equal("u2", Assert.Single(plan.Repaired).ControlId);
-        Assert.Equal(new[]
+        Assert.Equal(new (string, string?)[]
         {
             (BindingRepairReasons.RelatedOrUnboundControl, "u1"),
-            (BindingRepairReasons.EventAttributeCaseDiffers, (string?)null),
+            (BindingRepairReasons.EventAttributeCaseDiffers, null),
             (BindingRepairReasons.HiddenDataCaseDiffers, "h2"),
         }, plan.Unchanged.Select(u => (u.Reason, u.ControlId)));
     }
@@ -102,7 +102,7 @@ public sealed class FormBindingRepairEdgeTests
         var plan = FormXmlEditor.PlanBindingRepair(raw, ["NAME", "name"]);
         Assert.Empty(plan.Repaired);
         var ambiguous = Assert.Single(plan.Unchanged);
-        Assert.Equal((BindingRepairReasons.AmbiguousColumn, "c2", (string?)null), (ambiguous.Reason, ambiguous.ControlId, ambiguous.CanonicalName));
+        Assert.Equal<(string, string?, string?)>((BindingRepairReasons.AmbiguousColumn, "c2", null), (ambiguous.Reason, ambiguous.ControlId, ambiguous.CanonicalName));
         Assert.Equal(raw, plan.RepairedXml);
     }
 

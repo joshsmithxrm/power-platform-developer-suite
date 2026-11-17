@@ -290,7 +290,7 @@ public sealed class FormBindingRepairCommandTests
         ContributorFormHarness Create(CancellationToken ct) => new(readBackById: true, token: ct, rawXml: raw)
             { ReadBackTransform = xml => xml.Replace("&#84;ELEPHONE1", "TELEPHONE1") };
 
-        var (_, exit, stdout, stderr) = await Run(Create, []);
+        var (_, exit, _, stderr) = await Run(Create, []);
         Assert.True(exit == ExitCodes.Success, stderr);
         Assert.Contains("The form read back shows 1 other binding(s) this command can repair (listed below); run it again.", stderr);
         Assert.Contains("Read back as repairable: control 'telephone1' (My Tab / Other) binding 'TELEPHONE1'; run the command again to repair it.", stderr);
