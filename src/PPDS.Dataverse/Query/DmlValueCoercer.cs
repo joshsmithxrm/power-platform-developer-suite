@@ -72,7 +72,7 @@ public static class DmlValueCoercer
 
             case "String":
             case "Memo":
-                return value is string ? value : value.ToString();
+                return value is string ? value : Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture);
 
             case "Virtual":
                 // MultiSelectPicklist is modeled as Virtual with AttributeTypeName="MultiSelectPicklistType".

@@ -218,7 +218,17 @@ public sealed class FetchXmlGenerator
     /// </summary>
     private static int? ExtractTopValue(TopRowFilter topRowFilter)
     {
-        if (topRowFilter.Expression is IntegerLiteral intLiteral)
+        // TOP 5 and TOP (5) are the same; any other expression (TOP (@n), TOP (1 + 1)) is not a constant.
+        var expression = topRowFilter.Expression;
+        while (expression is ParenthesisExpression paren)
+            expression = paren.Expression;
+        if (topRowFilter.Percent || topRowFilter.WithTies || expression is not IntegerLiteral)
+        {
+            throw new PPDS.Query.Parsing.QueryParseException(
+                "Only TOP n or TOP (n) with a whole number is supported (not PERCENT, WITH TIES, variables or expressions).");
+        }
+
+        if (expression is IntegerLiteral intLiteral)
         {
             if (int.TryParse(intLiteral.Value, out var value))
             {
@@ -725,14 +735,17 @@ public sealed class FetchXmlGenerator
             var attrsList = new List<string> { $"name=\"{columnName}\"" };
             if (alias is not null)
             {
-                attrsList.Add($"alias=\"{alias}\"");
+                attrsList.Add($"alias=\"{EscapeXml(alias)}\"");
             }
             if (groupBySet.Contains(columnName))
             {
                 attrsList.Add("groupby=\"true\"");
             }
 
-            emittedBaseColumns.Add(columnName);
+            // An aliased attribute comes back under its alias only, so it does not make the base column available
+            // to computed expressions (which then fetch it again, un-aliased).
+            if (alias is null)
+                emittedBaseColumns.Add(columnName);
             lines.Add($"    <attribute {string.Join(" ", attrsList)} />");
             return;
         }
@@ -788,7 +801,7 @@ public sealed class FetchXmlGenerator
 
         // Alias is required for aggregates in FetchXML
         var alias = explicitAlias ?? GenerateAlias(funcName);
-        attrs.Add($"alias=\"{alias}\"");
+        attrs.Add($"alias=\"{EscapeXml(alias)}\"");
 
         lines.Add($"    <attribute {string.Join(" ", attrs)} />");
     }
@@ -868,7 +881,7 @@ public sealed class FetchXmlGenerator
             var alias = FindDateGroupingAlias(funcName, columnName, selectElements)
                      ?? $"{dategrouping}_{attrName}";
 
-            lines.Add($"    <attribute name=\"{attrName}\" groupby=\"true\" dategrouping=\"{dategrouping}\" alias=\"{alias}\" />");
+            lines.Add($"    <attribute name=\"{attrName}\" groupby=\"true\" dategrouping=\"{dategrouping}\" alias=\"{EscapeXml(alias)}\" />");
         }
     }
 
@@ -1031,7 +1044,7 @@ public sealed class FetchXmlGenerator
     {
         var from = NormalizeName(join.FromColumn);
         var to = NormalizeName(join.ToColumn);
-        var aliasAttr = join.Alias is not null ? $" alias=\"{join.Alias}\"" : "";
+        var aliasAttr = join.Alias is not null ? $" alias=\"{EscapeXml(join.Alias)}\"" : "";
         var linkEntityName = NormalizeName(join.TableName);
 
         lines.Add($"    <link-entity name=\"{linkEntityName}\" from=\"{from}\" to=\"{to}\" link-type=\"{join.LinkType}\"{aliasAttr}>");
@@ -1062,7 +1075,7 @@ public sealed class FetchXmlGenerator
                         var alias = scalar.ColumnName?.Value;
                         if (alias is not null)
                         {
-                            lines.Add($"      <attribute name=\"{attrName}\" alias=\"{alias}\" />");
+                            lines.Add($"      <attribute name=\"{attrName}\" alias=\"{EscapeXml(alias)}\" />");
                         }
                         else
                         {
@@ -1303,9 +1316,10 @@ public sealed class FetchXmlGenerator
                 break;
 
             default:
-                // For other cases, just emit inner
-                EmitFilter(notExpr.Expression, lines, indent);
-                break;
+                // Emitting the inner condition would select exactly the rows NOT excludes.
+                throw new PPDS.Query.Parsing.QueryParseException(
+                    "NOT (...) is not supported in a WHERE clause sent to Dataverse. Write the condition without NOT " +
+                    "(for example IS NOT NULL, NOT IN, NOT LIKE or NOT BETWEEN).");
         }
     }
 
@@ -1563,7 +1577,7 @@ public sealed class FetchXmlGenerator
             var matchingAlias = FindMatchingAlias(orderColumnName, selectElements);
             if (matchingAlias is not null)
             {
-                lines.Add($"    <order alias=\"{matchingAlias}\" descending=\"{descending}\" />");
+                lines.Add($"    <order alias=\"{EscapeXml(matchingAlias)}\" descending=\"{descending}\" />");
                 return;
             }
         }
@@ -1659,18 +1673,21 @@ public sealed class FetchXmlGenerator
                 return realLit.Value;
 
             case NullLiteral:
-                return "";
+                // In SQL, = NULL and <> NULL match no rows; sending an empty value would match empty strings.
+                throw new PPDS.Query.Parsing.QueryParseException(
+                    "Comparing with NULL (= NULL, <> NULL, IN (NULL)) is not supported. Use IS NULL or IS NOT NULL.");
 
             case UnaryExpression unary when unary.UnaryExpressionType == UnaryExpressionType.Negative:
                 return $"-{FormatLiteralValue(unary.Expression)}";
 
             case VariableReference varRef:
-                // Variables are typically replaced before reaching here,
-                // but emit the variable name as a placeholder.
-                return varRef.Name;
+                // The variable's value is not available here; sending its name would compare with the text "@n".
+                throw new PPDS.Query.Parsing.QueryParseException(
+                    $"The variable {varRef.Name} cannot be used in a WHERE condition sent to Dataverse. Use a literal value.");
 
             default:
-                return "";
+                throw new PPDS.Query.Parsing.QueryParseException(
+                    $"The value {expression.GetType().Name} is not supported in a WHERE condition sent to Dataverse. Use a literal value.");
         }
     }
 
@@ -1679,18 +1696,32 @@ public sealed class FetchXmlGenerator
     /// </summary>
     private static string EscapeXml(string value)
     {
+        // Tab, CR and LF are encoded too: XML attribute normalisation would otherwise turn them into spaces.
         return value
             .Replace("&", "&amp;")
             .Replace("<", "&lt;")
             .Replace(">", "&gt;")
             .Replace("\"", "&quot;")
-            .Replace("'", "&apos;");
+            .Replace("'", "&apos;")
+            .Replace("\t", "&#9;")
+            .Replace("\n", "&#10;")
+            .Replace("\r", "&#13;");
     }
 
     /// <summary>
     /// Normalizes an entity or attribute name to lowercase.
     /// </summary>
-    private static string NormalizeName(string name) => name.ToLowerInvariant();
+    /// <summary>
+    /// Entity, attribute and link names are written into FetchXML as attribute values. Dataverse logical names are
+    /// letters, digits and underscores (a dot separates an alias), so anything else is refused rather than written:
+    /// a bracketed name could otherwise close the attribute and inject conditions.
+    /// </summary>
+    private static string NormalizeName(string name)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(name, @"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$"))
+            throw new PPDS.Query.Parsing.QueryParseException($"'{name}' is not a valid Dataverse table or column name.");
+        return name.ToLowerInvariant();
+    }
 
     #endregion
 }

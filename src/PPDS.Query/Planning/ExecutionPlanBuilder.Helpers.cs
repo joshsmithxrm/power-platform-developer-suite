@@ -795,7 +795,11 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private static int? ExtractTopFromQuerySpec(QuerySpecification querySpec)
     {
-        if (querySpec.TopRowFilter?.Expression is IntegerLiteral lit
+        // TOP 5 and TOP (5) are the same; other forms are refused by the FetchXML generator.
+        var expression = querySpec.TopRowFilter?.Expression;
+        while (expression is ParenthesisExpression paren)
+            expression = paren.Expression;
+        if (expression is IntegerLiteral lit
             && int.TryParse(lit.Value, out var top))
         {
             return top;

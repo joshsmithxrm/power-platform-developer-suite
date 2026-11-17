@@ -112,7 +112,7 @@ public static class StringFunctions
         {
             if (HasNull(args)) return null;
             var str = AsString(args[0])!;
-            return str.TrimEnd().Length;
+            return str.TrimEnd(' ').Length; // T-SQL LEN ignores trailing spaces only
         }
     }
 
@@ -196,7 +196,7 @@ public static class StringFunctions
         public object? Execute(object?[] args)
         {
             if (HasNull(args)) return null;
-            return AsString(args[0])!.Trim();
+            return AsString(args[0])!.Trim(' '); // T-SQL TRIM removes spaces only, not tabs or line breaks
         }
     }
 
@@ -209,7 +209,7 @@ public static class StringFunctions
         public object? Execute(object?[] args)
         {
             if (HasNull(args)) return null;
-            return AsString(args[0])!.TrimStart();
+            return AsString(args[0])!.TrimStart(' ');
         }
     }
 
@@ -222,7 +222,7 @@ public static class StringFunctions
         public object? Execute(object?[] args)
         {
             if (HasNull(args)) return null;
-            return AsString(args[0])!.TrimEnd();
+            return AsString(args[0])!.TrimEnd(' ');
         }
     }
 
