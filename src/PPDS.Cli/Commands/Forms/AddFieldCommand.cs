@@ -145,7 +145,8 @@ public static class AddFieldCommand
                     addedFields = result.AddedFields, alreadyPresentFields = result.AlreadyPresentFields,
                     duplicateRequests = result.DuplicateRequests, formXmlChanged = result.FormXmlChanged,
                     solutionAssociationRequested = result.SolutionAssociationRequested, publicationRequested = result.PublicationRequested,
-                    otherPlacements = result.OtherPlacements, nonCanonicalBindings = result.NonCanonicalBindings });
+                    otherPlacements = result.OtherPlacements, nonCanonicalBindings = result.NonCanonicalBindings,
+                    addedControls = result.AddedControls });
             }
             else
             {

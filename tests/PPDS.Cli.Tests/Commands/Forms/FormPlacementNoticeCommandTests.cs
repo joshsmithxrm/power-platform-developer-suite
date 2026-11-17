@@ -38,6 +38,33 @@ public sealed class FormPlacementNoticeCommandTests
     }
 
     [Fact]
+    [Trait("AC", "AC-72")]
+    public async Task AddField_Json_ReportsAssignedControlIdsAdditively()
+    {
+        var (exit, stdout, stderr) = await Run(AddFieldCommand.Create(Provider(null)),
+            ["--section", "General", "--field", "telephone1"], json: true);
+        Assert.True(exit == 0, stderr);
+        using var doc = JsonDocument.Parse(stdout);
+        var data = doc.RootElement.GetProperty("data");
+        // Additive: every pre-existing key is still present, in its original order, and the new key comes last.
+        Assert.Equal(new[] { "section", "fields", "message", "outcomeKnown", "addedCount", "alreadyPresentCount", "duplicateRequestCount",
+            "addedFields", "alreadyPresentFields", "duplicateRequests", "formXmlChanged", "solutionAssociationRequested",
+            "publicationRequested", "otherPlacements", "nonCanonicalBindings", "addedControls" }, data.EnumerateObject().Select(p => p.Name));
+        var added = Assert.Single(data.GetProperty("addedControls").EnumerateArray());
+        Assert.Equal(new[] { "field", "controlId" }, added.EnumerateObject().Select(p => p.Name));
+        Assert.Equal("telephone1", added.GetProperty("field").GetString());
+        Assert.Equal("telephone11", added.GetProperty("controlId").GetString());
+
+        // Nothing added (same-section re-add): the key is present and empty, not omitted.
+        var (noopExit, noopStdout, noopStderr) = await Run(AddFieldCommand.Create(Provider(null)),
+            ["--section", "General", "--field", "name"], json: true);
+        Assert.True(noopExit == 0, noopStderr);
+        using var noop = JsonDocument.Parse(noopStdout);
+        Assert.Equal(JsonValueKind.Array, noop.RootElement.GetProperty("data").GetProperty("addedControls").ValueKind);
+        Assert.Equal(0, noop.RootElement.GetProperty("data").GetProperty("addedControls").GetArrayLength());
+    }
+
+    [Fact]
     [Trait("AC", "AC-71")]
     public async Task AddField_Json_HasNonCanonicalBindingShape()
     {

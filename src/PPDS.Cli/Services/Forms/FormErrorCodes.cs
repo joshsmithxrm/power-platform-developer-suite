@@ -62,6 +62,6 @@ public static class FormErrorCodes
     /// <summary>A section with the same generated name already exists in the form.</summary>
     public const string DuplicateSectionName = "Forms.DuplicateSectionName";
 
-    /// <summary>A sub-grid control with the same generated name already exists in the form.</summary>
+    /// <summary>The sub-grid's generated name (<c>subgrid_&lt;label&gt;</c>) is already used in the form: by another sub-grid, or as the <c>id</c> of any other control (field controls included).</summary>
     public const string DuplicateSubgridName = "Forms.DuplicateSubgridName";
 }

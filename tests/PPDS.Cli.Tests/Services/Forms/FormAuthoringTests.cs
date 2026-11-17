@@ -48,6 +48,69 @@ public sealed class FormAuthoringTests
             q.Criteria.Conditions.Any(c => c.AttributeName == "objecttypecode" && (string)c.Values[0] == "account"));
     }
 
+    private static readonly Guid OtherSectionId = new("55555555-5555-5555-5555-555555555555");
+
+    private static string WithOtherSection(Action<XDocument>? transform = null)
+    {
+        var doc = XDocument.Parse(TimelineFormFixture.Xml);
+        doc.Descendants("sections").Single().Add(new XElement("section", new XAttribute("name", "section_other"),
+            new XAttribute("id", $"{{{OtherSectionId}}}"), new XAttribute("showlabel", "1"), new XAttribute("visible", "1"), new XAttribute("columns", "1"),
+            new XElement("labels", new XElement("label", new XAttribute("description", "Other"), new XAttribute("languagecode", "1033"))),
+            new XElement("rows")));
+        transform?.Invoke(doc);
+        return doc.ToString(SaveOptions.DisableFormatting);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-72")]
+    public async Task AddField_SecondSectionPlacement_GetsSuffixedControlId_AndRetryIsUnchanged()
+    {
+        using var h = new Harness { Draft = WithOtherSection() };
+        var existing = XDocument.Parse(h.Draft).Descendants("control").Single(c => (string?)c.Attribute("datafieldname") == "name");
+
+        var plan = await h.Service.AddFieldDraftAsync(h.Request() with { SectionId = OtherSectionId, FieldLogicalName = "NAME", DryRun = true, ExpectedDraftHash = FormService.ComputeDraftHash(h.Draft) });
+        plan.ControlId.Should().Be("name1");
+        h.Writes.Should().Be(0);
+        var result = await h.Service.AddFieldDraftAsync(h.Request() with { SectionId = OtherSectionId, FieldLogicalName = "NAME", ExpectedDraftHash = FormService.ComputeDraftHash(h.Draft) });
+
+        result.Status.Should().Be("saved-unpublished");
+        result.ControlId.Should().Be("name1");
+        var after = XDocument.Parse(h.Draft);
+        after.Descendants("control").Where(c => (string?)c.Attribute("datafieldname") == "name")
+            .Select(c => (string?)c.Attribute("id")).Should().Equal("name", "name1");
+        XNode.DeepEquals(existing, after.Descendants("control").First(c => (string?)c.Attribute("datafieldname") == "name")).Should().BeTrue();
+        FormXmlValidator.Validate(after);
+
+        var retry = await h.Service.AddFieldDraftAsync(h.Request() with { SectionId = OtherSectionId, FieldLogicalName = "name", ExpectedDraftHash = FormService.ComputeDraftHash(h.Draft) });
+        retry.Status.Should().Be("unchanged");
+        retry.ControlId.Should().BeNull();
+        h.Writes.Should().Be(1);
+    }
+
+    [Theory]
+    [Trait("AC", "AC-72")]
+    [InlineData("header")]
+    [InlineData("footer")]
+    public async Task AddField_ColumnInHeaderOrFooterWithBareId_GetsSuffix_AndSkipsOtherColumnNames(string area)
+    {
+        using var h = new Harness
+        {
+            Columns = ["name", "telephone1", "telephone11"],
+            Draft = WithOtherSection(doc => doc.Root!.Add(new XElement(area, new XAttribute("id", "{cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd}"),
+                new XElement("rows", new XElement("row", new XElement("cell", new XAttribute("id", "{abababab-abab-abab-abab-abababababab}"),
+                    new XElement("control", new XAttribute("id", "telephone1"), new XAttribute("datafieldname", "telephone1"),
+                        new XAttribute("classid", "{4273EDBD-AC1D-40d3-9FB2-095C621B552D}")))))))),
+        };
+        var result = await h.Service.AddFieldDraftAsync(h.Request() with { SectionId = OtherSectionId, ExpectedDraftHash = FormService.ComputeDraftHash(h.Draft) });
+        result.Status.Should().Be("saved-unpublished");
+        // telephone1 is taken by the bare header/footer id and telephone11 is a real column, so the placement is telephone12.
+        result.ControlId.Should().Be("telephone12");
+        var after = XDocument.Parse(h.Draft);
+        after.Root!.Element(area)!.Descendants("control").Single().Attribute("id")!.Value.Should().Be("telephone1");
+        after.Descendants("control").Select(c => (string?)c.Attribute("id")).Where(id => id is not null).Should().OnlyHaveUniqueItems();
+        FormXmlValidator.Validate(after);
+    }
+
     [Fact]
     public async Task RetryWithFreshHash_IsIdempotent_AndDoesNotAssociateTwice()
     {
@@ -131,6 +194,44 @@ public sealed class FormAuthoringTests
         result.DraftVerification.Status.Should().Be("not-attempted");
         result.DraftWrite.ErrorCode.Should().Be(cancelled ? "Operation.Cancelled" : "Forms.SubmissionFailed");
         h.Publications.Should().Be(0);
+    }
+
+    [Theory]
+    [Trait("AC", "AC-72")]
+    [InlineData("failed")]
+    [InlineData("unknown")]
+    [InlineData("verification-failed")]
+    public async Task ControlId_IsNullOnlyWhenTheDraftWriteDefinitelyFailed(string outcome)
+    {
+        // telephone1 is new to the fixture form, so the planned/submitted id is the bare "telephone1".
+        using var h = new Harness
+        {
+            IgnoreWrite = outcome != "unknown",
+            WriteFailure = outcome switch
+            {
+                "failed" => new FaultException<OrganizationServiceFault>(new OrganizationServiceFault { Message = "rejected" }),
+                "unknown" => new IOException("connection lost"),
+                _ => null
+            }
+        };
+        var result = await h.Service.AddFieldDraftAsync(h.Request());
+        result.Status.Should().Be("partial");
+        switch (outcome)
+        {
+            case "failed":
+                result.DraftWrite.Status.Should().Be("failed");
+                result.ControlId.Should().BeNull("no control was written");
+                break;
+            case "unknown":
+                result.DraftWrite.Status.Should().Be("unknown");
+                result.ControlId.Should().Be("telephone1", "the submitted id is kept, unconfirmed");
+                break;
+            default:
+                result.DraftWrite.Status.Should().Be("succeeded");
+                result.DraftVerification.Status.Should().Be("failed");
+                result.ControlId.Should().Be("telephone1", "the written id is kept, unconfirmed by readback");
+                break;
+        }
     }
 
     [Fact]
@@ -227,6 +328,7 @@ public sealed class FormAuthoringTests
         public string Published = TimelineFormFixture.Xml;
         public bool Managed, ManagedSolution, Optimistic, IgnoreWrite, IgnorePublish, Associated, MissingForm;
         public int FormType = 2;
+        public string[] Columns = ["name", "telephone1"];
         public bool Customizable = true;
         public int Writes, Associations, Publications;
         public string? PublishXml;
@@ -278,7 +380,8 @@ public sealed class FormAuthoringTests
                 });
             var metadata = new Mock<IMetadataQueryService>();
             metadata.Setup(m => m.GetAttributesAsync("account", null, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new[] { "name", "telephone1" }.Select(n => new AttributeMetadataDto { LogicalName = n, SchemaName = n, DisplayName = n, AttributeType = "String" }).ToArray());
+                .Returns(() => Task.FromResult<IReadOnlyList<AttributeMetadataDto>>(Columns
+                    .Select(n => new AttributeMetadataDto { LogicalName = n, SchemaName = n, DisplayName = n, AttributeType = "String" }).ToArray()));
             Confirmation.SetupGet(c => c.Context).Returns(new EnvironmentConfirmationContext("test-session", "test-identity", "https://forms.example.test"));
             Confirmation.Setup(c => c.EnsureConfirmedAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
             Service = new FormService(Pool.Object, metadata.Object, NullLogger<FormService>.Instance, Confirmation.Object, _coordinator);
