@@ -218,6 +218,8 @@ The VS Code extension surfaces query capabilities through webview panels served 
 
 **DML dry-run response:** A `query/sql` request with `dmlSafety.isDryRun=true` returns the side-effect-free preview through the standard response contract. The response sets `dryRun`, `plan`, `executedFetchXml`, `rowCap`, and `requiresConfirmationForExecution`; no executor is dispatched, so `queryMode` is omitted. Compound scripts recursively expose each control-flow branch and planned data statement, with per-statement FetchXML. The dry-run fields are omitted for ordinary query responses. Service-level streaming previews expose the same plan and DML safety metadata on their single completion chunk.
 
+**DML confirmation (Data Explorer and notebooks):** Every extension `query/sql` request that carries user SQL sends `dmlSafety`. The first attempt and every load-more page send `{ isConfirmed: false }`; the extension never classifies SQL itself. Only a `Query.DmlConfirmationRequired` answer opens a modal confirmation showing the statement and target environment, and only an explicit "Execute Anyway" sends one retry with `{ isConfirmed: true }`. Guard refusals (`Query.DmlBlocked`, `Query.DmlRowCapExceeded`, `Safety.ShakedownActive`) are shown as errors, and DML results with failed rows show counts and the reason. Acceptance criteria: [data-explorer.md](./data-explorer.md#dml-confirmation-and-failure-display) AC-DML-01 to AC-DML-08.
+
 ---
 
 ## Core Types
