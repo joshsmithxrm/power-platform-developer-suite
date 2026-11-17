@@ -505,6 +505,8 @@ Non-destructive tools only (create and update — no delete):
 
 All MCP tools support `dryRun` parameter. All use `McpToolBase` with `CreateScopeAsync()` per existing patterns.
 
+A `MetadataValidationException` from the authoring service is reported like the CLI reports it: the structured MCP error carries its `errorCode` (e.g. `INVALID_CONSTRAINT`), its message as `userMessage`, and the failing request field as `context.field` when known. Its inner exception is never read, so server diagnostic text stays withheld. Other non-PPDS exceptions keep the generic `Operation.Internal` error (AC-144).
+
 ### Constraints
 
 - All authoring methods use `IDataverseConnectionPool` — never create `ServiceClient` per request (Constitution D1)
@@ -793,6 +795,12 @@ Dry-runs keep their documented scopes. `optionset update` and `optionset add-opt
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
 | AC-143 | Dry-runs of `optionset update`, `optionset add-option` (with and without `--value`), `attribute create --choice` and `column create --option-set-name` report `globalChoiceNameChecked=false` and `targetExistenceChecked=false` in JSON and the not-looked-up line in text; other dry-runs omit both | `GlobalChoiceDryRunScopeTests.Json_PreviewSaysTheGlobalChoiceNameWasNotLookedUp`, `Text_DiagnosticSaysTheGlobalChoiceNameWasNotLookedUp`, `OtherDryRuns_DoNotReportAGlobalChoiceName` | ✅ |
+
+### MCP validation errors
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-144 | Every MCP authoring tool (add column, add option value, create choice/key/relationship/table, update choice/column/relationship/table) reports a metadata validation failure with its error code, message and `context.field` (omitted when the exception has no field) instead of `Operation.Internal`; through the real service an ambiguous case-variant choice name is `INVALID_CONSTRAINT` on field `Name`, and neither the inner fault's text nor synthetic secrets reach the payload | `MetadataValidationErrorMappingTests.Helper_ReportsCodeMessageAndField_WithoutTheInnerFault`, `Helper_WithoutField_OmitsContext`, `EveryAuthoringTool_ReportsTheValidationFailure`, `ActualService_AmbiguousChoiceName_IsInvalidConstraintAtMcpBoundary` | ✅ |
 
 ### Create-option presence and publisher warnings
 
@@ -1092,6 +1100,7 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 | 2026-11-17 | `optionset update` reads the choice as-if-published so unrequested properties keep their unpublished values (AC-141). |
 | 2026-11-17 | State the label-language rule; option, status-reason, state-value and global-choice updates merge labels and re-send unrequested option labels in every language (AC-142). |
 | 2026-11-17 | Recognise the global choice "not found" fault by its ObjectDoesNotExist code, with the English wording as fallback (AC-133/AC-134 amended); input-only dry-runs say the global choice name was not looked up (AC-143). |
+| 2026-11-17 | MCP reports metadata validation failures with their error code, message and field instead of a generic internal error (AC-144). |
 | 2026-11-16 | Follow-ups for #1530/#1531/#1535: global choice names resolve to the stored name on a not-found fault only, preserving every previous failure outcome except case ambiguity; delete confirms and deletes exactly the previewed stored name; update/remove targeting and global color readback read drafts, with a published/draft label agreement check; legacy `--options` accepts bare labels and rejects malformed or conflicting inputs for Choice columns; add-option dry-run marks omitted values unallocated (AC-133-AC-140, AC-72 amended). |
 | 2026-11-09 | Bound sixteen SDK/catalog user-message paths to service-owned action/target text; retain diagnostic causes and classifications, verify synthetic MCP privacy and update the intentional CLI message contract (AC-103 through AC-105). |
 | 2026-11-08 | Preserve covered color cancellation and normalize the selected acquisition boundaries with unchanged CLI exits; protect authentication diagnostic details at the MCP error boundary (AC-97 through AC-102). |

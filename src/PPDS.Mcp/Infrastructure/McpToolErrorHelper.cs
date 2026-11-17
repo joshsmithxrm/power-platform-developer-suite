@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ModelContextProtocol;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Dataverse.Metadata.Authoring;
 
 namespace PPDS.Mcp.Infrastructure;
 
@@ -48,15 +49,40 @@ public static class McpToolErrorHelper
     /// <summary>
     /// Throws an <see cref="McpException"/> carrying a generic error description for
     /// non-PPDS exceptions. Avoids leaking internal exception messages to MCP clients.
+    /// A <see cref="MetadataValidationException"/> from the shared metadata authoring service
+    /// is reported with its own error code, message and field instead (see
+    /// <see cref="ThrowMetadataValidationError"/>).
     /// </summary>
     /// <param name="ex">The originating exception.</param>
     /// <exception cref="McpException">Always thrown.</exception>
     public static void ThrowStructuredError(Exception ex)
     {
+        if (ex is MetadataValidationException validation)
+            ThrowMetadataValidationError(validation);
+
         var payload = new StructuredErrorPayload
         {
             ErrorCode = ErrorCodes.Operation.Internal,
             UserMessage = "An internal error occurred. See server logs for details."
+        };
+
+        var json = JsonSerializer.Serialize(payload, SerializerOptions);
+        throw new McpException(json, McpErrorCode.InternalError);
+    }
+
+    /// <summary>
+    /// Mirrors the CLI, which reports a metadata validation failure as its error code and message. The message is
+    /// service-owned text built from caller-supplied identifiers; the inner exception (for example a Dataverse
+    /// fault) is never read, so server diagnostic text stays withheld. The failing request field, when known, is
+    /// added as <c>context.field</c>.
+    /// </summary>
+    private static void ThrowMetadataValidationError(MetadataValidationException ex)
+    {
+        var payload = new StructuredErrorPayload
+        {
+            ErrorCode = ex.ErrorCode,
+            UserMessage = ex.Message,
+            Context = ex.Field is null ? null : new Dictionary<string, string?> { ["field"] = ex.Field }
         };
 
         var json = JsonSerializer.Serialize(payload, SerializerOptions);
