@@ -6,11 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Changed
-
-- Bundle the self-contained .NET 10 CLI on the existing four VSIX targets. No separate runtime install is needed; native OS dependencies still apply. Candidate validation executes the actual archived CLI on matching native hosts without contacting Dataverse or publishing a package.
-
-## [1.8.0] - 2026-11-01
+## [1.8.0] - Unreleased
 
 ### Added
 
@@ -18,14 +14,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Bundle the self-contained .NET 10.0.15 CLI on the existing four VSIX targets. No separate runtime install is needed; native OS dependencies still apply. Candidate validation executes the actual archived CLI on matching native hosts without contacting Dataverse or publishing a package.
+
 - Bundled the matching CLI 1.5.0 release, including bounded flow activation, form-write safeguards and plugin/web-resource reliability fixes. Update the Extension and bundled daemon together; missing or mismatched captured identity fails closed with recovery guidance.
-- Refreshed development/packaging tooling: `@vscode/vsce` 3.9.2 to 4.1.0, `@vscode/test-electron` 3.0.0 to 3.1.0, ESLint 10.5.0 to 10.13.0, typescript-eslint 8.70.0 to 8.72.1 and Stylelint 17.14.0 to 17.16.0 (#1494, #1455, #1451, #1454, #1496). Existing VS Code `^1.116.0` and Node 22 development requirements are retained.
-- This stable-channel release follows the even-minor convention. Per-cell environment overrides remain deferred; see the [coordinated notes and migration guidance](https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/docs/releases/v1.8.0.md).
+- Updated vscode-jsonrpc from 9.0.2 to 10.0.0 (#1510).
+- Refreshed development/packaging tooling: `@vscode/vsce` 3.9.2 to 4.1.0, `@vscode/test-electron` 3.0.0 to 3.1.0, ESLint 10.5.0 to 10.14.0, typescript-eslint 8.70.0 to 8.72.2 and Stylelint 17.14.0 to 17.16.0 (#1494, #1455, #1451, #1454, #1496, #1583, #1585).
+- Repository development/packaging tooling now uses Node 26. The VS Code requirement remains `^1.116.0`; Extension execution is separately qualified in its Node 22 host. Tooling Node versions do not redefine the Extension host runtime (#1445).
+- The planned stable-channel release follows the even-minor convention. Per-cell environment overrides remain deferred; see the [coordinated notes and migration guidance](https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/docs/releases/v1.8.0.md).
 
 ### Fixed
 
 - Plugin registration form payloads use the daemon's actual parent/field names and preserve intentional clear/false versus untouched settings. Shared form adapters hydrate actual image/configuration DTO fields; this does not add a step/image edit launcher.
 - Bound notebook runs independently to the selected environment and captured authentication identity during concurrent SQL/FetchXML runs, cancellation, queued execution, completion and conversion. Profile rename/reorder cannot redirect captured queries.
+- When the maximum number of Data Explorer panels is open and the oldest one, which a notebook query would reuse, is bound to a different environment or profile, opening the query now shows a warning and leaves that panel unchanged instead of loading the query into it.
 - Attributed outputs, errors, record links, exports and query history to the executed environment; preserved valid legacy notebooks with missing or partial environment metadata.
 
 ## [1.6.2] - 2026-10-30
