@@ -41,9 +41,7 @@ public class DmlAllowlistTests
     [InlineData("COALESCE(description, name)", "n0|d1|n2|d3")]
     [InlineData("ISNULL(description, 'none')", "none|d1|none|d3")]
     [InlineData("IIF(revenue > 1000, 'big', name)", "n0|n1|big|big")]
-    [InlineData("NULLIF(name, 'n1')", "n0|<null>|n2|n3")]
     [InlineData("CASE WHEN revenue > 1000 THEN 'big' ELSE 'small' END", "small|small|big|big")]
-    [InlineData("CASE name WHEN 'n0' THEN 'first' ELSE description END", "first|d1|<null>|d3")]
     [InlineData("CASE WHEN description IS NULL THEN 'none' ELSE description END", "none|d1|none|d3")]
     [InlineData("UPPER(name)", "N0|N1|N2|N3")]
     [InlineData("LOWER(UPPER(name))", "n0|n1|n2|n3")]
@@ -51,7 +49,6 @@ public class DmlAllowlistTests
     [InlineData("TRIM(name)", "n0|n1|n2|n3")]
     [InlineData("CONCAT(name, '-', description)", "n0-|n1-d1|n2-|n3-d3")]
     [InlineData("SUBSTRING(name, 2, 1)", "0|1|2|3")]
-    [InlineData("REPLACE(name, 'n', 'm')", "m0|m1|m2|m3")]
     [InlineData("(name)", "n0|n1|n2|n3")]
     public async Task SetExpression_ReadsTheRowsRealValues(string expression, string expected)
     {

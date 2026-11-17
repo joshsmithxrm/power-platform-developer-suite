@@ -120,6 +120,11 @@ public sealed class DmlFaithfulTests : IDisposable
     [InlineData("UPDATE account SET followupby = NULL WHERE name = 'n1'", "date/time column")]
     [InlineData("UPDATE account SET name = CONCAT(name, customertypecode) WHERE name = 'n1'", "choice column, which is not supported in a value")]
     [InlineData("INSERT INTO account (name) SELECT TOP 2 name FROM account WHERE revenue > 0 ORDER BY revenue", "not supported in ORDER BY")]
+    [InlineData("UPDATE account SET description = NULLIF(name, 'n1') WHERE name = 'n1'", "Comparing text inside a value")]
+    [InlineData("UPDATE account SET description = CASE name WHEN 'n0' THEN 'a' END WHERE name = 'n1'", "Comparing text inside a value")]
+    [InlineData("UPDATE account SET description = IIF(name = 'n0', 'a', 'b') WHERE name = 'n1'", "Comparing text inside a value")]
+    [InlineData("UPDATE account SET description = IIF(UPPER(name) > 'N', 'a', 'b') WHERE name = 'n1'", "Comparing text inside a value")]
+    [InlineData("UPDATE account SET description = REPLACE(name, 'n', 'm') WHERE name = 'n1'", "the function REPLACE")]
     public async Task NotLiveVerified_IsRefused(string sql, string named)
     {
         var h = DmlTestHarness.Create(rows: 4);
@@ -127,6 +132,21 @@ public sealed class DmlFaithfulTests : IDisposable
         var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
 
         Assert.Contains(named, ex.Message);
+        h.AssertNothingChanged();
+    }
+
+    [Theory]
+    [InlineData("DELETE FROM account WHERE name = 'n1' OR accountid IN (SELECT accountid FROM account WHERE name = 'n2')")]
+    [InlineData("DELETE FROM account WHERE (name IN (SELECT name FROM account))")]
+    [InlineData("DELETE FROM account WHERE name = 'n1' OR EXISTS (SELECT 1 FROM account)")]
+    [InlineData("DELETE FROM account WHERE NOT (name IN (SELECT name FROM account))")]
+    public async Task SubqueryInsideOrOrNot_IsRefusedBeforePlanning_NoStackOverflow(string sql)
+    {
+        var h = DmlTestHarness.Create(rows: 4);
+
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
+
+        Assert.Equal(PPDS.Cli.Infrastructure.Errors.ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
         h.AssertNothingChanged();
     }
 

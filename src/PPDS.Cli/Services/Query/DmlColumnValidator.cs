@@ -168,6 +168,10 @@ internal static class DmlColumnValidator
     {
         foreach (var column in ScalarColumnCollector.Collect(fragment))
             Proven(Column(columns, table, column), table, ValueReadTypes, "a value");
+        var comparisons = new ValueComparisonCheck(columns);
+        fragment.Accept(comparisons);
+        if (comparisons.Problem != null)
+            throw Refuse(comparisons.Problem);
         Read(columns, table, fragment);
     }
 
@@ -238,6 +242,47 @@ internal static class DmlColumnValidator
         public override void ExplicitVisit(ScalarSubquery node)
         {
         }
+    }
+
+    /// <summary>
+    /// A comparison the engine evaluates itself (IIF/CASE conditions, simple CASE, NULLIF) must be between numbers:
+    /// Dataverse compares text case- and accent-insensitively and ignores trailing spaces (observed live), the evaluator
+    /// compares ordinally ignoring case only, so a text comparison there could disagree with the same SQL in WHERE.
+    /// </summary>
+    private sealed class ValueComparisonCheck(Dictionary<string, AttributeMetadataDto> columns) : TSqlFragmentVisitor
+    {
+        public string? Problem { get; private set; }
+
+        public override void Visit(BooleanComparisonExpression node) => Check(node.FirstExpression, node.SecondExpression);
+
+        public override void Visit(NullIfExpression node) => Check(node.FirstExpression, node.SecondExpression);
+
+        public override void Visit(SimpleCaseExpression node)
+            => Check([node.InputExpression, .. node.WhenClauses.Select(w => w.WhenExpression)]);
+
+        public override void ExplicitVisit(ScalarSubquery node)
+        {
+        }
+
+        private void Check(params ScalarExpression[] operands)
+        {
+            if (Problem == null && !operands.All(IsNumber))
+            {
+                Problem = "Comparing text inside a value (IIF, CASE or NULLIF) is not supported: Dataverse compares text without regard " +
+                          "to accents or trailing spaces and the query engine would not. Compare numbers there, or filter with WHERE.";
+            }
+        }
+
+        private bool IsNumber(ScalarExpression expression) => expression switch
+        {
+            IntegerLiteral or NumericLiteral or RealLiteral => true,
+            UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative } unary => IsNumber(unary.Expression),
+            ParenthesisExpression paren => IsNumber(paren.Expression),
+            BinaryExpression binary => IsNumber(binary.FirstExpression) && IsNumber(binary.SecondExpression),
+            ColumnReferenceExpression column => columns.TryGetValue(column.MultiPartIdentifier.Identifiers.Last().Value, out var a)
+                                                && NumericTypes.Contains(a.AttributeType ?? ""),
+            _ => false
+        };
     }
 
     private sealed class FilterTypeCheck(Dictionary<string, AttributeMetadataDto> columns, string table) : TSqlFragmentVisitor

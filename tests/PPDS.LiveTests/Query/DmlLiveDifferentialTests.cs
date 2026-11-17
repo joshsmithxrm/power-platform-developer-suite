@@ -146,10 +146,8 @@ public sealed class DmlLiveDifferentialTests : LiveTestBase
         {
             ("COALESCE(ppds_note, ppds_name)", r => r.Note ?? r.Name),
             ("ISNULL(ppds_note, 'none')", r => r.Note ?? "none"),
-            ("NULLIF(ppds_name, 'alpha')", r => Eq(r.Name, "alpha") ? null : r.Name),
             ("IIF(ppds_num > 2, 'big', 'small')", r => r.Num > 2 ? "big" : "small"),
             ("CASE WHEN ppds_amount > 20 THEN 'hi' ELSE 'lo' END", r => r.Amount > 20 ? "hi" : "lo"),
-            ("CASE ppds_name WHEN 'alpha' THEN 'first' ELSE ppds_note END", r => Eq(r.Name, "alpha") ? "first" : r.Note),
             ("CASE WHEN ppds_note IS NULL THEN 'none' ELSE ppds_note END", r => r.Note ?? "none"),
             ("UPPER(ppds_name)", r => r.Name?.ToUpperInvariant()),
             ("LOWER(ppds_name)", r => r.Name?.ToLowerInvariant()),
@@ -158,7 +156,6 @@ public sealed class DmlLiveDifferentialTests : LiveTestBase
             ("TRIM(ppds_note)", r => r.Note?.Trim(' ')),
             ("CONCAT(ppds_name, '-', ppds_note)", r => (r.Name ?? "") + "-" + (r.Note ?? "")),
             ("SUBSTRING(ppds_name, 2, 3)", r => r.Name is null ? null : r.Name.Length < 2 ? "" : r.Name.Substring(1, Math.Min(3, r.Name.Length - 1))),
-            ("REPLACE(ppds_name, 'a', 'o')", r => r.Name?.Replace("a", "o", StringComparison.OrdinalIgnoreCase)),
             ("CAST(ppds_num AS nvarchar(10))", r => r.Num?.ToString(CultureInfo.InvariantCulture)),
             ("CONVERT(nvarchar(10), ppds_num)", r => r.Num?.ToString(CultureInfo.InvariantCulture)),
             ("'lit'", _ => "lit"),
@@ -227,6 +224,9 @@ public sealed class DmlLiveDifferentialTests : LiveTestBase
             $"UPDATE {t} SET ppds_when = '2024-01-01T00:00:00Z' WHERE ppds_num = 1",
             $"UPDATE {t} SET ppds_note = 'x' WHERE ppds_name = 'a' + 'b'",
             $"UPDATE {t} SET ppds_num = TRY_CAST(ppds_name AS int) WHERE ppds_num = 1",
+            $"UPDATE {t} SET ppds_note = NULLIF(ppds_name, 'alpha') WHERE ppds_num = 1",
+            $"UPDATE {t} SET ppds_note = REPLACE(ppds_name, 'a', 'o') WHERE ppds_num = 1",
+            $"DELETE FROM {t} WHERE ppds_num = 1 OR ppds_num IN (SELECT ppds_num FROM {t} WHERE ppds_num = 2)",
         })
         {
             await RefusedAsync(sql);

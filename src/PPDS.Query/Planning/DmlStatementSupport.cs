@@ -38,7 +38,8 @@ internal static class DmlStatementSupport
     /// <summary>Scalar functions proven (by tests) to evaluate correctly in DML values.</summary>
     public static readonly IReadOnlySet<string> AllowedFunctions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "UPPER", "LOWER", "LTRIM", "RTRIM", "TRIM", "LEN", "CONCAT", "SUBSTRING", "REPLACE", "ABS", "ROUND", "ISNULL"
+        // REPLACE is not listed: the organisation's collation matches text without regard to accents, the evaluator does not.
+        "UPPER", "LOWER", "LTRIM", "RTRIM", "TRIM", "LEN", "CONCAT", "SUBSTRING", "ABS", "ROUND", "ISNULL"
     };
 
     private static readonly Sql160ScriptGenerator Generator = new();
