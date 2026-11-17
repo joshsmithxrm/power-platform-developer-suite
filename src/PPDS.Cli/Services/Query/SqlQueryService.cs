@@ -522,39 +522,38 @@ public sealed class SqlQueryService : ISqlQueryService
             }
         }
 
-        // DML safety check
+        // DML safety check. A request without explicit options is checked with the defaults (not
+        // confirmed, not dry-run, default row cap): the guard fails closed instead of being skipped.
+        var dmlSafety = request.DmlSafety ?? new DmlSafetyOptions();
         int? dmlRowCap = null;
         DmlSafetyResult? safetyResult = null;
 
-        if (request.DmlSafety != null)
+        var plannedStatement = ExtractPlannedStatement(fragment);
+
+        safetyResult = _dmlSafetyGuard.Check(
+            plannedStatement, dmlSafety,
+            EnvironmentSafetySettings, EnvironmentProtectionLevel);
+
+        if (safetyResult.IsBlocked)
         {
-            var plannedStatement = ExtractPlannedStatement(fragment);
-
-            safetyResult = _dmlSafetyGuard.Check(
-                plannedStatement, request.DmlSafety,
-                EnvironmentSafetySettings, EnvironmentProtectionLevel);
-
-            if (safetyResult.IsBlocked)
-            {
-                throw new PpdsException(
-                    safetyResult.ErrorCode ?? ErrorCodes.Query.DmlBlocked,
-                    safetyResult.BlockReason ?? "DML operation blocked by safety guard.");
-            }
-
-            // A dry-run is the confirmation preview, not an execution attempt. Keep the
-            // confirmation requirement on the result so callers know actual execution is
-            // still gated, but do not require --confirm merely to build the side-effect-free
-            // plan. Hard safety blocks above (for example, UPDATE/DELETE without WHERE) still
-            // apply to previews.
-            if (safetyResult.ContainsDml && safetyResult.RequiresConfirmation && !safetyResult.IsDryRun)
-            {
-                throw new PpdsException(
-                    ErrorCodes.Query.DmlConfirmationRequired,
-                    "DML operations require --confirm to execute. Use --dry-run to preview the operation.");
-            }
-
-            dmlRowCap = safetyResult.RowCap;
+            throw new PpdsException(
+                safetyResult.ErrorCode ?? ErrorCodes.Query.DmlBlocked,
+                safetyResult.BlockReason ?? "DML operation blocked by safety guard.");
         }
+
+        // A dry-run is the confirmation preview, not an execution attempt. Keep the
+        // confirmation requirement on the result so callers know actual execution is
+        // still gated, but do not require --confirm merely to build the side-effect-free
+        // plan. Hard safety blocks above (for example, UPDATE/DELETE without WHERE) still
+        // apply to previews.
+        if (safetyResult.ContainsDml && safetyResult.RequiresConfirmation && !safetyResult.IsDryRun)
+        {
+            throw new PpdsException(
+                ErrorCodes.Query.DmlConfirmationRequired,
+                "DML operations require --confirm to execute. Use --dry-run to preview the operation.");
+        }
+
+        dmlRowCap = safetyResult.RowCap;
 
         // For aggregate queries, fetch metadata needed for partitioning decisions.
         // A DML dry-run must remain side-effect-free, including avoiding Dataverse
@@ -616,7 +615,7 @@ public sealed class SqlQueryService : ISqlQueryService
         }
 
         // Check cross-environment DML policy after planning
-        CheckCrossEnvironmentDmlPolicy(fragment, planResult, request.DmlSafety, safetyResult);
+        CheckCrossEnvironmentDmlPolicy(fragment, planResult, dmlSafety, safetyResult);
 
         return (fragment, planResult, safetyResult, executionOptions, hints);
     }
@@ -1056,11 +1055,9 @@ public sealed class SqlQueryService : ISqlQueryService
     private void CheckCrossEnvironmentDmlPolicy(
         TSqlFragment fragment,
         QueryPlanResult planResult,
-        DmlSafetyOptions? dmlSafety,
+        DmlSafetyOptions dmlSafety,
         DmlSafetyResult? safetyResult)
     {
-        if (dmlSafety == null) return;
-
         var plannedStatement = ExtractPlannedStatement(fragment);
         foreach (var targetLabel in DetectCrossEnvironmentDmlTargets(fragment, safetyResult))
         {

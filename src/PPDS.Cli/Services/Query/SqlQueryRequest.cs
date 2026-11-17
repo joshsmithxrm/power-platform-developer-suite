@@ -39,9 +39,10 @@ public sealed record SqlQueryRequest
     public bool UseTdsEndpoint { get; init; }
 
     /// <summary>
-    /// DML safety options. When non-null, the service validates DML statements
-    /// (DELETE, UPDATE, INSERT) before execution. When null, DML safety checks
-    /// are skipped (e.g., for non-CLI callers that handle safety externally).
+    /// DML safety options. The service always validates DML statements (DELETE, UPDATE, INSERT)
+    /// before execution. When null, the defaults apply: not confirmed, not a dry-run, default row cap,
+    /// so DML is refused with <c>Query.DmlConfirmationRequired</c>. Callers must pass explicit options
+    /// (for example <c>IsConfirmed</c>) to run DML. SELECT-only requests are unaffected.
     /// </summary>
     public DmlSafetyOptions? DmlSafety { get; init; }
 

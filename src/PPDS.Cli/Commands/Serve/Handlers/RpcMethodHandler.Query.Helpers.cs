@@ -195,6 +195,30 @@ public partial class RpcMethodHandler
         return fetchXml.Substring(0, insertPoint) + $" top=\"{top}\"" + fetchXml.Substring(insertPoint);
     }
 
+    /// <summary>
+    /// Maps the RPC request to the shared service request. A client that omits <c>dmlSafety</c> gets
+    /// the default (unconfirmed) options, so DML is refused with <c>Query.DmlConfirmationRequired</c>
+    /// until the client explicitly sends <c>dmlSafety.isConfirmed</c> (or <c>isDryRun</c>).
+    /// </summary>
+    internal static SqlQueryRequest BuildSqlRequest(QuerySqlRequest request) => new()
+    {
+        Sql = request.Sql,
+        TopOverride = request.Top,
+        PageNumber = request.Page,
+        PagingCookie = request.PagingCookie,
+        IncludeCount = request.Count,
+        UseTdsEndpoint = request.UseTds,
+        DmlSafety = request.DmlSafety != null
+            ? new DmlSafetyOptions
+            {
+                IsConfirmed = request.DmlSafety.IsConfirmed,
+                IsDryRun = request.DmlSafety.IsDryRun,
+                NoLimit = request.DmlSafety.NoLimit,
+                RowCap = request.DmlSafety.RowCap,
+            }
+            : new DmlSafetyOptions(),
+    };
+
     internal static QueryResultResponse MapToResponse(SqlQueryResult result)
     {
         var response = MapToResponse(result.Result, result.TranspiledFetchXml);

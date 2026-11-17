@@ -133,7 +133,7 @@ The plan-based pipeline (introduced by the v2 execution plan layer) replaces the
 
 1. **Parse**: `SqlLexer` tokenizes input → `SqlParser` builds `ISqlStatement` AST
 2. **Extract hints**: `QueryHintParser.Parse(fragment)` extracts `-- ppds:*` hints
-3. **DML safety**: `DmlSafetyGuard.Check()` blocks unsafe DML (no-WHERE DELETE/UPDATE) and requires confirmation for execution. `--dry-run` is the side-effect-free preview path and never requires execution confirmation, while hard blocks (including cross-environment read-only policy) remain enforced.
+3. **DML safety**: `DmlSafetyGuard.Check()` blocks unsafe DML (no-WHERE DELETE/UPDATE) and requires confirmation for execution. A request that carries no `DmlSafety` options is guarded with the defaults (not confirmed, not dry-run, default row cap) rather than skipping the guard, so every surface fails closed; callers that mean to run DML must pass explicit options. `--dry-run` is the side-effect-free preview path and never requires execution confirmation, while hard blocks (including cross-environment read-only policy) remain enforced.
 4. **Plan**: `ExecutionPlanBuilder` builds `IQueryPlanNode` tree (FetchXmlScanNode → ProjectNode for standard queries; RemoteScanNode for cross-env; TdsScanNode for TDS)
 5. **Execute plan**: For dry-run, return the plan without dispatching any executor; otherwise walk the plan tree and dispatch to the appropriate executors
 6. **Expand**: `SqlQueryResultExpander` adds `*name` columns from formatted values

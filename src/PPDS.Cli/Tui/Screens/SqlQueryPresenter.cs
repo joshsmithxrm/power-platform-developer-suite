@@ -394,7 +394,10 @@ internal sealed class SqlQueryPresenter : IDisposable
                     Sql = _lastSql,
                     PageNumber = _lastPageNumber + 1,
                     PagingCookie = _lastPagingCookie,
-                    EnablePrefetch = true
+                    EnablePrefetch = true,
+                    // Load-more re-reads the last statement; it must never run DML. Explicit
+                    // unconfirmed options make a DML-containing script fail the guard here.
+                    DmlSafety = new DmlSafetyOptions()
                 };
 
                 var result = await service.ExecuteAsync(request, cancellationToken);

@@ -306,24 +306,7 @@ public partial class RpcMethodHandler
             }
 
             // Build the shared request
-            var sqlRequest = new SqlQueryRequest
-            {
-                Sql = request.Sql,
-                TopOverride = request.Top,
-                PageNumber = request.Page,
-                PagingCookie = request.PagingCookie,
-                IncludeCount = request.Count,
-                UseTdsEndpoint = request.UseTds,
-                DmlSafety = request.DmlSafety != null
-                    ? new DmlSafetyOptions
-                    {
-                        IsConfirmed = request.DmlSafety.IsConfirmed,
-                        IsDryRun = request.DmlSafety.IsDryRun,
-                        NoLimit = request.DmlSafety.NoLimit,
-                        RowCap = request.DmlSafety.RowCap,
-                    }
-                    : null,
-            };
+            var sqlRequest = BuildSqlRequest(request);
 
             try
             {
