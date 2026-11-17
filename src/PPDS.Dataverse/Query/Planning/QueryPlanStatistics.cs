@@ -36,6 +36,9 @@ public sealed class QueryPlanStatistics
     /// <summary>Paging cookie from the last fetched page (for caller-controlled paging).</summary>
     public string? LastPagingCookie { get; set; }
 
+    /// <summary>Message of the first failed row of a DML statement, if any row failed.</summary>
+    public string? DmlFirstError { get; set; }
+
     /// <summary>Whether more records are available after the last fetched page.</summary>
     public bool LastMoreRecords { get; set; }
 

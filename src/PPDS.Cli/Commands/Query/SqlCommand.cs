@@ -326,8 +326,17 @@ public static class SqlCommand
                 return ExitCodes.Success;
             }
 
+            var dmlExitCode = DmlExitCode(queryResult.Result);
+            var dmlFailure = dmlExitCode == ExitCodes.Success
+                ? null
+                : BuildDmlFailureError(queryResult.Result, queryResult.DmlFirstError);
+
             switch (globalOptions.OutputFormat)
             {
+                case OutputFormat.Json when dmlFailure != null:
+                    // Same data payload, but success=false plus a results[] entry naming the first failure.
+                    writer.WritePartialSuccess(queryResult.Result, new[] { ItemResult.Fail("dml", dmlFailure) });
+                    break;
                 case OutputFormat.Json:
                     writer.WriteSuccess(queryResult.Result);
                     break;
@@ -342,7 +351,13 @@ public static class SqlCommand
                     break;
             }
 
-            return DmlExitCode(queryResult.Result);
+            if (dmlFailure != null && globalOptions.OutputFormat != OutputFormat.Json)
+            {
+                // Status goes to stderr; stdout stays data-only.
+                Console.Error.WriteLine($"Error: {dmlFailure.Message}");
+            }
+
+            return dmlExitCode;
         }
         catch (QueryParseException ex)
         {
@@ -451,6 +466,19 @@ public static class SqlCommand
 
         var succeeded = sq.Value is long s && s > 0;
         return succeeded ? ExitCodes.PartialSuccess : ExitCodes.Failure;
+    }
+
+    internal static StructuredError BuildDmlFailureError(QueryResult result, string? firstError)
+    {
+        var row = result.Records[0];
+        var failed = (long)row["failed_rows"].Value!;
+        var affected = row["affected_rows"].Value is long a ? a : 0;
+        var message = affected > 0
+            ? $"DML partially succeeded: {affected} row(s) affected, {failed} row(s) failed."
+            : $"DML failed: all {failed} row(s) failed.";
+        if (!string.IsNullOrWhiteSpace(firstError))
+            message += $" First error: {firstError}";
+        return StructuredError.Create(ErrorCodes.Query.ExecutionFailed, message);
     }
 
     private static async Task<string> GetSqlAsync(

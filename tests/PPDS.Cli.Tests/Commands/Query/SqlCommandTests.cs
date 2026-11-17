@@ -520,6 +520,53 @@ public class SqlCommandTests
         Assert.Equal(ExitCodes.PartialSuccess, exitCode);
     }
 
+    private static QueryResult DmlResult(long affected, long failed) => new()
+    {
+        EntityLogicalName = "solution",
+        Columns = new[]
+        {
+            new QueryColumn { LogicalName = "affected_rows" },
+            new QueryColumn { LogicalName = "failed_rows" }
+        },
+        Records = new[]
+        {
+            new Dictionary<string, QueryValue>
+            {
+                ["affected_rows"] = QueryValue.Simple(affected),
+                ["failed_rows"] = QueryValue.Simple(failed)
+            }
+        },
+        Count = 1
+    };
+
+    [Fact]
+    public void BuildDmlFailureError_AllFailed_NamesFirstReason()
+    {
+        var error = SqlCommand.BuildDmlFailureError(DmlResult(0, 1), "CreateMultiple not supported for 'solution'");
+
+        Assert.Contains("all 1 row(s) failed", error.Message);
+        Assert.Contains("CreateMultiple not supported for 'solution'", error.Message);
+    }
+
+    [Fact]
+    public void BuildDmlFailureError_Partial_ReportsCounts()
+    {
+        var error = SqlCommand.BuildDmlFailureError(DmlResult(45, 5), "boom");
+
+        Assert.Contains("45 row(s) affected", error.Message);
+        Assert.Contains("5 row(s) failed", error.Message);
+        Assert.Contains("boom", error.Message);
+    }
+
+    [Fact]
+    public void BuildDmlFailureError_NoReason_StillReportsCounts()
+    {
+        var error = SqlCommand.BuildDmlFailureError(DmlResult(0, 3), null);
+
+        Assert.Contains("all 3 row(s) failed", error.Message);
+        Assert.DoesNotContain("First error", error.Message);
+    }
+
     [Fact]
     public void DmlExitCode_DmlWithOnlyFailures_ReturnsFailure()
     {

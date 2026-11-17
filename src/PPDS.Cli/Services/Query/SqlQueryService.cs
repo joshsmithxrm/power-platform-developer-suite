@@ -256,7 +256,8 @@ public sealed class SqlQueryService : ISqlQueryService
             Result = expandedResult,
             DataSources = dataSources,
             AppliedHints = appliedHints,
-            ExecutionMode = DetectExecutionMode(planResult.RootNode)
+            ExecutionMode = DetectExecutionMode(planResult.RootNode),
+            DmlFirstError = context.Statistics.DmlFirstError
         };
     }
 

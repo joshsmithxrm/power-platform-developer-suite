@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using PPDS.Dataverse.BulkOperations;
@@ -202,6 +203,18 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         yield return new QueryRow(values, EntityLogicalName);
     }
 
+    private static (long Success, long Failure) Summarize(
+        QueryPlanContext context,
+        BulkOperationResult result)
+    {
+        if (result.FailureCount > 0 && context.Statistics.DmlFirstError == null)
+        {
+            var message = result.Errors.FirstOrDefault(e => !string.IsNullOrWhiteSpace(e.Message))?.Message;
+            context.Statistics.DmlFirstError = message ?? "The operation failed without an error message.";
+        }
+        return (result.SuccessCount, result.FailureCount);
+    }
+
     private static readonly IReadOnlyDictionary<string, QueryValue> EmptyRow =
         new Dictionary<string, QueryValue>();
 
@@ -235,7 +248,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             progress: progress,
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        return (result.SuccessCount, result.FailureCount);
+        return Summarize(context, result);
     }
 
     private async System.Threading.Tasks.Task<(long Success, long Failure)> ExecuteInsertSelectAsync(
@@ -291,7 +304,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             progress: progress,
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        return (result.SuccessCount, result.FailureCount);
+        return Summarize(context, result);
     }
 
     private async System.Threading.Tasks.Task<(long Success, long Failure)> ExecuteUpdateAsync(
@@ -337,7 +350,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             progress: progress,
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        return (result.SuccessCount, result.FailureCount);
+        return Summarize(context, result);
     }
 
     private async System.Threading.Tasks.Task<(long Success, long Failure)> ExecuteDeleteAsync(
@@ -372,7 +385,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             progress: progress,
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        return (result.SuccessCount, result.FailureCount);
+        return Summarize(context, result);
     }
 
     /// <summary>

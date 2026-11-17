@@ -226,6 +226,36 @@ public class DmlExecuteNodeCoercionTests
     }
 
     [Fact]
+    public async Task InsertValues_AllRowsFail_RecordsFirstErrorInStatistics()
+    {
+        var bulk = new ConfigurableBulkExecutor(0, 1, "The 'CreateMultiple' method does not support entities of type 'solution'.");
+        var context = new QueryPlanContext(new StubQueryExecutor(), bulkOperationExecutor: bulk);
+        var node = DmlExecuteNode.InsertValues(
+            "solution",
+            new[] { "friendlyname" },
+            new IReadOnlyList<CompiledScalarExpression>[] { new CompiledScalarExpression[] { _ => "x" } });
+
+        await foreach (var _ in node.ExecuteAsync(context, CancellationToken.None)) { }
+
+        Assert.Contains("does not support entities of type 'solution'", context.Statistics.DmlFirstError);
+    }
+
+    [Fact]
+    public async Task InsertValues_NoFailures_LeavesFirstErrorNull()
+    {
+        var bulk = new ConfigurableBulkExecutor(1, 0, "ignored");
+        var context = new QueryPlanContext(new StubQueryExecutor(), bulkOperationExecutor: bulk);
+        var node = DmlExecuteNode.InsertValues(
+            "account",
+            new[] { "name" },
+            new IReadOnlyList<CompiledScalarExpression>[] { new CompiledScalarExpression[] { _ => "x" } });
+
+        await foreach (var _ in node.ExecuteAsync(context, CancellationToken.None)) { }
+
+        Assert.Null(context.Statistics.DmlFirstError);
+    }
+
+    [Fact]
     public async Task Update_WithFailures_IncludesFailureCountInResult()
     {
         var petId = Guid.NewGuid();
@@ -422,12 +452,23 @@ public class DmlExecuteNodeCoercionTests
     {
         private readonly int _successCount;
         private readonly int _failureCount;
+        private readonly string? _errorMessage;
 
-        public ConfigurableBulkExecutor(int successCount, int failureCount)
+        public ConfigurableBulkExecutor(int successCount, int failureCount, string? errorMessage = null)
         {
             _successCount = successCount;
             _failureCount = failureCount;
+            _errorMessage = errorMessage;
         }
+
+        private BulkOperationResult Result() => new()
+        {
+            SuccessCount = _successCount,
+            FailureCount = _failureCount,
+            Errors = _errorMessage == null
+                ? Array.Empty<BulkOperationError>()
+                : new[] { new BulkOperationError { Index = 0, Message = _errorMessage } }
+        };
 
         public Task<BulkOperationResult> CreateMultipleAsync(
             string entityLogicalName,
@@ -436,7 +477,7 @@ public class DmlExecuteNodeCoercionTests
             DataverseClientOptions? clientOptions = null,
             IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default)
-            => Task.FromResult(new BulkOperationResult { SuccessCount = _successCount, FailureCount = _failureCount });
+            => Task.FromResult(Result());
 
         public Task<BulkOperationResult> UpdateMultipleAsync(
             string entityLogicalName,
@@ -445,7 +486,7 @@ public class DmlExecuteNodeCoercionTests
             DataverseClientOptions? clientOptions = null,
             IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default)
-            => Task.FromResult(new BulkOperationResult { SuccessCount = _successCount, FailureCount = _failureCount });
+            => Task.FromResult(Result());
 
         public Task<BulkOperationResult> UpsertMultipleAsync(
             string entityLogicalName,
@@ -454,7 +495,7 @@ public class DmlExecuteNodeCoercionTests
             DataverseClientOptions? clientOptions = null,
             IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default)
-            => Task.FromResult(new BulkOperationResult { SuccessCount = _successCount, FailureCount = _failureCount });
+            => Task.FromResult(Result());
 
         public Task<BulkOperationResult> DeleteMultipleAsync(
             string entityLogicalName,
@@ -463,7 +504,7 @@ public class DmlExecuteNodeCoercionTests
             DataverseClientOptions? clientOptions = null,
             IProgress<ProgressSnapshot>? progress = null,
             CancellationToken cancellationToken = default)
-            => Task.FromResult(new BulkOperationResult { SuccessCount = _successCount, FailureCount = _failureCount });
+            => Task.FromResult(Result());
     }
 
     private sealed class StaticPlanNode : IQueryPlanNode

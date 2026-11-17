@@ -403,6 +403,7 @@ The implementation ([`QueryHistoryService.cs:52-98`](../src/PPDS.Cli/Services/Hi
 | `FileNotFoundException` | History file missing | Return empty list |
 | `PpdsException(DmlBlocked)` | DML without WHERE clause | Block execution, tell user to add WHERE or use `ppds truncate` |
 | `PpdsException(DmlConfirmationRequired)` | Actual DML was requested without confirmation | Require `--confirm` for execution (CLI exit code 11); `--dry-run` previews without confirmation |
+| DML rows failed (result `failed_rows > 0`) | One or more rows of an executed INSERT/UPDATE/DELETE failed | CLI exit code 1 (some rows succeeded) or 2 (none did); JSON envelope has `success=false` with the unchanged `data` plus a `results[]` entry naming the first failure; text/CSV print the error to stderr |
 | `PpdsException(TdsIncompatible)` | TDS requested but query can't use TDS | Fail with reason (DML, incompatible entity, unsupported feature) |
 | `PpdsException(TdsConnectionFailed)` | TDS endpoint disabled or unreachable | Fail with clear error, suggest disabling TDS mode |
 | Unknown environment label | `[LABEL].entity` where label not in `EnvironmentConfigStore` | Error: "No environment found matching label '{label}'" |

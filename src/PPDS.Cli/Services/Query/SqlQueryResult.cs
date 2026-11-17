@@ -54,4 +54,10 @@ public sealed class SqlQueryResult
     /// The actual execution path used. Null for transpile-only or dry-run results.
     /// </summary>
     public QueryExecutionMode? ExecutionMode { get; init; }
+
+    /// <summary>
+    /// For executed DML: the message of the first row that failed. Null when no row failed
+    /// or the statement was not DML.
+    /// </summary>
+    public string? DmlFirstError { get; init; }
 }
