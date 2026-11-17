@@ -571,22 +571,39 @@ public static class OptionSetCommand
                 Console.Error.WriteLine();
             }
 
+            var requestedName = name;
             var preview = await MetadataDeletePreview.InspectDependenciesAsync(authoringService,
-                new MetadataDeleteTarget(MetadataDeleteKind.GlobalChoice, solution, Name: name), cancellationToken);
+                new MetadataDeleteTarget(MetadataDeleteKind.GlobalChoice, solution, Name: requestedName), cancellationToken);
+
+            // #1535: the preview may resolve a case variant to the stored name. Everything after this point
+            // (preview output, confirmation, deletion, result) names the stored name that was inspected.
+            name = preview.TargetName ?? requestedName;
+            var resolution = DescribeNameResolution(requestedName, name);
+            if (resolution != null)
+                Console.Error.WriteLine(resolution);
+
             if (dryRun || !preview.IsClear)
-                return MetadataDeletePreview.WriteDependencies(writer, new { name, dryRun, preview }, preview);
+                return MetadataDeletePreview.WriteDependencies(writer, new { name, requestedName, dryRun, preview }, preview);
+
+            // The delete is pinned to the previewed object; never send it unpinned.
+            if (preview.TargetObjectId is null)
+            {
+                writer.WriteError(StructuredError.Create(ErrorCodes.Operation.Internal,
+                    "The deletion preview did not identify the target object; nothing was deleted."));
+                return ExitCodes.Failure;
+            }
 
             // Confirmation prompt
             if (!force)
             {
-                if (!Console.IsInputRedirected)
+                if (!IsInputRedirected())
                 {
+                    var (warning, expectedConfirmation) = BuildDeleteConfirmation(requestedName, name);
                     Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.Error.WriteLine($"WARNING: This will permanently delete global option set '{name}'.");
+                    Console.Error.WriteLine(warning);
                     Console.ResetColor();
                     Console.Error.WriteLine();
 
-                    var expectedConfirmation = $"DELETE OPTIONSET {name}";
                     Console.Error.Write($"Type '{expectedConfirmation}' to confirm, or Ctrl+C to cancel: ");
                     var confirmation = Console.ReadLine();
 
@@ -612,18 +629,21 @@ public static class OptionSetCommand
                 Console.Error.WriteLine($"Deleting global option set '{name}'...");
             }
 
+            // Delete exactly the previewed object: the stored name, pinned to the previewed metadata id, with
+            // no second case-insensitive resolution. A rename or re-create in between is refused.
             var deleteRequest = new DeleteGlobalChoiceRequest
             {
                 SolutionUniqueName = solution,
                 Name = name,
-                DryRun = false
+                DryRun = false,
+                ExpectedMetadataId = preview.TargetObjectId
             };
 
             await authoringService.DeleteGlobalChoiceAsync(deleteRequest, ct: cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new { name, deleted = true });
+                writer.WriteSuccess(new { name, requestedName, deleted = true });
             }
             else
             {
@@ -767,16 +787,19 @@ public static class OptionSetCommand
             };
 
             var assignedValue = await authoringService.AddOptionValueAsync(request, ct: cancellationToken);
+            // #1530: an omitted value is reported as unallocated (server-assigned), never as a number.
+            var previewScope = dryRun && !value.HasValue
+                ? MetadataDryRunScope.ServerAssignedValue : MetadataDryRunScope.RequestedValue;
 
             if (globalOptions.IsJsonMode)
             {
                 // On dry-run the SDK never assigns a value, so report the requested one
-                // (null = would be auto-assigned at execution time).
-                MetadataDryRunScope.RequestedValue.WriteSuccess(writer, dryRun, new { optionSetName = name, label, value = dryRun ? value : assignedValue, dryRun });
+                // (null = would be auto-assigned at execution time; preview.optionValueAllocation says so).
+                previewScope.WriteSuccess(writer, dryRun, new { optionSetName = name, label, value = dryRun ? value : assignedValue, dryRun });
             }
             else if (dryRun)
             {
-                MetadataDryRunScope.RequestedValue.WriteDiagnostic();
+                previewScope.WriteDiagnostic();
             }
             else
             {
@@ -1284,6 +1307,27 @@ public static class OptionSetCommand
             writer.WriteError(error);
             return ExceptionMapper.ToExitCode(ex);
         }
+    }
+
+    /// <summary>
+    /// Test seam for the interactive delete confirmation: whether stdin is redirected. Production always uses
+    /// <see cref="Console.IsInputRedirected"/>; tests substitute it so the real prompt path can be driven.
+    /// </summary>
+    internal static Func<bool> IsInputRedirected { get; set; } = () => Console.IsInputRedirected;
+
+    /// <summary>The stderr note shown when a typed global choice name resolved to a different stored spelling.</summary>
+    internal static string? DescribeNameResolution(string requestedName, string storedName)
+        => string.Equals(requestedName, storedName, StringComparison.Ordinal)
+            ? null
+            : $"Global choice '{requestedName}' resolved to stored name '{storedName}'.";
+
+    /// <summary>The delete warning and the exact phrase to type; both always name the stored name.</summary>
+    internal static (string Warning, string Confirmation) BuildDeleteConfirmation(string requestedName, string storedName)
+    {
+        var warning = $"WARNING: This will permanently delete global option set '{storedName}'.";
+        if (!string.Equals(requestedName, storedName, StringComparison.Ordinal))
+            warning += $" ('{requestedName}' resolved to this stored name.)";
+        return (warning, $"DELETE OPTIONSET {storedName}");
     }
 
     internal static OptionDefinition[] ParseOptionDefinitions(string raw)

@@ -160,13 +160,18 @@ public sealed class MetadataCreateOptionAllocationTests(ITestOutputHelper output
     [Theory]
     [InlineData("choice")]
     [InlineData("global")]
+    [InlineData("choice-legacy-csv")] // #1530: attribute/column create --options "Automatic,..." no longer drops bare labels.
     [Trait("AC", "AC-110")]
+    [Trait("AC", "AC-137")]
     public async Task ActualCliParser_LabelOnlyAndZero_ReachRealService(string route)
     {
         using var f = new Fixture(route);
-        var options = route == "global"
-            ? OptionSetCommand.ParseOptionDefinitions("Automatic,Zero=0,Reserved=718980000")
-            : AttributeCommandGroup.ParseOptionSpecs(["Automatic", "Zero:0", "Reserved:718980000"], null, null)!;
+        var options = route switch
+        {
+            "global" => OptionSetCommand.ParseOptionDefinitions("Automatic,Zero=0,Reserved=718980000"),
+            "choice-legacy-csv" => AttributeCommandGroup.ParseOptionSpecs(null, null, "Automatic,Zero=0,Reserved=718980000")!,
+            _ => AttributeCommandGroup.ParseOptionSpecs(["Automatic", "Zero:0", "Reserved:718980000"], null, null)!
+        };
         await f.Run(options);
         Assert.Equal(new[] { First + 1, 0, First }, f.Values);
         f.AssertReturnedAndRouted();

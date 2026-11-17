@@ -92,8 +92,9 @@ public sealed class MetadataDraftOptionReadTests
     {
         using var f = new Fixture(kind);
         await f.UpdateAsync(10000, "#654321");
-        Assert.False(f.Reads.First().RetrieveAsIfPublished); // Target resolution stays published.
-        Assert.True(f.Reads.Last().RetrieveAsIfPublished); // Shared color readback includes drafts.
+        Assert.All(f.Reads, r => Assert.True(r.RetrieveAsIfPublished)); // Target resolution and color readback include drafts (#1531).
+        // With no NewLabel the current DRAFT label is re-sent, so an unpublished label edit is not reverted.
+        Assert.Equal("Draft label", Assert.Single(f.Requests.OfType<SdkUpdateOption>()).Label.LocalizedLabels[0].Label);
         var update = Assert.Single(f.Requests.OfType<UpdateAttributeRequest>());
         var options = Assert.IsAssignableFrom<EnumAttributeMetadata>(update.Attribute).OptionSet.Options;
         Assert.Contains(options, o => o.Value == 10001);
@@ -147,13 +148,190 @@ public sealed class MetadataDraftOptionReadTests
     [InlineData("status", true)]
     [InlineData("choice", true)]
     [InlineData("choices", true)]
-    public async Task UpdateAndRemove_TargetResolutionRemainsPublished(string kind, bool remove)
+    [Trait("AC", "AC-72")]
+    public async Task UpdateAndRemove_TargetResolutionReadsDrafts(string kind, bool remove)
+    {
+        // #1531: 10001 exists only in unpublished (draft) metadata. It used to fail with OptionNotFound.
+        using var f = new Fixture(kind);
+        if (remove) await f.RemoveAsync(10001); else await f.UpdateAsync(10001);
+        Assert.True(Assert.Single(f.Reads).RetrieveAsIfPublished);
+        if (remove) Assert.Equal(10001, (int)Assert.Single(f.Requests.OfType<SdkDeleteOption>()).Value);
+        else
+        {
+            var update = Assert.Single(f.Requests.OfType<SdkUpdateOption>());
+            Assert.Equal(10001, update.Value);
+            Assert.Equal("Unpublished", update.Label.LocalizedLabels[0].Label); // Current draft label preserved.
+        }
+        f.AssertRoutingAndCancellation();
+    }
+
+    [Theory]
+    [InlineData("status", false)]
+    [InlineData("choice", false)]
+    [InlineData("choices", false)]
+    [InlineData("status", true)]
+    [InlineData("choice", true)]
+    [InlineData("choices", true)]
+    [Trait("AC", "AC-72")]
+    public async Task AddThenUpdateOrRemove_WithoutPublish_TargetsTheNewOption(string kind, bool remove)
     {
         using var f = new Fixture(kind);
-        var ex = await Assert.ThrowsAsync<MetadataValidationException>(() => remove ? f.RemoveAsync(10001) : f.UpdateAsync(10001));
+        var added = await f.AddAsync(); // Unpublished insert; derived from drafts as 10002.
+        Assert.Equal(10002, added);
+        if (remove) await f.RemoveAsync(added); else await f.UpdateAsync(added);
+        Assert.DoesNotContain(f.Requests, r => r.RequestName == "PublishXml");
+        if (remove) Assert.Equal(added, (int)Assert.Single(f.Requests.OfType<SdkDeleteOption>()).Value);
+        else Assert.Equal(added, Assert.Single(f.Requests.OfType<SdkUpdateOption>()).Value);
+        Assert.All(f.Reads, r => Assert.True(r.RetrieveAsIfPublished));
+        f.AssertRoutingAndCancellation();
+    }
+
+    [Theory]
+    [InlineData("status", false)]
+    [InlineData("choice", false)]
+    [InlineData("choices", false)]
+    [InlineData("status", true)]
+    [InlineData("choice", true)]
+    [InlineData("choices", true)]
+    [Trait("AC", "AC-72")]
+    public async Task UpdateAndRemove_MissingFromDrafts_StillOptionNotFound(string kind, bool remove)
+    {
+        using var f = new Fixture(kind);
+        var ex = await Assert.ThrowsAsync<MetadataValidationException>(() => remove ? f.RemoveAsync(55555) : f.UpdateAsync(55555));
         Assert.Equal(MetadataErrorCodes.OptionNotFound, ex.ErrorCode);
-        Assert.False(Assert.Single(f.Reads).RetrieveAsIfPublished);
+        Assert.True(Assert.Single(f.Reads).RetrieveAsIfPublished);
         Assert.Single(f.Requests);
+    }
+
+    [Theory]
+    [InlineData("status", false)]
+    [InlineData("choice", false)]
+    [InlineData("choices", false)]
+    [InlineData("status", true)]
+    [InlineData("choice", true)]
+    [InlineData("choices", true)]
+    [Trait("AC", "AC-140")]
+    public async Task LabelTarget_PublishedAndDraftDisagree_IsRefusedAndNothingIsWritten(string kind, bool remove)
+    {
+        // Review scenario: published 1="Open", 2="Closed"; drafts relabel 1="Closed", 2="Done".
+        // A listing shows 2="Closed", so --label Closed must not act on value 1.
+        using var f = new Fixture(kind, draft: [(1, "Closed"), (2, "Done")], published: [(1, "Open"), (2, "Closed")]);
+        var ex = await Assert.ThrowsAsync<MetadataValidationException>(() => remove ? f.RemoveByLabelAsync("Closed") : f.UpdateByLabelAsync("Closed"));
+        Assert.Equal(MetadataErrorCodes.InvalidConstraint, ex.ErrorCode);
+        Assert.Contains("--value", ex.Message);
+        Assert.Contains("publish", ex.Message);
+        Assert.DoesNotContain(f.Requests, r => r is SdkUpdateOption or SdkDeleteOption);
+        Assert.Equal(new[] { true, false }, f.Reads.Select(r => r.RetrieveAsIfPublished));
+    }
+
+    [Theory]
+    [InlineData("status", false)]
+    [InlineData("choice", false)]
+    [InlineData("choices", false)]
+    [InlineData("status", true)]
+    [InlineData("choice", true)]
+    [InlineData("choices", true)]
+    [Trait("AC", "AC-140")]
+    public async Task LabelTarget_SameOptionInDraftsButSeveralInPublished_IsRefused(string kind, bool remove)
+    {
+        // Drafts: only 1 is "Open". Published listing shows "Open" on 1 and 2.
+        using var f = new Fixture(kind, draft: [(1, "Open"), (2, "Reopened")], published: [(1, "Open"), (2, "Open")]);
+        var ex = await Assert.ThrowsAsync<MetadataValidationException>(() => remove ? f.RemoveByLabelAsync("Open") : f.UpdateByLabelAsync("Open"));
+        Assert.Equal(MetadataErrorCodes.InvalidConstraint, ex.ErrorCode);
+        Assert.DoesNotContain(f.Requests, r => r is SdkUpdateOption or SdkDeleteOption);
+    }
+
+    [Theory]
+    [InlineData("status", false)]
+    [InlineData("choice", false)]
+    [InlineData("choices", false)]
+    [InlineData("status", true)]
+    [InlineData("choice", true)]
+    [InlineData("choices", true)]
+    [Trait("AC", "AC-140")]
+    public async Task LabelTarget_OnlyInPublishedView_IsRefused(string kind, bool remove)
+    {
+        // Published 1="Open"; drafts relabel it "Reopened". --label Open would be OPTION_NOT_FOUND in drafts,
+        // although the listing shows it; refuse with guidance instead.
+        using var f = new Fixture(kind, draft: [(1, "Reopened")], published: [(1, "Open")]);
+        var ex = await Assert.ThrowsAsync<MetadataValidationException>(() => remove ? f.RemoveByLabelAsync("Open") : f.UpdateByLabelAsync("Open"));
+        Assert.Equal(MetadataErrorCodes.InvalidConstraint, ex.ErrorCode);
+        Assert.DoesNotContain(f.Requests, r => r is SdkUpdateOption or SdkDeleteOption);
+    }
+
+    [Theory]
+    [InlineData("status", false)]
+    [InlineData("choice", false)]
+    [InlineData("choices", true)]
+    [InlineData("status", true)]
+    [Trait("AC", "AC-140")]
+    public async Task LabelTarget_AgreeingOrDraftOnly_Proceeds(string kind, bool remove)
+    {
+        // "Same" resolves to 1 in both views; "Fresh" exists only in drafts (unpublished relabel/add).
+        using var f = new Fixture(kind, draft: [(1, "Same"), (2, "Fresh")], published: [(1, "Same"), (2, "Stale")]);
+        if (remove) { await f.RemoveByLabelAsync("Same"); await f.RemoveByLabelAsync("Fresh"); }
+        else { await f.UpdateByLabelAsync("Same"); await f.UpdateByLabelAsync("Fresh"); }
+        var values = remove
+            ? f.Requests.OfType<SdkDeleteOption>().Select(r => r.Value)
+            : f.Requests.OfType<SdkUpdateOption>().Select(r => r.Value);
+        Assert.Equal(new[] { 1, 2 }, values);
+    }
+
+    [Theory]
+    [InlineData("status", false)]
+    [InlineData("choice", false)]
+    [InlineData("status", true)]
+    [InlineData("choice", true)]
+    [Trait("AC", "AC-136")]
+    public async Task UpdateAndRemove_CallerCancellation_PropagatesInsteadOfSdkFailure(string kind, bool remove)
+    {
+        var f = new Fixture(kind);
+        using (f)
+        {
+            f.WriteFailureFactory = () => { f.Cancel(); return f.Cancellation; };
+            var ex = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => remove ? f.RemoveAsync(10000) : f.UpdateAsync(10000));
+            Assert.Same(f.Cancellation, ex);
+            Assert.True(ex.CancellationToken.IsCancellationRequested);
+        }
+    }
+
+    [Theory]
+    [InlineData("status", false)]
+    [InlineData("choice", false)]
+    [InlineData("status", true)]
+    [InlineData("choice", true)]
+    [Trait("AC", "AC-136")]
+    public async Task UpdateAndRemove_NonCallerCancellation_KeepsSdkFailure(string kind, bool remove)
+    {
+        // A transport-level cancellation (caller's token not cancelled) may hide a committed write, so it keeps
+        // the previous SDK_OPERATION_FAILED reporting.
+        using var f = new Fixture(kind);
+        var transport = new TaskCanceledException("Synthetic HTTP-layer timeout");
+        f.WriteFailureFactory = () => transport;
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => remove ? f.RemoveAsync(10000) : f.UpdateAsync(10000));
+        Assert.Equal(MetadataErrorCodes.SdkOperationFailed, ex.ErrorCode);
+        Assert.Same(transport, ex.InnerException);
+    }
+
+    [Theory]
+    [InlineData("status", false)]
+    [InlineData("choice", false)]
+    [InlineData("status", true)]
+    [InlineData("choice", true)]
+    [Trait("AC", "AC-136")]
+    public async Task UpdateAndRemove_SdkFault_SurfacesFaultCodeOnly(string kind, bool remove)
+    {
+        const string serverText = "Synthetic server diagnostic that must stay private.";
+        using var f = new Fixture(kind)
+        {
+            WriteFailure = new System.ServiceModel.FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040203), Message = serverText }, serverText)
+        };
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => remove ? f.RemoveAsync(10000) : f.UpdateAsync(10000));
+        Assert.Equal(MetadataErrorCodes.SdkOperationFailed, ex.ErrorCode);
+        Assert.Contains("Dataverse fault 0x80040203.", ex.UserMessage);
+        Assert.DoesNotContain(serverText, ex.UserMessage);
+        Assert.Same(f.WriteFailure, ex.InnerException);
     }
 
     [Theory]
@@ -208,7 +386,8 @@ public sealed class MetadataDraftOptionReadTests
         private readonly string _kind;
         private readonly Mock<IDataverseConnectionPool> _pool = new(MockBehavior.Strict);
         private readonly Mock<IPooledClient> _client = new(MockBehavior.Loose);
-        private readonly List<(int Value, string Label)> _draft = [(10000, "Draft label"), (10001, "Unpublished")];
+        private readonly List<(int Value, string Label)> _draft;
+        private readonly List<(int Value, string Label)> _published;
         private readonly List<CancellationToken> _tokens = [];
         public List<OrganizationRequest> Requests { get; } = [];
         public IEnumerable<RetrieveAttributeRequest> Reads => Requests.OfType<RetrieveAttributeRequest>();
@@ -217,12 +396,17 @@ public sealed class MetadataDraftOptionReadTests
         public OperationCanceledException Cancellation { get; }
         public int CancelReadNumber { get; init; }
         public Exception? InsertFailure { get; init; }
+        public Exception? WriteFailure { get; init; }
+        public Func<Exception>? WriteFailureFactory { get; set; }
+        public void Cancel() => _cancellationSource.Cancel();
         public string Attribute => _kind == "status" ? "statuscode" : "new_choice";
         public DataverseMetadataAuthoringService Service { get; }
 
-        public Fixture(string kind)
+        public Fixture(string kind, List<(int Value, string Label)>? draft = null, List<(int Value, string Label)>? published = null)
         {
             _kind = kind;
+            _draft = draft ?? [(10000, "Draft label"), (10001, "Unpublished")];
+            _published = published ?? [(10000, "Published")];
             Cancellation = new OperationCanceledException(Token);
             _pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
                 .Callback<DataverseClientOptions?, string?, CancellationToken>((_, _, token) => _tokens.Add(token))
@@ -236,7 +420,7 @@ public sealed class MetadataDraftOptionReadTests
                     {
                         case RetrieveAttributeRequest read:
                             if (Reads.Count() == CancelReadNumber) throw Cancellation;
-                            var values = read.RetrieveAsIfPublished ? _draft : [(10000, "Published")];
+                            var values = read.RetrieveAsIfPublished ? _draft : _published;
                             var set = new OptionSetMetadata { IsGlobal = false };
                             foreach (var (value, label) in values)
                             {
@@ -264,10 +448,14 @@ public sealed class MetadataDraftOptionReadTests
                             response.Results["NewOptionValue"] = assigned;
                             return Task.FromResult(response);
                         case SdkUpdateOption:
+                            if (WriteFailureFactory != null) throw WriteFailureFactory();
+                            if (WriteFailure != null) throw WriteFailure;
                             return Task.FromResult<OrganizationResponse>(new UpdateOptionValueResponse());
                         case UpdateAttributeRequest:
                             return Task.FromResult<OrganizationResponse>(new UpdateAttributeResponse());
                         case SdkDeleteOption:
+                            if (WriteFailureFactory != null) throw WriteFailureFactory();
+                            if (WriteFailure != null) throw WriteFailure;
                             return Task.FromResult<OrganizationResponse>(new DeleteOptionValueResponse());
                         default: throw new InvalidOperationException("Unexpected SDK request in offline fixture.");
                     }
@@ -288,6 +476,14 @@ public sealed class MetadataDraftOptionReadTests
         public Task<int> AddAsync(int? value = null, bool dryRun = false, string? color = null) => _kind == "status"
             ? Service.AddStatusReasonAsync(new AddStatusReasonRequest { EntityLogicalName = "new_table", Label = "New", StateCode = 0, Value = value, SolutionUniqueName = value.HasValue ? null : "test_solution", DryRun = dryRun, Color = color }, ct: Token)
             : Service.AddColumnOptionAsync(new AddColumnOptionRequest { EntityLogicalName = "new_table", ColumnLogicalName = Attribute, Label = "New", Value = value, SolutionUniqueName = value.HasValue ? null : "test_solution", DryRun = dryRun, Color = color }, Token);
+
+        public Task UpdateByLabelAsync(string label) => _kind == "status"
+            ? Service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = "new_table", Label = label, NewLabel = "Renamed" }, Token)
+            : Service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = "new_table", ColumnLogicalName = Attribute, Label = label, NewLabel = "Renamed" }, Token);
+
+        public Task RemoveByLabelAsync(string label) => _kind == "status"
+            ? Service.RemoveStatusReasonAsync(new RemoveStatusReasonRequest { EntityLogicalName = "new_table", Label = label }, Token)
+            : Service.RemoveColumnOptionAsync(new RemoveColumnOptionRequest { EntityLogicalName = "new_table", ColumnLogicalName = Attribute, Label = label }, Token);
 
         public Task UpdateAsync(int value, string? color = null) => _kind == "status"
             ? Service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = "new_table", Value = value, Color = color }, Token)

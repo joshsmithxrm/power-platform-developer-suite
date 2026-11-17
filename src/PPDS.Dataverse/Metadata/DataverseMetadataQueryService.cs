@@ -340,16 +340,26 @@ public class DataverseMetadataQueryService : IMetadataQueryService
 
         _logger?.LogInformation("Retrieving option set {Name}", name);
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
-
-        var request = new RetrieveOptionSetRequest
+        RetrieveOptionSetResponse response;
+        try
         {
-            Name = name
-        };
+            response = await RetrieveOptionSetByNameAsync(name, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && IsOptionSetNotFoundFault(ex, name))
+        {
+            // #1535: Dataverse stores global choice names in canonical (usually lower-case) form. The exact
+            // spelling is always tried first; only an "option set not found" fault lists the published catalog
+            // (any other failure propagates untouched). A single case-insensitive match is retried under its
+            // stored name. Otherwise (no match, an ambiguous match, the exact spelling is itself stored, or the
+            // listing fails) the original fault is rethrown, so existing not-found handling and the CLI's
+            // not-found hint are unchanged.
+            var canonical = await TryResolveOptionSetCaseVariantAsync(name, cancellationToken).ConfigureAwait(false);
+            if (canonical is null)
+                throw;
 
-        var response = (RetrieveOptionSetResponse)await client.ExecuteAsync(request, cancellationToken)
-            .ConfigureAwait(false);
+            _logger?.LogInformation("Option set {Name} resolved to stored name {StoredName}", name, canonical);
+            response = await RetrieveOptionSetByNameAsync(canonical, cancellationToken).ConfigureAwait(false);
+        }
 
         var result = MapToOptionSetMetadata(response.OptionSetMetadata);
 
@@ -358,6 +368,91 @@ public class DataverseMetadataQueryService : IMetadataQueryService
 
         return result;
     }
+
+    // Each attempt acquires and releases its own pooled lease.
+    private async Task<RetrieveOptionSetResponse> RetrieveOptionSetByNameAsync(string name, CancellationToken cancellationToken)
+    {
+        await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        var request = new RetrieveOptionSetRequest
+        {
+            Name = name
+        };
+
+        return (RetrieveOptionSetResponse)await client.ExecuteAsync(request, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Returns the stored spelling of <paramref name="name"/> when exactly one published global choice matches it
+    /// case-insensitively and none matches it exactly; otherwise null.
+    /// </summary>
+    private async Task<string?> TryResolveOptionSetCaseVariantAsync(string name, CancellationToken cancellationToken)
+    {
+        OptionSetMetadataBase[]? definitions;
+        try
+        {
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            var response = await client.ExecuteAsync(new RetrieveAllOptionSetsRequest(), cancellationToken)
+                .ConfigureAwait(false);
+            definitions = (response as RetrieveAllOptionSetsResponse)?.OptionSetMetadata;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw; // The caller's cancellation always propagates.
+        }
+        catch (Exception ex)
+        {
+            // Includes an OperationCanceledException not raised by the caller's token: the lookup failure must
+            // never replace the original not-found fault.
+            _logger?.LogDebug(ex, "Could not list global option sets to resolve {Name}", name);
+            return null;
+        }
+
+        if (definitions is null)
+            return null;
+
+        var matches = definitions
+            .Where(d => string.Equals(d?.Name, name, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (matches.Length != 1 || string.Equals(matches[0].Name, name, StringComparison.Ordinal))
+            return null;
+
+        return matches[0].Name;
+    }
+
+    /// <summary>
+    /// The anchored phrases of Dataverse's "option set not found" fault. The recorded server text is
+    /// "Could not find an optionset with name statuscode" (docs/qa/shakedown-v1-2026-04-20.md). This mirrors the
+    /// authoring service's recognition (that copy lives in PPDS.Cli, which this assembly cannot reference); keep
+    /// the two in step.
+    /// </summary>
+    private static readonly string[] OptionSetNotFoundPhrases =
+        ["Could not find an optionset with name", "Could not find an option set with"];
+
+    /// <summary>
+    /// True only for the "option set not found" fault about <paramref name="requestedName"/>: the fault text must
+    /// contain an anchored phrase (ordinal, case-insensitive) AND the requested name.
+    /// </summary>
+    private static bool IsOptionSetNotFoundFault(Exception exception, string requestedName)
+    {
+        Exception? current = exception;
+        for (var depth = 0; depth < 8 && current is not null; depth++, current = current.InnerException)
+        {
+            if (current is System.ServiceModel.FaultException<OrganizationServiceFault> { Detail: not null } fault)
+                return IsOptionSetNotFoundText(fault.Detail.Message, requestedName) || IsOptionSetNotFoundText(fault.Message, requestedName);
+        }
+
+        return false;
+    }
+
+    private static bool IsOptionSetNotFoundText(string? text, string requestedName)
+        => !string.IsNullOrEmpty(text)
+           && !string.IsNullOrEmpty(requestedName)
+           && OptionSetNotFoundPhrases.Any(phrase => text.Contains(phrase, StringComparison.OrdinalIgnoreCase))
+           && text.Contains(requestedName, StringComparison.OrdinalIgnoreCase);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<EntityKeyDto>> GetKeysAsync(

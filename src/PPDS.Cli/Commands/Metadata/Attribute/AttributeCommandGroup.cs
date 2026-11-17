@@ -121,7 +121,7 @@ public static class AttributeCommandGroup
 
         var optionsOption = new Option<string?>("--options")
         {
-            Description = "[Legacy] Local Choice options as CSV: \"Label1=1,Label2=2\""
+            Description = "[Legacy] Local Choice options as CSV: \"Label1=1,Label2=2\"; a bare Label's value is derived from --solution. Labels cannot contain ',' or '=' in this form; use --option or --options-file for such labels"
         };
 
         var optionOption = new Option<string[]?>("--option")
@@ -249,7 +249,11 @@ public static class AttributeCommandGroup
             OptionDefinition[]? options;
             try
             {
-                options = ParseOptionSpecs(optionArgs, optionsFile, optionsRaw);
+                // #1530: the strict grammar (bare labels, malformed-entry and conflicting-input rejection) applies
+                // only where option definitions matter. On other column types the inputs are parsed as before.
+                options = type is SchemaColumnType.Choice or SchemaColumnType.Choices
+                    ? ParseOptionSpecs(optionArgs, optionsFile, optionsRaw)
+                    : ParseOptionSpecsPreviousBehavior(optionArgs, optionsFile, optionsRaw);
             }
             catch (Exception ex)
             {
@@ -268,33 +272,39 @@ public static class AttributeCommandGroup
         return command;
     }
 
+    /// <summary>
+    /// Parses the legacy comma-separated <c>--options</c> grammar with the same rules as
+    /// <c>optionset create --options</c> (#1530): <c>Label=Value</c> keeps its explicit value (including 0),
+    /// a bare <c>Label</c> becomes a label-only option whose value is allocated like <c>--option "Label"</c>,
+    /// and a malformed non-empty entry throws <see cref="FormatException"/> instead of being silently dropped.
+    /// Returns null when no entries are supplied.
+    /// </summary>
     internal static OptionDefinition[]? ParseOptionDefinitions(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
             return null;
 
-        var result = new List<OptionDefinition>();
-
-        foreach (var pair in raw.Split(','))
-        {
-            var trimmed = pair.Trim();
-            var lastEquals = trimmed.LastIndexOf('=');
-            if (lastEquals > 0 && int.TryParse(trimmed[(lastEquals + 1)..].Trim(), out var value))
-            {
-                result.Add(new OptionDefinition { Label = trimmed[..lastEquals].Trim(), Value = value });
-            }
-        }
-
-        return result.Count > 0 ? result.ToArray() : null;
+        var result = OptionSetCommand.ParseOptionDefinitions(raw);
+        return result.Length > 0 ? result : null;
     }
 
     /// <summary>
     /// Parses local Choice option definitions from repeatable --option specs ("Label[:Value][:#Color]"),
     /// a JSON --options-file, or the legacy --options CSV. Returns null when none are supplied.
+    /// Supplying more than one of these sources is rejected (#1530) rather than silently ignoring one,
+    /// consistent with how --choice is rejected alongside the local-option inputs.
     /// Throws <see cref="FormatException"/> / <see cref="FileNotFoundException"/> on malformed input.
     /// </summary>
     internal static OptionDefinition[]? ParseOptionSpecs(string[]? optionArgs, string? optionsFile, string? legacyCsv)
     {
+        var supplied = new List<string>();
+        if (optionArgs is { Length: > 0 }) supplied.Add("--option");
+        if (!string.IsNullOrWhiteSpace(optionsFile)) supplied.Add("--options-file");
+        if (!string.IsNullOrWhiteSpace(legacyCsv)) supplied.Add("--options");
+        if (supplied.Count > 1)
+            throw new FormatException(
+                $"{string.Join(" and ", supplied)} each define the local option set; supply only one of --option, --options-file or --options.");
+
         if (optionArgs is { Length: > 0 })
         {
             var list = optionArgs
@@ -308,6 +318,42 @@ public static class AttributeCommandGroup
             return ParseOptionsFile(optionsFile);
 
         return ParseOptionDefinitions(legacyCsv);
+    }
+
+    /// <summary>
+    /// The pre-#1530 parse, kept for column types that ignore option definitions so a stray value behaves as it
+    /// did before: first supplied source wins, and the legacy CSV keeps only <c>Label=integer</c> entries.
+    /// </summary>
+    internal static OptionDefinition[]? ParseOptionSpecsPreviousBehavior(string[]? optionArgs, string? optionsFile, string? legacyCsv)
+    {
+        if (optionArgs is { Length: > 0 })
+        {
+            var list = optionArgs.Where(s => !string.IsNullOrWhiteSpace(s)).Select(ParseOptionSpec).ToList();
+            return list.Count > 0 ? list.ToArray() : null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(optionsFile))
+            return ParseOptionsFile(optionsFile);
+
+        return ParseOptionDefinitionsPreviousBehavior(legacyCsv);
+    }
+
+    /// <summary>The pre-#1530 legacy CSV parse: only <c>Label=integer</c> entries are kept.</summary>
+    internal static OptionDefinition[]? ParseOptionDefinitionsPreviousBehavior(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        var result = new List<OptionDefinition>();
+        foreach (var pair in raw.Split(','))
+        {
+            var trimmed = pair.Trim();
+            var lastEquals = trimmed.LastIndexOf('=');
+            if (lastEquals > 0 && int.TryParse(trimmed[(lastEquals + 1)..].Trim(), out var value))
+                result.Add(new OptionDefinition { Label = trimmed[..lastEquals].Trim(), Value = value });
+        }
+
+        return result.Count > 0 ? result.ToArray() : null;
     }
 
     /// <summary>Parses a single "Label[:Value][:#Color]" option spec.</summary>
