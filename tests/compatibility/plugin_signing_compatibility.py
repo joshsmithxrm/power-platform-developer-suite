@@ -74,7 +74,9 @@ BASE64_SHA512 = r"[A-Za-z0-9+/]{86}=="
 REFERENCE_PACKAGE = "microsoft.netframework.referenceassemblies.net462"
 # Where MSBuild finds an installed .NET Framework 4.6.2 targeting pack, under ProgramFiles(x86).
 TARGETING_PACK = ("Reference Assemblies", "Microsoft", "Framework", ".NETFramework", "v4.6.2")
-# The first package verification on a fresh host may fetch revocation data; later ones are bounded.
+INSTALLED_PACK = PureWindowsPath(*PureWindowsPath(FIXED_SIGNER).parts[:2], *TARGETING_PACK)
+# The first package verification of each build may fetch revocation data on a fresh host; the
+# others in that build are bounded.
 FIRST_VERIFICATION_TIMEOUT, VERIFICATION_TIMEOUT = 600, 120
 
 # This trusted, metadata-only probe never loads target code. Its bytes are bound
@@ -513,25 +515,36 @@ def validate_build_record(value, plan, control):
         require(row["id"].lower() not in ids, "Duplicate resolved dependency observation")
         ids.add(row["id"].lower())
     require({"minver", "microsoft.sourcelink.github"} <= ids, "Required build dependencies missing")
-    validate_reference_assemblies(value.get("reference_assemblies"), packages)
+    validate_reference_assemblies(value.get("reference_assemblies"), packages, props.get("TargetFrameworkDirectory"))
 
 
-def validate_reference_assemblies(value, packages):
+def windows_key(value):
+    # Case- and trailing-separator-insensitive form of a Windows path, for comparison only.
+    return str(PureWindowsPath(value)).rstrip("\\").lower()
+
+
+def validate_reference_assemblies(value, packages, reported):
     # Exactly one source of .NET Framework 4.6.2 reference assemblies: the restored package
     # (bound by its signature row) or an installed targeting pack (directory and file hashes).
+    # Either must be the directory the recorded TargetFrameworkDirectory names first.
     rows = [row for row in packages if row["id"].lower() == REFERENCE_PACKAGE]
     require(isinstance(value, dict) and value.get("kind") in {"package", "targeting-pack"},
             "Reference assembly observation required")
+    entries = [entry for entry in reported.split(";") if entry.strip()] if isinstance(reported, str) else []
+    require(entries, "Reference assembly directory missing")
+    primary = PureWindowsPath(entries[0])
     if value["kind"] == "package":
         require(set(value) == {"kind", "id", "version"} and len(rows) == 1
-                and value["id"] == rows[0]["id"] and value["version"] == rows[0]["version"],
+                and value["id"] == rows[0]["id"] and value["version"] == rows[0]["version"]
+                and [p.lower() for p in primary.parts[-5:]]
+                == [REFERENCE_PACKAGE, value["version"].lower(), "build", ".netframework", "v4.6.2"],
                 "Reference assembly observation differs")
         return
     files = value.get("files")
+    # PREPARE can only write the one installed-pack directory derived from FIXED_SIGNER.
     require(set(value) == {"kind", "directory", "files"} and not rows
             and isinstance(value["directory"], str)
-            and [p.lower() for p in PureWindowsPath(value["directory"]).parts[-len(TARGETING_PACK):]]
-            == [p.lower() for p in TARGETING_PACK]
+            and windows_key(value["directory"]) == windows_key(INSTALLED_PACK) == windows_key(primary)
             and isinstance(files, dict) and set(files) == {"mscorlib.dll", "System.dll"}
             and all(isinstance(row, dict) and check_hex(row.get("sha256")) and type(row.get("bytes")) is int
                     and row["bytes"] > 0 for row in files.values()),
@@ -579,6 +592,9 @@ def validate_observations(value, stage, plan):
             "Both build observations required")
     for name in ("delay", "public"):
         validate_build_record(value["build_evidence"][name], plan, name == "public")
+    # Both builds run on one host from one restore folder, so they use the same reference assemblies.
+    require(value["build_evidence"]["delay"]["reference_assemblies"]
+            == value["build_evidence"]["public"]["reference_assemblies"], "Reference assembly sources differ between builds")
     # The overlay is deterministic given the plan and PREPARE's output directory (the key-file
     # item names it), so the recorded list must equal exactly what build_overlay produces: no
     # added, reordered, /p:, -property: or ;-joined property can be present.
@@ -949,7 +965,7 @@ def reference_assemblies(reported, output, packages):
                                 "build", ".NETFramework", "v4.6.2")
         require(primary == norm(expected), "Reference assemblies differ from the restored package")
         return {"kind": "package", "id": rows[0]["id"], "version": rows[0]["version"]}
-    installed = PureWindowsPath(*PureWindowsPath(FIXED_SIGNER).parts[:2], *TARGETING_PACK)
+    installed = INSTALLED_PACK
     require(primary == norm(installed), "Reference assemblies differ from the installed targeting pack")
     return {"kind": "targeting-pack", "directory": str(installed),
             "files": {name: record(Path(str(installed)) / name) for name in ("mscorlib.dll", "System.dll")}}
@@ -1312,6 +1328,7 @@ REFUSALS = {
     "Reference assemblies differ from the restored package": "reference-assemblies-package",
     "Reference assemblies differ from the installed targeting pack": "reference-assemblies-targeting-pack",
     "Prepared package source differs from the repository source": "verify-package-source",
+    "Reference assembly sources differ between builds": "reference-assemblies-builds",
     "Assembly/PDB observations missing": "assembly-observation-missing",
     "Assembly observation identity differs": "assembly-observation-identity",
     "PDB observation identity differs": "pdb-observation-identity",

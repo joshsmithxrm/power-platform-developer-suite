@@ -121,8 +121,9 @@ For each package in `project.assets.json`, PREPARE requires and records:
   repository signature whose service index is the source above (its certificate
   SHA-256 is recorded) and reports a content hash equal to the assets `sha512`.
   Only these parsed fields are kept; the raw verification output is not
-  retained in the receipt. The first verification may take up to 10 minutes
-  (a fresh host may fetch revocation data); later ones are bounded at 2;
+  retained in the receipt. The first verification in each of the two builds
+  may take up to 10 minutes (a fresh host may fetch revocation data); the
+  others in that build are bounded at 2;
 - a direct reference with a central version equals its `Directory.Packages.props`
   pin. The SDK's implicit `Microsoft.NETFramework.ReferenceAssemblies` has no
   repository pin. A transitive package with a central `PackageVersion` entry
@@ -139,7 +140,10 @@ so PREPARE does too. It reads `TargetFrameworkDirectory` after
 bound by its signature row; the directory must be that package's folder) or
 the installed targeting pack (its directory under `ProgramFiles(x86)` and the
 hashes of its `mscorlib.dll` and `System.dll`). The receipt must carry exactly
-one of the two. The other reference-assembly files in a targeting pack are not
+one of the two; it must match the recorded `TargetFrameworkDirectory`, the
+targeting-pack directory must be exactly
+`C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.6.2`,
+and the delay and public builds must record the same source. The other reference-assembly files in a targeting pack are not
 hashed.
 
 This proves that each archive the build resolved carries a valid repository

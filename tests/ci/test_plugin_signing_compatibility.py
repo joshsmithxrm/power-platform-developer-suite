@@ -363,6 +363,11 @@ def receipt_fixture(plan, plan_hash, stage="prepare"):
 
 
 NUGET_ORG = "https://api.nuget.org/v3/index.json"
+PACKAGE_REFERENCE_DIRECTORY = ("C:\\fixture\\prepared\\temp\\packages\\microsoft.netframework.referenceassemblies.net462"
+                               "\\1.0.0\\build\\.NETFramework\\v4.6.2\\")
+# The exact shape observed locally for an installed (v4.8) pack: "<pack>\;;;<pack>\Facades\".
+INSTALLED_PACK_DIRECTORY = "C:\\Program Files (x86)\\Reference Assemblies\\Microsoft\\Framework\\.NETFramework\\v4.6.2\\"
+INSTALLED_PACK_REPORTED = INSTALLED_PACK_DIRECTORY + ";;;" + INSTALLED_PACK_DIRECTORY + "Facades\\"
 
 
 def build_record_fixture(plan, control):
@@ -389,7 +394,8 @@ def build_record_fixture(plan, control):
                 "PackageVersion": plan["version"], "MinVerVersion": plan["version"],
                 "InformationalVersion": plan["version"] + "+" + SOURCE,
                 "AssemblyOriginatorKeyFile": "C:/virtual/public-never-opened",
-                "AssemblyVersion": "3.0.0.0", "FileVersion": "3.1.1.0"},
+                "AssemblyVersion": "3.0.0.0", "FileVersion": "3.1.1.0",
+                "TargetFrameworkDirectory": PACKAGE_REFERENCE_DIRECTORY + ";;;" + PACKAGE_REFERENCE_DIRECTORY + "Facades\\"},
             "binaries": {name: {"path": f"C:/fixture/sdk/10.0.403/{name}.dll", "sha256": "f" * 64,
                                  "bytes": 123, "product_version": "1.2.3.4"}
                          for name in ("msbuild", "roslyn")}}
@@ -606,8 +612,7 @@ def test_build_record_refuses_unbound_package_or_version_observations(plan, chan
 
 
 def targeting_pack_record():
-    return {"kind": "targeting-pack",
-            "directory": "C:\\Program Files (x86)\\Reference Assemblies\\Microsoft\\Framework\\.NETFramework\\v4.6.2",
+    return {"kind": "targeting-pack", "directory": INSTALLED_PACK_DIRECTORY.rstrip("\\"),
             "files": {name: {"sha256": "c" * 64, "bytes": 1000} for name in ("mscorlib.dll", "System.dll")}}
 
 
@@ -617,8 +622,20 @@ def test_build_record_accepts_either_reference_assembly_source(plan):
     # An installed targeting pack: the SDK then adds no reference-assemblies package.
     record["packages"] = [row for row in record["packages"] if "ReferenceAssemblies" not in row["id"]]
     record["reference_assemblies"] = targeting_pack_record()
+    record["evaluated_properties"]["TargetFrameworkDirectory"] = INSTALLED_PACK_REPORTED
     d.validate_build_record(deepcopy(record), plan, False)
+    # Case and trailing separators do not matter.
+    upper = deepcopy(record)
+    upper["reference_assemblies"]["directory"] = INSTALLED_PACK_DIRECTORY.upper()
+    d.validate_build_record(upper, plan, False)
+    pack_tail = "\\Reference Assemblies\\Microsoft\\Framework\\.NETFramework\\v4.6.2"
     for change in (lambda r: r["reference_assemblies"].update(directory="C:/Elsewhere/v4.6.2"),
+                   # Same last five parts, but not the one directory PREPARE can write.
+                   lambda r: r["reference_assemblies"].update(directory="Z:\\x" + pack_tail),
+                   lambda r: r["reference_assemblies"].update(directory="D:\\Program Files (x86)" + pack_tail),
+                   # The recorded TargetFrameworkDirectory must name the same directory.
+                   lambda r: r["evaluated_properties"].update(TargetFrameworkDirectory="Z:\\x" + pack_tail + "\\"),
+                   lambda r: r["evaluated_properties"].update(TargetFrameworkDirectory=PACKAGE_REFERENCE_DIRECTORY),
                    lambda r: r["reference_assemblies"]["files"].pop("System.dll"),
                    lambda r: r["reference_assemblies"]["files"]["mscorlib.dll"].update(sha256="x"),
                    lambda r: r["reference_assemblies"].update(id="extra")):
@@ -626,6 +643,69 @@ def test_build_record_accepts_either_reference_assembly_source(plan):
         change(bad)
         with pytest.raises(d.Error, match="Reference assembly observation differs"):
             d.validate_build_record(bad, plan, False)
+    # The package form must also match the recorded directory.
+    package = build_record_fixture(plan, False)
+    package["evaluated_properties"]["TargetFrameworkDirectory"] = INSTALLED_PACK_REPORTED
+    with pytest.raises(d.Error, match="Reference assembly observation differs"):
+        d.validate_build_record(package, plan, False)
+    package["evaluated_properties"]["TargetFrameworkDirectory"] = ";;"
+    with pytest.raises(d.Error, match="Reference assembly directory missing"):
+        d.validate_build_record(package, plan, False)
+
+
+def test_receipt_requires_both_builds_to_use_the_same_reference_assemblies(monkeypatch, tmp_path, plan):
+    value, virtual, receipt_path = virtual_receipt(monkeypatch, tmp_path, plan, "prepare")
+    public = value["build_evidence"]["public"]
+    public["packages"] = [row for row in public["packages"] if "ReferenceAssemblies" not in row["id"]]
+    public["reference_assemblies"] = targeting_pack_record()
+    public["evaluated_properties"]["TargetFrameworkDirectory"] = INSTALLED_PACK_REPORTED
+    value["commands"] = [c for c in value["commands"] if c["operation"] != "package-signature-verification"] + [
+        {"operation": "package-signature-verification", "exit_code": 0, "started_utc": OBSERVED_UTC,
+         "completed_utc": OBSERVED_UTC}] * 5
+    virtual[receipt_path] = json.dumps(value).encode()
+    with pytest.raises(d.Error, match="differ between builds"):
+        d.receipt(tmp_path, "prepare", plan, PLAN_HASH)
+
+
+class PastSourceBinding(Exception):
+    """Raised by the double that VERIFY reaches only after its source binding."""
+
+
+@pytest.mark.parametrize("recorded_source,outcome", [(NUGET_ORG, "past"), ("https://other.example/v3/index.json", "refused")])
+def test_verify_stage_binds_the_package_source_before_package_verification(monkeypatch, tmp_path, plan,
+                                                                          recorded_source, outcome):
+    # Drives verify() itself (with doubles up to the source copy), so removing its
+    # bind_restore_source call fails this test, not only the helper's own test.
+    prepared = {"build_evidence": {name: build_record_fixture(plan, name == "public") for name in ("delay", "public")},
+                "files": {f"PPDS.Plugins.{plan['version']}.nupkg": {}, f"PPDS.Plugins.{plan['version']}.snupkg": {}},
+                "source_inputs": {"fixture": "e" * 64}, "metadata": {"mutation": {"name": "AccountPlugin"}},
+                "cases": {"COMPAT-01": "PASS", "COMPAT-03": "PASS"}}
+    for build in prepared["build_evidence"].values():
+        build["restore"]["source"] = recorded_source
+    signed = {"prepare_receipt_sha256": "e" * 64, "key_cleanup": "completed"}
+    monkeypatch.setattr(d, "receipt", lambda directory, stage, *a: (prepared, "e" * 64) if stage == "prepare" else (signed, "f" * 64))
+    monkeypatch.setattr(d, "read", lambda path, limit=None: public_fixture() if Path(path).name == "test-public.bin" else b"bytes")
+    monkeypatch.setattr(d, "write", lambda *a: None)
+    for name in ("pin", "invoke"):
+        monkeypatch.setattr(d, name, lambda *a, **kw: "")
+    monkeypatch.setattr(d, "fresh_output", lambda path: Path(path))
+    monkeypatch.setattr(d, "install_probe", lambda output: output / "probe.ps1")
+    monkeypatch.setattr(d, "tool_versions", lambda *a: {})
+    names = iter(["AccountPlugin", "accountPlugin"])
+    monkeypatch.setattr(d, "metadata", lambda *a: {"mutation": {"name": next(names)}})
+    monkeypatch.setattr(d, "mutations", lambda raw, meta: (b"x", b"y", {}))
+    monkeypatch.setattr(d.p, "repackage", lambda *a: None)
+    source = tmp_path / "verify-source"
+    monkeypatch.setattr(d, "source_copy", lambda *a: (source, prepared["source_inputs"]))
+    monkeypatch.setattr(d, "repository_source", lambda path: NUGET_ORG if path == source else pytest.fail("wrong copy"))
+    monkeypatch.setattr(d.ReleaseGraph, "discover", lambda *a: (_ for _ in ()).throw(PastSourceBinding()))
+    args = SimpleNamespace(prepared=tmp_path / "prepared", signed=tmp_path / "signed", output=tmp_path / "verified",
+                           source_root=d.ROOT, plan_sha256=PLAN_HASH)
+    expected = PastSourceBinding if outcome == "past" else d.Error
+    with pytest.raises(expected) as caught:
+        d.verify(args, plan, d.Runtime(evidence_class="process-double"))
+    if outcome == "refused":
+        assert str(caught.value) == "Prepared package source differs from the repository source"
 
 
 def test_verify_binds_the_recorded_package_source_to_the_repository_config(monkeypatch, plan):
@@ -1168,11 +1248,30 @@ def test_prepare_requires_the_specific_public_sign_control(monkeypatch, tmp_path
         assert [event[1] for event in dotnet] == ["delay-restore", "delay-build", "delay-pack",
                                                   "public-restore", "public-build"]
         assert len(build_props) == 2
-        for argv in [event[2] for event in dotnet] + build_props:
-            assert override in argv and "-p:SourceRevisionId=" + SOURCE in argv
-            assert set(result["build_overlay"]) <= set(argv)
-            assert not any(re.match(r"[-/]p(roperty)?:(Version|PackageVersion|AssemblyVersion|FileVersion|"
-                                    r"InformationalVersion|MinVerSkip)=", a, re.I) for a in argv)
+        # Exact argv: no property beyond the overlay and the per-build signing/output switches can
+        # reach restore, build, pack or the evaluated-properties call (Version, VersionPrefix,
+        # VersionSuffix, MinVerVersion, IncludeSourceRevisionInInformationalVersion, ...).
+        project = str(args.output / "source/src/PPDS.Plugins/PPDS.Plugins.csproj")
+
+        # Spelled out, not taken from build_overlay, so a property added there fails here.
+        overlay = ["-p:SignAssembly=true", "-p:AssemblyOriginatorKeyFile=" + str(args.output / "test-public.bin"),
+                   "-p:MinVerVersionOverride=" + plan["version"], "-p:RepositoryCommit=" + SOURCE,
+                   "-p:SourceRevisionId=" + SOURCE, "-p:ContinuousIntegrationBuild=true", "-p:DebugType=portable"]
+        assert result["build_overlay"] == overlay
+
+        def per_build(name, control):
+            work = args.output / name
+            return [*overlay, "-p:PublicSign=" + str(control).lower(),
+                    "-p:DelaySign=" + str(not control).lower(), "-p:BaseOutputPath=" + str(work / "bin") + "/",
+                    "-p:BaseIntermediateOutputPath=" + str(work / "obj") + "/"]
+
+        delay, public = per_build("delay", False), per_build("public", True)
+        assert [event[2] for event in dotnet] == [
+            ["restore", project, *delay], ["build", project, "--configuration", "Release", "--no-restore", *delay],
+            ["pack", project, "--configuration", "Release", "--no-build", "--output", str(args.output / "packages"), *delay],
+            ["restore", project, *public], ["build", project, "--configuration", "Release", "--no-restore", *public]]
+        assert build_props == [delay, public]
+        assert override in delay and "-p:SourceRevisionId=" + SOURCE in delay
         # Only the dotnet build children get the NuGet folders.
         assert {event[1]: event[3] for event in events if event[0] == "invoke"} == {
             "delay-restore": True, "delay-build": True, "delay-pack": True, "public-restore": True,
@@ -1334,7 +1433,7 @@ def test_build_evidence_checks_actual_properties_and_package_bindings(monkeypatc
                                               "version": "1.0.0"}
     d.validate_build_record({**build_record_fixture(plan, False), "packages": result["packages"],
                              "restore": result["restore"], "reference_assemblies": result["reference_assemblies"],
-                             "binaries": result["binaries"]},
+                             "binaries": result["binaries"], "evaluated_properties": result["evaluated_properties"]},
                             plan, False)
     # Only the first package verification gets the longer (revocation-fetch) timeout.
     assert [t for op, t in f.timeouts if op == "package-signature-verification"] == [600, 120, 120, 120]
@@ -1352,6 +1451,10 @@ def test_build_evidence_checks_actual_properties_and_package_bindings(monkeypatc
     assert flags == {"evaluated-properties": (True, True), "selected-sdk": (True, False),
                      "compiler-product-version": (False, False), "package-signature-verification": (True, True)}
     assert sum(operation == "package-signature-verification" for operation, *_ in f.calls) == 4
+    # PREPARE calls build_evidence once per build; each build's first verification gets the long timeout.
+    f.timeouts.clear()
+    f()
+    assert [t for op, t in f.timeouts if op == "package-signature-verification"] == [600, 120, 120, 120]
 
 
 def test_build_evidence_records_an_installed_targeting_pack_when_no_reference_package_is_restored(
@@ -1369,7 +1472,7 @@ def test_build_evidence_records_an_installed_targeting_pack_when_no_reference_pa
     assert [str(p).replace("/", "\\") for p in f.recorded[2:]] == [pack + "mscorlib.dll", pack + "System.dll"]
     d.validate_build_record({**build_record_fixture(plan, False), "packages": result["packages"],
                              "restore": result["restore"], "reference_assemblies": result["reference_assemblies"],
-                             "binaries": result["binaries"]},
+                             "binaries": result["binaries"], "evaluated_properties": result["evaluated_properties"]},
                             plan, False)
 
 
