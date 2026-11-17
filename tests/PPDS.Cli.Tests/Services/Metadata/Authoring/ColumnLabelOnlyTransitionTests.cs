@@ -36,6 +36,23 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
     private static IEnumerable<object[]> Product(string[] left, string[] right)
         => left.SelectMany(first => right.Select(second => new object[] { first, second }));
 
+    /// <summary>AC-147: the finite label-only path returns the same English-only notices as the typed path.</summary>
+    [Theory, MemberData(nameof(AllShapes)), Trait("AC", "AC-147")]
+    public async Task NewShapes_ReportEnglishOnlyNotices_ForTheShownNonEnglishLabels(string shape)
+    {
+        using var h = new ColumnLabelHarness(shape, output);
+        h.Attribute.DisplayName.UserLocalizedLabel = new LocalizedLabel("Original French", 1036);
+        h.Attribute.Description.UserLocalizedLabel = new LocalizedLabel("Description francaise", 1036);
+        var result = await h.UpdateAsync(Request("both"));
+        Assert.Equal(new[] { "DisplayName", "Description" }, result.ValidationMessages.Select(m => m.Field));
+        Assert.All(result.ValidationMessages, m => Assert.Equal(MetadataLabelWriteResult.EnglishLabelOnlyRule, m.Rule));
+        Assert.Contains("'Original French'", result.ValidationMessages[0].Message);
+        Assert.True(Assert.Single(h.Requests.OfType<UpdateAttributeRequest>()).MergeLabels);
+
+        using var english = new ColumnLabelHarness(shape, output);
+        Assert.Empty((await english.UpdateAsync(Request("both"))).ValidationMessages);
+    }
+
     [Theory, MemberData(nameof(ShapesAndLabels)), Trait("AC", "AC-123")]
     public async Task NewShapes_SendExactFreshRequestedLabels(string shape, string labelMode)
     {
@@ -295,7 +312,8 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
         var request = Request("both");
         await h.UpdateAsync(request);
         var update = Assert.Single(h.Requests.OfType<UpdateAttributeRequest>());
-        Assert.Equal(new UpdateAttributeRequest().MergeLabels, update.MergeLabels);
+        // Amended (AC-128/AC-147): the 1033-only labels are merged so other languages keep their text.
+        Assert.True(update.MergeLabels);
         var expected = ColumnLabelHarness.Fresh(type);
         expected.LogicalName = ColumnLabelHarness.Column; expected.SchemaName = ColumnLabelHarness.Schema;
         RequestedLabels(expected, request);
@@ -361,7 +379,7 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
         var constructor = Assert.Single(typeof(DataverseMetadataAuthoringService).GetConstructors());
         Assert.Equal(5, constructor.GetParameters().Length);
         var method = typeof(IMetadataAuthoringService).GetMethod(nameof(IMetadataAuthoringService.UpdateColumnAsync))!;
-        Assert.Equal(typeof(Task), method.ReturnType);
+        Assert.Equal(typeof(Task<MetadataLabelWriteResult>), method.ReturnType); // AC-147: English-only label notices.
         Assert.Equal(new[] { typeof(UpdateColumnRequest), typeof(IMetadataAuthoringProgressReporter), typeof(CancellationToken) }, method.GetParameters().Select(p => p.ParameterType));
         Assert.Equal(new[] { "AutoNumberFormat", "ColumnLogicalName", "Description", "DisplayName", "DryRun", "EntityLogicalName", "Format", "IsAuditEnabled",
             "IsSecured", "IsValidForAdvancedFind", "MaxLength", "MaxValue", "MinValue", "Precision", "Publish", "RequiredLevel", "SolutionUniqueName" },

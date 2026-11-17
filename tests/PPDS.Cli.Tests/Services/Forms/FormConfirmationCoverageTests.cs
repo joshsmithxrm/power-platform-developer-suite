@@ -33,6 +33,7 @@ public sealed class FormConfirmationCoverageTests
             () => service.AddFieldsWithResultAsync(new("account", "form", "section", ["name"])),
             () => service.ReorderFieldsStrictAsync(new("account", "form", "section", ["name"])),
             () => service.MoveFieldAsync(new("account", "form", "name", "section", "section")),
+            () => service.RepairBindingsAsync(new("account", "form")),
             () => service.AddSubgridAsync(new("account", "form", "section", "grid", "contact", Guid.NewGuid())),
             () => service.RemoveSubgridAsync(new("account", "form", "grid"))
         ];

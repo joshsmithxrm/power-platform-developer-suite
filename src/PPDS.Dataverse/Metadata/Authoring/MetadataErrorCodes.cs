@@ -47,6 +47,15 @@ public static class MetadataErrorCodes
     /// <summary>The targeted status reason or local option was not found by value or label.</summary>
     public const string OptionNotFound = "OPTION_NOT_FOUND";
 
-    /// <summary>The Dataverse SDK call failed with an unexpected error.</summary>
+    /// <summary>
+    /// A Dataverse SDK request failed with an unexpected error. This makes no statement about whether a write was
+    /// applied: for a timed-out or cancelled insert the message says the outcome is unknown and how to check it.
+    /// </summary>
     public const string SdkOperationFailed = "SDK_OPERATION_FAILED";
+
+    /// <summary>
+    /// The write request returned success, but a follow-up confirmation (for example the stored option colour) failed
+    /// or disagreed. The message states what was written and that publication was not attempted when it was requested.
+    /// </summary>
+    public const string WriteNotConfirmed = "WRITE_NOT_CONFIRMED";
 }

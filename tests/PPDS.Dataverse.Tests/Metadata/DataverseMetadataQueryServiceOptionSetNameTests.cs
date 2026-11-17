@@ -91,11 +91,59 @@ public sealed class DataverseMetadataQueryServiceOptionSetNameTests
     [Trait("AC", "AC-134")]
     public async Task NearMissNotFoundFault_DoesNotList_OrRetry(string message)
     {
-        var f = new Fixture { NotFoundMessage = _ => message };
+        // The text fallback only applies to faults that do not carry the ObjectDoesNotExist code.
+        var f = new Fixture { NotFoundMessage = _ => message, NotFoundCode = 0x80040203 };
         await Assert.ThrowsAsync<FaultException<OrganizationServiceFault>>(() => f.Service.GetOptionSetAsync("mayo_AIRequestType"));
         Assert.Single(f.Requests);
         Assert.DoesNotContain(f.Requests, r => r is RetrieveAllOptionSetsRequest);
         f.AssertLeases();
+    }
+
+    [Theory]
+    [InlineData("Could not find solution with name SharedOptionSets")]
+    [InlineData("Could not find an optionset with name mayo_other")]
+    [InlineData("Could not find option value 5 in optionset mayo_AIRequestType")]
+    [Trait("AC", "AC-134")]
+    public async Task NearMissText_WithObjectDoesNotExist_ListsOnce_AndReadsTheStoredName(string message)
+    {
+        // The code decides, not the text: a read under the single stored case variant follows the one listing.
+        var f = new Fixture { NotFoundMessage = _ => message };
+        var result = await f.Service.GetOptionSetAsync("mayo_AIRequestType");
+        Assert.Equal(Stored, result.Name);
+        Assert.Single(f.Requests.OfType<RetrieveAllOptionSetsRequest>());
+        Assert.Equal(new[] { "mayo_AIRequestType", Stored }, f.Requests.OfType<RetrieveOptionSetRequest>().Select(r => r.Name));
+        f.AssertLeases();
+    }
+
+    [Fact]
+    [Trait("AC", "AC-133")]
+    public async Task NonEnglishNotFoundFault_ResolvesByFaultCode()
+    {
+        var f = new Fixture { NotFoundMessage = name => $"Impossible de trouver un groupe d'options nommé {name}" };
+        var result = await f.Service.GetOptionSetAsync("mayo_AIRequestType");
+        Assert.Equal(Stored, result.Name);
+        Assert.Single(f.Requests.OfType<RetrieveAllOptionSetsRequest>());
+        Assert.Equal(new[] { "mayo_AIRequestType", Stored }, f.Requests.OfType<RetrieveOptionSetRequest>().Select(r => r.Name));
+        f.AssertLeases();
+    }
+
+    [Fact]
+    [Trait("AC", "AC-133")]
+    public async Task EnglishWordingWithAnotherCode_StillResolves()
+    {
+        var f = new Fixture { NotFoundCode = 0x80040203 };
+        var result = await f.Service.GetOptionSetAsync("mayo_AIRequestType");
+        Assert.Equal(Stored, result.Name);
+        Assert.Single(f.Requests.OfType<RetrieveAllOptionSetsRequest>());
+    }
+
+    [Fact]
+    [Trait("AC", "AC-134")]
+    public async Task NonEnglishFaultWithAnotherCode_DoesNotList()
+    {
+        var f = new Fixture { NotFoundMessage = name => $"Impossible de trouver un groupe d'options nommé {name}", NotFoundCode = 0x80040203 };
+        await Assert.ThrowsAsync<FaultException<OrganizationServiceFault>>(() => f.Service.GetOptionSetAsync("mayo_AIRequestType"));
+        Assert.DoesNotContain(f.Requests, r => r is RetrieveAllOptionSetsRequest);
     }
 
     [Fact]
@@ -168,6 +216,7 @@ public sealed class DataverseMetadataQueryServiceOptionSetNameTests
         internal Exception? RetrieveFailure { get; init; }
         internal Func<Fixture, Exception>? CatalogFailure { get; set; }
         internal Func<string, string>? NotFoundMessage { get; init; }
+        internal uint NotFoundCode { get; init; } = 0x80040217; // ObjectDoesNotExist
         internal CancellationTokenSource Cancellation { get; } = new();
         internal DataverseMetadataQueryService Service { get; }
 
@@ -205,7 +254,7 @@ public sealed class DataverseMetadataQueryServiceOptionSetNameTests
                         // Recorded server wording (docs/qa/shakedown-v1-2026-04-20.md), unless a test overrides it.
                         var message = NotFoundMessage?.Invoke(retrieve.Name) ?? $"Could not find an optionset with name {retrieve.Name}";
                         throw new FaultException<OrganizationServiceFault>(
-                            new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040217), Message = message }, message);
+                            new OrganizationServiceFault { ErrorCode = unchecked((int)NotFoundCode), Message = message }, message);
                     }
                     return new RetrieveOptionSetResponse { Results = new ParameterCollection { ["OptionSetMetadata"] = match } };
                 default:

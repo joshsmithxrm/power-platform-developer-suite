@@ -40,8 +40,8 @@ public sealed class MetadataUpdateColumnTool : McpToolBase
         [Description("Unique name of the solution containing the table.")] string solution,
         [Description("Logical name of the entity containing the column.")] string entityName,
         [Description("Logical name of the column to update.")] string columnName,
-        [Description("Updated display name (optional).")] string? displayName = null,
-        [Description("Updated description (optional).")] string? description = null,
+        [Description("Updated display name (optional; English, LCID 1033).")] string? displayName = null,
+        [Description("Updated description (optional; English, LCID 1033).")] string? description = null,
         [Description("Updated requirement level: 'None', 'Recommended', or 'Required' (optional).")] string? requiredLevel = null,
         [Description("If true, validates without persisting changes.")] bool dryRun = false,
         CancellationToken cancellationToken = default)
@@ -58,7 +58,7 @@ public sealed class MetadataUpdateColumnTool : McpToolBase
 
             var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
-            await service.UpdateColumnAsync(new UpdateColumnRequest
+            var labelResult = await service.UpdateColumnAsync(new UpdateColumnRequest
             {
                 SolutionUniqueName = solution,
                 EntityLogicalName = entityName,
@@ -73,6 +73,8 @@ public sealed class MetadataUpdateColumnTool : McpToolBase
             {
                 Success = true,
                 WasDryRun = dryRun,
+                ValidationMessages = (labelResult?.ValidationMessages ?? [])
+                    .Select(v => new ValidationMessageDto { Field = v.Field, Rule = v.Rule, Message = v.Message }).ToList(),
                 RequiresPublish = !dryRun,
                 PublishHint = dryRun ? null : $"ppds metadata publish {entityName}"
             };
@@ -111,4 +113,8 @@ public sealed class MetadataUpdateColumnResult
     /// <summary>CLI command the caller should run to publish the change, if any.</summary>
     [JsonPropertyName("publishHint")]
     public string? PublishHint { get; set; }
+
+    /// <summary>Notices such as only the English (LCID 1033) label being written; empty when there are none.</summary>
+    [JsonPropertyName("validationMessages")]
+    public List<ValidationMessageDto> ValidationMessages { get; set; } = [];
 }

@@ -468,17 +468,17 @@ public static class EntityCommand
 
         var displayNameOption = new Option<string?>("--display-name")
         {
-            Description = "Updated display name"
+            Description = "Updated display name (English, LCID 1033)"
         };
 
         var pluralNameOption = new Option<string?>("--plural-name")
         {
-            Description = "Updated plural display name"
+            Description = "Updated plural display name (English, LCID 1033)"
         };
 
         var descriptionOption = new Option<string?>("--description")
         {
-            Description = "Updated description"
+            Description = "Updated description (English, LCID 1033)"
         };
 
         var iconSmallOption = new Option<string?>("--icon-small")
@@ -606,7 +606,7 @@ public static class EntityCommand
                 Publish = publish
             };
 
-            await authoringService.UpdateTableAsync(request, ct: cancellationToken);
+            var labelResult = await authoringService.UpdateTableAsync(request, ct: cancellationToken);
 
             var publishHint = $"ppds metadata publish {entity}";
 
@@ -618,7 +618,8 @@ public static class EntityCommand
                     updated = true,
                     dryRun,
                     requiresPublish = !dryRun && !publish,
-                    publishHint = dryRun || publish ? null : publishHint
+                    publishHint = dryRun || publish ? null : publishHint,
+                    validationMessages = MetadataLabelNotices.ForJson(labelResult)
                 });
             }
             else if (dryRun)
@@ -627,10 +628,12 @@ public static class EntityCommand
             }
             else if (publish)
             {
+                MetadataLabelNotices.WriteWarnings(labelResult);
                 Console.Error.WriteLine($"Table '{entity}' updated and published.");
             }
             else
             {
+                MetadataLabelNotices.WriteWarnings(labelResult);
                 Console.Error.WriteLine($"Table '{entity}' updated. Run '{publishHint}' to publish changes.");
             }
 
@@ -1178,7 +1181,7 @@ public static class EntityCommand
 
         var newLabelOption = new Option<string?>("--new-label")
         {
-            Description = "New label to apply to the status reason"
+            Description = "New label to apply to the status reason (English, LCID 1033)"
         };
 
         var colorOption = new Option<string?>("--color")
@@ -1249,6 +1252,12 @@ public static class EntityCommand
                 return ExitCodes.ValidationError;
             }
 
+            if (newLabel == null && string.IsNullOrEmpty(color))
+            {
+                writer.WriteError(StructuredError.Create("MISSING_REQUIRED_FIELD", "Nothing to update: provide --new-label or --color."));
+                return ExitCodes.ValidationError;
+            }
+
             return await ExecuteUpdateStatusReasonAsync(
                 entity, value, label, newLabel, color, solution, publish,
                 profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
@@ -1306,7 +1315,7 @@ public static class EntityCommand
                 Publish = publish
             };
 
-            await authoringService.UpdateStatusReasonAsync(request, cancellationToken);
+            var labelResult = await authoringService.UpdateStatusReasonAsync(request, cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {
@@ -1314,11 +1323,13 @@ public static class EntityCommand
                 {
                     entity,
                     target = value.HasValue ? (object)value.Value : label!,
-                    updated = true
+                    updated = true,
+                    validationMessages = MetadataLabelNotices.ForJson(labelResult)
                 });
             }
             else
             {
+                MetadataLabelNotices.WriteWarnings(labelResult);
                 Console.Error.WriteLine($"Status reason ({target}) on '{entity}' updated successfully.");
             }
 

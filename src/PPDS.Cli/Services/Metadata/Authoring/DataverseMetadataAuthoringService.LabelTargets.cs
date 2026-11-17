@@ -1,3 +1,4 @@
+using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
 using PPDS.Cli.Infrastructure.Errors;
@@ -53,11 +54,51 @@ public partial class DataverseMetadataAuthoringService
         EnsureLabelAgreesWithPublished(label, draftValues, publishedValues, $"options in option set '{optionSetName}'");
     }
 
+    /// <summary>
+    /// The label an option or status-reason update sends: a requested label as the single LCID 1033 label (the request
+    /// also sets MergeLabels, so other languages keep their text), and no label at all when the caller did not ask to
+    /// change it. Asserted live (OptionColorPersistenceLiveTests for a global option;
+    /// MetadataGlobalChoiceLiveTests.ColourMechanisms_LocalOptionStatusReasonAndStateValue for a local option and a
+    /// status reason): an UpdateOptionValue without a Label leaves the English label unchanged, so a colour- or
+    /// description-only update never rewrites it. Other languages are not observed (English-only organisation).
+    /// </summary>
+    private static Label? OptionLabelForUpdate(string? requested)
+        => requested == null ? null : new Label(requested, 1033);
+
+    /// <summary>
+    /// Notices for requested labels that are written for English only while the label Dataverse shows the caller (its
+    /// user-localised label) is in another language, so that label is left as it was. The user-localised label is the
+    /// caller's UI language when the target has one, otherwise a fallback (believed to be the organisation's base
+    /// language; unconfirmed live), so the message names its LCID rather than claiming it is "your language". No notice
+    /// when that label already reads the requested text. Surfaces show them as warnings; without them a caller could
+    /// see no change in their own listing after a successful update.
+    /// </summary>
+    private static MetadataLabelWriteResult EnglishOnlyNotices(params (string Field, string Noun, string? Requested, Label? Existing)[] labels)
+    {
+        var notices = new List<ValidationMessage>();
+        foreach (var (field, noun, requested, existing) in labels)
+        {
+            if (requested == null || existing?.UserLocalizedLabel is not { } shown || shown.LanguageCode == 1033
+                || string.Equals(shown.Label, requested, StringComparison.Ordinal))
+                continue;
+            notices.Add(new ValidationMessage
+            {
+                Field = field,
+                Rule = MetadataLabelWriteResult.EnglishLabelOnlyRule,
+                Message = $"Only the English (LCID 1033) {noun} is written. The {noun} Dataverse shows you " +
+                    $"(LCID {shown.LanguageCode}) is not changed and still reads '{shown.Label}'."
+            });
+        }
+
+        return notices.Count == 0 ? MetadataLabelWriteResult.None : new MetadataLabelWriteResult { ValidationMessages = notices };
+    }
+
     /// <summary>Resolves a local column option from draft metadata, applying the label safety check.</summary>
-    private async Task<ColumnOptionInfo> ResolveDraftColumnOptionAsync(
+    private async Task<(ColumnOptionInfo Info, Label? Labels)> ResolveDraftColumnOptionAsync(
         string entityLogicalName, string columnLogicalName, int? value, string? label, CancellationToken ct)
     {
-        var drafts = await ReadColumnOptionsAsync(entityLogicalName, columnLogicalName, retrieveAsIfPublished: true, ct).ConfigureAwait(false);
+        var draftEntries = await ReadColumnOptionEntriesAsync(entityLogicalName, columnLogicalName, retrieveAsIfPublished: true, ct).ConfigureAwait(false);
+        var drafts = draftEntries.Select(entry => entry.Info).ToList();
         if (!value.HasValue)
         {
             var draftValues = drafts.Where(o => string.Equals(o.Label, label, StringComparison.OrdinalIgnoreCase)).Select(o => o.Value).ToList();
@@ -70,7 +111,8 @@ public partial class DataverseMetadataAuthoringService
             }
         }
 
-        return ResolveColumnOption(drafts, value, label, entityLogicalName, columnLogicalName);
+        var target = ResolveColumnOption(drafts, value, label, entityLogicalName, columnLogicalName);
+        return (target, draftEntries.First(entry => ReferenceEquals(entry.Info, target)).Labels);
     }
 
     /// <summary>

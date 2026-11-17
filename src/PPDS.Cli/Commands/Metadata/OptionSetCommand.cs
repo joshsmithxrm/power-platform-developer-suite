@@ -348,12 +348,12 @@ public static class OptionSetCommand
 
         var displayNameOption = new Option<string?>("--display-name")
         {
-            Description = "Updated display name"
+            Description = "Updated display name (English, LCID 1033)"
         };
 
         var descriptionOption = new Option<string?>("--description")
         {
-            Description = "Updated description"
+            Description = "Updated description (English, LCID 1033)"
         };
 
         var dryRunOption = new Option<bool>("--dry-run")
@@ -437,28 +437,31 @@ public static class OptionSetCommand
                 DryRun = dryRun
             };
 
-            await authoringService.UpdateGlobalChoiceAsync(request, ct: cancellationToken);
+            var labelResult = await authoringService.UpdateGlobalChoiceAsync(request, ct: cancellationToken);
 
             // Global option sets aren't entity-bound; suggest publish --all.
             const string publishHint = "ppds publish --all";
+            var previewScope = MetadataDryRunScope.Inputs.WithUncheckedGlobalChoiceName(name);
 
             if (globalOptions.IsJsonMode)
             {
-                MetadataDryRunScope.Inputs.WriteSuccess(writer, dryRun, new
+                previewScope.WriteSuccess(writer, dryRun, new
                 {
                     name,
                     updated = true,
                     dryRun,
                     requiresPublish = !dryRun,
-                    publishHint = dryRun ? null : publishHint
+                    publishHint = dryRun ? null : publishHint,
+                    validationMessages = MetadataLabelNotices.ForJson(labelResult)
                 });
             }
             else if (dryRun)
             {
-                MetadataDryRunScope.Inputs.WriteDiagnostic();
+                previewScope.WriteDiagnostic();
             }
             else
             {
+                MetadataLabelNotices.WriteWarnings(labelResult);
                 Console.Error.WriteLine($"Global option set '{name}' updated. Run '{publishHint}' to publish changes.");
             }
 
@@ -788,8 +791,8 @@ public static class OptionSetCommand
 
             var assignedValue = await authoringService.AddOptionValueAsync(request, ct: cancellationToken);
             // #1530: an omitted value is reported as unallocated (server-assigned), never as a number.
-            var previewScope = dryRun && !value.HasValue
-                ? MetadataDryRunScope.ServerAssignedValue : MetadataDryRunScope.RequestedValue;
+            var previewScope = (dryRun && !value.HasValue
+                ? MetadataDryRunScope.ServerAssignedValue : MetadataDryRunScope.RequestedValue).WithUncheckedGlobalChoiceName(name);
 
             if (globalOptions.IsJsonMode)
             {
@@ -853,7 +856,7 @@ public static class OptionSetCommand
 
         var newLabelOption = new Option<string?>("--new-label")
         {
-            Description = "New label to apply"
+            Description = "New label to apply (English, LCID 1033)"
         };
 
         var colorOption = new Option<string?>("--color")
@@ -907,6 +910,12 @@ public static class OptionSetCommand
             if (value.HasValue && !string.IsNullOrEmpty(label))
             {
                 writer.WriteError(StructuredError.Create("INVALID_CONSTRAINT", "--value and --label are mutually exclusive."));
+                return ExitCodes.ValidationError;
+            }
+
+            if (newLabel == null && string.IsNullOrEmpty(color))
+            {
+                writer.WriteError(StructuredError.Create("MISSING_REQUIRED_FIELD", "Nothing to update: provide --new-label or --color."));
                 return ExitCodes.ValidationError;
             }
 
@@ -965,19 +974,19 @@ public static class OptionSetCommand
                 DryRun = dryRun
             };
 
-            await authoringService.UpdateOptionValueAsync(request, ct: cancellationToken);
+            var labelResult = await authoringService.UpdateOptionValueAsync(request, ct: cancellationToken);
 
             if (globalOptions.IsJsonMode)
             {
-                MetadataDryRunScope.Option.WriteSuccess(writer, dryRun, new { optionSetName = name, updated = true, dryRun });
-            }
-            else if (dryRun)
-            {
-                MetadataDryRunScope.Option.WriteDiagnostic();
+                MetadataDryRunScope.Option.WriteSuccess(writer, dryRun, new { optionSetName = name, updated = true, dryRun, validationMessages = MetadataLabelNotices.ForJson(labelResult) });
             }
             else
             {
-                Console.Error.WriteLine($"Option on '{name}' updated successfully.");
+                MetadataLabelNotices.WriteWarnings(labelResult);
+                if (dryRun)
+                    MetadataDryRunScope.Option.WriteDiagnostic();
+                else
+                    Console.Error.WriteLine($"Option on '{name}' updated successfully.");
             }
 
             return ExitCodes.Success;
