@@ -42,9 +42,21 @@ public class MetadataAuthoringServiceTests
             .ReturnsAsync(new OrganizationResponse());
 
         SetupPublisherPrefixQuery("new");
+        SetupTableRead();
 
         _service = new DataverseMetadataAuthoringService(_pool.Object, _validator, new InactiveFakeShakedownGuard());
     }
+
+    /// <summary>
+    /// A table label update reads the table first (AC-147); registered after a generic ExecuteAsync setup so it wins
+    /// for RetrieveEntity.
+    /// </summary>
+    private void SetupTableRead()
+        => _client.Setup(c => c.ExecuteAsync(It.IsAny<RetrieveEntityRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RetrieveEntityResponse { Results = new ParameterCollection
+            {
+                ["EntityMetadata"] = new EntityMetadata { LogicalName = "account", DisplayName = new Label("Account", 1033) }
+            } });
 
     private void SetupPublisherPrefixQuery(string prefix)
     {
@@ -198,6 +210,7 @@ public class MetadataAuthoringServiceTests
                 if (req is UpdateEntityRequest update) capturedRequest = update;
             })
             .ReturnsAsync(new OrganizationResponse());
+        SetupTableRead();
 
         var request = new UpdateTableRequest
         {
@@ -273,6 +286,7 @@ public class MetadataAuthoringServiceTests
                 if (req is Microsoft.Crm.Sdk.Messages.PublishXmlRequest pxr) publishRequest = pxr;
             })
             .ReturnsAsync(new OrganizationResponse());
+        SetupTableRead();
 
         var request = new UpdateTableRequest
         {

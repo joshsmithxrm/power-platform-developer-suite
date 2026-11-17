@@ -180,11 +180,104 @@ public sealed class GlobalChoiceNameResolutionTests
     [Trait("AC", "AC-134")]
     public async Task NearMissNotFoundFault_PropagatesWithoutListingOrRetry(string message)
     {
-        using var f = new GlobalChoiceServerFake { FailFirstNamedRequestWith = () => GlobalChoiceServerFake.Fault(message) };
+        // The text fallback only applies to faults that do not carry the ObjectDoesNotExist code.
+        using var f = new GlobalChoiceServerFake { FailFirstNamedRequestWith = () => GlobalChoiceServerFake.Fault(message, 0x80040203) };
         var ex = await Assert.ThrowsAsync<FaultException<OrganizationServiceFault>>(() => f.Run("option-add", Typed));
         Assert.Same(f.InjectedFault, ex);
         Assert.DoesNotContain(f.Requests, r => r is RetrieveAllOptionSetsRequest);
         Assert.Single(f.Requests, r => GlobalChoiceServerFake.NameOf(r) != null);
+    }
+
+    [Theory]
+    [MemberData(nameof(ResolvingOperations))]
+    [Trait("AC", "AC-133")]
+    public async Task NonEnglishNotFoundFault_ResolvesByFaultCode(string operation)
+    {
+        // #1535 on a non-English organisation: the fault text matches none of the English phrases, but the
+        // ObjectDoesNotExist code identifies it.
+        using var f = new GlobalChoiceServerFake { NotFoundTemplate = "Impossible de trouver un groupe d'options nommé {0}" };
+        await f.Run(operation, Typed);
+        Assert.Single(f.Requests, r => r is RetrieveAllOptionSetsRequest);
+        Assert.Equal(Typed, Assert.Single(f.Faults));
+        var afterListing = f.Requests.SkipWhile(r => r is not RetrieveAllOptionSetsRequest).Skip(1).ToList();
+        Assert.All(afterListing.Select(GlobalChoiceServerFake.NameOf).Where(n => n != null), name => Assert.Equal(Stored, name));
+        f.AssertLeases();
+    }
+
+    [Fact]
+    [Trait("AC", "AC-134")]
+    public async Task NonEnglishFaultWithAnotherCode_PropagatesWithoutListingOrRetry()
+    {
+        using var f = new GlobalChoiceServerFake { FailFirstNamedRequestWith = () => GlobalChoiceServerFake.Fault("Le privilège prvWriteOptionSet est manquant.", 0x80040220) };
+        var ex = await Assert.ThrowsAsync<FaultException<OrganizationServiceFault>>(() => f.Run("option-add", Typed));
+        Assert.Same(f.InjectedFault, ex);
+        Assert.DoesNotContain(f.Requests, r => r is RetrieveAllOptionSetsRequest);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-134")]
+    public async Task ObjectDoesNotExistAboutAnotherObject_RetriesOnceAndSurfacesTheRetryFailure()
+    {
+        // The code cannot say WHICH object was missing (here: the solution). The catalog lookup still requires a
+        // single stored case variant, the not-found write wrote nothing, and the one retry's own failure surfaces.
+        using var f = new GlobalChoiceServerFake
+        {
+            FailFirstNamedRequestWith = () => GlobalChoiceServerFake.Fault("Could not find solution with name Sol"),
+            FailStoredNameWith = () => GlobalChoiceServerFake.Fault("Could not find solution with name Sol")
+        };
+        var ex = await Assert.ThrowsAsync<FaultException<OrganizationServiceFault>>(() => f.Run("option-add", Typed));
+        Assert.Same(f.InjectedFault, ex);
+        Assert.Single(f.Requests, r => r is RetrieveAllOptionSetsRequest);
+        Assert.Equal(new[] { Typed, Stored }, f.Requests.OfType<InsertOptionValueRequest>().Select(r => r.OptionSetName));
+        f.AssertLeases();
+    }
+
+    [Theory]
+    [InlineData("option-add")]
+    [InlineData("option-reorder")]
+    [Trait("AC", "AC-134")]
+    public async Task ObjectDoesNotExist_ForTheExactStoredName_ListsOnce_AndNeverResendsTheWrite(string operation)
+    {
+        // The requested spelling is itself stored, so no other spelling exists to retry: exactly one write, one
+        // listing, and the original fault.
+        using var f = new GlobalChoiceServerFake { FailFirstNamedRequestWith = () => GlobalChoiceServerFake.Fault("Could not find solution with name Sol") };
+        var ex = await Assert.ThrowsAsync<FaultException<OrganizationServiceFault>>(() => f.Run(operation, Stored));
+        Assert.Same(f.InjectedFault, ex);
+        Assert.Single(f.Requests, r => r is RetrieveAllOptionSetsRequest);
+        Assert.Single(f.Requests, GlobalChoiceServerFake.IsWrite);
+        f.AssertLeases();
+    }
+
+    public static TheoryData<string, string> NearMissesWithObjectDoesNotExist
+    {
+        get
+        {
+            var data = new TheoryData<string, string>();
+            foreach (var operation in new[] { "option-add", "option-reorder" })
+                foreach (var message in new[]
+                {
+                    "Could not find solution with name SharedOptionSets",
+                    "Could not find an optionset with name mayo_other",
+                    "Could not find option value 5 in optionset mayo_AIRequestType",
+                    "Could not find publisher for solution SharedOptionSet_mayo_AIRequestType"
+                })
+                    data.Add(operation, message);
+            return data;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(NearMissesWithObjectDoesNotExist))]
+    [Trait("AC", "AC-134")]
+    public async Task NearMissText_WithObjectDoesNotExist_ListsOnce_AndRetriesOnceUnderTheStoredName(string operation, string message)
+    {
+        // The code decides, not the text: one listing, one retry under the single stored case variant, and the
+        // retry's own outcome stands (here it succeeds; FailingRetry_SurfacesTheRetryFailure covers failure).
+        using var f = new GlobalChoiceServerFake { FailFirstNamedRequestWith = () => GlobalChoiceServerFake.Fault(message) };
+        await f.Run(operation, Typed);
+        Assert.Single(f.Requests, r => r is RetrieveAllOptionSetsRequest);
+        Assert.Equal(new[] { Typed, Stored }, f.Requests.Where(GlobalChoiceServerFake.IsWrite).Select(GlobalChoiceServerFake.NameOf));
+        f.AssertLeases();
     }
 
     [Theory]
@@ -194,7 +287,8 @@ public sealed class GlobalChoiceNameResolutionTests
     [Trait("AC", "AC-133")]
     public async Task RecognisedNotFoundWordings_TriggerResolution(string template)
     {
-        using var f = new GlobalChoiceServerFake { NotFoundTemplate = template };
+        // English fallback: the wording alone is recognised when the fault carries another code.
+        using var f = new GlobalChoiceServerFake { NotFoundTemplate = template, NotFoundCode = 0x80040203 };
         await f.Run("option-add", Typed);
         Assert.Single(f.Requests, r => r is RetrieveAllOptionSetsRequest);
         Assert.Equal(new[] { Typed, Stored }, f.Requests.OfType<InsertOptionValueRequest>().Select(r => r.OptionSetName));
@@ -375,22 +469,44 @@ public sealed class GlobalChoiceNameResolutionTests
         Assert.Equal(GlobalChoiceServerFake.ChoiceId, preview.TargetObjectId);
     }
 
+    [Theory]
+    [InlineData(Stored)]
+    [InlineData(Typed)]
+    [Trait("AC", "AC-141")]
+    public async Task ChoiceUpdate_ReadsDraft_SoUnrequestedPropertiesKeepTheirUnpublishedValues(string name)
+    {
+        // The description was edited and not yet published. 'optionset update --display-name' must not revert it
+        // by re-sending the published copy.
+        using var f = new GlobalChoiceServerFake
+        {
+            DraftDescription = new Label("Unpublished description", 1033),
+            PublishedDescription = new Label("Published description", 1033)
+        };
+        await f.Run("choice-update", name);
+        Assert.All(f.Requests.OfType<RetrieveOptionSetRequest>(), r => Assert.True(r.RetrieveAsIfPublished));
+        var update = Assert.Single(f.Requests.OfType<UpdateOptionSetRequest>());
+        Assert.Equal(Stored, update.OptionSet.Name);
+        Assert.Equal("Unpublished description", Assert.Single(update.OptionSet.Description.LocalizedLabels).Label);
+        Assert.Equal("Renamed", Assert.Single(update.OptionSet.DisplayName.LocalizedLabels).Label);
+        f.AssertLeases();
+    }
+
     [Fact]
     [Trait("AC", "AC-135")]
-    public async Task AddOptionWithColor_ReadsDraftAndResendsTheDraftSetWithTheNewColor()
+    public async Task AddOptionWithColor_CarriesTheColorOnTheInsert_AndReadsTheDraftBack()
     {
         // The inserted option exists only in draft metadata. A published read (the previous behaviour) could not
-        // find it, and its UpdateOptionSet would have re-sent the published set.
+        // find it. The colour rides on the insert itself (observed live to be stored) and the as-if-published
+        // read-back under the stored name confirms it; nothing else is written.
         using var f = new GlobalChoiceServerFake();
         await f.Run("option-add-color", Stored);
+        var insert = Assert.Single(f.Requests.OfType<InsertOptionValueRequest>());
+        Assert.Equal("#112233", insert["Color"]);
+        Assert.Equal("Sol", insert.SolutionUniqueName);
         var colorRead = f.Requests.OfType<RetrieveOptionSetRequest>().Single();
         Assert.True(colorRead.RetrieveAsIfPublished);
-        var update = Assert.IsType<OptionSetMetadata>(Assert.Single(f.Requests.OfType<UpdateOptionSetRequest>()).OptionSet);
-        Assert.Equal(Stored, update.Name);
-        Assert.Equal(new int?[] { 1, 2, 3 }, update.Options.Select(o => o.Value));
-        Assert.Equal("#112233", update.Options.Single(o => o.Value == 3).Color);
-        Assert.All(update.Options.Where(o => o.Value != 3), o => Assert.Null(o.Color));
-        Assert.Equal("Sol", Assert.Single(f.Requests.OfType<UpdateOptionSetRequest>()).SolutionUniqueName);
+        Assert.Equal(Stored, colorRead.Name);
+        Assert.DoesNotContain(f.Requests, r => r is SdkUpdateOption or UpdateOptionSetRequest);
     }
 }
 
@@ -582,8 +698,15 @@ internal sealed class GlobalChoiceServerFake : IDisposable
     internal List<(int Value, string Label)>? Draft { get; init; }
     internal List<(int Value, string Label)>? Published { get; init; }
 
+    /// <summary>Choice-level description in the draft (as-if-published) and published reads.</summary>
+    internal Label? DraftDescription { get; init; }
+    internal Label? PublishedDescription { get; init; }
+
+    /// <summary>Not-found fault code; the default is ObjectDoesNotExist.</summary>
+    internal uint NotFoundCode { get; init; } = 0x80040217;
+
     internal FaultException<OrganizationServiceFault> NotFoundFault(string name) =>
-        (FaultException<OrganizationServiceFault>)Fault(string.Format(System.Globalization.CultureInfo.InvariantCulture, NotFoundTemplate, name), 0x80040217);
+        (FaultException<OrganizationServiceFault>)Fault(string.Format(System.Globalization.CultureInfo.InvariantCulture, NotFoundTemplate, name), NotFoundCode);
 
     internal static Exception Fault(string message, uint code = 0x80040217) => new FaultException<OrganizationServiceFault>(
         new OrganizationServiceFault { ErrorCode = unchecked((int)code), Message = message }, message);
@@ -658,8 +781,8 @@ internal sealed class GlobalChoiceServerFake : IDisposable
         return request switch
         {
             RetrieveOptionSetRequest r => new RetrieveOptionSetResponse { Results = new ParameterCollection { ["OptionSetMetadata"] = Read(match, r.RetrieveAsIfPublished) } },
-            InsertOptionValueRequest => Insert(),
-            SdkUpdateOption => new UpdateOptionValueResponse(),
+            InsertOptionValueRequest insert => Insert(insert),
+            SdkUpdateOption update => StoreColor(update.Value, update),
             SdkDeleteOption => new DeleteOptionValueResponse(),
             OrderOptionRequest => new OrderOptionResponse(),
             UpdateOptionSetRequest => new UpdateOptionSetResponse(),
@@ -668,22 +791,36 @@ internal sealed class GlobalChoiceServerFake : IDisposable
         };
     }
 
-    private InsertOptionValueResponse Insert()
+    private InsertOptionValueResponse Insert(InsertOptionValueRequest insert)
     {
         _inserted = true;
+        StoreColor(3, insert);
         return new InsertOptionValueResponse { Results = new ParameterCollection { ["NewOptionValue"] = 3 } };
     }
+
+    /// <summary>Dataverse stores the Color parameter of an option-value message on the option (observed live).</summary>
+    private UpdateOptionValueResponse StoreColor(int value, OrganizationRequest request)
+    {
+        if (request.Parameters.TryGetValue("Color", out var color)) _colors[value] = (string)color;
+        return new UpdateOptionValueResponse();
+    }
+
+    private readonly Dictionary<int, string> _colors = [];
 
     // The inserted option is unpublished: only an as-if-published read sees it.
     private OptionSetMetadata Read(OptionSetMetadata stored, bool asIfPublished)
     {
         var choice = Choice(stored.Name, stored.MetadataId);
+        if ((asIfPublished ? DraftDescription : PublishedDescription) is { } description)
+            choice.Description = description;
         if ((asIfPublished ? Draft : Published) is { } labels)
         {
             choice.Options.Clear();
             foreach (var (value, label) in labels) choice.Options.Add(new OptionMetadata(new Label(label, 1033), value));
         }
         if (_inserted && asIfPublished) choice.Options.Add(new OptionMetadata(new Label("New", 1033), 3));
+        foreach (var option in choice.Options)
+            option.Color = option.Value is { } v ? _colors.GetValueOrDefault(v) : null;
         return choice;
     }
 
