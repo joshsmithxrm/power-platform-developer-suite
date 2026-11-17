@@ -253,6 +253,10 @@ public sealed class SqlQueryService : ISqlQueryService
         {
             throw WrapRowCapExceeded(ex, context);
         }
+        catch (DmlSafetyRefusalException ex)
+        {
+            throw WrapRefusal(ex, context);
+        }
         catch (Exception ex) when (DmlRan(context) && ex is not OperationCanceledException && (ex is not PpdsException || ex is PpdsAuthException))
         {
             throw WrapInterrupted(ex, context);
@@ -312,6 +316,14 @@ public sealed class SqlQueryService : ISqlQueryService
     }
 
     private static bool DmlRan(QueryPlanContext context) => context.Statistics.DmlOutcomes.Count > 0;
+
+    /// <summary>A planner refusal raised while a script ran, as a <see cref="PpdsException"/> with its own code.</summary>
+    private static PpdsException WrapRefusal(DmlSafetyRefusalException ex, QueryPlanContext context)
+    {
+        var wrapped = new PpdsException(ex.ErrorCode, ex.Message, ex);
+        RecordCommittedOutcome(wrapped, context);
+        return wrapped;
+    }
 
     /// <summary>
     /// A failure after DML already changed rows (an earlier statement ran, or the failing statement was part-way
@@ -491,6 +503,10 @@ public sealed class SqlQueryService : ISqlQueryService
                 {
                     throw WrapRowCapExceeded(ex, context);
                 }
+                catch (DmlSafetyRefusalException ex)
+                {
+                    throw WrapRefusal(ex, context);
+                }
                 catch (Exception ex) when (DmlRan(context) && ex is not OperationCanceledException && (ex is not PpdsException || ex is PpdsAuthException))
                 {
                     throw WrapInterrupted(ex, context);
@@ -637,12 +653,6 @@ public sealed class SqlQueryService : ISqlQueryService
         // DML safety check. A request without explicit options is checked with the defaults (not
         // confirmed, not dry-run, default row cap): the guard fails closed instead of being skipped.
         var dmlSafety = request.DmlSafety ?? new DmlSafetyOptions();
-        if (dmlSafety.RowCap is <= 0)
-        {
-            throw new PpdsValidationException(
-                "rowCap",
-                $"The row cap must be a positive number of rows (got {dmlSafety.RowCap}). Nothing was executed.");
-        }
         int? dmlRowCap = null;
         DmlSafetyResult? safetyResult = null;
 
@@ -657,6 +667,13 @@ public sealed class SqlQueryService : ISqlQueryService
         // not ask for (the extension's default top over RPC) is not marked explicit and is simply ignored for DML.
         // The MAX_ROWS hint is text the user wrote, so ignoring it would change what the statement affects. The engine
         // cannot apply a row limit to DML, so the request is refused instead (on every surface, before anything runs).
+        if (safetyResult.ContainsDml && dmlSafety.RowCap is <= 0)
+        {
+            throw new PpdsValidationException(
+                "rowCap",
+                $"The row cap must be a positive number of rows (got {dmlSafety.RowCap}). Nothing was executed.");
+        }
+
         if (safetyResult.ContainsDml && hints.UnrecognizedHints.Count > 0)
         {
             throw new PpdsValidationException(
@@ -767,8 +784,8 @@ public sealed class SqlQueryService : ISqlQueryService
         // Only apply TopOverride as MaxRows if the SQL itself does not contain a TOP clause.
         // The extension sends a default top (100) on every query — we must not clobber the
         // user's explicit TOP 5 with the default 100.
-        // TopOverride (and the MAX_ROWS hint) limits result sets only. It must never change which rows a
-        // DML statement affects, so it is ignored when the request contains DML.
+        // A caller's default TopOverride limits result sets only and is ignored when the request contains DML (an
+        // explicit --top and the MAX_ROWS hint were refused above for DML).
         var sqlHasExplicitTop = ExtractQuerySpecification(fragment)?.TopRowFilter != null;
         var effectiveMaxRows = sqlHasExplicitTop || safetyResult.ContainsDml ? null : request.TopOverride;
 

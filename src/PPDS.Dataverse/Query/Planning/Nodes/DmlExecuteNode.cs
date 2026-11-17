@@ -224,7 +224,8 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             EntityLogicalName,
             RowCap,
             $"{operation} {EntityLogicalName} was refused: it would affect more than the row cap of {cap} rows " +
-            $"({matched}). This statement changed nothing. Narrow the WHERE clause to affect fewer rows.");
+            $"({matched}). This statement changed nothing. " +
+            (exactCount.HasValue ? "Split the INSERT into smaller statements." : "Narrow the WHERE clause to affect fewer rows."));
     }
 
     /// <summary>A statement that matched no rows still counts as an executed DML statement (keeps positions real).</summary>

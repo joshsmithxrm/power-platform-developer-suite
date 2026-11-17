@@ -112,7 +112,7 @@ public class DmlRowCapTests
         // INSERT VALUES knows its exact row count; the others only know that at least cap + 1 rows match.
         Assert.Contains(sql == InsertValuesSql ? "it would insert 3 rows" : "at least 3 rows", ex.Message);
         Assert.Contains("changed nothing", ex.Message);
-        Assert.Contains("Narrow the WHERE clause", ex.Message);
+        Assert.Contains(sql == InsertValuesSql ? "Split the INSERT" : "Narrow the WHERE clause", ex.Message);
         Assert.DoesNotContain("--", ex.Message); // surface-neutral: TUI and RPC users cannot pass CLI flags
         Assert.DoesNotContain("5", ex.Message); // never claims a total it did not count
         Assert.Equal(2, ex.RowCap);

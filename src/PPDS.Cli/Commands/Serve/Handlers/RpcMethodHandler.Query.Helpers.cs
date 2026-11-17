@@ -225,7 +225,8 @@ public partial class RpcMethodHandler
     /// failure (including a cancelled run), <c>dmlCommitted</c> says what changed and the message repeats it. Returns
     /// false for anything else, which then propagates unchanged (an <see cref="RpcException"/>, or a bare cancellation).
     /// </summary>
-    internal static bool TryMapQuerySqlFailure(Exception ex, string sql, out RpcException? rpcException)
+    internal static bool TryMapQuerySqlFailure(
+        Exception ex, string sql, out RpcException? rpcException, bool cancellationRequested = true)
     {
         var committed = DmlOutcome.From(ex)?.DescribeCommitted();
         string WithCommitted(string message) => committed == null ? message : $"{message} {committed}";
@@ -273,6 +274,14 @@ public partial class RpcMethodHandler
             PpdsException { ErrorCode: ErrorCodes.Query.TdsIncompatible or ErrorCodes.Query.TdsConnectionFailed } tds =>
                 new RpcException(tds.ErrorCode, tds.UserMessage),
             PpdsException other => WithCommittedMessage(MapPpdsToRpcException(other), committed),
+            // A cancellation nobody asked for (a timeout) after data changed is an interruption, not "cancelled".
+            OperationCanceledException when committed != null && !cancellationRequested =>
+                new RpcException(ErrorCodes.Query.DmlInterrupted, WithCommitted("The run stopped before it finished (it timed out)."), new RpcErrorData
+                {
+                    Code = ErrorCodes.Query.DmlInterrupted,
+                    Message = WithCommitted("The run stopped before it finished (it timed out)."),
+                    DmlCommitted = committed,
+                }),
             OperationCanceledException when committed != null =>
                 new RpcException(ErrorCodes.Operation.Cancelled, WithCommitted("The query was cancelled."), new RpcErrorData
                 {

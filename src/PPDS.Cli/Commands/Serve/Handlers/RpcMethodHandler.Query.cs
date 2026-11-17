@@ -320,7 +320,7 @@ public partial class RpcMethodHandler
 
                 return mapped;
             }
-            catch (Exception ex) when (TryMapQuerySqlFailure(ex, request.Sql, out var rpcException))
+            catch (Exception ex) when (TryMapQuerySqlFailure(ex, request.Sql, out var rpcException, ct.IsCancellationRequested))
             {
                 throw rpcException!;
             }

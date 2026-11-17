@@ -39,13 +39,18 @@ public sealed class DmlOutcome
     public bool HasFailures => FailedRows > 0 || Statements.Any(s => s.Interrupted);
 
     /// <summary>True when rows failed and none succeeded in any statement.</summary>
-    public bool IsTotalFailure => HasFailures && AffectedRows == 0;
+    public bool IsTotalFailure => HasFailures && AffectedRows == 0 && !IsInterrupted;
+
+    /// <summary>True when a statement was interrupted part-way: rows may be partly applied, the counts are lower bounds.</summary>
+    public bool IsInterrupted => Statements.Any(s => s.Interrupted);
 
     /// <summary>Error code: <c>Query.ExecutionFailed</c> for total failure, <c>Operation.PartialFailure</c> otherwise.</summary>
-    public string ErrorCode => IsTotalFailure ? ErrorCodes.Query.ExecutionFailed : ErrorCodes.Operation.PartialFailure;
+    public string ErrorCode => IsInterrupted ? ErrorCodes.Query.DmlInterrupted
+        : IsTotalFailure ? ErrorCodes.Query.ExecutionFailed : ErrorCodes.Operation.PartialFailure;
 
     /// <summary>Process exit code: 0 no failures, 1 (PartialSuccess) some rows succeeded, 2 (Failure) none did.</summary>
-    public int ExitCode => !HasFailures ? ExitCodes.Success : IsTotalFailure ? ExitCodes.Failure : ExitCodes.PartialSuccess;
+    public int ExitCode => !HasFailures ? ExitCodes.Success
+        : IsTotalFailure || IsInterrupted ? ExitCodes.Failure : ExitCodes.PartialSuccess;
 
     /// <summary>
     /// Describes the failure with counts and a representative error tied to the statement it came from.
@@ -122,7 +127,9 @@ public sealed class DmlOutcome
             return head + ErrorSuffix(only.ErrorMessage, " Example error: ");
         }
 
-        var summary = IsTotalFailure
+        var summary = IsInterrupted
+            ? $"DML was interrupted across {Statements.Count} statements and may be partly applied: {AffectedRows} row(s) reported affected, {FailedRows} failed."
+            : IsTotalFailure
             ? $"DML failed across {Statements.Count} statements: all {FailedRows} row(s) failed."
             : $"DML partially succeeded across {Statements.Count} statements: {AffectedRows} row(s) affected, {FailedRows} row(s) failed.";
         var details = failed.Take(MaxStatementsListed).Select(x => x.Statement.Interrupted

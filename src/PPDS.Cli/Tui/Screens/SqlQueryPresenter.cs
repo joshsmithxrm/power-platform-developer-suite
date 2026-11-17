@@ -298,8 +298,8 @@ internal sealed class SqlQueryPresenter : IDisposable
         " The row cap cannot be removed in the TUI; to change every matching row, run the statement with 'ppds query sql --no-limit'.";
 
     /// <summary>
-    /// Load-more re-reads the last statement; it must never run DML. Explicit unconfirmed options make a
-    /// DML-containing script fail the guard instead of executing.
+    /// Load-more re-reads the last statement; it must never run DML. It always asks for page 2 or later, and the
+    /// service refuses DML on a request for a further page (Query.DmlBlocked), confirmed or not.
     /// </summary>
     internal static SqlQueryRequest BuildLoadMoreRequest(string sql, int pageNumber, string? pagingCookie) => new()
     {

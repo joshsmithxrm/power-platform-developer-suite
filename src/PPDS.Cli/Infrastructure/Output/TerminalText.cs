@@ -28,6 +28,10 @@ public static class TerminalText
                 // A CRLF line ending is harmless; show it as a plain newline.
                 sb ??= new StringBuilder(text.Length + 16).Append(text, 0, i);
             }
+            else if ((c == 0x200C || c == 0x200D) && JoinsScriptOrEmoji(text, i))
+            {
+                sb?.Append(c); // ordinary orthography (Persian, Indic) or part of an emoji sequence
+            }
             else if (NeedsEscape(c))
             {
                 sb ??= new StringBuilder(text.Length + 16).Append(text, 0, i);
@@ -40,6 +44,22 @@ public static class TerminalText
         }
 
         return sb?.ToString() ?? text;
+    }
+
+    /// <summary>
+    /// U+200C/U+200D are ordinary orthography in Persian and Indic scripts and glue emoji sequences, so they are kept when
+    /// both neighbours are non-ASCII letters, combining marks or emoji (surrogates or symbols). Anywhere else (next to
+    /// ASCII, spaces, the ends, other invisible characters) they can only hide something, and are escaped.
+    /// </summary>
+    private static bool JoinsScriptOrEmoji(string text, int i)
+    {
+        static bool Visible(char ch) => ch > 0x7F && (char.IsSurrogate(ch) || char.IsLetter(ch)
+            || char.GetUnicodeCategory(ch) is System.Globalization.UnicodeCategory.NonSpacingMark
+                or System.Globalization.UnicodeCategory.SpacingCombiningMark
+                or System.Globalization.UnicodeCategory.OtherSymbol);
+
+        return i > 0 && i + 1 < text.Length && Visible(text[i - 1]) && Visible(text[i + 1])
+            && text[i - 1] is not ('\u200B' or '\u200C' or '\u200D' or '\uFEFF');
     }
 
     private static bool NeedsEscape(char c)
