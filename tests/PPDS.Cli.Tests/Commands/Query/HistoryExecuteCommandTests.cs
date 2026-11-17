@@ -224,17 +224,21 @@ public class HistoryExecuteCommandTests : IDisposable
             bulk.Verify(b => b.UpdateMultipleAsync("account", It.IsAny<IEnumerable<Microsoft.Xrm.Sdk.Entity>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    [Fact]
-    public async Task Replay_DryRun_PrintsPlan_ExecutesNothing()
+    [Theory]
+    [InlineData(DeleteSql, false, DmlSafetyGuard.DefaultRowCap)]
+    [InlineData(UpdateSql, false, DmlSafetyGuard.DefaultRowCap)]
+    [InlineData(DeleteSql, true, int.MaxValue)]
+    public async Task Replay_DryRun_PrintsPlan_WithTheRowCap_ExecutesNothing(string sql, bool noLimit, int expectedCap)
     {
         WriteEnvConfig(EnvironmentType.Development);
         var (service, executor, bulk) = Service();
 
-        var (exit, stdout, stderr) = await Replay(service, DeleteSql, new DmlSafetyOptions { IsDryRun = true });
+        var (exit, stdout, stderr) = await Replay(service, sql, new DmlSafetyOptions { IsDryRun = true, NoLimit = noLimit });
 
         Assert.Equal(ExitCodes.Success, exit);
         using var json = JsonDocument.Parse(stdout);
         Assert.True(json.RootElement.GetProperty("data").GetProperty("dryRun").GetBoolean());
+        Assert.Equal(expectedCap, json.RootElement.GetProperty("data").GetProperty("rowCap").GetInt32());
         Assert.Contains("--dry-run", stderr);
         executor.VerifyNoOtherCalls();
         bulk.VerifyNoOtherCalls();
@@ -250,7 +254,7 @@ public class HistoryExecuteCommandTests : IDisposable
 
         var (exit, stdout, _) = await Replay(service, sql, new DmlSafetyOptions { IsConfirmed = true });
 
-        Assert.NotEqual(ExitCodes.Success, exit);
+        Assert.Equal(ExitCodes.Failure, exit);
         using var json = JsonDocument.Parse(stdout);
         Assert.Equal(ErrorCodes.Query.DmlBlocked, json.RootElement.GetProperty("error").GetProperty("code").GetString());
         executor.VerifyNoOtherCalls();
@@ -278,6 +282,29 @@ public class HistoryExecuteCommandTests : IDisposable
         await Replay(service, "SELECT name FROM account", new DmlSafetyOptions());
 
         Assert.Equal(ProtectionLevel.Test, service.EnvironmentProtectionLevel);
+    }
+
+    [Theory]
+    [InlineData(ProtectionLevel.Production, "", ExitCodes.ConfirmationRequired, false)]
+    [InlineData(ProtectionLevel.Production, "dry-run", ExitCodes.Success, false)]
+    [InlineData(ProtectionLevel.Production, "confirm", ExitCodes.Success, true)]
+    [InlineData(ProtectionLevel.Test, "", ExitCodes.ConfirmationRequired, false)]
+    [InlineData(ProtectionLevel.Test, "dry-run", ExitCodes.Success, false)]
+    [InlineData(ProtectionLevel.Test, "confirm", ExitCodes.Success, true)]
+    public async Task Replay_ProtectedEnvironment_IsExactlyAsHardAsSql(
+        ProtectionLevel protection, string flag, int expectedExit, bool executes)
+    {
+        WriteEnvConfig(EnvironmentType.Sandbox, protection);
+        var (service, executor, bulk) = Service(MockBehavior.Loose);
+        ReturnThreeAccounts(executor, bulk);
+        var options = new DmlSafetyOptions { IsConfirmed = flag == "confirm", IsDryRun = flag == "dry-run" };
+
+        var (exit, _, _) = await Replay(service, DeleteSql, options);
+
+        Assert.Equal(expectedExit, exit);
+        Assert.Equal(protection, service.EnvironmentProtectionLevel);
+        bulk.Verify(b => b.DeleteMultipleAsync(It.IsAny<string>(), It.IsAny<IEnumerable<Guid>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()),
+            executes ? Times.Once() : Times.Never());
     }
 
     [Fact]
@@ -410,9 +437,10 @@ public class HistoryExecuteCommandTests : IDisposable
             service, "DELETE FROM account WHERE name = 'a'; DELETE FROM account WHERE name = 'b'",
             new DmlSafetyOptions { IsConfirmed = true });
 
-        Assert.NotEqual(ExitCodes.Success, exit);
+        Assert.Equal(ExitCodes.Failure, exit);
         Assert.Contains("not rolled back", stderr);
         Assert.Contains("#1 DELETE account: 2 affected, 0 failed", stderr);
+        Assert.Contains("#2 DELETE account was running when the run was interrupted and may be partly applied", stderr);
     }
 
     // ---- request building ------------------------------------------------
