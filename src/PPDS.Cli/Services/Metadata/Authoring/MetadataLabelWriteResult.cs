@@ -4,8 +4,9 @@ namespace PPDS.Cli.Services.Metadata.Authoring;
 
 /// <summary>
 /// Outcome of an update that may write labels. Every label PPDS writes is the English (LCID 1033) label, merged with
-/// the other languages. When the target's label in the caller's own language is not English, that label is left
-/// unchanged, and <see cref="ValidationMessages"/> says so (rule <see cref="EnglishLabelOnlyRule"/>).
+/// the other languages. When the label Dataverse shows the caller (the user-localised label) is in another language
+/// and does not already read the requested text, that label is left unchanged and <see cref="ValidationMessages"/>
+/// says so (rule <see cref="EnglishLabelOnlyRule"/>). Every surface (CLI, TUI, MCP) shows these notices.
 /// </summary>
 public sealed class MetadataLabelWriteResult
 {

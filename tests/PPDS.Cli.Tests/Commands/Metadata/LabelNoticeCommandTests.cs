@@ -83,11 +83,33 @@ public sealed class LabelNoticeCommandTests
     [InlineData("optionset", "update", "--display-name")]
     [InlineData("optionset", "update", "--description")]
     [InlineData("choice", "update", "--display-name")]
+    [InlineData("choice", "update", "--description")]
+    [InlineData("choice", "update-option", "--label")]
+    [InlineData("entity", "update", "--display-name")]
+    [InlineData("entity", "update", "--plural-name")]
+    [InlineData("entity", "update", "--description")]
+    [InlineData("table", "update", "--display-name")]
+    [InlineData("table", "update", "--plural-name")]
+    [InlineData("table", "update", "--description")]
+    [InlineData("attribute", "update", "--display-name")]
+    [InlineData("attribute", "update", "--description")]
+    [InlineData("column", "update", "--display-name")]
+    [InlineData("column", "update", "--description")]
     [Trait("AC", "AC-145")]
     public void Help_SaysTheLabelIsEnglish(string group, string verb, string option)
     {
         var command = MetadataCommandGroup.Create(null).Subcommands.Single(c => c.Name == group).Subcommands.Single(c => c.Name == verb);
         Assert.EndsWith("(English, LCID 1033)", command.Options.Single(o => o.Name == option).Description);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-145")]
+    public void Tui_ChoiceUpdateStatus_ShowsTheNotice()
+    {
+        Assert.Equal("Choice updated: new_choice", PPDS.Cli.Tui.Screens.MetadataExplorerScreen.ChoiceUpdatedStatus("new_choice", MetadataLabelWriteResult.None));
+        Assert.Equal("Choice updated: new_choice", PPDS.Cli.Tui.Screens.MetadataExplorerScreen.ChoiceUpdatedStatus("new_choice", null));
+        var status = PPDS.Cli.Tui.Screens.MetadataExplorerScreen.ChoiceUpdatedStatus("new_choice", Notice);
+        Assert.StartsWith("Choice updated: new_choice Warning: Only the English (LCID 1033) label is written.", status);
     }
 
     private static async Task<(int Exit, string Stdout, string Stderr)> Invoke(string command, MetadataLabelWriteResult result)

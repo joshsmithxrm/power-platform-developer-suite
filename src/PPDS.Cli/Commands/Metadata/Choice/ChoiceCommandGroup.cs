@@ -316,7 +316,7 @@ public static class ChoiceCommandGroup
 
         var labelOption = new Option<string>("--label")
         {
-            Description = "New label for the option",
+            Description = "New label for the option (English, LCID 1033)",
             Required = true
         };
 

@@ -473,7 +473,7 @@ public static class EntityCommand
 
         var pluralNameOption = new Option<string?>("--plural-name")
         {
-            Description = "Updated plural display name"
+            Description = "Updated plural display name (English, LCID 1033)"
         };
 
         var descriptionOption = new Option<string?>("--description")

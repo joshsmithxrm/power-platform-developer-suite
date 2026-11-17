@@ -120,6 +120,24 @@ public sealed class OptionLabelLanguageTests
         Assert.Contains("'Nom français'", notice.Message);
     }
 
+    [Fact]
+    [Trait("AC", "AC-145")]
+    public async Task ChoiceUpdate_Description_ForANonEnglishUser_ReportsTheDescriptionNotice()
+    {
+        var result = await new Fixture().Service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = "Sol", Name = Fixture.ChoiceName, Description = "New text" });
+        var notice = Assert.Single(result.ValidationMessages);
+        Assert.Equal("Description", notice.Field);
+        Assert.Contains("description Dataverse shows you (LCID 1036)", notice.Message);
+        Assert.Contains("'Description française'", notice.Message);
+        Assert.DoesNotContain("your language", notice.Message);
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    [Trait("AC", "AC-145")]
+    public async Task NoNotice_WhenTheShownLabelAlreadyReadsTheRequestedText(string kind)
+        => Assert.Empty((await new Fixture().UpdateAsync(kind, value: 1, newLabel: "Ouvert")).ValidationMessages);
+
     [Theory]
     [MemberData(nameof(Kinds))]
     [Trait("AC", "AC-142")]

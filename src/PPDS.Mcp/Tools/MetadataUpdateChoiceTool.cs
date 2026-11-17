@@ -68,7 +68,8 @@ public sealed class MetadataUpdateChoiceTool : McpToolBase
                 WasDryRun = dryRun,
                 // An input-only dry run does not look the choice name up (#1535), so it cannot vouch for it.
                 GlobalChoiceNameChecked = dryRun ? false : null,
-                ValidationMessages = labelResult?.ValidationMessages.ToArray() ?? []
+                ValidationMessages = (labelResult?.ValidationMessages ?? [])
+                    .Select(v => new ValidationMessageDto { Field = v.Field, Rule = v.Rule, Message = v.Message }).ToList()
             };
         }
         catch (PpdsException ex)
@@ -107,5 +108,5 @@ public sealed class MetadataUpdateChoiceResult
 
     /// <summary>Notices such as only the English (LCID 1033) label being written; empty when there are none.</summary>
     [JsonPropertyName("validationMessages")]
-    public ValidationMessage[] ValidationMessages { get; set; } = [];
+    public List<ValidationMessageDto> ValidationMessages { get; set; } = [];
 }

@@ -602,6 +602,18 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         }
     }
 
+    /// <summary>
+    /// Status text after a choice update. English-only label notices are appended so a caller shown another
+    /// language's label learns why the list still shows the old text.
+    /// </summary>
+    internal static string ChoiceUpdatedStatus(string name, MetadataLabelWriteResult? result)
+    {
+        var status = $"Choice updated: {name}";
+        foreach (var notice in result?.ValidationMessages ?? [])
+            status += $" Warning: {notice.Message}";
+        return status;
+    }
+
     private async Task ExecuteUpdateGlobalChoiceAsync(UpdateGlobalChoiceRequest request)
     {
         try
@@ -609,17 +621,18 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
             var reporter = new TuiMetadataAuthoringProgressReporter(_statusLabel);
             var provider = await GetProviderAsync(ScreenCancellation);
             var service = provider.GetRequiredService<IMetadataAuthoringService>();
-            await service.UpdateGlobalChoiceAsync(request, reporter, ScreenCancellation);
-
-            Application.MainLoop?.Invoke(() =>
-            {
-                _statusLabel.Text = $"Choice updated: {request.Name}";
-            });
+            var labelResult = await service.UpdateGlobalChoiceAsync(request, reporter, ScreenCancellation);
 
             if (_selectedEntity != null)
             {
                 await LoadEntityDetailAsync(_selectedEntity.LogicalName);
             }
+
+            // Set after the reload, which writes its own status, so a label notice stays visible.
+            Application.MainLoop?.Invoke(() =>
+            {
+                _statusLabel.Text = ChoiceUpdatedStatus(request.Name, labelResult);
+            });
         }
         catch (Exception ex)
         {

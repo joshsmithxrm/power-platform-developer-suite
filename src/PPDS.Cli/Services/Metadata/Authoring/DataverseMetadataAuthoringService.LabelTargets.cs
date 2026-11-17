@@ -83,23 +83,27 @@ public partial class DataverseMetadataAuthoringService
     }
 
     /// <summary>
-    /// Notices for requested labels that are written for English only while the target's label in the caller's own
-    /// language (its user-localised label) is in another language, so that label is left as it was. The CLI shows
-    /// them as warnings; without them a caller would see no change in their own listing after a successful update.
+    /// Notices for requested labels that are written for English only while the label Dataverse shows the caller (its
+    /// user-localised label) is in another language, so that label is left as it was. The user-localised label is the
+    /// caller's UI language when the target has one, otherwise a fallback (believed to be the organisation's base
+    /// language; unconfirmed live), so the message names its LCID rather than claiming it is "your language". No notice
+    /// when that label already reads the requested text. Surfaces show them as warnings; without them a caller could
+    /// see no change in their own listing after a successful update.
     /// </summary>
     private static MetadataLabelWriteResult EnglishOnlyNotices(params (string Field, string Noun, string? Requested, Label? Existing)[] labels)
     {
         var notices = new List<ValidationMessage>();
         foreach (var (field, noun, requested, existing) in labels)
         {
-            if (requested == null || existing?.UserLocalizedLabel is not { } user || user.LanguageCode == 1033)
+            if (requested == null || existing?.UserLocalizedLabel is not { } shown || shown.LanguageCode == 1033
+                || string.Equals(shown.Label, requested, StringComparison.Ordinal))
                 continue;
             notices.Add(new ValidationMessage
             {
                 Field = field,
                 Rule = MetadataLabelWriteResult.EnglishLabelOnlyRule,
-                Message = $"Only the English (LCID 1033) {noun} is written. The {noun} in your language " +
-                    $"(LCID {user.LanguageCode}) is not changed and still reads '{user.Label}'."
+                Message = $"Only the English (LCID 1033) {noun} is written. The {noun} Dataverse shows you " +
+                    $"(LCID {shown.LanguageCode}) is not changed and still reads '{shown.Label}'."
             });
         }
 

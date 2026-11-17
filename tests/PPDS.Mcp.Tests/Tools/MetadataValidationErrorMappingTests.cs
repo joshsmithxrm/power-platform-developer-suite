@@ -143,7 +143,7 @@ public sealed class MetadataValidationErrorMappingTests
         var json = JsonSerializer.SerializeToElement(result);
         if (dryRun) Assert.False(json.GetProperty("globalChoiceNameChecked").GetBoolean());
         else Assert.False(json.TryGetProperty("globalChoiceNameChecked", out _));
-        Assert.Equal(MetadataLabelWriteResult.EnglishLabelOnlyRule, Assert.Single(json.GetProperty("validationMessages").EnumerateArray()).GetProperty("Rule").GetString());
+        Assert.Equal(MetadataLabelWriteResult.EnglishLabelOnlyRule, Assert.Single(json.GetProperty("validationMessages").EnumerateArray()).GetProperty("rule").GetString());
     }
 
     /// <summary>An authoring service whose every method fails with the given exception.</summary>
