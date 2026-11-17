@@ -143,6 +143,8 @@ public static class RepairBindingsCommand
                     publicationRequested = result.PublicationRequested,
                     repaired = result.Repaired,
                     unchanged = result.Unchanged,
+                    readBackRepairableCount = result.ReadBackRepairable.Count,
+                    readBackScanComplete = result.ReadBackScanComplete,
                     readBackRepairable = result.ReadBackRepairable
                 });
             }
@@ -152,7 +154,8 @@ public static class RepairBindingsCommand
                 foreach (var item in result.Repaired)
                     Console.Error.WriteLine($"  {(result.DryRun ? "Would repair" : "Repaired")}: control '{item.ControlId ?? "(no id)"}' ({item.Location}) " +
                         $"binding '{item.OldBinding}' -> '{item.NewBinding}'." +
-                        (item.ControlIdCaseDiffers ? " Its id also differs from the logical name by case and was not changed." : ""));
+                        (item.ControlIdCaseDiffers ? " Its id also differs from the logical name by case and was not changed." : "") +
+                        (item.VerifiedBy == BindingVerification.ByPosition ? " Verified by position (its id is absent or repeated)." : ""));
                 foreach (var item in result.Unchanged)
                     Console.Error.WriteLine("  " + DescribeUnchanged(request.EntityLogicalName, item));
                 foreach (var item in result.ReadBackRepairable)
@@ -187,8 +190,14 @@ public static class RepairBindingsCommand
             messages.Add("The change is saved unpublished; publish the table (or rerun with --publish) to publish it.");
         if (remaining > 0)
             messages.Add($"{remaining} case-variant reference(s) remain on the form and were not changed (listed below).");
+        var diverged = result.Unchanged.Where(u => u.OwnerControlRewritten).ToList();
+        if (diverged.Count > 0)
+            messages.Add($"{diverged.Count} reference(s) belonging to rewritten controls were not rewritten, so each control's binding and that " +
+                "reference now differ in case (listed below).");
         if (result.ReadBackRepairable.Count > 0)
             messages.Add($"The form read back shows {result.ReadBackRepairable.Count} other binding(s) this command can repair (listed below); run it again.");
+        if (!result.ReadBackScanComplete)
+            messages.Add("The form read back could not be scanned for further repairable bindings.");
         if (noMatch > 0)
             messages.Add($"{noMatch} binding(s) match no column and were left unchanged.");
         if (result.SolutionAssociationRequested) messages.Add("The explicit solution association request completed.");
@@ -199,12 +208,17 @@ public static class RepairBindingsCommand
     private static string DescribeUnchanged(string entity, UnchangedBinding item)
     {
         var control = $"control '{item.ControlId ?? "(no id)"}' ({item.Location})";
+        // Null canonical name: the value matches more than one column name ignoring case.
+        var differs = item.CanonicalName is null
+            ? $"which matches more than one column on '{entity}' ignoring case"
+            : $"which differs from '{item.CanonicalName}' by case";
+        var owner = item.OwnerControlRewritten ? " That control's binding was rewritten, so the two now differ in case." : "";
         return item.Reason switch
         {
             BindingRepairReasons.AmbiguousColumn =>
                 $"Left unchanged: {control} is bound to '{item.Binding}', which matches more than one column on '{entity}' ignoring case.",
             BindingRepairReasons.OutsideFormLayout =>
-                $"Left unchanged: a control bound to '{item.Binding}' sits outside the form layout (for example inside custom-control parameters).",
+                $"Left unchanged: control '{item.ControlId ?? "(no id)"}' bound to '{item.Binding}' sits outside the form layout (for example inside custom-control parameters).",
             BindingRepairReasons.NoMatchingColumn =>
                 $"Left unchanged: {control} is bound to '{item.Binding}', which matches no column on '{entity}'.",
             BindingRepairReasons.ControlIdCaseDiffers =>
@@ -214,11 +228,11 @@ public static class RepairBindingsCommand
             BindingRepairReasons.BindingNotPlainText =>
                 $"Left unchanged: {control} is bound to '{item.Binding}', but the stored text spells it with character references; edit it with 'forms get --raw' and 'forms set-xml'.",
             BindingRepairReasons.CustomControlParameterCaseDiffers =>
-                $"Left unchanged: a custom-control datafieldname parameter for {control} is '{item.Binding}', which differs from '{item.CanonicalName}' by case.",
+                $"Left unchanged: a custom-control datafieldname parameter for {control} is '{item.Binding}', {differs}.{owner}",
             BindingRepairReasons.EventAttributeCaseDiffers =>
-                $"Left unchanged: {item.Location} names attribute '{item.Binding}', which differs from '{item.CanonicalName}' by case.",
+                $"Left unchanged: {item.Location} names attribute '{item.Binding}', {differs}.{owner}",
             BindingRepairReasons.HiddenDataCaseDiffers =>
-                $"Left unchanged: hidden control '{item.ControlId ?? "(no id)"}' is bound to '{item.Binding}', which differs from '{item.CanonicalName}' by case.",
+                $"Left unchanged: hidden control '{item.ControlId ?? "(no id)"}' is bound to '{item.Binding}', {differs}.",
             _ => $"Left unchanged: {control} ({item.Reason})."
         };
     }

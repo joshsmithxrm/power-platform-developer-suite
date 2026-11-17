@@ -31,7 +31,7 @@ public static class FormsCommandGroup
     internal static string NonCanonicalNotice(NonCanonicalBinding binding)
         => $"Warning: an existing control is bound to '{binding.StoredName}', which differs from the column's logical name '{binding.CanonicalName}' by case; " +
            "this has been reported to stop the control rendering (#1527). The control was left unchanged. " +
-           "'ppds forms repair-bindings' rewrites every control binding on this form that differs from its column's logical name only by case " +
+           "'ppds forms repair-bindings' rewrites the control bindings in this form's layout that differ from their column's logical name only by case " +
            "(preview with --dry-run); it changes only those bindings and keeps the cells' authored labels and settings, which removing and re-adding the field would discard.";
 
     internal static Task ConfirmEnvironmentAsync(IServiceProvider provider, string? confirmedEnvironment, CancellationToken ct)
