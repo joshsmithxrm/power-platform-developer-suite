@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.2.0] - 2026-11-01
+## [1.2.1] - Unreleased
+
+Will be the first published 1.2.x version. 1.2.0 was tagged but never published to NuGet, so this release also carries the 1.2.0 changes listed below. Upgrading from 1.1.2 gets both.
+
+### Changed
+
+- Refreshed MSAL and its cache extensions from 4.90.1 to 4.92.0 (#1513), and System.Text.Json from 10.0.9 to 10.0.14 (#1565). `CloudEndpoints.GetAzureCloudInstance` still returns MSAL's `AzureCloudInstance`, now from MSAL 4.92.0; consumers that pin an older MSAL need to allow 4.92.0. Authentication source and public APIs are unchanged.
+
+## [1.2.0] - 2026-11-01 (tagged, not published)
+
+Tagged as `Auth-v1.2.0` but not published to NuGet. These changes first ship in 1.2.1; the 1.2.0 tag is not reused.
 
 ### Changed
 
