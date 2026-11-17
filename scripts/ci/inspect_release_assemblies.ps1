@@ -4,6 +4,20 @@ param(
     [switch]$DelaySignedInput
 )
 $ErrorActionPreference = 'Stop'
+function Invoke-StrongNameVerification([string]$Tool, [string]$Assembly) {
+    if (!(Test-Path -LiteralPath $Tool -PathType Leaf)) { throw 'Required Windows SDK sn.exe is missing' }
+    # A native command that never started leaves no exit code. Clear any stale one first so an
+    # unset value can be told apart from a real result of an earlier call.
+    $global:LASTEXITCODE = $null
+    $notRun = 'Strong-name verification tool did not run; the environment may lack PATHEXT, which PowerShell needs to launch a native executable by full path'
+    try {
+        # -vf forces verification even if verification skipping is configured.
+        $diagnostics = & $Tool -vf $Assembly 2>&1
+    }
+    catch [System.Management.Automation.CommandNotFoundException] { throw $notRun }
+    if ($null -eq $LASTEXITCODE) { throw $notRun }
+    if ($LASTEXITCODE -ne 0) { throw "Plugins cryptographic strong-name verification failed: $diagnostics" }
+}
 if ($DelaySignedInput -and !$ExpectedPublicKey) { throw 'Delay-signed input requires an expected public key' }
 $rows = @(foreach ($file in Get-ChildItem -LiteralPath $Directory -Filter '*.dll' -File) {
     # Metadata reads only: never load or execute package code.
@@ -45,11 +59,7 @@ $rows = @(foreach ($file in Get-ChildItem -LiteralPath $Directory -Filter '*.dll
         }
         $sdk = Join-Path ${env:ProgramFiles(x86)} 'Microsoft SDKs\Windows\v10.0A\bin\NETFX 4.8 Tools\sn.exe'
         if (!(Test-Path -LiteralPath $sdk -PathType Leaf)) { throw 'Required Windows SDK sn.exe is missing' }
-        # -vf forces verification even if verification skipping is configured.
-        if (!$DelaySignedInput) {
-            $diagnostics = & $sdk -vf $file.FullName 2>&1
-            if ($LASTEXITCODE -ne 0) { throw "Plugins cryptographic strong-name verification failed: $diagnostics" }
-        }
+        if (!$DelaySignedInput) { Invoke-StrongNameVerification $sdk $file.FullName }
     }
     [pscustomobject]@{name=$identity.Name; version=$version}
 })
