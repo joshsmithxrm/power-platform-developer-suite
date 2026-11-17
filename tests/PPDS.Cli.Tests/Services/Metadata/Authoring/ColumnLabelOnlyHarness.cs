@@ -87,7 +87,7 @@ internal sealed class ColumnLabelHarness : IDisposable
         _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), guard, cacheProvider: _cache.Object);
     }
 
-    internal Task UpdateAsync(UpdateColumnRequest request, IMetadataAuthoringProgressReporter? reporter = null)
+    internal Task<MetadataLabelWriteResult> UpdateAsync(UpdateColumnRequest request, IMetadataAuthoringProgressReporter? reporter = null)
     { _input = request; return _service.UpdateColumnAsync(request, reporter, Token); }
     internal void Cancel() => _cancel.Cancel();
     internal string SourceXml() => Serialize(Attribute).ToString(SaveOptions.DisableFormatting);

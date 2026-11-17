@@ -28,6 +28,32 @@ public class MetadataAuthoringRpcTests
     private static IServiceProvider CreateAuthServices() =>
         new ServiceCollection().AddAuthServices().BuildServiceProvider();
 
+    #region Label notices (AC-147)
+
+    [Fact]
+    [Trait("AC", "AC-147")]
+    public void MapLabelNotices_CarriesFieldRuleAndMessage_AndIsOmittedWithoutNotices()
+    {
+        var notice = new ValidationMessage
+        {
+            Field = "PluralDisplayName", Rule = PPDS.Cli.Services.Metadata.Authoring.MetadataLabelWriteResult.EnglishLabelOnlyRule,
+            Message = "Only the English (LCID 1033) plural name is written."
+        };
+        var mapped = RpcMethodHandler.MapLabelNotices(new PPDS.Cli.Services.Metadata.Authoring.MetadataLabelWriteResult { ValidationMessages = [notice] });
+        var dto = mapped.Should().ContainSingle().Subject;
+        dto.Field.Should().Be("PluralDisplayName");
+        dto.Rule.Should().Be("ENGLISH_LABEL_ONLY");
+        dto.Message.Should().Be(notice.Message);
+
+        RpcMethodHandler.MapLabelNotices(PPDS.Cli.Services.Metadata.Authoring.MetadataLabelWriteResult.None).Should().BeNull("an empty list is omitted from the response");
+        RpcMethodHandler.MapLabelNotices(null).Should().BeNull("a null result (e.g. a loose mock) does not throw");
+
+        var json = JsonSerializer.Serialize(new MetadataAuthoringResponse { Success = true, ValidationMessages = RpcMethodHandler.MapLabelNotices(null) }, JsonOptions);
+        json.Should().NotContain("validationMessages");
+    }
+
+    #endregion
+
     #region Parameter Validation Tests
 
     [Theory]

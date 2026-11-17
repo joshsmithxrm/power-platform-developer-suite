@@ -75,11 +75,11 @@ public sealed class MetadataDraftOptionReadTests
         Assert.Equal(77, await f.AddAsync(value: 77, color: "#123456"));
         Assert.Equal(2, f.Reads.Count());
         Assert.All(f.Reads, r => Assert.True(r.RetrieveAsIfPublished));
-        var updated = Assert.IsAssignableFrom<EnumAttributeMetadata>(Assert.Single(f.Requests.OfType<UpdateAttributeRequest>()).Attribute);
-        Assert.Equal("#123456", updated.OptionSet.Options.Single(o => o.Value == 77).Color);
-        Assert.Equal("Draft label", updated.OptionSet.Options.Single(o => o.Value == 10000).Label.LocalizedLabels[0].Label);
-        Assert.Equal("Unpublished", updated.OptionSet.Options.Single(o => o.Value == 10001).Label.LocalizedLabels[0].Label);
-        Assert.Null(updated.RequiredLevel); // Keep the existing minimal color carrier.
+        // The colour rides on the insert (observed live to be stored); the second draft read confirms it. No option
+        // collection or attribute is re-sent, so the other draft options and their labels cannot be touched.
+        var insert = Assert.Single(f.Requests, r => r is InsertOptionValueRequest or InsertStatusValueRequest);
+        Assert.Equal("#123456", insert["Color"]);
+        Assert.DoesNotContain(f.Requests, r => r is SdkUpdateOption or UpdateAttributeRequest);
         Assert.DoesNotContain(f.Requests, r => r.RequestName == "PublishXml");
         f.AssertRoutingAndCancellation();
     }
@@ -93,13 +93,36 @@ public sealed class MetadataDraftOptionReadTests
         using var f = new Fixture(kind);
         await f.UpdateAsync(10000, "#654321");
         Assert.All(f.Reads, r => Assert.True(r.RetrieveAsIfPublished)); // Target resolution and color readback include drafts (#1531).
-        // With no NewLabel the current DRAFT label is re-sent, so an unpublished label edit is not reverted.
-        Assert.Equal("Draft label", Assert.Single(f.Requests.OfType<SdkUpdateOption>()).Label.LocalizedLabels[0].Label);
-        var update = Assert.Single(f.Requests.OfType<UpdateAttributeRequest>());
-        var options = Assert.IsAssignableFrom<EnumAttributeMetadata>(update.Attribute).OptionSet.Options;
-        Assert.Contains(options, o => o.Value == 10001);
-        Assert.Equal("#654321", options.Single(o => o.Value == 10000).Color);
+        // One request: the Color parameter and no Label, so an unpublished label edit cannot be reverted or rewritten.
+        var update = Assert.Single(f.Requests.OfType<SdkUpdateOption>());
+        Assert.Equal(10000, update.Value);
+        Assert.Equal("#654321", update["Color"]);
+        Assert.False(update.Parameters.ContainsKey("Label"));
+        Assert.DoesNotContain(f.Requests, r => r is UpdateAttributeRequest);
         f.AssertRoutingAndCancellation();
+    }
+
+    [Theory]
+    [InlineData("status", "timeout")]
+    [InlineData("status", "cancel")]
+    [InlineData("choice", "timeout")]
+    [InlineData("choice", "cancel")]
+    [Trait("AC", "AC-146")]
+    public async Task InsertThatTimesOutOrIsCancelled_SaysTheOutcomeIsUnknown(string kind, string interruption)
+    {
+        Exception failure = interruption == "timeout" ? new TimeoutException("synthetic") : new OperationCanceledException("synthetic");
+        using var f = new Fixture(kind) { InsertFailure = failure };
+        var error = await Assert.ThrowsAsync<PpdsException>(() => f.AddAsync());
+        Assert.Equal(MetadataErrorCodes.SdkOperationFailed, error.ErrorCode);
+        Assert.Same(failure, error.InnerException);
+        Assert.Contains("whether it was added is unknown", error.Message);
+        Assert.Contains(interruption == "timeout" ? "timed out or was cancelled" : "was cancelled", error.Message);
+        Assert.Contains(kind == "status" ? "ppds metadata entity list-statusreasons new_table" : "Check the column's options", error.Message);
+        Assert.Contains("a retry could add a second one", error.Message); // the value was auto-derived
+
+        using var explicitValue = new Fixture(kind) { InsertFailure = new TimeoutException("synthetic") };
+        var withValue = await Assert.ThrowsAsync<PpdsException>(() => explicitValue.AddAsync(value: 77));
+        Assert.DoesNotContain("a retry could add a second one", withValue.Message);
     }
 
     [Fact]
@@ -112,8 +135,9 @@ public sealed class MetadataDraftOptionReadTests
             Label = "New", Value = 77, Color = "#123456"
         }, f.Token);
         Assert.Equal(77, value);
-        Assert.True(Assert.Single(f.Reads).RetrieveAsIfPublished);
-        Assert.Single(f.Requests.OfType<UpdateAttributeRequest>());
+        Assert.True(Assert.Single(f.Reads).RetrieveAsIfPublished); // the colour read-back
+        Assert.Equal("#123456", Assert.Single(f.Requests.OfType<InsertOptionValueRequest>())["Color"]);
+        Assert.DoesNotContain(f.Requests, r => r is SdkUpdateOption);
         f.AssertRoutingAndCancellation();
     }
 
@@ -160,7 +184,7 @@ public sealed class MetadataDraftOptionReadTests
         {
             var update = Assert.Single(f.Requests.OfType<SdkUpdateOption>());
             Assert.Equal(10001, update.Value);
-            Assert.Equal("Unpublished", update.Label.LocalizedLabels[0].Label); // Current draft label preserved.
+            Assert.Equal("Renamed", Assert.Single(update.Label.LocalizedLabels).Label); // Only the requested label is sent.
         }
         f.AssertRoutingAndCancellation();
     }
@@ -349,12 +373,16 @@ public sealed class MetadataDraftOptionReadTests
     [Theory]
     [InlineData("status")]
     [InlineData("choice")]
-    public async Task ColorReadCancellation_Propagates(string kind)
+    public async Task ColorReadCancellation_AfterTheInsert_IsWriteNotConfirmed(string kind)
     {
         using var f = new Fixture(kind) { CancelReadNumber = 2 };
-        var ex = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => f.AddAsync(value: 77, color: "#123456"));
-        Assert.Same(f.Cancellation, ex);
-        Assert.DoesNotContain(f.Requests, r => r is UpdateAttributeRequest);
+        var error = await Assert.ThrowsAsync<PpdsException>(() => f.AddAsync(value: 77, color: "#123456"));
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.Same(f.Cancellation, error.InnerException);
+        Assert.Contains("was added with value 77", error.Message);
+        // The colour rode on the insert; only the confirming read was cancelled, and nothing else was written.
+        Assert.Equal("#123456", Assert.Single(f.Requests, r => r is InsertOptionValueRequest or InsertStatusValueRequest)["Color"]);
+        Assert.DoesNotContain(f.Requests, r => r is SdkUpdateOption);
         f.AssertRoutingAndCancellation();
     }
 
@@ -388,6 +416,7 @@ public sealed class MetadataDraftOptionReadTests
         private readonly Mock<IPooledClient> _client = new(MockBehavior.Loose);
         private readonly List<(int Value, string Label)> _draft;
         private readonly List<(int Value, string Label)> _published;
+        private readonly Dictionary<int, string> _colors = [];
         private readonly List<CancellationToken> _tokens = [];
         public List<OrganizationRequest> Requests { get; } = [];
         public IEnumerable<RetrieveAttributeRequest> Reads => Requests.OfType<RetrieveAttributeRequest>();
@@ -427,6 +456,7 @@ public sealed class MetadataDraftOptionReadTests
                                 OptionMetadata option = kind == "status" ? new StatusOptionMetadata { State = 0 } : new OptionMetadata();
                                 option.Value = value;
                                 option.Label = new Label(label, 1033);
+                                option.Color = _colors.GetValueOrDefault(value);
                                 set.Options.Add(option);
                             }
                             EnumAttributeMetadata attribute = kind switch
@@ -444,15 +474,15 @@ public sealed class MetadataDraftOptionReadTests
                             if (InsertFailure != null) throw InsertFailure;
                             var assigned = (int)request["Value"];
                             _draft.Add((assigned, "New"));
+                            if (request.Parameters.TryGetValue("Color", out var insertedColor)) _colors[assigned] = (string)insertedColor;
                             OrganizationResponse response = request is InsertStatusValueRequest ? new InsertStatusValueResponse() : new InsertOptionValueResponse();
                             response.Results["NewOptionValue"] = assigned;
                             return Task.FromResult(response);
-                        case SdkUpdateOption:
+                        case SdkUpdateOption update:
                             if (WriteFailureFactory != null) throw WriteFailureFactory();
                             if (WriteFailure != null) throw WriteFailure;
+                            if (update.Parameters.TryGetValue("Color", out var updatedColor)) _colors[update.Value] = (string)updatedColor;
                             return Task.FromResult<OrganizationResponse>(new UpdateOptionValueResponse());
-                        case UpdateAttributeRequest:
-                            return Task.FromResult<OrganizationResponse>(new UpdateAttributeResponse());
                         case SdkDeleteOption:
                             if (WriteFailureFactory != null) throw WriteFailureFactory();
                             if (WriteFailure != null) throw WriteFailure;
@@ -485,9 +515,10 @@ public sealed class MetadataDraftOptionReadTests
             ? Service.RemoveStatusReasonAsync(new RemoveStatusReasonRequest { EntityLogicalName = "new_table", Label = label }, Token)
             : Service.RemoveColumnOptionAsync(new RemoveColumnOptionRequest { EntityLogicalName = "new_table", ColumnLogicalName = Attribute, Label = label }, Token);
 
+        // An update must change something: without a colour it renames the option.
         public Task UpdateAsync(int value, string? color = null) => _kind == "status"
-            ? Service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = "new_table", Value = value, Color = color }, Token)
-            : Service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = "new_table", ColumnLogicalName = Attribute, Value = value, Color = color }, Token);
+            ? Service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = "new_table", Value = value, Color = color, NewLabel = color == null ? "Renamed" : null }, Token)
+            : Service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = "new_table", ColumnLogicalName = Attribute, Value = value, Color = color, NewLabel = color == null ? "Renamed" : null }, Token);
 
         public Task RemoveAsync(int value) => _kind == "status"
             ? Service.RemoveStatusReasonAsync(new RemoveStatusReasonRequest { EntityLogicalName = "new_table", Value = value }, Token)
@@ -509,7 +540,11 @@ public sealed class MetadataDraftOptionReadTests
                 Assert.Equal("new_table", insert["EntityLogicalName"]);
                 Assert.Equal(Attribute, insert["AttributeLogicalName"]);
             });
-            Assert.All(Requests.OfType<UpdateAttributeRequest>(), write => Assert.Equal("new_table", write.EntityName));
+            Assert.All(Requests.OfType<SdkUpdateOption>(), write =>
+            {
+                Assert.Equal("new_table", write["EntityLogicalName"]);
+                Assert.Equal(Attribute, write["AttributeLogicalName"]);
+            });
         }
     }
 }
