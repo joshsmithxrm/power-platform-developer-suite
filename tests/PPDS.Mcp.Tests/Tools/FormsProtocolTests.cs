@@ -48,7 +48,8 @@ public sealed class FormsProtocolTests
                 // immediately can legitimately race the SDK removing its per-call progress callback.
                 await progressReceived.Task.WaitAsync(ct);
                 return new FormAuthoringResult { EnvironmentUrl = "https://fixture.example.test", EntityLogicalName = request.EntityLogicalName,
-                    FormId = request.FormId, Status = "saved-unpublished", DraftHash = hash, DraftWrite = new("succeeded"), DraftVerification = new("succeeded") };
+                    FormId = request.FormId, Status = "saved-unpublished", DraftHash = hash, DraftWrite = new("succeeded"), DraftVerification = new("succeeded"),
+                    ControlId = "fixture_value1" };
             });
         forms.Setup(f => f.PublishFormEntityAsync(It.IsAny<PublishFormEntityRequest>(), It.IsAny<IProgressReporter>(), It.IsAny<CancellationToken>()))
             .Returns<PublishFormEntityRequest, IProgressReporter, CancellationToken>((request, _, _) =>
@@ -71,7 +72,11 @@ public sealed class FormsProtocolTests
             ["fieldLogicalName"] = "fixture_value", ["expectedDraftHash"] = hash, ["confirmEnvironment"] = "https://fixture.example.test"
         }, progress: new InlineProgress(value => progressReceived.TrySetResult(value)), cancellationToken: fixture.Token);
         add.IsError.Should().BeFalse();
-        JsonSerializer.Serialize(add).Should().Contain("saved-unpublished");
+        JsonSerializer.Serialize(add).Should().Contain("saved-unpublished")
+            .And.Contain("controlId").And.Contain("fixture_value1"); // wire name of the assigned control id
+        var addJson = JsonSerializer.Serialize(add);
+        addJson.LastIndexOf("controlId", StringComparison.Ordinal).Should().BeGreaterThan(
+            addJson.LastIndexOf("publishedVerification", StringComparison.Ordinal), "the additive member serialises after the existing ones");
         (await progressReceived.Task.WaitAsync(fixture.Token)).Message.Should().Contain("Verifying");
         draft.Should().NotBeNull();
         draft!.SectionId.Should().Be(sectionId);
@@ -81,7 +86,7 @@ public sealed class FormsProtocolTests
             ["entityLogicalName"] = "fixture_table", ["formId"] = formId,
             ["expectedDraftHash"] = hash, ["confirmPublishEntity"] = "fixture_table"
         });
-        publication.Should().Contain("published").And.Contain("entity");
+        publication.Should().Contain("published").And.Contain("entity").And.NotContain("controlId");
         publish!.ConfirmPublishEntity.Should().Be("fixture_table");
     }
 

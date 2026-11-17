@@ -212,12 +212,26 @@ internal static partial class FormXmlEditor
                 : (string?)element.Attribute("name") ?? (string?)element.Attribute("id") ?? "(unnamed)";
     }
 
+    // XDocument-returning form of AddFieldControl, kept for the existing editor tests' fluent style; production code calls
+    // AddFieldControl so it can report the assigned id.
     internal static XDocument AddField(XDocument formXml, string sectionLabel, string fieldLogicalName, string classId, string displayName)
     {
-        var section = RequireSection(formXml, sectionLabel);
-        var rows = EnsureRows(section);
-        rows.Add(new XElement("row", BuildFieldCell(fieldLogicalName, classId, displayName)));
+        AddFieldControl(formXml, sectionLabel, fieldLogicalName, classId, displayName);
         return formXml;
+    }
+
+    /// <summary>
+    /// Appends a new field cell to the section and returns the control <c>id</c> it was given
+    /// (see <see cref="NextFieldControlId(ISet{string}, string, IEnumerable{string}?)"/>).
+    /// <paramref name="tableColumnNames"/> are the table's column logical names; a suffixed id never takes one of them.
+    /// </summary>
+    internal static string AddFieldControl(XDocument formXml, string sectionLabel, string fieldLogicalName, string classId, string displayName,
+        IEnumerable<string>? tableColumnNames = null)
+    {
+        var section = RequireSection(formXml, sectionLabel);
+        var controlId = NextFieldControlId(UsedControlIds(formXml), fieldLogicalName, tableColumnNames);
+        EnsureRows(section).Add(new XElement("row", BuildFieldCell(controlId, fieldLogicalName, classId, displayName)));
+        return controlId;
     }
 
     internal static XDocument RemoveField(XDocument formXml, string fieldLogicalName, string? sectionLabelOrId = null)
@@ -248,7 +262,8 @@ internal static partial class FormXmlEditor
     }
 
     internal static XDocument ReorderFields(XDocument formXml, string sectionLabel, IReadOnlyList<string> orderedFields,
-        Func<string, (string LogicalName, string ClassId, string DisplayName)> resolveNewField)
+        Func<string, (string LogicalName, string ClassId, string DisplayName)> resolveNewField,
+        IEnumerable<string>? tableColumnNames = null)
     {
         var section = RequireSection(formXml, sectionLabel);
         if (orderedFields.Distinct(StringComparer.OrdinalIgnoreCase).Count() != orderedFields.Count)
@@ -281,6 +296,12 @@ internal static partial class FormXmlEditor
             }
         }
 
+        // Ids that remain in the written XML: every control except those in bound cells this reorder drops
+        // (unlisted fields of the selected section). Each new cell's id is reserved as soon as it is planned,
+        // because new cells are not attached until planning finishes.
+        var listed = new HashSet<string>(orderedFields, StringComparer.OrdinalIgnoreCase);
+        var dropped = existingCells.Where(pair => !listed.Contains(pair.Key)).Select(pair => pair.Value).ToHashSet();
+        var usedIds = UsedControlIds(formXml, control => !control.Ancestors("cell").Any(dropped.Contains));
         var orderedCells = new List<XElement>();
         foreach (var fieldName in orderedFields)
         {
@@ -297,7 +318,9 @@ internal static partial class FormXmlEditor
                     .Any(other => ContainsField(other, metadata.LogicalName)))
                     throw new PpdsException(FormErrorCodes.FieldInAnotherSection,
                         $"Column '{metadata.LogicalName}' is already placed in another section. Reorder does not copy or move that control.");
-                cell = BuildFieldCell(metadata.LogicalName, metadata.ClassId, metadata.DisplayName);
+                var controlId = NextFieldControlId(usedIds, metadata.LogicalName, tableColumnNames);
+                usedIds.Add(controlId);
+                cell = BuildFieldCell(controlId, metadata.LogicalName, metadata.ClassId, metadata.DisplayName);
             }
             orderedCells.Add(cell);
         }
@@ -325,6 +348,11 @@ internal static partial class FormXmlEditor
             .Any(c => string.Equals((string?)c.Attribute("id"), controlName, StringComparison.OrdinalIgnoreCase)))
             throw new PpdsException(FormErrorCodes.DuplicateSubgridName,
                 $"A sub-grid with name '{controlName}' already exists. Use a label with a distinct name.");
+        // Control ids are unique on the form: a sub-grid must not take an id another control (e.g. a field) already uses.
+        // This also covers the sub-grid check above, which is kept first only for its more specific message.
+        if (UsedControlIds(formXml).Contains(controlName))
+            throw new PpdsException(FormErrorCodes.DuplicateSubgridName,
+                $"Another control on the form already uses the id '{controlName}'. Use a label with a distinct name.");
 
         var cellId = NewBraceGuid();
         var uniqueId = NewBraceGuid();
@@ -541,18 +569,56 @@ internal static partial class FormXmlEditor
                 new XAttribute("description", description),
                 new XAttribute("languagecode", DefaultLanguageCode)));
 
-    private static XElement BuildFieldCell(string fieldLogicalName, string classId, string displayName)
+    private static XElement BuildFieldCell(string controlId, string fieldLogicalName, string classId, string displayName)
         => new("cell",
             new XAttribute("id", NewBraceGuid()),
             new XAttribute("showlabel", "1"),
             new XAttribute("locklevel", "0"),
             Labels(displayName),
             new XElement("control",
-                // control id is the field logical name (xs:string), not a GUID.
-                new XAttribute("id", fieldLogicalName),
+                // control id is a logical-name string (xs:string), not a GUID; see NextFieldControlId.
+                new XAttribute("id", controlId),
                 new XAttribute("classid", classId),
                 new XAttribute("datafieldname", fieldLogicalName),
                 new XAttribute("disabled", "false")));
+
+    /// <summary>
+    /// The non-empty <c>id</c> values of every <c>&lt;control&gt;</c> in the document (tabs, header, footer, nested
+    /// parameter lookalikes included), case-insensitive. <c>&lt;hiddencontrols&gt;/&lt;data&gt;</c> ids are not controls
+    /// and are deliberately not counted, so adding a column that is only a hidden data entry keeps its bare name.
+    /// </summary>
+    internal static HashSet<string> UsedControlIds(XDocument formXml, Func<XElement, bool>? include = null)
+        => new(formXml.Descendants("control").Where(c => include?.Invoke(c) ?? true)
+                .Select(c => (string?)c.Attribute("id")).Where(id => !string.IsNullOrEmpty(id))!,
+            StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Convenience overload over the document's current control ids. Not used by production code (callers that
+    /// plan several cells keep their own set); kept as the readable entry point for the id-rule tests.</summary>
+    internal static string NextFieldControlId(XDocument formXml, string fieldLogicalName, IEnumerable<string>? tableColumnNames = null)
+        => NextFieldControlId(UsedControlIds(formXml), fieldLogicalName, tableColumnNames);
+
+    /// <summary>
+    /// Returns the control <c>id</c> for a new placement of <paramref name="fieldLogicalName"/>: the logical name
+    /// when no control uses it, otherwise <c>&lt;logicalname&gt;N</c> with the smallest N ≥ 1 that is neither a used
+    /// control id nor the logical name of another column of the table (<paramref name="tableColumnNames"/>), so a
+    /// suffixed placement never squats on a real column's name. FormXml documents control <c>id</c> as uniquely
+    /// identifying the control on the form, and the Client API names repeated column controls <c>name</c>,
+    /// <c>name1</c>, <c>name2</c>… Header controls conventionally use a <c>header_</c> prefix and so do not occupy the
+    /// bare name. Existing controls are never renamed. Comparison is case-insensitive; the result is deterministic.
+    /// </summary>
+    internal static string NextFieldControlId(ISet<string> usedControlIds, string fieldLogicalName, IEnumerable<string>? tableColumnNames = null)
+    {
+        // Case-insensitivity must not depend on the caller's set: a set from UsedControlIds is used as is, any other is copied.
+        if (usedControlIds is not HashSet<string> { Comparer: var comparer } || !ReferenceEquals(comparer, StringComparer.OrdinalIgnoreCase))
+            usedControlIds = new HashSet<string>(usedControlIds, StringComparer.OrdinalIgnoreCase);
+        if (!usedControlIds.Contains(fieldLogicalName)) return fieldLogicalName;
+        var columns = new HashSet<string>(tableColumnNames ?? [], StringComparer.OrdinalIgnoreCase);
+        for (var n = 1; ; n++)
+        {
+            var candidate = fieldLogicalName + n.ToString(CultureInfo.InvariantCulture);
+            if (!usedControlIds.Contains(candidate) && !columns.Contains(candidate)) return candidate;
+        }
+    }
 
     private static string Bool(bool value) => value ? "1" : "0";
 
