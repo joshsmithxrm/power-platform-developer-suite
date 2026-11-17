@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.4.1] - Unreleased
+## [1.5.0] - Unreleased
 
-Will be the first published 1.4.x version. 1.4.0 was tagged but never published to NuGet, so this release also carries the 1.4.0 changes listed below. Upgrading from 1.3.2 gets both.
+1.4.0 was tagged but never published to NuGet. 1.5.0 carries the 1.4.0 changes listed below plus the additions in this section. Upgrading from 1.3.2 gets both.
 
 ### Added
 
@@ -27,7 +27,7 @@ Will be the first published 1.4.x version. 1.4.0 was tagged but never published 
 
 ## [1.4.0] - 2026-11-01 (tagged, not published)
 
-Tagged as `Dataverse-v1.4.0` but not published to NuGet. These changes first ship in 1.4.1; the 1.4.0 tag is not reused.
+Tagged as `Dataverse-v1.4.0` but not published to NuGet. These changes first ship in 1.5.0; the 1.4.0 tag is not reused.
 
 ### Changed
 

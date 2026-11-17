@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Aligned with PPDS.Dataverse 1.4.1 in the coordinated release and refreshed direct Microsoft.Extensions dependencies to 10.0.14 (#1501, #1502). Refreshed the MSAL cache extension from 4.90.1 to 4.92.0 (#1513).
+- Aligned with PPDS.Dataverse 1.5.0 in the coordinated release and refreshed direct Microsoft.Extensions dependencies to 10.0.14 (#1501, #1502). Refreshed the MSAL cache extension from 4.90.1 to 4.92.0 (#1513).
 - Updated SourceLink build tooling to 10.0.403 (#1498). The bounded-export property is an additive public API change; dependency servicing and version alignment are also included.
 
 ## [1.2.2] - 2026-10-30
