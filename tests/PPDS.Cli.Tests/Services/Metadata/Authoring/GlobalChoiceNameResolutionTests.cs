@@ -493,23 +493,20 @@ public sealed class GlobalChoiceNameResolutionTests
 
     [Fact]
     [Trait("AC", "AC-135")]
-    public async Task AddOptionWithColor_ReadsDraftAndWritesTheColorToTheNewOption()
+    public async Task AddOptionWithColor_CarriesTheColorOnTheInsert_AndReadsTheDraftBack()
     {
         // The inserted option exists only in draft metadata. A published read (the previous behaviour) could not
-        // find it. The colour is then written to that option alone through UpdateOptionValue's Color parameter
-        // under the stored name (observed live: UpdateOptionSet ignores option colours).
+        // find it. The colour rides on the insert itself (observed live to be stored) and the as-if-published
+        // read-back under the stored name confirms it; nothing else is written.
         using var f = new GlobalChoiceServerFake();
         await f.Run("option-add-color", Stored);
+        var insert = Assert.Single(f.Requests.OfType<InsertOptionValueRequest>());
+        Assert.Equal("#112233", insert["Color"]);
+        Assert.Equal("Sol", insert.SolutionUniqueName);
         var colorRead = f.Requests.OfType<RetrieveOptionSetRequest>().Single();
         Assert.True(colorRead.RetrieveAsIfPublished);
-        var colour = Assert.Single(f.Requests.OfType<SdkUpdateOption>());
-        Assert.Equal(Stored, colour.OptionSetName);
-        Assert.Equal(3, colour.Value);
-        Assert.Equal("#112233", colour["Color"]);
-        Assert.Null(colour.Label);
-        Assert.True(colour.MergeLabels);
-        Assert.Equal("Sol", colour.SolutionUniqueName);
-        Assert.DoesNotContain(f.Requests, r => r is UpdateOptionSetRequest);
+        Assert.Equal(Stored, colorRead.Name);
+        Assert.DoesNotContain(f.Requests, r => r is SdkUpdateOption or UpdateOptionSetRequest);
     }
 }
 
@@ -784,8 +781,8 @@ internal sealed class GlobalChoiceServerFake : IDisposable
         return request switch
         {
             RetrieveOptionSetRequest r => new RetrieveOptionSetResponse { Results = new ParameterCollection { ["OptionSetMetadata"] = Read(match, r.RetrieveAsIfPublished) } },
-            InsertOptionValueRequest => Insert(),
-            SdkUpdateOption => new UpdateOptionValueResponse(),
+            InsertOptionValueRequest insert => Insert(insert),
+            SdkUpdateOption update => StoreColor(update.Value, update),
             SdkDeleteOption => new DeleteOptionValueResponse(),
             OrderOptionRequest => new OrderOptionResponse(),
             UpdateOptionSetRequest => new UpdateOptionSetResponse(),
@@ -794,11 +791,21 @@ internal sealed class GlobalChoiceServerFake : IDisposable
         };
     }
 
-    private InsertOptionValueResponse Insert()
+    private InsertOptionValueResponse Insert(InsertOptionValueRequest insert)
     {
         _inserted = true;
+        StoreColor(3, insert);
         return new InsertOptionValueResponse { Results = new ParameterCollection { ["NewOptionValue"] = 3 } };
     }
+
+    /// <summary>Dataverse stores the Color parameter of an option-value message on the option (observed live).</summary>
+    private UpdateOptionValueResponse StoreColor(int value, OrganizationRequest request)
+    {
+        if (request.Parameters.TryGetValue("Color", out var color)) _colors[value] = (string)color;
+        return new UpdateOptionValueResponse();
+    }
+
+    private readonly Dictionary<int, string> _colors = [];
 
     // The inserted option is unpublished: only an as-if-published read sees it.
     private OptionSetMetadata Read(OptionSetMetadata stored, bool asIfPublished)
@@ -812,6 +819,8 @@ internal sealed class GlobalChoiceServerFake : IDisposable
             foreach (var (value, label) in labels) choice.Options.Add(new OptionMetadata(new Label(label, 1033), value));
         }
         if (_inserted && asIfPublished) choice.Options.Add(new OptionMetadata(new Label("New", 1033), 3));
+        foreach (var option in choice.Options)
+            option.Color = option.Value is { } v ? _colors.GetValueOrDefault(v) : null;
         return choice;
     }
 

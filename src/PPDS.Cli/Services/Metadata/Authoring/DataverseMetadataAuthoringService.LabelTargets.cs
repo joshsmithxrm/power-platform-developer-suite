@@ -55,32 +55,14 @@ public partial class DataverseMetadataAuthoringService
     }
 
     /// <summary>
-    /// The label an option or status-reason update sends. A requested label is written for LCID 1033, the language
-    /// every PPDS label write targets; the request also sets MergeLabels, so other languages keep their text. When
-    /// the caller did not ask to change the label, every existing translation (as read from draft metadata) is
-    /// re-sent unchanged, so the update cannot replace the English label with the caller's user-language text.
-    /// Translations with empty text are not re-sent (MergeLabels keeps them anyway). Null when there is no label
-    /// text to re-send; the caller then leaves the request's Label unset instead of sending a null or empty label.
+    /// The label an option or status-reason update sends: a requested label as the single LCID 1033 label (the request
+    /// also sets MergeLabels, so other languages keep their text), and no label at all when the caller did not ask to
+    /// change it. Observed live (OptionColorPersistenceLiveTests): an UpdateOptionValue without a Label leaves every
+    /// language of the option's label unchanged, for global options, local options and status reasons, so a colour- or
+    /// description-only update never rewrites a label.
     /// </summary>
-    private static Label? OptionLabelForUpdate(string? requested, Label? existing)
-    {
-        if (requested != null)
-            return new Label(requested, 1033);
-
-        var current = (existing?.LocalizedLabels ?? [])
-            .Where(l => !string.IsNullOrEmpty(l?.Label))
-            .Select(l => new LocalizedLabel(l.Label, l.LanguageCode))
-            .ToList();
-        if (current.Count == 0 && existing?.UserLocalizedLabel is { } user && !string.IsNullOrEmpty(user.Label))
-            current.Add(new LocalizedLabel(user.Label, user.LanguageCode));
-        if (current.Count == 0)
-            return null;
-
-        var label = new Label();
-        foreach (var localized in current)
-            label.LocalizedLabels.Add(localized);
-        return label;
-    }
+    private static Label? OptionLabelForUpdate(string? requested)
+        => requested == null ? null : new Label(requested, 1033);
 
     /// <summary>
     /// Notices for requested labels that are written for English only while the label Dataverse shows the caller (its

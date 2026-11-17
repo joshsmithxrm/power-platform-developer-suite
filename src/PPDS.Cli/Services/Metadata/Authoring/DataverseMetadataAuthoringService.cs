@@ -190,9 +190,9 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             reporter?.ReportPhase("Retrieving existing table labels", request.EntityLogicalName);
             var existing = await ReadTableLabelsAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
             notices = EnglishOnlyNotices(
-                ("DisplayName", "display name", request.DisplayName, existing?.DisplayName),
-                ("PluralDisplayName", "plural name", request.PluralDisplayName, existing?.DisplayCollectionName),
-                ("Description", "description", request.Description, existing?.Description));
+                ("DisplayName", "display name", request.DisplayName, existing.DisplayName),
+                ("PluralDisplayName", "plural name", request.PluralDisplayName, existing.DisplayCollectionName),
+                ("Description", "description", request.Description, existing.Description));
         }
 
         reporter?.ReportPhase("Updating table", request.EntityLogicalName);
@@ -260,24 +260,30 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         return notices;
     }
 
-    /// <summary>Reads a table's entity-level metadata (labels) as-if-published, on its own lease.</summary>
-    private async Task<EntityMetadata?> ReadTableLabelsAsync(string entityLogicalName, CancellationToken ct)
+    /// <summary>
+    /// Reads a table's entity-level metadata (labels) on its own lease, before a label update. Published, like the
+    /// column read the column notices use, because list commands show published labels. Checkout failures keep the
+    /// shared acquisition classification; SDK failures keep the mapper's timeout/connection/auth codes, exit codes and
+    /// re-authentication signal (as the column read does); a response without table metadata stops the update.
+    /// </summary>
+    private async Task<EntityMetadata> ReadTableLabelsAsync(string entityLogicalName, CancellationToken ct)
     {
+        await using var client = await GetMetadataClientAsync(ct).ConfigureAwait(false);
+        const string message = "Could not read the table metadata before updating its labels.";
         try
         {
-            await using var client = await GetMetadataClientAsync(ct).ConfigureAwait(false);
             var response = await client.ExecuteAsync(new RetrieveEntityRequest
             {
                 LogicalName = entityLogicalName,
                 EntityFilters = EntityFilters.Entity,
-                RetrieveAsIfPublished = true
+                RetrieveAsIfPublished = false
             }, ct).ConfigureAwait(false);
-            return (response as RetrieveEntityResponse)?.EntityMetadata;
+            return (response as RetrieveEntityResponse)?.EntityMetadata
+                ?? throw new PpdsException(MetadataErrorCodes.SdkOperationFailed, message);
         }
-        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not PpdsException and not MetadataValidationException)
         {
-            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                $"Could not read table '{entityLogicalName}' before updating its labels.", ex);
+            throw NormalizeColumnLabelSdkFailure(ex, message);
         }
     }
 
@@ -979,7 +985,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 OptionSetName = optionSetName,
                 Label = new Label(request.Label, 1033),
                 Value = request.Value,
-                SolutionUniqueName = request.SolutionUniqueName
+                SolutionUniqueName = OptionSolution(request.SolutionUniqueName)
             };
 
             if (!string.IsNullOrEmpty(request.Description))
@@ -988,6 +994,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
             if (!string.IsNullOrEmpty(request.AttributeLogicalName))
                 sdkRequest["AttributeLogicalName"] = request.AttributeLogicalName;
+            WithColor(sdkRequest, request.Color);
 
             await using var client = await GetMetadataClientAsync(ct).ConfigureAwait(false);
             return (InsertOptionValueResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
@@ -1002,10 +1009,10 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         else
             (optionSetName, response) = await WithGlobalChoiceNameAsync(optionSetName, "OptionSetName", InsertAsync, null, ct).ConfigureAwait(false);
 
-        // Color is applied after the insert by the shared colour helper (UpdateOptionValue's Color parameter).
+        // The colour rides on the insert; the read-back confirms Dataverse stored it.
         if (!string.IsNullOrEmpty(request.Color))
-            await ApplyOptionColorAsync(optionSetName, request.EntityLogicalName, request.AttributeLogicalName,
-                response.NewOptionValue, request.Color, request.SolutionUniqueName, ct).ConfigureAwait(false);
+            await VerifyOptionColorAsync(optionSetName, request.EntityLogicalName, request.AttributeLogicalName,
+                response.NewOptionValue, request.Color, ct).ConfigureAwait(false);
 
         _logger?.LogInformation("Added option value {Value} to {OptionSet}", response.NewOptionValue, request.OptionSetName);
 
@@ -1044,9 +1051,9 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             OptionSetName = target.OptionSetName,
             Value = target.Value,
             MergeLabels = true,
-            SolutionUniqueName = request.SolutionUniqueName
+            SolutionUniqueName = OptionSolution(request.SolutionUniqueName)
         };
-        if (OptionLabelForUpdate(request.NewLabel, target.Labels) is { } globalLabel)
+        if (OptionLabelForUpdate(request.NewLabel) is { } globalLabel)
             sdkRequest.Label = globalLabel;
 
         if (!string.IsNullOrEmpty(request.Description))
@@ -1055,16 +1062,17 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
         if (!string.IsNullOrEmpty(request.AttributeLogicalName))
             sdkRequest["AttributeLogicalName"] = request.AttributeLogicalName;
+        WithColor(sdkRequest, request.Color);
 
         await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
         {
             await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
         }
 
-        // Color is applied to the resolved option by the shared colour helper (UpdateOptionValue's Color parameter).
+        // The colour rides on the same request as the label and description; the read-back confirms it was stored.
         if (!string.IsNullOrEmpty(request.Color))
-            await ApplyOptionColorAsync(target.OptionSetName, request.EntityLogicalName, request.AttributeLogicalName,
-                target.Value, request.Color, request.SolutionUniqueName, ct).ConfigureAwait(false);
+            await VerifyOptionColorAsync(target.OptionSetName, request.EntityLogicalName, request.AttributeLogicalName,
+                target.Value, request.Color, ct).ConfigureAwait(false);
 
         _logger?.LogInformation("Updated option value {Value} in {OptionSet}", target.Value, request.OptionSetName);
         return notices;
@@ -1431,8 +1439,9 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             StateCode = request.StateCode,
             Value = value,
             Label = new Label(request.Label, 1033),
-            SolutionUniqueName = request.SolutionUniqueName
+            SolutionUniqueName = OptionSolution(request.SolutionUniqueName)
         };
+        WithColor(sdkRequest, request.Color);
 
         InsertStatusValueResponse response;
         try
@@ -1449,8 +1458,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         }
 
         if (!string.IsNullOrEmpty(request.Color))
-            await ApplyOptionColorAsync(null, request.EntityLogicalName, "statuscode",
-                response.NewOptionValue, request.Color, request.SolutionUniqueName, ct).ConfigureAwait(false);
+            await VerifyOptionColorAsync(null, request.EntityLogicalName, "statuscode",
+                response.NewOptionValue, request.Color, ct).ConfigureAwait(false);
 
         _logger?.LogInformation("Added status reason '{Label}' with value {Value} to '{Entity}'", request.Label, response.NewOptionValue, request.EntityLogicalName);
 
@@ -1595,13 +1604,14 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         {
             Value = targetValue,
             MergeLabels = true,
-            SolutionUniqueName = request.SolutionUniqueName
+            SolutionUniqueName = OptionSolution(request.SolutionUniqueName)
         };
-        if (OptionLabelForUpdate(request.NewLabel, currentLabels) is { } statusLabel)
+        if (OptionLabelForUpdate(request.NewLabel) is { } statusLabel)
             sdkRequest.Label = statusLabel;
 
         sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
         sdkRequest["AttributeLogicalName"] = "statuscode";
+        WithColor(sdkRequest, request.Color);
 
         await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
         {
@@ -1619,8 +1629,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         }
 
         if (!string.IsNullOrEmpty(request.Color))
-            await ApplyOptionColorAsync(null, request.EntityLogicalName, "statuscode",
-                targetValue, request.Color, request.SolutionUniqueName, ct).ConfigureAwait(false);
+            await VerifyOptionColorAsync(null, request.EntityLogicalName, "statuscode",
+                targetValue, request.Color, ct).ConfigureAwait(false);
 
         _logger?.LogInformation("Updated status reason (value {Value}) on '{Entity}'", targetValue, request.EntityLogicalName);
 
@@ -1820,10 +1830,11 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         {
             Label = new Label(request.Label, 1033),
             Value = value,
-            SolutionUniqueName = request.SolutionUniqueName
+            SolutionUniqueName = OptionSolution(request.SolutionUniqueName)
         };
         sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
         sdkRequest["AttributeLogicalName"] = request.ColumnLogicalName;
+        WithColor(sdkRequest, request.Color);
 
         InsertOptionValueResponse response;
         try
@@ -1838,8 +1849,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         }
 
         if (!string.IsNullOrEmpty(request.Color))
-            await ApplyOptionColorAsync(null, request.EntityLogicalName, request.ColumnLogicalName,
-                response.NewOptionValue, request.Color, request.SolutionUniqueName, ct).ConfigureAwait(false);
+            await VerifyOptionColorAsync(null, request.EntityLogicalName, request.ColumnLogicalName,
+                response.NewOptionValue, request.Color, ct).ConfigureAwait(false);
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
         if (request.Publish)
@@ -1875,12 +1886,13 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         {
             Value = target.Value,
             MergeLabels = true,
-            SolutionUniqueName = request.SolutionUniqueName
+            SolutionUniqueName = OptionSolution(request.SolutionUniqueName)
         };
-        if (OptionLabelForUpdate(request.NewLabel, targetLabels) is { } columnLabel)
+        if (OptionLabelForUpdate(request.NewLabel) is { } columnLabel)
             sdkRequest.Label = columnLabel;
         sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
         sdkRequest["AttributeLogicalName"] = request.ColumnLogicalName;
+        WithColor(sdkRequest, request.Color);
 
         try
         {
@@ -1894,8 +1906,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         }
 
         if (!string.IsNullOrEmpty(request.Color))
-            await ApplyOptionColorAsync(null, request.EntityLogicalName, request.ColumnLogicalName,
-                target.Value, request.Color, request.SolutionUniqueName, ct).ConfigureAwait(false);
+            await VerifyOptionColorAsync(null, request.EntityLogicalName, request.ColumnLogicalName,
+                target.Value, request.Color, ct).ConfigureAwait(false);
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
         if (request.Publish)
@@ -2234,35 +2246,34 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     }
 
     /// <summary>
-    /// Applies an option <paramref name="color"/> to an existing option: the target is read back first (draft
-    /// metadata, so a just-inserted option is found and a missing one fails before any write), then the colour is
-    /// written with <c>UpdateOptionValue</c> carrying the message's <c>Color</c> parameter, with no <c>Label</c>
-    /// and <c>MergeLabels = true</c>, so no label in any language is touched.
+    /// Confirms that <paramref name="color"/> was stored on the option the preceding Insert/Update OptionValue (or
+    /// InsertStatusValue) request carried it to. The option is read back from draft metadata on its own lease; a
+    /// missing option fails <c>OPTION_NOT_FOUND</c> and a different stored colour fails <c>SDK_OPERATION_FAILED</c>,
+    /// so a colour that Dataverse accepted but ignored can never be reported as applied again (#1234).
     /// </summary>
     /// <remarks>
-    /// Observed live (specs/metadata-authoring.md "Option colours"): Dataverse persists an existing option's colour
-    /// only through the <c>Color</c> parameter of <c>UpdateOptionValue</c> (and of <c>InsertOptionValue</c> /
-    /// <c>InsertStatusValue</c> for a new option). Re-sending <see cref="OptionMetadata.Color"/> through
-    /// <c>UpdateOptionSet</c> (global choices) or <c>UpdateAttribute</c> (local options and status reasons) is
-    /// accepted but leaves the colour unchanged, before and after publishing. <see cref="OptionMetadata.Color"/>
-    /// is honoured only when the option set or column is created.
+    /// The colour itself rides on the write request as the message's <c>Color</c> parameter (see
+    /// <see cref="WithColor"/>). Observed live and asserted by <c>OptionColorPersistenceLiveTests</c>: that parameter is
+    /// stored for a global option, a local option, a status reason and a state value, with or without a solution, with
+    /// or without a <c>Label</c>/<c>Description</c> in the same request, and on <c>InsertOptionValue</c> /
+    /// <c>InsertStatusValue</c>; <see cref="OptionMetadata.Color"/> re-sent through <c>UpdateOptionSet</c> or
+    /// <c>UpdateAttribute</c> is accepted and ignored, also after <c>PublishXml</c>.
     /// </remarks>
-    private Task ApplyOptionColorAsync(
+    private Task VerifyOptionColorAsync(
         string? optionSetName,
         string? entityLogicalName,
         string? attributeLogicalName,
         int value,
         string color,
-        string? solutionUniqueName,
         CancellationToken ct)
     {
         // Local (column option or status reason) takes precedence: the entity + attribute pair fully
         // identifies a column-scoped option set, even when an OptionSetName is also present.
         if (!string.IsNullOrEmpty(entityLogicalName) && !string.IsNullOrEmpty(attributeLogicalName))
-            return ApplyLocalOptionColorAsync(entityLogicalName, attributeLogicalName, value, color, solutionUniqueName, ct);
+            return VerifyLocalOptionColorAsync(entityLogicalName, attributeLogicalName, value, color, ct);
 
         if (!string.IsNullOrEmpty(optionSetName))
-            return ApplyGlobalOptionColorAsync(optionSetName, value, color, solutionUniqueName, ct);
+            return VerifyGlobalOptionColorAsync(optionSetName, value, color, ct);
 
         throw new MetadataValidationException(
             MetadataErrorCodes.MissingRequiredField,
@@ -2270,14 +2281,12 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             "Color");
     }
 
-    private async Task ApplyGlobalOptionColorAsync(
-        string optionSetName, int value, string color, string? solutionUniqueName, CancellationToken ct)
+    private async Task VerifyGlobalOptionColorAsync(string optionSetName, int value, string color, CancellationToken ct)
     {
         OptionSetMetadata? optionSet;
         try
         {
-            // #1531: read as-if-published so an option inserted moments earlier (add-option --color) is found,
-            // and a missing option fails before the colour write.
+            // #1531: read as-if-published so an option inserted moments earlier (add-option --color) is found.
             // #1535: the exact spelling is retrieved first; a case variant resolves to the stored name.
             RetrieveOptionSetResponse retrieveResponse;
             (optionSetName, retrieveResponse) = await WithGlobalChoiceNameAsync(optionSetName, "OptionSetName", async name =>
@@ -2293,32 +2302,20 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
         {
             throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                $"Failed to retrieve global choice '{optionSetName}' to apply color.", ex);
+                $"Failed to read global choice '{optionSetName}' to confirm the color.", ex);
         }
 
-        _ = optionSet?.Options?.FirstOrDefault(o => o.Value == value)
+        var target = optionSet?.Options?.FirstOrDefault(o => o.Value == value)
             ?? throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
                 $"Option {value} not found in global choice '{optionSetName}'.", "Value");
-
-        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
-        {
-            try
-            {
-                await client.ExecuteAsync(ColorOnlyUpdate(value, color, solutionUniqueName, optionSetName, null, null), ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
-            {
-                throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                    $"Failed to apply color to option {value} in global choice '{optionSetName}'.", ex);
-            }
-        }
+        EnsureColorStored(target, color, $"option {value} in global choice '{optionSetName}'");
 
         _cacheProvider?.InvalidateGlobalOptionSets();
         _logger?.LogInformation("Applied color {Color} to option {Value} in global choice {OptionSet}", color, value, optionSetName);
     }
 
-    private async Task ApplyLocalOptionColorAsync(
-        string entityLogicalName, string attributeLogicalName, int value, string color, string? solutionUniqueName, CancellationToken ct)
+    private async Task VerifyLocalOptionColorAsync(
+        string entityLogicalName, string attributeLogicalName, int value, string color, CancellationToken ct)
     {
         AttributeMetadata? attribute;
         await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
@@ -2343,7 +2340,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
             {
                 throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                    $"Failed to retrieve attribute '{attributeLogicalName}' on '{entityLogicalName}' to apply color.", ex);
+                    $"Failed to read attribute '{attributeLogicalName}' on '{entityLogicalName}' to confirm the color.", ex);
             }
         }
 
@@ -2356,49 +2353,36 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             ?? throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
                 $"Attribute '{attributeLogicalName}' on '{entityLogicalName}' has no option set to color.", "ColumnLogicalName");
 
-        _ = optionSet.Options?.FirstOrDefault(o => o.Value == value)
+        var target = optionSet.Options?.FirstOrDefault(o => o.Value == value)
             ?? throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
                 $"Option {value} not found on '{entityLogicalName}.{attributeLogicalName}'.", "Value");
-
-        if (enumAttribute is not (StatusAttributeMetadata or StateAttributeMetadata or MultiSelectPicklistAttributeMetadata or PicklistAttributeMetadata))
-            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
-                $"Unsupported choice attribute type for option color update: {enumAttribute.GetType().Name}", "ColumnLogicalName");
-
-        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
-        {
-            try
-            {
-                await client.ExecuteAsync(ColorOnlyUpdate(value, color, solutionUniqueName, null, entityLogicalName, attributeLogicalName), ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
-            {
-                throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                    $"Failed to apply color to option {value} on '{entityLogicalName}.{attributeLogicalName}'.", ex);
-            }
-        }
+        EnsureColorStored(target, color, $"option {value} on '{entityLogicalName}.{attributeLogicalName}'");
 
         _cacheProvider?.InvalidateEntity(entityLogicalName);
         _logger?.LogInformation("Applied color {Color} to option {Value} on {Entity}.{Attribute}", color, value, entityLogicalName, attributeLogicalName);
     }
 
-    /// <summary>
-    /// The colour write for an existing option: <c>UpdateOptionValue</c> with the <c>Color</c> parameter, no
-    /// <c>Label</c> and <c>MergeLabels = true</c>. A global choice is named by <paramref name="optionSetName"/>; a
-    /// local option or status reason by <paramref name="entityLogicalName"/> + <paramref name="attributeLogicalName"/>.
-    /// </summary>
-    private static SdkUpdateOptionValueRequest ColorOnlyUpdate(
-        int value, string color, string? solutionUniqueName, string? optionSetName, string? entityLogicalName, string? attributeLogicalName)
+    private static void EnsureColorStored(OptionMetadata option, string color, string what)
     {
-        var request = new SdkUpdateOptionValueRequest { Value = value, MergeLabels = true, SolutionUniqueName = solutionUniqueName };
-        if (optionSetName is not null)
-            request.OptionSetName = optionSetName;
-        if (entityLogicalName is not null)
-            request["EntityLogicalName"] = entityLogicalName;
-        if (attributeLogicalName is not null)
-            request["AttributeLogicalName"] = attributeLogicalName;
-        request[ColorParameter] = color;
-        return request;
+        if (!string.Equals(option.Color, color, StringComparison.OrdinalIgnoreCase))
+            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                $"Dataverse accepted the color for {what} but did not store it (requested '{color}', stored '{option.Color ?? "none"}'). " +
+                "The rest of the update was applied.");
     }
+
+    /// <summary>Adds the option-value messages' <c>Color</c> parameter to <paramref name="request"/> when a colour is requested.</summary>
+    private static void WithColor(OrganizationRequest request, string? color)
+    {
+        if (!string.IsNullOrEmpty(color))
+            request[ColorParameter] = color;
+    }
+
+    /// <summary>
+    /// The solution for an option-value message. Dataverse rejects an empty <c>SolutionUniqueName</c> ("The given
+    /// solution name is not valid: ()", observed live), so an empty or blank name is sent as no solution.
+    /// </summary>
+    private static string? OptionSolution(string? solutionUniqueName)
+        => string.IsNullOrWhiteSpace(solutionUniqueName) ? null : solutionUniqueName;
 
     /// <summary>The <c>Color</c> parameter of the option-value messages (not exposed as an SDK property).</summary>
     internal const string ColorParameter = "Color";

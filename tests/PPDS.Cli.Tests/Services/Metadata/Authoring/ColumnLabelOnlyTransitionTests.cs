@@ -36,6 +36,23 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
     private static IEnumerable<object[]> Product(string[] left, string[] right)
         => left.SelectMany(first => right.Select(second => new object[] { first, second }));
 
+    /// <summary>AC-147: the finite label-only path returns the same English-only notices as the typed path.</summary>
+    [Theory, MemberData(nameof(AllShapes)), Trait("AC", "AC-147")]
+    public async Task NewShapes_ReportEnglishOnlyNotices_ForTheShownNonEnglishLabels(string shape)
+    {
+        using var h = new ColumnLabelHarness(shape, output);
+        h.Attribute.DisplayName.UserLocalizedLabel = new LocalizedLabel("Original French", 1036);
+        h.Attribute.Description.UserLocalizedLabel = new LocalizedLabel("Description francaise", 1036);
+        var result = await h.UpdateAsync(Request("both"));
+        Assert.Equal(new[] { "DisplayName", "Description" }, result.ValidationMessages.Select(m => m.Field));
+        Assert.All(result.ValidationMessages, m => Assert.Equal(MetadataLabelWriteResult.EnglishLabelOnlyRule, m.Rule));
+        Assert.Contains("'Original French'", result.ValidationMessages[0].Message);
+        Assert.True(Assert.Single(h.Requests.OfType<UpdateAttributeRequest>()).MergeLabels);
+
+        using var english = new ColumnLabelHarness(shape, output);
+        Assert.Empty((await english.UpdateAsync(Request("both"))).ValidationMessages);
+    }
+
     [Theory, MemberData(nameof(ShapesAndLabels)), Trait("AC", "AC-123")]
     public async Task NewShapes_SendExactFreshRequestedLabels(string shape, string labelMode)
     {

@@ -137,32 +137,72 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
         finally { output.WriteLine(h.Snapshot(operation)); }
     }
 
-    [Theory]
-    [InlineData("ordinary")]
-    [InlineData("cancel")]
-    [Trait("AC", "AC-147")]
-    public async Task LabelReadFailure_StopsBeforeTheUpdate(string kind)
+    public static IEnumerable<object[]> ReadFailures()
     {
-        using var h = new Harness(publish: true, capacity: 2, failureBoundary: "read-sdk", failureKind: kind);
+        foreach (var kind in new[] { "ordinary", "coded", "cancel", "timeout", "auth" })
+            yield return ["read-sdk", kind];
+        foreach (var kind in new[] { "ordinary", "coded", "cancel", "timeout", "pool" })
+            yield return ["read-checkout", kind];
+    }
+
+    /// <summary>
+    /// S1/AC-147: the pre-write table read keeps the classification the update stage has: checkout failures follow the
+    /// shared acquisition rule, SDK timeouts stay Connection.Timeout (exit 4), auth failures stay auth errors with the
+    /// re-authentication signal, coded and cancellation failures propagate as themselves; nothing is written.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ReadFailures))]
+    [Trait("AC", "AC-147")]
+    public async Task LabelReadFailure_KeepsItsClassification_AndStopsBeforeTheUpdate(string boundary, string kind)
+    {
+        using var h = new Harness(publish: true, capacity: 2, failureBoundary: boundary, failureKind: kind);
         var operation = h.Invoke();
         try
         {
             var error = await Record.ExceptionAsync(() => operation);
-            if (kind == "cancel") Assert.Same(h.Injected, error);
-            else
+            Assert.NotNull(error);
+            if (kind is "coded" or "cancel") Assert.Same(h.Injected, error);
+            else Assert.Same(h.Injected, Assert.IsAssignableFrom<PpdsException>(error).InnerException);
+            Assert.Equal(kind == "cancel", operation.IsCanceled);
+            var (expectedCode, expectedExit) = (boundary, kind) switch
             {
-                var coded = Assert.IsType<PpdsException>(error);
-                Assert.Equal(MetadataErrorCodes.SdkOperationFailed, coded.ErrorCode);
-                Assert.Same(h.Injected, coded.InnerException);
+                (_, "coded") => ("Synthetic.Coded", 2),
+                (_, "cancel") => ("Operation.Cancelled", 2),
+                (_, "timeout" or "pool") => ("Connection.Timeout", 4),
+                ("read-sdk", "auth") => (ExceptionMapper.Map(h.Injected!).Code, 5),
+                ("read-sdk", _) => (MetadataErrorCodes.SdkOperationFailed, 1),
+                _ => ("Operation.Internal", 2)
+            };
+            if (boundary == "read-sdk" && kind == "ordinary")
+            {
+                Assert.Equal(MetadataErrorCodes.SdkOperationFailed, Assert.IsType<PpdsException>(error).ErrorCode);
+                Assert.Equal(ExceptionMapper.ToExitCode(new PpdsException(MetadataErrorCodes.SdkOperationFailed, "x")), ExceptionMapper.ToExitCode(error));
             }
+            else AssertCli(error, expectedCode, expectedExit);
+            if (kind == "auth")
+                Assert.True(Assert.IsType<PpdsAuthException>(error).RequiresReauthentication);
             Assert.Equal("Existing", h.StoredLabel);
-            Assert.Equal(new[] { "read" }, h.AttemptedSdk);
+            Assert.Equal(boundary == "read-sdk" ? new[] { "read" } : [], h.AttemptedSdk);
             Assert.Empty(h.SuccessfulSdk);
             Assert.Empty(h.Cache);
             Assert.Empty(h.Infos);
             h.AssertReturned();
         }
         finally { output.WriteLine(h.Snapshot(operation)); }
+    }
+
+    /// <summary>N2/AC-147: a read that returns no table metadata stops the update with a coded error.</summary>
+    [Fact]
+    [Trait("AC", "AC-147")]
+    public async Task LabelReadWithoutTableMetadata_StopsBeforeTheUpdate()
+    {
+        using var h = new Harness(publish: false, capacity: 2, emptyRead: true);
+        var error = await Assert.ThrowsAsync<PpdsException>(() => h.Invoke());
+        Assert.Equal(MetadataErrorCodes.SdkOperationFailed, error.ErrorCode);
+        Assert.Equal(new[] { "read" }, h.AttemptedSdk);
+        Assert.Equal("Existing", h.StoredLabel);
+        Assert.Empty(h.Cache);
+        h.AssertReturned();
     }
 
     [Theory]
@@ -294,8 +334,11 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
         internal List<string> SuccessfulSdk { get; } = [];
         private int Active => _capacity - _slots.CurrentCount;
 
-        internal Harness(bool publish, int capacity = 1, string? failureBoundary = null, string? failureKind = null, bool blocked = false)
+        private readonly bool _emptyRead;
+
+        internal Harness(bool publish, int capacity = 1, string? failureBoundary = null, string? failureKind = null, bool blocked = false, bool emptyRead = false)
         {
+            _emptyRead = emptyRead;
             _capacity = capacity;
             _slots = new SemaphoreSlim(capacity, capacity);
             _failureBoundary = failureBoundary; _failureKind = failureKind;
@@ -342,6 +385,7 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
                 "coded" => new PpdsException("Synthetic.Coded", "Coded fixture failure"),
                 "timeout" => new TimeoutException("SDK/acquisition timeout fixture"),
                 "pool" => new PoolExhaustedException(Active, _capacity, TimeSpan.FromMilliseconds(40)),
+                "auth" => new PPDS.Dataverse.Resilience.DataverseAuthenticationException("Synthetic expired sign-in", requiresReauthentication: true),
                 "cancel" => Cancel(),
                 _ => new InvalidOperationException("Ordinary fixture failure")
             };
@@ -390,9 +434,9 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
                     MaybeFail(sdkStage + "-sdk");
                     if (request is RetrieveEntityRequest read)
                     {
-                        // AC-147: the current labels are read as-if-published before a label update.
+                        // AC-147: the current (published) labels are read before a label update, like the column read.
                         Assert.Equal(Table, read.LogicalName);
-                        Assert.True(read.RetrieveAsIfPublished);
+                        Assert.False(read.RetrieveAsIfPublished);
                         ReadRequest = read;
                     }
                     else if (request is UpdateEntityRequest update)
@@ -404,6 +448,7 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
                     SuccessfulSdk.Add(sdkStage); Record("success:" + sdkStage + ":" + id, id);
                     return request switch
                     {
+                        RetrieveEntityRequest when _emptyRead => new OrganizationResponse(),
                         RetrieveEntityRequest => new RetrieveEntityResponse { Results = new ParameterCollection
                         {
                             ["EntityMetadata"] = new Microsoft.Xrm.Sdk.Metadata.EntityMetadata { LogicalName = Table, DisplayName = new Label("Existing", 1033) }

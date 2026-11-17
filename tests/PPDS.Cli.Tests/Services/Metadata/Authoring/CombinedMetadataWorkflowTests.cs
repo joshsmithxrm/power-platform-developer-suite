@@ -194,21 +194,12 @@ public sealed class CombinedMetadataWorkflowTests : IDisposable
             Assert.Equal(Table, r["EntityLogicalName"]);
             Assert.Equal(Local, r["AttributeLogicalName"]);
             Assert.Equal(10002, r.Value);
-            inserted = new OptionMetadata { Label = r.Label, Value = r.Value };
+            // The colour rides on the insert; the following draft read confirms it was stored.
+            Assert.Equal("#abcdef", r["Color"]);
+            inserted = new OptionMetadata { Label = r.Label, Value = r.Value, Color = (string)r["Color"] };
             return new InsertOptionValueResponse { Results = new ParameterCollection { ["NewOptionValue"] = r.Value } };
         });
         ExpectRead(true);
-        Expect<Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest>(r =>
-        {
-            // The colour is written to the inserted option alone; other draft options are not re-sent.
-            Assert.Equal(Table, r["EntityLogicalName"]);
-            Assert.Equal(Local, r["AttributeLogicalName"]);
-            Assert.Equal(10002, r.Value);
-            Assert.Equal("#abcdef", r["Color"]);
-            Assert.Null(r.Label);
-            Assert.True(r.MergeLabels);
-            return new UpdateOptionValueResponse();
-        });
         var value = await _service.AddColumnOptionAsync(new AddColumnOptionRequest
         {
             SolutionUniqueName = Solution, EntityLogicalName = Table, ColumnLogicalName = Local,

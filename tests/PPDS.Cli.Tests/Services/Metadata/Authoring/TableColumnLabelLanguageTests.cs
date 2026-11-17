@@ -33,7 +33,7 @@ public sealed class TableColumnLabelLanguageTests
         });
 
         var read = Assert.Single(f.Requests.OfType<RetrieveEntityRequest>());
-        Assert.True(read.RetrieveAsIfPublished);
+        Assert.False(read.RetrieveAsIfPublished); // published, like the column read (list commands show published labels)
         Assert.Equal(EntityFilters.Entity, read.EntityFilters);
         var update = Assert.Single(f.Requests.OfType<UpdateEntityRequest>());
         Assert.True(update.MergeLabels);

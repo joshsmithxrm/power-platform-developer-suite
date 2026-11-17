@@ -75,14 +75,11 @@ public sealed class MetadataDraftOptionReadTests
         Assert.Equal(77, await f.AddAsync(value: 77, color: "#123456"));
         Assert.Equal(2, f.Reads.Count());
         Assert.All(f.Reads, r => Assert.True(r.RetrieveAsIfPublished));
-        // The colour write names only the new option: no option collection or attribute is re-sent, so the other
-        // draft options and their labels cannot be touched (observed live: UpdateAttribute ignores option colours).
-        var colour = Assert.Single(f.Requests.OfType<SdkUpdateOption>(), IsColourWrite);
-        Assert.Equal(77, colour.Value);
-        Assert.Equal("#123456", colour["Color"]);
-        Assert.Null(colour.Label);
-        Assert.True(colour.MergeLabels);
-        Assert.DoesNotContain(f.Requests, r => r is UpdateAttributeRequest);
+        // The colour rides on the insert (observed live to be stored); the second draft read confirms it. No option
+        // collection or attribute is re-sent, so the other draft options and their labels cannot be touched.
+        var insert = Assert.Single(f.Requests, r => r is InsertOptionValueRequest or InsertStatusValueRequest);
+        Assert.Equal("#123456", insert["Color"]);
+        Assert.DoesNotContain(f.Requests, r => r is SdkUpdateOption or UpdateAttributeRequest);
         Assert.DoesNotContain(f.Requests, r => r.RequestName == "PublishXml");
         f.AssertRoutingAndCancellation();
     }
@@ -96,17 +93,14 @@ public sealed class MetadataDraftOptionReadTests
         using var f = new Fixture(kind);
         await f.UpdateAsync(10000, "#654321");
         Assert.All(f.Reads, r => Assert.True(r.RetrieveAsIfPublished)); // Target resolution and color readback include drafts (#1531).
-        // With no NewLabel the current DRAFT label is re-sent, so an unpublished label edit is not reverted.
-        Assert.Equal("Draft label", Assert.Single(f.Requests.OfType<SdkUpdateOption>(), r => !IsColourWrite(r)).Label.LocalizedLabels[0].Label);
-        var colour = Assert.Single(f.Requests.OfType<SdkUpdateOption>(), IsColourWrite);
-        Assert.Equal(10000, colour.Value);
-        Assert.Equal("#654321", colour["Color"]);
-        Assert.Null(colour.Label);
+        // One request: the Color parameter and no Label, so an unpublished label edit cannot be reverted or rewritten.
+        var update = Assert.Single(f.Requests.OfType<SdkUpdateOption>());
+        Assert.Equal(10000, update.Value);
+        Assert.Equal("#654321", update["Color"]);
+        Assert.False(update.Parameters.ContainsKey("Label"));
         Assert.DoesNotContain(f.Requests, r => r is UpdateAttributeRequest);
         f.AssertRoutingAndCancellation();
     }
-
-    private static bool IsColourWrite(SdkUpdateOption request) => request.Parameters.ContainsKey("Color");
 
     [Fact]
     public async Task GenericLocalOptionAdd_ColorReadsDraft()
@@ -118,8 +112,9 @@ public sealed class MetadataDraftOptionReadTests
             Label = "New", Value = 77, Color = "#123456"
         }, f.Token);
         Assert.Equal(77, value);
-        Assert.True(Assert.Single(f.Reads).RetrieveAsIfPublished);
-        Assert.Equal("#123456", Assert.Single(f.Requests.OfType<SdkUpdateOption>(), IsColourWrite)["Color"]);
+        Assert.True(Assert.Single(f.Reads).RetrieveAsIfPublished); // the colour read-back
+        Assert.Equal("#123456", Assert.Single(f.Requests.OfType<InsertOptionValueRequest>())["Color"]);
+        Assert.DoesNotContain(f.Requests, r => r is SdkUpdateOption);
         f.AssertRoutingAndCancellation();
     }
 
@@ -166,7 +161,7 @@ public sealed class MetadataDraftOptionReadTests
         {
             var update = Assert.Single(f.Requests.OfType<SdkUpdateOption>());
             Assert.Equal(10001, update.Value);
-            Assert.Equal("Unpublished", update.Label.LocalizedLabels[0].Label); // Current draft label preserved.
+            Assert.False(update.Parameters.ContainsKey("Label")); // The current draft label is left alone (not re-sent).
         }
         f.AssertRoutingAndCancellation();
     }
@@ -360,7 +355,9 @@ public sealed class MetadataDraftOptionReadTests
         using var f = new Fixture(kind) { CancelReadNumber = 2 };
         var ex = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => f.AddAsync(value: 77, color: "#123456"));
         Assert.Same(f.Cancellation, ex);
-        Assert.DoesNotContain(f.Requests, r => r is SdkUpdateOption u && IsColourWrite(u));
+        // The colour rode on the insert; only the confirming read was cancelled, and nothing else was written.
+        Assert.Equal("#123456", Assert.Single(f.Requests, r => r is InsertOptionValueRequest or InsertStatusValueRequest)["Color"]);
+        Assert.DoesNotContain(f.Requests, r => r is SdkUpdateOption);
         f.AssertRoutingAndCancellation();
     }
 
@@ -394,6 +391,7 @@ public sealed class MetadataDraftOptionReadTests
         private readonly Mock<IPooledClient> _client = new(MockBehavior.Loose);
         private readonly List<(int Value, string Label)> _draft;
         private readonly List<(int Value, string Label)> _published;
+        private readonly Dictionary<int, string> _colors = [];
         private readonly List<CancellationToken> _tokens = [];
         public List<OrganizationRequest> Requests { get; } = [];
         public IEnumerable<RetrieveAttributeRequest> Reads => Requests.OfType<RetrieveAttributeRequest>();
@@ -433,6 +431,7 @@ public sealed class MetadataDraftOptionReadTests
                                 OptionMetadata option = kind == "status" ? new StatusOptionMetadata { State = 0 } : new OptionMetadata();
                                 option.Value = value;
                                 option.Label = new Label(label, 1033);
+                                option.Color = _colors.GetValueOrDefault(value);
                                 set.Options.Add(option);
                             }
                             EnumAttributeMetadata attribute = kind switch
@@ -450,12 +449,14 @@ public sealed class MetadataDraftOptionReadTests
                             if (InsertFailure != null) throw InsertFailure;
                             var assigned = (int)request["Value"];
                             _draft.Add((assigned, "New"));
+                            if (request.Parameters.TryGetValue("Color", out var insertedColor)) _colors[assigned] = (string)insertedColor;
                             OrganizationResponse response = request is InsertStatusValueRequest ? new InsertStatusValueResponse() : new InsertOptionValueResponse();
                             response.Results["NewOptionValue"] = assigned;
                             return Task.FromResult(response);
-                        case SdkUpdateOption:
+                        case SdkUpdateOption update:
                             if (WriteFailureFactory != null) throw WriteFailureFactory();
                             if (WriteFailure != null) throw WriteFailure;
+                            if (update.Parameters.TryGetValue("Color", out var updatedColor)) _colors[update.Value] = (string)updatedColor;
                             return Task.FromResult<OrganizationResponse>(new UpdateOptionValueResponse());
                         case SdkDeleteOption:
                             if (WriteFailureFactory != null) throw WriteFailureFactory();

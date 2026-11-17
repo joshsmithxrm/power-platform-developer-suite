@@ -30,8 +30,8 @@ public class MetadataStatusReasonServiceTests
     private readonly Mock<IPooledClient> _client = new(MockBehavior.Loose);
     private readonly DataverseMetadataAuthoringService _service;
 
-    // Captures the colour write: an UpdateOptionValue carrying the Color parameter (observed live: re-sending
-    // StatusOptionMetadata.Color through UpdateAttribute leaves the colour unchanged).
+    // Captures the update that carries the Color parameter and stores the colour on the status option, as Dataverse
+    // does (observed live), so the service's colour read-back sees it.
     private Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest? _capturedAttrUpdate;
 
     public MetadataStatusReasonServiceTests()
@@ -47,6 +47,8 @@ public class MetadataStatusReasonServiceTests
             .Returns<OrganizationRequest, CancellationToken>((req, _) =>
             {
                 _capturedAttrUpdate = (Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest)req;
+                var stored = _statusOptions.FirstOrDefault(o => o.Value == _capturedAttrUpdate.Value);
+                if (stored is not null) stored.Color = (string)_capturedAttrUpdate["Color"];
                 return Task.FromResult<OrganizationResponse>(new UpdateOptionValueResponse());
             });
 
@@ -59,6 +61,8 @@ public class MetadataStatusReasonServiceTests
     private string? CapturedStatusColorFor(int value)
         => _capturedAttrUpdate is { } update && update.Value == value ? update["Color"] as string : null;
 
+    private List<OptionMetadata> _statusOptions = [];
+
     private void SetupListStatusReasons(string entityLogicalName, IEnumerable<(int value, string label, int state)> options)
     {
         var statusOptions = options.Select(o =>
@@ -69,6 +73,7 @@ public class MetadataStatusReasonServiceTests
             opt.Label = new Label(o.label, 1033);
             return (OptionMetadata)opt;
         }).ToList();
+        _statusOptions = statusOptions;
 
         // OptionMetadataCollection is a DataCollection<OptionMetadata> — create and add items
         var collection = new OptionMetadataCollection();
@@ -247,7 +252,8 @@ public class MetadataStatusReasonServiceTests
     // Observed live: an existing status reason's colour persists only through UpdateOptionValue's Color
     // parameter; StatusOptionMetadata.Color re-sent through UpdateAttribute is accepted and ignored.
     [Fact]
-    public async Task UpdateStatusReasonAsync_WithColor_AppliesColorViaUpdateOptionValueColorParameter()
+    [Trait("AC", "AC-146")]
+    public async Task UpdateStatusReasonAsync_ColorOnly_SendsOneRequestWithNoLabel()
     {
         SetupListStatusReasons("account", [(1, "Active", 0), (2, "Inactive", 1)]);
 
@@ -260,15 +266,14 @@ public class MetadataStatusReasonServiceTests
 
         await _service.UpdateStatusReasonAsync(request);
 
-        // The status update itself carries no Color parameter...
+        // One UpdateOptionValue on statuscode carrying the Color parameter and no Label; nothing else is written.
         _client.Verify(c => c.ExecuteAsync(
             It.Is<OrganizationRequest>(r => r.RequestName == "UpdateOptionValue" && !r.Parameters.ContainsKey("Color")),
-            It.IsAny<CancellationToken>()), Times.Once);
-        // ...color is a separate UpdateOptionValue on statuscode carrying only the Color parameter.
+            It.IsAny<CancellationToken>()), Times.Never);
         _capturedAttrUpdate.Should().NotBeNull();
         _capturedAttrUpdate!["EntityLogicalName"].Should().Be("account");
         _capturedAttrUpdate["AttributeLogicalName"].Should().Be("statuscode");
-        _capturedAttrUpdate.Label.Should().BeNull("the colour write changes no label");
+        _capturedAttrUpdate.Parameters.ContainsKey("Label").Should().BeFalse("an unrequested label is not sent");
         CapturedStatusColorFor(2).Should().Be("#3366FF");
     }
 

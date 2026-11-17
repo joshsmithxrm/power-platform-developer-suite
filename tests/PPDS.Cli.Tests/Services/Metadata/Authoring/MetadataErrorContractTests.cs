@@ -15,8 +15,7 @@ public sealed partial class MetadataLeaseLifetimeTests
     {
         foreach (var (route, stage) in new[]
         {
-            ("global-add", "global-color-read"), ("global-add", "global-color-write"),
-            ("column-add", "local-color-read"), ("column-add", "local-color-write")
+            ("global-add", "global-color-read"), ("column-add", "local-color-read")
         })
         foreach (var delayed in new[] { false, true })
             yield return [route, stage, delayed];
@@ -71,12 +70,12 @@ public sealed partial class MetadataLeaseLifetimeTests
     {
         foreach (var (route, stages) in new[]
         {
-            ("global-add", new[] { "insert", "global-color-read", "global-color-write" }),
-            ("global-update", new[] { "option-update", "global-color-read", "global-color-write" }),
-            ("status-update", new[] { "option-update", "local-color-read", "local-color-write", "publish" }),
+            ("global-add", new[] { "insert", "global-color-read" }),
+            ("global-update", new[] { "option-update", "global-color-read" }),
+            ("status-update", new[] { "option-update", "local-color-read", "publish" }),
             ("status-remove", new[] { "option-remove", "publish" }),
             ("table-create", new[] { "solution", "publisher", "table-create", "publish" }),
-            ("column-add", new[] { "local-color-read", "local-color-write", "publish" }),
+            ("column-add", new[] { "local-color-read", "publish" }),
             ("column-update", new[] { "publish" }) // Shared helper's limited wider reach.
         })
         foreach (var stage in stages)

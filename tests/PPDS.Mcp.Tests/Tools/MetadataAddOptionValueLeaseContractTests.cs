@@ -161,7 +161,6 @@ public sealed class MetadataAddOptionValueLeaseContractTests
 
     [Theory, Trait("AC", "AC-100")]
     [InlineData("global-color-read")]
-    [InlineData("global-color-write")]
     public async Task ActualColorCancellation_PropagatesOriginalAtMcpBoundary(string stage)
     {
         using var cancellation = new CancellationTokenSource();
@@ -186,7 +185,6 @@ public sealed class MetadataAddOptionValueLeaseContractTests
                     {
                         Microsoft.Xrm.Sdk.Messages.InsertOptionValueRequest => "insert",
                         Microsoft.Xrm.Sdk.Messages.RetrieveOptionSetRequest => "global-color-read",
-                        Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest u when u.Parameters.ContainsKey("Color") => "global-color-write",
                         _ => throw new InvalidOperationException("Unexpected SDK operation")
                     };
                     sdkCalls.Add(current);
@@ -224,8 +222,8 @@ public sealed class MetadataAddOptionValueLeaseContractTests
         Assert.Equal(cancellation.Token, actual.CancellationToken);
         Assert.True(task.IsCanceled);
         Assert.False(task.IsFaulted);
-        Assert.Equal(stage == "global-color-read" ? new[] { "insert", "global-color-read" } : ["insert", "global-color-read", "global-color-write"], sdkCalls);
-        Assert.Equal(stage == "global-color-read" ? 2 : 3, acquired);
+        Assert.Equal(new[] { "insert", "global-color-read" }, sdkCalls); // The colour rides on the insert.
+        Assert.Equal(2, acquired);
         Assert.Equal(acquired, disposed);
         fixture.AssertCalledOnce();
     }

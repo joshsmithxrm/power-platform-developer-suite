@@ -119,6 +119,15 @@ public sealed class LabelNoticeCommandTests
 
     [Fact]
     [Trait("AC", "AC-147")]
+    public void Tui_UpdateStatus_KeepsAReloadError()
+    {
+        Assert.Equal("Column updated: new_text", PPDS.Cli.Tui.Screens.MetadataExplorerScreen.WithReloadOutcome("Column updated: new_text", "new_table", reloaded: true));
+        Assert.Equal("Column updated: new_text Error loading new_table",
+            PPDS.Cli.Tui.Screens.MetadataExplorerScreen.WithReloadOutcome("Column updated: new_text", "new_table", reloaded: false));
+    }
+
+    [Fact]
+    [Trait("AC", "AC-147")]
     public void Tui_ColumnUpdateStatus_ShowsTheNotice()
     {
         Assert.Equal("Column updated: new_text", PPDS.Cli.Tui.Screens.MetadataExplorerScreen.UpdatedStatus("Column", "new_text", MetadataLabelWriteResult.None));

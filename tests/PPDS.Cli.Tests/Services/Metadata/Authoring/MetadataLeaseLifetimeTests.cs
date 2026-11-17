@@ -82,7 +82,7 @@ public sealed partial class MetadataLeaseLifetimeTests
         Assert.Equal(MetadataErrorCodes.OptionNotFound, error.ErrorCode);
         var colorRead = Array.FindIndex(h.ExpectedStages, s => s.EndsWith("color-read", StringComparison.Ordinal));
         h.AssertFinished(h.ExpectedStages.Take(colorRead + 1));
-        Assert.DoesNotContain(h.AttemptedStages, s => s.EndsWith("color-write", StringComparison.Ordinal) || s == "publish");
+        Assert.DoesNotContain(h.AttemptedStages, s => s == "publish");
         h.AssertIndividualLeases();
     }
 
@@ -132,20 +132,17 @@ public sealed partial class MetadataLeaseLifetimeTests
 
     [Theory]
     [InlineData("global-add", "global-color-read", "sdk")]
-    [InlineData("global-add", "global-color-write", "sdk")]
     [InlineData("column-add", "local-color-read", "sdk")]
-    [InlineData("column-add", "local-color-write", "sdk")]
     [InlineData("global-add", "global-color-read", "cancel")]
-    [InlineData("global-add", "global-color-write", "cancel")]
     [InlineData("column-add", "local-color-read", "cancel")]
-    [InlineData("column-add", "local-color-write", "cancel")]
     [Trait("AC", "AC-87")]
     public async Task ColorSdkFaults_PreserveSdkFaultAndCancellationCliEnvelope(string route, string stage, string fault)
     {
         using var h = new Harness(route, true, false, stage, fault, capacity: 8);
         var operation = h.Run();
         var error = await Record.ExceptionAsync(() => operation);
-        // All four color stages now preserve cancellation; ordinary SDK faults stay coded.
+        // The colour read-back preserves cancellation; ordinary SDK faults stay coded. (The colour itself rides on
+        // the insert/update, so there is no separate colour write stage.)
         if (fault == "cancel")
         {
             var canceled = Assert.IsType<OperationCanceledException>(error);
@@ -167,9 +164,7 @@ public sealed partial class MetadataLeaseLifetimeTests
 
     [Theory]
     [InlineData("global-add", "global-color-read")]
-    [InlineData("global-add", "global-color-write")]
     [InlineData("column-add", "local-color-read")]
-    [InlineData("column-add", "local-color-write")]
     [InlineData("status-update", "publish")]
     [InlineData("table-create", "publisher")]
     [InlineData("table-create", "table-create")]
@@ -281,7 +276,7 @@ public sealed partial class MetadataLeaseLifetimeTests
             if (color)
             {
                 var prefix = route is "global-add" or "global-update" ? "global" : "local";
-                stages.Add(prefix + "-color-read"); stages.Add(prefix + "-color-write");
+                stages.Add(prefix + "-color-read"); // The colour rides on the insert/update; this read confirms it.
             }
             if (publish && route is not ("global-add" or "global-update" or "generic-local-add")) stages.Add("publish");
             return stages.ToArray();
@@ -385,7 +380,6 @@ public sealed partial class MetadataLeaseLifetimeTests
         {
             RetrieveOptionSetRequest => _mutated && _failStage == "global-color-read",
             RetrieveAttributeRequest => _mutated && _failStage == "local-color-read",
-            SdkUpdateOption u when IsColorWrite(u) => _failStage == ColorWriteStage(u),
             _ => false
         };
 
@@ -409,7 +403,6 @@ public sealed partial class MetadataLeaseLifetimeTests
                 RetrieveOptionSetRequest => _mutated ? "global-color-read" : "global-target",
                 RetrieveAttributeRequest a => _mutated ? "local-color-read" : a.LogicalName == "statuscode" ? "status-target" : "local-target",
                 InsertOptionValueRequest => "insert", InsertStatusValueRequest => "status-insert",
-                SdkUpdateOption u when IsColorWrite(u) => ColorWriteStage(u),
                 SdkUpdateOption => "option-update", SdkDeleteOption => "option-remove",
                 CreateEntityRequest => "table-create", PublishXmlRequest => "publish",
                 _ => throw new InvalidOperationException("Unexpected SDK request: " + request.RequestName)
@@ -437,30 +430,19 @@ public sealed partial class MetadataLeaseLifetimeTests
                     break;
                 case InsertOptionValueRequest r:
                     Assert.Equal(Value, r.Value); Assert.Equal("Added", Assert.Single(r.Label.LocalizedLabels).Label);
-                    Assert.Equal(Solution, r.SolutionUniqueName); Assert.False(r.Parameters.Contains("Color"));
+                    Assert.Equal(Solution, r.SolutionUniqueName); AssertColorParameter(r);
                     StoredLabel = "Added";
                     response = new InsertOptionValueResponse { Results = new ParameterCollection { ["NewOptionValue"] = Value } };
                     break;
                 case InsertStatusValueRequest r:
-                    Assert.Equal(Value, r.Value); Assert.Equal(0, r.StateCode); Assert.Equal(Solution, r.SolutionUniqueName);
+                    Assert.Equal(Value, r.Value); Assert.Equal(0, r.StateCode); Assert.Equal(Solution, r.SolutionUniqueName); AssertColorParameter(r);
                     StoredLabel = "Added";
                     response = new InsertStatusValueResponse { Results = new ParameterCollection { ["NewOptionValue"] = Value } };
                     break;
-                case SdkUpdateOption r when IsColorWrite(r):
-                    // The colour write: UpdateOptionValue's Color parameter, no Label, MergeLabels (live-observed).
-                    Assert.Equal(Value, r.Value); Assert.Equal(Solution, r.SolutionUniqueName);
-                    Assert.Equal(Color, r[DataverseMetadataAuthoringService.ColorParameter]);
-                    Assert.Null(r.Label); Assert.True(r.MergeLabels);
-                    if (ColorWriteStage(r) == "global-color-write") Assert.Equal(Global, r.OptionSetName);
-                    else
-                    {
-                        Assert.Equal(Table, r["EntityLogicalName"]);
-                        Assert.Equal(_route.StartsWith("status", StringComparison.Ordinal) ? "statuscode" : Column, r["AttributeLogicalName"]);
-                    }
-                    response = new UpdateOptionValueResponse();
-                    break;
                 case SdkUpdateOption r:
-                    Assert.Equal(Value, r.Value); Assert.Equal(Solution, r.SolutionUniqueName);
+                    // S8: one request carries the label and, when requested, the Color parameter (live-observed).
+                    Assert.Equal(Value, r.Value); Assert.Equal(Solution, r.SolutionUniqueName); Assert.True(r.MergeLabels);
+                    AssertColorParameter(r);
                     StoredLabel = Assert.Single(r.Label.LocalizedLabels).Label; Assert.Equal("Changed", StoredLabel);
                     response = new UpdateOptionValueResponse();
                     break;
@@ -492,16 +474,18 @@ public sealed partial class MetadataLeaseLifetimeTests
                 OptionMetadata target = status ? new StatusOptionMetadata { State = 0 } : new OptionMetadata();
                 target.Value = Value; target.Label = new Label(StoredLabel, 1033);
                 target.Label.LocalizedLabels.Add(new LocalizedLabel("Existant", 1036));
+                target.Color = _mutated && _color ? Color : null; // Dataverse stores the Color parameter (observed live).
                 options.Options.Add(target);
             }
             options.Options.Add(new OptionMetadata(new Label("Other", 1033), 88));
             return options;
         }
 
-        private static bool IsColorWrite(SdkUpdateOption request) => request.Parameters.Contains(DataverseMetadataAuthoringService.ColorParameter);
-
-        private static string ColorWriteStage(SdkUpdateOption request)
-            => request.Parameters.Contains("AttributeLogicalName") ? "local-color-write" : "global-color-write";
+        private void AssertColorParameter(OrganizationRequest request)
+        {
+            if (_color) Assert.Equal(Color, request[DataverseMetadataAuthoringService.ColorParameter]);
+            else Assert.False(request.Parameters.Contains(DataverseMetadataAuthoringService.ColorParameter));
+        }
 
         internal CreateTableRequest TableRequest(bool dryRun = false) => new()
         {

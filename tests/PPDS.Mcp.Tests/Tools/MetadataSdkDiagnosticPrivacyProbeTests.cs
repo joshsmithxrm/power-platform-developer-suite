@@ -32,8 +32,6 @@ public sealed class MetadataSdkDiagnosticPrivacyProbeTests
     [Theory, Trait("Probe", "PRIV-01/02/03/04")]
     [InlineData("global-color-read", "ClientSecret")]
     [InlineData("global-color-read", "Bearer")]
-    [InlineData("global-color-write", "ClientSecret")]
-    [InlineData("global-color-write", "Bearer")]
     public async Task ActualServiceColorFailure_UntrustedDetailMustNotReachMcp(string stage, string payloadKind)
     {
         using var cancellation = new CancellationTokenSource();
@@ -83,7 +81,6 @@ public sealed class MetadataSdkDiagnosticPrivacyProbeTests
 
     [Theory, Trait("Probe", "PRIV-07")]
     [InlineData("global-color-read")]
-    [InlineData("global-color-write")]
     public async Task ActualColorWrapper_CliMapperRemovesKnownSecretKey(string stage)
     {
         using var cancellation = new CancellationTokenSource();
@@ -156,7 +153,6 @@ public sealed class MetadataSdkDiagnosticPrivacyProbeTests
                         {
                             InsertOptionValueRequest => "insert",
                             RetrieveOptionSetRequest => "global-color-read",
-                            Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest u when u.Parameters.ContainsKey("Color") => "global-color-write",
                             _ => throw new InvalidOperationException("Unexpected synthetic SDK request")
                         };
                         _calls.Add(current);
@@ -185,7 +181,6 @@ public sealed class MetadataSdkDiagnosticPrivacyProbeTests
             {
                 "insert" => ["insert"],
                 "global-color-read" => ["insert", "global-color-read"],
-                "global-color-write" => ["insert", "global-color-read", "global-color-write"],
                 _ => throw new InvalidOperationException("Unexpected synthetic stage")
             };
             Assert.Equal(expected, _calls);

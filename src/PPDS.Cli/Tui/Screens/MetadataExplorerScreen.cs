@@ -585,12 +585,14 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
             var service = provider.GetRequiredService<IMetadataAuthoringService>();
             var labelResult = await service.UpdateColumnAsync(request, reporter, ScreenCancellation);
 
-            await LoadEntityDetailAsync(_selectedEntity!.LogicalName);
+            var entity = _selectedEntity!.LogicalName;
+            var reloaded = await LoadEntityDetailAsync(entity);
 
-            // Set after the reload, which writes its own status, so a label notice stays visible.
+            // Set after the reload, which writes its own status, so a label notice stays visible; a failed reload
+            // keeps its error in the line.
             Application.MainLoop?.Invoke(() =>
             {
-                _statusLabel.Text = UpdatedStatus("Column", request.ColumnLogicalName, labelResult);
+                _statusLabel.Text = WithReloadOutcome(UpdatedStatus("Column", request.ColumnLogicalName, labelResult), entity, reloaded);
             });
         }
         catch (Exception ex)
@@ -610,6 +612,10 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
     internal static string ChoiceUpdatedStatus(string name, MetadataLabelWriteResult? result)
         => UpdatedStatus("Choice", name, result);
 
+    /// <summary>Appends the reload failure to an update's status, so it is not hidden by the success text.</summary>
+    internal static string WithReloadOutcome(string status, string? entity, bool reloaded)
+        => reloaded ? status : $"{status} Error loading {entity}";
+
     /// <summary>Status text after a label-writing update, with any English-only label notices appended.</summary>
     internal static string UpdatedStatus(string what, string name, MetadataLabelWriteResult? result)
     {
@@ -628,15 +634,14 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
             var service = provider.GetRequiredService<IMetadataAuthoringService>();
             var labelResult = await service.UpdateGlobalChoiceAsync(request, reporter, ScreenCancellation);
 
-            if (_selectedEntity != null)
-            {
-                await LoadEntityDetailAsync(_selectedEntity.LogicalName);
-            }
+            var entity = _selectedEntity?.LogicalName;
+            var reloaded = entity == null || await LoadEntityDetailAsync(entity);
 
-            // Set after the reload, which writes its own status, so a label notice stays visible.
+            // Set after the reload, which writes its own status, so a label notice stays visible; a failed reload
+            // keeps its error in the line.
             Application.MainLoop?.Invoke(() =>
             {
-                _statusLabel.Text = ChoiceUpdatedStatus(request.Name, labelResult);
+                _statusLabel.Text = WithReloadOutcome(ChoiceUpdatedStatus(request.Name, labelResult), entity, reloaded);
             });
         }
         catch (Exception ex)
@@ -952,7 +957,8 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         }
     }
 
-    private async Task LoadEntityDetailAsync(string logicalName)
+    /// <summary>Loads the entity detail; false when the load failed (its error is reported and shown).</summary>
+    private async Task<bool> LoadEntityDetailAsync(string logicalName)
     {
         var oldCts = _loadCts;
         _loadCts = CancellationTokenSource.CreateLinkedTokenSource(ScreenCancellation);
@@ -982,8 +988,9 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
                 RefreshDetailTable();
                 UpdateStatusLabel();
             });
+            return true;
         }
-        catch (OperationCanceledException) { /* screen closing or superseded */ }
+        catch (OperationCanceledException) { /* screen closing or superseded */ return true; }
         catch (Exception ex)
         {
             Application.MainLoop.Invoke(() =>
@@ -991,6 +998,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
                 ErrorService.ReportError($"Failed to load entity: {logicalName}", ex, "Metadata.LoadEntity");
                 _statusLabel.Text = $"Error loading {logicalName}";
             });
+            return false;
         }
     }
 

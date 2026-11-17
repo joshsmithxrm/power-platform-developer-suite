@@ -22,16 +22,39 @@ public sealed class OptionLabelLanguageTests
 {
     public static TheoryData<string> Kinds => new() { "global", "local", "status" };
 
+    /// <summary>
+    /// An update that does not ask to change the label sends no Label at all, whatever the existing label holds, so
+    /// it cannot replace the English text with the caller's user-language text. Observed live: an UpdateOptionValue
+    /// without a Label leaves every language of the label unchanged.
+    /// </summary>
     [Theory]
-    [MemberData(nameof(Kinds))]
+    [MemberData(nameof(UnrequestedCases))]
     [Trait("AC", "AC-142")]
-    public async Task UnrequestedLabel_IsResentUnchangedInEveryLanguage(string kind)
+    public async Task UnrequestedLabel_IsNeverSent(string kind, string existing)
     {
-        var f = new Fixture();
+        var f = new Fixture
+        {
+            OpenLabel = existing switch
+            {
+                "empty-translation" => () => new Label(new LocalizedLabel("Open", 1033), new LocalizedLabel[] { new("Open", 1033), new("", 1036) }),
+                "no-english" => () => new Label("Ouvert", 1036),
+                "user-localised-only" => () => new Label { UserLocalizedLabel = new LocalizedLabel("Ouvert", 1036) },
+                _ => null
+            }
+        };
         await f.UpdateAsync(kind, value: 1, newLabel: null);
         var update = Assert.Single(f.Requests.OfType<SdkUpdateOption>());
         Assert.True(update.MergeLabels);
-        Assert.Equal(new[] { (1033, "Open"), (1036, "Ouvert") }, Pairs(update.Label));
+        Assert.False(update.Parameters.ContainsKey("Label"));
+    }
+
+    public static TheoryData<string, string> UnrequestedCases()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var kind in new[] { "global", "local", "status" })
+            foreach (var existing in new[] { "two-languages", "empty-translation", "no-english", "user-localised-only" })
+                data.Add(kind, existing);
+        return data;
     }
 
     [Theory]
@@ -56,7 +79,7 @@ public sealed class OptionLabelLanguageTests
         var update = Assert.Single(f.Requests.OfType<SdkUpdateOption>());
         Assert.Equal(1, update.Value);
         Assert.True(update.MergeLabels);
-        Assert.Equal(new[] { (1033, "Open"), (1036, "Ouvert") }, Pairs(update.Label));
+        Assert.False(update.Parameters.ContainsKey("Label"), "a label used only as a selector is not written");
     }
 
     [Fact]
@@ -141,21 +164,6 @@ public sealed class OptionLabelLanguageTests
     [Theory]
     [MemberData(nameof(Kinds))]
     [Trait("AC", "AC-142")]
-    public async Task UnrequestedLabel_SkipsEmptyTranslations_AndKeepsAnOptionWithoutEnglish(string kind)
-    {
-        // An empty-text translation is not re-sent (MergeLabels keeps it); no 1033 label is invented.
-        var withEmpty = new Fixture { OpenLabel = () => new Label(new LocalizedLabel("Open", 1033), new LocalizedLabel[] { new("Open", 1033), new("", 1036) }) };
-        await withEmpty.UpdateAsync(kind, value: 1, newLabel: null);
-        Assert.Equal(new[] { (1033, "Open") }, Pairs(Assert.Single(withEmpty.Requests.OfType<SdkUpdateOption>()).Label));
-
-        var noEnglish = new Fixture { OpenLabel = () => new Label("Ouvert", 1036) };
-        await noEnglish.UpdateAsync(kind, value: 1, newLabel: null);
-        Assert.Equal(new[] { (1036, "Ouvert") }, Pairs(Assert.Single(noEnglish.Requests.OfType<SdkUpdateOption>()).Label));
-    }
-
-    [Theory]
-    [MemberData(nameof(Kinds))]
-    [Trait("AC", "AC-142")]
     public async Task UnrequestedLabel_WithNoText_IsNotSent(string kind)
     {
         var f = new Fixture { OpenLabel = () => new Label(new LocalizedLabel("", 1033), new LocalizedLabel[] { new("", 1033) }) };
@@ -167,22 +175,14 @@ public sealed class OptionLabelLanguageTests
 
     [Fact]
     [Trait("AC", "AC-142")]
-    public async Task UserLocalisedOnlyLabel_IsResentInItsOwnLanguage()
-    {
-        var f = new Fixture { OpenLabel = () => new Label { UserLocalizedLabel = new LocalizedLabel("Ouvert", 1036) } };
-        await f.UpdateAsync("global", value: 1, newLabel: null);
-        Assert.Equal(new[] { (1036, "Ouvert") }, Pairs(Assert.Single(f.Requests.OfType<SdkUpdateOption>()).Label));
-    }
-
-    [Fact]
-    [Trait("AC", "AC-142")]
-    public async Task ColorWrite_SendsNoLabel_AndMergesLabels()
+    public async Task ColorOnlyUpdate_SendsOneRequestWithNoLabel_AndMergesLabels()
     {
         var f = new Fixture();
         await f.Service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = Fixture.ChoiceName, Value = 1, Color = "#112233" });
-        var colour = Assert.Single(f.Requests.OfType<SdkUpdateOption>(), r => r.Parameters.ContainsKey("Color"));
-        Assert.Null(colour.Label);
-        Assert.True(colour.MergeLabels);
+        var update = Assert.Single(f.Requests.OfType<SdkUpdateOption>());
+        Assert.Equal("#112233", update["Color"]);
+        Assert.False(update.Parameters.ContainsKey("Label"));
+        Assert.True(update.MergeLabels);
         Assert.DoesNotContain(f.Requests, r => r is UpdateOptionSetRequest);
     }
 
@@ -201,6 +201,8 @@ public sealed class OptionLabelLanguageTests
         /// <summary>Overrides the labels of option 1 (default: English 'Open', French 'Ouvert').</summary>
         public Func<Label>? OpenLabel { get; init; }
 
+        private string? _storedColor;
+
         private Label French(string english, string french) => new(
             UserLanguage == 1033 ? new LocalizedLabel(english, 1033) : new LocalizedLabel(french, 1036),
             new LocalizedLabel[] { new(english, 1033), new(french, 1036) });
@@ -216,6 +218,7 @@ public sealed class OptionLabelLanguageTests
             OptionMetadata open = status ? new StatusOptionMetadata { State = 0 } : new OptionMetadata();
             open.Value = 1;
             open.Label = OpenLabel?.Invoke() ?? French("Open", "Ouvert");
+            open.Color = _storedColor;
             set.Options.Add(open);
             OptionMetadata other = status ? new StatusOptionMetadata { State = 0 } : new OptionMetadata();
             other.Value = 2;
@@ -233,6 +236,8 @@ public sealed class OptionLabelLanguageTests
                 .Returns<OrganizationRequest, CancellationToken>((request, _) =>
                 {
                     Requests.Add(request);
+                    if (request is SdkUpdateOption { Value: 1 } written && written.Parameters.TryGetValue("Color", out var color))
+                        _storedColor = (string?)color;
                     OrganizationResponse response = request switch
                     {
                         RetrieveOptionSetRequest => new RetrieveOptionSetResponse { Results = new ParameterCollection { ["OptionSetMetadata"] = OptionSet(status: false) } },
