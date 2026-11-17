@@ -38,6 +38,19 @@ public sealed class FormPlacementNoticeCommandTests
     }
 
     [Fact]
+    [Trait("AC", "AC-72")]
+    public async Task AddField_Json_ReportsAssignedControlIdsAdditively()
+    {
+        var (exit, stdout, stderr) = await Run(AddFieldCommand.Create(Provider(null)),
+            ["--section", "General", "--field", "telephone1"], json: true);
+        Assert.True(exit == 0, stderr);
+        using var doc = JsonDocument.Parse(stdout);
+        var added = Assert.Single(doc.RootElement.GetProperty("data").GetProperty("addedControls").EnumerateArray());
+        Assert.Equal("telephone1", added.GetProperty("field").GetString());
+        Assert.Equal("telephone11", added.GetProperty("controlId").GetString());
+    }
+
+    [Fact]
     [Trait("AC", "AC-71")]
     public async Task AddField_Json_HasNonCanonicalBindingShape()
     {

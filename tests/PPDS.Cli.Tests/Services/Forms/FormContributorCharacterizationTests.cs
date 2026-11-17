@@ -278,7 +278,8 @@ internal sealed class ContributorFormHarness
     internal bool IsCustomizable { get; init; } = true;
     internal Action? BeforeMetadata { get; init; }
 
-    internal ContributorFormHarness(CancellationToken token, string fixture = "base", bool emptyDisplayName = false, Action<XDocument>? transform = null)
+    internal ContributorFormHarness(CancellationToken token, string fixture = "base", bool emptyDisplayName = false, Action<XDocument>? transform = null,
+        IEnumerable<string>? extraColumns = null)
     {
         _token = token;
         var initial = XDocument.Parse(ContributorFormFixture.Build(fixture));
@@ -288,7 +289,8 @@ internal sealed class ContributorFormHarness
             new() { LogicalName = "name", SchemaName = "Name", DisplayName = "Metadata account name", AttributeType = "String" },
             new() { LogicalName = "telephone1", SchemaName = "Telephone1", DisplayName = "Business phone", AttributeType = "String" },
             new() { LogicalName = ContributorFormFixture.Priority, SchemaName = "mayo_PriorityScore",
-                DisplayName = emptyDisplayName ? "" : "Priority score", AttributeType = "Integer" }];
+                DisplayName = emptyDisplayName ? "" : "Priority score", AttributeType = "Integer" },
+            .. (extraColumns ?? []).Select(c => new AttributeMetadataDto { LogicalName = c, SchemaName = c, DisplayName = c, AttributeType = "String" })];
         _confirmation.Setup(c => c.EnsureConfirmedAsync(It.IsAny<string>(), It.IsAny<string?>(), It.Is<CancellationToken>(t => t == _token)))
             .Returns(() => { Journal.Add("confirmation"); return DenyConfirmation
                 ? Task.FromException(new PpdsException("Environment.ReadOnly", "Synthetic confirmation denied.")) : Task.CompletedTask; });

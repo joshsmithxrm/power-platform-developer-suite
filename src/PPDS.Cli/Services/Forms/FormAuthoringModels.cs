@@ -25,6 +25,8 @@ public sealed record FormAuthoringResult
     public string? DraftHash { get; set; }
     public Guid? SectionId { get; init; }
     public string? FieldLogicalName { get; init; }
+    /// <summary>Control <c>id</c> of the new placement (planned on a dry run); null when the field was already in the section.</summary>
+    public string? ControlId { get; init; }
     public string? SolutionUniqueName { get; init; }
     public string PublicationScope { get; init; } = "none";
     public string[] Warnings { get; set; } = [];

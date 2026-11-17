@@ -432,6 +432,7 @@ public sealed partial class FormService : IFormService
             var duplicateRequests = new List<string>();
             var otherPlacements = new List<FieldPlacementNotice>();
             var nonCanonical = new List<NonCanonicalBinding>();
+            var addedControls = new List<AddedFieldControl>();
 
             foreach (var field in request.FieldLogicalNames)
             {
@@ -455,9 +456,10 @@ public sealed partial class FormService : IFormService
                 if (elsewhere.Count > 0)
                     otherPlacements.Add(new FieldPlacementNotice(attr.LogicalName, elsewhere));
                 var classId = ClassIdResolver.ResolveForField(attr.AttributeType);
-                FormXmlEditor.AddField(doc, request.SectionLabel, attr.LogicalName, classId,
-                    string.IsNullOrWhiteSpace(attr.DisplayName) ? attr.LogicalName : attr.DisplayName);
+                var controlId = FormXmlEditor.AddFieldControl(doc, request.SectionLabel, attr.LogicalName, classId,
+                    string.IsNullOrWhiteSpace(attr.DisplayName) ? attr.LogicalName : attr.DisplayName, attrByName.Keys);
                 added.Add(attr.LogicalName);
+                addedControls.Add(new AddedFieldControl(attr.LogicalName, controlId));
             }
 
             if (added.Count > 0)
@@ -478,7 +480,8 @@ public sealed partial class FormService : IFormService
                 request.SolutionUniqueName is not null, request.Publish)
             {
                 OtherPlacements = otherPlacements.ToArray(),
-                NonCanonicalBindings = nonCanonical.ToArray()
+                NonCanonicalBindings = nonCanonical.ToArray(),
+                AddedControls = addedControls.ToArray()
             };
         }
         catch (OperationCanceledException) { throw; }
@@ -552,7 +555,7 @@ public sealed partial class FormService : IFormService
                     && !nonCanonical.Any(n => n.StoredName == stored))
                     nonCanonical.Add(new NonCanonicalBinding(stored, meta.LogicalName));
             }
-            FormXmlEditor.ReorderFields(doc, request.SectionLabel, request.FieldLogicalNames, ResolveNewField);
+            FormXmlEditor.ReorderFields(doc, request.SectionLabel, request.FieldLogicalNames, ResolveNewField, attributesByName.Keys);
 
             reporter?.ReportPhase("Writing", $"Reordering fields in section '{request.SectionLabel}'");
             await WriteFormXmlAsync(doc, formId, entityLogicalName, request.SolutionUniqueName, request.Publish, ct);
