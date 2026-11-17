@@ -37,8 +37,13 @@ public sealed class EnvironmentConfirmationServiceTests
         var (service, _) = Create(type, protection);
         var action = () => service.EnsureConfirmedAsync("write");
         if (requiresConfirmation)
+        {
             (await action.Should().ThrowAsync<PpdsException>()).Which.ErrorCode.Should().Be(EnvironmentConfirmationErrorCodes.Required);
-        else await action.Should().NotThrowAsync();
+        }
+        else
+        {
+            await action.Should().NotThrowAsync();
+        }
     }
 
     [Theory]

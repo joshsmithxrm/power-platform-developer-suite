@@ -82,7 +82,9 @@ public sealed class CliEnvironmentAliasTests(ITestOutputHelper output)
             .Select(o => (Path: n.Path, Option: o))).ToArray();
         Assert.NotEmpty(definitions);
         foreach (var definition in definitions)
+        {
             Assert.True(definition.Option.Aliases.Contains("-env"), "Missing -env at " + definition.Path);
+        }
     }
 
     [Fact]
@@ -90,10 +92,12 @@ public sealed class CliEnvironmentAliasTests(ITestOutputHelper output)
     public void CompleteTree_MigrationAliasesHaveUniqueBindings()
     {
         foreach (var node in Walk(Root()))
-        foreach (var alias in new[] { "-e", "-env", "--environment", "--entity", "--entities" })
         {
-            var bound = node.Command.Options.Where(o => o.Name == alias || o.Aliases.Contains(alias)).Distinct().ToArray();
-            Assert.True(bound.Length <= 1, "Ambiguous " + alias + " at " + node.Path);
+            foreach (var alias in new[] { "-e", "-env", "--environment", "--entity", "--entities" })
+            {
+                var bound = node.Command.Options.Where(o => o.Name == alias || o.Aliases.Contains(alias)).Distinct().ToArray();
+                Assert.True(bound.Length <= 1, "Ambiguous " + alias + " at " + node.Path);
+            }
         }
     }
 
@@ -150,11 +154,16 @@ public sealed class CliEnvironmentAliasTests(ITestOutputHelper output)
     {
         var found = new Dictionary<string, string[]>(StringComparer.Ordinal);
         foreach (var node in Walk(Root()))
-        foreach (var group in node.Command.Options.SelectMany(o => ShortBindings(o).Select(b => (b.Alias, Option: o)))
-                     .GroupBy(b => b.Alias, StringComparer.Ordinal))
         {
-            var longs = group.Select(g => LongName(g.Option)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
-            if (longs.Length > 1) found[(node.Path.Length == 0 ? "<root>" : node.Path) + "|" + group.Key] = longs;
+            foreach (var group in node.Command.Options.SelectMany(o => ShortBindings(o).Select(b => (b.Alias, Option: o)))
+                         .GroupBy(b => b.Alias, StringComparer.Ordinal))
+            {
+                var longs = group.Select(g => LongName(g.Option)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+                if (longs.Length > 1)
+                {
+                    found[(node.Path.Length == 0 ? "<root>" : node.Path) + "|" + group.Key] = longs;
+                }
+            }
         }
         Assert.True(found.Count == 0, "Short alias bound to more than one option on a single command: " +
             string.Join("; ", found.Select(f => f.Key + " => " + string.Join(", ", f.Value))));
@@ -199,10 +208,18 @@ public sealed class CliEnvironmentAliasTests(ITestOutputHelper output)
             for (var i = 0; i < options.Count; i++)
             {
                 var shared = options[i];
-                if (!SharedLongNames.Contains(shared.Name)) continue;
+                if (!SharedLongNames.Contains(shared.Name))
+                {
+                    continue;
+                }
+
                 foreach (var binding in ShortBindings(shared))
-                foreach (var owner in options.Take(i).Where(o => o.Name != shared.Name && ShortBindings(o).Any(b => b.Alias == binding.Alias)))
-                    keys.Add(node.Path + "|" + binding.Alias + "|" + LongName(owner) + "|" + shared.Name);
+                {
+                    foreach (var owner in options.Take(i).Where(o => o.Name != shared.Name && ShortBindings(o).Any(b => b.Alias == binding.Alias)))
+                    {
+                        keys.Add(node.Path + "|" + binding.Alias + "|" + LongName(owner) + "|" + shared.Name);
+                    }
+                }
             }
         }
         return keys.Order(StringComparer.Ordinal).ToArray();
@@ -244,7 +261,9 @@ public sealed class CliEnvironmentAliasTests(ITestOutputHelper output)
         var outputFormats = postNodes.SelectMany(n => n.Command.Options.Where(o => o.Name == "--output-format").Select(o => (n.Path, Option: o))).ToList();
         Assert.NotEmpty(outputFormats);
         foreach (var (path, option) in outputFormats.Where(x => !clashes.Any(c => c.StartsWith(x.Path + "|", StringComparison.Ordinal))))
+        {
             Assert.Equal(path == "data load" ? new[] { "-o" } : new[] { "-f" }, option.Aliases.Where(a => a.Length == 2).ToArray());
+        }
     }
 
     [Fact]
@@ -295,8 +314,10 @@ public sealed class CliEnvironmentAliasTests(ITestOutputHelper output)
         var root = Root();
         string[] baseArgs = ["views", "get", "--entity", "account", "--view", "v1"];
         foreach (var conflict in new[] { "--quiet", "--debug" })
+        {
             Assert.Contains(root.Parse(baseArgs.Append("--verbose").Append(conflict).ToArray()).Errors,
                 e => e.Message.Contains("mutually exclusive", StringComparison.Ordinal));
+        }
         Assert.DoesNotContain(root.Parse(baseArgs.Append("--verbose").ToArray()).Errors,
             e => e.Message.Contains("mutually exclusive", StringComparison.Ordinal));
 
@@ -374,7 +395,9 @@ public sealed class CliEnvironmentAliasTests(ITestOutputHelper output)
             " :: errors=[" + string.Join(" | ", parsed.Errors.Select(e => e.Message)) + "]");
         // The command-specific option (added first) takes the alias; the shared option is silently shadowed.
         foreach (var option in command.Options.Where(o => ShortBindings(o).Any(b => b.Alias == alias)))
+        {
             Assert.Equal(option.Name == winner, parsed.GetResult(option) is OptionResult { Implicit: false });
+        }
     }
 
     // Single-dash names/aliases of an option, including options declared short-first (Name is single-dash).
@@ -604,7 +627,12 @@ public sealed class CliEnvironmentAliasTests(ITestOutputHelper output)
     {
         yield return new Node(command, path);
         foreach (var child in command.Subcommands)
-        foreach (var node in Walk(child, (path.Length == 0 ? "" : path + " ") + child.Name)) yield return node;
+        {
+            foreach (var node in Walk(child, (path.Length == 0 ? "" : path + " ") + child.Name))
+            {
+                yield return node;
+            }
+        }
     }
     private static RootCommand BaselineRoot(bool includeInternal)
     {
