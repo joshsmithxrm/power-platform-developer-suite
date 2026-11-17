@@ -9,7 +9,9 @@
 The Test workflow reports its aggregate on every pull request to main. Its change
 classifier decides whether .NET, single-file extraction, candidate VSIX, and
 Python regression suites are needed. Python tests run through one reusable
-workflow. A needed suite must succeed; failure, cancellation, and unexpected skip
+workflow, which also has one Windows job for the few tests that need real
+PowerShell 7 and the Windows SDK `sn.exe`; that job installs the pinned SDK and
+fails, rather than skips, when a required tool is missing. A needed suite must succeed; failure, cancellation, and unexpected skip
 fail the aggregate. An intentionally unneeded suite may skip. Missing
 classification fails closed.
 

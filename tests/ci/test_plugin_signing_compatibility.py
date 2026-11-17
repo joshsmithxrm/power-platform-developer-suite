@@ -653,6 +653,119 @@ def test_build_record_accepts_either_reference_assembly_source(plan):
         d.validate_build_record(package, plan, False)
 
 
+@pytest.mark.parametrize("reported", [None, "", ";;", 5, ["C:\\x"], {"a": 1}])
+@pytest.mark.parametrize("kind", ["package", "targeting-pack"])
+def test_build_record_refuses_an_absent_or_non_string_reported_directory(plan, kind, reported):
+    # Both an absent key and a wrong type are refused with the directory reason, not an AttributeError.
+    record = build_record_fixture(plan, False)
+    if kind == "targeting-pack":
+        record["packages"] = [row for row in record["packages"] if "ReferenceAssemblies" not in row["id"]]
+        record["reference_assemblies"] = targeting_pack_record()
+    if reported is None:
+        del record["evaluated_properties"]["TargetFrameworkDirectory"]
+    else:
+        record["evaluated_properties"]["TargetFrameworkDirectory"] = reported
+    with pytest.raises(d.Error, match="Reference assembly directory missing"):
+        d.validate_build_record(record, plan, False)
+
+
+PACKAGE_TAIL = "\\microsoft.netframework.referenceassemblies.net462\\1.0.0\\build\\.NETFramework\\v4.6.2\\"
+PREPARED_PACKAGES = "C:\\fixture\\prepared\\temp\\packages"
+
+
+@pytest.mark.parametrize("reported", [
+    # Same tail, different folders.
+    "Z:\\other\\temp\\packages" + PACKAGE_TAIL,
+    "C:\\fixture\\prepared\\packages" + PACKAGE_TAIL,
+    # The package folder one level deeper than PREPARE writes it.
+    PREPARED_PACKAGES + "\\extra" + PACKAGE_TAIL,
+])
+def test_receipt_binds_the_package_reference_directory_to_the_prepared_restore_folder(
+        monkeypatch, tmp_path, plan, reported):
+    value, virtual, receipt_path = virtual_receipt(monkeypatch, tmp_path, plan, "prepare")
+    for name in ("delay", "public"):
+        value["build_evidence"][name]["evaluated_properties"]["TargetFrameworkDirectory"] = (
+            reported + ";;;" + reported + "Facades\\")
+        # The tail-only check this replaces would have accepted every one of these.
+        d.validate_build_record(deepcopy(value["build_evidence"][name]), plan, name == "public")
+    virtual[receipt_path] = json.dumps(value).encode()
+    with pytest.raises(d.Error, match="differ from the restored package"):
+        d.receipt(tmp_path, "prepare", plan, PLAN_HASH)
+
+
+@pytest.mark.parametrize("reported", [
+    # Near misses of the tail itself: another version, another package, no build folder, an extra part.
+    PREPARED_PACKAGES + "\\microsoft.netframework.referenceassemblies.net462\\1.0.1\\build\\.NETFramework\\v4.6.2\\",
+    PREPARED_PACKAGES + "\\microsoft.netframework.referenceassemblies.net48\\1.0.0\\build\\.NETFramework\\v4.6.2\\",
+    PREPARED_PACKAGES + "\\microsoft.netframework.referenceassemblies.net462\\1.0.0\\.NETFramework\\v4.6.2\\",
+    PREPARED_PACKAGES + "\\microsoft.netframework.referenceassemblies.net462\\1.0.0\\build\\.NETFramework\\v4.6.2\\extra\\",
+])
+def test_build_record_refuses_near_miss_package_directories(plan, reported):
+    record = build_record_fixture(plan, False)
+    record["evaluated_properties"]["TargetFrameworkDirectory"] = reported + ";;;" + reported + "Facades\\"
+    with pytest.raises(d.Error, match="Reference assembly observation differs"):
+        d.validate_build_record(record, plan, False)
+
+
+@pytest.mark.parametrize("output,reported", [
+    # What PREPARE writes, in the spellings its own normalisation (normcase/normpath) accepts.
+    ("C:/fixture/prepared", PACKAGE_REFERENCE_DIRECTORY),
+    ("C:/fixture/prepared", PACKAGE_REFERENCE_DIRECTORY.upper()),
+    ("C:/fixture/prepared", PACKAGE_REFERENCE_DIRECTORY.rstrip("\\")),
+    ("C:/fixture/prepared", PACKAGE_REFERENCE_DIRECTORY.replace("\\", "/")),
+    ("C:/fixture/prepared/work/..", PACKAGE_REFERENCE_DIRECTORY),
+    # The directory moves with the recorded output directory (a different PREPARE VM path).
+    ("D:/a/_temp/prepared", PACKAGE_REFERENCE_DIRECTORY.replace("C:\\fixture\\prepared", "D:\\a\\_temp\\prepared")),
+])
+def test_receipt_accepts_the_package_reference_directory_prepare_writes(monkeypatch, tmp_path, plan, output, reported):
+    value, virtual, receipt_path = virtual_receipt(monkeypatch, tmp_path, plan, "prepare")
+    value["build_overlay"] = d.build_overlay(plan, PureWindowsPath(output))
+    for name in ("delay", "public"):
+        value["build_evidence"][name]["evaluated_properties"]["TargetFrameworkDirectory"] = (
+            reported + ";;;" + reported.rstrip("\\/") + "\\Facades\\")
+    virtual[receipt_path] = json.dumps(value).encode()
+    d.receipt(tmp_path, "prepare", plan, PLAN_HASH)
+
+
+def test_receipt_refuses_a_package_directory_that_does_not_follow_the_recorded_output(monkeypatch, tmp_path, plan):
+    # The overlay (and so the output directory) moves; the recorded reference directory does not.
+    value, virtual, receipt_path = virtual_receipt(monkeypatch, tmp_path, plan, "prepare")
+    value["build_overlay"] = d.build_overlay(plan, PureWindowsPath("D:/elsewhere"))
+    virtual[receipt_path] = json.dumps(value).encode()
+    with pytest.raises(d.Error, match="differ from the restored package"):
+        d.receipt(tmp_path, "prepare", plan, PLAN_HASH)
+
+
+@pytest.mark.parametrize("suffix", [";C:\\unrelated\\", ";C:\\fixture\\prepared\\temp\\other\\"])
+@pytest.mark.parametrize("kind", ["package", "targeting-pack"])
+def test_build_record_refuses_entries_other_than_the_primary_or_its_facades(plan, kind, suffix):
+    # PREPARE's rule, re-applied by SIGN and VERIFY: a later entry is the primary directory or Facades.
+    record = build_record_fixture(plan, False)
+    if kind == "targeting-pack":
+        record["packages"] = [row for row in record["packages"] if "ReferenceAssemblies" not in row["id"]]
+        record["reference_assemblies"] = targeting_pack_record()
+        record["evaluated_properties"]["TargetFrameworkDirectory"] = INSTALLED_PACK_REPORTED
+    record["evaluated_properties"]["TargetFrameworkDirectory"] += suffix
+    with pytest.raises(d.Error, match="Unexpected reference assembly directories"):
+        d.validate_build_record(record, plan, False)
+
+
+def test_receipt_refuses_builds_with_the_same_kind_but_different_reference_assemblies(monkeypatch, tmp_path, plan):
+    value, virtual, receipt_path = virtual_receipt(monkeypatch, tmp_path, plan, "prepare")
+    # Same kind, each record valid on its own, but a different package version: not the same sources.
+    public = value["build_evidence"]["public"]
+    for row in public["packages"]:
+        if row["id"].lower() == d.REFERENCE_PACKAGE:
+            row["version"] = "1.0.1"
+    public["reference_assemblies"]["version"] = "1.0.1"
+    reported = PREPARED_PACKAGES + PACKAGE_TAIL.replace("1.0.0", "1.0.1")
+    public["evaluated_properties"]["TargetFrameworkDirectory"] = reported + ";;;" + reported + "Facades\\"
+    d.validate_build_record(deepcopy(public), plan, True)
+    virtual[receipt_path] = json.dumps(value).encode()
+    with pytest.raises(d.Error, match="differ between builds"):
+        d.receipt(tmp_path, "prepare", plan, PLAN_HASH)
+
+
 def test_receipt_requires_both_builds_to_use_the_same_reference_assemblies(monkeypatch, tmp_path, plan):
     value, virtual, receipt_path = virtual_receipt(monkeypatch, tmp_path, plan, "prepare")
     public = value["build_evidence"]["public"]
@@ -1044,13 +1157,162 @@ def test_native_launch_setting_is_only_pathext_for_powershell_children(monkeypat
                      "metadata", native=True)
 
 
-def test_failure_names_which_call_of_an_operation_failed(monkeypatch, tmp_path, plan, capsys):
+def test_failure_names_which_call_of_an_operation_failed():
     calls = [{"operation": "packaged-forced-verification", "exit_code": 0},
              {"operation": "packaged-metadata", "exit_code": 0},
              {"operation": "packaged-forced-verification", "exit_code": 1}]
     assert d.last_operation(calls) == ("packaged-forced-verification", "1", "2")
     assert d.last_operation(calls[:2]) == ("packaged-metadata", "0", "1")
     assert re.fullmatch(d.INDEX_PATTERN, d.last_operation(calls)[2])
+    # The index is clamped to the coordinator's four-digit pattern, which would otherwise drop it.
+    many = [{"operation": "source-identity", "exit_code": 0}] * 10005
+    assert d.last_operation(many) == ("source-identity", "0", "9999")
+    assert re.fullmatch(d.INDEX_PATTERN, d.last_operation(many)[2])
+    assert d.last_operation(many[:9999])[2] == "9999" and d.last_operation(many[:9998])[2] == "9998"
+
+
+def test_only_the_packaged_metadata_child_is_launched_with_pathext():
+    # Every call that asks for the native-launch environment, found in the driver source itself, so a
+    # new pwsh call site (inventory, metadata, ...) cannot quietly get PATHEXT.
+    import ast
+    tree = ast.parse(Path(d.__file__).read_text(encoding="utf-8"))
+    native_calls = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and any(
+                keyword.arg == "native" and isinstance(keyword.value, ast.Constant) and keyword.value.value is True
+                for keyword in node.keywords):
+            native_calls.append([a.value for a in node.args if isinstance(a, ast.Constant)])
+    assert len(native_calls) == 1 and "packaged-metadata" in native_calls[0] and "pwsh" in native_calls[0]
+    # Every other environment shape is PATHEXT-free.
+    plan = {"windows_directory": "C:/Windows", "windows_common_data_directory": "C:/ProgramData",
+            "tools": {"dotnet": {"path": "C:/fixture/dotnet.exe"}}}
+    for options in ({}, {"build": True}, {"build": True, "nuget": True}):
+        assert "PATHEXT" not in d.environment(plan, Path("C:/fixture/temp"), **options)
+
+
+def inspector_throw_messages():
+    # Every fixed failure message in the inspector. A `throw` form this cannot read fails the test
+    # rather than being skipped, so a new form cannot hide a message from the phrase table.
+    source = (d.ROOT / "scripts/ci/inspect_release_assemblies.ps1").read_text(encoding="utf-8")
+    code_lines = [line for line in source.splitlines() if not line.lstrip().startswith("#")]
+    not_run = re.findall(r"\$notRun = '([^']+)'", "\n".join(code_lines))
+    messages = []
+    for line in code_lines:
+        found = re.findall(r"\bthrow\b", line)
+        if len(found) > 1:
+            pytest.fail("More than one throw on a line of the inspector: " + line.strip())
+        for found in re.finditer(r"\bthrow\b(.*)", line):
+            rest = found[1].strip()
+            if match := re.match(r"'([^']+)'", rest):
+                messages.append(match[1])
+            elif match := re.match(r'"([^"]+)"', rest):
+                messages.append(match[1].split(":")[0])
+            elif re.match(r"\$notRun\b", rest):
+                messages.extend(not_run)
+            else:
+                pytest.fail("Unreadable throw form in the inspector: " + line.strip())
+    return messages
+
+
+def test_inspector_diagnostics_cover_every_message_the_inspector_throws():
+    messages = inspector_throw_messages()
+    phrases = [phrase for phrase, _ in d.INSPECTOR_DIAGNOSTICS]
+    assert len(messages) >= 10
+    # Every fixed message the inspector can throw starts with exactly one registered phrase, and no
+    # registered phrase is stale.
+    for message in messages:
+        assert len([phrase for phrase in phrases if message.startswith(phrase)]) == 1, message
+    assert all(any(message.startswith(phrase) for message in messages) for phrase in phrases)
+    codes = [code for _, code in d.INSPECTOR_DIAGNOSTICS]
+    assert len(codes) == len(set(codes)) and d.INSPECTOR_UNCLASSIFIED not in codes
+    assert all(re.fullmatch(r"[A-Za-z0-9-]{1,64}", code) for code in d.DIAGNOSTIC_CODES)
+    assert d.DIAGNOSTIC_CODES.isdisjoint(d.REFUSAL_CODES)
+
+
+def test_inspector_throw_harvest_fails_loudly_on_a_form_it_cannot_read(monkeypatch):
+    real = Path.read_text
+    monkeypatch.setattr(Path, "read_text", lambda self, *a, **kw: real(self, *a, **kw) + "\nthrow $other\n")
+    with pytest.raises(pytest.fail.Exception, match="Unreadable throw form"):
+        inspector_throw_messages()
+
+
+def test_inspector_throw_harvest_fails_on_two_throws_in_one_line(monkeypatch):
+    real = Path.read_text
+    monkeypatch.setattr(Path, "read_text", lambda self, *a, **kw: real(self, *a, **kw)
+                        + "\nif ($a) { throw 'x' } else { throw 'y' }\n")
+    with pytest.raises(pytest.fail.Exception, match="More than one throw"):
+        inspector_throw_messages()
+
+
+def marker(message):
+    return "PPDS_INSPECTOR_MESSAGE=" + message
+
+
+@pytest.mark.parametrize("phrase,code", d.INSPECTOR_DIAGNOSTICS)
+def test_inspector_diagnostic_maps_each_fixed_message_to_its_code(phrase, code):
+    # The anchored line comes first (CRLF as pwsh writes it); PowerShell's own rendering follows.
+    stderr = (marker(phrase + ": raw tool output PRIVATE") + "\r\n\x1b[31;1mException: \x1b[0mC:\\PRIVATE\\inspect.ps1:47\r\n"
+              "   47 |  { throw '" + phrase + "' }\r\n")
+    assert d.inspector_diagnostic(stderr) == code
+
+
+@pytest.mark.parametrize("stderr", [
+    "", "PRIVATE C:/Users/x/secret.snk", "Cannot bind argument to parameter PRIVATE", None, 7,
+    # The phrase appears only in PowerShell's rendering (a source line echo), not on the anchored line.
+    "\x1b[31;1mException: \x1b[0m x.ps1:49\n   49 | $blob.ReadUInt16(); throw 'Invalid framework attribute'\n",
+    "  PPDS_INSPECTOR_MESSAGE=Plugins must target net462",  # Not anchored at line start.
+    marker("Something else entirely PRIVATE"),
+])
+def test_inspector_diagnostic_never_returns_text_it_did_not_register(stderr):
+    assert d.inspector_diagnostic(stderr) == d.INSPECTOR_UNCLASSIFIED
+
+
+def test_inspector_diagnostic_uses_the_first_anchored_line_only():
+    stderr = marker("Plugins must target net462") + "\n" + marker("No assemblies to inspect") + "\n"
+    assert d.inspector_diagnostic(stderr) == "inspector-framework"
+
+
+def packaged_metadata_run(monkeypatch, tmp_path, plan, *, operation, returncode, stderr):
+    monkeypatch.setattr(d, "pin", lambda *args: None)
+    monkeypatch.setattr(d.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=returncode, stdout="", stderr=stderr))
+    rt = d.Runtime(evidence_class="process-double")
+    return rt, lambda: REAL_INVOKE(rt, plan, "pwsh", [], tmp_path, operation, native=operation == "packaged-metadata")
+
+
+def test_a_failed_packaged_metadata_call_records_which_inspector_check_failed(monkeypatch, tmp_path, plan):
+    rt, call = packaged_metadata_run(monkeypatch, tmp_path, plan, operation="packaged-metadata", returncode=1,
+                                     stderr=marker("Strong-name verification tool did not report an exit code; PRIVATE"))
+    with pytest.raises(d.Error, match="required outcome"):
+        call()
+    assert rt.diagnostic == "inspector-sn-no-result"
+    assert "PRIVATE" not in json.dumps(rt.calls)
+    # Success and other operations leave it unset.
+    rt, call = packaged_metadata_run(monkeypatch, tmp_path, plan, operation="packaged-metadata", returncode=0,
+                                     stderr=marker("Plugins must target net462"))
+    call()
+    assert rt.diagnostic is None
+    rt, call = packaged_metadata_run(monkeypatch, tmp_path, plan, operation="metadata", returncode=1,
+                                     stderr=marker("Plugins must target net462"))
+    with pytest.raises(d.Error, match="required outcome"):
+        call()
+    assert rt.diagnostic is None
+
+
+def test_main_prints_only_the_fixed_inspector_diagnostic_code(monkeypatch, tmp_path, plan, capsys):
+    monkeypatch.setattr(d.sys, "platform", "win32")
+    monkeypatch.setattr(d, "load_plan", lambda *args: plan)
+    monkeypatch.setattr(d, "json_write", lambda *args: None)
+    monkeypatch.setattr(d, "pin", lambda *args: None)
+    monkeypatch.setattr(d.subprocess, "run", lambda *a, **kw: SimpleNamespace(
+        returncode=1, stdout="PRIVATE_OUT", stderr=marker("Plugins must target net462") + "\nPRIVATE_ERR"))
+    monkeypatch.setattr(d, "verify", lambda args, selected, runtime: REAL_INVOKE(
+        runtime, selected, "pwsh", ["PRIVATE_ARG"], tmp_path, "packaged-metadata", native=True))
+    assert d.main(stage_arguments("verify"), runtime=d.Runtime(evidence_class="process-double")) == 1
+    captured = capsys.readouterr()
+    assert diagnostic_lines(captured.err) == [
+        "PPDS_COMPAT_REFUSAL=tool-result", "PPDS_COMPAT_OPERATION=packaged-metadata", "PPDS_COMPAT_STATUS=1",
+        "PPDS_COMPAT_OPERATION_INDEX=1", "PPDS_COMPAT_DIAGNOSTIC=inspector-framework"]
+    assert "PRIVATE" not in captured.out + captured.err
 
 
 def diagnostic_lines(err):
@@ -1464,7 +1726,12 @@ def test_build_evidence_checks_actual_properties_and_package_bindings(monkeypatc
                              "restore": result["restore"], "reference_assemblies": result["reference_assemblies"],
                              "binaries": result["binaries"], "evaluated_properties": result["evaluated_properties"]},
                             plan, False)
-    # Only the first package verification gets the longer (revocation-fetch) timeout.
+    # What PREPARE writes is accepted by the receipt-side full-directory binding, derived (as the
+    # receipt validator does) from the overlay's key-file parent alone.
+    d.bind_package_reference_directory({"reference_assemblies": result["reference_assemblies"],
+                                        "evaluated_properties": result["evaluated_properties"]},
+                                       PureWindowsPath(str(f.output / "test-public.bin")).parent)
+    # Only the first package verification in this build gets the longer (revocation-fetch) timeout.
     assert [t for op, t in f.timeouts if op == "package-signature-verification"] == [600, 120, 120, 120]
     # The recorded compiler is the collapsed real path, and the probe reads that same path.
     assert result["binaries"]["roslyn"]["path"] == str(f.compiler)
