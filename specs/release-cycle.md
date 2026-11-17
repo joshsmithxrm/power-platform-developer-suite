@@ -422,7 +422,11 @@ they do not grant authorization. There is no combined stage or key generator.
 The public plan binds the source commit/tree, candidate version, distinct test
 public-key identity and accepted absolute tool paths/hashes/versions. `prepare`
 builds the actual Plugins project with a recorded public-input overlay in an
-owned copy, with no private-key argument. `sign` receives only the prepared
+owned copy without `.git`, with no private-key argument. MinVer's own target
+derives every version property by the production rule from
+`MinVerVersionOverride` (in place of a tag), and `prepare` and `verify` check
+the built DLL's assembly, file and product versions against that rule; MinVer's
+tag discovery itself is not exercised. `sign` receives only the prepared
 public handoff and later-authorized disposable key, invokes the pinned strong-
 name tool, and removes its owned key copy on success or failure. `verify` has no
 key argument and independently checks actual signed bytes. No stage changes
@@ -439,7 +443,17 @@ creates tags or publishes. Local stages are not proof of fresh-host isolation.
 | COMPAT-06 | Repack changes only `lib/net462/PPDS.Plugins.dll`; every other uncompressed member and the complete symbol package remain unchanged; the extracted signed DLL passes real verification and existing local NuGet package rules. |
 
 The receipt records each case separately, exact source/tool/public-input/package
-bindings, actual process outcomes and key-copy cleanup. Missing, mocked, skipped
+bindings, actual process outcomes and key-copy cleanup. For build dependencies
+the binding is: restore used only the owned package folder and no fallback
+folder; each package's recorded source is the repository's single NuGet source;
+its file hash equals NuGet's `.nupkg.sha512`; its content hash equals
+`.nupkg.metadata` and the hash that a successful `dotnet nuget verify --all`
+reports while validating a repository signature whose signer names nuget.org's
+service index (the certificate is recorded but not pinned); and direct
+references equal their central pins. The reference assemblies used are recorded
+as either the restored package or an installed 4.6.2 targeting pack (directory
+and `mscorlib.dll`/`System.dll` hashes). No reviewer-expected hash (lock file)
+is compared, and extracted package files are not re-hashed. Missing, mocked, skipped
 or failed cryptographic operations cannot produce a compatibility PASS. The
 fixed SDK tool used by the existing metadata inspector must match the accepted
 signer identity. Production lifecycle, key custody, producer trust and release

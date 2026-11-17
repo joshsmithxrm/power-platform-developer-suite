@@ -3,6 +3,7 @@
 These tests never read a key/public-key file, launch a tool, inspect the ambient
 environment, or establish real Windows signing compatibility.
 """
+import ast
 from copy import deepcopy
 import base64
 import hashlib
@@ -10,7 +11,8 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+import re
 import struct
 import subprocess
 import sys
@@ -26,6 +28,111 @@ d = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = d
 SPEC.loader.exec_module(d)
 REAL_HOST_OBSERVATION = d.host_observation
+REAL_INVOKE = d.invoke
+
+
+@pytest.mark.parametrize("error,expected", [
+    (d.Error("Pinned tool bytes differ"), "tool-hash"),
+    (d.Error("Tool product version mismatch"), "tool-version"),
+    (d.Error("Restore used a NuGet fallback folder"), "restore-fallback-folder"),
+    (d.Error("PRIVATE_PATH_OR_TOKEN"), "unregistered"),
+    (d.Error("Pinned tool bytes differ PRIVATE_VALUE"), "unregistered"),
+    (ValueError("Pinned tool bytes differ"), "exception-valueerror"),
+    (FileNotFoundError(2, "No such file", "C:/PRIVATE/path.snk"), "exception-filenotfounderror"),
+    (KeyError("PRIVATE_KEY_NAME"), "exception-keyerror"),
+    (json.JSONDecodeError("PRIVATE_DOCUMENT", "PRIVATE_DOCUMENT", 0), "exception-jsondecodeerror"),
+    (type("PrivateCustomError", (Exception,), {})("PRIVATE"), "exception-other"),
+])
+def test_failure_diagnostic_uses_only_exact_fixed_codes(error, expected):
+    code = d.safe_refusal(error)
+    assert code == expected and code in d.REFUSAL_CODES and "PRIVATE" not in code.upper()
+
+
+HELPER_REASONS = {"Bounded regular handoff file required", "Handoff file changed while reading", "JSON bound",
+                  "Keyless input must be delay-signed, not public/fully signed",
+                  "Release tag/package versions must not contain build metadata"}
+
+
+def test_reason_scan_includes_keyword_reasons(tmp_path):
+    source = tmp_path / "sample.py"
+    source.write_text('require(ok, reason="Keyword reason")\nrequire(ok, "Positional reason")\n'
+                      'raise Error("Raised reason")\nrequire(ok, reason=f"{value}")\n', encoding="utf-8")
+    reasons, dynamic = literal_refusal_reasons(source)
+    assert reasons == {"Keyword reason", "Positional reason", "Raised reason"} and dynamic == [4]
+
+
+def operation_literals_outside_pass_through(path):
+    """Operation values at every invoke(...)/.run(...) call site, with their line numbers."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    pass_through = {id(child) for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "invoke"
+                    for child in ast.walk(node)}
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = getattr(node.func, "id", getattr(node.func, "attr", None))
+        keywords = {keyword.arg: keyword.value for keyword in node.keywords}
+        if name == "invoke" and len(node.args) >= 6:
+            found.append((node.lineno, node.args[5]))
+        elif name == "run" and "operation" in keywords and id(node) not in pass_through:
+            found.append((node.lineno, keywords["operation"]))
+    return found
+
+
+def test_every_operation_name_at_a_call_site_is_listed():
+    # A misspelt or newly added operation would otherwise first fail on a hosted run.
+    sites = operation_literals_outside_pass_through(DRIVER_PATH)
+    assert len(sites) >= 20
+    for line, value in sites:
+        if isinstance(value, ast.Constant):
+            assert value.value in d.OPERATIONS, line
+        elif isinstance(value, ast.BinOp) and isinstance(value.op, ast.Add) and isinstance(value.right, ast.Constant):
+            # name + "-restore" / "-build": name is "delay" or "public".
+            assert {prefix + value.right.value for prefix in ("delay", "public")} & d.OPERATIONS, line
+            assert all(prefix + value.right.value in d.OPERATIONS for prefix in ("delay", "public")
+                       if value.right.value != "-pack"), line
+        elif isinstance(value, ast.BinOp) and isinstance(value.op, ast.Add) and isinstance(value.left, ast.Constant):
+            assert all(value.left.value + tool in d.OPERATIONS for tool in ("git", "dotnet", "pwsh", "sn")), line
+        else:
+            pytest.fail(f"Unchecked operation expression at line {line}")
+
+
+def literal_refusal_reasons(path):
+    """Every constant reason passed to require(...) or raised as Error/ValueError(...) in a source file."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    wrappers = {node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "require"}
+    inside_wrapper = {id(child) for wrapper in wrappers for child in ast.walk(wrapper)}
+    reasons, dynamic = set(), []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or id(node) in inside_wrapper:
+            continue
+        name = getattr(node.func, "id", getattr(node.func, "attr", None))
+        keywords = {keyword.arg: keyword.value for keyword in node.keywords}
+        if name == "require" and (len(node.args) >= 2 or "reason" in keywords):
+            argument = node.args[1] if len(node.args) >= 2 else keywords["reason"]
+        elif name in {"Error", "ValueError"} and node.args:
+            argument = node.args[0]
+        else:
+            continue
+        if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+            reasons.add(argument.value)
+        else:
+            dynamic.append(node.lineno)
+    return reasons, dynamic
+
+
+def test_refusal_registry_covers_every_driver_reason_with_a_distinct_code():
+    reasons, dynamic = literal_refusal_reasons(DRIVER_PATH)
+    assert len(reasons) > 100
+    assert sorted(reasons - set(d.REFUSALS)) == []
+    # No stale entry: everything else in the registry is a known helper-module reason.
+    assert set(d.REFUSALS) - reasons == HELPER_REASONS
+    # A reason built at run time can never be printed: it would map to the fixed bucket.
+    assert dynamic == []
+    codes = list(d.REFUSALS.values())
+    assert len(codes) == len(set(codes)), "two reasons share a refusal code"
+    assert all(re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", code) and len(code) <= 48 for code in d.REFUSAL_CODES)
+    assert d.UNREGISTERED_REFUSAL not in codes
 
 SOURCE = "a" * 40
 TREE = "b" * 40
@@ -133,9 +240,10 @@ def plan():
     for name in ("git", "dotnet", "pwsh", "sn"):
         tools[name] = {"path": d.FIXED_SIGNER if name == "sn" else f"C:/fixture/{name}.exe",
                        "sha256": "d" * 64, "version": "1.2.3.4"}
-    return {"schema": 1, "kind": "ppds-signing-compatibility-plan", "experiment": "offline-fixture",
+    return {"schema": 2, "kind": "ppds-signing-compatibility-plan", "experiment": "offline-fixture",
             "source": SOURCE, "tree": TREE, "version": "3.1.1-compat.1",
             "public_key_sha256": d.digest(public_fixture()), "windows_directory": "C:/Windows",
+            "windows_common_data_directory": "C:/ProgramData",
             "tools": tools}
 
 
@@ -254,20 +362,41 @@ def receipt_fixture(plan, plan_hash, stage="prepare"):
     return value
 
 
+NUGET_ORG = "https://api.nuget.org/v3/index.json"
+PACKAGE_REFERENCE_DIRECTORY = ("C:\\fixture\\prepared\\temp\\packages\\microsoft.netframework.referenceassemblies.net462"
+                               "\\1.0.0\\build\\.NETFramework\\v4.6.2\\")
+# The exact shape observed locally for an installed (v4.8) pack: "<pack>\;;;<pack>\Facades\".
+INSTALLED_PACK_DIRECTORY = "C:\\Program Files (x86)\\Reference Assemblies\\Microsoft\\Framework\\.NETFramework\\v4.6.2\\"
+INSTALLED_PACK_REPORTED = INSTALLED_PACK_DIRECTORY + ";;;" + INSTALLED_PACK_DIRECTORY + "Facades\\"
+
+
 def build_record_fixture(plan, control):
     packages = []
-    for name in ("MinVer", "Microsoft.SourceLink.GitHub", "Microsoft.NETFramework.ReferenceAssemblies.net462"):
+    for name, reference in (("MinVer", "direct-pinned"), ("Microsoft.SourceLink.GitHub", "direct-pinned"),
+                            ("Microsoft.NETFramework.ReferenceAssemblies.net462", "transitive")):
         raw = ("synthetic package " + name).encode()
+        content = base64.b64encode(hashlib.sha512(b"content " + raw).digest()).decode()
         packages.append({"id": name, "version": "1.0.0", "sha256": d.digest(raw),
-                         "sha512": base64.b64encode(hashlib.sha512(raw).digest()).decode()})
+                         "sha512": base64.b64encode(hashlib.sha512(raw).digest()).decode(),
+                         "content_sha512": content, "source": NUGET_ORG, "reference": reference,
+                         "pin": "1.0.0" if reference == "direct-pinned" else None,
+                         "pin_matches": True if reference == "direct-pinned" else None,
+                         "signature": {"content_sha512": content, "repository_service_index": NUGET_ORG,
+                                       "repository_certificate_sha256": "a" * 64}})
+    # The candidate 3.1.1-compat.1 uses MinVer's production rule, not {Major}.{Minor}.{Patch}.0 for both.
     return {"sdk": "10.0.403", "assets_sha256": "e" * 64, "packages": packages,
+            "reference_assemblies": {"kind": "package", "id": "Microsoft.NETFramework.ReferenceAssemblies.net462",
+                                     "version": "1.0.0"},
+            "restore": {"fallback_folders": [], "package_folders": 1, "source": NUGET_ORG, "sources": [NUGET_ORG]},
             "evaluated_properties": {"NETCoreSdkVersion": "10.0.403", "MSBuildVersion": "18.0.1",
                 "TargetFramework": "net462", "SignAssembly": "true", "PublicSign": str(control).lower(),
                 "DelaySign": str(not control).lower(), "Configuration": "Release",
-                "PackageVersion": plan["version"], "InformationalVersion": plan["version"] + "+" + SOURCE,
+                "PackageVersion": plan["version"], "MinVerVersion": plan["version"],
+                "InformationalVersion": plan["version"] + "+" + SOURCE,
                 "AssemblyOriginatorKeyFile": "C:/virtual/public-never-opened",
-                "AssemblyVersion": "3.1.1.0", "FileVersion": "3.1.1.0"},
-            "binaries": {name: {"path": f"C:/virtual/{name}.dll", "sha256": "f" * 64,
+                "AssemblyVersion": "3.0.0.0", "FileVersion": "3.1.1.0",
+                "TargetFrameworkDirectory": PACKAGE_REFERENCE_DIRECTORY + ";;;" + PACKAGE_REFERENCE_DIRECTORY + "Facades\\"},
+            "binaries": {name: {"path": f"C:/fixture/sdk/10.0.403/{name}.dll", "sha256": "f" * 64,
                                  "bytes": 123, "product_version": "1.2.3.4"}
                          for name in ("msbuild", "roslyn")}}
 
@@ -281,7 +410,9 @@ def observation_fixture(plan, stage):
         counts.update({name: 1 for name in ("delay-restore", "delay-build", "delay-pack", "public-restore",
                                            "public-build", "delay-forced-rejection")})
         counts.update({"source-identity": 5, "evaluated-properties": 2, "selected-sdk": 2,
-                       "compiler-product-version": 4, "metadata": 2})
+                       "compiler-product-version": 4, "metadata": 2,
+                       # One per recorded package row: three packages in each of the two builds.
+                       "package-signature-verification": 6})
     value = {"recorded_utc": OBSERVED_UTC, "host": host_fixture(),
              "python": {"version": "synthetic interpreter", "executable": "C:/virtual/python.exe",
                         "sha256": "d" * 64},
@@ -293,7 +424,7 @@ def observation_fixture(plan, stage):
                      key_cleanup="completed", prepare_receipt_sha256="e" * 64,
                      authorization_reference="synthetic owner-reference parser fixture")
         return value
-    metadata = {"name": "PPDS.Plugins", "assembly_version": "3.1.1.0", "culture": "",
+    metadata = {"name": "PPDS.Plugins", "assembly_version": "3.0.0.0", "file_version": "3.1.1.0", "culture": "",
                 "public_key_sha256": plan["public_key_sha256"],
                 "mvid": "00000000-0000-0000-0000-000000000001", "framework": ".NETFramework,Version=v4.6.2",
                 "informational_version": plan["version"] + "+" + SOURCE,
@@ -305,8 +436,7 @@ def observation_fixture(plan, stage):
                  tool_product_versions={name: row["version"] for name, row in plan["tools"].items()},
                  build_evidence={"delay": build_record_fixture(plan, False),
                                  "public": build_record_fixture(plan, True)},
-                 build_overlay=["-p:SignAssembly=true", "-p:DebugType=portable", "-p:Version=" + plan["version"],
-                                "-p:InformationalVersion=" + plan["version"] + "+" + SOURCE])
+                 build_overlay=d.build_overlay(plan, PureWindowsPath("C:/fixture/prepared")))
     return value
 
 
@@ -389,7 +519,8 @@ def test_receipt_rejects_missing_or_extra_handoff_files(monkeypatch, tmp_path, p
     for field in ("commands", "host", "python", "python.sha256", "recorded_utc")
 ] + [("prepare", field) for field in (
     "build_evidence", "build_evidence.delay.assets_sha256", "build_evidence.public.binaries",
-    "build_overlay", "metadata", "control_metadata", "control_metadata.pdb",
+    "build_evidence.delay.restore", "build_overlay", "metadata", "metadata.file_version",
+    "control_metadata", "control_metadata.pdb",
     "tool_product_versions", "cases"
 )] + [("sign", field) for field in (
     "cases", "key_cleanup", "prepare_receipt_sha256", "authorization_reference"
@@ -432,6 +563,212 @@ def test_receipt_rejects_failed_or_missing_command(monkeypatch, tmp_path, plan, 
     virtual[receipt_path] = json.dumps(value).encode()
     with pytest.raises(d.Error):
         d.receipt(tmp_path, stage, plan, PLAN_HASH)
+
+
+@pytest.mark.parametrize("key", ["sha512", "content_sha512"])
+@pytest.mark.parametrize("value", [None, "", "not-base64", "A" * 86 + "=", "A" * 88, ("A" * 86 + "==").encode().hex()])
+def test_build_record_refuses_missing_or_malformed_package_hashes(plan, key, value):
+    record = build_record_fixture(plan, False)
+    d.validate_build_record(deepcopy(record), plan, False)
+    if value is None:
+        del record["packages"][0][key]
+    else:
+        record["packages"][0][key] = value
+    with pytest.raises(d.Error, match="content hash missing"):
+        d.validate_build_record(record, plan, False)
+
+
+@pytest.mark.parametrize("change,message", [
+    (lambda r: r["packages"][0].update(source="https://other.example/v3/index.json"), "source differs"),
+    (lambda r: r["packages"][0].update(pin="9.9.9"), "pin observation"),
+    (lambda r: r["packages"][2].update(pin="1.0.0"), "pin observation"),
+    (lambda r: r["packages"][0].update(reference="direct-unpinned"), "pin observation"),
+    (lambda r: r["packages"][0]["signature"].update(content_sha512=r["packages"][1]["content_sha512"]), "signature"),
+    (lambda r: r["packages"][0]["signature"].update(repository_service_index="https://other.example/"), "signature"),
+    (lambda r: r["packages"][0].pop("signature"), "signature"),
+    (lambda r: r["restore"].update(fallback_folders=["C:/Program Files (x86)/Shared/NuGetPackages"]), "Restore folder"),
+    (lambda r: r["restore"].update(package_folders=2), "Restore folder"),
+    (lambda r: r["evaluated_properties"].update(AssemblyVersion="3.1.1.0"), "evaluated build observations"),
+    (lambda r: r["evaluated_properties"].update(FileVersion="3.0.0.0"), "evaluated build observations"),
+    (lambda r: r["evaluated_properties"].update(MinVerVersion="0.0.0-alpha.0"), "evaluated build observations"),
+    # SIGN and VERIFY re-apply PREPARE's dotnet-root containment to the recorded compiler paths.
+    (lambda r: r["binaries"]["roslyn"].update(path="C:/elsewhere/Roslyn/bincore/csc.dll"), "pinned dotnet root"),
+    (lambda r: r["binaries"]["msbuild"].update(path="C:/fixture/sdk/../../elsewhere/MSBuild.dll"), "pinned dotnet root"),
+    (lambda r: r["packages"][0].update(pin_matches=None), "pin observation"),
+    (lambda r: r["packages"][2].update(pin="1.0.0", pin_matches=False), "pin observation"),
+    # Reference assemblies: neither form, a package form without its row, or a targeting pack
+    # recorded while the package was also resolved ("both") are refused.
+    (lambda r: r.pop("reference_assemblies"), "Reference assembly observation required"),
+    (lambda r: r["reference_assemblies"].update(kind="installed"), "Reference assembly observation required"),
+    (lambda r: r.update(packages=r["packages"][:2]), "Reference assembly observation differs"),
+    (lambda r: r["reference_assemblies"].update(version="9.9.9"), "Reference assembly observation differs"),
+    (lambda r: r.update(reference_assemblies=targeting_pack_record()), "Reference assembly observation differs"),
+])
+def test_build_record_refuses_unbound_package_or_version_observations(plan, change, message):
+    record = build_record_fixture(plan, False)
+    change(record)
+    with pytest.raises(d.Error, match=message):
+        d.validate_build_record(record, plan, False)
+
+
+def targeting_pack_record():
+    return {"kind": "targeting-pack", "directory": INSTALLED_PACK_DIRECTORY.rstrip("\\"),
+            "files": {name: {"sha256": "c" * 64, "bytes": 1000} for name in ("mscorlib.dll", "System.dll")}}
+
+
+def test_build_record_accepts_either_reference_assembly_source(plan):
+    record = build_record_fixture(plan, False)
+    d.validate_build_record(deepcopy(record), plan, False)  # The restored package.
+    # An installed targeting pack: the SDK then adds no reference-assemblies package.
+    record["packages"] = [row for row in record["packages"] if "ReferenceAssemblies" not in row["id"]]
+    record["reference_assemblies"] = targeting_pack_record()
+    record["evaluated_properties"]["TargetFrameworkDirectory"] = INSTALLED_PACK_REPORTED
+    d.validate_build_record(deepcopy(record), plan, False)
+    # Case and trailing separators do not matter.
+    upper = deepcopy(record)
+    upper["reference_assemblies"]["directory"] = INSTALLED_PACK_DIRECTORY.upper()
+    d.validate_build_record(upper, plan, False)
+    pack_tail = "\\Reference Assemblies\\Microsoft\\Framework\\.NETFramework\\v4.6.2"
+    for change in (lambda r: r["reference_assemblies"].update(directory="C:/Elsewhere/v4.6.2"),
+                   # Same last five parts, but not the one directory PREPARE can write.
+                   lambda r: r["reference_assemblies"].update(directory="Z:\\x" + pack_tail),
+                   lambda r: r["reference_assemblies"].update(directory="D:\\Program Files (x86)" + pack_tail),
+                   # The recorded TargetFrameworkDirectory must name the same directory.
+                   lambda r: r["evaluated_properties"].update(TargetFrameworkDirectory="Z:\\x" + pack_tail + "\\"),
+                   lambda r: r["evaluated_properties"].update(TargetFrameworkDirectory=PACKAGE_REFERENCE_DIRECTORY),
+                   lambda r: r["reference_assemblies"]["files"].pop("System.dll"),
+                   lambda r: r["reference_assemblies"]["files"]["mscorlib.dll"].update(sha256="x"),
+                   lambda r: r["reference_assemblies"].update(id="extra")):
+        bad = deepcopy(record)
+        change(bad)
+        with pytest.raises(d.Error, match="Reference assembly observation differs"):
+            d.validate_build_record(bad, plan, False)
+    # The package form must also match the recorded directory.
+    package = build_record_fixture(plan, False)
+    package["evaluated_properties"]["TargetFrameworkDirectory"] = INSTALLED_PACK_REPORTED
+    with pytest.raises(d.Error, match="Reference assembly observation differs"):
+        d.validate_build_record(package, plan, False)
+    package["evaluated_properties"]["TargetFrameworkDirectory"] = ";;"
+    with pytest.raises(d.Error, match="Reference assembly directory missing"):
+        d.validate_build_record(package, plan, False)
+
+
+def test_receipt_requires_both_builds_to_use_the_same_reference_assemblies(monkeypatch, tmp_path, plan):
+    value, virtual, receipt_path = virtual_receipt(monkeypatch, tmp_path, plan, "prepare")
+    public = value["build_evidence"]["public"]
+    public["packages"] = [row for row in public["packages"] if "ReferenceAssemblies" not in row["id"]]
+    public["reference_assemblies"] = targeting_pack_record()
+    public["evaluated_properties"]["TargetFrameworkDirectory"] = INSTALLED_PACK_REPORTED
+    value["commands"] = [c for c in value["commands"] if c["operation"] != "package-signature-verification"] + [
+        {"operation": "package-signature-verification", "exit_code": 0, "started_utc": OBSERVED_UTC,
+         "completed_utc": OBSERVED_UTC}] * 5
+    virtual[receipt_path] = json.dumps(value).encode()
+    with pytest.raises(d.Error, match="differ between builds"):
+        d.receipt(tmp_path, "prepare", plan, PLAN_HASH)
+
+
+class PastSourceBinding(Exception):
+    """Raised by the double that VERIFY reaches only after its source binding."""
+
+
+@pytest.mark.parametrize("recorded_source,outcome", [(NUGET_ORG, "past"), ("https://other.example/v3/index.json", "refused")])
+def test_verify_stage_binds_the_package_source_before_package_verification(monkeypatch, tmp_path, plan,
+                                                                          recorded_source, outcome):
+    # Drives verify() itself (with doubles up to the source copy), so removing its
+    # bind_restore_source call fails this test, not only the helper's own test.
+    prepared = {"build_evidence": {name: build_record_fixture(plan, name == "public") for name in ("delay", "public")},
+                "files": {f"PPDS.Plugins.{plan['version']}.nupkg": {}, f"PPDS.Plugins.{plan['version']}.snupkg": {}},
+                "source_inputs": {"fixture": "e" * 64}, "metadata": {"mutation": {"name": "AccountPlugin"}},
+                "cases": {"COMPAT-01": "PASS", "COMPAT-03": "PASS"}}
+    for build in prepared["build_evidence"].values():
+        build["restore"]["source"] = recorded_source
+    signed = {"prepare_receipt_sha256": "e" * 64, "key_cleanup": "completed"}
+    monkeypatch.setattr(d, "receipt", lambda directory, stage, *a: (prepared, "e" * 64) if stage == "prepare" else (signed, "f" * 64))
+    monkeypatch.setattr(d, "read", lambda path, limit=None: public_fixture() if Path(path).name == "test-public.bin" else b"bytes")
+    monkeypatch.setattr(d, "write", lambda *a: None)
+    for name in ("pin", "invoke"):
+        monkeypatch.setattr(d, name, lambda *a, **kw: "")
+    monkeypatch.setattr(d, "fresh_output", lambda path: Path(path))
+    monkeypatch.setattr(d, "install_probe", lambda output: output / "probe.ps1")
+    monkeypatch.setattr(d, "tool_versions", lambda *a: {})
+    names = iter(["AccountPlugin", "accountPlugin"])
+    monkeypatch.setattr(d, "metadata", lambda *a: {"mutation": {"name": next(names)}})
+    monkeypatch.setattr(d, "mutations", lambda raw, meta: (b"x", b"y", {}))
+    monkeypatch.setattr(d.p, "repackage", lambda *a: None)
+    source = tmp_path / "verify-source"
+    monkeypatch.setattr(d, "source_copy", lambda *a: (source, prepared["source_inputs"]))
+    monkeypatch.setattr(d, "repository_source", lambda path: NUGET_ORG if path == source else pytest.fail("wrong copy"))
+    monkeypatch.setattr(d.ReleaseGraph, "discover", lambda *a: (_ for _ in ()).throw(PastSourceBinding()))
+    args = SimpleNamespace(prepared=tmp_path / "prepared", signed=tmp_path / "signed", output=tmp_path / "verified",
+                           source_root=d.ROOT, plan_sha256=PLAN_HASH)
+    expected = PastSourceBinding if outcome == "past" else d.Error
+    with pytest.raises(expected) as caught:
+        d.verify(args, plan, d.Runtime(evidence_class="process-double"))
+    if outcome == "refused":
+        assert str(caught.value) == "Prepared package source differs from the repository source"
+
+
+def test_verify_binds_the_recorded_package_source_to_the_repository_config(monkeypatch, plan):
+    source = Path("C:/virtual/verify-source")
+    prepared = {"build_evidence": {name: build_record_fixture(plan, name == "public") for name in ("delay", "public")}}
+    monkeypatch.setattr(d, "read", lambda path, limit=None: {source / "NuGet.config": REPOSITORY_NUGET_CONFIG}[Path(path)])
+    d.bind_restore_source(prepared, source)
+    prepared["build_evidence"]["public"]["restore"]["source"] = "https://other.example/v3/index.json"
+    with pytest.raises(d.Error, match="Prepared package source differs"):
+        d.bind_restore_source(prepared, source)
+
+
+@pytest.mark.parametrize("version,assembly,file", [
+    ("3.1.1-compat.1", "3.0.0.0", "3.1.1.0"), ("12.34.56", "12.0.0.0", "12.34.56.0"),
+    ("0.0.0-compat.12345", "0.0.0.0", "0.0.0.0"),
+])
+def test_version_rule_is_minvers_production_derivation(version, assembly, file):
+    # The hosted run's 0.0.0-compat.<run> version cannot tell the rules apart; these can.
+    assert d.version_rule(version) == {"assembly_version": assembly, "file_version": file}
+
+
+@pytest.mark.parametrize("version", ["3.1.1+build", "65535.0.0", "1.2"])
+def test_version_rule_refuses_build_metadata_and_out_of_range_components(version):
+    with pytest.raises(d.REFUSAL_TYPES):
+        d.version_rule(version)
+
+
+@pytest.mark.parametrize("field,value", [("assembly_version", "3.1.1.0"), ("file_version", "3.0.0.0"),
+                                         ("file_version", None)])
+def test_assembly_metadata_must_carry_the_production_version_rule(monkeypatch, tmp_path, plan, field, value):
+    probe = {"name": "PPDS.Plugins", "framework": ".NETFramework,Version=v4.6.2",
+             "public_key_sha256": plan["public_key_sha256"], "informational_version": plan["version"] + "+" + SOURCE,
+             "assembly_version": "3.0.0.0", "file_version": "3.1.1.0"}
+    monkeypatch.setattr(d, "invoke", lambda *args, **kwargs: json.dumps(probe))
+    assert d.metadata(None, plan, tmp_path, "probe", "x.dll", "x.pdb")["file_version"] == "3.1.1.0"
+    probe[field] = value
+    with pytest.raises(d.Error, match="metadata differs"):
+        d.metadata(None, plan, tmp_path, "probe", "x.dll", "x.pdb")
+
+
+@pytest.mark.parametrize("change", [
+    lambda o: o.append("-p:Version=3.1.1-compat.1"), lambda o: o.append("-p:MinVerSkip=true"),
+    lambda o: o.append("/p:AssemblyVersion=9.9.9.9"), lambda o: o.append("-property:Version=9.9.9"),
+    lambda o: o.__setitem__(-1, o[-1] + ";MinVerSkip=true"), lambda o: o.append("-p:Configuration=Release;MinVerSkip=true"),
+    lambda o: o.reverse(), lambda o: o.pop(), lambda o: o.__setitem__(2, "-p:MinVerVersionOverride=9.9.9"),
+    lambda o: o.__setitem__(1, "-p:AssemblyOriginatorKeyFile=C:\\fixture\\prepared\\other.bin"),
+    lambda o: o.append("-p:AssemblyOriginatorKeyFile=C:\\fixture\\prepared\\test-public.bin"),
+])
+def test_receipt_refuses_any_overlay_but_the_one_prepare_builds(monkeypatch, tmp_path, plan, change):
+    value, virtual, receipt_path = virtual_receipt(monkeypatch, tmp_path, plan, "prepare")
+    assert d.receipt(tmp_path, "prepare", plan, PLAN_HASH)[0] == value
+    change(value["build_overlay"])
+    virtual[receipt_path] = json.dumps(value).encode()
+    with pytest.raises(d.Error, match="overlay"):
+        d.receipt(tmp_path, "prepare", plan, PLAN_HASH)
+
+
+def test_receipt_requires_one_signature_verification_per_package_row(monkeypatch, tmp_path, plan):
+    value, virtual, receipt_path = virtual_receipt(monkeypatch, tmp_path, plan, "prepare")
+    value["build_evidence"]["public"]["packages"].pop()
+    virtual[receipt_path] = json.dumps(value).encode()
+    with pytest.raises(d.Error, match="command observations incomplete"):
+        d.receipt(tmp_path, "prepare", plan, PLAN_HASH)
 
 
 @pytest.mark.parametrize("name,version", [
@@ -534,24 +871,34 @@ def signing_fixture(monkeypatch, tmp_path, plan):
     return SimpleNamespace(args=args, plan=plan, pins=pins)
 
 
-@pytest.mark.parametrize("operation", ["restore", "build", "pack"])
+# The build environment as it was before NuGet folders were added (commit 1524e4192). Git
+# source-identity children and every coordinator-launched driver process keep exactly this set.
+BUILD_ENVIRONMENT = {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "ProgramFiles(x86)", "PROGRAMDATA", "ALLUSERSPROFILE",
+                     "DOTNET_CLI_HOME", "NUGET_PACKAGES", "DOTNET_CLI_TELEMETRY_OPTOUT", "DOTNET_NOLOGO",
+                     "DOTNET_SKIP_FIRST_TIME_EXPERIENCE", "DOTNET_GENERATE_ASPNET_CERTIFICATE", "PATH"}
+NUGET_ENVIRONMENT = BUILD_ENVIRONMENT | {"APPDATA", "LOCALAPPDATA", "DOTNET_CLI_UI_LANGUAGE"}
+
+
+@pytest.mark.parametrize("operation", ["restore", "build", "pack", "msbuild"])
+@pytest.mark.parametrize("nuget", [False, True])
 @pytest.mark.parametrize("inherited_certificate_setting", [None, "true"])
 def test_build_invocation_suppresses_certificate_generation_without_inheriting_environment(
-        monkeypatch, tmp_path, plan, operation, inherited_certificate_setting):
+        monkeypatch, tmp_path, plan, operation, nuget, inherited_certificate_setting):
     calls = []
 
     def capture(command, **options):
         calls.append((command, options))
         return SimpleNamespace(returncode=0, stdout="fixture-only", stderr="")
 
-    synthetic_environment = {"PATH": "untrusted-parent-path", "PLUGINS_SNK_BASE64": "synthetic-secret-marker"}
+    synthetic_environment = {"PATH": "untrusted-parent-path", "PLUGINS_SNK_BASE64": "synthetic-secret-marker",
+                             "APPDATA": "C:/Users/PRIVATE/AppData/Roaming"}
     if inherited_certificate_setting is not None:
         synthetic_environment["DOTNET_GENERATE_ASPNET_CERTIFICATE"] = inherited_certificate_setting
     with monkeypatch.context() as patch:
         patch.setattr(os, "environ", synthetic_environment)
         patch.setattr(d, "pin", lambda *args: None)
         d.invoke(SimpleNamespace(run=capture), plan, "dotnet", [operation], tmp_path,
-                 "fixture-" + operation, build=True)
+                 "fixture-" + operation, build=True, nuget=nuget)
 
     assert len(calls) == 1
     command, options = calls[0]
@@ -561,10 +908,23 @@ def test_build_invocation_suppresses_certificate_generation_without_inheriting_e
     assert child["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] == "1"
     assert "PLUGINS_SNK_BASE64" not in child
     assert "untrusted-parent-path" not in child["PATH"]
-    assert set(child) == {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "ProgramFiles(x86)",
-                          "DOTNET_CLI_HOME", "NUGET_PACKAGES", "DOTNET_CLI_TELEMETRY_OPTOUT",
-                          "DOTNET_NOLOGO", "DOTNET_SKIP_FIRST_TIME_EXPERIENCE",
-                          "DOTNET_GENERATE_ASPNET_CERTIFICATE", "PATH"}
+    assert "PRIVATE" not in json.dumps(child)
+    assert child["PROGRAMDATA"] == child["ALLUSERSPROFILE"] == plan["windows_common_data_directory"]
+    assert set(child) == (NUGET_ENVIRONMENT if nuget else BUILD_ENVIRONMENT)
+    if nuget:
+        # NuGet needs both folders to restore; they must stay inside the owned temporary directory.
+        owned = Path(child["TEMP"])
+        assert Path(child["APPDATA"]) == owned / "appdata" and Path(child["LOCALAPPDATA"]) == owned / "localappdata"
+
+
+@pytest.mark.parametrize("tool", ["git", "pwsh", "sn"])
+def test_nuget_folders_are_refused_for_non_dotnet_children(monkeypatch, tmp_path, plan, tool):
+    monkeypatch.setattr(d, "pin", lambda *args: None)
+    rt = SimpleNamespace(run=lambda *a, **kw: pytest.fail("process launched"))
+    with pytest.raises(d.Error, match="only for build children"):
+        d.invoke(rt, plan, tool, [], tmp_path, "metadata", build=True, nuget=True)
+    with pytest.raises(d.Error, match="only for build children"):
+        d.environment(plan, tmp_path, nuget=True)
 
 
 def test_sign_launches_only_sn_and_does_not_claim_completed_metadata(signing_fixture):
@@ -579,7 +939,8 @@ def test_sign_launches_only_sn_and_does_not_claim_completed_metadata(signing_fix
     assert value["cases"] == {"COMPAT-02": "SIGNATURE_OPERATIONS_PASSED_METADATA_PENDING"}
     assert "result" not in value
     for _, options in rt.commands:
-        assert set(options["environment"]) == {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "ProgramFiles(x86)"}
+        assert set(options["environment"]) == {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "ProgramFiles(x86)", "PROGRAMDATA", "ALLUSERSPROFILE"}
+        assert options["environment"]["PROGRAMDATA"] == options["environment"]["ALLUSERSPROFILE"] == "C:/ProgramData"
         assert options["environment"]["ProgramFiles(x86)"] == "C:\\Program Files (x86)"
 
 
@@ -607,6 +968,14 @@ def test_sign_cleanup_on_failure(signing_fixture, failure):
     if failure != "cleanup":
         assert not (f.args.output / "signed.dll").exists()
     assert (f.args.output / "input.dll").read_bytes() == pe_fixture()
+
+
+def test_runtime_refuses_an_unlisted_operation_before_launch(monkeypatch, tmp_path):
+    monkeypatch.setattr(d.subprocess, "run", lambda *a, **kw: pytest.fail("process launched"))
+    rt = d.Runtime(evidence_class="process-double")
+    with pytest.raises(d.Error, match="Unlisted tool operation"):
+        rt.run(["C:/fixture/tool.exe"], cwd=tmp_path, environment={}, operation="C:/PRIVATE/argument")
+    assert rt.calls == []
 
 
 def test_runtime_timeout_redacts_diagnostics_and_disables_shell(monkeypatch, tmp_path):
@@ -659,6 +1028,83 @@ def test_main_retains_only_owned_public_failure_receipt(monkeypatch, tmp_path, p
         path, failure = emitted[0]
         assert path == tmp_path / "owned/failure-receipt.json"
         assert failure["result"] == "FAIL" and failure["commands"][0]["status"] == "timeout"
+    assert captured.err.splitlines()[:3] == ["PPDS_COMPAT_REFUSAL=tool-incomplete", "PPDS_COMPAT_OPERATION=sign",
+                                             "PPDS_COMPAT_STATUS=timeout"]
+
+
+def test_native_launch_setting_is_only_pathext_for_powershell_children(monkeypatch, tmp_path, plan):
+    child = d.environment(plan, tmp_path, native=True)
+    assert child == {**d.environment(plan, tmp_path), "PATHEXT": ".EXE"}
+    with pytest.raises(d.Error, match="only for PowerShell children"):
+        d.environment(plan, tmp_path, build=True, native=True)
+    monkeypatch.setattr(d, "pin", lambda *args: None)
+    for tool in ("sn", "dotnet", "git"):
+        with pytest.raises(d.Error, match="only for PowerShell children"):
+            d.invoke(SimpleNamespace(run=lambda *a, **kw: pytest.fail("launched")), plan, tool, [], tmp_path,
+                     "metadata", native=True)
+
+
+def test_failure_names_which_call_of_an_operation_failed(monkeypatch, tmp_path, plan, capsys):
+    calls = [{"operation": "packaged-forced-verification", "exit_code": 0},
+             {"operation": "packaged-metadata", "exit_code": 0},
+             {"operation": "packaged-forced-verification", "exit_code": 1}]
+    assert d.last_operation(calls) == ("packaged-forced-verification", "1", "2")
+    assert d.last_operation(calls[:2]) == ("packaged-metadata", "0", "1")
+    assert re.fullmatch(d.INDEX_PATTERN, d.last_operation(calls)[2])
+
+
+def diagnostic_lines(err):
+    return [line for line in err.splitlines() if line.startswith("PPDS_COMPAT_")]
+
+
+@pytest.mark.parametrize("stage,failure,expected", [
+    # A tool ran and exited non-zero; its private output never appears.
+    ("prepare", "tool-exit", ["PPDS_COMPAT_REFUSAL=tool-result", "PPDS_COMPAT_OPERATION=delay-restore",
+                              "PPDS_COMPAT_STATUS=17", "PPDS_COMPAT_OPERATION_INDEX=1"]),
+    # A tool succeeded, then a validation built from a private value refused.
+    ("prepare", "dynamic-reason", ["PPDS_COMPAT_REFUSAL=unregistered", "PPDS_COMPAT_OPERATION=evaluated-properties",
+                                   "PPDS_COMPAT_STATUS=0", "PPDS_COMPAT_OPERATION_INDEX=1"]),
+    # A file read failed with a private path in the exception.
+    ("sign", "missing-file", ["PPDS_COMPAT_REFUSAL=exception-filenotfounderror", "PPDS_COMPAT_OPERATION=sign",
+                              "PPDS_COMPAT_STATUS=0", "PPDS_COMPAT_OPERATION_INDEX=1"]),
+    ("verify", "launch", ["PPDS_COMPAT_REFUSAL=tool-incomplete", "PPDS_COMPAT_OPERATION=fresh-forced-verification",
+                          "PPDS_COMPAT_STATUS=launch-failure", "PPDS_COMPAT_OPERATION_INDEX=1"]),
+    # Refused before any tool call: no operation or status line at all.
+    ("verify", "before-tools", ["PPDS_COMPAT_REFUSAL=exception-other"]),
+])
+def test_failure_diagnostics_name_only_fixed_operations_and_status(monkeypatch, tmp_path, plan, capsys,
+                                                                    stage, failure, expected):
+    monkeypatch.setattr(d.sys, "platform", "win32")
+    monkeypatch.setattr(d, "load_plan", lambda *args: plan)
+    monkeypatch.setattr(d, "json_write", lambda *args: None)
+    private = "C:/Users/PRIVATE_USER/secret-key.snk PRIVATE_TOKEN_VALUE"
+
+    def launch(command, **kwargs):
+        if failure == "launch":
+            raise OSError(private)
+        return SimpleNamespace(returncode=17 if failure == "tool-exit" else 0, stdout=private, stderr=private)
+
+    monkeypatch.setattr(d.subprocess, "run", launch)
+
+    def fail_stage(args, selected_plan, runtime):
+        operation = {"tool-exit": "delay-restore", "dynamic-reason": "evaluated-properties",
+                     "missing-file": "sign", "launch": "fresh-forced-verification"}.get(failure)
+        if operation is not None:
+            result = runtime.run(["C:/fixture/tool.exe", private], cwd=tmp_path, environment={}, operation=operation)
+            d.require(result.returncode == 0, "Candidate tool result differs from the required outcome")
+        if failure == "dynamic-reason":
+            raise d.Error("Property differs: " + private)
+        if failure == "missing-file":
+            raise FileNotFoundError(2, "No such file", private)
+        raise type("PrivatePathError", (Exception,), {})(private)
+
+    monkeypatch.setattr(d, stage, fail_stage)
+    rt = d.Runtime(evidence_class="process-double")
+    arguments = stage_arguments(stage) + (["--key-use-authorization", "fixture-approval-reference"] if stage == "sign" else [])
+    assert d.main(arguments, runtime=rt) == 1
+    captured = capsys.readouterr()
+    assert diagnostic_lines(captured.err) == expected
+    assert "PRIVATE" not in captured.out + captured.err
 
 
 @pytest.mark.parametrize("operation,cleanup", [("sign", "in_progress"), ("signed-forced-verification", "completed")])
@@ -720,6 +1166,14 @@ def test_package_adapter_checks_real_bytes(monkeypatch, tmp_path, plan):
             operation = options["operation"]
             assert options["environment"]["ProgramFiles(x86)"] == "C:\\Program Files (x86)"
             assert "PATH" not in options["environment"]
+            # The inspector launches sn.exe from PowerShell: that child needs PATHEXT=.EXE, or pwsh
+            # never runs sn and the inspector fails (hosted run r12). Nothing else is added.
+            base = set(d.environment(plan, tmp_path / "temp"))
+            if operation == "packaged-metadata":
+                assert set(options["environment"]) == base | {"PATHEXT"}
+                assert options["environment"]["PATHEXT"] == ".EXE"
+            else:
+                assert set(options["environment"]) == base
             if operation == "packaged-forced-verification":
                 actual = Path(command[2]).read_bytes()
                 observed.append((operation, actual))
@@ -790,15 +1244,24 @@ def test_prepare_requires_the_specific_public_sign_control(monkeypatch, tmp_path
     real_iterdir = Path.iterdir
     monkeypatch.setattr(Path, "iterdir", lambda path: iter(args.output / "packages" / n for n in expected)
                         if path == args.output / "packages" else real_iterdir(path))
+    events = []
     monkeypatch.setattr(d, "read", read_virtual)
-    monkeypatch.setattr(d, "write", lambda path, raw: virtual.__setitem__(Path(path), raw))
+    monkeypatch.setattr(d, "write", lambda path, raw: events.append(("write", Path(path))) or
+                        virtual.__setitem__(Path(path), raw))
     monkeypatch.setattr(d, "json_write", lambda path, value: emitted.append((path, value)))
     monkeypatch.setattr(d, "pin", lambda *args: None)
     monkeypatch.setattr(d, "install_probe", lambda output: output / "virtual-probe.ps1")
     monkeypatch.setattr(d, "tool_versions", lambda *args: {n: v["version"] for n, v in plan["tools"].items()})
     monkeypatch.setattr(d, "source_copy", lambda *args: (args[-1] / "source", helper_fixture_hashes()))
-    monkeypatch.setattr(d, "build_evidence", lambda *args: {"fixture_only": True})
-    monkeypatch.setattr(d, "invoke", lambda *args, **kwargs: operations.append(args[5]) or "")
+    build_props = []
+    monkeypatch.setattr(d, "build_evidence", lambda *args: build_props.append(list(args[6])) or {"fixture_only": True})
+
+    def invoke(*args, **kwargs):
+        operations.append(args[5])
+        events.append(("invoke", args[5], [str(a) for a in args[3]], kwargs.get("nuget", False)))
+        return ""
+
+    monkeypatch.setattr(d, "invoke", invoke)
     monkeypatch.setattr(d, "common", lambda *args: {"evidence_class": "process-double", "cases": {}})
     monkeypatch.setattr(d, "metadata", lambda *args: observed_metadata.append(Path(args[4]).name) or
                         {"fixture_only": True})
@@ -806,6 +1269,46 @@ def test_prepare_requires_the_specific_public_sign_control(monkeypatch, tmp_path
         result = d.prepare(args, plan, d.Runtime(evidence_class="process-double"))
         assert result["cases"] == {"COMPAT-01": "PASS", "COMPAT-03": "PASS"}
         assert len(emitted) == 1 and observed_metadata == ["delay.dll", "public.dll"]
+        # MinVer's own target derives the version: the override reaches restore, build, pack and
+        # the evaluated-properties call (build_evidence), and no explicit version property does.
+        override = "-p:MinVerVersionOverride=" + plan["version"]
+        assert override in result["build_overlay"] and result["build_overlay"] == d.build_overlay(plan, args.output)
+        dotnet = [event for event in events if event[0] == "invoke" and event[1].endswith(("-restore", "-build", "-pack"))]
+        assert [event[1] for event in dotnet] == ["delay-restore", "delay-build", "delay-pack",
+                                                  "public-restore", "public-build"]
+        assert len(build_props) == 2
+        # Exact argv: no property beyond the overlay and the per-build signing/output switches can
+        # reach restore, build, pack or the evaluated-properties call (Version, VersionPrefix,
+        # VersionSuffix, MinVerVersion, IncludeSourceRevisionInInformationalVersion, ...).
+        project = str(args.output / "source/src/PPDS.Plugins/PPDS.Plugins.csproj")
+
+        # Spelled out, not taken from build_overlay, so a property added there fails here.
+        overlay = ["-p:SignAssembly=true", "-p:AssemblyOriginatorKeyFile=" + str(args.output / "test-public.bin"),
+                   "-p:MinVerVersionOverride=" + plan["version"], "-p:RepositoryCommit=" + SOURCE,
+                   "-p:SourceRevisionId=" + SOURCE, "-p:ContinuousIntegrationBuild=true", "-p:DebugType=portable"]
+        assert result["build_overlay"] == overlay
+
+        def per_build(name, control):
+            work = args.output / name
+            return [*overlay, "-p:PublicSign=" + str(control).lower(),
+                    "-p:DelaySign=" + str(not control).lower(), "-p:BaseOutputPath=" + str(work / "bin") + "/",
+                    "-p:BaseIntermediateOutputPath=" + str(work / "obj") + "/"]
+
+        delay, public = per_build("delay", False), per_build("public", True)
+        assert [event[2] for event in dotnet] == [
+            ["restore", project, *delay], ["build", project, "--configuration", "Release", "--no-restore", *delay],
+            ["pack", project, "--configuration", "Release", "--no-build", "--output", str(args.output / "packages"), *delay],
+            ["restore", project, *public], ["build", project, "--configuration", "Release", "--no-restore", *public]]
+        assert build_props == [delay, public]
+        assert override in delay and "-p:SourceRevisionId=" + SOURCE in delay
+        # Only the dotnet build children get the NuGet folders.
+        assert {event[1]: event[3] for event in events if event[0] == "invoke"} == {
+            "delay-restore": True, "delay-build": True, "delay-pack": True, "public-restore": True,
+            "public-build": True, "delay-forced-rejection": False}
+        # The owned user-level NuGet config (clears fallback folders) exists before the first restore.
+        config = args.output / "temp/appdata/NuGet/NuGet.Config"
+        assert virtual[config] == d.NUGET_USER_CONFIG
+        assert events.index(("write", config)) < next(n for n, e in enumerate(events) if e[0] == "invoke")
     else:
         with pytest.raises((d.Error, struct.error)):
             d.prepare(args, plan, d.Runtime(evidence_class="process-double"))
@@ -813,55 +1316,522 @@ def test_prepare_requires_the_specific_public_sign_control(monkeypatch, tmp_path
     assert "sign" not in operations
 
 
-def test_build_evidence_checks_actual_properties_and_package_hashes(monkeypatch, tmp_path, plan):
-    output, source, work = tmp_path / "out", tmp_path / "source", tmp_path / "work"
-    props = {"NETCoreSdkVersion": "10.0.403", "MSBuildVersion": "18.0.1",
-             "MSBuildBinPath": str(tmp_path / "sdk"), "RoslynTargetsPath": str(tmp_path / "roslyn"),
-             "CscToolPath": "", "CscToolExe": "", "TargetFramework": "net462", "Configuration": "Release",
-             "SignAssembly": "true", "PublicSign": "false", "DelaySign": "true",
-             "AssemblyOriginatorKeyFile": str(output / "test-public.bin"),
-             "AssemblyVersion": "3.1.1.0", "FileVersion": "3.1.1.0",
-             "InformationalVersion": plan["version"] + "+" + SOURCE, "PackageVersion": plan["version"]}
-    assets = {"libraries": {}}
-    virtual = {}
-    for name in ("MinVer", "Microsoft.SourceLink.GitHub", "Microsoft.NETFramework.ReferenceAssemblies.net462"):
-        raw = ("synthetic resolved package " + name).encode()
-        version = "1.0.0"
-        relative = name.lower() + "/" + version
-        assets["libraries"][name + "/" + version] = {
-            "type": "package", "path": relative, "sha512": base64.b64encode(hashlib.sha512(raw).digest()).decode()}
-        virtual[output / "temp/packages" / relative / (name.lower() + "." + version + ".nupkg")] = raw
+REPOSITORY_NUGET_CONFIG = (b'<?xml version="1.0" encoding="utf-8"?>\n<!-- fixture -->\n<configuration>\n'
+                           b'  <packageSources>\n    <clear />\n    <add key="nuget.org" value="' + NUGET_ORG.encode()
+                           + b'" protocolVersion="3" />\n  </packageSources>\n</configuration>\n')
 
-    def read_virtual(path, limit=d.h.MAX_PACKAGE):
-        if Path(path) == work / "obj/project.assets.json":
-            return json.dumps(assets).encode()
-        return virtual[Path(path)]
 
-    def invoke(*args, **kwargs):
-        operation = args[5]
+def verify_output(package_id, version, content_hash, service_index=NUGET_ORG):
+    """The shape `dotnet nuget verify --all` printed locally for an author-signed nuget.org package."""
+    return "\n".join([
+        "X.509 certificate chain validation will use the default trust store selected by .NET for code signing.",
+        "", f"Verifying {package_id}.{version}", f"Content hash: {content_hash}",
+        "C:\\virtual\\package.nupkg", "Signature Hash Algorithm: SHA256", "", "Signature type: Author",
+        "Verifying the author primary signature with certificate: ", "  Subject Name: CN=Author fixture",
+        "  SHA1 hash: " + "C" * 40, "  SHA256 hash: " + "D" * 64, "", "Signature type: Repository",
+        "Service index: " + service_index, "Owners: fixture",
+        "Verifying the repository countersignature with certificate: ", "  Subject Name: CN=NuGet.org Repository fixture",
+        "  SHA1 hash: " + "A" * 40, "  SHA256 hash: " + "B" * 64, "",
+        f"Successfully verified package '{package_id}.{version}'."])
+
+
+class BuildEvidenceFixture:
+    """Virtual restore output for build_evidence: assets, package folder, sidecars, config and pins."""
+
+    PACKAGES = (("MinVer", "direct-pinned"), ("Microsoft.SourceLink.GitHub", "direct-pinned"),
+                ("Microsoft.NETFramework.ReferenceAssemblies", "direct-sdk-implicit"),
+                ("Microsoft.NETFramework.ReferenceAssemblies.net462", "transitive"))
+
+    def __init__(self, monkeypatch, tmp_path, plan):
+        self.plan, self.output, self.source, self.work = plan, tmp_path / "out", tmp_path / "source", tmp_path / "work"
+        dotnet = tmp_path / "dotnet"
+        plan["tools"]["dotnet"]["path"] = str(dotnet / "dotnet.exe")
+        sdk = dotnet / "sdk/10.0.403"
+        # The SDK reports RoslynTargetsPath with parent segments; this is the real shape.
+        (sdk / "Sdks/Microsoft.NET.Sdk/targets").mkdir(parents=True)
+        (sdk / "Roslyn/bincore").mkdir(parents=True)
+        self.compiler = sdk / "Roslyn/bincore/csc.dll"
+        self.msbuild = sdk / "MSBuild.dll"
+        self.props = {"NETCoreSdkVersion": "10.0.403", "MSBuildVersion": "18.0.1",
+                      "MSBuildBinPath": str(sdk), "RoslynTargetsPath": str(sdk / "Sdks/Microsoft.NET.Sdk/targets")
+                      + os.sep + os.path.join("..", "..", "..", "Roslyn"),
+                      "CscToolPath": "", "CscToolExe": "", "TargetFramework": "net462", "Configuration": "Release",
+                      "SignAssembly": "true", "PublicSign": "false", "DelaySign": "true",
+                      "AssemblyOriginatorKeyFile": str(self.output / "test-public.bin"),
+                      "AssemblyVersion": "3.0.0.0", "FileVersion": "3.1.1.0", "MinVerVersion": plan["version"],
+                      "InformationalVersion": plan["version"] + "+" + SOURCE, "PackageVersion": plan["version"]}
+        # As reported locally: the package's v4.6.2 directory, two empty entries, then Facades.
+        package_refs = os.path.join(str(self.output / "temp/packages"), d.REFERENCE_PACKAGE, "1.0.0", "build",
+                                    ".NETFramework", "v4.6.2")
+        self.props["TargetFrameworkDirectory"] = (package_refs + os.sep + ";;;"
+                                                  + os.path.join(package_refs, "Facades") + os.sep)
+        self.assets = {"libraries": {}, "packageFolders": {str(self.output / "temp/packages"): {}},
+                       "project": {"restore": {"sources": {NUGET_ORG: {}}},
+                                   "frameworks": {"net462": {"dependencies": {}}}}}
+        self.virtual = {self.source / "NuGet.config": REPOSITORY_NUGET_CONFIG,
+                        self.source / "Directory.Packages.props": (
+                            b'<Project><ItemGroup><PackageVersion Include="MinVer" Version="1.0.0" />'
+                            b'<PackageVersion Include="Microsoft.SourceLink.GitHub" Version="1.0.0" />'
+                            # Central entry for a package that is transitive here (as in the repository).
+                            b'<PackageVersion Include="Microsoft.NETFramework.ReferenceAssemblies.net462" Version="1.0.0" />'
+                            b'<PackageVersion Include="Unrelated.Package" Version="9.0.0" /></ItemGroup></Project>')}
+        self.verified = {}
+        dependencies = self.assets["project"]["frameworks"]["net462"]["dependencies"]
+        for name, reference in self.PACKAGES:
+            raw = ("synthetic resolved package " + name).encode()
+            version = "1.0.0"
+            relative = name.lower() + "/" + version
+            # As with every repository-signed nuget.org package, the content hash the assets file
+            # records differs from the hash of the package file. NuGet writes both beside it.
+            file_hash = base64.b64encode(hashlib.sha512(raw).digest()).decode()
+            content_hash = base64.b64encode(hashlib.sha512(b"content without signature " + raw).digest()).decode()
+            assert file_hash != content_hash
+            self.assets["libraries"][name + "/" + version] = {"type": "package", "path": relative, "sha512": content_hash}
+            if reference == "direct-pinned":
+                dependencies[name] = {"target": "Package", "version": "[1.0.0, )", "versionCentrallyManaged": True}
+            elif reference == "direct-sdk-implicit":
+                dependencies[name] = {"target": "Package", "version": "[1.0.0, )", "autoReferenced": True}
+            folder = self.output / "temp/packages" / relative
+            archive = name.lower() + "." + version + ".nupkg"
+            self.virtual[folder / archive] = raw
+            self.virtual[folder / ".nupkg.metadata"] = json.dumps(
+                {"version": 2, "contentHash": content_hash, "source": NUGET_ORG}).encode()
+            self.virtual[folder / (archive + ".sha512")] = file_hash.encode()
+            self.verified[str(folder / archive)] = verify_output(name, version, content_hash)
+        self.calls, self.recorded, self.timeouts = [], [], []
+        monkeypatch.setattr(d, "read", self.read)
+        monkeypatch.setattr(d, "record", lambda path: self.recorded.append(Path(path)) or {"sha256": "f" * 64, "bytes": 123})
+        monkeypatch.setattr(d, "invoke", self.invoke)
+
+    def read(self, path, limit=d.h.MAX_PACKAGE):
+        if Path(path) == self.work / "obj/project.assets.json":
+            return json.dumps(self.assets).encode()
+        return self.virtual[Path(path)]
+
+    def drop_reference_package(self):
+        """Model a host with an installed 4.6.2 targeting pack: the SDK adds no package."""
+        for name in ("Microsoft.NETFramework.ReferenceAssemblies", "Microsoft.NETFramework.ReferenceAssemblies.net462"):
+            self.assets["libraries"].pop(name + "/1.0.0")
+            self.assets["project"]["frameworks"]["net462"]["dependencies"].pop(name, None)
+        pack = "C:\\Program Files (x86)\\Reference Assemblies\\Microsoft\\Framework\\.NETFramework\\v4.6.2\\"
+        self.props["TargetFrameworkDirectory"] = pack + ";;;" + pack + "Facades\\"
+        return pack
+
+    def invoke(self, *args, **kwargs):
+        operation, argv = args[5], [str(a) for a in args[3]]
+        self.calls.append((operation, argv, kwargs.get("build", False), kwargs.get("nuget", False)))
+        self.timeouts.append((operation, kwargs.get("timeout")))
         if operation == "evaluated-properties":
-            return json.dumps({"Properties": props})
+            return json.dumps({"Properties": self.props})
         if operation == "selected-sdk":
             return "10.0.403"
+        if operation == "package-signature-verification":
+            assert argv[:3] == ["nuget", "verify", "--all"] and argv[4:] == ["-v", "normal"]
+            return self.verified[argv[3]]
         assert operation == "compiler-product-version"
         return "1.2.3.4"
 
-    monkeypatch.setattr(d, "read", read_virtual)
-    monkeypatch.setattr(d, "record", lambda path: {"sha256": "f" * 64, "bytes": 123})
-    monkeypatch.setattr(d, "invoke", invoke)
-    call = lambda: d.build_evidence(d.Runtime(evidence_class="process-double"), plan, output, source,
-                                   source / "plugins.csproj", work, [], output / "probe.ps1", False)
-    result = call()
-    assert result["sdk"] == "10.0.403" and len(result["packages"]) == 3
-    assert set(result["binaries"]) == {"msbuild", "roslyn"}
-    first = next(iter(assets["libraries"].values()))
-    first["sha512"] = "incorrect-content-hash"
-    with pytest.raises(d.Error, match="content hash"):
-        call()
-    props["PublicSign"] = "true"
-    with pytest.raises(d.Error, match="properties differ"):
-        call()
-    props["PublicSign"] = "false"
-    props["Configuration"] = "Debug"
-    with pytest.raises(d.Error, match="properties differ"):
-        call()
+    def library(self, name):
+        return self.assets["libraries"][name + "/1.0.0"]
+
+    def folder(self, name):
+        return self.output / "temp/packages" / (name.lower() + "/1.0.0")
+
+    def __call__(self, rt=None):
+        return d.build_evidence(rt or d.Runtime(evidence_class="process-double"), self.plan, self.output, self.source,
+                                self.source / "plugins.csproj", self.work, ["-p:MinVerVersionOverride=fixture"],
+                                self.output / "probe.ps1", False)
+
+
+def test_build_evidence_checks_actual_properties_and_package_bindings(monkeypatch, tmp_path, plan):
+    f = BuildEvidenceFixture(monkeypatch, tmp_path, plan)
+    result = f()
+    assert result["sdk"] == "10.0.403" and len(result["packages"]) == 4
+    assert result["restore"] == {"fallback_folders": [], "package_folders": 1, "source": NUGET_ORG, "sources": [NUGET_ORG]}
+    rows = {row["id"]: row for row in result["packages"]}
+    for name, reference in f.PACKAGES:
+        row, library = rows[name], f.library(name)
+        assert row["content_sha512"] == library["sha512"] and row["sha512"] != library["sha512"]
+        assert row["source"] == NUGET_ORG and row["reference"] == reference
+        # The transitive net462 package has a central entry: compared and recorded.
+        assert (row["pin"], row["pin_matches"]) == {"direct-pinned": ("1.0.0", True), "direct-sdk-implicit": (None, None),
+                                                    "transitive": ("1.0.0", True)}[reference]
+        assert row["signature"] == {"content_sha512": library["sha512"], "repository_service_index": NUGET_ORG,
+                                    "repository_certificate_sha256": "b" * 64}
+    assert result["reference_assemblies"] == {"kind": "package", "id": "Microsoft.NETFramework.ReferenceAssemblies.net462",
+                                              "version": "1.0.0"}
+    d.validate_build_record({**build_record_fixture(plan, False), "packages": result["packages"],
+                             "restore": result["restore"], "reference_assemblies": result["reference_assemblies"],
+                             "binaries": result["binaries"], "evaluated_properties": result["evaluated_properties"]},
+                            plan, False)
+    # Only the first package verification gets the longer (revocation-fetch) timeout.
+    assert [t for op, t in f.timeouts if op == "package-signature-verification"] == [600, 120, 120, 120]
+    # The recorded compiler is the collapsed real path, and the probe reads that same path.
+    assert result["binaries"]["roslyn"]["path"] == str(f.compiler)
+    assert result["binaries"]["msbuild"]["path"] == str(f.msbuild)
+    probed = [argv[argv.index("-Tool") + 1] for operation, argv, *_ in f.calls if operation == "compiler-product-version"]
+    assert probed == [str(f.msbuild), str(f.compiler)] and f.recorded == [f.msbuild, f.compiler]
+    # The version properties are read after MinVer's target runs, not from evaluation alone.
+    evaluated = next(argv for operation, argv, *_ in f.calls if operation == "evaluated-properties")
+    assert "-t:GetReferenceAssemblyPaths;GetAssemblyAttributes" in evaluated
+    assert "-p:MinVerVersionOverride=fixture" in evaluated
+    # Exactly the msbuild and package-verification children get the NuGet folders.
+    flags = {operation: (build, nuget) for operation, _, build, nuget in f.calls}
+    assert flags == {"evaluated-properties": (True, True), "selected-sdk": (True, False),
+                     "compiler-product-version": (False, False), "package-signature-verification": (True, True)}
+    assert sum(operation == "package-signature-verification" for operation, *_ in f.calls) == 4
+    # PREPARE calls build_evidence once per build; each build's first verification gets the long timeout.
+    f.timeouts.clear()
+    f()
+    assert [t for op, t in f.timeouts if op == "package-signature-verification"] == [600, 120, 120, 120]
+
+
+def test_build_evidence_records_an_installed_targeting_pack_when_no_reference_package_is_restored(
+        monkeypatch, tmp_path, plan):
+    # Hosted images with Visual Studio may have the 4.6.2 targeting pack; the SDK then adds no
+    # Microsoft.NETFramework.ReferenceAssemblies package, and PREPARE must still pass.
+    f = BuildEvidenceFixture(monkeypatch, tmp_path, plan)
+    pack = f.drop_reference_package()
+    result = f()
+    assert {row["id"] for row in result["packages"]} == {"MinVer", "Microsoft.SourceLink.GitHub"}
+    assert result["reference_assemblies"] == {
+        "kind": "targeting-pack", "directory": pack.rstrip("\\"),
+        "files": {name: {"sha256": "f" * 64, "bytes": 123} for name in ("mscorlib.dll", "System.dll")}}
+    # The two reference assemblies are read (through record) from the reported directory.
+    assert [str(p).replace("/", "\\") for p in f.recorded[2:]] == [pack + "mscorlib.dll", pack + "System.dll"]
+    d.validate_build_record({**build_record_fixture(plan, False), "packages": result["packages"],
+                             "restore": result["restore"], "reference_assemblies": result["reference_assemblies"],
+                             "binaries": result["binaries"], "evaluated_properties": result["evaluated_properties"]},
+                            plan, False)
+
+
+@pytest.mark.parametrize("change,message", [
+    ("pack-elsewhere", "installed targeting pack"), ("package-but-pack-reported", "restored package"),
+    ("pack-but-package-restored", "restored package"), ("other-facades", "Unexpected reference assembly"),
+    ("empty", "directory missing"),
+])
+def test_build_evidence_refuses_reference_assemblies_it_cannot_attribute(monkeypatch, tmp_path, plan, change, message):
+    f = BuildEvidenceFixture(monkeypatch, tmp_path, plan)
+    if change == "pack-elsewhere":
+        f.drop_reference_package()
+        f.props["TargetFrameworkDirectory"] = "D:\\Reference Assemblies\\Microsoft\\Framework\\.NETFramework\\v4.6.2\\"
+    elif change == "package-but-pack-reported":
+        f.props["TargetFrameworkDirectory"] = "C:\\Program Files (x86)\\Reference Assemblies\\Microsoft\\Framework\\.NETFramework\\v4.6.2\\"
+    elif change == "pack-but-package-restored":
+        f.props["TargetFrameworkDirectory"] = str(tmp_path / "elsewhere/v4.6.2")
+    elif change == "other-facades":
+        f.props["TargetFrameworkDirectory"] += ";" + str(tmp_path / "unrelated")
+    else:
+        f.props["TargetFrameworkDirectory"] = ";;"
+    with pytest.raises(d.Error, match=message):
+        f()
+
+
+def test_build_evidence_refuses_a_failed_verification_through_the_real_invoke(monkeypatch, tmp_path, plan):
+    # Exercise invoke's exit-code check, not a replaced invoke: verification exits non-zero.
+    f = BuildEvidenceFixture(monkeypatch, tmp_path, plan)
+    monkeypatch.setattr(d, "invoke", REAL_INVOKE)
+    monkeypatch.setattr(d, "pin", lambda *args: None)
+
+    class VerifyFails(d.Runtime):
+        def run(self, command, **kwargs):
+            operation = kwargs["operation"]
+            self.calls.append({"operation": operation, "exit_code": 0})
+            stdout = f.invoke(None, None, None, command[1:], None, operation)
+            code = 1 if operation == "package-signature-verification" else 0
+            return SimpleNamespace(returncode=code, stdout=stdout, stderr="NU3008 PRIVATE")
+
+    rt = VerifyFails(evidence_class="process-double")
+    with pytest.raises(d.Error, match="required outcome"):
+        f(rt)
+    assert rt.calls[-1]["operation"] == "package-signature-verification"
+
+
+def test_build_evidence_refuses_a_package_folder_other_than_the_owned_one(monkeypatch, tmp_path, plan):
+    f = BuildEvidenceFixture(monkeypatch, tmp_path, plan)
+    f.assets["packageFolders"] = {str(tmp_path / "other/packages"): {}}
+    with pytest.raises(d.Error, match="package folder other than the owned one"):
+        f()
+
+
+def test_build_evidence_records_a_transitive_central_entry_that_differs(monkeypatch, tmp_path, plan):
+    f = BuildEvidenceFixture(monkeypatch, tmp_path, plan)
+    f.virtual[f.source / "Directory.Packages.props"] = f.virtual[f.source / "Directory.Packages.props"].replace(
+        b'ReferenceAssemblies.net462" Version="1.0.0"', b'ReferenceAssemblies.net462" Version="1.0.9"')
+    row = next(r for r in f()["packages"] if r["id"].endswith(".net462"))
+    assert (row["reference"], row["pin"], row["pin_matches"]) == ("transitive", "1.0.9", False)
+
+
+def repository_primary_output(package_id, version, content_hash):
+    """A repository-signed-only package (no author signature), as printed for MinVer locally."""
+    return "\n".join([
+        f"Verifying {package_id}.{version}", f"Content hash: {content_hash}", "Signature Hash Algorithm: SHA256", "",
+        "Signature type: Repository", "Service index: " + NUGET_ORG, "Owners: fixture",
+        "Verifying the repository primary signature with certificate: ", "  Subject Name: CN=NuGet.org Repository fixture",
+        "  SHA1 hash: " + "A" * 40, "  SHA256 hash: " + "E" * 64, "", "Timestamp: fixture",
+        "Verifying repository primary signature's timestamp with timestamping service certificate: ",
+        "  SHA256 hash: " + "F" * 64, "", f"Successfully verified package '{package_id}.{version}'."])
+
+
+def test_signature_parser_handles_primary_and_counter_repository_signatures():
+    content = base64.b64encode(hashlib.sha512(b"c").digest()).decode()
+    primary = d.signature_verification(repository_primary_output("MinVer", "7.0.0", content), "MinVer", "7.0.0", NUGET_ORG)
+    assert primary["repository_certificate_sha256"] == "e" * 64  # Not the timestamp certificate.
+    counter = d.signature_verification(verify_output("SourceLink", "1.0.0", content), "SourceLink", "1.0.0", NUGET_ORG)
+    assert counter["repository_certificate_sha256"] == "b" * 64  # Not the author certificate.
+
+
+@pytest.mark.parametrize("change,message", [
+    (lambda t, c: t.replace("Content hash: " + c, "Content hash: " + c + "\nContent hash: " + c), "verification incomplete"),
+    (lambda t, c: t.replace("Successfully verified package 'MinVer.7.0.0'.", ""), "verification incomplete"),
+    (lambda t, c: t + "\nSuccessfully verified package 'MinVer.7.0.0'.", "verification incomplete"),
+    (lambda t, c: t.replace("Content hash: " + c, "Content hash: not-a-hash"), "verification incomplete"),
+    (lambda t, c: t.replace("  SHA256 hash: " + "E" * 64 + "\n", ""), "repository signature"),
+    (lambda t, c: t + "\nSignature type: Repository\nService index: " + NUGET_ORG, "repository signature"),
+])
+def test_signature_parser_fails_closed(change, message):
+    content = base64.b64encode(hashlib.sha512(b"c").digest()).decode()
+    with pytest.raises(d.Error, match=message):
+        d.signature_verification(change(repository_primary_output("MinVer", "7.0.0", content), content),
+                                 "MinVer", "7.0.0", NUGET_ORG)
+
+
+def test_package_verification_output_is_never_retained_in_the_receipt(monkeypatch, tmp_path):
+    # The parsed signature row is the record; raw tool output (paths, certificate text) is not.
+    monkeypatch.setattr(d.subprocess, "run", lambda *a, **kw: SimpleNamespace(
+        returncode=0, stdout="Content hash: PRIVATE_VERIFY_OUTPUT", stderr="PRIVATE_VERIFY_ERROR"))
+    rt = d.Runtime(evidence_class="process-double")
+    rt.run(["C:/fixture/dotnet.exe", "nuget", "verify"], cwd=tmp_path, environment={},
+           operation="package-signature-verification")
+    assert "package-signature-verification" not in d.PUBLIC_DIAGNOSTIC_OPERATIONS
+    assert "PRIVATE" not in json.dumps(rt.calls) and set(rt.calls[0]) == {
+        "operation", "exit_code", "started_utc", "completed_utc"}
+
+
+def _set_library_hash(f, value, sidecar=None):
+    f.library("MinVer")["sha512"] = value
+    metadata = f.folder("MinVer") / ".nupkg.metadata"
+    f.virtual[metadata] = json.dumps({"version": 2, "source": NUGET_ORG, **(
+        {} if sidecar is None else {"contentHash": sidecar})}).encode()
+
+
+@pytest.mark.parametrize("change,message", [
+    # None == None, or an empty value, must never pass as a content-hash match (S6).
+    ("null-hashes", "content hash differs"), ("empty-hashes", "content hash differs"),
+    ("assets-hash", "content hash differs"), ("metadata-source", "package source differs"),
+    ("metadata-no-source", "package source differs"), ("file-sidecar", "file hash differs"),
+    ("verified-content", "Verified package content hash differs"),
+    ("verified-index", "repository signature differs"), ("verified-unsigned", "repository signature differs"),
+    ("verified-other-package", "verification incomplete"), ("pin", "central pin"), ("range", "central pin"),
+    ("unpinned", "Unpinned direct"), ("fallback", "fallback folder"), ("package-folders", "package folder"),
+    ("two-sources", "Repository package source"), ("public-sign", "properties differ"),
+    ("configuration", "properties differ"), ("assembly-version", "properties differ"),
+    ("file-version", "properties differ"), ("minver-skipped", "properties differ"),
+    ("compiler-root", "outside the pinned dotnet root"),
+])
+def test_build_evidence_refuses_unbound_packages_restore_or_properties(monkeypatch, tmp_path, plan, change, message):
+    f = BuildEvidenceFixture(monkeypatch, tmp_path, plan)
+    f()
+    archive = str(f.folder("MinVer") / "minver.1.0.0.nupkg")
+    content = f.library("MinVer")["sha512"]
+    if change == "null-hashes":
+        _set_library_hash(f, None)
+    elif change == "empty-hashes":
+        _set_library_hash(f, "", "")
+    elif change == "assets-hash":
+        f.library("MinVer")["sha512"] = base64.b64encode(hashlib.sha512(b"other").digest()).decode()
+    elif change in ("metadata-source", "metadata-no-source"):
+        row = {"version": 2, "contentHash": content}
+        if change == "metadata-source":
+            row["source"] = "C:\\Program Files\\dotnet\\library-packs"
+        f.virtual[f.folder("MinVer") / ".nupkg.metadata"] = json.dumps(row).encode()
+    elif change == "file-sidecar":
+        # A package file that is not the one NuGet recorded downloading is refused.
+        f.virtual[f.folder("MinVer") / "minver.1.0.0.nupkg.sha512"] = base64.b64encode(hashlib.sha512(b"x").digest())
+    elif change == "verified-content":
+        # The archive's own signed content hash must equal the resolved graph's hash.
+        f.verified[archive] = verify_output("MinVer", "1.0.0", base64.b64encode(hashlib.sha512(b"y").digest()).decode())
+    elif change == "verified-index":
+        f.verified[archive] = verify_output("MinVer", "1.0.0", content, "https://other.example/v3/index.json")
+    elif change == "verified-unsigned":
+        f.verified[archive] = "\n".join(line for line in verify_output("MinVer", "1.0.0", content).splitlines()
+                                        if "Repository" not in line and "Service index" not in line)
+    elif change == "verified-other-package":
+        f.verified[archive] = verify_output("MinVer", "1.0.1", content)
+    elif change == "pin":
+        f.virtual[f.source / "Directory.Packages.props"] = b'<Project><ItemGroup><PackageVersion Include="MinVer" Version="2.0.0" /></ItemGroup></Project>'
+    elif change == "range":
+        f.assets["project"]["frameworks"]["net462"]["dependencies"]["MinVer"]["version"] = "[0.9.0, )"
+    elif change == "unpinned":
+        f.assets["project"]["frameworks"]["net462"]["dependencies"]["MinVer"].pop("versionCentrallyManaged")
+    elif change == "fallback":
+        f.assets["project"]["restore"]["fallbackFolders"] = ["C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"]
+    elif change == "package-folders":
+        f.assets["packageFolders"]["C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"] = {}
+    elif change == "two-sources":
+        f.virtual[f.source / "NuGet.config"] = REPOSITORY_NUGET_CONFIG.replace(
+            b"  </packageSources>", b'    <add key="other" value="https://other.example/v3/index.json" />\n  </packageSources>')
+    elif change == "public-sign":
+        f.props["PublicSign"] = "true"
+    elif change == "configuration":
+        f.props["Configuration"] = "Debug"
+    elif change == "assembly-version":
+        f.props["AssemblyVersion"] = "3.1.1.0"  # The pre-fix overlay rule; production gives 3.0.0.0.
+    elif change == "file-version":
+        f.props["FileVersion"] = "3.0.0.0"
+    elif change == "minver-skipped":
+        f.props["MinVerVersion"] = ""
+    elif change == "compiler-root":
+        f.plan["tools"]["dotnet"]["path"] = str(tmp_path / "other-dotnet/dotnet.exe")
+    with pytest.raises(d.Error, match=message):
+        f()
+
+
+def test_canonical_tool_path_collapses_the_parent_segments_the_sdk_reports(tmp_path):
+    # MSBuild reports RoslynTargetsPath as <sdk>/Sdks/Microsoft.NET.Sdk/targets/../../../Roslyn.
+    targets = tmp_path / "sdk/Sdks/Microsoft.NET.Sdk/targets"
+    targets.mkdir(parents=True)
+    compiler = tmp_path / "sdk/Roslyn/bincore/csc.dll"
+    compiler.parent.mkdir(parents=True)
+    compiler.write_bytes(b"synthetic compiler")
+    reported = targets / ".." / ".." / ".." / "Roslyn" / "bincore" / "csc.dll"
+    assert ".." in reported.parts
+    collapsed = d.canonical_tool_path(reported, tmp_path)
+    assert collapsed == compiler and ".." not in collapsed.parts
+    # A path with no parent segments is returned unchanged.
+    assert d.canonical_tool_path(compiler, tmp_path / "sdk") == compiler
+    # Both recorded binaries must sit under the pinned dotnet root.
+    with pytest.raises(d.Error, match="outside the pinned dotnet root"):
+        d.canonical_tool_path(reported, tmp_path / "sdk/Sdks")
+    with pytest.raises(d.Error, match="outside the pinned dotnet root"):
+        d.canonical_tool_path(tmp_path / "sdk" / ".." / "elsewhere" / "csc.dll", tmp_path / "sdk")
+
+
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="Windows resolves parent segments lexically before following links, so the collapsed form is exact there")
+def test_canonical_tool_path_refuses_a_link_among_the_collapsed_segments(tmp_path):
+    # Where the OS follows a link before applying "..", the lexical result can name a different
+    # file than the one the reported path reaches. That must be refused, not silently recorded.
+    real = tmp_path / "elsewhere/Sdks/inner"
+    real.mkdir(parents=True)
+    (tmp_path / "elsewhere/Roslyn").mkdir()
+    (tmp_path / "elsewhere/Roslyn/csc.dll").write_bytes(b"reached through the link")
+    (tmp_path / "sdk").mkdir()
+    link = tmp_path / "sdk/targets"
+    try:
+        os.symlink(real, link, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Directory links are not available to this account")
+    # A decoy at the lexically collapsed location: recording it would name a file the OS never opens.
+    (tmp_path / "Roslyn").mkdir()
+    (tmp_path / "Roslyn/csc.dll").write_bytes(b"decoy at the collapsed location")
+    with pytest.raises(d.Error, match="canonical form"):
+        d.canonical_tool_path(link / ".." / ".." / "Roslyn" / "csc.dll", tmp_path)
+
+
+class GitDouble(d.Runtime):
+    """Answers the source-inspection git calls from a table; launches nothing."""
+    def __init__(self, answers):
+        super().__init__(evidence_class="process-double")
+        self.answers = answers
+
+    def run(self, command, **kwargs):
+        assert kwargs["operation"] == "source-identity"
+        # Git children keep the build environment they had before NuGet folders were added.
+        assert set(kwargs["environment"]) == BUILD_ENVIRONMENT
+        return SimpleNamespace(returncode=0, stdout=self.answers[tuple(command[3:])], stderr="")
+
+
+def blob_id(raw):
+    return hashlib.sha1(b"blob %d\0" % len(raw) + raw).hexdigest()
+
+
+def tracked_tree(tmp_path, monkeypatch, plan, files, index=None):
+    tree = tmp_path / "tree"
+    for name, raw in files.items():
+        target = tree / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(raw)
+    monkeypatch.setattr(d, "ROOT", tree)
+    monkeypatch.setattr(d, "HELPERS", ("helper.py",))
+    monkeypatch.setattr(d, "pin", lambda *args: None)
+    output = tmp_path / "output"
+    output.mkdir()
+    index = index or {name: blob_id(raw) for name, raw in files.items()}
+    listing = "".join(f"100644 {index[name]} 0\t{name}\0" for name in files)
+    answers = {("rev-parse", "HEAD"): plan["source"] + "\n", ("rev-parse", "HEAD^{tree}"): plan["tree"] + "\n",
+               ("status", "--porcelain"): "", ("ls-files", "-s", "-z"): listing}
+    return tree, output, GitDouble(answers)
+
+
+def test_source_copy_admits_empty_tracked_files(tmp_path, monkeypatch, plan):
+    # The real repository tracks zero-byte files (.gitkeep, package __init__.py). A reader
+    # that requires a non-empty handoff file refused them, so PREPARE could never pass.
+    files = {"helper.py": b"print('helper')\n", "pkg/__init__.py": b"", "keep/.gitkeep": b""}
+    assert blob_id(b"") == d.EMPTY_BLOB
+    tree, output, rt = tracked_tree(tmp_path, monkeypatch, plan, files)
+    copied, inputs = d.source_copy(rt, plan, tree, output)
+    assert copied == output / "source"
+    for name, raw in files.items():
+        assert (copied / name).read_bytes() == raw
+        assert inputs[name] == d.digest(raw)
+    assert set(inputs) == set(files)
+
+
+def test_source_copy_refuses_a_tracked_non_empty_file_truncated_to_zero(tmp_path, monkeypatch, plan):
+    # The index still records the original non-empty blob (a truncation hidden from status by
+    # assume-unchanged/skip-worktree); the worktree file is empty. It must not be copied as empty.
+    files = {"helper.py": b"print('helper')\n", "settings.json": b""}
+    index = {"helper.py": blob_id(files["helper.py"]), "settings.json": blob_id(b'{"tracked": true}\n')}
+    tree, output, rt = tracked_tree(tmp_path, monkeypatch, plan, files, index)
+    with pytest.raises(d.Error, match="not an empty tracked blob"):
+        d.source_copy(rt, plan, tree, output)
+
+
+@pytest.mark.parametrize("entry", ["120000 " + "a" * 40 + " 0\tlink", "160000 " + "a" * 40 + " 0\tsubmodule",
+                                   "100644 " + "a" * 40 + " 2\tconflicted", "100644 short 0\tname"])
+def test_source_copy_refuses_links_submodules_conflicts_and_malformed_index_entries(tmp_path, monkeypatch, plan, entry):
+    tree, output, rt = tracked_tree(tmp_path, monkeypatch, plan, {"helper.py": b"x"})
+    rt.answers[("ls-files", "-s", "-z")] += entry + "\0"
+    with pytest.raises(d.Error, match="Unexpected source index entry"):
+        d.source_copy(rt, plan, tree, output)
+
+
+def hard_link_or_skip(source, target):
+    try:
+        os.link(source, target)
+    except (OSError, NotImplementedError, AttributeError):
+        pytest.skip("Hard links are not available on this filesystem")
+
+
+def test_read_source_keeps_every_other_regular_file_rule_for_empty_files(tmp_path):
+    empty = tmp_path / "empty.txt"
+    empty.write_bytes(b"")
+    assert d.read_source(empty, d.EMPTY_BLOB) == b""
+    with pytest.raises(d.Error, match="not an empty tracked blob"):
+        d.read_source(empty, blob_id(b"originally non-empty"))
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    with pytest.raises(d.Error):
+        d.read_source(directory, d.EMPTY_BLOB)
+    hard_link_or_skip(empty, tmp_path / "second-name.txt")
+    with pytest.raises(d.Error, match="Regular tracked source file required"):
+        d.read_source(empty, d.EMPTY_BLOB)
+
+
+def test_read_source_still_applies_the_handoff_rule_to_non_empty_files(tmp_path):
+    present = tmp_path / "present.txt"
+    present.write_bytes(b"content")
+    assert d.read_source(present, blob_id(b"content")) == b"content"
+    hard_link_or_skip(present, tmp_path / "second-name.txt")
+    with pytest.raises(d.Error, match="Bounded regular handoff file required"):
+        d.read_source(present, blob_id(b"content"))
+
+
+@pytest.mark.parametrize("reader", ["read", "record"])
+def test_handoff_reads_still_refuse_an_empty_file(tmp_path, reader):
+    # Only the tracked-source copy admits empty files; handoff, receipt and package reads do not.
+    empty = tmp_path / "empty-handoff.json"
+    empty.write_bytes(b"")
+    with pytest.raises(d.Error, match="Bounded regular handoff file required"):
+        getattr(d, reader)(empty)

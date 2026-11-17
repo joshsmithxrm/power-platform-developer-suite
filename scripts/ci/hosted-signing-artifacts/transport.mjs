@@ -10,6 +10,24 @@ const fail = message => { throw new Error(message); };
 const exactKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
   Object.keys(value).sort().join(',') === [...keys].sort().join(',');
 
+export function safeRefusal(error) {
+  // Closed vocabulary only: client errors can contain signed URLs or tokens.
+  const codes = new Map([
+    ['Preparation reported failure', 'prepare-failed'],
+    ['Missing or invalid artifact digest', 'metadata-digest'],
+    ['Invalid artifact metadata', 'metadata-shape'],
+    ['Unsafe directory', 'directory'],
+    ['Artifact client did not confirm matching digest', 'client-digest'],
+    ['Expected one raw envelope', 'raw-inventory'],
+    ['Unsafe or wrong-size raw envelope', 'raw-size'],
+    ['Downloaded envelope digest mismatch', 'raw-digest'],
+    ['Envelope binding or schema mismatch', 'envelope-binding'],
+    ['Envelope content mismatch', 'envelope-content'],
+    ['Artifact wait timed out', 'wait-timeout'],
+  ]);
+  return codes.get(error?.message) ?? 'unclassified';
+}
+
 export function validateBinding(binding, env = process.env) {
   if (!exactKeys(binding, bindingKeys)) fail('Invalid binding fields');
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(binding.repository) ||
@@ -165,6 +183,13 @@ export async function download({client, name, dest, binding, timeoutSeconds, exp
   const deadline = now() + timeoutSeconds * 1000;
   let found;
   while (now() < deadline) {
+    if (binding.stage === 'prepare') {
+      // A same-run, same-source failure signal can only abort. It can never
+      // admit data or produce a passing signing receipt.
+      const failedName = artifactName({...binding, stage: 'prepare-failed'});
+      const failed = await matches(client, failedName);
+      if (failed.length) { metadata(failed[0], failedName); fail('Preparation reported failure'); }
+    }
     found = await matches(client, name);
     if (found.length) break;
     await sleep(Math.min(5000, Math.max(0, deadline - now())));

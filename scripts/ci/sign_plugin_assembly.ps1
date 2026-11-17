@@ -169,7 +169,7 @@ function Invoke-StrongName([string]$Tool, [string[]]$Arguments, [string]$Working
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
     $start.Environment.Clear()
-    foreach ($name in @('SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP')) {
+    foreach ($name in @('SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'PROGRAMDATA', 'ALLUSERSPROFILE')) {
         $value = [Environment]::GetEnvironmentVariable($name, 'Process')
         if ($value) { $start.Environment[$name] = $value }
     }

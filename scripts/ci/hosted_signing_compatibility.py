@@ -11,7 +11,7 @@ import argparse
 import importlib.util
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
 import shutil
 import subprocess
@@ -22,6 +22,41 @@ DRIVER = ROOT / "tests/compatibility/plugin_signing_compatibility.py"
 REPOSITORY = "joshsmithxrm/power-platform-developer-suite"
 PLAN_FILES = {"plan.json", "public.bin", "context.json"}
 PRODUCT_PROBE = 'param([string]$Path)\n[Diagnostics.FileVersionInfo]::GetVersionInfo($Path).ProductVersion\n'
+PUBLIC_ENV_PROBE = r'''$ErrorActionPreference = 'Stop'
+$result = [ordered]@{ process_bits = [IntPtr]::Size * 8; fips = [Security.Cryptography.CryptoConfig]::AllowOnlyFipsAlgorithms }
+foreach ($name in @('ApplicationData', 'LocalApplicationData', 'CommonApplicationData', 'UserProfile', 'System')) {
+    $result[$name] = [Environment]::GetFolderPath([Environment+SpecialFolder]::$name)
+}
+$result | ConvertTo-Json -Compress
+'''
+WINDOWS_FOLDER_ENV = ('APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA', 'ALLUSERSPROFILE', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH')
+DISPOSABLE_KEYGEN = r'''param([string]$Output)
+$ErrorActionPreference = 'Stop'
+$rsa = $null; $blob = $null; $stream = $null
+try {
+    $parameters = [Security.Cryptography.CspParameters]::new(24)
+    $parameters.KeyNumber = 2 # AT_SIGNATURE; no existing/default key container.
+    $parameters.Flags = [Security.Cryptography.CspProviderFlags]::CreateEphemeralKey
+    $rsa = [Security.Cryptography.RSACryptoServiceProvider]::new(1024, $parameters)
+    $rsa.PersistKeyInCsp = $false
+    $blob = $rsa.ExportCspBlob($true)
+    $stream = [IO.File]::Open($Output, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    $stream.Write($blob, 0, $blob.Length)
+    $stream.Flush($true)
+}
+catch {
+    # No key bytes, exception text or paths are logged.
+    $failure = $_.Exception
+    while ($null -ne $failure.InnerException) { $failure = $failure.InnerException }
+    [Console]::Error.WriteLine('Disposable key generation failed HRESULT=' + $failure.HResult)
+    exit 1
+}
+finally {
+    if ($null -ne $stream) { $stream.Dispose() }
+    if ($null -ne $blob) { [Array]::Clear($blob, 0, $blob.Length) }
+    if ($null -ne $rsa) { $rsa.Dispose() }
+}
+'''
 
 
 def checkpoint(phase):
@@ -31,14 +66,131 @@ def checkpoint(phase):
 
 
 class StageCommandError(ValueError):
-    def __init__(self, code):
+    def __init__(self, code, refusal=None, hresult=None, operation=None, status=None, index=None):
         super().__init__("Hosted stage command failed")
         self.code = code
+        self.refusal = refusal
+        self.hresult = hresult
+        self.operation = operation
+        self.status = status
+        self.index = index
+
+
+DRIVER_MODULE = "ppds_hosted_compat_driver"
+
+
+def driver_vocabulary():
+    # The driver's own refusal codes and operation names: the only values passed through.
+    # Loaded lazily (default invocation refuses before file access); empty if unavailable.
+    try:
+        driver = sys.modules.get(DRIVER_MODULE) or load_driver()
+        return frozenset(driver.REFUSAL_CODES), frozenset(driver.OPERATIONS), driver.STATUS_PATTERN
+    except Exception:
+        return frozenset(), frozenset(), None
+
+
+def driver_line(text, name, allowed):
+    # One exact "PPDS_COMPAT_<NAME>=<value>" line whose value is in the fixed allowed set.
+    values = re.findall(r"(?m)^PPDS_COMPAT_" + name + r"=([A-Za-z0-9-]{1,64})\r?$", text)
+    return values[0] if len(values) == 1 and allowed(values[0]) else None
+
+
+def command_operation(stdout, stderr):
+    _, operations, _ = driver_vocabulary()
+    return driver_line(stdout + "\n" + stderr, "OPERATION", lambda value: value in operations)
+
+
+def command_operation_index(stdout, stderr):
+    # Which call of that operation name failed; a bounded integer only.
+    try:
+        pattern = (sys.modules.get(DRIVER_MODULE) or load_driver()).INDEX_PATTERN
+    except Exception:
+        return None
+    return driver_line(stdout + "\n" + stderr, "OPERATION_INDEX", lambda value: re.fullmatch(pattern, value) is not None)
+
+
+def command_status(stdout, stderr):
+    _, _, pattern = driver_vocabulary()
+    return driver_line(stdout + "\n" + stderr, "STATUS",
+                       lambda value: pattern is not None and re.fullmatch(pattern, value) is not None)
+
+
+def command_refusal(stdout, stderr):
+    # Emit only a fixed classification, never any captured private-phase text.
+    text = (stdout + "\n" + stderr).lower()
+    for label in ("prepare-failed", "metadata-digest", "metadata-shape", "directory", "client-digest",
+                  "raw-inventory", "raw-size", "raw-digest", "envelope-binding", "envelope-content",
+                  "wait-timeout", "unclassified"):
+        if re.search(r"(?m)^ppds_artifact_refusal=" + label + r"\s*$", text):
+            return "transport-" + label
+    codes, _, _ = driver_vocabulary()
+    code = driver_line(stdout + "\n" + stderr, "REFUSAL", lambda value: value in codes)
+    if code is not None:
+        return "driver-" + code
+    known = (("artifact transport failed; no successful result was written", "artifact-transport"),
+             ("candidate experiment refused or failed; no passing compatibility claim is available", "candidate-driver"),
+             ("access is denied", "access-denied"),
+             ("keyset is not defined", "keyset-undefined"),
+             ("keyset does not exist", "keyset-missing"),
+             ("the system cannot find the file specified", "file-not-found"),
+             ("invalid command line", "command-line"),
+             ("invalid option", "command-line"),
+             ("failed to generate a strong name key pair", "key-generation"))
+    return next((label for phrase, label in known if phrase in text), None)
 
 
 def require(ok, reason):
     if not ok:
         raise ValueError(reason)
+
+
+# Every constant reason this coordinator passes to require(...), each with its own fixed code.
+# A test parses this file and fails when one is missing or two share a code. Driver refusals
+# raised inside the coordinator map through the driver's registry instead.
+REFUSALS = {
+    "Explicit hosted-network disposable-key admission required": "admission",
+    "Exact source required": "admission-source",
+    "Experiment required": "admission-experiment",
+    "Applicable execution authority reference required": "admission-authority",
+    "Fresh hosted manual first attempt required": "host-admission",
+    "Run identity required": "run-identity",
+    "Current-run artifact action context required": "runtime-context",
+    "Unexpected public stage": "public-stage",
+    "Original key cleanup unproven": "key-cleanup",
+    "Windows common-data paths disagree": "common-data-disagree",
+    "Windows common-data directory required": "common-data-missing",
+    "Reviewed Windows checkout required": "checkout",
+    "External stage root required": "stage-root",
+    "External trusted adapter required": "adapter-location",
+    "Required tool unavailable": "missing-tool",
+    "Clean exact reviewed source required": "source-state",
+    "Staged transport source differs": "transport-source",
+    "Trusted bootstrap bytes changed": "bootstrap-bytes",
+    "Exact public handoff inventory required": "handoff-inventory",
+    "Artifact identity missing": "artifact-identity",
+    "Local tool/source identity differs from authoritative plan": "plan-identity",
+    "Public identity differs": "public-identity",
+    "Disposable generator bytes changed": "generator-bytes",
+    "Driver-owned copy cleanup unproven": "driver-key-cleanup",
+    "Completed job artifact binding required": "job-binding",
+    "Original/copy key custody evidence required": "custody",
+    "Hosted stage context binding differs": "context-binding",
+    "Hosted stage command failed": "stage-command",
+}
+EXCEPTION_CLASSES = ("FileNotFoundError", "FileExistsError", "PermissionError", "IsADirectoryError",
+                     "NotADirectoryError", "OSError", "KeyError", "IndexError", "TypeError", "ValueError",
+                     "JSONDecodeError", "UnicodeDecodeError", "AttributeError", "TimeoutExpired")
+
+
+def refusal_code(error):
+    # A fixed code only: never the exception text, which can hold paths or private values.
+    if isinstance(error, ValueError) and type(error) in (ValueError, StageCommandError) and str(error) in REFUSALS:
+        return REFUSALS[str(error)]
+    driver = sys.modules.get(DRIVER_MODULE)
+    if driver is not None and isinstance(error, getattr(driver, "REFUSAL_TYPES", ())):
+        return "driver-" + driver.safe_refusal(error)
+    name = type(error).__name__
+    return "exception-" + name.lower() if name in EXCEPTION_CLASSES else "exception-other"
 
 
 def authorize(args):
@@ -63,7 +215,7 @@ def admit_host(args, env):
 
 
 def load_driver():
-    spec = importlib.util.spec_from_file_location("ppds_hosted_compat_driver", DRIVER)
+    spec = importlib.util.spec_from_file_location(DRIVER_MODULE, DRIVER)
     driver = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = driver
     spec.loader.exec_module(driver)
@@ -75,7 +227,12 @@ def execute(command, *, cwd, env, timeout):
     result = subprocess.run(command, cwd=cwd, env=env, timeout=timeout,
                             capture_output=True, text=True, shell=False, check=False)
     if result.returncode != 0:
-        raise StageCommandError(result.returncode)
+        match = re.search(r"(?m)^Disposable key generation failed HRESULT=(-?[0-9]{1,10})\s*$", result.stderr)
+        hresult = int(match[1]) if match and -(2**31) <= int(match[1]) < 2**31 else None
+        raise StageCommandError(result.returncode, command_refusal(result.stdout, result.stderr), hresult,
+                                command_operation(result.stdout, result.stderr),
+                                command_status(result.stdout, result.stderr),
+                                command_operation_index(result.stdout, result.stderr))
     return result.stdout.strip()
 
 
@@ -86,6 +243,8 @@ def json_write(path, value):
 
 
 def stage_files(stage, version):
+    if stage == "prepare-failed":
+        return {"failure.json"}
     if stage == "plan":
         return PLAN_FILES
     if stage == "prepare":
@@ -101,6 +260,16 @@ def cleanup_original(path):
     # Exact owned file only, never parent/recursive cleanup. Also covers partial -k.
     path.unlink(missing_ok=True)
     require(not path.exists() and not path.is_symlink(), "Original key cleanup unproven")
+
+
+def common_data_directory(env, driver):
+    value, alias = env.get("PROGRAMDATA"), env.get("ALLUSERSPROFILE")
+    driver.windows_path(value)
+    driver.windows_path(alias)
+    require(PureWindowsPath(value) == PureWindowsPath(alias), "Windows common-data paths disagree")
+    driver.local_path(Path(value))
+    require(Path(value).is_dir(), "Windows common-data directory required")
+    return str(Path(value))
 
 
 class Hosted:
@@ -125,6 +294,7 @@ class Hosted:
 
     def bootstrap(self):
         d = self.d
+        self.common_data = common_data_directory(self.env, d)
         probe = self.root / "product-version.ps1"
         d.write(probe, PRODUCT_PROBE.encode())
         paths = {name: shutil.which(name + ".exe") for name in ("git", "dotnet", "pwsh")}
@@ -203,6 +373,34 @@ class Hosted:
                 stream.write(f"{stage}-id={artifact['id']}\n{stage}-digest={artifact['digest']}\n")
         return value["artifact"]
 
+    def keyless_diagnostics(self):
+        # Read-only public host metadata. Never call -k/-p/-R, acquire a key
+        # container, change CSP/machine policy, or inherit tokens into a process.
+        d = self.d
+        minimal = d.environment({"tools": self.tools, "windows_directory": self.env["SYSTEMROOT"],
+                                 "windows_common_data_directory": self.common_data}, self.root / "temp")
+        folders = {**minimal, **{k: self.env[k] for k in WINDOWS_FOLDER_ENV if k in self.env}}
+        probe = self.root / "public-environment.ps1"
+        d.write(probe, PUBLIC_ENV_PROBE.encode())
+        public_shell = Path(self.tools["pwsh"]["path"])
+        print(json.dumps({"keyless_tool_identity": {k: {f: v[f] for f in ("sha256", "version")}
+                                                   for k, v in self.tools.items()}}), flush=True)
+        contexts = {}
+        for label, environment in (("minimal", minimal), ("windows-folders", folders)):
+            d.pin({"tools": self.tools}, ["pwsh"])
+            checkpoint("keyless-public-folders-" + label)
+            values = json.loads(execute([str(public_shell), "-NoProfile", "-NonInteractive", "-File", str(probe)],
+                                        cwd=self.root, env=environment, timeout=120))
+            # -m without a value only reads the setting. Never use -c (which
+            # resets CSP configuration even without a value).
+            d.pin({"tools": self.tools}, ["sn"])
+            checkpoint("keyless-sn-policy-" + label)
+            policy = execute([self.tools["sn"]["path"], "-m"], cwd=self.root, env=environment, timeout=120)
+            contexts[label] = {"folders": values, "sn_machine_policy": policy[:2048]}
+        print(json.dumps({"keyless_public_diagnostics": contexts,
+                          "tools": {k: {f: v[f] for f in ("sha256", "version")} for k, v in self.tools.items()},
+                          "source": self.args.source}), flush=True)
+
     def plan(self, directory):
         d = self.d
         raw = d.read(directory / "plan.json", 65536)
@@ -210,7 +408,8 @@ class Hosted:
         self.plan_value = d.load_plan(directory / "plan.json", self.plan_hash)
         p = self.plan_value
         require(p["source"] == self.args.source and p["tree"] == self.tree and p["tools"] == self.tools
-                and p["version"] == self.version and p["experiment"] == self.args.experiment,
+                and p["version"] == self.version and p["experiment"] == self.args.experiment
+                and PureWindowsPath(p["windows_common_data_directory"]) == PureWindowsPath(self.common_data),
                 "Local tool/source identity differs from authoritative plan")
         public = d.read(directory / "public.bin", 4096)
         d.public_shape(public)
@@ -232,18 +431,24 @@ class Hosted:
         public.mkdir()
         key = self.root / "original-disposable-key.snk"
         signed, prepared = self.root / "signed", self.root / "prepared"
-        partial_plan = {"tools": self.tools, "windows_directory": self.env["SYSTEMROOT"]}
-        # Ownership starts before -k; any partial file must be removed too.
+        partial_plan = {"tools": self.tools, "windows_directory": self.env["SYSTEMROOT"],
+                        "windows_common_data_directory": self.common_data}
+        generator = self.root / "generate-disposable.ps1"
+        d.write(generator, DISPOSABLE_KEYGEN.encode())
+        # Ownership starts before generation; any partial file must be removed too.
         try:
-            for options in (("-k", "1024", key), ("-p", key, public / "public.bin")):
-                checkpoint("key-generation-start" if options[0] == "-k" else "public-key-export-start")
-                d.pin(partial_plan, ["sn"])
-                execute([self.tools["sn"]["path"], *map(str, options)], cwd=self.root,
+            commands = (("key-generation", "pwsh", ["-NoProfile", "-NonInteractive", "-File", generator, "-Output", key]),
+                        ("public-key-export", "sn", ["-p", key, public / "public.bin"]))
+            for phase, tool, options in commands:
+                checkpoint(phase + "-start")
+                d.pin(partial_plan, [tool])
+                require(d.read(generator) == DISPOSABLE_KEYGEN.encode(), "Disposable generator bytes changed")
+                execute([self.tools[tool]["path"], *map(str, options)], cwd=self.root,
                         env=d.environment(partial_plan, self.root / "temp"), timeout=120)
-                checkpoint("key-generation-completed" if options[0] == "-k" else "public-key-export-completed")
+                checkpoint(phase + "-completed")
             blob = d.read(public / "public.bin", 4096)
             d.public_shape(blob)
-            plan = {"schema": 1, "kind": "ppds-signing-compatibility-plan", "experiment": self.args.experiment,
+            plan = {"schema": 2, "kind": "ppds-signing-compatibility-plan", "experiment": self.args.experiment,
                     "source": self.args.source, "tree": self.tree, "version": self.version,
                     "public_key_sha256": d.digest(blob), **partial_plan}
             json_write(public / "plan.json", plan)
@@ -268,10 +473,30 @@ class Hosted:
         self.transfer("upload", "sign", signed)
 
     def prepare(self):
+        try:
+            self.prepare_public()
+        except Exception:
+            # Publish a constant-only failure signal so the signer can promptly
+            # enter its existing finally/cleanup. Never upload driver diagnostics.
+            try:
+                failed = self.root / "prepare-failed"
+                failed.mkdir()
+                json_write(failed / "failure.json", {"stage": "prepare", "result": "FAIL"})
+                self.transfer("upload", "prepare-failed", failed)
+                checkpoint("prepare-failure-signalled")
+            except Exception:
+                checkpoint("prepare-failure-signal-unavailable")
+            raise
+
+    def prepare_public(self):
         public, prepared = self.root / "public", self.root / "prepared"
+        checkpoint("prepare-plan-download-started")
         self.transfer("download", "plan", public)
+        checkpoint("prepare-plan-download-completed")
         self.plan(public)
+        checkpoint("prepare-plan-validated")
         self.driver("prepare", prepared, "--source-root", ROOT, "--public-key", public / "public.bin")
+        checkpoint("prepare-driver-completed")
         json_write(prepared / "prepare-context.json", self.context)
         self.transfer("upload", "prepare", prepared)
 
@@ -284,11 +509,14 @@ class Hosted:
                     and re.fullmatch(r"sha256:[0-9a-f]{64}", expected["digest"]), "Completed job artifact binding required")
             inputs[stage] = self.root / stage
             self.transfer("download", stage, inputs[stage], expected=expected)
+            checkpoint("verify-" + stage + "-download-completed")
         self.plan(inputs["plan"])
+        checkpoint("verify-plan-validated")
         custody = json.loads(self.d.read(inputs["sign"] / "custody.json", 65536))
         require(custody["binding"] == self.binding and custody["plan_sha256"] == self.plan_hash
                 and custody["original_key_cleanup"] == custody["driver_copy_cleanup"] == "completed",
                 "Original/copy key custody evidence required")
+        checkpoint("verify-custody-validated")
         prepared_context = json.loads(self.d.read(inputs["prepare"] / "prepare-context.json", 65536))
         plan_context = json.loads(self.d.read(inputs["plan"] / "context.json", 65536))
         for context, job in ((plan_context, "sign"), (custody["context"], "sign"),
@@ -298,10 +526,13 @@ class Hosted:
                     and context.get("job") == job and context.get("runner")
                     and context.get("network_connected_disposable_signer_admitted") is True,
                     "Hosted stage context binding differs")
+        checkpoint("verify-context-validated")
         output = self.root / "verified"
         self.driver("verify", output, "--source-root", ROOT, "--prepared", inputs["prepare"], "--signed", inputs["sign"])
+        checkpoint("verify-driver-completed")
         receipt = json.loads(self.d.read(output / "compatibility-receipt.json"))
         self.d.complete_cases(receipt["cases"], receipt["evidence_class"])
+        checkpoint("verify-cases-validated")
         json_write(output / "hosted-receipt.json", {"schema": 1, "result": "PASS", "binding": self.binding,
                    "plan_sha256": self.plan_hash, "context": self.context, "prepare_context": prepared_context,
                    "custody": custody,
@@ -309,6 +540,7 @@ class Hosted:
                    "nonclaims": ["Not production signing/release authorization", "Not an independently administered rebuild",
                                  "Hosted networking/provider remnants trusted; no air-gap or secure-erasure claim"]})
         self.transfer("upload", "evidence", output)
+        checkpoint("verify-evidence-uploaded")
 
 
 def parser():
@@ -331,6 +563,7 @@ def main(argv=None):
         context = Hosted(args, os.environ, load_driver())
         checkpoint("bootstrap-completed")
         if args.bootstrap_only:
+            context.keyless_diagnostics()
             checkpoint("keyless-bootstrap-completed-no-stage-called")
             return 0
         getattr(context, args.stage)()
@@ -338,19 +571,20 @@ def main(argv=None):
         return 0
     except Exception as ex:
         category = "command" if isinstance(ex, StageCommandError) else "filesystem" if isinstance(ex, OSError) else "validation"
-        diagnostic = {"hosted_compatibility_failure": category}
-        safe_refusals = {"Fresh hosted manual first attempt required": "host-admission",
-                         "Current-run artifact action context required": "runtime-context",
-                         "Reviewed Windows checkout required": "checkout",
-                         "Linked input/output refused": "linked-path",
-                         "Required tool unavailable": "missing-tool",
-                         "Clean exact reviewed source required": "source-state",
-                         "Tool hash/version required": "tool-identity",
-                         "Original key cleanup unproven": "key-cleanup"}
-        if str(ex) in safe_refusals:
-            diagnostic["refusal"] = safe_refusals[str(ex)]
+        diagnostic = {"hosted_compatibility_failure": category, "refusal": refusal_code(ex)}
         if isinstance(ex, StageCommandError):
             diagnostic["exit_code"] = ex.code
+            if ex.refusal:
+                diagnostic["command_refusal"] = ex.refusal
+            if ex.hresult is not None:
+                diagnostic["hresult"] = ex.hresult
+            # Already validated against the driver's fixed operation names and status pattern.
+            if ex.operation is not None:
+                diagnostic["driver_operation"] = ex.operation
+            if ex.status is not None:
+                diagnostic["driver_status"] = ex.status
+            if ex.index is not None:
+                diagnostic["driver_operation_index"] = ex.index
         print(json.dumps(diagnostic), file=sys.stderr, flush=True)
         print("Hosted compatibility refused or failed; no passing claim. Private diagnostics omitted.", file=sys.stderr)
         return 1

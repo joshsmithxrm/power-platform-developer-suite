@@ -5,8 +5,12 @@ No test here signs, accesses keys, runs sn.exe or proves Windows signing compati
 from copy import deepcopy
 import io
 import json
+import os
 from pathlib import Path
+import shutil
 import struct
+import subprocess
+import sys
 from types import SimpleNamespace
 import zipfile
 
@@ -269,3 +273,25 @@ def test_signer_source_has_no_build_or_assembly_load_and_policy_precedes_secret(
     assert "@('-R'," in source and "@('-vf'," in source and "@('-D'," in source
     assert "dotnet " not in source and "GITHUB_ENV" not in source
     assert "Assembly]::Load" not in source
+
+
+@pytest.mark.skipif(sys.platform != 'win32' or not shutil.which('pwsh'), reason='Windows process environment contract')
+def test_signer_process_preserves_common_data_without_inheriting_secrets(tmp_path):
+    source = (ROOT / 'scripts/ci/sign_plugin_assembly.ps1').read_text()
+    begin = source.index('function Invoke-StrongName(')
+    function = source[begin:source.index('\ntry {', begin)]
+    report = tmp_path / 'public-environment.json'
+    script = tmp_path / 'process-boundary.ps1'
+    script.write_text("function Assert-Condition([bool]$Condition, [string]$Reason) { if (-not $Condition) { throw $Reason } }\n"
+                      + function + "\nInvoke-StrongName $env:PPDS_TEST_EXE (ConvertFrom-Json $env:PPDS_TEST_ARGS) $env:PPDS_TEST_CWD\n")
+    probe = ("import json,os,pathlib,sys; pathlib.Path(sys.argv[1]).write_text(json.dumps("
+             "{'names':sorted(os.environ), 'common':os.environ.get('PROGRAMDATA'), 'alias':os.environ.get('ALLUSERSPROFILE')}))")
+    env = {**os.environ, 'PROGRAMDATA': str(tmp_path), 'ALLUSERSPROFILE': str(tmp_path),
+           'PPDS_TEST_SECRET': 'synthetic-marker', 'PPDS_TEST_EXE': sys.executable,
+           'PPDS_TEST_ARGS': json.dumps(['-I', '-c', probe, str(report)]), 'PPDS_TEST_CWD': str(tmp_path)}
+    result = subprocess.run([shutil.which('pwsh'), '-NoProfile', '-NonInteractive', '-File', str(script)],
+                            env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(report.read_text())
+    assert observed['common'] == observed['alias'] == str(tmp_path)
+    assert set(observed['names']) <= {'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'PROGRAMDATA', 'ALLUSERSPROFILE'}
