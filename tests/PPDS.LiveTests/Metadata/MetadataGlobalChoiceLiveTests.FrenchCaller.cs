@@ -74,9 +74,8 @@ public sealed partial class MetadataGlobalChoiceLiveTests
             Shown($"choice description ({view})", choice.Description).Should().Be(((int?)fr, "Description FR"));
             Label OptionLabel(int value) => choice.Options.Single(o => o.Value == value).Label;
             Shown($"option with both labels ({view})", OptionLabel(scene.Open)).Should().Be(((int?)fr, "Ouvert"));
-            // Fallback (stored labels are 1033 only, checked as the base caller before the switch): the spec states the
-            // base-language TEXT is shown; the LCID Dataverse stamps on it is recorded, not assumed (2026-11-17 run 2:
-            // a table description stored only in 1033 was shown to the French caller as LCID 1036).
+            // English-only as created (what is stored is recorded by the fixture): the base-language TEXT is shown, either
+            // from a stored copy under the caller's LCID or as a fallback; the LCID is recorded, not assumed.
             Shown($"option with an English label only ({view})", OptionLabel(scene.EnglishOnly)).Text
                 .Should().Be("English only", "without a label in the caller's language the base-language text is shown");
             Shown($"option with French text and empty English text ({view})", OptionLabel(scene.FrenchOnly))
@@ -161,9 +160,9 @@ public sealed partial class MetadataGlobalChoiceLiveTests
         var reason = await ReasonAsync(pool, scene.Entity, scene.Reason);
         Text(reason.Label, English).Should().Be("Live"); Text(reason.Label, fr).Should().Be("Actif", "MergeLabels keeps the French status label");
 
-        // Table. The display and plural names have French labels and must give notices. The description is stored in
-        // English only (run 2, 2026-11-17: it gave a notice naming LCID 1036 and the English text); whether that notice
-        // is true is decided by what the caller is shown afterwards.
+        // Table. The display and plural names have French labels and must give notices. The description was created
+        // with English text only (run 3, 2026-11-17: stored under 1033 and 1036 alike; run 2: a notice naming LCID 1036
+        // and the English text); whether that notice is true is decided by what the caller is shown afterwards.
         result = await UpdateAndCheckNoticesAsync("service table update",
             () => service.UpdateTableAsync(new UpdateTableRequest
             {
@@ -435,20 +434,32 @@ public sealed partial class MetadataGlobalChoiceLiveTests
                 Shown("base-language caller, choice display name before the switch", (await RetrieveChoiceAsync(pool, name, asIfPublished: false)).DisplayName)
                     .Should().Be(((int?)English, "Choice EN"), "precondition: before the switch the caller is served the base language");
 
-                // The STORED labels of the English-only targets, read by the base caller: 1033 only. A French caller's read
-                // is then compared with this, so a fallback the server stamps with the caller's LCID is told apart from a
-                // stored French copy.
-                var storedEnglishOnly = new (string What, Label? Label)[]
+                // What is STORED for every kind of target as created, read by the base caller. Recorded, not assumed:
+                // run 3 (2026-11-17) showed a table description created with English text only stored under 1033 AND
+                // 1036, while an option created in English only is stored under 1033 alone. The notice truth checks
+                // derive each expectation from what is stored and then shown, not from how the target was created.
+                var storedChoice = await RetrieveChoiceAsync(pool, name, asIfPublished: true);
+                var storedTable = await ReadTableAsync(pool, entity, asIfPublished: true);
+                var storedColumn = await ReadColumnAsync(pool, entity, column, asIfPublished: true);
+                var stored = new (string What, Label? Label)[]
                 {
-                    ("option 'English only'", (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single(o => o.Value == englishOnly).Label),
-                    ("table description", (await ReadTableAsync(pool, entity, asIfPublished: true)).Description),
+                    ("choice display name", storedChoice.DisplayName),
+                    ("choice description", storedChoice.Description),
+                    ("option 'Open'", storedChoice.Options.Single(o => o.Value == open).Label),
+                    ("option 'Same'", storedChoice.Options.Single(o => o.Value == same).Label),
+                    ("option 'English only'", storedChoice.Options.Single(o => o.Value == englishOnly).Label),
+                    ("option 'Seulement'", storedChoice.Options.Single(o => o.Value == frenchOnly).Label),
+                    ("local option", (await RetrieveOptionsAsync(pool, entity, column)).Single(o => o.Value == localOpen).Label),
+                    ("status reason", (await ReasonAsync(pool, entity, reason)).Label),
+                    ("table display name", storedTable.DisplayName),
+                    ("table plural name", storedTable.DisplayCollectionName),
+                    ("table description", storedTable.Description),
+                    ("column display name", storedColumn.DisplayName),
+                    ("column description", storedColumn.Description),
                     ("primary name column display name", (await ReadColumnAsync(pool, entity, nameColumn, asIfPublished: true)).DisplayName)
                 };
-                foreach (var (what, label) in storedEnglishOnly)
-                {
+                foreach (var (what, label) in stored)
                     Shown($"base-language caller, stored labels of the {what}", label);
-                    Pairs(label).Select(p => p.Item1).Should().Equal(new[] { English }, $"precondition: the {what} is stored in English (1033) only");
-                }
 
                 await WithSwitchedUiLanguageAsync(pool, uiSwitch, name, french => body(scene, french));
             });
