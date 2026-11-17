@@ -47,6 +47,7 @@ internal sealed class DmlTestHarness
             ["name"] = QueryValue.Simple("n" + i),
             // revenue 500, 1000, 1500, ...; description null on even rows, "d<i>" on odd rows
             ["revenue"] = QueryValue.Simple(500m * (i + 1)),
+            ["numberofemployees"] = QueryValue.Simple(10 * (i + 1)),
             ["description"] = i % 2 == 0 ? QueryValue.Null : QueryValue.Simple("d" + i)
         }).ToArray(),
         Count = count,

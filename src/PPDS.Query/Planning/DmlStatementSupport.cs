@@ -333,8 +333,14 @@ internal static class DmlStatementSupport
         if (!IsLogicalName(schemaObject.BaseIdentifier.Value) || (named.Alias != null && !IsLogicalName(named.Alias.Value)))
             return $"{Sql(named)} is not a valid Dataverse table name or alias." + NothingExecuted;
         var schema = schemaObject.SchemaIdentifier?.Value;
-        if (schemaObject.ServerIdentifier != null || schemaObject.DatabaseIdentifier != null
-            || (schema != null && !schema.Equals("dbo", StringComparison.OrdinalIgnoreCase)))
+        if (schemaObject.ServerIdentifier == null && schemaObject.DatabaseIdentifier == null
+            && schema != null && schema.Equals("dbo", StringComparison.OrdinalIgnoreCase))
+        {
+            // Not part of the live-verified allowlist (specs/query.md); the plain table name is.
+            return $"{Sql(named)} (a dbo. prefix) is not supported in {verb}." + NothingExecuted +
+                   $" Name the table without the prefix: {schemaObject.BaseIdentifier.Value}.";
+        }
+        if (schemaObject.ServerIdentifier != null || schemaObject.DatabaseIdentifier != null || schema != null)
         {
             return $"{Sql(named)} names another environment or schema: {verb} can {(reading ? "read" : "write")} only tables " +
                    "of the connected environment." + NothingExecuted;
@@ -390,7 +396,7 @@ internal static class DmlStatementSupport
             case BooleanParenthesisExpression paren:
                 return CheckCondition(paren.Expression, names, verb);
             case BooleanNotExpression:
-                return Unsupported($"NOT ({Sql(condition)})", context, " Write the opposite condition instead (for example <> instead of NOT =).");
+                return Unsupported(Sql(condition), context, " Write the opposite condition instead (for example <> instead of NOT =).");
             case BooleanComparisonExpression comparison when IsComparison(comparison.ComparisonType):
                 if (comparison.FirstExpression is not ColumnReferenceExpression compared)
                     return Unsupported(Sql(condition), context, " Put the column on the left and a constant on the right.");
@@ -404,6 +410,10 @@ internal static class DmlStatementSupport
             case InPredicate { Subquery: null, Expression: ColumnReferenceExpression column } inPredicate
                 when inPredicate.Values.All(IsConstant):
                 return CheckColumn(column, names, context);
+            case LikePredicate { EscapeExpression: null, NotDefined: true, SecondExpression: StringLiteral pattern }
+                when !IsPrefixPattern(pattern.Value):
+                // Only NOT LIKE 'text%' (not-begin-with) was verified live; other NOT LIKE patterns are not proven.
+                return Unsupported(Sql(condition), context, " NOT LIKE is supported only as NOT LIKE 'text%'.");
             case LikePredicate { EscapeExpression: null, FirstExpression: ColumnReferenceExpression column, SecondExpression: StringLiteral pattern }
                 when !pattern.Value.Contains('[') && !pattern.Value.Contains(']'):
                 return CheckColumn(column, names, context);
@@ -416,6 +426,10 @@ internal static class DmlStatementSupport
                     "BETWEEN, IS [NOT] NULL, combined with AND, OR and parentheses.");
         }
     }
+
+    /// <summary>'text%' with no other wildcard.</summary>
+    private static bool IsPrefixPattern(string pattern)
+        => pattern.Length > 1 && pattern.EndsWith('%') && pattern[..^1].IndexOfAny(['%', '_', '[', ']']) < 0;
 
     private static bool IsComparison(BooleanComparisonType type) => type is BooleanComparisonType.Equals
         or BooleanComparisonType.NotEqualToBrackets or BooleanComparisonType.NotEqualToExclamation
@@ -455,9 +469,11 @@ internal static class DmlStatementSupport
             case BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add } add
                 when add.FirstExpression is StringLiteral || add.SecondExpression is StringLiteral:
                 return Unsupported($"{Sql(add)} (+ with text)", context, " Use CONCAT(...) to join text.");
+            case BinaryExpression { BinaryExpressionType: BinaryExpressionType.Divide } divide:
+                // SQL divides whole numbers without a remainder; not verified against the evaluator live.
+                return Unsupported($"{Sql(divide)} (division)", context);
             case BinaryExpression binary when binary.BinaryExpressionType is BinaryExpressionType.Add
-                or BinaryExpressionType.Subtract or BinaryExpressionType.Multiply or BinaryExpressionType.Divide
-                or BinaryExpressionType.Modulo:
+                or BinaryExpressionType.Subtract or BinaryExpressionType.Multiply or BinaryExpressionType.Modulo:
                 return All([binary.FirstExpression, binary.SecondExpression]);
             case ParenthesisExpression paren:
                 return CheckValue(paren.Expression, columns, context);
@@ -478,25 +494,26 @@ internal static class DmlStatementSupport
             case SimpleCaseExpression simple:
                 return All(new[] { simple.InputExpression, simple.ElseExpression }
                     .Concat(simple.WhenClauses.SelectMany(w => new[] { w.WhenExpression, w.ThenExpression })));
+            // Only conversion to text (nvarchar) was verified live; other target types and the TRY_ forms are not proven.
+            case CastCall cast when !IsText(cast.DataType):
+                return Unsupported($"{Sql(cast)} (CAST to a type other than nvarchar)", context);
             case CastCall cast:
                 return CheckValue(cast.Parameter, columns, context);
             case ConvertCall { Style: not null } convert:
                 return Unsupported($"{Sql(convert)} (a CONVERT style)", context, " Use CONVERT without a style, or CAST.");
+            case ConvertCall convert when !IsText(convert.DataType):
+                return Unsupported($"{Sql(convert)} (CONVERT to a type other than nvarchar)", context);
             case ConvertCall convert:
                 return CheckValue(convert.Parameter, columns, context);
-            case TryCastCall tryCast:
-                return CheckValue(tryCast.Parameter, columns, context);
-            case TryConvertCall { Style: not null } tryConvert:
-                return Unsupported($"{Sql(tryConvert)} (a CONVERT style)", context, " Use TRY_CONVERT without a style, or TRY_CAST.");
-            case TryConvertCall tryConvert:
-                return CheckValue(tryConvert.Parameter, columns, context);
+            case TryCastCall or TryConvertCall:
+                return Unsupported(Sql(expression), context, " Use CAST(... AS nvarchar(n)) or CONVERT(nvarchar(n), ...).");
             case FunctionCall function when function.CallTarget == null && function.OverClause == null
                 && function.WithinGroupClause == null && function.UniqueRowFilter == UniqueRowFilter.NotSpecified
                 && AllowedFunctions.Contains(function.FunctionName.Value):
                 return All(function.Parameters);
             case FunctionCall function:
                 return Unsupported($"the function {function.FunctionName.Value}", context,
-                    $" Supported functions: {string.Join(", ", AllowedFunctions.OrderBy(f => f))}, and COALESCE, NULLIF, IIF, CASE, CAST, CONVERT, TRY_CAST, TRY_CONVERT.");
+                    $" Supported functions: {string.Join(", ", AllowedFunctions.OrderBy(f => f))}, and COALESCE, NULLIF, IIF, CASE, CAST and CONVERT to nvarchar.");
             case ScalarSubquery:
                 return Unsupported("a subquery", context);
             default:
@@ -509,13 +526,14 @@ internal static class DmlStatementSupport
     {
         switch (predicate)
         {
-            case BooleanBinaryExpression binary:
-                return CheckValuePredicate(binary.FirstExpression, columns, context) ?? CheckValuePredicate(binary.SecondExpression, columns, context);
+            case BooleanBinaryExpression:
+                // Only single conditions inside IIF/CASE were verified live; AND/OR over NULLs there is not proven.
+                return Unsupported($"{Sql(predicate)} (AND/OR inside IIF or CASE)", context, " Use one condition per WHEN.");
             case BooleanParenthesisExpression paren:
                 return CheckValuePredicate(paren.Expression, columns, context);
             case BooleanNotExpression:
                 // NOT over an unknown (NULL) comparison is unknown in SQL; the evaluator would make it true.
-                return Unsupported($"NOT ({Sql(predicate)})", context, " Write the condition without NOT.");
+                return Unsupported(Sql(predicate), context, " Write the condition without NOT.");
             case BooleanComparisonExpression comparison when IsComparison(comparison.ComparisonType):
                 return CheckValue(comparison.FirstExpression, columns, context) ?? CheckValue(comparison.SecondExpression, columns, context);
             case BooleanIsNullExpression isNull:
@@ -598,6 +616,9 @@ internal static class DmlStatementSupport
 
         public override void Visit(IdentityFunctionCall node) => _found ??= Unsupported("IDENTITY()", "INSERT, UPDATE or DELETE");
     }
+
+    private static bool IsText(DataTypeReference type)
+        => type is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.NVarChar };
 
     private static string Unsupported(string part, string context, string? howTo = null)
         => $"{part} is not supported in {context}." + NothingExecuted + (howTo ?? string.Empty);

@@ -55,7 +55,7 @@ public class DmlAllowlistTests
     [InlineData("(name)", "n0|n1|n2|n3")]
     public async Task SetExpression_ReadsTheRowsRealValues(string expression, string expected)
     {
-        var h = await Run($"UPDATE account SET description = {expression} WHERE statecode = 0");
+        var h = await Run($"UPDATE account SET description = {expression} WHERE name IS NOT NULL");
 
         Assert.Equal(expected.Split('|').Select(v => v == "<null>" ? null : v), Values(h, "description"));
     }
@@ -64,15 +64,10 @@ public class DmlAllowlistTests
     [InlineData("LEN(name)", "2|2|2|2")]
     [InlineData("revenue * 2", "1000|2000|3000|4000")]
     [InlineData("ABS(0 - revenue)", "500|1000|1500|2000")]
-    [InlineData("ROUND(revenue / 3, 0)", "167|333|500|667")]
-    [InlineData("CAST(revenue AS int)", "500|1000|1500|2000")]
-    [InlineData("CONVERT(int, revenue)", "500|1000|1500|2000")]
-    [InlineData("TRY_CAST(name AS int)", "<null>|<null>|<null>|<null>")]
-    [InlineData("TRY_CONVERT(int, revenue)", "500|1000|1500|2000")]
     [InlineData("-revenue", "-500|-1000|-1500|-2000")]
     public async Task SetNumericExpression_ReadsTheRowsRealValues(string expression, string expected)
     {
-        var h = await Run($"UPDATE account SET revenue = {expression} WHERE statecode = 0");
+        var h = await Run($"UPDATE account SET revenue = {expression} WHERE name IS NOT NULL");
 
         var actual = Values(h, "revenue").Select(v => v is string s && s.Contains('.') ? s.TrimEnd('0').TrimEnd('.') : v);
         Assert.Equal(expected.Split('|').Select(v => v == "<null>" ? null : v), actual);
@@ -81,7 +76,7 @@ public class DmlAllowlistTests
     [Fact]
     public async Task SetExpression_RequestsEveryColumnItReads()
     {
-        var h = await Run("UPDATE account SET name = COALESCE(description, IIF(revenue > 1, name, NULL)) WHERE statecode = 0");
+        var h = await Run("UPDATE account SET name = COALESCE(description, IIF(revenue > 1, name, NULL)) WHERE name IS NOT NULL");
 
         var fetch = h.Reads.Single().FetchXml;
         foreach (var column in new[] { "accountid", "description", "revenue", "name" })
@@ -124,7 +119,6 @@ public class DmlAllowlistTests
     [Theory]
     [InlineData("UPDATE a SET name = UPPER(a.name) FROM account a WHERE a.name = 'x'")]
     [InlineData("UPDATE account SET name = UPPER(name) FROM account WHERE account.name = 'x'")]
-    [InlineData("UPDATE dbo.account SET name = UPPER(name) WHERE name = 'x'")]
     // T-SQL: the target names the FROM alias, so the aliased table (account) is written, not a table called contact.
     [InlineData("UPDATE contact SET name = UPPER(contact.name) FROM account contact WHERE contact.name = 'x'")]
     public async Task Update_TheTargetOrItsAliasInFrom_WritesTheTargetTable(string sql)
@@ -152,7 +146,7 @@ public class DmlAllowlistTests
     [Fact]
     public async Task InsertSelect_MapsValuesByPosition_IncludingAliasedExpressions()
     {
-        var h = await Run("INSERT INTO account (description, name) SELECT UPPER(name) AS n, COALESCE(description, name) AS d FROM account WHERE statecode = 0");
+        var h = await Run("INSERT INTO account (description, name) SELECT UPPER(name) AS n, COALESCE(description, name) AS d FROM account WHERE name IS NOT NULL");
 
         Assert.Equal(new object?[] { "N0", "N1", "N2", "N3" }, Values(h, "description"));
         Assert.Equal(new object?[] { "n0", "d1", "n2", "d3" }, Values(h, "name"));
@@ -161,7 +155,7 @@ public class DmlAllowlistTests
     [Fact]
     public async Task InsertSelect_SwappedColumns_MapByPositionNotByName()
     {
-        var h = await Run("INSERT INTO account (description, name) SELECT name, description FROM account WHERE statecode = 0");
+        var h = await Run("INSERT INTO account (description, name) SELECT name, description FROM account WHERE name IS NOT NULL");
 
         Assert.Equal(new object?[] { "n0", "n1", "n2", "n3" }, Values(h, "description"));
         Assert.Equal(new object?[] { null, "d1", null, "d3" }, Values(h, "name"));

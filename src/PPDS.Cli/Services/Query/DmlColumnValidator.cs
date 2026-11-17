@@ -19,6 +19,16 @@ internal static class DmlColumnValidator
         "Integer", "BigInt", "Decimal", "Double", "Money"
     };
 
+    // The column types each use was verified with in the live differential run (specs/query.md, "DML allowlist").
+    // Anything else is refused: a shape that was not proven against Dataverse does not run.
+    private static readonly HashSet<string> WriteTypes = new(StringComparer.OrdinalIgnoreCase) { "String", "Integer", "Decimal", "Boolean" };
+    private static readonly HashSet<string> ValueReadTypes = new(StringComparer.OrdinalIgnoreCase) { "String", "Integer", "Decimal" };
+    private static readonly HashSet<string> FilterTypes = new(StringComparer.OrdinalIgnoreCase) { "String", "Integer", "Decimal", "Boolean", "Picklist", "DateTime" };
+    private static readonly HashSet<string> OrderedFilterTypes = new(StringComparer.OrdinalIgnoreCase) { "Integer", "Decimal", "DateTime" };
+    private static readonly HashSet<string> InTypes = new(StringComparer.OrdinalIgnoreCase) { "String" };
+    private static readonly HashSet<string> LikeTypes = new(StringComparer.OrdinalIgnoreCase) { "String" };
+    private static readonly HashSet<string> OrderByTypes = new(StringComparer.OrdinalIgnoreCase) { "Integer" };
+
     public static async Task ValidateAsync(TSqlStatement planned, ICachedMetadataProvider metadata, CancellationToken ct)
     {
         foreach (var statement in DataStatements(planned))
@@ -32,11 +42,11 @@ internal static class DmlColumnValidator
                     var columns = await ColumnsAsync(metadata, table, ct);
                     foreach (var set in spec.SetClauses.OfType<AssignmentSetClause>())
                     {
-                        WrittenValue(Written(columns, table, set.Column, forCreate: false), table, set.NewValue);
-                        Read(columns, table, set.NewValue);
+                        Written(columns, table, set.Column, forCreate: false);
+                        ReadValue(columns, table, set.NewValue);
                     }
                     if (spec.WhereClause?.SearchCondition != null)
-                        Read(columns, table, spec.WhereClause.SearchCondition);
+                        ReadFilter(columns, table, spec.WhereClause.SearchCondition);
                     break;
                 }
                 case DeleteStatement delete:
@@ -45,7 +55,7 @@ internal static class DmlColumnValidator
                     var table = TableName(DmlStatementSupport.ResolveTarget(spec.Target, spec.FromClause));
                     var columns = await ColumnsAsync(metadata, table, ct);
                     if (spec.WhereClause?.SearchCondition != null)
-                        Read(columns, table, spec.WhereClause.SearchCondition);
+                        ReadFilter(columns, table, spec.WhereClause.SearchCondition);
                     break;
                 }
                 case InsertStatement insert:
@@ -53,34 +63,28 @@ internal static class DmlColumnValidator
                     var spec = insert.InsertSpecification;
                     var table = TableName((NamedTableReference)spec.Target);
                     var columns = await ColumnsAsync(metadata, table, ct);
-                    var targets = spec.Columns.Select(column => Written(columns, table, column, forCreate: true)).ToList();
+                    foreach (var column in spec.Columns)
+                        Written(columns, table, column, forCreate: true);
 
                     if (spec.InsertSource is ValuesInsertSource values)
                     {
-                        foreach (var row in values.RowValues)
-                        {
-                            for (var i = 0; i < row.ColumnValues.Count && i < targets.Count; i++)
-                            {
-                                WrittenValue(targets[i], table, row.ColumnValues[i]);
-                                Read(columns, table, row.ColumnValues[i]);
-                            }
-                        }
+                        foreach (var value in values.RowValues.SelectMany(row => row.ColumnValues))
+                            ReadValue(columns, table, value);
                     }
                     else if (spec.InsertSource is SelectInsertSource { Select: QuerySpecification select }
                              && select.FromClause?.TableReferences.FirstOrDefault() is NamedTableReference source)
                     {
                         var sourceTable = TableName(source);
                         var sourceColumns = await ColumnsAsync(metadata, sourceTable, ct);
-                        for (var i = 0; i < select.SelectElements.Count; i++)
-                        {
-                            if (select.SelectElements[i] is SelectScalarExpression item && i < targets.Count)
-                                WrittenValue(targets[i], table, item.Expression);
-                            Read(sourceColumns, sourceTable, select.SelectElements[i]);
-                        }
+                        foreach (var item in select.SelectElements)
+                            ReadValue(sourceColumns, sourceTable, item);
                         if (select.WhereClause?.SearchCondition != null)
-                            Read(sourceColumns, sourceTable, select.WhereClause.SearchCondition);
+                            ReadFilter(sourceColumns, sourceTable, select.WhereClause.SearchCondition);
                         if (select.OrderByClause != null)
-                            Read(sourceColumns, sourceTable, select.OrderByClause);
+                        {
+                            foreach (var column in ScalarColumnCollector.Collect(select.OrderByClause))
+                                Proven(Column(sourceColumns, sourceTable, column), sourceTable, OrderByTypes, "ORDER BY");
+                        }
                     }
                     break;
                 }
@@ -124,17 +128,54 @@ internal static class DmlColumnValidator
         var attribute = Column(columns, table, column);
         if (forCreate ? !attribute.IsValidForCreate : !attribute.IsValidForUpdate)
             throw Refuse($"The column {table}.{attribute.LogicalName} cannot be set by {(forCreate ? "INSERT" : "UPDATE")}.");
+        Proven(attribute, table, WriteTypes, forCreate ? "INSERT" : "UPDATE ... SET");
         return attribute;
     }
 
-    /// <summary>
-    /// Writing a date/time value is not proven (time zone handling was not verified live), so a date/time column can only
-    /// be set to NULL.
-    /// </summary>
-    private static void WrittenValue(AttributeMetadataDto target, string table, ScalarExpression value)
+    /// <summary>Refuses a column whose type was not verified live for this use.</summary>
+    private static void Proven(AttributeMetadataDto attribute, string table, HashSet<string> types, string use)
     {
-        if (string.Equals(target.AttributeType, "DateTime", StringComparison.OrdinalIgnoreCase) && value is not NullLiteral)
-            throw Refuse($"Setting the date/time column {table}.{target.LogicalName} to a value is not supported (only NULL).");
+        if (!types.Contains(attribute.AttributeType ?? ""))
+        {
+            throw Refuse($"{table}.{attribute.LogicalName} is a {Describe(attribute.AttributeType)} column, which is not supported in {use} " +
+                         $"(supported there: {string.Join(", ", types.Select(Describe))} columns).");
+        }
+    }
+
+    private static string Describe(string? type) => type switch
+    {
+        "String" => "text",
+        "Memo" => "multiline text",
+        "Integer" => "whole number",
+        "BigInt" => "big whole number",
+        "Decimal" => "decimal",
+        "Double" => "floating point",
+        "Money" => "currency",
+        "Boolean" => "yes/no",
+        "Picklist" => "choice",
+        "DateTime" => "date/time",
+        "Lookup" or "Customer" or "Owner" => "lookup",
+        "Uniqueidentifier" => "unique identifier",
+        "State" => "status",
+        "Status" => "status reason",
+        null or "" => "unknown",
+        _ => type.ToLowerInvariant()
+    };
+
+    /// <summary>A SET value, VALUES row value or INSERT ... SELECT item.</summary>
+    private static void ReadValue(Dictionary<string, AttributeMetadataDto> columns, string table, TSqlFragment fragment)
+    {
+        foreach (var column in ScalarColumnCollector.Collect(fragment))
+            Proven(Column(columns, table, column), table, ValueReadTypes, "a value");
+        Read(columns, table, fragment);
+    }
+
+    /// <summary>A WHERE condition: each column's type must have been verified with the operator used on it.</summary>
+    private static void ReadFilter(Dictionary<string, AttributeMetadataDto> columns, string table, BooleanExpression condition)
+    {
+        var filter = new FilterTypeCheck(columns, table);
+        condition.Accept(filter);
+        Read(columns, table, condition);
     }
 
     private static void Read(Dictionary<string, AttributeMetadataDto> columns, string table, TSqlFragment fragment)
@@ -195,6 +236,30 @@ internal static class DmlColumnValidator
 
         public override void ExplicitVisit(ScalarSubquery node)
         {
+        }
+    }
+
+    private sealed class FilterTypeCheck(Dictionary<string, AttributeMetadataDto> columns, string table) : TSqlFragmentVisitor
+    {
+        public override void Visit(BooleanComparisonExpression node)
+        {
+            var equality = node.ComparisonType is BooleanComparisonType.Equals or BooleanComparisonType.NotEqualToBrackets
+                or BooleanComparisonType.NotEqualToExclamation;
+            Check(node.FirstExpression, equality ? FilterTypes : OrderedFilterTypes, equality ? "a WHERE comparison" : "a WHERE comparison with < > <= >=");
+        }
+
+        public override void Visit(BooleanTernaryExpression node) => Check(node.FirstExpression, OrderedFilterTypes, "BETWEEN");
+
+        public override void Visit(InPredicate node) => Check(node.Expression, InTypes, "IN");
+
+        public override void Visit(LikePredicate node) => Check(node.FirstExpression, LikeTypes, "LIKE");
+
+        public override void Visit(BooleanIsNullExpression node) => Check(node.Expression, FilterTypes, "IS NULL");
+
+        private void Check(ScalarExpression expression, HashSet<string> types, string use)
+        {
+            if (expression is ColumnReferenceExpression column)
+                Proven(Column(columns, table, column), table, types, use);
         }
     }
 

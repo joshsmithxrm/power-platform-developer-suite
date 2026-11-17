@@ -90,8 +90,8 @@ internal static class TestMetadata
     {
         ["account"] =
         [
-            A("accountid", "Uniqueidentifier", update: false), A("name", "String"), A("description", "Memo"),
-            A("revenue", "Money"), A("statecode", "State"), A("parentaccountid", "Lookup"), A("ownerid", "Owner"),
+            A("accountid", "Uniqueidentifier", update: false), A("name", "String"), A("description", "String"),
+            A("revenue", "Decimal"), A("creditlimit", "Money"), A("numberofemployees", "Integer"), A("notes", "Memo"), A("customertypecode", "Picklist"), A("statecode", "State"), A("parentaccountid", "Lookup"), A("ownerid", "Owner"),
             A("owneridname", "String", create: false, update: false, attributeOf: "ownerid"), A("domainname", "String"),
             A("contactid", "Lookup"), A("createdon", "DateTime", create: false, update: false), A("followupby", "DateTime")
         ],

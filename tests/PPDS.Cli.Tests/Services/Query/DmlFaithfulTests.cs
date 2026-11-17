@@ -54,8 +54,8 @@ public sealed class DmlFaithfulTests : IDisposable
     // ---- M1: TOP (n) is honoured exactly like TOP n ------------------------------------------
 
     [Theory]
-    [InlineData("INSERT INTO account (name) SELECT TOP 2 name FROM account WHERE revenue > 0 ORDER BY revenue")]
-    [InlineData("INSERT INTO account (name) SELECT TOP (2) name FROM account WHERE revenue > 0 ORDER BY revenue")]
+    [InlineData("INSERT INTO account (name) SELECT TOP 2 name FROM account WHERE revenue > 0 ORDER BY numberofemployees")]
+    [InlineData("INSERT INTO account (name) SELECT TOP (2) name FROM account WHERE revenue > 0 ORDER BY numberofemployees")]
     public async Task InsertSelectTop_WithOrWithoutParentheses_InsertsExactlyN(string sql)
     {
         var h = await Run(sql);
@@ -75,7 +75,7 @@ public sealed class DmlFaithfulTests : IDisposable
     [Fact]
     public async Task InsertSelectTopDescending_TakesTheHighestRows()
     {
-        var h = await Run("INSERT INTO account (name) SELECT TOP (2) name FROM account WHERE revenue > 0 ORDER BY revenue DESC");
+        var h = await Run("INSERT INTO account (name) SELECT TOP (2) name FROM account WHERE revenue > 0 ORDER BY numberofemployees DESC");
 
         Assert.Equal(new object?[] { "n3", "n2" }, Values(h, "name"));
     }
@@ -92,6 +92,50 @@ public sealed class DmlFaithfulTests : IDisposable
         var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
 
         Assert.Contains(named, ex.Message);
+        h.AssertNothingChanged();
+    }
+
+    // Shapes the live differential run did not prove (specs/query.md "DML allowlist") are refused.
+    [Theory]
+    [InlineData("UPDATE account SET revenue = revenue / 3 WHERE name = 'n1'", "(division)")]
+    [InlineData("UPDATE account SET revenue = CAST(revenue AS int) WHERE name = 'n1'", "CAST to a type other than nvarchar")]
+    [InlineData("UPDATE account SET revenue = CONVERT(int, revenue) WHERE name = 'n1'", "CONVERT to a type other than nvarchar")]
+    [InlineData("UPDATE account SET revenue = TRY_CAST(name AS int) WHERE name = 'n1'", "TRY_CAST")]
+    [InlineData("UPDATE account SET name = TRY_CONVERT(nvarchar(10), revenue) WHERE name = 'n1'", "TRY_CONVERT")]
+    [InlineData("UPDATE dbo.account SET name = 'x' WHERE name = 'n1'", "dbo. prefix")]
+    [InlineData("DELETE FROM account WHERE name NOT LIKE '%1'", "NOT LIKE is supported only as NOT LIKE 'text%'")]
+    [InlineData("DELETE FROM account WHERE name NOT LIKE 'n_%'", "NOT LIKE is supported only as NOT LIKE 'text%'")]
+    [InlineData("UPDATE account SET name = IIF(revenue > 1 AND revenue < 9, 'a', 'b') WHERE name = 'n1'", "AND/OR inside IIF or CASE")]
+    [InlineData("DELETE FROM account WHERE statecode = 0", "status column")]
+    [InlineData("DELETE FROM account WHERE accountid = '00000000-0000-0000-0000-000000000001'", "unique identifier column")]
+    [InlineData("DELETE FROM account WHERE parentaccountid IS NULL", "lookup column")]
+    [InlineData("DELETE FROM account WHERE name > 'n1'", "text column, which is not supported in a WHERE comparison with < > <= >=")]
+    [InlineData("DELETE FROM account WHERE revenue IN (500, 1000)", "decimal column, which is not supported in IN")]
+    [InlineData("DELETE FROM account WHERE creditlimit > 5", "currency column")]
+    [InlineData("UPDATE account SET creditlimit = 5 WHERE name = 'n1'", "currency column")]
+    [InlineData("UPDATE account SET customertypecode = 1 WHERE name = 'n1'", "choice column")]
+    [InlineData("UPDATE account SET notes = 'x' WHERE name = 'n1'", "multiline text column")]
+    [InlineData("UPDATE account SET followupby = NULL WHERE name = 'n1'", "date/time column")]
+    [InlineData("UPDATE account SET name = CONCAT(name, customertypecode) WHERE name = 'n1'", "choice column, which is not supported in a value")]
+    [InlineData("INSERT INTO account (name) SELECT TOP 2 name FROM account WHERE revenue > 0 ORDER BY revenue", "not supported in ORDER BY")]
+    public async Task NotLiveVerified_IsRefused(string sql, string named)
+    {
+        var h = DmlTestHarness.Create(rows: 4);
+
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
+
+        Assert.Contains(named, ex.Message);
+        h.AssertNothingChanged();
+    }
+
+    [Fact]
+    public async Task NotRefusal_NamesTheConditionOnce()
+    {
+        var h = DmlTestHarness.Create(rows: 4);
+
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = "DELETE FROM account WHERE NOT (name = 'n1')", DmlSafety = Confirmed }));
+
+        Assert.StartsWith("NOT (name = 'n1') is not supported", ex.Message);
         h.AssertNothingChanged();
     }
 

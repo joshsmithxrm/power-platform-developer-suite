@@ -1679,7 +1679,7 @@ public class SqlQueryServiceTests
         };
         var request = new SqlQueryRequest
         {
-            Sql = "UPDATE dbo.account SET name = 'preview' FROM [PROD].account AS prod WHERE prod.accountid = '00000000-0000-0000-0000-000000000001'",
+            Sql = "UPDATE account SET name = 'preview' FROM [PROD].account AS prod WHERE prod.accountid = '00000000-0000-0000-0000-000000000001'",
             DmlSafety = new DmlSafetyOptions { IsDryRun = true }
         };
 
