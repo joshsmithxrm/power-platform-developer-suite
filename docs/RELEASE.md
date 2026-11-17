@@ -404,7 +404,7 @@ The stages are separate:
 
 | Stage | Inputs and result |
 |---|---|
-| `prepare` | Exact source and public experiment plan; build the actual net462 project with a test-public-key/source overlay in an owned copy, letting MinVer derive the version properties from `MinVerVersionOverride`, verify each restored package's nuget.org repository signature and source, preserve delay-signed and public-signed controls, and produce a bound public handoff. No private-key argument is accepted. |
+| `prepare` | Exact source and public experiment plan; build the actual net462 project with a test-public-key/source overlay in an owned copy, letting MinVer derive the version properties from `MinVerVersionOverride`, verify each restored package's repository signature and source (the signature must be valid and its signer must name nuget.org's service index; the signing certificate is recorded but not pinned), record which .NET Framework reference assemblies were used, preserve delay-signed and public-signed controls, and produce a bound public handoff. No private-key argument is accepted. |
 | `sign` | The public handoff plus a later-authorized disposable key and owner approval reference; use only pinned `sn.exe`, remove the owned key copy, and retain the signed DLL and receipt. No restore, build, pack or source command runs. |
 | `verify` | The prepared and signed public handoffs; independently verify the signature and signature-only transform, run negative controls, repack, and apply the existing local package rules. No private key is accepted. |
 

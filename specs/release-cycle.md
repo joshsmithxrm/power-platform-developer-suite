@@ -448,9 +448,12 @@ the binding is: restore used only the owned package folder and no fallback
 folder; each package's recorded source is the repository's single NuGet source;
 its file hash equals NuGet's `.nupkg.sha512`; its content hash equals
 `.nupkg.metadata` and the hash that a successful `dotnet nuget verify --all`
-reports while validating the nuget.org repository signature; and direct
-references equal their central pins. No reviewer-expected hash (lock file) is
-compared, and extracted package files are not re-hashed. Missing, mocked, skipped
+reports while validating a repository signature whose signer names nuget.org's
+service index (the certificate is recorded but not pinned); and direct
+references equal their central pins. The reference assemblies used are recorded
+as either the restored package or an installed 4.6.2 targeting pack (directory
+and `mscorlib.dll`/`System.dll` hashes). No reviewer-expected hash (lock file)
+is compared, and extracted package files are not re-hashed. Missing, mocked, skipped
 or failed cryptographic operations cannot produce a compatibility PASS. The
 fixed SDK tool used by the existing metadata inspector must match the accepted
 signer identity. Production lifecycle, key custody, producer trust and release

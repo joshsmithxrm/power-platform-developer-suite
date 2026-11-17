@@ -117,23 +117,48 @@ For each package in `project.assets.json`, PREPARE requires and records:
 - the assets `sha512` and the metadata `contentHash` are both base64 SHA-512
   and equal;
 - the SHA-512 of the `.nupkg` file equals NuGet's `<name>.nupkg.sha512`;
-- the pinned `dotnet nuget verify --all` succeeds for the archive, reports the
-  nuget.org repository signature (service index above; its certificate SHA-256
-  is recorded) and reports a content hash equal to the assets `sha512`;
+- the pinned `dotnet nuget verify --all` succeeds for the archive, reports a
+  repository signature whose service index is the source above (its certificate
+  SHA-256 is recorded) and reports a content hash equal to the assets `sha512`.
+  Only these parsed fields are kept; the raw verification output is not
+  retained in the receipt. The first verification may take up to 10 minutes
+  (a fresh host may fetch revocation data); later ones are bounded at 2;
 - a direct reference with a central version equals its `Directory.Packages.props`
-  pin; the SDK's implicit `Microsoft.NETFramework.ReferenceAssemblies` and
-  transitive packages have no repository pin and are recorded as such.
+  pin. The SDK's implicit `Microsoft.NETFramework.ReferenceAssemblies` has no
+  repository pin. A transitive package with a central `PackageVersion` entry
+  (for example `Microsoft.NETFramework.ReferenceAssemblies.net462`) records
+  that entry and whether it matched; central package management does not pin
+  transitive packages here, so a mismatch is recorded, not refused.
 
-This proves that each archive the build resolved carries a valid nuget.org
-repository signature over the content hash that the resolved graph names, that
-the sidecars agree with it, and that direct pins were honoured. It does not
-prove that a reviewer expected that hash for that id/version (there is no lock
-file; NuGet's trust policy is the default store with no `trustedSigners`),
-that the extracted files MSBuild loaded (targets, task and tool DLLs) match the
-archive, or that the repository certificate is a specific pinned one. The
-stronger follow-up is a committed `packages.lock.json` restored in locked mode,
-with the same change in the publish workflow; this experiment does not change
-the production build.
+Reference assemblies: the SDK adds the implicit reference-assemblies package
+only when MSBuild finds no installed .NET Framework 4.6.2 targeting pack
+(`IncludeTargetingPackReference`, `Microsoft.NET.Sdk.FrameworkReferenceResolution.targets`).
+Both outcomes are legitimate, and the publish workflow lets the image decide,
+so PREPARE does too. It reads `TargetFrameworkDirectory` after
+`GetReferenceAssemblyPaths` and records either the package (id and version,
+bound by its signature row; the directory must be that package's folder) or
+the installed targeting pack (its directory under `ProgramFiles(x86)` and the
+hashes of its `mscorlib.dll` and `System.dll`). The receipt must carry exactly
+one of the two. The other reference-assembly files in a targeting pack are not
+hashed.
+
+This proves that each archive the build resolved carries a valid repository
+signature, chaining to a trusted root, over content whose hash the resolved
+graph names; that the signer names nuget.org's service index; that the sidecars
+agree; and that direct pins were honoured. The service index is an attribute
+the signer writes, and with no `trustedSigners` any certificate chaining to a
+trusted code-signing root is accepted: the certificate is recorded but not
+pinned. It does not prove that a reviewer expected that hash for that
+id/version (there is no lock file), or that the extracted files MSBuild loaded
+(targets, task and tool DLLs) match the archive. The stronger follow-up is a
+committed `packages.lock.json` restored in locked mode, with the same change in
+the publish workflow; this experiment does not change the production build.
+
+SIGN and VERIFY re-check what they can of these bindings when they admit the
+prepare receipt: the recorded compiler paths must sit under the plan's dotnet
+root, the overlay must equal exactly the one PREPARE builds from the plan and
+its output directory, and VERIFY (which has its own source copy) requires the
+recorded package source to equal the one in `NuGet.config`.
 
 ### Version properties
 
@@ -142,9 +167,9 @@ Production lets MinVer derive every version property from the `Plugins-v` tag:
 `PackageVersion`/`Version` and `InformationalVersion`, to which the SDK appends
 `+<SourceRevisionId>` from SourceLink. The owned copy has no `.git`, so PREPARE
 passes `MinVerVersionOverride=<candidate>`: MinVer's own target still runs and
-applies the production rule, and `SourceRevisionId` is supplied explicitly. No
-explicit version property, `MinVerSkip` or source-revision switch is accepted in
-the overlay. PREPARE reads the properties after `GetAssemblyAttributes` runs and
+applies the production rule, and `SourceRevisionId` is supplied explicitly. The
+recorded overlay must equal that exact list, so no explicit version property,
+`MinVerSkip` or source-revision switch can be added in any switch form. PREPARE reads the properties after `GetAssemblyAttributes` runs and
 checks the built DLL's assembly version, file version and product version in
 PREPARE and again in VERIFY. The hosted version `0.0.0-compat.<run id>` gives
 `0.0.0.0` under every rule; offline tests use non-zero versions. Not covered:
@@ -174,7 +199,9 @@ share a code. Other driver refusals print `unregistered`; other exceptions print
 only their class from a fixed list, otherwise `exception-other`. When a driver
 stage fails after a tool call it also prints `PPDS_COMPAT_OPERATION=<name>`
 (a fixed operation name) and `PPDS_COMPAT_STATUS=<exit code|timeout|launch-failure>`
-for the last call. The coordinator passes through only registry codes, listed
+for the last call. That is the last tool call recorded, which need not be the
+cause: a refusal after a successful call reports that call with status 0. The
+coordinator passes through only registry codes, listed
 operation names and that status pattern, as `command_refusal`,
 `driver_operation` and `driver_status` in its failure JSON, and VERIFY prints
 a checkpoint after each download, the plan, custody and context checks, the
