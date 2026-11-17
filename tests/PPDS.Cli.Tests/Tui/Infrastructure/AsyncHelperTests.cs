@@ -58,7 +58,9 @@ public sealed class AsyncHelperTests
         Assert.Null(exception);
     }
 
-    private static async Task WaitForErrors(TuiErrorService errorService, int count, int timeoutMs = 2000)
+    // The poll returns as soon as the condition holds, so the deadline is only a backstop against a hang.
+    // It must be generous: a loaded CI runner can delay the thread-pool continuation that records the error.
+    private static async Task WaitForErrors(TuiErrorService errorService, int count, int timeoutMs = 30_000)
     {
         var stopwatch = Stopwatch.StartNew();
         while (errorService.RecentErrors.Count < count && stopwatch.ElapsedMilliseconds < timeoutMs)
