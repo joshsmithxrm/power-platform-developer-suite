@@ -56,6 +56,9 @@ public static class FormErrorCodes
     /// <summary>The form's iscustomizable flag is false; mutations are silently ignored by Dataverse.</summary>
     public const string FormNotCustomizable = "Forms.FormNotCustomizable";
 
+    /// <summary>A binding repair was submitted but reading the form back did not confirm it.</summary>
+    public const string RepairNotVerified = "Forms.RepairNotVerified";
+
     /// <summary>A tab with the same generated name already exists in the form.</summary>
     public const string DuplicateTabName = "Forms.DuplicateTabName";
 
