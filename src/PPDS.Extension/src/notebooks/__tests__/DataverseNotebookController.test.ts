@@ -827,7 +827,8 @@ describe('DataverseNotebookController DML safety', () => {
         expect(modalCalls()).toHaveLength(1);
         expect(daemon.querySql).toHaveBeenCalledTimes(2);
         expect(executionsFor(nb, 0).at(-1).output.some((output: any) => output.items[0].mime === 'application/vnd.code.notebook.error')).toBe(true);
-        expect(cellText(nb, 0)).toContain('may have partly applied');
+        // The daemon rejected it before execution, so it is not described as possibly applied.
+        expect(cellText(nb, 0)).not.toContain('may have partly applied');
         endedWith(nb, 0, false);
         controller.dispose();
     });
@@ -1024,11 +1025,11 @@ describe('DataverseNotebookController DML safety', () => {
         const { daemon, controller, run } = setup();
         guardLikeDaemon(daemon);
         answerDml(CONFIRM);
-        const statement = 'DELETE FROM account WHERE name = ‮1 = 1 --‬';
+        const statement = 'DELETE FROM account WHERE name = \u202E1 = 1 --\u202C';
         await run(sqlNotebook('bidi', [statement]));
         const detail = modalCalls()[0][1].detail;
         expect(detail).toContain('<U+202E>');
-        expect(detail).not.toContain('‮');
+        expect(detail).not.toContain('\u202E');
         expect(detail).toContain('shown as <U+XXXX>. The statement that runs is unchanged.');
         expect(confirmedCalls(daemon)[0].sql).toBe(statement);
         controller.dispose();
@@ -1110,6 +1111,60 @@ describe('DataverseNotebookController DML safety', () => {
         await pending;
         expect(executionsFor(nb, 1)).toHaveLength(0);
         expect(daemon.querySql).toHaveBeenCalledTimes(1);
+        controller.dispose();
+    });
+
+    function targetsDaemon(daemon: ReturnType<typeof setup>['daemon'], dmlTargets: unknown) {
+        daemon.querySql.mockImplementation(async (params: any) => {
+            if (params.dmlSafety?.isConfirmed) return result();
+            throw new ResponseError(-32000, 'confirm', { code: 'Query.DmlConfirmationRequired', dmlConfirmationRequired: true, dmlTargets });
+        });
+    }
+
+    it('says reported but unreadable write targets could not be read', async () => {
+        const { daemon, controller, run } = setup();
+        targetsDaemon(daemon, []);
+        answerDml(CONFIRM);
+        await run(sqlNotebook('cross', ['DELETE FROM PROD.account WHERE name = 1']));
+        const detail = modalCalls()[0][1].detail;
+        expect(detail).toContain('The daemon reported write targets, but they could not be read');
+        expect(detail).not.toContain('This daemon does not report');
+        controller.dispose();
+    });
+
+    it('marks a target with no type as protected and a target with no URL as another environment', async () => {
+        const { daemon, controller, run } = setup();
+        const ls = String.fromCharCode(0x2028);
+        targetsDaemon(daemon, [{ label: `REMOTE${ls}fake line`, url: 'https://remote.crm.dynamics.com' }, { label: 'NOURL', type: 'Development' }]);
+        answerDml(CONFIRM);
+        await run(sqlNotebook('cross', ['DELETE FROM REMOTE.account WHERE name = 1']));
+        const [prompt] = modalCalls();
+        expect(prompt[1].detail).toMatch(/REMOTE<U\+2028>fake line https:\/\/remote\.crm\.dynamics\.com \[OTHER ENVIRONMENT; TYPE UNKNOWN, TREATED AS PROTECTED\]/);
+        expect(prompt[1].detail).toMatch(/NOURL \(Development\) \[OTHER ENVIRONMENT\]/);
+        expect(prompt[1].detail).not.toContain(ls);
+        expect(prompt[0]).toContain('and 2 other environment(s)');
+        controller.dispose();
+    });
+
+    it('opens no confirmation when the notebook is interrupted before the modal', async () => {
+        const { daemon, controller, run, interrupt } = setup();
+        guardLikeDaemon(daemon);
+        answerDml(CONFIRM);
+        const nb = sqlNotebook('dml', ['DELETE FROM account WHERE name = 1']);
+        const native = host.controllers.at(-1);
+        const original = native.createNotebookCellExecution.getMockImplementation();
+        native.createNotebookCellExecution.mockImplementation((cell: any) => {
+            const execution = original(cell);
+            const replace = execution.replaceOutput;
+            execution.replaceOutput = vi.fn(async (outputs: any[]) => {
+                if (outputs.some(output => output.items.some((item: any) => String(item.value).includes('Waiting for DML confirmation')))) interrupt(nb);
+                return replace(outputs);
+            });
+            return execution;
+        });
+        await run(nb);
+        expect(modalCalls()).toHaveLength(0);
+        expect(confirmedCalls(daemon)).toHaveLength(0);
         controller.dispose();
     });
 });

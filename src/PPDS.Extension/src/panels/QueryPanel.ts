@@ -9,7 +9,7 @@ import { showErrorWithReport } from '../utils/errorNotify.js';
 import { queryDefaultTop } from '../utils/config.js';
 import {
     type DmlConfirmation, type DmlConfirmationOptions, type DmlTarget, UNCONFIRMED_DML_SAFETY, confirmDmlExecution, describeDmlFailure,
-    dmlRefusalMessage, dmlServerMessage, dmlWriteTargets, isDmlConfirmationRequired,
+    dmlMayHaveApplied, dmlRefusalMessage, dmlServerMessage, dmlWriteTargets, isDmlConfirmationRequired,
     DML_SUBMITTED_MAY_HAVE_APPLIED as SUBMITTED_MAY_HAVE_APPLIED, DML_SUBMITTED_THEN_CANCELLED as SUBMITTED_THEN_CANCELLED,
 } from '../utils/dmlSafety.js';
 
@@ -360,6 +360,24 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
     }
 
     /**
+     * True only when the daemon's own resolution of `profileName` (ProfileCollection.GetByNameOrIndex:
+     * "[N…]" and integers as an index, anything else as a case-insensitive name) is the active
+     * profile. No aliases such as "Profile N"; anything ambiguous is refused.
+     */
+    private static resolvesToActiveProfile(profileName: string, who: { index: number; name: string | null }): boolean {
+        const bracket = /^\[\s*([+-]?\d+)\s*\]/.exec(profileName);
+        if (profileName.startsWith('[')) return bracket !== null && QueryPanel.sameIndex(bracket[1], who.index);
+        if (/^\s*[+-]?\d+\s*$/.test(profileName)) return QueryPanel.sameIndex(profileName, who.index);
+        return who.name !== null && who.name.toUpperCase() === profileName.toUpperCase();
+    }
+
+    /** An integer string the daemon parses as an index (Int32 only; anything else is refused). */
+    private static sameIndex(value: string, index: number): boolean {
+        const parsed = Number(value.trim());
+        return Number.isSafeInteger(parsed) && parsed >= -2147483648 && parsed <= 2147483647 && parsed === index;
+    }
+
+    /**
      * Pins the profile of a DML confirmation by its opaque identity, as notebooks do, so a renamed
      * or re-pointed profile name cannot redirect the confirmed request. Returns why it cannot be
      * pinned when the environment URL or the profile cannot be resolved.
@@ -375,8 +393,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             return `the profile ${target.profileName} could not be resolved (${error instanceof Error ? error.message : String(error)}), so the statement cannot be confirmed`;
         }
         if (!who.profileIdentity) return 'this daemon does not report a profile identity, so the statement cannot be pinned to a profile. Update the PPDS daemon, then run it again';
-        const activeNames = [who.name, `Profile ${who.index}`, String(who.index)];
-        if (!activeNames.includes(target.profileName)) {
+        if (!QueryPanel.resolvesToActiveProfile(target.profileName, who)) {
             return `the profile ${target.profileName} is not the active profile, and only the active profile can be pinned by identity. Make it the active profile in PPDS Profiles, then run the statement again`;
         }
         return Object.freeze({ ...target, profileIdentity: who.profileIdentity });
@@ -433,8 +450,12 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             });
         } catch (error) {
             if (token.isCancellationRequested) {
-                // A newer execution replaced this one: it owns the webview state now.
-                if (this.queryCts?.token !== token) return;
+                // A newer execution replaced this one: it owns the webview state now. A confirmed
+                // request that was replaced still says it was submitted, in a separate notice.
+                if (this.queryCts?.token !== token) {
+                    if (isConfirmed) void vscode.window.showWarningMessage(`Data Explorer: ${SUBMITTED_THEN_CANCELLED} A newer execution replaced it. Check the data before running it again.`);
+                    return;
+                }
                 if (isConfirmed) {
                     this.postMessage({ command: 'queryError', error: `${SUBMITTED_THEN_CANCELLED} Check the data before running it again.` });
                 } else {
@@ -463,7 +484,8 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             }
 
             const msg = error instanceof Error ? error.message : String(error);
-            const submittedNote = isConfirmed ? `\n${SUBMITTED_MAY_HAVE_APPLIED}` : '';
+            const reachedExecution = isConfirmed && dmlMayHaveApplied(error);
+            const submittedNote = reachedExecution ? `\n${SUBMITTED_MAY_HAVE_APPLIED}` : '';
 
             if (target.capturedProfile && isAuthError(error)) {
                 this.postMessage({ command: 'queryError', error: `${msg}\nAuthentication failed for the captured notebook profile on ${target.environmentUrl}. Confirm the intended profile in PPDS Profiles, re-authenticate it, then run the query again.${submittedNote}` });
@@ -473,7 +495,7 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
             // The retry is always unconfirmed: a DML statement goes back through the daemon's
             // guard and a fresh modal for the target captured by that new attempt.
             if (await handleAuthError(this.daemon, error, isRetry, () =>
-                this.executeQuery(sql, true, useTds, language, undefined, isConfirmed ? AUTH_RETRY_NOTICE : undefined)
+                this.executeQuery(sql, true, useTds, language, undefined, reachedExecution ? AUTH_RETRY_NOTICE : undefined)
             )) {
                 return;
             }
@@ -494,6 +516,10 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
         const superseded = (): boolean => this.abortSignal.aborted || this.queryCts?.token !== token;
         const pinned = await this.pinTarget(target);
         if (superseded()) return;
+        if (token.isCancellationRequested) {
+            this.postMessage({ command: 'queryCancelled', message: 'Query cancelled. No records were changed.' });
+            return;
+        }
         if (typeof pinned === 'string') {
             this.postMessage({ command: 'queryError', error: `Not executed: ${pinned}. No records were changed.` });
             return;
@@ -511,17 +537,27 @@ export class QueryPanel extends WebviewPanelBase<QueryPanelWebviewToHost, QueryP
         }
         // A superseded confirmation never posts over the newer execution.
         if (superseded()) return;
-        if (token.isCancellationRequested || answer.kind === 'aborted') {
+        if (token.isCancellationRequested) {
             this.postMessage({ command: 'queryCancelled', message: 'Query cancelled. No records were changed.' });
             return;
         }
-        if (answer.kind === 'declined') {
-            this.postMessage({ command: 'queryCancelled', message: answer.message });
-            return;
-        }
-        if (answer.kind === 'failed') {
-            this.postMessage({ command: 'queryError', error: answer.message });
-            return;
+        switch (answer.kind) {
+            case 'confirmed':
+                break;
+            case 'aborted':
+                this.postMessage({ command: 'queryCancelled', message: 'Query cancelled. No records were changed.' });
+                return;
+            case 'declined':
+                this.postMessage({ command: 'queryCancelled', message: answer.message });
+                return;
+            case 'failed':
+                this.postMessage({ command: 'queryError', error: answer.message });
+                return;
+            default: {
+                const unexpected: never = answer;
+                this.postMessage({ command: 'queryError', error: `Not executed: unexpected confirmation result ${JSON.stringify(unexpected)}. No records were changed.` });
+                return;
+            }
         }
         if (!QueryPanel.sameTarget(target, this.captureTarget())) {
             this.postMessage({

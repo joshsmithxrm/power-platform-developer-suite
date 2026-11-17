@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type * as vscode from 'vscode';
+import * as vscode from 'vscode';
 import { ResponseError } from 'vscode-jsonrpc/node';
 
 import type { DaemonClient } from '../../daemonClient.js';
@@ -242,6 +242,10 @@ describe('Data Explorer DML safety', () => {
         ['the profile is not known yet', (panel: any) => { panel.profileName = undefined; }, 'profile of this panel is not known'],
         ['the environment URL is not known', (panel: any) => { panel.environmentUrl = undefined; }, 'environment URL of this panel is not known'],
         ['the daemon reports no identity', (panel: any, daemon: any) => { daemon.authWho.mockResolvedValue({ name: 'p', index: 1 }); }, 'does not report a profile identity'],
+        ['auth/who fails', (panel: any, daemon: any) => { daemon.authWho.mockRejectedValue(new Error('daemon restarting')); }, 'could not be resolved (daemon restarting)'],
+        ['the panel shows "Profile 2" for an unnamed active profile 2', (panel: any, daemon: any) => { panel.profileName = 'Profile 2'; daemon.authWho.mockResolvedValue({ name: null, index: 2, profileIdentity: 'id-2' }); }, 'not the active profile'],
+        ['the panel profile "2" is an index while the active profile is named "2"', (panel: any, daemon: any) => { panel.profileName = '2'; daemon.authWho.mockResolvedValue({ name: '2', index: 5, profileIdentity: 'id-5' }); }, 'not the active profile'],
+        ['the panel profile has a bracket form that is not an index', (panel: any, daemon: any) => { panel.profileName = '[x] p'; }, 'not the active profile'],
     ])('refuses without offering Execute when %s', async (_label, arrange, message) => {
         const { panel, daemon, posted } = setupPanel(false);
         guardLike(daemon);
@@ -326,6 +330,116 @@ describe('Data Explorer DML safety', () => {
         host.warning.mockResolvedValue(CONFIRM);
         await panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
         expect(posted()).toContainEqual({ command: 'queryError', error: expect.stringContaining('Cancelled after the confirmed statement was submitted: records may already have been changed.') });
-        expect(posted()).not.toContainEqual({ command: 'queryCancelled' });
+        expect(posted().some(message => message.command === 'queryCancelled')).toBe(false);
+    });
+
+    it.each([
+        ['an index', '2', { name: 'x', index: 2 }],
+        ['a bracketed index', '[2] x', { name: 'x', index: 2 }],
+        ['a name in another case', 'P', { name: 'p', index: 7 }],
+    ])('pins the active profile when the panel names it by %s, as the daemon resolves it', async (_label, profileName, who) => {
+        const { panel, daemon } = setupPanel(false);
+        guardLike(daemon);
+        panel.profileName = profileName;
+        daemon.authWho.mockResolvedValue({ ...who, profileIdentity: 'id-active' });
+        host.warning.mockResolvedValue(CONFIRM);
+        await panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
+        expect(confirmed(daemon)).toEqual([expect.objectContaining({ profileIdentity: 'id-active' })]);
+    });
+
+    it('opens no modal when cancelled while the profile is being resolved', async () => {
+        const { panel, daemon, posted } = setupPanel(false);
+        guardLike(daemon);
+        daemon.authWho.mockImplementation(async () => {
+            await panel.handleMessage({ command: 'cancelQuery' });
+            return { name: 'p', index: 1, profileIdentity: 'id-p' };
+        });
+        await panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
+        expect(modals()).toHaveLength(0);
+        expect(posted()).toContainEqual({ command: 'queryCancelled', message: 'Query cancelled. No records were changed.' });
+    });
+
+    it('cancelling while the modal is open sends nothing and says no records were changed', async () => {
+        const { panel, daemon, posted } = setupPanel();
+        guardLike(daemon);
+        host.warning.mockImplementation(async () => { await panel.handleMessage({ command: 'cancelQuery' }); return CONFIRM; });
+        await panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
+        expect(confirmed(daemon)).toHaveLength(0);
+        expect(posted()).toContainEqual({ command: 'queryCancelled', message: 'Query cancelled. No records were changed.' });
+    });
+
+    it('cancelling during the review step closes it and sends nothing', async () => {
+        const { panel, daemon } = setupPanel();
+        guardLike(daemon);
+        host.warning.mockResolvedValue(SHOW);
+        let reviewToken: any;
+        host.quickPick.mockImplementation(async (items: any[], _options: any, token: any) => {
+            reviewToken = token;
+            await panel.handleMessage({ command: 'cancelQuery' });
+            await new Promise(resolve => setTimeout(resolve, 0));
+            return items[0];
+        });
+        await panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
+        expect(reviewToken.isCancellationRequested).toBe(true);
+        expect(confirmed(daemon)).toHaveLength(0);
+    });
+
+    it('reports a rejected dialog as a failure and sends nothing', async () => {
+        const { panel, daemon, posted } = setupPanel();
+        guardLike(daemon);
+        host.warning.mockRejectedValue(new Error('dialog service unavailable'));
+        await panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
+        expect(confirmed(daemon)).toHaveLength(0);
+        expect(posted()).toContainEqual({ command: 'queryError', error: expect.stringContaining('could not be shown (dialog service unavailable)') });
+    });
+
+    it('reports a failure to open the full statement as a failure and sends nothing', async () => {
+        const { panel, daemon, posted } = setupPanel();
+        guardLike(daemon);
+        host.warning.mockResolvedValue(SHOW);
+        (vscode.workspace.openTextDocument as any).mockRejectedValueOnce(new Error('no editor available'));
+        await panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
+        expect(confirmed(daemon)).toHaveLength(0);
+        expect(posted()).toContainEqual({ command: 'queryError', error: expect.stringContaining('could not be opened (no editor available)') });
+    });
+
+    it('shows reported write targets and makes hidden characters in names visible', async () => {
+        const { panel, daemon } = setupPanel();
+        const rlo = String.fromCharCode(0x202E);
+        panel.environmentDisplayName = `Target${rlo}veD`;
+        daemon.querySql.mockImplementation(async (params: any) => {
+            if (params.dmlSafety?.isConfirmed) return response();
+            throw new ResponseError(-32000, 'confirm', {
+                code: 'Query.DmlConfirmationRequired', dmlConfirmationRequired: true,
+                dmlTargets: [{ label: 'local', url: ENV, type: 'Production' }, { label: `QA${rlo}`, url: OTHER, type: 'Test' }],
+            });
+        });
+        host.warning.mockResolvedValue(CONFIRM);
+        await panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
+        const [title, options] = modals()[0];
+        expect(title).toContain('Target<U+202E>veD');
+        expect(title).toContain('and 1 other environment(s)');
+        expect(options.detail).toContain('Writes to 2 environment(s):');
+        expect(options.detail).toContain('QA<U+202E>');
+        expect(options.detail).toMatch(/local \(Production\) https:\/\/target\.crm\.dynamics\.com \[this environment; PRODUCTION \/ PROTECTED\]/);
+        expect(`${title}${options.detail}`).not.toContain(rlo);
+        expect(options.detail).toContain('shown as <U+XXXX>');
+    });
+
+    it('a confirmed request replaced by a newer execution still says it was submitted, without posting over the newer one', async () => {
+        const { panel, daemon, posted } = setupPanel();
+        daemon.querySql.mockImplementation((params: any, token: any) => {
+            if (!/^\s*delete/i.test(params.sql)) return Promise.resolve(response());
+            if (params.dmlSafety?.isConfirmed !== true) return Promise.reject(confirmationRequired());
+            return new Promise((_resolve, reject) => token.onCancellationRequested(() => reject(new Error('Request cancelled'))));
+        });
+        host.warning.mockResolvedValue(CONFIRM);
+        const first = panel.handleMessage({ command: 'executeQuery', sql: DML, language: 'sql' });
+        await vi.waitFor(() => expect(confirmed(daemon)).toHaveLength(1));
+        await panel.handleMessage({ command: 'executeQuery', sql: 'SELECT name FROM account', language: 'sql' });
+        await first;
+        await vi.waitFor(() => expect(host.warning).toHaveBeenCalledWith(expect.stringContaining('A newer execution replaced it')));
+        expect(posted().at(-1).command).toBe('queryResult');
+        expect(posted().some(message => message.command === 'queryError')).toBe(false);
     });
 });

@@ -6,7 +6,7 @@ import type { QueryResultResponse } from '../types.js';
 import { isAuthError } from '../utils/errorUtils.js';
 import { showErrorWithReport } from '../utils/errorNotify.js';
 import {
-    UNCONFIRMED_DML_SAFETY, confirmDmlExecution, describeDmlFailure, dmlRefusalMessage, dmlServerMessage, dmlWriteTargets, isDmlConfirmationRequired,
+    UNCONFIRMED_DML_SAFETY, confirmDmlExecution, describeDmlFailure, dmlMayHaveApplied, dmlRefusalMessage, dmlServerMessage, dmlWriteTargets, isDmlConfirmationRequired,
     DML_SUBMITTED_MAY_HAVE_APPLIED as SUBMITTED_MAY_HAVE_APPLIED, DML_SUBMITTED_THEN_CANCELLED as SUBMITTED_THEN_CANCELLED,
 } from '../utils/dmlSafety.js';
 
@@ -416,11 +416,11 @@ export class DataverseNotebookController implements vscode.Disposable {
                 const message = error instanceof Error ? error.message : String(error);
                 await writeOutput(this.errorOutput(new Error(
                     `${message}\nAuthentication failed for the profile captured by this run (${context.profileName}) on ${context.environmentName}. Confirm the intended profile in PPDS Profiles, re-authenticate it, then run the cell again.`
-                    + (confirmedDml ? `\n${SUBMITTED_MAY_HAVE_APPLIED}` : ''),
+                    + (confirmedDml && dmlMayHaveApplied(error) ? `\n${SUBMITTED_MAY_HAVE_APPLIED}` : ''),
                 )));
                 return stopIfDml('an earlier DML cell failed');
             }
-            await writeOutputs([this.errorOutput(error), ...(confirmedDml ? [textOutput(SUBMITTED_MAY_HAVE_APPLIED)] : [])]);
+            await writeOutputs([this.errorOutput(error), ...(confirmedDml && dmlMayHaveApplied(error) ? [textOutput(SUBMITTED_MAY_HAVE_APPLIED)] : [])]);
             return stopIfDml('an earlier DML cell failed');
         } finally {
             if (this.activeExecutions.get(cellUri) === entry) this.activeExecutions.delete(cellUri);

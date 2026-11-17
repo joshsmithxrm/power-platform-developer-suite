@@ -50,9 +50,12 @@ const HEAD_CHARS = 900;
 const TAIL_LINES = 8;
 const TAIL_CHARS = 500;
 
-/** Control, zero-width and bidirectional formatting characters, made visible in dialogs. */
-const HIDDEN_IN_TEXT = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F؜​-‏‪-‮⁠-⁩﻿]/g;
-const HIDDEN_IN_LINE = /[\u0000-\u001F\u007F-\u009F؜​-‏‪-‮⁠-⁩﻿]/g;
+/**
+ * Control, zero-width, bidirectional formatting and line/paragraph separator characters, made
+ * visible in dialogs. Written with escapes only so the class can be read.
+ */
+const HIDDEN_IN_TEXT = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u061C\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2069\uFEFF]/g;
+const HIDDEN_IN_LINE = /[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2069\uFEFF]/g;
 
 export interface DmlTarget {
     readonly environmentName?: string | null;
@@ -64,8 +67,8 @@ export interface DmlTarget {
 export interface DmlConfirmationOptions {
     /** The daemon's confirmation text; shown only when it is not the CLI-only "--confirm" wording. */
     readonly serverMessage?: string;
-    /** Every environment the request writes to, from daemons that send `dmlTargets`. */
-    readonly writeTargets?: readonly DmlWriteTarget[];
+    /** Every environment the request writes to, from daemons that send `dmlTargets`; `unreadable` if sent but malformed. */
+    readonly writeTargets?: readonly DmlWriteTarget[] | typeof DML_TARGETS_UNREADABLE;
     /** Shown first in the dialog, for example after an earlier attempt may have partly applied. */
     readonly notice?: string;
     /** Aborting (interrupt, cancel, close) resolves the confirmation as aborted and closes the review prompt. */
@@ -90,6 +93,8 @@ export interface StatementPreview {
     readonly hiddenChars: number;
     /** Lines with at least one character not shown. */
     readonly hiddenLines: number;
+    /** True when U+2028/U+2029 ended a line; the display marks each one. */
+    readonly hasSeparators: boolean;
 }
 
 function dmlErrorData(error: unknown): DmlSafetyErrorData | undefined {
@@ -113,22 +118,40 @@ export function dmlServerMessage(error: unknown): string | undefined {
 
 const optionalString = (value: unknown): string | undefined => typeof value === 'string' && value.trim() ? value.trim() : undefined;
 
+/** `dmlTargets` was sent but is empty or malformed: treated as not listed, and said so. */
+export const DML_TARGETS_UNREADABLE = 'unreadable';
+
 /**
  * Environments the request writes to, read defensively from `dmlTargets` (daemons that report
- * them). Undefined when the daemon does not send the field or it is malformed.
+ * them). Undefined when the daemon does not send the field; `unreadable` when it is sent but
+ * empty or any entry is malformed (no entry is then trusted).
  */
-export function dmlWriteTargets(error: unknown): DmlWriteTarget[] | undefined {
-    const raw: unknown = dmlErrorData(error)?.dmlTargets;
-    if (!Array.isArray(raw) || raw.length === 0) return undefined;
+export function dmlWriteTargets(error: unknown): DmlWriteTarget[] | typeof DML_TARGETS_UNREADABLE | undefined {
+    const data = dmlErrorData(error);
+    if (!data || !('dmlTargets' in data) || data.dmlTargets === undefined || data.dmlTargets === null) return undefined;
+    const raw: unknown = data.dmlTargets;
+    if (!Array.isArray(raw) || raw.length === 0) return DML_TARGETS_UNREADABLE;
     const targets: DmlWriteTarget[] = [];
     for (const item of raw as unknown[]) {
-        if (!item || typeof item !== 'object') return undefined;
+        if (!item || typeof item !== 'object') return DML_TARGETS_UNREADABLE;
         const entry = item as Record<string, unknown>;
         const target = { label: optionalString(entry.label), url: optionalString(entry.url), type: optionalString(entry.type), protection: optionalString(entry.protection) };
-        if (!target.label && !target.url) return undefined;
+        if (!target.label && !target.url) return DML_TARGETS_UNREADABLE;
         targets.push(target);
     }
     return targets;
+}
+
+/** Codes the daemon returns before it executes anything; a confirmed request answered with them changed nothing. */
+const REJECTED_BEFORE_EXECUTION = new Set([
+    CONFIRMATION_REQUIRED_CODE, 'Query.ParseError', 'Auth.ProfileNotFound', 'Auth.NoActiveProfile',
+    'Connection.EnvironmentNotFound', 'Validation.RequiredField',
+]);
+
+/** False only when the daemon's answer shows the request was rejected before execution. */
+export function dmlMayHaveApplied(error: unknown): boolean {
+    const code = dmlErrorData(error)?.code;
+    return !(isDmlConfirmationRequired(error) || (code !== undefined && REJECTED_BEFORE_EXECUTION.has(code)));
 }
 
 /**
@@ -158,11 +181,18 @@ function visibleLine(text: string, changed: { value: boolean }): string {
 
 /** The modal text for a statement: whole, or its start and end with exactly what is hidden counted. */
 export function previewStatement(statement: string): StatementPreview {
-    const lines = statement.split(/\r\n|\n|\r/);
+    // U+2028/U+2029 count as line breaks (dialogs may render them as one) and are marked where they were.
+    const parts = statement.split(/(\r\n|\n|\r|\u2028|\u2029)/);
+    const lines = parts.filter((_, i) => i % 2 === 0);
+    const separatorAfter = new Set(parts.flatMap((part, i) => (i % 2 === 1 && /[\u2028\u2029]/.test(part) ? [(i - 1) / 2] : [])));
+    /** Text of lines [first, …] joined by line breaks, with each separator-ended line marked. */
+    const mark = (text: string, first: number): string => text.split('\n')
+        .map((line, i, all) => (i < all.length - 1 && separatorAfter.has(first + i) ? `${line}${escapeChar(parts[2 * (first + i) + 1])}` : line))
+        .join('\n');
     const normalised = lines.join('\n');
-    const base = { totalLines: lines.length, totalChars: normalised.length };
+    const base = { totalLines: lines.length, totalChars: normalised.length, hasSeparators: separatorAfter.size > 0 };
     if (lines.length <= MAX_PREVIEW_LINES && normalised.length <= MAX_PREVIEW_CHARS) {
-        return { ...base, text: normalised, truncated: false, hiddenChars: 0, hiddenLines: 0 };
+        return { ...base, text: mark(normalised, 0), truncated: false, hiddenChars: 0, hiddenLines: 0 };
     }
     const head = lines.slice(0, HEAD_LINES).join('\n').slice(0, HEAD_CHARS);
     const tailLines = lines.slice(-TAIL_LINES).join('\n');
@@ -174,7 +204,7 @@ export function previewStatement(statement: string): StatementPreview {
     const hiddenLines = hidden.length === 0 ? 0 : hidden.split('\n').length;
     return {
         ...base, truncated: true, hiddenChars: hidden.length, hiddenLines,
-        text: `${head}\n… ${hidden.length} character(s) on ${hiddenLines} line(s) not shown …\n${tail}`,
+        text: `${mark(head, 0)}\n… ${hidden.length} character(s) on ${hiddenLines} line(s) not shown …\n${mark(tail, lines.length - tail.split('\n').length)}`,
     };
 }
 
@@ -219,29 +249,40 @@ function targetLabel(target: DmlTarget, changed: { value: boolean }): { name: st
 
 const normalisedUrl = (url: string | null | undefined): string | undefined => url?.trim().replace(/\/+$/, '').toLowerCase() || undefined;
 
-const isProtected = (target: DmlWriteTarget): boolean =>
-    [target.protection, target.type].some(value => value?.toLowerCase() === 'production');
+/** Protection mark: production is protected, and a missing or unknown type is never treated as ordinary. */
+function protectionMark(target: DmlWriteTarget): string | undefined {
+    const values = [target.protection, target.type].map(value => value?.toLowerCase()).filter((value): value is string => !!value);
+    if (values.includes('production')) return 'PRODUCTION / PROTECTED';
+    if (values.length === 0 || values.every(value => value === 'unknown')) return 'TYPE UNKNOWN, TREATED AS PROTECTED';
+    return undefined;
+}
 
-function writeTargetLines(target: DmlTarget, writeTargets: readonly DmlWriteTarget[] | undefined, changed: { value: boolean }): string[] {
-    if (!writeTargets) {
-        return ['Other environments: SQL that names another environment (for example [LABEL].account) also writes there. '
-            + 'This daemon does not report those targets before execution, so other named environments are not listed here.'];
-    }
+/** A target is the bound environment only when both URLs are known and equal. */
+function isBoundTarget(target: DmlTarget, item: DmlWriteTarget): boolean {
     const bound = normalisedUrl(target.environmentUrl);
+    return bound !== undefined && normalisedUrl(item.url) === bound;
+}
+
+function writeTargetLines(target: DmlTarget, writeTargets: DmlConfirmationOptions['writeTargets'], changed: { value: boolean }): string[] {
+    const sentence = 'Other environments: SQL that names another environment (for example [LABEL].account) also writes there. ';
+    if (writeTargets === DML_TARGETS_UNREADABLE) {
+        return [`${sentence}The daemon reported write targets, but they could not be read, so other named environments are not listed here.`];
+    }
+    if (!writeTargets) {
+        return [`${sentence}This daemon does not report those targets before execution, so other named environments are not listed here.`];
+    }
     return [`Writes to ${writeTargets.length} environment(s):`, ...writeTargets.map(item => {
-        const marks = [
-            normalisedUrl(item.url) === bound ? 'this environment' : 'OTHER ENVIRONMENT',
-            ...(isProtected(item) ? ['PRODUCTION / PROTECTED'] : []),
-        ];
+        const protection = protectionMark(item);
+        const marks = [isBoundTarget(target, item) ? 'this environment' : 'OTHER ENVIRONMENT', ...(protection ? [protection] : [])];
         const kind = [item.type, item.protection && item.protection !== item.type ? `protection ${item.protection}` : undefined].filter(Boolean).join(', ');
         return `  - ${visibleLine(item.label ?? item.url ?? '', changed)}${kind ? ` (${visibleLine(kind, changed)})` : ''}`
             + `${item.url ? ` ${visibleLine(item.url, changed)}` : ''} [${marks.join('; ')}]`;
     })];
 }
 
-function otherTargetCount(target: DmlTarget, writeTargets: readonly DmlWriteTarget[] | undefined): number {
-    const bound = normalisedUrl(target.environmentUrl);
-    return writeTargets?.filter(item => normalisedUrl(item.url) !== bound).length ?? 0;
+function otherTargetCount(target: DmlTarget, writeTargets: DmlConfirmationOptions['writeTargets']): number {
+    if (!writeTargets || writeTargets === DML_TARGETS_UNREADABLE) return 0;
+    return writeTargets.filter(item => !isBoundTarget(target, item)).length;
 }
 
 interface DialogText {
@@ -255,7 +296,7 @@ function confirmationDialog(preview: StatementPreview, target: DmlTarget, mustRe
     const others = otherTargetCount(target, options.writeTargets);
     const where = `${name} (${type})${others > 0 ? ` and ${others} other environment(s)` : ''}`;
     const statement = visibleText(preview.text);
-    if (statement.changed) changed.value = true;
+    if (statement.changed || preview.hasSeparators) changed.value = true;
     const serverMessage = options.serverMessage && !options.serverMessage.includes('--confirm') ? options.serverMessage : undefined;
     const lines = [
         ...(options.notice ? [visibleLine(options.notice, changed), ''] : []),
@@ -288,6 +329,7 @@ function confirmationDialog(preview: StatementPreview, target: DmlTarget, mustRe
 /** Review prompt that stays until answered (focus may move to the opened document). */
 async function reviewStep(name: string, opened: 'read-only' | 'copy', signal: AbortSignal | undefined): Promise<{ value?: string; aborted: boolean }> {
     // Closing the quick pick on abort keeps no abandoned prompt on screen.
+    if (signal?.aborted) return { aborted: true };
     const cts = new CancellationTokenSource();
     const onAbort = (): void => cts.cancel();
     signal?.addEventListener('abort', onAbort, { once: true });
@@ -349,6 +391,7 @@ export async function confirmDmlExecution(statement: string, target: DmlTarget, 
     const name = targetLabel(target, { value: false }).name;
     let reviewed = false;
     for (;;) {
+        if (options.signal?.aborted) return { kind: 'aborted' };
         const mustReview = preview.truncated && !reviewed;
         const dialog = confirmationDialog(preview, target, mustReview, options);
         const buttons = mustReview ? [DML_SHOW_ACTION] : [DML_SHOW_ACTION, DML_CONFIRM_ACTION];

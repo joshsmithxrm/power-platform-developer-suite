@@ -3,8 +3,12 @@ import { ResponseError } from 'vscode-jsonrpc/node';
 
 vi.mock('vscode', () => ({ window: { showWarningMessage: vi.fn() } }));
 
+import * as vscode from 'vscode';
+
 import type { QueryResultResponse } from '../../types.js';
-import { describeDmlFailure, dmlRefusalMessage, dmlWriteTargets, isDmlConfirmationRequired, previewStatement, visibleText } from '../../utils/dmlSafety.js';
+import {
+    confirmDmlExecution, describeDmlFailure, dmlMayHaveApplied, dmlRefusalMessage, dmlWriteTargets, isDmlConfirmationRequired, previewStatement, visibleText,
+} from '../../utils/dmlSafety.js';
 
 function response(overrides: Partial<QueryResultResponse> = {}): QueryResultResponse {
     return {
@@ -72,16 +76,75 @@ describe('dmlSafety helpers', () => {
 
     it('reads dmlTargets defensively', () => {
         const error = (dmlTargets: unknown) => new ResponseError(1, 'x', { code: 'Query.DmlConfirmationRequired', dmlTargets });
+        expect(dmlWriteTargets(new ResponseError(1, 'x', { code: 'Query.DmlConfirmationRequired' }))).toBeUndefined();
         expect(dmlWriteTargets(error(undefined))).toBeUndefined();
-        expect(dmlWriteTargets(error('PROD'))).toBeUndefined();
-        expect(dmlWriteTargets(error([]))).toBeUndefined();
-        expect(dmlWriteTargets(error([{ label: 1 }]))).toBeUndefined();
+        expect(dmlWriteTargets(error(null))).toBeUndefined();
+        expect(dmlWriteTargets(error('PROD'))).toBe('unreadable');
+        expect(dmlWriteTargets(error([]))).toBe('unreadable');
+        expect(dmlWriteTargets(error([{ label: 1 }]))).toBe('unreadable');
+        expect(dmlWriteTargets(error([{ label: 'ok', url: 'https://a' }, 'bad']))).toBe('unreadable');
         expect(dmlWriteTargets(error([{ label: 'PROD', url: 'https://p', type: 'Production', protection: 5 }])))
             .toEqual([{ label: 'PROD', url: 'https://p', type: 'Production', protection: undefined }]);
     });
 
     it('makes control and bidirectional characters visible and keeps line breaks', () => {
-        expect(visibleText('a‮b\nc\u0007')).toEqual({ text: 'a<U+202E>b\nc<U+0007>', changed: true });
+        expect(visibleText('a\u202Eb\nc\u0007')).toEqual({ text: 'a<U+202E>b\nc<U+0007>', changed: true });
         expect(visibleText('plain\ttext')).toEqual({ text: 'plain\ttext', changed: false });
+    });
+
+    it.each([['CR', '\r']])('counts exactly what is hidden in a long %s-only statement', (_label, eol) => {
+        const lines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
+        const preview = previewStatement(lines.join(eol));
+        expect(preview).toMatchObject({ truncated: true, totalLines: 40, hiddenLines: 18, hiddenChars: lines.slice(14, 32).join('\n').length });
+        expect(14 + 8 + preview.hiddenLines).toBe(preview.totalLines);
+    });
+
+    it('counts a trailing line break as starting one more (empty) line', () => {
+        const lines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
+        const preview = previewStatement(`${lines.join('\n')}\n`);
+        const all = [...lines, ''];
+        const head = all.slice(0, 14).join('\n');
+        const tail = all.slice(33).join('\n');
+        expect(preview).toMatchObject({ truncated: true, totalLines: 41, hiddenLines: 19 });
+        expect(head.length + tail.length + preview.hiddenChars + 2).toBe(preview.totalChars);
+        expect(14 + 8 + preview.hiddenLines).toBe(preview.totalLines);
+    });
+
+    it('counts U+2028 and U+2029 as line breaks and marks them visibly', () => {
+        const ls = String.fromCharCode(0x2028);
+        const ps = String.fromCharCode(0x2029);
+        const preview = previewStatement(`DELETE FROM account WHERE statecode = 0 -- note${ls}AND name = 'test'${ps}`);
+        expect(preview).toMatchObject({ truncated: false, totalLines: 3, hasSeparators: true });
+        expect(preview.text).toBe("DELETE FROM account WHERE statecode = 0 -- note<U+2028>\nAND name = 'test'<U+2029>\n");
+        expect(preview.text).not.toContain(ls);
+        const many = previewStatement(Array.from({ length: 300 }, (_, i) => `x${i}`).join(ls));
+        expect(many).toMatchObject({ truncated: true, totalLines: 300 });
+        expect(many.text).not.toContain(ls);
+    });
+
+    it('opens no dialog when the execution is already cancelled', async () => {
+        const abort = new AbortController();
+        abort.abort();
+        await expect(confirmDmlExecution('DELETE FROM account WHERE name = 1', { environmentUrl: 'https://a' }, { signal: abort.signal }))
+            .resolves.toEqual({ kind: 'aborted' });
+        expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+    });
+
+    it('treats only pre-execution answers as having changed nothing', () => {
+        const coded = (code: string) => new ResponseError(1, 'x', { code });
+        expect(dmlMayHaveApplied(coded('Query.DmlConfirmationRequired'))).toBe(false);
+        expect(dmlMayHaveApplied(coded('Auth.ProfileNotFound'))).toBe(false);
+        expect(dmlMayHaveApplied(coded('Query.ExecutionFailed'))).toBe(true);
+        expect(dmlMayHaveApplied(new Error('connection reset'))).toBe(true);
+    });
+
+    it('never labels a target without a URL as this environment, even when the bound URL is unknown', async () => {
+        await confirmDmlExecution('DELETE FROM X.account WHERE name = 1', { environmentName: 'Bound' }, {
+            writeTargets: [{ label: 'NOURL', type: 'Development' }],
+        });
+        const [title, options] = (vscode.window.showWarningMessage as any).mock.calls.at(-1);
+        expect(options.detail).toMatch(/NOURL \(Development\) \[OTHER ENVIRONMENT\]/);
+        expect(options.detail).not.toContain('this environment');
+        expect(title).toContain('and 1 other environment(s)');
     });
 });
