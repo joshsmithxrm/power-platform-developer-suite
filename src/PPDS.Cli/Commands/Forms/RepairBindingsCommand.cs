@@ -50,7 +50,8 @@ public static class RepairBindingsCommand
         var command = new Command("repair-bindings",
             "Rewrite every control binding (datafieldname) on a Main form that differs from a column's logical name only by case to the " +
             "exact logical name, in tab sections, tab headers/footers and the form header/footer. Only those attribute values change: " +
-            "the rest of the stored form XML text (control ids, cells, labels, whitespace) is sent back as it was, and the form is read " +
+            "the rest of the stored form XML text (control ids, cells, labels, whitespace) is sent back as it was (Dataverse may still " +
+            "change what it stores, for example by filling an empty cell label), and the form is read " +
             "back to check that each rewritten control now holds the logical name. Reported and left unchanged: bindings that match no " +
             "column or several, control ids that differ by case, controls with a relationship or isunbound, controls outside the form " +
             "layout, and case-variant names in custom-control parameters, form events and hidden controls.")
