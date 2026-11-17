@@ -307,7 +307,7 @@ public class DmlRowCapTests
     // ---- TUI -----------------------------------------------------------------
 
     [Fact]
-    public async Task Tui_LoadMoreRequest_IsUnconfirmed_SoItCanNeverRunDml()
+    public async Task Tui_LoadMoreRequest_CanNeverRunDml()
     {
         var request = SqlQueryPresenter.BuildLoadMoreRequest(DeleteSql, 2, "cookie");
 
@@ -319,7 +319,8 @@ public class DmlRowCapTests
 
         var h = Create(rows: 3);
         var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(request));
-        Assert.Equal(ErrorCodes.Query.DmlConfirmationRequired, ex.ErrorCode);
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode); // a further page never runs DML, confirmed or not
+        Assert.Contains("further page", ex.Message);
         AssertNothingChanged(h);
     }
 }

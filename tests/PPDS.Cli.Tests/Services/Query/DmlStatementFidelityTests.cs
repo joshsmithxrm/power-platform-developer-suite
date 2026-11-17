@@ -270,4 +270,77 @@ public class DmlStatementFidelityTests
         Assert.Equal(new[] { ("Create", "account", 2) }, h.Writes);
     }
 
+    // ---- paging arguments (S4) ----------------------------------------------------------------
+
+    [Theory]
+    [InlineData(1, null)]
+    [InlineData(null, "cookie")]
+    public async Task ExplicitPaging_WithDml_IsRefusedBeforeExecuting_ExitCode3(int? page, string? cookie)
+    {
+        var h = DmlTestHarness.Create(rows: 2, pages: 3);
+
+        var ex = await Assert.ThrowsAsync<PpdsValidationException>(() => h.Service.ExecuteAsync(new SqlQueryRequest
+        {
+            Sql = DeleteSql,
+            PageNumber = page,
+            PagingCookie = cookie,
+            PagingIsUserSpecified = true,
+            DmlSafety = Confirmed
+        }));
+
+        Assert.Contains("--page", ex.Message);
+        Assert.Contains("INSERT, UPDATE or DELETE", ex.Message);
+        Assert.Equal(ExitCodes.InvalidArguments, ExceptionMapper.ToExitCode(ex));
+        h.AssertNothingChanged();
+    }
+
+    [Fact]
+    public async Task FirstPageArgument_NotAskedForByTheUser_NeverReachesDml_EveryPageIsAffected()
+    {
+        var h = DmlTestHarness.Create(rows: 2, pages: 3);
+
+        await h.Service.ExecuteAsync(new SqlQueryRequest { Sql = DeleteSql, PageNumber = 1, DmlSafety = Confirmed });
+
+        Assert.Equal(new[] { 6 }, h.Deleted); // all three pages of matches, not one
+    }
+
+    [Theory]
+    [InlineData(2, null)]
+    [InlineData(1, "cookie")]
+    [InlineData(null, "cookie")]
+    public async Task LoadMoreRequest_CanNeverExecuteDml_EvenConfirmed(int? page, string? cookie)
+    {
+        var h = DmlTestHarness.Create(rows: 2, pages: 3);
+        var request = RpcMethodHandler.BuildSqlRequest(new QuerySqlRequest
+        {
+            Sql = DeleteSql,
+            Page = page,
+            PagingCookie = cookie,
+            DmlSafety = new DmlSafetyRpcOptions { IsConfirmed = true }
+        });
+
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(request));
+
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        Assert.Contains("further page", ex.Message);
+        h.AssertNothingChanged();
+    }
+
+    [Fact]
+    public async Task Paging_WithSelect_StillPassesThePage()
+    {
+        var h = DmlTestHarness.Create(rows: 2, pages: 3);
+
+        var result = await h.Service.ExecuteAsync(new SqlQueryRequest
+        {
+            Sql = "SELECT name FROM account",
+            PageNumber = 2,
+            PagingCookie = "cookie",
+            PagingIsUserSpecified = true
+        });
+
+        Assert.Equal(2, result.Result.Count);
+        Assert.Contains(h.Reads, r => r.Page == 2 && r.Cookie == "cookie");
+    }
+
 }

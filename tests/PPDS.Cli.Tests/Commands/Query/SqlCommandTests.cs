@@ -590,6 +590,23 @@ public class SqlCommandTests
     }
 
     [Fact]
+    public void BuildRequest_MarksExplicitPagingAsUserSpecified()
+    {
+        const string sql = "DELETE FROM account WHERE name = 'x'";
+
+        Assert.True(SqlCommand.BuildRequest(sql, null, 1, null, false, false, new DmlSafetyOptions()).PagingIsUserSpecified);
+        Assert.True(SqlCommand.BuildRequest(sql, null, null, "cookie", false, false, new DmlSafetyOptions()).PagingIsUserSpecified);
+        Assert.False(SqlCommand.BuildRequest(sql, null, null, null, false, false, new DmlSafetyOptions()).PagingIsUserSpecified);
+    }
+
+    [Fact]
+    public void PagingHelp_SaysItDoesNotApplyToDml()
+    {
+        Assert.Contains("INSERT, UPDATE or DELETE", QueryCommandGroup.PageOption.Description);
+        Assert.Contains("INSERT, UPDATE or DELETE", QueryCommandGroup.PagingCookieOption.Description);
+    }
+
+    [Fact]
     public void TopHelp_SaysItDoesNotApplyToDml()
     {
         Assert.Contains("INSERT, UPDATE or DELETE", QueryCommandGroup.TopOption.Description);

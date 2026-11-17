@@ -35,6 +35,14 @@ public sealed record SqlQueryRequest
     public string? PagingCookie { get; init; }
 
     /// <summary>
+    /// True when a user explicitly asked for <see cref="PageNumber"/> or <see cref="PagingCookie"/> (CLI
+    /// <c>--page</c>, <c>--paging-cookie</c>). Paging selects returned rows only, so the service then refuses the
+    /// request if it contains DML. When false, paging values come from a caller: a first-page value is ignored for
+    /// DML, and a request for a further page (a page after the first, or a paging cookie) never runs DML.
+    /// </summary>
+    public bool PagingIsUserSpecified { get; init; }
+
+    /// <summary>
     /// Whether to include total record count in the result.
     /// Note: Cannot be used with TOP queries due to Dataverse limitation.
     /// </summary>

@@ -600,6 +600,29 @@ public sealed class SqlQueryService : ISqlQueryService
                 "executed. Put the limit in the statement's WHERE clause instead.");
         }
 
+        // Paging selects returned rows only. A DML source scan given a page would change one page of matches and
+        // report success, so paging never reaches DML: refused when the user asked for it, refused for a request
+        // that asks for a further page (load more), and otherwise (a caller's first-page value) ignored below.
+        var isPaged = request.PageNumber.HasValue || request.PagingCookie != null;
+        if (safetyResult.ContainsDml && isPaged)
+        {
+            if (request.PagingIsUserSpecified)
+            {
+                throw new PpdsValidationException(
+                    "page",
+                    "--page and --paging-cookie select returned rows only and do not apply to INSERT, UPDATE or " +
+                    "DELETE, so nothing was executed. Run the statement without them.");
+            }
+
+            if (request.PagingCookie != null || request.PageNumber > 1)
+            {
+                throw new PpdsException(
+                    ErrorCodes.Query.DmlBlocked,
+                    "This is a request for a further page of results, which never runs INSERT, UPDATE or DELETE. " +
+                    "Nothing was executed. Run the statement again as a new query.");
+            }
+        }
+
         if (safetyResult.IsBlocked)
         {
             throw new PpdsException(
@@ -659,8 +682,8 @@ public sealed class SqlQueryService : ISqlQueryService
         var planOptions = new QueryPlanOptions
         {
             MaxRows = effectiveMaxRows,
-            PageNumber = request.PageNumber,
-            PagingCookie = request.PagingCookie,
+            PageNumber = safetyResult.ContainsDml ? null : request.PageNumber,
+            PagingCookie = safetyResult.ContainsDml ? null : request.PagingCookie,
             IncludeCount = request.IncludeCount,
             UseTdsEndpoint = request.UseTdsEndpoint,
             OriginalSql = request.Sql,

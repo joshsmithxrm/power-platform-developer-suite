@@ -407,6 +407,7 @@ public static class SqlCommand
         TopIsUserSpecified = top.HasValue,
         PageNumber = page,
         PagingCookie = pagingCookie,
+        PagingIsUserSpecified = page.HasValue || pagingCookie != null,
         IncludeCount = count,
         UseTdsEndpoint = useTds,
         DmlSafety = dmlSafety
