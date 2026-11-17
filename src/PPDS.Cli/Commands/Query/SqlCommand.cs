@@ -234,18 +234,12 @@ public static class SqlCommand
                     return remoteProvider.GetRequiredService<IQueryExecutor>();
                 };
 
-                // Wire environment-specific DML safety settings (mirrors InteractiveSession)
-                concreteSqlService.ProfileResolver = resolver;
-                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-                var envConfig = await envConfigStore.GetConfigAsync(
-                    connectionInfo.EnvironmentUrl, cancellationToken);
-                if (envConfig != null)
-                {
-                    concreteSqlService.EnvironmentSafetySettings = envConfig.SafetySettings;
-                    var envType = envConfig.Type ?? EnvironmentType.Unknown;
-                    concreteSqlService.EnvironmentProtectionLevel = envConfig.Protection
-                        ?? DmlSafetyGuard.DetectProtectionLevel(envType);
-                }
+                await ConfigureDmlSafetyAsync(
+                    concreteSqlService,
+                    envConfigStore,
+                    resolver,
+                    serviceProvider.GetRequiredService<ResolvedConnectionInfo>().EnvironmentUrl,
+                    cancellationToken);
             }
 
             // If --explain, show execution plan without executing
@@ -466,6 +460,28 @@ public static class SqlCommand
 
         var succeeded = sq.Value is long s && s > 0;
         return succeeded ? ExitCodes.PartialSuccess : ExitCodes.Failure;
+    }
+
+    /// <summary>
+    /// Wires environment-specific DML safety settings (mirrors InteractiveSession). Shared by every
+    /// CLI entry point that executes SQL so they all apply the same guard configuration.
+    /// </summary>
+    internal static async Task ConfigureDmlSafetyAsync(
+        SqlQueryService service,
+        EnvironmentConfigStore envConfigStore,
+        ProfileResolutionService resolver,
+        string environmentUrl,
+        CancellationToken cancellationToken)
+    {
+        service.ProfileResolver = resolver;
+        var envConfig = await envConfigStore.GetConfigAsync(environmentUrl, cancellationToken);
+        if (envConfig != null)
+        {
+            service.EnvironmentSafetySettings = envConfig.SafetySettings;
+            var envType = envConfig.Type ?? EnvironmentType.Unknown;
+            service.EnvironmentProtectionLevel = envConfig.Protection
+                ?? DmlSafetyGuard.DetectProtectionLevel(envType);
+        }
     }
 
     internal static StructuredError BuildDmlFailureError(QueryResult result, string? firstError)

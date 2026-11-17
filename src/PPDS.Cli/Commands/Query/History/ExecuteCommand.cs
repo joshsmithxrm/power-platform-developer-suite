@@ -130,13 +130,12 @@ public static class ExecuteCommand
                     remoteProviders.Add(remoteProvider);
                     return remoteProvider.GetRequiredService<IQueryExecutor>();
                 };
+
+                await SqlCommand.ConfigureDmlSafetyAsync(
+                    concreteSqlService, envConfigStore, resolver, environmentUrl, cancellationToken);
             }
 
-            var request = new SqlQueryRequest
-            {
-                Sql = entry.Sql,
-                TopOverride = top
-            };
+            var request = BuildRequest(entry.Sql, top);
 
             var queryResult = await sqlQueryService.ExecuteAsync(request, cancellationToken);
 
@@ -172,4 +171,15 @@ public static class ExecuteCommand
         }
     }
 
+    /// <summary>
+    /// Builds the replay request. Uses the same guard defaults as 'ppds query sql' without
+    /// --confirm/--dry-run/--no-limit: replayed DML is checked (confirmation, row cap, environment
+    /// protection) instead of skipping safety.
+    /// </summary>
+    internal static SqlQueryRequest BuildRequest(string sql, int? top) => new()
+    {
+        Sql = sql,
+        TopOverride = top,
+        DmlSafety = new DmlSafetyOptions()
+    };
 }
