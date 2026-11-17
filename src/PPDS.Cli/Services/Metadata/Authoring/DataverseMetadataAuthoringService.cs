@@ -839,10 +839,9 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         reporter?.ReportPhase("Retrieving existing choice");
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-
-        var retrieveRequest = new RetrieveOptionSetRequest { Name = request.Name };
-        var retrieveResponse = (RetrieveOptionSetResponse)await client.ExecuteAsync(retrieveRequest, ct).ConfigureAwait(false);
+        // #1535: the exact spelling is retrieved first; a case variant resolves to the stored name.
+        // The retrieve lease is returned before the update acquires its own.
+        var (_, retrieveResponse) = await RetrieveGlobalChoiceAsync(request.Name, "Name", retrieveAsIfPublished: false, ct).ConfigureAwait(false);
 
         reporter?.ReportPhase("Updating global choice", request.Name);
 
@@ -859,7 +858,10 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             SolutionUniqueName = request.SolutionUniqueName
         };
 
-        await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        {
+            await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
 
         _cacheProvider?.InvalidateGlobalOptionSets();
 
@@ -880,7 +882,10 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _validator.ValidateRequiredString(request.SolutionUniqueName, "SolutionUniqueName");
         _validator.ValidateRequiredString(request.Name, "Name");
 
-        await EnsureDeleteAllowedAsync(new MetadataDeleteTarget(MetadataDeleteKind.GlobalChoice, request.SolutionUniqueName, Name: request.Name), ct).ConfigureAwait(false);
+        // Delete is exact-name only (#1535): a caller that needs case resolution previews first
+        // (PreviewDeleteAsync reports TargetName) and deletes that stored name after confirmation.
+        await EnsureDeleteAllowedAsync(new MetadataDeleteTarget(MetadataDeleteKind.GlobalChoice, request.SolutionUniqueName, Name: request.Name), ct,
+            request.ExpectedMetadataId).ConfigureAwait(false);
 
         if (request.DryRun)
         {
@@ -921,31 +926,40 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             return request.Value ?? 0;
         }
 
-        var sdkRequest = new InsertOptionValueRequest
+        async Task<InsertOptionValueResponse> InsertAsync(string optionSetName)
         {
-            OptionSetName = request.OptionSetName,
-            Label = new Label(request.Label, 1033),
-            Value = request.Value,
-            SolutionUniqueName = request.SolutionUniqueName
-        };
+            var sdkRequest = new InsertOptionValueRequest
+            {
+                OptionSetName = optionSetName,
+                Label = new Label(request.Label, 1033),
+                Value = request.Value,
+                SolutionUniqueName = request.SolutionUniqueName
+            };
 
-        if (!string.IsNullOrEmpty(request.Description))
-            sdkRequest.Description = new Label(request.Description, 1033);
-        if (!string.IsNullOrEmpty(request.EntityLogicalName))
-            sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
-        if (!string.IsNullOrEmpty(request.AttributeLogicalName))
-            sdkRequest["AttributeLogicalName"] = request.AttributeLogicalName;
+            if (!string.IsNullOrEmpty(request.Description))
+                sdkRequest.Description = new Label(request.Description, 1033);
+            if (!string.IsNullOrEmpty(request.EntityLogicalName))
+                sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
+            if (!string.IsNullOrEmpty(request.AttributeLogicalName))
+                sdkRequest["AttributeLogicalName"] = request.AttributeLogicalName;
 
-        InsertOptionValueResponse response;
-        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
-        {
-            response = (InsertOptionValueResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+            await using var client = await GetMetadataClientAsync(ct).ConfigureAwait(false);
+            return (InsertOptionValueResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
         }
+
+        // #1535: a global choice is inserted under the caller's spelling first; only a server rejection
+        // resolves the stored name and retries. Local (entity + attribute) targets are sent unchanged.
+        var optionSetName = request.OptionSetName;
+        InsertOptionValueResponse response;
+        if (IsLocalOptionTarget(request.EntityLogicalName, request.AttributeLogicalName))
+            response = await InsertAsync(optionSetName).ConfigureAwait(false);
+        else
+            (optionSetName, response) = await WithGlobalChoiceNameAsync(optionSetName, "OptionSetName", InsertAsync, null, ct).ConfigureAwait(false);
 
         // Color is applied via OptionMetadata.Color (UpdateOptionSet/UpdateAttribute), never the
         // InsertOptionValue["Color"] indexer — that parameter is silently dropped by the platform.
         if (!string.IsNullOrEmpty(request.Color))
-            await ApplyOptionColorAsync(request.OptionSetName, request.EntityLogicalName, request.AttributeLogicalName,
+            await ApplyOptionColorAsync(optionSetName, request.EntityLogicalName, request.AttributeLogicalName,
                 response.NewOptionValue, request.Color, request.SolutionUniqueName, ct).ConfigureAwait(false);
 
         _logger?.LogInformation("Added option value {Value} to {OptionSet}", response.NewOptionValue, request.OptionSetName);
@@ -981,7 +995,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         var sdkRequest = new SdkUpdateOptionValueRequest
         {
-            OptionSetName = request.OptionSetName,
+            OptionSetName = target.OptionSetName,
             Value = target.Value,
             Label = new Label(request.NewLabel ?? target.Label, 1033),
             SolutionUniqueName = request.SolutionUniqueName
@@ -1002,7 +1016,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         // Color is applied to the resolved option via OptionMetadata.Color (UpdateOptionSet/UpdateAttribute),
         // never the UpdateOptionValue["Color"] indexer — that parameter is silently dropped by the platform.
         if (!string.IsNullOrEmpty(request.Color))
-            await ApplyOptionColorAsync(request.OptionSetName, request.EntityLogicalName, request.AttributeLogicalName,
+            await ApplyOptionColorAsync(target.OptionSetName, request.EntityLogicalName, request.AttributeLogicalName,
                 target.Value, request.Color, request.SolutionUniqueName, ct).ConfigureAwait(false);
 
         _logger?.LogInformation("Updated option value {Value} in {OptionSet}", target.Value, request.OptionSetName);
@@ -1035,7 +1049,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         var sdkRequest = new SdkDeleteOptionValueRequest
         {
-            OptionSetName = request.OptionSetName,
+            OptionSetName = target.OptionSetName,
             Value = target.Value,
             SolutionUniqueName = request.SolutionUniqueName
         };
@@ -1055,26 +1069,22 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     /// Retrieves a global option set (as-if-published, so unpublished edits are visible) and
     /// resolves the target option by value or label (#1169). Mirrors <see cref="ResolveColumnOption"/>.
     /// </summary>
-    private async Task<(int Value, string Label)> ResolveGlobalOptionAsync(
+    private async Task<(int Value, string Label, string OptionSetName)> ResolveGlobalOptionAsync(
         string optionSetName, int? value, string? label, CancellationToken ct)
     {
         RetrieveOptionSetResponse retrieveResponse;
+        var requestedName = optionSetName;
         try
         {
-            var retrieveRequest = new RetrieveOptionSetRequest
-            {
-                Name = optionSetName,
-                RetrieveAsIfPublished = true
-            };
-
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-            retrieveResponse = (RetrieveOptionSetResponse)await client.ExecuteAsync(retrieveRequest, ct).ConfigureAwait(false);
+            // #1535: the exact spelling is retrieved first; a case variant resolves to the stored name.
+            (optionSetName, retrieveResponse) = await RetrieveGlobalChoiceAsync(
+                requestedName, "OptionSetName", retrieveAsIfPublished: true, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
             throw; // R2: cancellation must propagate
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not MetadataValidationException)
         {
             throw new PpdsException(MetadataErrorCodes.EntityNotFound,
                 $"Could not retrieve option set '{optionSetName}'.", ex);
@@ -1096,7 +1106,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                     var matchedLabel = option.Label?.UserLocalizedLabel?.Label
                         ?? option.Label?.LocalizedLabels?.FirstOrDefault()?.Label
                         ?? "";
-                    return (value.Value, matchedLabel);
+                    return (value.Value, matchedLabel, optionSetName);
                 }
             }
 
@@ -1121,6 +1131,12 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 labelMatches.Add((optionValue, optionLabel));
         }
 
+        // #1531 follow-up: 'optionset <name>' lists published labels, so a draft-resolved label must not act on
+        // an option other than the one the listing shows under that label.
+        if (labelMatches.Count <= 1)
+            await EnsureGlobalOptionLabelAgreesWithPublishedAsync(optionSetName, label!,
+                labelMatches.Select(m => m.Value), ct).ConfigureAwait(false);
+
         if (labelMatches.Count == 0)
             throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
                 $"Option with label '{label}' not found in option set '{optionSetName}'.",
@@ -1132,7 +1148,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 $"(values: {string.Join(", ", labelMatches.Select(m => m.Value))}). " +
                 "Select the target option with --value instead.");
 
-        return labelMatches[0];
+        return (labelMatches[0].Value, labelMatches[0].Label, optionSetName);
     }
 
     /// <inheritdoc />
@@ -1143,20 +1159,30 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         _validator.ValidateRequiredString(request.OptionSetName, "OptionSetName");
 
-        var sdkRequest = new OrderOptionRequest
+        async Task<OrganizationResponse> OrderAsync(string optionSetName)
         {
-            OptionSetName = request.OptionSetName,
-            Values = request.Order,
-            SolutionUniqueName = request.SolutionUniqueName
-        };
+            var sdkRequest = new OrderOptionRequest
+            {
+                OptionSetName = optionSetName,
+                Values = request.Order,
+                SolutionUniqueName = request.SolutionUniqueName
+            };
 
-        if (!string.IsNullOrEmpty(request.EntityLogicalName))
-            sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
-        if (!string.IsNullOrEmpty(request.AttributeLogicalName))
-            sdkRequest["AttributeLogicalName"] = request.AttributeLogicalName;
+            if (!string.IsNullOrEmpty(request.EntityLogicalName))
+                sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
+            if (!string.IsNullOrEmpty(request.AttributeLogicalName))
+                sdkRequest["AttributeLogicalName"] = request.AttributeLogicalName;
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-        await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+            await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
+            return await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
+
+        // #1535: a global choice is ordered under the caller's spelling first; only a server rejection
+        // resolves the stored name and retries. Local (entity + attribute) targets are sent unchanged.
+        if (IsLocalOptionTarget(request.EntityLogicalName, request.AttributeLogicalName))
+            await OrderAsync(request.OptionSetName).ConfigureAwait(false);
+        else
+            await WithGlobalChoiceNameAsync(request.OptionSetName, "OptionSetName", OrderAsync, null, ct).ConfigureAwait(false);
 
         _logger?.LogInformation("Reordered options in {OptionSet}", request.OptionSetName);
     }
@@ -1389,7 +1415,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     public Task<IReadOnlyList<StatusReasonInfo>> ListStatusReasonsAsync(string entityLogicalName, CancellationToken ct = default)
         => ReadStatusReasonsAsync(entityLogicalName, retrieveAsIfPublished: false, ct);
 
-    // Allocation needs draft values, while public lists and existing target resolution remain published.
+    // Allocation and write-target resolution need draft values (#1531); the public list remains published.
     private async Task<IReadOnlyList<StatusReasonInfo>> ReadStatusReasonsAsync(
         string entityLogicalName, bool retrieveAsIfPublished, CancellationToken ct)
     {
@@ -1463,8 +1489,10 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         int targetValue;
         string? currentLabel = null;
 
-        // Always list to get currentLabel — prevents blank-label clobber when NewLabel is null
-        var statusReasons = await ListStatusReasonsAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+        // Always read to get currentLabel — prevents blank-label clobber when NewLabel is null.
+        // #1531: resolve the target from draft (as-if-published) metadata so a reason added moments earlier,
+        // and its unpublished label, are visible. The public list stays published.
+        var statusReasons = await ReadStatusReasonsAsync(request.EntityLogicalName, retrieveAsIfPublished: true, ct).ConfigureAwait(false);
 
         if (request.Value.HasValue)
         {
@@ -1484,6 +1512,10 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             var labelMatches = statusReasons
                 .Where(r => string.Equals(r.Label, request.Label, StringComparison.OrdinalIgnoreCase))
                 .ToList();
+
+            if (labelMatches.Count <= 1)
+                await EnsureStatusReasonLabelAgreesWithPublishedAsync(request.EntityLogicalName, request.Label!,
+                    labelMatches.Select(r => r.Value), ct).ConfigureAwait(false);
 
             if (labelMatches.Count == 0)
                 throw new MetadataValidationException(
@@ -1520,11 +1552,11 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             {
                 await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException && !(ex is OperationCanceledException && ct.IsCancellationRequested))
             {
                 throw new PpdsException(
                     MetadataErrorCodes.SdkOperationFailed,
-                    $"Failed to update status reason (value {targetValue}) on '{request.EntityLogicalName}'.",
+                    AppendDataverseFaultCode($"Failed to update status reason (value {targetValue}) on '{request.EntityLogicalName}'.", ex),
                     ex);
             }
         }
@@ -1553,7 +1585,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 "Provide --value or --label to identify the target status reason.",
                 "Value");
 
-        var removeReasons = await ListStatusReasonsAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
+        // #1531: resolve the target from draft (as-if-published) metadata so an unpublished reason can be removed.
+        var removeReasons = await ReadStatusReasonsAsync(request.EntityLogicalName, retrieveAsIfPublished: true, ct).ConfigureAwait(false);
 
         int targetValue;
 
@@ -1573,6 +1606,10 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             var labelMatches = removeReasons
                 .Where(r => string.Equals(r.Label, request.Label, StringComparison.OrdinalIgnoreCase))
                 .ToList();
+
+            if (labelMatches.Count <= 1)
+                await EnsureStatusReasonLabelAgreesWithPublishedAsync(request.EntityLogicalName, request.Label!,
+                    labelMatches.Select(r => r.Value), ct).ConfigureAwait(false);
 
             if (labelMatches.Count == 0)
                 throw new MetadataValidationException(
@@ -1605,11 +1642,11 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             {
                 await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException && !(ex is OperationCanceledException && ct.IsCancellationRequested))
             {
                 throw new PpdsException(
                     MetadataErrorCodes.SdkOperationFailed,
-                    $"Failed to remove status reason (value {targetValue}) from '{request.EntityLogicalName}'.",
+                    AppendDataverseFaultCode($"Failed to remove status reason (value {targetValue}) from '{request.EntityLogicalName}'.", ex),
                     ex);
             }
         }
@@ -1628,7 +1665,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     public Task<IReadOnlyList<ColumnOptionInfo>> ListColumnOptionsAsync(string entityLogicalName, string columnLogicalName, CancellationToken ct = default)
         => ReadColumnOptionsAsync(entityLogicalName, columnLogicalName, retrieveAsIfPublished: false, ct);
 
-    // Keep draft-aware allocation separate from published list/update/remove semantics.
+    // Draft-aware reads serve allocation and update/remove target resolution (#1531); the public list stays published.
     private async Task<IReadOnlyList<ColumnOptionInfo>> ReadColumnOptionsAsync(
         string entityLogicalName, string columnLogicalName, bool retrieveAsIfPublished, CancellationToken ct)
     {
@@ -1760,8 +1797,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
                 "Provide --value or --label to identify the target option.", "Value");
 
-        var options = await ListColumnOptionsAsync(request.EntityLogicalName, request.ColumnLogicalName, ct).ConfigureAwait(false);
-        var target = ResolveColumnOption(options, request.Value, request.Label, request.EntityLogicalName, request.ColumnLogicalName);
+        // #1531: resolve the target (and its current label) from draft metadata so an unpublished option is visible.
+        var target = await ResolveDraftColumnOptionAsync(request.EntityLogicalName, request.ColumnLogicalName, request.Value, request.Label, ct).ConfigureAwait(false);
 
         if (request.DryRun)
         {
@@ -1783,10 +1820,10 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
             await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException && !(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                $"Failed to update option {target.Value} on '{request.EntityLogicalName}.{request.ColumnLogicalName}'.", ex);
+                AppendDataverseFaultCode($"Failed to update option {target.Value} on '{request.EntityLogicalName}.{request.ColumnLogicalName}'.", ex), ex);
         }
 
         if (!string.IsNullOrEmpty(request.Color))
@@ -1812,8 +1849,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
                 "Provide --value or --label to identify the target option.", "Value");
 
-        var options = await ListColumnOptionsAsync(request.EntityLogicalName, request.ColumnLogicalName, ct).ConfigureAwait(false);
-        var target = ResolveColumnOption(options, request.Value, request.Label, request.EntityLogicalName, request.ColumnLogicalName);
+        // #1531: resolve the target from draft metadata so an unpublished option can be removed.
+        var target = await ResolveDraftColumnOptionAsync(request.EntityLogicalName, request.ColumnLogicalName, request.Value, request.Label, ct).ConfigureAwait(false);
 
         if (request.DryRun)
         {
@@ -1834,10 +1871,10 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
             await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException && !(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                $"Failed to remove option {target.Value} from '{request.EntityLogicalName}.{request.ColumnLogicalName}'.", ex);
+                AppendDataverseFaultCode($"Failed to remove option {target.Value} from '{request.EntityLogicalName}.{request.ColumnLogicalName}'.", ex), ex);
         }
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
@@ -2074,55 +2111,6 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         return attr;
     }
 
-    private async Task<string> ResolveGlobalChoiceNameAsync(string name, CancellationToken ct)
-    {
-        OptionSetMetadataBase[] definitions;
-        try
-        {
-            await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-            var response = await client.ExecuteAsync(
-                new RetrieveAllOptionSetsRequest { RetrieveAsIfPublished = true }, ct).ConfigureAwait(false);
-            definitions = (response as RetrieveAllOptionSetsResponse)?.OptionSetMetadata
-                ?? throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                    "Dataverse did not return the global choice definitions.");
-        }
-        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
-        {
-            var (error, exitCode) = ExceptionMapper.MapWithExitCode(ex);
-            if (exitCode == ExitCodes.AuthError)
-                throw new PpdsAuthException(error.Code, $"Could not retrieve the global choices to resolve '{name}'.", ex)
-                {
-                    RequiresReauthentication = ex is DataverseAuthenticationException { RequiresReauthentication: true }
-                };
-
-            var code = exitCode is ExitCodes.ConnectionError or ExitCodes.InvalidArguments
-                ? error.Code
-                : MetadataErrorCodes.SdkOperationFailed;
-            throw new PpdsException(code, $"Could not retrieve the global choices to resolve '{name}'.", ex);
-        }
-
-        var matches = definitions.Where(d => string.Equals(d?.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
-        var exact = matches.Where(d => string.Equals(d.Name, name, StringComparison.Ordinal)).ToArray();
-        var candidates = exact.Length > 0 ? exact : matches;
-        if (candidates.Length == 0)
-            throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
-                $"Global choice '{name}' was not found. List the available choices with 'ppds metadata optionsets'.",
-                nameof(CreateColumnRequest.OptionSetName));
-        if (candidates.Length > 1)
-            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
-                $"Global choice '{name}' matched multiple definitions. Check the exact stored name.",
-                nameof(CreateColumnRequest.OptionSetName));
-
-        var selected = candidates[0];
-        if (selected is not OptionSetMetadata || selected.IsGlobal == false
-            || selected.OptionSetType is not (null or OptionSetType.Picklist))
-            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
-                $"'{selected.Name}' is not a global picklist that can be attached to a Choice or Choices column.",
-                nameof(CreateColumnRequest.OptionSetName));
-
-        return selected.Name;
-    }
-
     private static PicklistAttributeMetadata BuildChoiceAttribute(CreateColumnRequest request, OptionDefinition[]? options)
     {
         var attr = new PicklistAttributeMetadata();
@@ -2221,21 +2209,26 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         string optionSetName, int value, string color, string? solutionUniqueName, CancellationToken ct)
     {
         OptionSetMetadata? optionSet;
-        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
+        try
         {
-            try
+            // #1531: read as-if-published so an option inserted moments earlier (add-option --color) is found,
+            // and so the UpdateOptionSet below re-sends the draft option set rather than the published one.
+            // #1535: the exact spelling is retrieved first; a case variant resolves to the stored name.
+            RetrieveOptionSetResponse retrieveResponse;
+            (optionSetName, retrieveResponse) = await WithGlobalChoiceNameAsync(optionSetName, "OptionSetName", async name =>
             {
-                var retrieveResponse = (RetrieveOptionSetResponse)await client
-                    .ExecuteAsync(new RetrieveOptionSetRequest { Name = optionSetName }, ct).ConfigureAwait(false);
-                // RetrieveOptionSetResponse.OptionSetMetadata is typed as the base; the Options collection lives on
-                // the picklist-typed OptionSetMetadata. A boolean choice (no Options) falls through to OptionNotFound.
-                optionSet = retrieveResponse.OptionSetMetadata as OptionSetMetadata;
-            }
-            catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
-            {
-                throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                    $"Failed to retrieve global choice '{optionSetName}' to apply color.", ex);
-            }
+                await using var client = await GetMetadataClientAsync(ct).ConfigureAwait(false);
+                return (RetrieveOptionSetResponse)await client
+                    .ExecuteAsync(new RetrieveOptionSetRequest { Name = name, RetrieveAsIfPublished = true }, ct).ConfigureAwait(false);
+            }, response => response?.OptionSetMetadata?.Name, ct).ConfigureAwait(false);
+            // RetrieveOptionSetResponse.OptionSetMetadata is typed as the base; the Options collection lives on
+            // the picklist-typed OptionSetMetadata. A boolean choice (no Options) falls through to OptionNotFound.
+            optionSet = retrieveResponse.OptionSetMetadata as OptionSetMetadata;
+        }
+        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
+        {
+            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                $"Failed to retrieve global choice '{optionSetName}' to apply color.", ex);
         }
 
         var target = optionSet?.Options?.FirstOrDefault(o => o.Value == value)

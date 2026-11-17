@@ -31,6 +31,19 @@ public class MetadataValidationException : Exception
     }
 
     /// <summary>
+    /// Initializes a new instance for a single-field validation failure caused by <paramref name="innerException"/>.
+    /// </summary>
+    public MetadataValidationException(string errorCode, string message, string? field, Exception? innerException)
+        : base(message, innerException)
+    {
+        ErrorCode = errorCode;
+        Field = field;
+        ValidationMessages = field != null
+            ? [new ValidationMessage { Field = field, Rule = errorCode, Message = message }]
+            : [];
+    }
+
+    /// <summary>
     /// Initializes a new instance for multiple validation failures.
     /// </summary>
     public MetadataValidationException(string errorCode, string message, IReadOnlyList<ValidationMessage> messages)
