@@ -715,7 +715,12 @@ def prepare(args, plan, rt):
         "-p:InformationalVersion=" + plan["version"] + "+" + plan["source"],
         "-p:IncludeSourceRevisionInInformationalVersion=false", "-p:RepositoryCommit=" + plan["source"],
         "-p:SourceRevisionId=" + plan["source"], "-p:ContinuousIntegrationBuild=true",
-        "-p:DebugType=portable"
+        "-p:DebugType=portable",
+        # MinVer computes the version from Git tags inside a build target and overwrites the
+        # version properties above. The owned copy has no .git, so it would stamp its
+        # 0.0.0-alpha.0 fallback on the assembly and the package. Skip it so the explicit
+        # candidate version is the one that is built, packed and then verified.
+        "-p:MinVerSkip=true"
     ]
     build_records = {}
     for control in (False, True):
