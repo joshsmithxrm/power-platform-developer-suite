@@ -229,6 +229,13 @@ public static class ErrorCodes
         /// <summary>DML operation would affect more rows than the configured cap.</summary>
         public const string DmlRowCapExceeded = "Query.DmlRowCapExceeded";
 
+        /// <summary>
+        /// A SQL run was interrupted after it had already changed data. Deliberately not an <c>Auth.*</c> code even when
+        /// the cause was an expired sign-in: a client must not re-authenticate and replay the request, because the
+        /// statements that already ran would run again.
+        /// </summary>
+        public const string DmlInterrupted = "Query.DmlInterrupted";
+
         /// <summary>Query plan generation timed out.</summary>
         public const string PlanTimeout = "Query.PlanTimeout";
 

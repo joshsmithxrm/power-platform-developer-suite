@@ -1,3 +1,4 @@
+using Moq;
 using System.Text.Json;
 using PPDS.Cli.Commands.Serve.Handlers;
 using PPDS.Cli.Infrastructure.Errors;
@@ -94,16 +95,55 @@ public class DmlInterruptedRunTests
     }
 
     [Fact]
-    public async Task AuthFailureAfterDmlRan_IsWrapped_AndNeverAsksToReauthenticateAndRetry()
+    public async Task AuthFailureAfterDmlRan_IsReportedWithANonRetryableCode_OnEverySurface()
     {
         var h = FailingOn("contact", new DataverseAuthenticationException("token expired", requiresReauthentication: true));
 
-        var ex = await Assert.ThrowsAsync<PpdsAuthException>(() => h.Service.ExecuteAsync(
+        var ex = await Assert.ThrowsAsync<PpdsDmlInterruptedException>(() => h.Service.ExecuteAsync(
             new SqlQueryRequest { Sql = TwoDeletes, DmlSafety = Confirmed }));
 
-        Assert.Equal(ErrorCodes.Auth.Expired, ex.ErrorCode);
-        Assert.False(ex.RequiresReauthentication); // a retry would run statement #1 again
+        // Not an Auth.* code: clients (the released extension) re-authenticate and replay on those.
+        Assert.Equal(ErrorCodes.Query.DmlInterrupted, ex.ErrorCode);
+        Assert.True(ex.AuthenticationRequired);
+        Assert.Contains("token expired", ex.UserMessage);
+        Assert.Contains("do not simply re-run", ex.UserMessage);
         Assert.NotNull(DmlOutcome.From(ex));
+        Assert.Equal(ExitCodes.Failure, ExceptionMapper.ToExitCode(ex)); // CLI: no auth exit code, no retry
+
+        Assert.True(RpcMethodHandler.TryMapQuerySqlFailure(ex, TwoDeletes, out var rpc));
+        var data = Data(rpc!);
+        Assert.Equal(ErrorCodes.Query.DmlInterrupted, data.GetProperty("code").GetString());
+        Assert.DoesNotContain("Auth.", rpc!.StructuredErrorCode);
+        Assert.True(data.GetProperty("authenticationRequired").GetBoolean());
+        Assert.Contains("#1 DELETE account: 3 affected", data.GetProperty("dmlCommitted").GetString());
+    }
+
+    [Fact]
+    public async Task PpdsAuthFailureAfterDmlRan_IsAlsoReportedWithTheNonRetryableCode()
+    {
+        var h = FailingOn("contact", new PpdsAuthException(ErrorCodes.Auth.Expired, "token expired") { RequiresReauthentication = true });
+
+        var ex = await Assert.ThrowsAsync<PpdsDmlInterruptedException>(() => h.Service.ExecuteAsync(
+            new SqlQueryRequest { Sql = TwoDeletes, DmlSafety = Confirmed }));
+
+        Assert.Equal(ErrorCodes.Query.DmlInterrupted, ex.ErrorCode);
+    }
+
+    [Fact]
+    public async Task AuthFailureBeforeAnyDml_KeepsItsAuthCode()
+    {
+        var auth = new DataverseAuthenticationException("token expired", requiresReauthentication: true);
+
+        // A SELECT that fails on sign-in before any DML keeps the normal behaviour (raw auth exception, re-auth flow).
+        var executor = new Moq.Mock<PPDS.Dataverse.Query.IQueryExecutor>();
+        executor.Setup(x => x.ExecuteFetchXmlAsync(Moq.It.IsAny<string>(), Moq.It.IsAny<int?>(), Moq.It.IsAny<string?>(), Moq.It.IsAny<bool>(), Moq.It.IsAny<CancellationToken>())).ThrowsAsync(auth);
+        executor.Setup(x => x.ExecuteFetchXmlAsync(Moq.It.IsAny<string>(), Moq.It.IsAny<int?>(), Moq.It.IsAny<string?>(), Moq.It.IsAny<bool>(), Moq.It.IsAny<PPDS.Dataverse.Query.QueryExecutionOptions?>(), Moq.It.IsAny<CancellationToken>())).ThrowsAsync(auth);
+        var service = new SqlQueryService(executor.Object, guard: new PPDS.Cli.Tests.Services.Shared.InactiveFakeShakedownGuard());
+
+        var ex = await Assert.ThrowsAsync<DataverseAuthenticationException>(() => service.ExecuteAsync(
+            new SqlQueryRequest { Sql = "SELECT name FROM account" }));
+
+        Assert.True(ex.RequiresReauthentication);
     }
 
     [Fact]

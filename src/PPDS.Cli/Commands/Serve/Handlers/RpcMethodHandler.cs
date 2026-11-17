@@ -394,6 +394,9 @@ public partial class RpcMethodHandler : IDisposable
                 data.ResourceType = notFoundEx.ResourceType;
                 data.ResourceId = notFoundEx.ResourceId;
                 break;
+            case Services.Query.PpdsDmlInterruptedException interrupted when interrupted.AuthenticationRequired:
+                data.AuthenticationRequired = true;
+                break;
         }
 
         data.DmlCommitted = Services.Query.DmlOutcome.From(ex)?.DescribeCommitted();

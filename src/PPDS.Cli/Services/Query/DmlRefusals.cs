@@ -51,3 +51,21 @@ public sealed class PpdsDmlConfirmationRequiredException : PpdsException
     /// <summary>The environments the request would write to.</summary>
     public IReadOnlyList<DmlTarget> Targets { get; }
 }
+
+/// <summary>
+/// A SQL run was stopped by a sign-in failure after it had already changed data (<c>Query.DmlInterrupted</c>). It is
+/// never reported with an <c>Auth.*</c> code, so no surface re-authenticates and replays the request (which would run
+/// the statements that already ran a second time). <see cref="AuthenticationRequired"/> tells the user to sign in.
+/// </summary>
+public sealed class PpdsDmlInterruptedException : PpdsException
+{
+    /// <summary>Creates the exception.</summary>
+    public PpdsDmlInterruptedException(string message, bool authenticationRequired, Exception inner)
+        : base(ErrorCodes.Query.DmlInterrupted, message, inner)
+    {
+        AuthenticationRequired = authenticationRequired;
+    }
+
+    /// <summary>True when the interruption was a sign-in failure: the user must sign in again before the next request.</summary>
+    public bool AuthenticationRequired { get; }
+}

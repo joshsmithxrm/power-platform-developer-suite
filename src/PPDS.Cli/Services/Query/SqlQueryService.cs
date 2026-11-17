@@ -253,7 +253,7 @@ public sealed class SqlQueryService : ISqlQueryService
         {
             throw WrapRowCapExceeded(ex, context);
         }
-        catch (Exception ex) when (DmlRan(context) && ex is not PpdsException and not OperationCanceledException)
+        catch (Exception ex) when (DmlRan(context) && ex is not OperationCanceledException && (ex is not PpdsException || ex is PpdsAuthException))
         {
             throw WrapInterrupted(ex, context);
         }
@@ -323,12 +323,13 @@ public sealed class SqlQueryService : ISqlQueryService
         var message = PPDS.Dataverse.Security.ConnectionStringRedactor.RedactExceptionMessage(ex.Message);
         PpdsException wrapped = ex switch
         {
-            PPDS.Dataverse.Resilience.DataverseAuthenticationException auth => new PpdsAuthException(
-                auth.RequiresReauthentication ? ErrorCodes.Auth.Expired : ErrorCodes.Auth.InsufficientPermissions, message, ex)
-            {
-                // Never re-authenticate and retry automatically: statements that already ran would run again.
-                RequiresReauthentication = false
-            },
+            // Never an Auth.* code after data changed: clients re-authenticate and replay on those, which would run the
+            // statements that already ran again.
+            PPDS.Dataverse.Resilience.DataverseAuthenticationException or PpdsAuthException => new PpdsDmlInterruptedException(
+                $"The run was interrupted by a sign-in failure after it had already changed data: {message} Sign in again " +
+                "before running anything else, and do not simply re-run the request: statements that already ran would run again.",
+                authenticationRequired: true,
+                ex),
             QueryExecutionException query => new PpdsException(query.ErrorCode, message, ex),
             _ => new PpdsException(ErrorCodes.Query.ExecutionFailed, message, ex)
         };
@@ -490,7 +491,7 @@ public sealed class SqlQueryService : ISqlQueryService
                 {
                     throw WrapRowCapExceeded(ex, context);
                 }
-                catch (Exception ex) when (DmlRan(context) && ex is not PpdsException and not OperationCanceledException)
+                catch (Exception ex) when (DmlRan(context) && ex is not OperationCanceledException && (ex is not PpdsException || ex is PpdsAuthException))
                 {
                     throw WrapInterrupted(ex, context);
                 }

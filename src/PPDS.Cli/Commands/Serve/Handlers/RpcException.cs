@@ -138,6 +138,14 @@ public class RpcErrorData
     [JsonPropertyName("dmlCommitted")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DmlCommitted { get; set; }
+
+    /// <summary>
+    /// <c>Query.DmlInterrupted</c> only: the run stopped on a sign-in failure after it had changed data. The user must
+    /// sign in again; the request must not be replayed.
+    /// </summary>
+    [JsonPropertyName("authenticationRequired")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? AuthenticationRequired { get; set; }
 }
 
 /// <summary>
