@@ -203,6 +203,20 @@ public sealed class FormControlIdUniquenessTests
         FormXmlValidator.Validate(written);
     }
 
+    [Fact]
+    public async Task LegacyReorder_Service_PassesTableColumnNames_SoTheSuffixSkipsARealColumn()
+    {
+        // Header holds bare id p; the table also has a real column p1. The service must hand the column names to the
+        // editor, so the new reorder cell for p becomes p2, not p1.
+        var p = ContributorFormFixture.Priority;
+        var h = new ContributorFormHarness(CancellationToken.None, extraColumns: [p + "1"],
+            transform: doc => doc.Root!.Add(Area("header", p, p)));
+        await h.Service.ReorderFieldsWithResultAsync(new("account", "Fixture", "General", ["name", p]));
+        var written = XDocument.Parse(Assert.Single(h.Writes));
+        Assert.Equal(p + "2", IdIn(written, "General", p));
+        AssertControlIdsUnique(written);
+    }
+
     private static XDocument FooterForm(string footerField) => new(new XElement("form",
         new XElement("tabs", new XElement("tab", new XAttribute("id", "{10000000-0000-0000-0000-000000000001}"),
             new XElement("columns", new XElement("column", new XElement("sections",
@@ -319,12 +333,11 @@ public sealed class FormControlIdUniquenessTests
 
     [Theory]
     [InlineData(new string[0], "name")]
-    [InlineData(new[] { "name" }, "name")] // only a control *without* an id attribute: see the missing-id row
+    [InlineData(new[] { "name" }, "name")] // a control bound to "name" but with no id attribute occupies nothing
     [InlineData(new[] { "name" }, "name1", true)]
     [InlineData(new[] { "name", "name1", "name3" }, "name2", true)]
     [InlineData(new[] { "NAME", "Name1" }, "name2", true)]
     [InlineData(new[] { "header_name" }, "name", true)]
-    [InlineData(new[] { "" }, "name", true)] // empty id occupies nothing
     public void NextFieldControlId_IsDeterministicSmallestFreeSuffix(string[] existingIds, string expected, bool withIdAttribute = false)
     {
         var doc = new XDocument(new XElement("form", existingIds.Select(id => withIdAttribute
@@ -345,12 +358,26 @@ public sealed class FormControlIdUniquenessTests
     }
 
     [Fact]
-    public void NextFieldControlId_ReservedPendingIdsAreHonoured()
+    public void NextFieldControlId_IsCaseInsensitiveWhateverSetTheCallerPasses()
     {
-        // Callers that plan several cells before attaching them add each planned id to the used set.
-        var used = FormXmlEditor.UsedControlIds(FooterForm("x"));
-        var first = FormXmlEditor.NextFieldControlId(used, "x");
-        used.Add(first);
-        Assert.Equal(("x1", "x2"), (first, FormXmlEditor.NextFieldControlId(used, "x")));
+        // A case-sensitive caller set must not let "NAME"/"Name1" through as free for "name"/"name1".
+        var caseSensitive = new HashSet<string>(["NAME", "Name1"], StringComparer.Ordinal);
+        Assert.Equal("name2", FormXmlEditor.NextFieldControlId(caseSensitive, "name"));
+        Assert.Equal("name2", FormXmlEditor.NextFieldControlId(new SortedSet<string>(["NAME", "Name1"], StringComparer.Ordinal), "name"));
+    }
+
+    [Fact]
+    public async Task Add_ColumnOnlyInHiddenControls_KeepsItsBareNameOnTheFirstVisiblePlacement()
+    {
+        // <hiddencontrols>/<data> entries are not controls and must not force a suffix on the common first placement.
+        var p = ContributorFormFixture.Priority;
+        var h = new ContributorFormHarness(CancellationToken.None, transform: doc => doc.Root!.Add(new XElement("hiddencontrols",
+            new XElement("data", new XAttribute("id", p), new XAttribute("datafieldname", p), new XAttribute("classid", TextBox)))));
+        var result = await h.Service.AddFieldsWithResultAsync(new("account", "Fixture", "General", [p]));
+        Assert.Equal(new[] { new AddedFieldControl(p, p) }, result.AddedControls);
+        var written = XDocument.Parse(Assert.Single(h.Writes));
+        Assert.Equal(p, IdIn(written, "General", p));
+        Assert.Equal(p, (string?)written.Root!.Element("hiddencontrols")!.Element("data")!.Attribute("id"));
+        FormXmlValidator.Validate(written);
     }
 }

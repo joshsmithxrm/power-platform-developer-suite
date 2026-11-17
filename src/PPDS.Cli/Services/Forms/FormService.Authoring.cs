@@ -89,6 +89,8 @@ public sealed partial class FormService
                 catch (Exception ex)
                 {
                     result.DraftWrite = SubmissionFailure(ex);
+                    // A definite failure means the control is not on the form; an unknown outcome keeps the submitted id.
+                    if (result.DraftWrite.Status == "failed") result.ControlId = null;
                     result.Status = "partial";
                     return result;
                 }

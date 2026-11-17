@@ -212,6 +212,8 @@ internal static partial class FormXmlEditor
                 : (string?)element.Attribute("name") ?? (string?)element.Attribute("id") ?? "(unnamed)";
     }
 
+    // XDocument-returning form of AddFieldControl, kept for the existing editor tests' fluent style; production code calls
+    // AddFieldControl so it can report the assigned id.
     internal static XDocument AddField(XDocument formXml, string sectionLabel, string fieldLogicalName, string classId, string displayName)
     {
         AddFieldControl(formXml, sectionLabel, fieldLogicalName, classId, displayName);
@@ -347,6 +349,7 @@ internal static partial class FormXmlEditor
             throw new PpdsException(FormErrorCodes.DuplicateSubgridName,
                 $"A sub-grid with name '{controlName}' already exists. Use a label with a distinct name.");
         // Control ids are unique on the form: a sub-grid must not take an id another control (e.g. a field) already uses.
+        // This also covers the sub-grid check above, which is kept first only for its more specific message.
         if (UsedControlIds(formXml).Contains(controlName))
             throw new PpdsException(FormErrorCodes.DuplicateSubgridName,
                 $"Another control on the form already uses the id '{controlName}'. Use a label with a distinct name.");
@@ -589,7 +592,8 @@ internal static partial class FormXmlEditor
                 .Select(c => (string?)c.Attribute("id")).Where(id => !string.IsNullOrEmpty(id))!,
             StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Convenience overload over the document's current control ids.</summary>
+    /// <summary>Convenience overload over the document's current control ids. Not used by production code (callers that
+    /// plan several cells keep their own set); kept as the readable entry point for the id-rule tests.</summary>
     internal static string NextFieldControlId(XDocument formXml, string fieldLogicalName, IEnumerable<string>? tableColumnNames = null)
         => NextFieldControlId(UsedControlIds(formXml), fieldLogicalName, tableColumnNames);
 
@@ -604,6 +608,9 @@ internal static partial class FormXmlEditor
     /// </summary>
     internal static string NextFieldControlId(ISet<string> usedControlIds, string fieldLogicalName, IEnumerable<string>? tableColumnNames = null)
     {
+        // Case-insensitivity must not depend on the caller's set: a set from UsedControlIds is used as is, any other is copied.
+        if (usedControlIds is not HashSet<string> { Comparer: var comparer } || !ReferenceEquals(comparer, StringComparer.OrdinalIgnoreCase))
+            usedControlIds = new HashSet<string>(usedControlIds, StringComparer.OrdinalIgnoreCase);
         if (!usedControlIds.Contains(fieldLogicalName)) return fieldLogicalName;
         var columns = new HashSet<string>(tableColumnNames ?? [], StringComparer.OrdinalIgnoreCase);
         for (var n = 1; ; n++)

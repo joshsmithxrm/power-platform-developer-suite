@@ -196,6 +196,44 @@ public sealed class FormAuthoringTests
         h.Publications.Should().Be(0);
     }
 
+    [Theory]
+    [Trait("AC", "AC-72")]
+    [InlineData("failed")]
+    [InlineData("unknown")]
+    [InlineData("verification-failed")]
+    public async Task ControlId_IsNullOnlyWhenTheDraftWriteDefinitelyFailed(string outcome)
+    {
+        // telephone1 is new to the fixture form, so the planned/submitted id is the bare "telephone1".
+        using var h = new Harness
+        {
+            IgnoreWrite = outcome != "unknown",
+            WriteFailure = outcome switch
+            {
+                "failed" => new FaultException<OrganizationServiceFault>(new OrganizationServiceFault { Message = "rejected" }),
+                "unknown" => new IOException("connection lost"),
+                _ => null
+            }
+        };
+        var result = await h.Service.AddFieldDraftAsync(h.Request());
+        result.Status.Should().Be("partial");
+        switch (outcome)
+        {
+            case "failed":
+                result.DraftWrite.Status.Should().Be("failed");
+                result.ControlId.Should().BeNull("no control was written");
+                break;
+            case "unknown":
+                result.DraftWrite.Status.Should().Be("unknown");
+                result.ControlId.Should().Be("telephone1", "the submitted id is kept, unconfirmed");
+                break;
+            default:
+                result.DraftWrite.Status.Should().Be("succeeded");
+                result.DraftVerification.Status.Should().Be("failed");
+                result.ControlId.Should().Be("telephone1", "the written id is kept, unconfirmed by readback");
+                break;
+        }
+    }
+
     [Fact]
     public async Task ServerIgnoringDraftWrite_ReportsVerificationFailure()
     {
