@@ -115,7 +115,7 @@ public sealed class LiveTestConfiguration : IDisposable
 
     /// <summary>
     /// Name of an existing PPDS auth profile (PPDS_TEST_PROFILE) for local runs without a service-principal secret.
-    /// Honoured only by the in-process metadata live tests (see <see cref="ProfileConnectionSource"/>); every other
+    /// Honoured only by the in-process metadata live tests (see <see cref="LiveTestProfileConnectionSource"/>); every other
     /// live test still needs the service-principal settings.
     /// </summary>
     public string? ProfileName { get; }

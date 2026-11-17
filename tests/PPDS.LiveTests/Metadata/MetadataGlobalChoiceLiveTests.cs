@@ -25,11 +25,11 @@ namespace PPDS.LiveTests.Metadata;
 /// dotnet test tests/PPDS.LiveTests/PPDS.LiveTests.csproj -f net8.0 --filter "FullyQualifiedName~MetadataGlobalChoiceLiveTests" --logger "console;verbosity=detailed"
 /// </code>
 /// Settings: DATAVERSE_URL, PPDS_TEST_APP_ID, PPDS_TEST_CLIENT_SECRET, PPDS_TEST_TENANT_ID, PPDS_TEST_SOLUTION,
-/// PPDS_TEST_PREFIX. For a local run without a secret, set DATAVERSE_URL and PPDS_TEST_PROFILE (the name of an existing,
+/// PPDS_TEST_PREFIX. For a local run without a secret, set DATAVERSE_URL and PPDS_TEST_PROFILE (the name of an existing InteractiveBrowser,
 /// already signed-in PPDS auth profile bound to that environment) instead of the three PPDS_TEST_APP_ID/CLIENT_SECRET/
 /// TENANT_ID settings: the token is acquired silently through the product's profile store and credential provider, the
 /// run fails rather than prompting when a sign-in would be needed, and the connected organisation must equal
-/// DATAVERSE_URL before anything is written (<see cref="ProfileConnectionSource"/>). Optional PPDS_TEST_SECOND_LCID (a provisioned language other than 1033) for the multi-language
+/// DATAVERSE_URL before anything is written (<see cref="LiveTestProfileConnectionSource"/>). Optional PPDS_TEST_SECOND_LCID (a provisioned language other than 1033) for the multi-language
 /// tests, which are reported as skipped without it. The detailed console logger is needed to see the "OBSERVED" lines
 /// (fault codes, messages, label languages); xunit hides the output of passing tests otherwise.
 /// <para>
@@ -352,7 +352,7 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
             var raw = await ObserveAsync(pool, "InsertOptionValue (missing solution)",
                 new InsertOptionValueRequest { OptionSetName = stored, Label = new Label("Probe", English), SolutionUniqueName = missingSolution });
             _output.WriteLine($"OBSERVED {raw.Operation}: {raw.Outcome}");
-            raw.Code.Should().NotBeNull("Dataverse must reject an unknown solution");
+            raw.Code.Should().Be(ObjectDoesNotExist, "an unknown solution on InsertOptionValue is ObjectDoesNotExist (0x80040217)");
             (await RetrieveChoiceAsync(pool, stored, asIfPublished: true)).Options.Should().HaveCount(1, "the rejected raw probe must write nothing");
 
             foreach (var spelling in new[] { stored, MisCase(stored) })
@@ -379,7 +379,7 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
         await WithChoiceAsync(pool, name, "Clear test", new Label("English description", English), [new Label("One", English)], async () =>
         {
             var outcome = await ClearDescriptionAsync(pool, service, name);
-            outcome.Should().BeOneOf("cleared", "kept", "rejected");
+            outcome.Should().Be("cleared", "an empty English description sent with MergeLabels clears the English text");
         });
     }
 
@@ -423,6 +423,166 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
                     label.LocalizedLabels.Select(l => l.LanguageCode).Should().Contain(shown.LanguageCode,
                         "a user-localised label must be one of the option's own labels");
             }
+        });
+    }
+
+    // AC-146 raw mechanisms for a local option, a status reason and a state value, one variable per step: the
+    // OptionMetadata.Color carrier through UpdateAttribute is ignored (also after PublishXml); the Color parameter of
+    // UpdateOptionValue / InsertOptionValue / InsertStatusValue is stored without a solution, alone or with a Label and
+    // Description; an omitted Label, Description or Color leaves that value unchanged.
+    [MetadataLiveFact]
+    public async Task ColourMechanisms_LocalOptionStatusReasonAndStateValue()
+    {
+        var (pool, _) = await ConnectAsync();
+        await WithTableAsync(pool, Labels("Open", null), async (entity, column) =>
+        {
+            async Task<OptionMetadata> Opt(string attribute, int value, bool asIfPublished = true)
+                => (await RetrieveOptionsAsync(pool, entity, attribute, asIfPublished)).Single(o => o.Value == value);
+            async Task Expect(string step, string attribute, int value, string? color, string label, string? description)
+            {
+                var option = await Opt(attribute, value);
+                _output.WriteLine($"OBSERVED {step}: color {option.Color ?? "null"}, label '{Text(option.Label, English)}', description '{Text(option.Description, English)}'");
+                option.Color.Should().Be(color, step);
+                Text(option.Label, English).Should().Be(label, step);
+                Text(option.Description, English).Should().Be(description, step);
+            }
+            Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest Update(string attribute, int value, string? solution)
+            {
+                var request = new Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest { Value = value, MergeLabels = true, SolutionUniqueName = solution };
+                request["EntityLogicalName"] = entity;
+                request["AttributeLogicalName"] = attribute;
+                return request;
+            }
+            Task Publish() => ExecuteAsync(pool, new PublishXmlRequest { ParameterXml = $"<importexportxml><entities><entity>{entity}</entity></entities></importexportxml>" });
+            async Task Carrier(string attribute, int value, string color)
+            {
+                var read = (EnumAttributeMetadata)((RetrieveAttributeResponse)await ExecuteAsync(pool,
+                    new RetrieveAttributeRequest { EntityLogicalName = entity, LogicalName = attribute, RetrieveAsIfPublished = true })).AttributeMetadata;
+                read.OptionSet.Options.Single(o => o.Value == value).Color = color;
+                EnumAttributeMetadata carrier = attribute == "statuscode" ? new StatusAttributeMetadata() : new PicklistAttributeMetadata();
+                carrier.LogicalName = read.LogicalName; carrier.SchemaName = read.SchemaName; carrier.OptionSet = read.OptionSet;
+                await ExecuteAsync(pool, new UpdateAttributeRequest { EntityName = entity, Attribute = carrier, SolutionUniqueName = Solution });
+                await Publish();
+                var published = (await Opt(attribute, value, asIfPublished: false)).Color;
+                _output.WriteLine($"OBSERVED {attribute} UpdateAttribute carrier {color}, then PublishXml: published color {published ?? "null"}");
+                published.Should().NotBe(color, "UpdateAttribute ignores an existing option's colour even after publishing");
+            }
+
+            // Local option.
+            var local = (await RetrieveOptionsAsync(pool, entity, column)).Single().Value!.Value;
+            var description = Update(column, local, null);
+            description.Description = new Label("LD", English);
+            await ExecuteAsync(pool, description);
+            await Expect("local UpdateOptionValue Description only", column, local, null, "Open", "LD");
+            await Carrier(column, local, "#B00002");
+            await Expect("local after the UpdateAttribute carrier (draft)", column, local, null, "Open", "LD");
+            var colour = Update(column, local, null);
+            colour["Color"] = "#B00003";
+            await ExecuteAsync(pool, colour);
+            await Expect("local UpdateOptionValue Color only, no solution", column, local, "#B00003", "Open", "LD");
+            var all = Update(column, local, Solution);
+            all.Label = new Label("Open renamed", English); all.Description = new Label("LD2", English); all["Color"] = "#B00004";
+            await ExecuteAsync(pool, all);
+            await Expect("local UpdateOptionValue Label + Description + Color", column, local, "#B00004", "Open renamed", "LD2");
+            var insert = new InsertOptionValueRequest { Label = new Label("Second", English), Description = new Label("LDI", English), Value = local + 1 };
+            insert["EntityLogicalName"] = entity; insert["AttributeLogicalName"] = column; insert["Color"] = "#B00005";
+            await ExecuteAsync(pool, insert);
+            await Expect("local InsertOptionValue with Color, no solution", column, local + 1, "#B00005", "Second", "LDI");
+
+            // Status reason.
+            var reason = (await ActiveReasonAsync(pool, entity)).Value!.Value;
+            var statusDescription = Update("statuscode", reason, null);
+            statusDescription.Description = new Label("SD", English);
+            await ExecuteAsync(pool, statusDescription);
+            await Expect("status UpdateOptionValue Description only", "statuscode", reason, null, "Active", "SD");
+            await Carrier("statuscode", reason, "#C00001");
+            await Expect("status after the UpdateAttribute carrier (draft)", "statuscode", reason, null, "Active", "SD");
+            var statusColour = Update("statuscode", reason, null);
+            statusColour["Color"] = "#C00002";
+            await ExecuteAsync(pool, statusColour);
+            await Expect("status UpdateOptionValue Color only, no solution", "statuscode", reason, "#C00002", "Active", "SD");
+            var statusAll = Update("statuscode", reason, Solution);
+            statusAll.Label = new Label("Live", English); statusAll.Description = new Label("SD2", English); statusAll["Color"] = "#C00003";
+            await ExecuteAsync(pool, statusAll);
+            await Expect("status UpdateOptionValue Label + Description + Color", "statuscode", reason, "#C00003", "Live", "SD2");
+            var statusInsert = new InsertStatusValueRequest
+            {
+                EntityLogicalName = entity, AttributeLogicalName = "statuscode", StateCode = 0, Value = local + 2,
+                Label = new Label("Extra", English), Description = new Label("SDI", English)
+            };
+            statusInsert["Color"] = "#C00004";
+            await ExecuteAsync(pool, statusInsert);
+            await Expect("status InsertStatusValue with Color, no solution", "statuscode", local + 2, "#C00004", "Extra", "SDI");
+
+            // State value (statecode): the generic option update can reach it with a colour.
+            var state = Update("statecode", 0, null);
+            state["Color"] = "#D00001";
+            await ExecuteAsync(pool, state);
+            await Expect("statecode UpdateOptionValue Color only, no solution", "statecode", 0, "#D00001", "Active", null);
+        });
+    }
+
+    // AC-146 through the service, in the request shapes production sends: the colour rides on the same request as the
+    // label/description, with no solution (null) or an empty one (sent as none); add-option/add-statusreason carry it
+    // on the insert; a colour-only update leaves the label and the description alone.
+    [MetadataLiveFact]
+    public async Task ServiceColourWrites_KeepDescriptionsAndLabels_WithoutASolution()
+    {
+        var (pool, service) = await ConnectAsync();
+        var name = NewName("svc");
+        await WithChoiceAsync(pool, name, "Service colour test", new Label("Service colour test", English), [new Label("One", English)], async () =>
+        {
+            var one = (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single().Value!.Value;
+            async Task<OptionMetadata> Option(int value) => (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single(o => o.Value == value);
+
+            // update-option --description D --color C (CLI/MCP default SolutionUniqueName is "").
+            await service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = name, Value = one, Description = "Kept description", Color = "#112233" });
+            var option = await Option(one);
+            _output.WriteLine($"OBSERVED service update-option --description --color, empty solution: color {option.Color}, label '{Text(option.Label, English)}', description '{Text(option.Description, English)}'");
+            option.Color.Should().Be("#112233"); Text(option.Description, English).Should().Be("Kept description"); Text(option.Label, English).Should().Be("One");
+
+            // A colour-only update afterwards keeps the description and the label.
+            await service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = name, Value = one, Color = "#445566", SolutionUniqueName = Solution });
+            option = await Option(one);
+            option.Color.Should().Be("#445566"); Text(option.Description, English).Should().Be("Kept description", "a colour-only update keeps the description"); Text(option.Label, English).Should().Be("One");
+
+            // --new-label and --color in one command land together.
+            await service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = name, Value = one, NewLabel = "One renamed", Color = "#778899" });
+            option = await Option(one);
+            option.Color.Should().Be("#778899"); Text(option.Label, English).Should().Be("One renamed"); Text(option.Description, English).Should().Be("Kept description");
+
+            // add-option --description D --color C with no solution.
+            var added = await service.AddOptionValueAsync(new AddOptionValueRequest { OptionSetName = name, Label = "Added", Description = "Added description", Color = "#ABCDEF" });
+            var addedOption = await Option(added);
+            _output.WriteLine($"OBSERVED service add-option --description --color, empty solution: color {addedOption.Color}, description '{Text(addedOption.Description, English)}'");
+            addedOption.Color.Should().Be("#ABCDEF"); Text(addedOption.Description, English).Should().Be("Added description");
+        });
+
+        await WithTableAsync(pool, Labels("Open", null), async (entity, column) =>
+        {
+            var local = (await RetrieveOptionsAsync(pool, entity, column)).Single().Value!.Value;
+            var setDescription = new Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest { Value = local, MergeLabels = true, Description = new Label("Local description", English) };
+            setDescription["EntityLogicalName"] = entity; setDescription["AttributeLogicalName"] = column;
+            await ExecuteAsync(pool, setDescription);
+            await service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = entity, ColumnLogicalName = column, Value = local, Color = "#010203" });
+            var option = (await RetrieveOptionsAsync(pool, entity, column)).Single(o => o.Value == local);
+            _output.WriteLine($"OBSERVED service attribute update-option --color, no solution: color {option.Color}, label '{Text(option.Label, English)}', description '{Text(option.Description, English)}'");
+            option.Color.Should().Be("#010203"); Text(option.Description, English).Should().Be("Local description"); Text(option.Label, English).Should().Be("Open");
+
+            var addedLocal = await service.AddColumnOptionAsync(new AddColumnOptionRequest { EntityLogicalName = entity, ColumnLogicalName = column, Label = "Second", Value = local + 1, Color = "#040506" });
+            (await RetrieveOptionsAsync(pool, entity, column)).Single(o => o.Value == addedLocal).Color.Should().Be("#040506");
+
+            var reason = (await ActiveReasonAsync(pool, entity)).Value!.Value;
+            var setStatusDescription = new Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest { Value = reason, MergeLabels = true, Description = new Label("Status description", English) };
+            setStatusDescription["EntityLogicalName"] = entity; setStatusDescription["AttributeLogicalName"] = "statuscode";
+            await ExecuteAsync(pool, setStatusDescription);
+            await service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = entity, Value = reason, Color = "#070809" });
+            var status = await ReasonAsync(pool, entity, reason);
+            _output.WriteLine($"OBSERVED service update-statusreason --color, no solution: color {status.Color}, label '{Text(status.Label, English)}', description '{Text(status.Description, English)}'");
+            status.Color.Should().Be("#070809"); Text(status.Description, English).Should().Be("Status description"); Text(status.Label, English).Should().Be("Active");
+
+            var addedReason = await service.AddStatusReasonAsync(new AddStatusReasonRequest { EntityLogicalName = entity, Label = "Extra", StateCode = 0, Value = local + 2, Color = "#0A0B0C" });
+            (await ReasonAsync(pool, entity, addedReason)).Color.Should().Be("#0A0B0C");
         });
     }
 
@@ -488,7 +648,7 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
         guard.EnsureCanMutate("livetests.metadata.setup"); // before any raw schema write
         _source = Configuration.HasClientSecretCredentials
             ? await LiveTestHelpers.CreateConnectionSourceAsync(Configuration, "MetadataGlobalChoiceLiveTests", maxPoolSize: 3)
-            : await ProfileConnectionSource.CreateAsync(Configuration, "MetadataGlobalChoiceLiveTests", maxPoolSize: 3);
+            : await LiveTestProfileConnectionSource.CreateAsync(Configuration, "MetadataGlobalChoiceLiveTests", maxPoolSize: 3);
         _pool = LiveTestHelpers.CreateConnectionPool(new[] { _source });
         return (_pool, new DataverseMetadataAuthoringService(_pool, new SchemaValidator(), guard));
     }
@@ -634,10 +794,10 @@ public sealed class MetadataGlobalChoiceLiveTests : LiveTestBase
         => ((RetrieveAttributeResponse)await ExecuteAsync(pool,
             new RetrieveAttributeRequest { EntityLogicalName = entity, LogicalName = attribute, RetrieveAsIfPublished = true })).AttributeMetadata;
 
-    private static async Task<IReadOnlyList<OptionMetadata>> RetrieveOptionsAsync(IDataverseConnectionPool pool, string entity, string attribute)
+    private static async Task<IReadOnlyList<OptionMetadata>> RetrieveOptionsAsync(IDataverseConnectionPool pool, string entity, string attribute, bool asIfPublished = true)
     {
         var response = (RetrieveAttributeResponse)await ExecuteAsync(pool,
-            new RetrieveAttributeRequest { EntityLogicalName = entity, LogicalName = attribute, RetrieveAsIfPublished = true });
+            new RetrieveAttributeRequest { EntityLogicalName = entity, LogicalName = attribute, RetrieveAsIfPublished = asIfPublished });
         return ((EnumAttributeMetadata)response.AttributeMetadata).OptionSet.Options;
     }
 

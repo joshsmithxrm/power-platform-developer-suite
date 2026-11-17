@@ -195,8 +195,8 @@ public sealed class SkipIfNoSolutionAttribute : FactAttribute
 /// but runs on .NET 8.0 only (as the CLI E2E attributes do): the behaviour under test is server-side, so running the
 /// same schema-creating test on three target frameworks would only triple the throwaway objects and contend for the
 /// organisation's customisation lock. Credentials: the service-principal client-secret settings, or (local runs only)
-/// DATAVERSE_URL plus PPDS_TEST_PROFILE, an existing signed-in PPDS auth profile used silently through
-/// <see cref="ProfileConnectionSource"/>; the client secret wins when both are set.
+/// DATAVERSE_URL plus PPDS_TEST_PROFILE, an existing signed-in InteractiveBrowser PPDS auth profile used silently through
+/// <see cref="LiveTestProfileConnectionSource"/>; the client secret wins when both are set.
 /// </summary>
 public sealed class MetadataLiveFactAttribute : FactAttribute
 {
@@ -246,7 +246,7 @@ public static class MetadataLivePrerequisites
 #else
         if (!configuration.HasClientSecretCredentials && !configuration.HasProfileCredentials)
             return "Credentials not configured. Set DATAVERSE_URL, PPDS_TEST_APP_ID, PPDS_TEST_CLIENT_SECRET, and PPDS_TEST_TENANT_ID; " +
-                   "or, locally, DATAVERSE_URL and PPDS_TEST_PROFILE (an existing PPDS auth profile bound to that environment, already signed in).";
+                   "or, locally, DATAVERSE_URL and PPDS_TEST_PROFILE (an existing InteractiveBrowser PPDS auth profile bound to that environment, already signed in).";
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PPDS_TEST_SOLUTION"))
             || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PPDS_TEST_PREFIX")))
             return "Solution-scoped metadata test requires PPDS_TEST_SOLUTION (target unmanaged solution unique name) and PPDS_TEST_PREFIX (publisher customization prefix, e.g., 'new' or 'hsl').";
