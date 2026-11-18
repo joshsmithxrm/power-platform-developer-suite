@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `DataverseMetadataQueryService.GetOptionSetAsync` finds a global choice whose stored name differs from the requested name only by case. The exact name is always tried first. Only when Dataverse reports that option set as not found does the service list global choices and retry once under a single case-insensitive match. Other faults, no match and several matches rethrow the original error unchanged. The not-found fault is recognised by the Dataverse fault code `0x80040217`, so a localized server message no longer prevents it; the English server message is kept as a fallback for a fault with another code (#1535, #1604).
+- `DataverseMetadataQueryService.GetOptionSetAsync` finds a global choice whose stored name differs from the requested name only by case. The exact name is always tried first. Only when Dataverse reports that option set as not found does the service list global choices and retry once under a single case-insensitive match. Other faults, no match and several matches rethrow the original error unchanged. Recognition checks the Dataverse fault code `0x80040217` first and falls back to the English server message. The code treats `0x80040217` as an assumption for this case: #1604 reports observing it on one English-only organisation, and behaviour on a non-English organisation is unverified (#1535, #1604).
 - The `MetadataErrorCodes.SdkOperationFailed` documentation no longer implies that nothing was written (#1604).
 
 ## [1.4.0] - 2026-11-01 (tagged, not published)
