@@ -170,29 +170,37 @@ public sealed partial class MetadataGlobalChoiceLiveTests
     }
 
     /// <summary>
-    /// Sends a setup write that carries a second-language label and checks the label is stored. Dataverse was observed to
-    /// acknowledge such writes and drop the second-language label for stretches of several minutes (once more than 45)
-    /// after other metadata activity, so the write is repeated every 30 seconds until the label is stored, for up to
-    /// <see cref="SecondLanguageWindow"/>; then the test fails saying the precondition could not be set up. Each retry is
-    /// written to the output.
+    /// Sets up a second-language label. It first checks whether the label is already stored (for example given at
+    /// create) and sends the setup write only when it is not. Dataverse was observed to acknowledge such writes and drop
+    /// the second-language label for stretches of several minutes (once more than 45) after other metadata activity, so
+    /// the write is repeated every 30 seconds until the label is stored, for up to <see cref="SecondLanguageWindow"/>;
+    /// then the test fails saying the precondition was not stored. Each call writes one OBSERVED line saying whether the
+    /// label was stored at the first check, or after how many writes over how many seconds.
     /// </summary>
     private async Task SetSecondLanguageAsync(string what, Func<Task> write, Func<Task<bool>> stored)
     {
+        if (await stored())
+        {
+            _output.WriteLine($"OBSERVED setup of the {what}: the second-language label was stored at the first check; no setup write was sent.");
+            return;
+        }
+
         var started = DateTime.UtcNow;
-        for (var attempt = 1; ; attempt++)
+        for (var writes = 1; ; writes++)
         {
             await write();
+            var elapsed = (DateTime.UtcNow - started).TotalSeconds;
             if (await stored())
             {
-                if (attempt > 1)
-                    _output.WriteLine($"OBSERVED setup of the {what}: the second-language label was stored on attempt {attempt}, {(DateTime.UtcNow - started).TotalSeconds:F0}s after the first.");
+                _output.WriteLine($"OBSERVED setup of the {what}: the second-language label was stored after {writes} write(s) over {elapsed:F0}s.");
                 return;
             }
-            _output.WriteLine($"OBSERVED setup of the {what}: Dataverse acknowledged the write but did not store its second-language label (attempt {attempt}, " +
-                $"{(DateTime.UtcNow - started).TotalSeconds:F0}s); retrying in 30 seconds.");
             if (DateTime.UtcNow - started > SecondLanguageWindow)
-                throw new XunitException($"Precondition not met: Dataverse did not store the second-language label of the {what} within " +
-                    $"{SecondLanguageWindow.TotalMinutes:F0} minutes of retries. Nothing the product does is involved in this setup step.");
+            {
+                _output.WriteLine($"OBSERVED setup of the {what}: the second-language label was not stored after {writes} write(s) over {elapsed:F0}s.");
+                throw new XunitException($"Precondition not met: the second-language label of the {what}, written by this test's setup, was not stored " +
+                    $"within {SecondLanguageWindow.TotalMinutes:F0} minutes ({writes} writes).");
+            }
             await Task.Delay(TimeSpan.FromSeconds(30));
         }
     }
