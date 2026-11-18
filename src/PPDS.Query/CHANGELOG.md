@@ -12,7 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Aligned with PPDS.Dataverse 1.5.0 and its refreshed Microsoft.Extensions/JWT dependency graph in the coordinated release (#1501, #1502).
-- Updated SourceLink build tooling to 10.0.403 (#1498). SQL engine source and public APIs are unchanged; notebook/RPC target-isolation fixes are in CLI/Extension.
+- Updated SourceLink build tooling to 10.0.403 (#1498). Notebook/RPC target-isolation fixes are in CLI/Extension.
+- **Breaking:** the planner refuses INSERT, UPDATE and DELETE shapes that are not on the DML allowlist (`specs/query.md`, "DML allowlist") with `DmlSafetyRefusalException` (`QueryErrorCode.DmlBlocked`), so explain, scripts and the ADO.NET provider cannot plan them; MERGE, EXECUTE AS and REVERT are refused; a row limit, page number or paging cookie in `QueryPlanOptions` is refused for DML; SQL with more than one batch (`GO`) is a `QueryParseException`. DML target and column names are planned as lower-case logical names (#1698).
+- INSERT ... SELECT is planned from the parsed statement, so its WHERE and ORDER BY are applied (they were dropped) (#1698).
+
+### Fixed
+
+- SELECT returns what its text says or fails with a clear error: `IN (subquery)`/`EXISTS` inside OR, parentheses or NOT no longer overflow the stack; `NOT (...)`, `= NULL`, `<> NULL` and variables in a pushed-down WHERE are errors (they selected wrong rows); `<>`, `NOT IN`, `NOT LIKE`, `NOT BEGINS/ENDS WITH` are paired with `not-null`, as SQL never matches NULL; `TOP (n)` is honoured, TOP PERCENT/WITH TIES/non-literal TOP are errors; an aliased column next to a computed item, and a computed item over a GROUP BY column, return their values; names that are not valid Dataverse names are refused instead of written into FetchXML; LIKE patterns with an inner wildcard are sent as `like` (#1698).
+- Int (and bigint) arithmetic that overflows is an error instead of a wider value: int / int and int % int are int, so a later step that leaves the int range is an error, and `-` of the smallest int or bigint is an overflow (#1698).
 
 ## [1.0.2] - 2026-10-30
 

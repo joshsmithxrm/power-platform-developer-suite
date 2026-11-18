@@ -195,6 +195,125 @@ public partial class RpcMethodHandler
         return fetchXml.Substring(0, insertPoint) + $" top=\"{top}\"" + fetchXml.Substring(insertPoint);
     }
 
+    /// <summary>
+    /// Maps the RPC request to the shared service request. A client that omits <c>dmlSafety</c> gets
+    /// the default (unconfirmed) options, so DML is refused with <c>Query.DmlConfirmationRequired</c>
+    /// until the client explicitly sends <c>dmlSafety.isConfirmed</c> (or <c>isDryRun</c>).
+    /// </summary>
+    internal static SqlQueryRequest BuildSqlRequest(QuerySqlRequest request, string? executingProfileIdentity = null) => new()
+    {
+        Sql = request.Sql,
+        TopOverride = request.Top,
+        PageNumber = request.Page,
+        PagingCookie = request.PagingCookie,
+        IncludeCount = request.Count,
+        UseTdsEndpoint = request.UseTds,
+        DmlSafety = request.DmlSafety != null
+            ? new DmlSafetyOptions
+            {
+                IsConfirmed = request.DmlSafety.IsConfirmed,
+                IsDryRun = request.DmlSafety.IsDryRun,
+                NoLimit = request.DmlSafety.NoLimit,
+                RowCap = request.DmlSafety.RowCap,
+                // A confirmed DML request must name the environment it was confirmed for (both extension surfaces do).
+                RequireConfirmedTarget = true,
+                ConfirmedEnvironmentUrl = request.EnvironmentUrl,
+                // ... and the profile it was confirmed for (both extension surfaces pin it by profileIdentity).
+                RequireConfirmedProfile = true,
+                ConfirmedProfileIdentity = request.ProfileIdentity,
+                ExecutingProfileIdentity = executingProfileIdentity,
+            }
+            : new DmlSafetyOptions(),
+    };
+
+    /// <summary>
+    /// Maps a failure of <c>query/sql</c> to the error clients receive. Every guard refusal carries its flag
+    /// (<c>dmlConfirmationRequired</c>, <c>dmlBlocked</c>, <c>dmlRowCapExceeded</c>); when DML already ran before the
+    /// failure (including a cancelled run), <c>dmlCommitted</c> says what changed and the message repeats it. Returns
+    /// false for anything else, which then propagates unchanged (an <see cref="RpcException"/>, or a bare cancellation).
+    /// </summary>
+    internal static bool TryMapQuerySqlFailure(
+        Exception ex, string sql, out RpcException? rpcException, bool cancellationRequested = true)
+    {
+        var committed = DmlOutcome.From(ex)?.DescribeCommitted();
+        string WithCommitted(string message) => committed == null ? message : $"{message} {committed}";
+
+        rpcException = ex switch
+        {
+            RpcException => null,
+            PpdsException { ErrorCode: ErrorCodes.Query.ParseError } parse =>
+                ExtractParseDiagnostics(parse, sql) is { Count: > 0 } diagnostics
+                    ? new RpcException(ErrorCodes.Query.ParseError, parse.UserMessage, new RpcErrorData
+                    {
+                        Code = ErrorCodes.Query.ParseError,
+                        Message = parse.UserMessage,
+                        Diagnostics = diagnostics,
+                    })
+                    : new RpcException(ErrorCodes.Query.ParseError, parse.UserMessage),
+            PpdsException { ErrorCode: ErrorCodes.Query.DmlConfirmationRequired } confirm =>
+                new RpcException(ErrorCodes.Query.DmlConfirmationRequired, confirm.UserMessage, new DmlSafetyErrorData
+                {
+                    Code = ErrorCodes.Query.DmlConfirmationRequired,
+                    Message = confirm.UserMessage,
+                    DmlConfirmationRequired = true,
+                    DmlBypass = confirm is PpdsDmlConfirmationRequiredException { Bypasses.Count: > 0 } withBypass
+                        ? withBypass.Bypasses.ToList() : null,
+                    DmlTargets = (confirm as PpdsDmlConfirmationRequiredException)?.Targets
+                        .Select(t => new DmlTargetDto { Label = t.Label, Url = t.Url, Type = t.Type, Protection = t.Protection })
+                        .ToList(),
+                }),
+            // A refusal raised part-way through a script reports what the earlier statements committed, as the CLI does.
+            PpdsException { ErrorCode: ErrorCodes.Query.DmlBlocked } blocked =>
+                new RpcException(ErrorCodes.Query.DmlBlocked, WithCommitted(blocked.UserMessage), new DmlSafetyErrorData
+                {
+                    Code = ErrorCodes.Query.DmlBlocked,
+                    Message = WithCommitted(blocked.UserMessage),
+                    DmlBlocked = true,
+                    DmlCommitted = committed,
+                }),
+            PpdsException { ErrorCode: ErrorCodes.Query.DmlRowCapExceeded } cap =>
+                new RpcException(ErrorCodes.Query.DmlRowCapExceeded, WithCommitted(cap.UserMessage), new DmlSafetyErrorData
+                {
+                    Code = ErrorCodes.Query.DmlRowCapExceeded,
+                    Message = WithCommitted(cap.UserMessage),
+                    DmlRowCapExceeded = true,
+                    DmlCommitted = committed,
+                    RowCap = (cap as PpdsDmlRowCapExceededException)?.RowCap,
+                    Operation = (cap as PpdsDmlRowCapExceededException)?.Operation,
+                    Entity = (cap as PpdsDmlRowCapExceededException)?.EntityLogicalName,
+                }),
+            PpdsException { ErrorCode: ErrorCodes.Query.TdsIncompatible or ErrorCodes.Query.TdsConnectionFailed } tds =>
+                new RpcException(tds.ErrorCode, tds.UserMessage),
+            PpdsException other => WithCommittedMessage(MapPpdsToRpcException(other), committed),
+            // A cancellation nobody asked for (a timeout) after data changed is an interruption, not "cancelled".
+            OperationCanceledException when committed != null && !cancellationRequested =>
+                new RpcException(ErrorCodes.Query.DmlInterrupted, WithCommitted("The run stopped before it finished (it timed out)."), new RpcErrorData
+                {
+                    Code = ErrorCodes.Query.DmlInterrupted,
+                    Message = WithCommitted("The run stopped before it finished (it timed out)."),
+                    DmlCommitted = committed,
+                }),
+            OperationCanceledException when committed != null =>
+                new RpcException(ErrorCodes.Operation.Cancelled, WithCommitted("The query was cancelled."), new RpcErrorData
+                {
+                    Code = ErrorCodes.Operation.Cancelled,
+                    Message = WithCommitted("The query was cancelled."),
+                    DmlCommitted = committed,
+                }),
+            _ => null
+        };
+        return rpcException != null;
+    }
+
+    private static RpcException WithCommittedMessage(RpcException mapped, string? committed)
+    {
+        if (committed == null || mapped.ErrorData is not RpcErrorData data)
+            return mapped;
+
+        data.Message = $"{data.Message} {committed}";
+        return new RpcException(mapped.StructuredErrorCode, data.Message, data);
+    }
+
     internal static QueryResultResponse MapToResponse(SqlQueryResult result)
     {
         var response = MapToResponse(result.Result, result.TranspiledFetchXml);
@@ -205,6 +324,17 @@ public partial class RpcMethodHandler
             QueryExecutionMode.Tds => "tds",
             _ => null
         };
+
+        if (result.DmlOutcome is { HasFailures: true } dml)
+        {
+            // Failed rows are not a success. Counts and reason are additive so clients that only read
+            // the table keep working; 'success' tells the client the DML failed. (Notebook cells send no
+            // dmlSafety, so they never run DML: the fail-closed guard refuses it.)
+            response.Success = false;
+            response.AffectedRows = dml.AffectedRows;
+            response.FailedRows = dml.FailedRows;
+            response.DmlError = dml.Message;
+        }
 
         if (safety?.IsDryRun == true)
         {

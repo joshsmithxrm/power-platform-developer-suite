@@ -22,7 +22,7 @@ public class SqlQueryServiceTests
     public SqlQueryServiceTests()
     {
         _mockQueryExecutor = new Mock<IQueryExecutor>();
-        _service = new SqlQueryService(_mockQueryExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        _service = new SqlQueryService(_mockQueryExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
     }
 
     #region Constructor Tests
@@ -322,7 +322,7 @@ public class SqlQueryServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aggregateResult);
 
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
         var request = new SqlQueryRequest { Sql = "SELECT COUNT(*) FROM account" };
 
         // Act
@@ -358,7 +358,7 @@ public class SqlQueryServiceTests
                 Count = 0
             });
 
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
         var request = new SqlQueryRequest { Sql = "SELECT name FROM account" };
 
         // Act
@@ -379,7 +379,7 @@ public class SqlQueryServiceTests
     {
         // Arrange & Act: constructing with poolCapacity should not throw
         var mockExecutor = new Mock<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, poolCapacity: 8, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, poolCapacity: 8, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         // Assert: the service was created (poolCapacity is used internally during planning)
         Assert.NotNull(service);
@@ -400,7 +400,7 @@ public class SqlQueryServiceTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Executor should not be called during dry-run"));
 
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
         var request = new SqlQueryRequest
         {
             Sql = "-- ppds:BATCH_SIZE 50\nDELETE FROM account WHERE name = 'test'",
@@ -426,7 +426,7 @@ public class SqlQueryServiceTests
         var dataSource = Assert.Single(result.DataSources!);
         Assert.Equal("Local", dataSource.Label);
         Assert.False(dataSource.IsRemote);
-        Assert.Equal(["BATCH_SIZE"], result.AppliedHints);
+        Assert.Equal(["BATCH_SIZE"], result.AppliedHints); // applied to the DML bulk writes
 
         // Verify executor was never called
         mockExecutor.Verify(
@@ -444,7 +444,6 @@ public class SqlQueryServiceTests
     [InlineData("BEGIN UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END", "DmlExecuteNode", "<fetch")]
     [InlineData("WHILE 1 = 0 UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
     [InlineData("BEGIN TRY UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END TRY BEGIN CATCH DELETE FROM account WHERE accountid = '00000000-0000-0000-0000-000000000001' END CATCH", "DmlExecuteNode", "<fetch")]
-    [InlineData("MERGE INTO account AS target USING source_table AS src ON target.accountid = src.id WHEN NOT MATCHED THEN INSERT (name) VALUES (src.name);", "MergeNode", "-- MERGE")]
     [InlineData("DECLARE @preview int; SELECT @preview = 1; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
     [InlineData("SELECT 1; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
     [InlineData("SELECT name INTO #accounts FROM account; SELECT * FROM #accounts; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
@@ -459,7 +458,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development
         };
@@ -487,7 +486,6 @@ public class SqlQueryServiceTests
     [InlineData("BEGIN UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END", "DmlExecuteNode", "<fetch")]
     [InlineData("WHILE 1 = 0 UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
     [InlineData("BEGIN TRY UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END TRY BEGIN CATCH DELETE FROM account WHERE accountid = '00000000-0000-0000-0000-000000000001' END CATCH", "DmlExecuteNode", "<fetch")]
-    [InlineData("MERGE INTO account AS target USING source_table AS src ON target.accountid = src.id WHEN NOT MATCHED THEN INSERT (name) VALUES (src.name);", "MergeNode", "-- MERGE")]
     [InlineData("DECLARE @preview int; SELECT @preview = 1; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
     [InlineData("SELECT 1; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
     [InlineData("SELECT name INTO #accounts FROM account; SELECT * FROM #accounts; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
@@ -502,7 +500,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development
         };
@@ -537,7 +535,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development
         };
@@ -567,7 +565,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development
         };
@@ -595,7 +593,7 @@ public class SqlQueryServiceTests
     public async Task ExecuteAsync_DmlWithoutDryRunOrConfirmation_StillRequiresConfirmation()
     {
         var service = new SqlQueryService(
-            Mock.Of<IQueryExecutor>(), guard: new InactiveFakeShakedownGuard())
+            Mock.Of<IQueryExecutor>(), guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development
         };
@@ -606,7 +604,7 @@ public class SqlQueryServiceTests
             DmlSafety = new DmlSafetyOptions()
         };
 
-        var exception = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
+        var exception = await Assert.ThrowsAsync<PpdsDmlConfirmationRequiredException>(() => service.ExecuteAsync(request));
 
         Assert.Equal(ErrorCodes.Query.DmlConfirmationRequired, exception.ErrorCode);
     }
@@ -616,7 +614,7 @@ public class SqlQueryServiceTests
     public async Task ExecuteAsync_WhereLessDmlDryRun_RemainsBlocked()
     {
         var service = new SqlQueryService(
-            Mock.Of<IQueryExecutor>(), guard: new InactiveFakeShakedownGuard());
+            Mock.Of<IQueryExecutor>(), guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
         var request = new SqlQueryRequest
         {
             Sql = "UPDATE account SET name = 'test'",
@@ -635,7 +633,7 @@ public class SqlQueryServiceTests
     {
         var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
         var service = new SqlQueryService(
-            mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+            mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
         var request = new SqlQueryRequest
         {
             Sql = "-- ppds:BATCH_SIZE 50\nDELETE FROM account WHERE name = 'test'",
@@ -662,7 +660,7 @@ public class SqlQueryServiceTests
         var dataSource = Assert.Single(result.DataSources!);
         Assert.Equal("Local", dataSource.Label);
         Assert.False(dataSource.IsRemote);
-        Assert.Equal(["BATCH_SIZE"], result.AppliedHints);
+        Assert.Equal(["BATCH_SIZE"], result.AppliedHints); // applied to the DML bulk writes
         Assert.Null(result.ExecutionMode);
         mockExecutor.VerifyNoOtherCalls();
     }
@@ -990,7 +988,7 @@ public class SqlQueryServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(tdsResult);
 
-        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         // The -- ppds:USE_TDS hint should force TDS routing
         var request = new SqlQueryRequest
@@ -1079,7 +1077,7 @@ public class SqlQueryServiceTests
                 Count = records.Count
             });
 
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
         var request = new SqlQueryRequest
         {
             Sql = "-- ppds:MAX_ROWS 100\nSELECT name FROM account"
@@ -1102,7 +1100,7 @@ public class SqlQueryServiceTests
     {
         // Arrange: service with pool capacity of 8; MAXDOP 2 should cap it at 2
         var mockExecutor = new Mock<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, poolCapacity: 8, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, poolCapacity: 8, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         // Act
         var plan = await service.ExplainAsync("-- ppds:MAXDOP 2\nSELECT name FROM account");
@@ -1172,7 +1170,7 @@ public class SqlQueryServiceTests
                 Count = 0
             });
 
-        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         // Caller explicitly sets UseTdsEndpoint = false, but hint overrides it
         var request = new SqlQueryRequest
@@ -1276,7 +1274,7 @@ public class SqlQueryServiceTests
     {
         // Arrange
         var mockExecutor = new Mock<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         // Act
         var plan = await service.ExplainAsync("-- ppds:NOLOCK\nSELECT name FROM account");
@@ -1295,7 +1293,7 @@ public class SqlQueryServiceTests
         // Arrange: service with TDS executor configured
         var mockExecutor = new Mock<IQueryExecutor>();
         var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         // Act
         var plan = await service.ExplainAsync("-- ppds:USE_TDS\nSELECT name FROM account");
@@ -1311,7 +1309,7 @@ public class SqlQueryServiceTests
     {
         // Arrange
         var mockExecutor = new Mock<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         // Act
         var plan = await service.ExplainAsync("-- ppds:MAX_ROWS 50\nSELECT name FROM account");
@@ -1331,7 +1329,7 @@ public class SqlQueryServiceTests
     {
         // Arrange: service with RemoteExecutorFactory set
         var mockExecutor = new Mock<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         var factoryCalled = false;
         var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
@@ -1360,7 +1358,7 @@ public class SqlQueryServiceTests
     {
         // Arrange: service WITHOUT RemoteExecutorFactory
         var mockExecutor = new Mock<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
         // RemoteExecutorFactory is null (default)
 
         // Act & Assert: cross-env query fails with actionable error
@@ -1377,7 +1375,7 @@ public class SqlQueryServiceTests
         // Arrange: service with Development protection level — DML dry-run should pass
         // without execution confirmation.
         var mockExecutor = new Mock<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard())
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development
         };
@@ -1404,7 +1402,7 @@ public class SqlQueryServiceTests
         // Arrange: service with RemoteExecutorFactory and cross-env DML
         var mockExecutor = new Mock<IQueryExecutor>();
         var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         service.RemoteExecutorFactory = label =>
             label == "QA" ? mockRemoteExecutor : null;
@@ -1451,7 +1449,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development,
             RemoteExecutorFactory = label => label == "QA" ? mockRemoteExecutor.Object : null
@@ -1487,7 +1485,7 @@ public class SqlQueryServiceTests
         var mockExecutor = new Mock<IQueryExecutor>();
         var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
         var service = new SqlQueryService(
-            mockExecutor.Object, guard: new InactiveFakeShakedownGuard())
+            mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider)
         {
             RemoteExecutorFactory = label => label == "QA" ? mockRemoteExecutor : null,
             ProfileResolver = new ProfileResolutionService(
@@ -1521,7 +1519,7 @@ public class SqlQueryServiceTests
     public async Task ExecuteAsync_CompoundCrossEnvDml_ReadOnlyPolicy_BlocksBeforeDeferredExecution()
     {
         var service = new SqlQueryService(
-            Mock.Of<IQueryExecutor>(), guard: new InactiveFakeShakedownGuard())
+            Mock.Of<IQueryExecutor>(), guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider)
         {
             RemoteExecutorFactory = label => label == "QA" ? Mock.Of<IQueryExecutor>() : null,
             ProfileResolver = new ProfileResolutionService(
@@ -1562,7 +1560,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development,
             RemoteExecutorFactory = label =>
@@ -1600,8 +1598,8 @@ public class SqlQueryServiceTests
         var exception = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
 
         Assert.Equal(ErrorCodes.Query.DmlBlocked, exception.ErrorCode);
-        Assert.Contains("[PROD]", exception.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("read-only", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[DEV]", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not supported", exception.Message, StringComparison.OrdinalIgnoreCase);
         mockExecutor.VerifyNoOtherCalls();
         mockBulkExecutor.VerifyNoOtherCalls();
     }
@@ -1616,7 +1614,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development,
             RemoteExecutorFactory = label =>
@@ -1653,7 +1651,7 @@ public class SqlQueryServiceTests
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task ExecuteAsync_MultipartLocalDmlTarget_DoesNotTreatRemoteReadAsWriteTarget()
+    public async Task ExecuteAsync_LocalTargetWithRemoteFromSource_IsRefused()
     {
         var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
         var mockBulkExecutor = new Mock<IBulkOperationExecutor>(MockBehavior.Strict);
@@ -1661,7 +1659,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development,
             RemoteExecutorFactory = label => label == "PROD" ? remoteExecutor : null,
@@ -1681,21 +1679,22 @@ public class SqlQueryServiceTests
         };
         var request = new SqlQueryRequest
         {
-            Sql = "UPDATE dbo.account SET name = 'preview' FROM [PROD].account AS prod WHERE prod.accountid = '00000000-0000-0000-0000-000000000001'",
+            Sql = "UPDATE account SET name = 'preview' FROM [PROD].account AS prod WHERE prod.accountid = '00000000-0000-0000-0000-000000000001'",
             DmlSafety = new DmlSafetyOptions { IsDryRun = true }
         };
 
-        var result = await service.ExecuteAsync(request);
+        // Ids read from another environment would be applied to the connected one: refused, also for a dry-run.
+        var exception = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
 
-        Assert.True(result.DmlSafetyResult?.IsDryRun);
-        Assert.Equal(["Local", "PROD"], result.DataSources!.Select(source => source.Label));
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, exception.ErrorCode);
+        Assert.Contains("another environment", exception.Message);
         mockExecutor.VerifyNoOtherCalls();
         mockBulkExecutor.VerifyNoOtherCalls();
     }
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task ExecuteAsync_CompoundCrossEnvDmlDryRun_ReportsEveryPlannedSource()
+    public async Task ExecuteAsync_CompoundCrossEnvDmlDryRun_RefusesTheFirstRemoteWriteTarget()
     {
         var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
         var mockBulkExecutor = new Mock<IBulkOperationExecutor>(MockBehavior.Strict);
@@ -1703,7 +1702,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development,
             RemoteExecutorFactory = label =>
@@ -1738,11 +1737,11 @@ public class SqlQueryServiceTests
             DmlSafety = new DmlSafetyOptions { IsDryRun = true }
         };
 
-        var result = await service.ExecuteAsync(request);
+        var exception = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
 
-        Assert.Equal(["Local", "DEV", "QA"], result.DataSources!.Select(source => source.Label));
-        Assert.Equal(2, CountNodeType(result.DryRunPlan!, "DmlExecuteNode"));
-        Assert.Equal(2, CountOccurrences(result.TranspiledFetchXml!, "<!-- client-side join -->"));
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, exception.ErrorCode);
+        Assert.Contains("[DEV]", exception.Message);
+        Assert.Contains("not supported", exception.Message);
         mockExecutor.VerifyNoOtherCalls();
         mockBulkExecutor.VerifyNoOtherCalls();
     }
@@ -1760,7 +1759,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development,
             RemoteExecutorFactory = label => label == "DEV" ? remoteExecutor.Object : null
@@ -1821,7 +1820,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development,
             RemoteExecutorFactory = label => label == "DEV" ? remoteExecutor : null
@@ -1867,12 +1866,12 @@ public class SqlQueryServiceTests
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task ExecuteAsync_CrossEnvDml_PromptPolicy_DryRunBypassesOnlyExecutionConfirmation()
+    public async Task ExecuteAsync_CrossEnvDml_PromptPolicy_IsRefusedBeforeConfirmationOrPreview()
     {
         var mockExecutor = new Mock<IQueryExecutor>();
         var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
         var service = new SqlQueryService(
-            mockExecutor.Object, guard: new InactiveFakeShakedownGuard())
+            mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider)
         {
             RemoteExecutorFactory = label => label == "QA" ? mockRemoteExecutor : null,
             ProfileResolver = new ProfileResolutionService(
@@ -1896,29 +1895,25 @@ public class SqlQueryServiceTests
             DmlSafety = new DmlSafetyOptions { IsDryRun = true }
         };
 
-        var result = await service.ExecuteAsync(request);
-
-        Assert.True(result.DmlSafetyResult?.IsDryRun);
-
-        var executionRequest = request with
+        foreach (var options in new[] { new DmlSafetyOptions { IsDryRun = true }, new DmlSafetyOptions(), new DmlSafetyOptions { IsConfirmed = true } })
         {
-            DmlSafety = new DmlSafetyOptions()
-        };
-        var exception = await Assert.ThrowsAsync<PpdsException>(
-            () => service.ExecuteAsync(executionRequest));
-        Assert.Equal(ErrorCodes.Query.DmlConfirmationRequired, exception.ErrorCode);
-        Assert.Contains("require --confirm", exception.Message, StringComparison.OrdinalIgnoreCase);
+            var exception = await Assert.ThrowsAsync<PpdsException>(
+                () => service.ExecuteAsync(request with { DmlSafety = options }));
+            Assert.Equal(ErrorCodes.Query.DmlBlocked, exception.ErrorCode);
+            Assert.Contains("[QA]", exception.Message);
+            Assert.Contains("not supported", exception.Message);
+        }
     }
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task ExecuteAsync_CrossEnvDml_AllowPolicy_WithConfirm_Passes()
+    public async Task ExecuteAsync_CrossEnvDml_AllowPolicy_WithConfirm_IsRefusedAsUnsupported()
     {
         // Arrange: service with Allow cross-env DML policy + confirmed + dry-run
         // Dry-run verifies the safety checks pass without requiring BulkOperationExecutor.
         var mockExecutor = new Mock<IQueryExecutor>();
         var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         service.RemoteExecutorFactory = label =>
             label == "DEV" ? mockRemoteExecutor : null;
@@ -1944,13 +1939,12 @@ public class SqlQueryServiceTests
             DmlSafety = new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true }
         };
 
-        // Act — should pass because Allow policy + confirmed + Development target
-        var result = await service.ExecuteAsync(request);
+        // Act: the planner would send the write to the connected environment, so even an allowed target is refused.
+        var exception = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
 
-        // Assert: dry-run returns the plan without executing
-        Assert.NotNull(result);
-        Assert.NotNull(result.DmlSafetyResult);
-        Assert.True(result.DmlSafetyResult.IsDryRun);
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, exception.ErrorCode);
+        Assert.Contains("[DEV]", exception.Message);
+        Assert.Contains("not supported", exception.Message);
     }
 
     [Fact]
@@ -1973,7 +1967,7 @@ public class SqlQueryServiceTests
                 Count = 0
             });
 
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         service.RemoteExecutorFactory = label =>
             label == "QA" ? mockRemoteExecutor.Object : null;
@@ -2037,7 +2031,7 @@ public class SqlQueryServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(tdsResult);
 
-        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         var request = new SqlQueryRequest
         {
@@ -2099,7 +2093,7 @@ public class SqlQueryServiceTests
     {
         // Arrange: service with a TDS executor, but DML query
         var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
-        var service = new SqlQueryService(_mockQueryExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(_mockQueryExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         var request = new SqlQueryRequest
         {
@@ -2120,7 +2114,7 @@ public class SqlQueryServiceTests
     {
         // Arrange: service with TDS executor, query targets incompatible entity
         var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
-        var service = new SqlQueryService(_mockQueryExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(_mockQueryExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         var request = new SqlQueryRequest
         {
@@ -2181,7 +2175,7 @@ public class SqlQueryServiceTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Connection refused on port 5558"));
 
-        var service = new SqlQueryService(_mockQueryExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(_mockQueryExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         var request = new SqlQueryRequest
         {
@@ -2278,7 +2272,7 @@ public class SqlQueryServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(tdsResult);
 
-        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         var request = new SqlQueryRequest
         {
@@ -2332,7 +2326,7 @@ public class SqlQueryServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(tdsResult);
 
-        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         var request = new SqlQueryRequest
         {
@@ -2358,6 +2352,103 @@ public class SqlQueryServiceTests
         var finalChunk = chunks[^1];
         Assert.True(finalChunk.IsComplete);
         Assert.Equal(QueryExecutionMode.Tds, finalChunk.ExecutionMode);
+    }
+
+    #endregion
+
+    #region DML failure outcome (all surfaces read DmlOutcome)
+
+    private static SqlQueryService ServiceWithBulk(Mock<IBulkOperationExecutor> bulk) => new(
+        new Mock<IQueryExecutor>().Object,
+        guard: new InactiveFakeShakedownGuard(),
+        bulkOperationExecutor: bulk.Object,
+        metadataProvider: TestMetadata.Provider)
+    {
+        EnvironmentProtectionLevel = ProtectionLevel.Development
+    };
+
+    private static BulkOperationResult Failed(int ok, int failed, string? message) => new()
+    {
+        SuccessCount = ok,
+        FailureCount = failed,
+        Errors = message == null ? Array.Empty<BulkOperationError>() : new[] { new BulkOperationError { Message = message } }
+    };
+
+    private static readonly SqlQueryRequest InsertRequest = new()
+    {
+        Sql = "INSERT INTO solution (friendlyname) VALUES ('x')",
+        DmlSafety = new DmlSafetyOptions { IsConfirmed = true }
+    };
+
+    [Fact]
+    [Trait("Category", "PlanUnit")]
+    public async Task ExecuteAsync_DmlRowsFail_SurfacesOutcomeWithReason()
+    {
+        var bulk = new Mock<IBulkOperationExecutor>();
+        bulk.Setup(b => b.CreateMultipleAsync(It.IsAny<string>(), It.IsAny<IEnumerable<Microsoft.Xrm.Sdk.Entity>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Failed(0, 1, "The 'CreateMultiple' method does not support entities of type 'solution'."));
+
+        var result = await ServiceWithBulk(bulk).ExecuteAsync(InsertRequest);
+
+        Assert.NotNull(result.DmlOutcome);
+        Assert.True(result.DmlOutcome!.IsTotalFailure);
+        Assert.Contains("does not support entities of type 'solution'", result.DmlOutcome.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "PlanUnit")]
+    public async Task ExecuteAsync_DmlSucceeds_OutcomeHasNoFailures()
+    {
+        var bulk = new Mock<IBulkOperationExecutor>();
+        bulk.Setup(b => b.CreateMultipleAsync(It.IsAny<string>(), It.IsAny<IEnumerable<Microsoft.Xrm.Sdk.Entity>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Failed(1, 0, null));
+
+        var result = await ServiceWithBulk(bulk).ExecuteAsync(InsertRequest);
+
+        Assert.False(result.DmlOutcome!.HasFailures);
+    }
+
+    [Fact]
+    [Trait("Category", "PlanUnit")]
+    public async Task ExecuteAsync_Script_FirstStatementFailsLastSucceeds_OutcomeStillFails_AndReasonBelongsToFirst()
+    {
+        var bulk = new Mock<IBulkOperationExecutor>();
+        bulk.Setup(b => b.CreateMultipleAsync("account", It.IsAny<IEnumerable<Microsoft.Xrm.Sdk.Entity>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Failed(0, 1, "account failure"));
+        bulk.Setup(b => b.CreateMultipleAsync("contact", It.IsAny<IEnumerable<Microsoft.Xrm.Sdk.Entity>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Failed(1, 0, null));
+
+        var result = await ServiceWithBulk(bulk).ExecuteAsync(new SqlQueryRequest
+        {
+            Sql = "INSERT INTO account (name) VALUES ('a'); INSERT INTO contact (lastname) VALUES ('b')",
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = true }
+        });
+
+        var outcome = result.DmlOutcome!;
+        Assert.Equal(2, outcome.Statements.Count);
+        Assert.True(outcome.HasFailures);
+        Assert.Equal(PPDS.Cli.Infrastructure.Errors.ExitCodes.PartialSuccess, outcome.ExitCode);
+        Assert.Contains("#1 INSERT account", outcome.Message);
+        Assert.Contains("account failure", outcome.Message);
+        Assert.DoesNotContain("contact", outcome.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "PlanUnit")]
+    public async Task ExecuteStreamingAsync_DmlRowsFail_FinalChunkCarriesOutcome()
+    {
+        var bulk = new Mock<IBulkOperationExecutor>();
+        bulk.Setup(b => b.CreateMultipleAsync(It.IsAny<string>(), It.IsAny<IEnumerable<Microsoft.Xrm.Sdk.Entity>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Failed(0, 1, "stream failure"));
+
+        var chunks = new List<SqlQueryStreamChunk>();
+        await foreach (var chunk in ServiceWithBulk(bulk).ExecuteStreamingAsync(InsertRequest))
+            chunks.Add(chunk);
+
+        var final = chunks[^1];
+        Assert.True(final.IsComplete);
+        Assert.Contains("stream failure", final.DmlOutcome!.Message);
+        Assert.All(chunks.Take(chunks.Count - 1), c => Assert.Null(c.DmlOutcome));
     }
 
     #endregion

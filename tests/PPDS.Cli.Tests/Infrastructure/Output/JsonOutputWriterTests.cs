@@ -219,4 +219,18 @@ public class JsonOutputWriterTests
         var writer = new JsonOutputWriter(debugMode: true);
         Assert.True(writer.DebugMode);
     }
+
+    [Fact]
+    public void WritePartialSuccess_WithError_EmitsTopLevelError()
+    {
+        using var sw = new StringWriter();
+        var writer = new JsonOutputWriter(sw);
+        var error = new StructuredError(ErrorCodes.Operation.PartialFailure, "some failed");
+
+        writer.WritePartialSuccess("data", new[] { ItemResult.Fail("dml", error) }, error);
+
+        var doc = JsonDocument.Parse(sw.ToString());
+        Assert.False(doc.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal("some failed", doc.RootElement.GetProperty("error").GetProperty("message").GetString());
+    }
 }

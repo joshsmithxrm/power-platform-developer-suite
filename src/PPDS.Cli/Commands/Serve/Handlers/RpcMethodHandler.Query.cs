@@ -295,35 +295,11 @@ public partial class RpcMethodHandler
                     _logger.LogWarning("Environment config has duplicate or reserved labels — cross-environment queries disabled");
                 }
 
-                var envConfig = await configStore.GetConfigAsync(env.Url, ct);
-                if (envConfig != null)
-                {
-                    concrete.EnvironmentSafetySettings = envConfig.SafetySettings;
-                    var envType = envConfig.Type ?? PPDS.Auth.Profiles.EnvironmentType.Unknown;
-                    concrete.EnvironmentProtectionLevel = envConfig.Protection
-                        ?? DmlSafetyGuard.DetectProtectionLevel(envType);
-                }
+                concrete.ConfigureEnvironment(env.Url, await configStore.GetConfigAsync(env.Url, ct));
             }
 
             // Build the shared request
-            var sqlRequest = new SqlQueryRequest
-            {
-                Sql = request.Sql,
-                TopOverride = request.Top,
-                PageNumber = request.Page,
-                PagingCookie = request.PagingCookie,
-                IncludeCount = request.Count,
-                UseTdsEndpoint = request.UseTds,
-                DmlSafety = request.DmlSafety != null
-                    ? new DmlSafetyOptions
-                    {
-                        IsConfirmed = request.DmlSafety.IsConfirmed,
-                        IsDryRun = request.DmlSafety.IsDryRun,
-                        NoLimit = request.DmlSafety.NoLimit,
-                        RowCap = request.DmlSafety.RowCap,
-                    }
-                    : null,
-            };
+            var sqlRequest = BuildSqlRequest(request, RpcProfileIdentity.Create(profile));
 
             try
             {
@@ -344,58 +320,9 @@ public partial class RpcMethodHandler
 
                 return mapped;
             }
-            catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.ParseError)
+            catch (Exception ex) when (TryMapQuerySqlFailure(ex, request.Sql, out var rpcException, ct.IsCancellationRequested))
             {
-                var diagnostics = ExtractParseDiagnostics(ex, request.Sql);
-                if (diagnostics is { Count: > 0 })
-                {
-                    throw new RpcException(
-                        ErrorCodes.Query.ParseError,
-                        ex.UserMessage,
-                        new RpcErrorData
-                        {
-                            Code = ErrorCodes.Query.ParseError,
-                            Message = ex.UserMessage,
-                            Diagnostics = diagnostics,
-                        });
-                }
-                throw new RpcException(ErrorCodes.Query.ParseError, ex.UserMessage);
-            }
-            catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.DmlConfirmationRequired)
-            {
-                throw new RpcException(
-                    ErrorCodes.Query.DmlConfirmationRequired,
-                    ex.UserMessage,
-                    new DmlSafetyErrorData
-                    {
-                        Code = ErrorCodes.Query.DmlConfirmationRequired,
-                        Message = ex.UserMessage,
-                        DmlConfirmationRequired = true,
-                    });
-            }
-            catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.DmlBlocked)
-            {
-                throw new RpcException(
-                    ErrorCodes.Query.DmlBlocked,
-                    ex.UserMessage,
-                    new DmlSafetyErrorData
-                    {
-                        Code = ErrorCodes.Query.DmlBlocked,
-                        Message = ex.UserMessage,
-                        DmlBlocked = true,
-                    });
-            }
-            catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.TdsIncompatible)
-            {
-                throw new RpcException(ErrorCodes.Query.TdsIncompatible, ex.UserMessage);
-            }
-            catch (PpdsException ex) when (ex.ErrorCode == ErrorCodes.Query.TdsConnectionFailed)
-            {
-                throw new RpcException(ErrorCodes.Query.TdsConnectionFailed, ex.UserMessage);
-            }
-            catch (PpdsException ex)
-            {
-                throw MapPpdsToRpcException(ex);
+                throw rpcException!;
             }
         }, cancellationToken, profileIdentity: request.ProfileIdentity);
 
@@ -694,6 +621,21 @@ public class QueryResultResponse
     [JsonPropertyName("queryMode")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? QueryMode { get; set; }
+
+    /// <summary>DML only, when any row failed: total rows that succeeded across all statements.</summary>
+    [JsonPropertyName("affectedRows")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? AffectedRows { get; set; }
+
+    /// <summary>DML only, when any row failed: total rows that failed across all statements.</summary>
+    [JsonPropertyName("failedRows")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? FailedRows { get; set; }
+
+    /// <summary>DML only, when any row failed: counts and a representative error per failed statement.</summary>
+    [JsonPropertyName("dmlError")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DmlError { get; set; }
 
     [JsonPropertyName("dataSources")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

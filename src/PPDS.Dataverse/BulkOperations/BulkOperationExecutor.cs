@@ -77,6 +77,9 @@ namespace PPDS.Dataverse.BulkOperations
         private readonly IDataverseConnectionPool _connectionPool;
         private readonly IThrottleTracker _throttleTracker;
         private readonly DataverseOptions _options;
+
+        /// <inheritdoc />
+        public BulkOperationOptions ConfiguredOptions => _options.BulkOperations;
         private readonly ILogger<BulkOperationExecutor> _logger;
 
         /// <summary>

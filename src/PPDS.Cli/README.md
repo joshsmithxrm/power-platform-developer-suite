@@ -548,9 +548,9 @@ Options:
 - `--no-limit` - Remove the 10,000-row DML safety cap
 - `--profile`, `-p` - Profile name
 - `--environment`, `-env` - Override environment URL
-- `--top`, `-t` - Limit number of results (applies if no TOP in query)
-- `--page` - Page number (1-based)
-- `--paging-cookie` - Paging cookie for continuation
+- `--top`, `-t` - Limit number of results (applies if no TOP in query); not valid with INSERT, UPDATE or DELETE (refused, exit 3: put the limit in the WHERE clause)
+- `--page` - Page number (1-based); not valid with INSERT, UPDATE or DELETE (refused, exit 3)
+- `--paging-cookie` - Paging cookie for continuation; not valid with INSERT, UPDATE or DELETE (refused, exit 3)
 - `--count`, `-c` - Include total record count
 - `--output-format`, `-f` - Output format (Text, Json, or Csv); DML dry-run plans support Text or Json
 

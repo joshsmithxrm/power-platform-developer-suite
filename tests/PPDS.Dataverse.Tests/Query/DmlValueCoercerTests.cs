@@ -144,6 +144,19 @@ public class DmlValueCoercerTests
         Assert.Equal("some-bytes", DmlValueCoercer.Coerce("some-bytes", attr));
     }
 
+    [Theory]
+    [InlineData("2024-05-05T10:00:00+02:00")]
+    [InlineData("2024-05-05T03:00:00-05:00")]
+    [InlineData("2024-05-05T08:00:00Z")]
+    public void Coerce_DateTimeWithAnOffset_IsTheSameInstantInUtc(string literal)
+    {
+        // Found live (2026-11-17): '+02:00' was parsed to the machine's local time and written hours off.
+        var result = DmlValueCoercer.Coerce(literal, Attr("DateTime"));
+        var dt = Assert.IsType<DateTime>(result);
+        Assert.Equal(DateTimeKind.Utc, dt.Kind);
+        Assert.Equal(new DateTime(2024, 5, 5, 8, 0, 0, DateTimeKind.Utc), dt);
+    }
+
     [Fact]
     public void Coerce_DateTimeWithOffset_PreservesUtcKind()
     {

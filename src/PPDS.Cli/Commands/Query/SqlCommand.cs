@@ -53,20 +53,10 @@ public static class SqlCommand
             Description = "Route query through the TDS Endpoint (direct SQL) instead of FetchXML"
         };
 
-        var confirmOption = new Option<bool>("--confirm")
-        {
-            Description = "Confirm DML execution without interactive prompt"
-        };
-
-        var dryRunOption = new Option<bool>("--dry-run")
-        {
-            Description = "Show the execution plan without running the DML statement"
-        };
-
-        var noLimitOption = new Option<bool>("--no-limit")
-        {
-            Description = "Remove the 10,000 row safety cap for DML operations"
-        };
+        var dmlSafety = new DmlSafetyOptionSet();
+        var confirmOption = dmlSafety.Confirm;
+        var dryRunOption = dmlSafety.DryRun;
+        var noLimitOption = dmlSafety.NoLimit;
 
         var command = new Command("sql", "Execute a SQL query against Dataverse (transpiled to FetchXML)")
         {
@@ -136,8 +126,10 @@ public static class SqlCommand
             if (format == OutputFormat.Csv)
             {
                 result.AddError(
-                    "CSV output is not supported with --explain or --show-fetchxml. Use --output-format Json or Text. " +
-                    "The same restriction applies to --dry-run.");
+                    result.GetValue(showFetchXmlOption) || result.GetValue(explainOption)
+                        ? "CSV output is not supported with --explain or --show-fetchxml. Use --output-format Json or Text. " +
+                          "The same restriction applies to --dry-run."
+                        : DmlSafetyOptionSet.DryRunCsvError);
             }
         });
 
@@ -149,9 +141,7 @@ public static class SqlCommand
             var showFetchXml = parseResult.GetValue(showFetchXmlOption);
             var explain = parseResult.GetValue(explainOption);
             var useTds = parseResult.GetValue(tdsOption);
-            var confirm = parseResult.GetValue(confirmOption);
-            var dryRun = parseResult.GetValue(dryRunOption);
-            var noLimit = parseResult.GetValue(noLimitOption);
+            var dmlSafetyOptions = DmlSafetyOptionSet.Read(command, parseResult);
             var profile = parseResult.GetValue(QueryCommandGroup.ProfileOption);
             var environment = parseResult.GetValue(QueryCommandGroup.EnvironmentOption);
             var top = parseResult.GetValue(QueryCommandGroup.TopOption);
@@ -162,7 +152,7 @@ public static class SqlCommand
 
             return await ExecuteAsync(
                 sql, file, stdin, showFetchXml, explain, useTds,
-                confirm, dryRun, noLimit,
+                dmlSafetyOptions,
                 profile, environment,
                 top, page, pagingCookie, count,
                 globalOptions, cancellationToken);
@@ -178,9 +168,7 @@ public static class SqlCommand
         bool showFetchXml,
         bool explain,
         bool useTds,
-        bool confirm,
-        bool dryRun,
-        bool noLimit,
+        DmlSafetyOptions dmlSafety,
         string? profile,
         string? environment,
         int? top,
@@ -234,18 +222,19 @@ public static class SqlCommand
                     return remoteProvider.GetRequiredService<IQueryExecutor>();
                 };
 
-                // Wire environment-specific DML safety settings (mirrors InteractiveSession)
-                concreteSqlService.ProfileResolver = resolver;
-                var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-                var envConfig = await envConfigStore.GetConfigAsync(
-                    connectionInfo.EnvironmentUrl, cancellationToken);
-                if (envConfig != null)
-                {
-                    concreteSqlService.EnvironmentSafetySettings = envConfig.SafetySettings;
-                    var envType = envConfig.Type ?? EnvironmentType.Unknown;
-                    concreteSqlService.EnvironmentProtectionLevel = envConfig.Protection
-                        ?? DmlSafetyGuard.DetectProtectionLevel(envType);
-                }
+                await ConfigureDmlSafetyAsync(
+                    concreteSqlService,
+                    envConfigStore,
+                    resolver,
+                    serviceProvider.GetRequiredService<ResolvedConnectionInfo>().EnvironmentUrl,
+                    cancellationToken);
+            }
+            else
+            {
+                // The guard configuration is mandatory: a service that cannot be configured must not run DML.
+                throw new PpdsException(
+                    ErrorCodes.Query.ExecutionFailed,
+                    "The SQL query service cannot apply DML safety settings, so the query was not executed.");
             }
 
             // If --explain, show execution plan without executing
@@ -299,24 +288,10 @@ public static class SqlCommand
                 var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
                 ConsoleHeader.WriteConnectedAs(connectionInfo);
                 Console.Error.WriteLine();
-                Console.Error.WriteLine(dryRun ? "Building DML preview..." : "Executing query...");
+                Console.Error.WriteLine(dmlSafety.IsDryRun ? "Building DML preview..." : "Executing query...");
             }
 
-            var request = new SqlQueryRequest
-            {
-                Sql = query,
-                TopOverride = top,
-                PageNumber = page,
-                PagingCookie = pagingCookie,
-                IncludeCount = count,
-                UseTdsEndpoint = useTds,
-                DmlSafety = new DmlSafetyOptions
-                {
-                    IsConfirmed = confirm,
-                    IsDryRun = dryRun,
-                    NoLimit = noLimit
-                }
-            };
+            var request = BuildRequest(query, top, page, pagingCookie, count, useTds, dmlSafety);
 
             var queryResult = await sqlQueryService.ExecuteAsync(request, cancellationToken);
 
@@ -326,23 +301,13 @@ public static class SqlCommand
                 return ExitCodes.Success;
             }
 
-            switch (globalOptions.OutputFormat)
-            {
-                case OutputFormat.Json:
-                    writer.WriteSuccess(queryResult.Result);
-                    break;
-                case OutputFormat.Csv:
-                    QueryResultFormatter.WriteCsvOutput(queryResult.Result);
-                    break;
-                default:
-                    QueryResultFormatter.WriteTableOutput(
-                        queryResult.Result,
-                        globalOptions.Verbose,
-                        queryResult.TranspiledFetchXml);
-                    break;
-            }
-
-            return DmlExitCode(queryResult.Result);
+            return WriteResult(
+                queryResult,
+                globalOptions.OutputFormat,
+                globalOptions.Verbose,
+                writer,
+                queryResult.TranspiledFetchXml,
+                pagingHint: null);
         }
         catch (QueryParseException ex)
         {
@@ -365,8 +330,11 @@ public static class SqlCommand
         }
         catch (Exception ex)
         {
-            var error = ExceptionMapper.Map(ex, context: "executing SQL query", debug: globalOptions.Debug);
+            var error = DmlSafetyOptionSet.WithCliWording(
+                ExceptionMapper.Map(ex, context: "executing SQL query", debug: globalOptions.Debug), ex)
+                with { DmlCommitted = DmlOutcome.From(ex)?.DescribeCommitted() };
             writer.WriteError(error);
+            WriteCommittedNote(ex);
             return ExceptionMapper.ToExitCode(ex);
         }
         finally
@@ -432,25 +400,89 @@ public static class SqlCommand
         public bool RequiresConfirmationForExecution { get; init; }
     }
 
-    internal static int DmlExitCode(QueryResult result)
+    /// <summary>Builds the service request for 'ppds query sql'; DML safety is always explicit.</summary>
+    internal static SqlQueryRequest BuildRequest(
+        string sql, int? top, int? page, string? pagingCookie, bool count, bool useTds, DmlSafetyOptions dmlSafety) => new()
     {
-        // DmlExecuteNode always yields exactly one row with exactly two columns:
-        // affected_rows and failed_rows. Guard on that shape so a SELECT with a
-        // user-named "failed_rows" column can't produce a false-positive exit code.
-        if (result.Records.Count != 1)
-            return ExitCodes.Success;
+        Sql = sql,
+        TopOverride = top,
+        TopIsUserSpecified = top.HasValue,
+        PageNumber = page,
+        PagingCookie = pagingCookie,
+        PagingIsUserSpecified = page.HasValue || pagingCookie != null,
+        IncludeCount = count,
+        UseTdsEndpoint = useTds,
+        DmlSafety = dmlSafety
+    };
 
-        var row = result.Records[0];
-        if (row.Count != 2 ||
-            !row.TryGetValue("failed_rows", out var fq) ||
-            !row.TryGetValue("affected_rows", out var sq))
-            return ExitCodes.Success;
+    /// <summary>
+    /// When a script was interrupted (error or cancellation) after some DML statements had already run,
+    /// say what they did on stderr. They are not rolled back.
+    /// </summary>
+    internal static void WriteCommittedNote(Exception exception)
+    {
+        var committed = DmlOutcome.From(exception);
+        if (committed != null)
+            Console.Error.WriteLine(committed.DescribeCommitted());
+    }
 
-        if (fq.Value is not long failed || failed == 0)
-            return ExitCodes.Success;
+    /// <summary>
+    /// Writes an executed query result and reports DML row failures. Data goes to stdout; the failure
+    /// message goes to stderr (text/CSV) or into the JSON envelope (<c>success: false</c> with the unchanged
+    /// <c>data</c>, a top-level <c>error</c> and a <c>results[]</c> entry). Returns the process exit code.
+    /// </summary>
+    internal static int WriteResult(
+        SqlQueryResult queryResult,
+        OutputFormat format,
+        bool verbose,
+        IOutputWriter writer,
+        string? fetchXml,
+        string? pagingHint)
+    {
+        var outcome = queryResult.DmlOutcome;
+        var failure = outcome is { HasFailures: true }
+            ? StructuredError.Create(outcome.ErrorCode, outcome.Message!)
+            : null;
 
-        var succeeded = sq.Value is long s && s > 0;
-        return succeeded ? ExitCodes.PartialSuccess : ExitCodes.Failure;
+        switch (format)
+        {
+            case OutputFormat.Json when failure != null:
+                writer.WritePartialSuccess(
+                    queryResult.Result, new[] { ItemResult.Fail("dml", failure) }, failure);
+                break;
+            case OutputFormat.Json:
+                writer.WriteSuccess(queryResult.Result);
+                break;
+            case OutputFormat.Csv:
+                QueryResultFormatter.WriteCsvOutput(queryResult.Result);
+                break;
+            default:
+                QueryResultFormatter.WriteTableOutput(queryResult.Result, verbose, fetchXml, pagingHint);
+                break;
+        }
+
+        if (failure != null && format != OutputFormat.Json)
+        {
+            // Status goes to stderr; stdout stays data-only.
+            Console.Error.WriteLine($"Error: {failure.Message}");
+        }
+
+        return outcome?.ExitCode ?? ExitCodes.Success;
+    }
+
+    /// <summary>
+    /// Wires environment-specific DML safety settings (mirrors InteractiveSession). Shared by every
+    /// CLI entry point that executes SQL so they all apply the same guard configuration.
+    /// </summary>
+    internal static async Task ConfigureDmlSafetyAsync(
+        SqlQueryService service,
+        EnvironmentConfigStore envConfigStore,
+        ProfileResolutionService resolver,
+        string environmentUrl,
+        CancellationToken cancellationToken)
+    {
+        service.ProfileResolver = resolver;
+        service.ConfigureEnvironment(environmentUrl, await envConfigStore.GetConfigAsync(environmentUrl, cancellationToken));
     }
 
     private static async Task<string> GetSqlAsync(

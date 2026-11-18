@@ -131,6 +131,21 @@ public class RpcErrorData
     /// </summary>
     [JsonPropertyName("diagnostics")]
     public List<DiagnosticDto>? Diagnostics { get; set; }
+
+    /// <summary>
+    /// For an interrupted SQL script: what the DML statements that had already run did. They are not rolled back.
+    /// </summary>
+    [JsonPropertyName("dmlCommitted")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DmlCommitted { get; set; }
+
+    /// <summary>
+    /// <c>Query.DmlInterrupted</c> only: the run stopped on a sign-in failure after it had changed data. The user must
+    /// sign in again; the request must not be replayed.
+    /// </summary>
+    [JsonPropertyName("authenticationRequired")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? AuthenticationRequired { get; set; }
 }
 
 /// <summary>
@@ -161,4 +176,59 @@ public sealed class DmlSafetyErrorData : RpcErrorData
     /// <summary>Whether the DML operation requires user confirmation before execution.</summary>
     [JsonPropertyName("dmlConfirmationRequired")]
     public bool DmlConfirmationRequired { get; init; }
+
+    /// <summary>
+    /// Confirmation required only: every environment the request would write to. Writes to another environment are
+    /// refused before confirmation, so today this is the connected environment.
+    /// </summary>
+    [JsonPropertyName("dmlBypass")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? DmlBypass { get; init; }
+
+    /// <summary>Confirmation required only: every environment the request would write to.</summary>
+    [JsonPropertyName("dmlTargets")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<DmlTargetDto>? DmlTargets { get; init; }
+
+    /// <summary>
+    /// Whether the statement was refused because it would affect more rows than the cap. Nothing was changed by
+    /// that statement; re-run with the cap removed (<c>noLimit</c>) or a narrower WHERE clause.
+    /// </summary>
+    [JsonPropertyName("dmlRowCapExceeded")]
+    public bool DmlRowCapExceeded { get; init; }
+
+    /// <summary>Row cap refusal only: the cap that would have been exceeded (at least <c>rowCap + 1</c> rows match).</summary>
+    [JsonPropertyName("rowCap")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RowCap { get; init; }
+
+    /// <summary>Row cap refusal only: the refused operation (INSERT, UPDATE or DELETE).</summary>
+    [JsonPropertyName("operation")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Operation { get; init; }
+
+    /// <summary>Row cap refusal only: the target entity of the refused statement.</summary>
+    [JsonPropertyName("entity")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Entity { get; init; }
+}
+
+/// <summary>An environment a DML request would write to (<see cref="DmlSafetyErrorData.DmlTargets"/>).</summary>
+public sealed class DmlTargetDto
+{
+    /// <summary>The environment's configured label, or null.</summary>
+    [JsonPropertyName("label")]
+    public string? Label { get; init; }
+
+    /// <summary>The environment URL.</summary>
+    [JsonPropertyName("url")]
+    public string? Url { get; init; }
+
+    /// <summary>The configured environment type (Production, Sandbox, ...), or null when not configured.</summary>
+    [JsonPropertyName("type")]
+    public string? Type { get; init; }
+
+    /// <summary>The protection level the guard applied: Production, Test or Development.</summary>
+    [JsonPropertyName("protection")]
+    public string Protection { get; init; } = "";
 }

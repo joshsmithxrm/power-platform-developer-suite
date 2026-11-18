@@ -1,3 +1,4 @@
+using System.Linq;
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Text.Json;
@@ -11,6 +12,7 @@ using PPDS.Cli.Tests.TestHelpers;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
+using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Query.Parsing;
 using Xunit;
 
@@ -416,6 +418,7 @@ public class SqlCommandTests
         Result = QueryResult.Empty("dry-run"),
         DmlSafetyResult = new DmlSafetyResult
         {
+            ContainsDml = true,
             IsDryRun = true,
             RequiresConfirmation = true,
             RowCap = DmlSafetyGuard.DefaultRowCap
@@ -429,211 +432,189 @@ public class SqlCommandTests
 
     #endregion
 
-    #region DML Exit Code Logic
+    #region DML failure reporting (WriteResult)
 
-    [Fact]
-    public void DmlExitCode_NormalSelectResults_ReturnsSuccess()
+    private static DmlStatementOutcome Stmt(DmlOperation op, string entity, long ok, long failed, string? error = null)
+        => new(op, entity, ok, failed, error);
+
+    private static SqlQueryResult DmlQueryResult(params DmlStatementOutcome[] statements) => new()
     {
-        // Normal SELECT result with multiple rows - not DML shape
-        var result = new QueryResult
+        OriginalSql = "UPDATE x",
+        TranspiledFetchXml = null,
+        Result = new QueryResult
         {
             EntityLogicalName = "account",
-            Columns = new[]
-            {
-                new QueryColumn { LogicalName = "name" },
-                new QueryColumn { LogicalName = "accountid" }
-            },
+            Columns = new[] { new QueryColumn { LogicalName = "affected_rows" }, new QueryColumn { LogicalName = "failed_rows" } },
             Records = new[]
             {
                 new Dictionary<string, QueryValue>
                 {
-                    ["name"] = QueryValue.Simple("Contoso"),
-                    ["accountid"] = QueryValue.Simple(Guid.NewGuid())
-                },
-                new Dictionary<string, QueryValue>
-                {
-                    ["name"] = QueryValue.Simple("Fabrikam"),
-                    ["accountid"] = QueryValue.Simple(Guid.NewGuid())
-                }
-            },
-            Count = 2
-        };
-
-        // DmlExitCode returns Success when Records.Count != 1
-        Assert.NotEqual(1, result.Records.Count);
-        // The exit code would be ExitCodes.Success (0)
-        var exitCode = SqlCommand.DmlExitCode(result);
-        Assert.Equal(ExitCodes.Success, exitCode);
-    }
-
-    [Fact]
-    public void DmlExitCode_DmlWithZeroFailedRows_ReturnsSuccess()
-    {
-        // DML result: exactly 1 row, exactly 2 columns: affected_rows and failed_rows
-        var result = new QueryResult
-        {
-            EntityLogicalName = "account",
-            Columns = new[]
-            {
-                new QueryColumn { LogicalName = "affected_rows" },
-                new QueryColumn { LogicalName = "failed_rows" }
-            },
-            Records = new[]
-            {
-                new Dictionary<string, QueryValue>
-                {
-                    ["affected_rows"] = QueryValue.Simple(50L),
-                    ["failed_rows"] = QueryValue.Simple(0L)
+                    ["affected_rows"] = QueryValue.Simple(statements.Sum(x => x.AffectedRows)),
+                    ["failed_rows"] = QueryValue.Simple(statements.Sum(x => x.FailedRows))
                 }
             },
             Count = 1
-        };
+        },
+        DmlOutcome = DmlOutcome.From(statements)
+    };
 
-        var exitCode = SqlCommand.DmlExitCode(result);
-        Assert.Equal(ExitCodes.Success, exitCode);
-    }
-
-    [Fact]
-    public void DmlExitCode_DmlWithFailedAndSucceeded_ReturnsPartialSuccess()
+    private static (int exit, string stdout, string stderr) Run(SqlQueryResult result, OutputFormat format)
     {
-        // DML result with both failed_rows > 0 and affected_rows > 0
-        var result = new QueryResult
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        var originalOut = Console.Out;
+        var originalError = Console.Error;
+        try
         {
-            EntityLogicalName = "account",
-            Columns = new[]
-            {
-                new QueryColumn { LogicalName = "affected_rows" },
-                new QueryColumn { LogicalName = "failed_rows" }
-            },
-            Records = new[]
-            {
-                new Dictionary<string, QueryValue>
-                {
-                    ["affected_rows"] = QueryValue.Simple(45L),
-                    ["failed_rows"] = QueryValue.Simple(5L)
-                }
-            },
-            Count = 1
-        };
-
-        var exitCode = SqlCommand.DmlExitCode(result);
-        Assert.Equal(ExitCodes.PartialSuccess, exitCode);
-    }
-
-    [Fact]
-    public void DmlExitCode_DmlWithOnlyFailures_ReturnsFailure()
-    {
-        // DML result with failed_rows > 0 and affected_rows = 0
-        var result = new QueryResult
+            Console.SetOut(stdout);
+            Console.SetError(stderr);
+            IOutputWriter writer = format == OutputFormat.Json ? new JsonOutputWriter(stdout) : new TextOutputWriter();
+            var exit = SqlCommand.WriteResult(result, format, verbose: false, writer, fetchXml: null, pagingHint: null);
+            return (exit, stdout.ToString(), stderr.ToString());
+        }
+        finally
         {
-            EntityLogicalName = "account",
-            Columns = new[]
-            {
-                new QueryColumn { LogicalName = "affected_rows" },
-                new QueryColumn { LogicalName = "failed_rows" }
-            },
-            Records = new[]
-            {
-                new Dictionary<string, QueryValue>
-                {
-                    ["affected_rows"] = QueryValue.Simple(0L),
-                    ["failed_rows"] = QueryValue.Simple(10L)
-                }
-            },
-            Count = 1
-        };
-
-        var exitCode = SqlCommand.DmlExitCode(result);
-        Assert.Equal(ExitCodes.Failure, exitCode);
+            Console.SetOut(originalOut);
+            Console.SetError(originalError);
+        }
     }
 
     [Fact]
-    public void DmlExitCode_SingleRowWithOnlyOneColumn_ReturnsSuccess()
+    public void WriteResult_Json_AllRowsFailed_IsNotSuccess_WithTopLevelErrorResultsAndUnchangedData()
     {
-        // Single row but only 1 column - not DML shape
-        var result = new QueryResult
-        {
-            EntityLogicalName = "account",
-            Columns = new[]
-            {
-                new QueryColumn { LogicalName = "name" }
-            },
-            Records = new[]
-            {
-                new Dictionary<string, QueryValue>
-                {
-                    ["name"] = QueryValue.Simple("Contoso")
-                }
-            },
-            Count = 1
-        };
+        var (exit, stdout, stderr) = Run(
+            DmlQueryResult(Stmt(DmlOperation.Insert, "solution", 0, 1, "The 'CreateMultiple' method does not support entities of type 'solution'.")),
+            OutputFormat.Json);
 
-        var exitCode = SqlCommand.DmlExitCode(result);
-        Assert.Equal(ExitCodes.Success, exitCode);
+        Assert.Equal(ExitCodes.Failure, exit);
+        Assert.Equal(string.Empty, stderr);
+        using var json = JsonDocument.Parse(stdout);
+        var root = json.RootElement;
+        Assert.False(root.GetProperty("success").GetBoolean());
+        Assert.Equal(ErrorCodes.Query.ExecutionFailed, root.GetProperty("error").GetProperty("code").GetString());
+        Assert.Contains("does not support entities of type 'solution'", root.GetProperty("error").GetProperty("message").GetString());
+        Assert.Equal(1, root.GetProperty("results").GetArrayLength());
+        Assert.False(root.GetProperty("results")[0].GetProperty("success").GetBoolean());
+        // data shape is unchanged: the QueryResult with its single summary row
+        var record = root.GetProperty("data").GetProperty("records")[0];
+        Assert.Equal(0, record.GetProperty("affected_rows").GetProperty("value").GetInt64());
+        Assert.Equal(1, record.GetProperty("failed_rows").GetProperty("value").GetInt64());
     }
 
     [Fact]
-    public void DmlExitCode_SingleRowTwoColumnsButNotDmlShape_ReturnsSuccess()
+    public void WriteResult_Json_Partial_UsesPartialFailureCodeAndExitOne()
     {
-        // Single row, 2 columns, but not named affected_rows/failed_rows
-        var result = new QueryResult
-        {
-            EntityLogicalName = "account",
-            Columns = new[]
-            {
-                new QueryColumn { LogicalName = "name" },
-                new QueryColumn { LogicalName = "revenue" }
-            },
-            Records = new[]
-            {
-                new Dictionary<string, QueryValue>
-                {
-                    ["name"] = QueryValue.Simple("Contoso"),
-                    ["revenue"] = QueryValue.Simple(1000000L)
-                }
-            },
-            Count = 1
-        };
+        var (exit, stdout, _) = Run(DmlQueryResult(Stmt(DmlOperation.Update, "account", 45, 5, "boom")), OutputFormat.Json);
 
-        var exitCode = SqlCommand.DmlExitCode(result);
-        Assert.Equal(ExitCodes.Success, exitCode);
+        Assert.Equal(ExitCodes.PartialSuccess, exit);
+        using var json = JsonDocument.Parse(stdout);
+        Assert.False(json.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal(ErrorCodes.Operation.PartialFailure, json.RootElement.GetProperty("error").GetProperty("code").GetString());
+        var message = json.RootElement.GetProperty("error").GetProperty("message").GetString();
+        Assert.Contains("45 row(s) affected", message);
+        Assert.Contains("5 row(s) failed", message);
+    }
+
+    [Theory]
+    [InlineData(DmlOperation.Insert)]
+    [InlineData(DmlOperation.Update)]
+    [InlineData(DmlOperation.Delete)]
+    public void WriteResult_Json_NoFailures_IsSuccess_ExitZero(DmlOperation op)
+    {
+        var (exit, stdout, _) = Run(DmlQueryResult(Stmt(op, "account", 3, 0)), OutputFormat.Json);
+
+        Assert.Equal(ExitCodes.Success, exit);
+        using var json = JsonDocument.Parse(stdout);
+        Assert.True(json.RootElement.GetProperty("success").GetBoolean());
+        Assert.False(json.RootElement.TryGetProperty("error", out _));
+    }
+
+    [Theory]
+    [InlineData(OutputFormat.Text)]
+    [InlineData(OutputFormat.Csv)]
+    public void WriteResult_TextAndCsv_FailureGoesToStderrNotStdout(OutputFormat format)
+    {
+        var (exit, stdout, stderr) = Run(DmlQueryResult(Stmt(DmlOperation.Delete, "account", 0, 2, "plugin threw")), format);
+
+        Assert.Equal(ExitCodes.Failure, exit);
+        Assert.Contains("Error: DML failed (DELETE account): all 2 row(s) failed.", stderr);
+        Assert.Contains("plugin threw", stderr);
+        Assert.DoesNotContain("plugin threw", stdout);
+        Assert.Contains("affected_rows", stdout);
     }
 
     [Fact]
-    public void DmlExitCode_EmptyResult_ReturnsSuccess()
+    public void WriteResult_NonDmlResult_IsSuccess_EvenWithDmlShapedColumns()
     {
-        var result = QueryResult.Empty("account");
+        // A SELECT that happens to alias columns affected_rows/failed_rows has no DmlOutcome.
+        var result = DmlQueryResult(Stmt(DmlOperation.Update, "account", 0, 4));
+        var select = new SqlQueryResult { OriginalSql = "SELECT", TranspiledFetchXml = null, Result = result.Result };
 
-        var exitCode = SqlCommand.DmlExitCode(result);
-        Assert.Equal(ExitCodes.Success, exitCode);
+        var (exit, stdout, _) = Run(select, OutputFormat.Json);
+
+        Assert.Equal(ExitCodes.Success, exit);
+        using var json = JsonDocument.Parse(stdout);
+        Assert.True(json.RootElement.GetProperty("success").GetBoolean());
     }
 
     [Fact]
-    public void DmlExitCode_FailedRowsNotLong_ReturnsSuccess()
+    public void WriteResult_Script_EarlierStatementFailed_LaterSucceeded_IsStillAFailure()
     {
-        // DML shape but failed_rows value is not a long (e.g., string)
-        var result = new QueryResult
-        {
-            EntityLogicalName = "account",
-            Columns = new[]
-            {
-                new QueryColumn { LogicalName = "affected_rows" },
-                new QueryColumn { LogicalName = "failed_rows" }
-            },
-            Records = new[]
-            {
-                new Dictionary<string, QueryValue>
-                {
-                    ["affected_rows"] = QueryValue.Simple(10L),
-                    ["failed_rows"] = QueryValue.Simple("not-a-number")
-                }
-            },
-            Count = 1
-        };
+        var result = DmlQueryResult(
+            Stmt(DmlOperation.Update, "account", 0, 3, "plugin X threw"),
+            Stmt(DmlOperation.Update, "contact", 2, 0));
 
-        var exitCode = SqlCommand.DmlExitCode(result);
-        Assert.Equal(ExitCodes.Success, exitCode);
+        var (exit, stdout, _) = Run(result, OutputFormat.Json);
+
+        Assert.Equal(ExitCodes.PartialSuccess, exit);
+        using var json = JsonDocument.Parse(stdout);
+        Assert.False(json.RootElement.GetProperty("success").GetBoolean());
+        var message = json.RootElement.GetProperty("error").GetProperty("message").GetString();
+        Assert.Contains("#1 UPDATE account: 0 affected, 3 failed", message);
+        Assert.Contains("plugin X threw", message);
+        Assert.DoesNotContain("#2", message);
     }
+
+    #endregion
+
+    #region --top and DML
+
+    [Fact]
+    public void BuildRequest_MarksAnExplicitTopAsUserSpecified()
+    {
+        var withTop = SqlCommand.BuildRequest("DELETE FROM account WHERE name = 'x'", 5, null, null, false, false, new DmlSafetyOptions());
+        var withoutTop = SqlCommand.BuildRequest("DELETE FROM account WHERE name = 'x'", null, null, null, false, false, new DmlSafetyOptions());
+
+        Assert.True(withTop.TopIsUserSpecified);
+        Assert.False(withoutTop.TopIsUserSpecified);
+    }
+
+    [Fact]
+    public void BuildRequest_MarksExplicitPagingAsUserSpecified()
+    {
+        const string sql = "DELETE FROM account WHERE name = 'x'";
+
+        Assert.True(SqlCommand.BuildRequest(sql, null, 1, null, false, false, new DmlSafetyOptions()).PagingIsUserSpecified);
+        Assert.True(SqlCommand.BuildRequest(sql, null, null, "cookie", false, false, new DmlSafetyOptions()).PagingIsUserSpecified);
+        Assert.False(SqlCommand.BuildRequest(sql, null, null, null, false, false, new DmlSafetyOptions()).PagingIsUserSpecified);
+    }
+
+    [Fact]
+    public void PagingHelp_SaysItDoesNotApplyToDml()
+    {
+        Assert.Contains("INSERT, UPDATE or DELETE", QueryCommandGroup.PageOption.Description);
+        Assert.Contains("INSERT, UPDATE or DELETE", QueryCommandGroup.PagingCookieOption.Description);
+    }
+
+    [Fact]
+    public void TopHelp_SaysItDoesNotApplyToDml()
+    {
+        Assert.Contains("INSERT, UPDATE or DELETE", QueryCommandGroup.TopOption.Description);
+        Assert.Contains("INSERT, UPDATE and DELETE", ExecuteTopDescription());
+    }
+
+    private static string ExecuteTopDescription()
+        => PPDS.Cli.Commands.Query.History.ExecuteCommand.Create().Options.Single(o => o.Name == "--top").Description!;
 
     #endregion
 

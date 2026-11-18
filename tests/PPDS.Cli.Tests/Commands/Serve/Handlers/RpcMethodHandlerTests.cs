@@ -489,4 +489,52 @@ public class RpcMethodHandlerTests
     }
 
     #endregion
+
+    [Fact]
+    public void MapToResponse_DmlRowsFailed_IsNotSuccess_AndCarriesCountsAndReason()
+    {
+        var result = new SqlQueryResult
+        {
+            OriginalSql = "INSERT INTO solution (friendlyname) VALUES ('x')",
+            TranspiledFetchXml = null,
+            Result = QueryResult.Empty("solution"),
+            DmlOutcome = DmlOutcome.From(new[]
+            {
+                new PPDS.Dataverse.Query.Planning.DmlStatementOutcome(
+                    PPDS.Dataverse.Query.Planning.Nodes.DmlOperation.Insert, "solution", 0, 1, "not supported")
+            })
+        };
+
+        var response = RpcMethodHandler.MapToResponse(result);
+
+        Assert.False(response.Success);
+        Assert.Equal(0, response.AffectedRows);
+        Assert.Equal(1, response.FailedRows);
+        Assert.Contains("not supported", response.DmlError);
+        var json = JsonSerializer.Serialize(response, JsonOptions);
+        Assert.Contains("\"failedRows\":1", json);
+    }
+
+    [Fact]
+    public void MapToResponse_DmlSucceeded_IsSuccess_AndOmitsFailureFields()
+    {
+        var result = new SqlQueryResult
+        {
+            OriginalSql = "UPDATE account SET name = 'x' WHERE accountid = 'id'",
+            TranspiledFetchXml = null,
+            Result = QueryResult.Empty("account"),
+            DmlOutcome = DmlOutcome.From(new[]
+            {
+                new PPDS.Dataverse.Query.Planning.DmlStatementOutcome(
+                    PPDS.Dataverse.Query.Planning.Nodes.DmlOperation.Update, "account", 2, 0, null)
+            })
+        };
+
+        var response = RpcMethodHandler.MapToResponse(result);
+
+        Assert.True(response.Success);
+        var json = JsonSerializer.Serialize(response, JsonOptions);
+        Assert.DoesNotContain("failedRows", json);
+        Assert.DoesNotContain("dmlError", json);
+    }
 }

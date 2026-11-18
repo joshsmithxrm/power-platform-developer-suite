@@ -246,7 +246,7 @@ public static class EntityCommand
 
             if (string.IsNullOrWhiteSpace(positional) && string.IsNullOrWhiteSpace(flag))
             {
-                result.AddError("The entity logical name is required. Pass it as the positional <entity> argument or via --entity.");
+                result.AddError($"The entity logical name is required. Put it after the verb ('entity {command.Name} <entity>') or pass --entity <entity>; a name placed before the verb ('entity <entity> {command.Name}') is not supported.");
             }
             else if (!string.IsNullOrWhiteSpace(positional) && !string.IsNullOrWhiteSpace(flag) &&
                      !string.Equals(positional, flag, StringComparison.OrdinalIgnoreCase))

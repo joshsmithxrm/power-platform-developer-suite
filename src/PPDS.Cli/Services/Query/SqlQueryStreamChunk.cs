@@ -69,4 +69,10 @@ public sealed class SqlQueryStreamChunk
     /// The actual execution path used. Non-null only on the final chunk.
     /// </summary>
     public QueryExecutionMode? ExecutionMode { get; init; }
+
+    /// <summary>
+    /// Outcome of the executed DML statements. Non-null only on the final chunk, and only when DML
+    /// executed. Failed rows are reported here, never as a thrown error.
+    /// </summary>
+    public DmlOutcome? DmlOutcome { get; init; }
 }

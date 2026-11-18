@@ -412,15 +412,9 @@ internal sealed class InteractiveSession : IAsyncDisposable
 
             // Wire environment-specific DML safety settings
             concrete.ProfileResolver = _profileResolutionService;
-            var envConfig = await _envConfigStore.GetConfigAsync(environmentUrl, cancellationToken)
-                .ConfigureAwait(false);
-            if (envConfig != null)
-            {
-                concrete.EnvironmentSafetySettings = envConfig.SafetySettings;
-                var envType = envConfig.Type ?? EnvironmentType.Unknown;
-                concrete.EnvironmentProtectionLevel = envConfig.Protection
-                    ?? DmlSafetyGuard.DetectProtectionLevel(envType);
-            }
+            concrete.ConfigureEnvironment(
+                environmentUrl,
+                await _envConfigStore.GetConfigAsync(environmentUrl, cancellationToken).ConfigureAwait(false));
         }
 
         return service;

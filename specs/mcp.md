@@ -107,7 +107,7 @@ Environment selection checks explicit URLs against the captured current target a
 |----------|-------------|
 | `--profile <name>` | Lock to a specific profile (default: current active) |
 | `--environment <url>` | Lock to a specific environment (default: profile's default) |
-| `--read-only` | Disable all DML operations |
+| `--read-only` | Disable the tools that change the environment (the SQL tool `ppds_query_sql` never runs INSERT, UPDATE or DELETE in any session: it only transpiles a SELECT and reads) |
 | `--allowed-env <url>` | Repeatable. Restrict environment switching to these URLs only |
 
 ### Session Isolation Model
@@ -159,7 +159,7 @@ See also: [CONSTITUTION.md — Session Laws](./CONSTITUTION.md#session-laws)
 
 - Configuration is set by the user at MCP client configuration time
 - The AI agent cannot modify the allowlist or read-only flag
-- If no args are provided, the safest defaults apply: current active profile, its default environment, no switching, DML allowed
+- If no args are provided, the safest defaults apply: current active profile, its default environment, no switching, the write tools allowed (SQL through `ppds_query_sql` stays read-only)
 
 ---
 

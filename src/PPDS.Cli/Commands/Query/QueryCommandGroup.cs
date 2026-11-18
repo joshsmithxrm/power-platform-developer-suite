@@ -29,7 +29,7 @@ public static class QueryCommandGroup
     /// </summary>
     public static readonly Option<int?> TopOption = new("--top", "-t")
     {
-        Description = "Limit the number of results returned"
+        Description = "Limit the number of rows returned by a query (not valid with INSERT, UPDATE or DELETE)"
     };
 
     /// <summary>
@@ -37,7 +37,7 @@ public static class QueryCommandGroup
     /// </summary>
     public static readonly Option<int?> PageOption = new("--page")
     {
-        Description = "Page number (1-based) for paged results"
+        Description = "Page number (1-based) for paged results (not valid with INSERT, UPDATE or DELETE)"
     };
 
     /// <summary>
@@ -45,7 +45,7 @@ public static class QueryCommandGroup
     /// </summary>
     public static readonly Option<string?> PagingCookieOption = new("--paging-cookie")
     {
-        Description = "Paging cookie from previous query for continuation"
+        Description = "Paging cookie from previous query for continuation (not valid with INSERT, UPDATE or DELETE)"
     };
 
     /// <summary>

@@ -127,7 +127,9 @@ public sealed class FetchXmlGenerator
         // Filter (WHERE)
         if (querySpec.WhereClause is not null)
         {
+            var filterStart = lines.Count;
             EmitFilter(querySpec.WhereClause.SearchCondition, lines, "    ");
+            ExcludeNullsFromNegatedConditions(lines, filterStart);
         }
 
         // Order (ORDER BY)
@@ -147,6 +149,40 @@ public sealed class FetchXmlGenerator
             FetchXml = string.Join("\n", lines),
             VirtualColumns = virtualColumns
         };
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex NegatedCondition = new(
+        "^(?<indent>\\s*)<condition attribute=\"(?<attr>[^\"]+)\"(?<entity> entityname=\"[^\"]+\")? operator=\"(ne|not-in|not-like|not-begin-with|not-end-with)\"(?<rest>.*)$");
+
+    /// <summary>
+    /// In SQL, <c>col &lt;&gt; v</c>, <c>NOT IN</c> and <c>NOT LIKE</c> never match a row whose column is NULL. Dataverse's
+    /// ne, not-in, not-like, not-begin-with and not-end-with do match NULL rows (observed live, specs/query.md), so each such
+    /// condition is paired with not-null on the same attribute. not-between already excludes NULL rows.
+    /// </summary>
+    private static void ExcludeNullsFromNegatedConditions(List<string> lines, int start)
+    {
+        for (var i = start; i < lines.Count; i++)
+        {
+            var match = NegatedCondition.Match(lines[i]);
+            if (!match.Success)
+                continue;
+
+            var indent = match.Groups["indent"].Value;
+            var end = i;
+            if (!match.Groups["rest"].Value.TrimEnd().EndsWith("/>", StringComparison.Ordinal))
+            {
+                while (end < lines.Count && lines[end].Trim() != "</condition>")
+                    end++;
+            }
+
+            var notNull = $"{indent}  <condition attribute=\"{match.Groups["attr"].Value}\"{match.Groups["entity"].Value} operator=\"not-null\" />";
+            for (var j = i; j <= end; j++)
+                lines[j] = "  " + lines[j];
+            lines.Insert(end + 1, $"{indent}</filter>");
+            lines.Insert(end + 1, notNull);
+            lines.Insert(i, $"{indent}<filter type=\"and\">");
+            i = end + 3;
+        }
     }
 
     #region AST Extraction
@@ -218,7 +254,17 @@ public sealed class FetchXmlGenerator
     /// </summary>
     private static int? ExtractTopValue(TopRowFilter topRowFilter)
     {
-        if (topRowFilter.Expression is IntegerLiteral intLiteral)
+        // TOP 5 and TOP (5) are the same; any other expression (TOP (@n), TOP (1 + 1)) is not a constant.
+        var expression = topRowFilter.Expression;
+        while (expression is ParenthesisExpression paren)
+            expression = paren.Expression;
+        if (topRowFilter.Percent || topRowFilter.WithTies || expression is not IntegerLiteral)
+        {
+            throw new PPDS.Query.Parsing.QueryParseException(
+                "Only TOP n or TOP (n) with a whole number is supported (not PERCENT, WITH TIES, variables or expressions).");
+        }
+
+        if (expression is IntegerLiteral intLiteral)
         {
             if (int.TryParse(intLiteral.Value, out var value))
             {
@@ -725,20 +771,23 @@ public sealed class FetchXmlGenerator
             var attrsList = new List<string> { $"name=\"{columnName}\"" };
             if (alias is not null)
             {
-                attrsList.Add($"alias=\"{alias}\"");
+                attrsList.Add($"alias=\"{EscapeXml(alias)}\"");
             }
             if (groupBySet.Contains(columnName))
             {
                 attrsList.Add("groupby=\"true\"");
             }
 
-            emittedBaseColumns.Add(columnName);
+            // An aliased attribute comes back under its alias only, so it does not make the base column available
+            // to computed expressions (which then fetch it again, un-aliased).
+            if (alias is null)
+                emittedBaseColumns.Add(columnName);
             lines.Add($"    <attribute {string.Join(" ", attrsList)} />");
             return;
         }
 
         // Computed expression (CASE, IIF, arithmetic, etc.) - emit referenced columns
-        EmitReferencedColumnsFromExpression(expression, emittedBaseColumns, lines);
+        EmitReferencedColumnsFromExpression(expression, emittedBaseColumns, lines, groupBySet);
     }
 
     /// <summary>
@@ -788,7 +837,7 @@ public sealed class FetchXmlGenerator
 
         // Alias is required for aggregates in FetchXML
         var alias = explicitAlias ?? GenerateAlias(funcName);
-        attrs.Add($"alias=\"{alias}\"");
+        attrs.Add($"alias=\"{EscapeXml(alias)}\"");
 
         lines.Add($"    <attribute {string.Join(" ", attrs)} />");
     }
@@ -868,7 +917,7 @@ public sealed class FetchXmlGenerator
             var alias = FindDateGroupingAlias(funcName, columnName, selectElements)
                      ?? $"{dategrouping}_{attrName}";
 
-            lines.Add($"    <attribute name=\"{attrName}\" groupby=\"true\" dategrouping=\"{dategrouping}\" alias=\"{alias}\" />");
+            lines.Add($"    <attribute name=\"{attrName}\" groupby=\"true\" dategrouping=\"{dategrouping}\" alias=\"{EscapeXml(alias)}\" />");
         }
     }
 
@@ -991,58 +1040,10 @@ public sealed class FetchXmlGenerator
     /// </summary>
     private static void CollectColumnsFromScalar(ScalarExpression expression, List<string> columnNames)
     {
-        switch (expression)
-        {
-            case ColumnReferenceExpression colRef when colRef.ColumnType != ColumnType.Wildcard:
-                columnNames.Add(GetColumnName(colRef));
-                break;
-
-            case FunctionCall funcCall:
-                foreach (var param in funcCall.Parameters)
-                {
-                    CollectColumnsFromScalar(param, columnNames);
-                }
-                break;
-
-            case BinaryExpression binExpr:
-                CollectColumnsFromScalar(binExpr.FirstExpression, columnNames);
-                CollectColumnsFromScalar(binExpr.SecondExpression, columnNames);
-                break;
-
-            case UnaryExpression unaryExpr:
-                CollectColumnsFromScalar(unaryExpr.Expression, columnNames);
-                break;
-
-            case SearchedCaseExpression caseExpr:
-                foreach (var whenClause in caseExpr.WhenClauses)
-                {
-                    CollectExpressionConditionColumns(whenClause.WhenExpression, columnNames);
-                    CollectColumnsFromScalar(whenClause.ThenExpression, columnNames);
-                }
-                if (caseExpr.ElseExpression is not null)
-                {
-                    CollectColumnsFromScalar(caseExpr.ElseExpression, columnNames);
-                }
-                break;
-
-            case IIfCall iifCall:
-                CollectExpressionConditionColumns(iifCall.Predicate, columnNames);
-                CollectColumnsFromScalar(iifCall.ThenExpression, columnNames);
-                CollectColumnsFromScalar(iifCall.ElseExpression, columnNames);
-                break;
-
-            case CastCall castCall:
-                CollectColumnsFromScalar(castCall.Parameter, columnNames);
-                break;
-
-            case ConvertCall convertCall:
-                CollectColumnsFromScalar(convertCall.Parameter, columnNames);
-                break;
-
-            case ParenthesisExpression parenExpr:
-                CollectColumnsFromScalar(parenExpr.Expression, columnNames);
-                break;
-        }
+        // Every column at any depth (COALESCE, NULLIF, simple CASE, TRY_CAST, ...): a column that is not fetched
+        // evaluates as NULL.
+        foreach (var column in PPDS.Query.Planning.ScalarColumnCollector.Collect(expression))
+            columnNames.Add(GetColumnName(column));
     }
 
     /// <summary>
@@ -1050,7 +1051,7 @@ public sealed class FetchXmlGenerator
     /// Used for computed columns (CASE/IIF) so the base data is retrieved from Dataverse.
     /// </summary>
     private void EmitReferencedColumnsFromExpression(
-        ScalarExpression expression, HashSet<string> emitted, List<string> lines)
+        ScalarExpression expression, HashSet<string> emitted, List<string> lines, HashSet<string>? groupBySet = null)
     {
         var columnNames = new List<string>();
         CollectColumnsFromScalar(expression, columnNames);
@@ -1060,7 +1061,11 @@ public sealed class FetchXmlGenerator
             var attrName = NormalizeName(colName);
             if (emitted.Add(attrName))
             {
-                lines.Add($"    <attribute name=\"{attrName}\" />");
+                // In an aggregate query every attribute must be grouped or aggregated; a computed item over a GROUP BY
+                // column reads that column under its own name.
+                lines.Add(groupBySet != null && groupBySet.Contains(attrName)
+                    ? $"    <attribute name=\"{attrName}\" groupby=\"true\" alias=\"{EscapeXml(attrName)}\" />"
+                    : $"    <attribute name=\"{attrName}\" />");
             }
         }
     }
@@ -1079,7 +1084,7 @@ public sealed class FetchXmlGenerator
     {
         var from = NormalizeName(join.FromColumn);
         var to = NormalizeName(join.ToColumn);
-        var aliasAttr = join.Alias is not null ? $" alias=\"{join.Alias}\"" : "";
+        var aliasAttr = join.Alias is not null ? $" alias=\"{EscapeXml(join.Alias)}\"" : "";
         var linkEntityName = NormalizeName(join.TableName);
 
         lines.Add($"    <link-entity name=\"{linkEntityName}\" from=\"{from}\" to=\"{to}\" link-type=\"{join.LinkType}\"{aliasAttr}>");
@@ -1110,7 +1115,7 @@ public sealed class FetchXmlGenerator
                         var alias = scalar.ColumnName?.Value;
                         if (alias is not null)
                         {
-                            lines.Add($"      <attribute name=\"{attrName}\" alias=\"{alias}\" />");
+                            lines.Add($"      <attribute name=\"{attrName}\" alias=\"{EscapeXml(alias)}\" />");
                         }
                         else
                         {
@@ -1228,35 +1233,27 @@ public sealed class FetchXmlGenerator
         if (like.SecondExpression is not StringLiteral patternLiteral) return;
 
         var attr = NormalizeName(GetColumnName(colRef));
-        var pattern = patternLiteral.Value;
-        var isNegated = like.NotDefined;
-
-        string op, value;
-
-        if (pattern.StartsWith('%') && pattern.EndsWith('%'))
-        {
-            op = isNegated ? "not-like" : "like";
-            value = pattern;
-        }
-        else if (pattern.StartsWith('%'))
-        {
-            op = isNegated ? "not-end-with" : "ends-with";
-            value = pattern[1..];
-        }
-        else if (pattern.EndsWith('%'))
-        {
-            op = isNegated ? "not-begin-with" : "begins-with";
-            value = pattern[..^1];
-        }
-        else
-        {
-            op = isNegated ? "not-like" : "like";
-            value = pattern;
-        }
+        var (op, value) = LikeCondition(patternLiteral.Value, like.NotDefined);
 
         lines.Add($"{indent}<filter>");
         lines.Add($"{indent}  <condition attribute=\"{attr}\" operator=\"{op}\" value=\"{EscapeXml(value)}\" />");
         lines.Add($"{indent}</filter>");
+    }
+
+    /// <summary>
+    /// The FetchXML operator and value for a LIKE pattern. begins-with / ends-with are used only when the rest of the
+    /// pattern is plain text: whether Dataverse reads a %, _ or [ inside their value as a wildcard is not established, so
+    /// any other pattern is sent whole as like / not-like, which has SQL's wildcard meaning.
+    /// </summary>
+    internal static (string Operator, string Value) LikeCondition(string pattern, bool negated)
+    {
+        static bool Plain(string text) => text.IndexOfAny(['%', '_', '[', ']']) < 0;
+
+        if (pattern.Length > 1 && pattern.StartsWith('%') && !pattern.EndsWith('%') && Plain(pattern[1..]))
+            return (negated ? "not-end-with" : "ends-with", pattern[1..]);
+        if (pattern.Length > 1 && pattern.EndsWith('%') && !pattern.StartsWith('%') && Plain(pattern[..^1]))
+            return (negated ? "not-begin-with" : "begins-with", pattern[..^1]);
+        return (negated ? "not-like" : "like", pattern);
     }
 
     /// <summary>
@@ -1351,9 +1348,10 @@ public sealed class FetchXmlGenerator
                 break;
 
             default:
-                // For other cases, just emit inner
-                EmitFilter(notExpr.Expression, lines, indent);
-                break;
+                // Emitting the inner condition would select exactly the rows NOT excludes.
+                throw new PPDS.Query.Parsing.QueryParseException(
+                    "NOT (...) is not supported in a WHERE clause sent to Dataverse. Write the condition without NOT " +
+                    "(for example IS NOT NULL, NOT IN, NOT LIKE or NOT BETWEEN).");
         }
     }
 
@@ -1407,30 +1405,7 @@ public sealed class FetchXmlGenerator
                 if (like.SecondExpression is not StringLiteral patternLiteral) break;
 
                 var attr = NormalizeName(GetColumnName(colRef));
-                var pattern = patternLiteral.Value;
-                var isNegated = like.NotDefined;
-
-                string op, val;
-                if (pattern.StartsWith('%') && pattern.EndsWith('%'))
-                {
-                    op = isNegated ? "not-like" : "like";
-                    val = pattern;
-                }
-                else if (pattern.StartsWith('%'))
-                {
-                    op = isNegated ? "not-end-with" : "ends-with";
-                    val = pattern[1..];
-                }
-                else if (pattern.EndsWith('%'))
-                {
-                    op = isNegated ? "not-begin-with" : "begins-with";
-                    val = pattern[..^1];
-                }
-                else
-                {
-                    op = isNegated ? "not-like" : "like";
-                    val = pattern;
-                }
+                var (op, val) = LikeCondition(patternLiteral.Value, like.NotDefined);
                 lines.Add($"{indent}<condition attribute=\"{attr}\" operator=\"{op}\" value=\"{EscapeXml(val)}\" />");
                 break;
             }
@@ -1611,7 +1586,7 @@ public sealed class FetchXmlGenerator
             var matchingAlias = FindMatchingAlias(orderColumnName, selectElements);
             if (matchingAlias is not null)
             {
-                lines.Add($"    <order alias=\"{matchingAlias}\" descending=\"{descending}\" />");
+                lines.Add($"    <order alias=\"{EscapeXml(matchingAlias)}\" descending=\"{descending}\" />");
                 return;
             }
         }
@@ -1707,18 +1682,21 @@ public sealed class FetchXmlGenerator
                 return realLit.Value;
 
             case NullLiteral:
-                return "";
+                // In SQL, = NULL and <> NULL match no rows; sending an empty value would match empty strings.
+                throw new PPDS.Query.Parsing.QueryParseException(
+                    "Comparing with NULL (= NULL, <> NULL, IN (NULL)) is not supported. Use IS NULL or IS NOT NULL.");
 
             case UnaryExpression unary when unary.UnaryExpressionType == UnaryExpressionType.Negative:
                 return $"-{FormatLiteralValue(unary.Expression)}";
 
             case VariableReference varRef:
-                // Variables are typically replaced before reaching here,
-                // but emit the variable name as a placeholder.
-                return varRef.Name;
+                // The variable's value is not available here; sending its name would compare with the text "@n".
+                throw new PPDS.Query.Parsing.QueryParseException(
+                    $"The variable {varRef.Name} cannot be used in a WHERE condition sent to Dataverse. Use a literal value.");
 
             default:
-                return "";
+                throw new PPDS.Query.Parsing.QueryParseException(
+                    $"The value {expression.GetType().Name} is not supported in a WHERE condition sent to Dataverse. Use a literal value.");
         }
     }
 
@@ -1727,18 +1705,29 @@ public sealed class FetchXmlGenerator
     /// </summary>
     private static string EscapeXml(string value)
     {
+        // Tab, CR and LF are encoded too: XML attribute normalisation would otherwise turn them into spaces.
         return value
             .Replace("&", "&amp;")
             .Replace("<", "&lt;")
             .Replace(">", "&gt;")
             .Replace("\"", "&quot;")
-            .Replace("'", "&apos;");
+            .Replace("'", "&apos;")
+            .Replace("\t", "&#9;")
+            .Replace("\n", "&#10;")
+            .Replace("\r", "&#13;");
     }
 
     /// <summary>
-    /// Normalizes an entity or attribute name to lowercase.
+    /// Entity, attribute and link names are written into FetchXML as attribute values. Dataverse logical names are
+    /// letters, digits and underscores (a dot separates an alias), so anything else is refused rather than written:
+    /// a bracketed name could otherwise close the attribute and inject conditions.
     /// </summary>
-    private static string NormalizeName(string name) => name.ToLowerInvariant();
+    private static string NormalizeName(string name)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(name, @"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$"))
+            throw new PPDS.Query.Parsing.QueryParseException($"'{name}' is not a valid Dataverse table or column name.");
+        return name.ToLowerInvariant();
+    }
 
     #endregion
 }

@@ -54,4 +54,10 @@ public sealed class SqlQueryResult
     /// The actual execution path used. Null for transpile-only or dry-run results.
     /// </summary>
     public QueryExecutionMode? ExecutionMode { get; init; }
+
+    /// <summary>
+    /// Outcome of the DML statements that executed, covering every statement of a script (not only the
+    /// last one). Null when no DML statement executed (SELECT, dry-run).
+    /// </summary>
+    public DmlOutcome? DmlOutcome { get; init; }
 }

@@ -40,6 +40,45 @@ public class QueryExecutionException : InvalidOperationException
 }
 
 /// <summary>
+/// A refusal by a DML safety rule: the statement was not executed and changed nothing. Script code cannot handle it
+/// (<c>BEGIN TRY ... END TRY BEGIN CATCH ... END CATCH</c> does not catch it), so it always ends the run with its own
+/// error code.
+/// </summary>
+public class DmlSafetyRefusalException : QueryExecutionException
+{
+    /// <summary>Creates a refusal with a <see cref="QueryErrorCode"/> code (for example <see cref="QueryErrorCode.DmlBlocked"/>).</summary>
+    public DmlSafetyRefusalException(string errorCode, string message)
+        : base(errorCode, message)
+    {
+    }
+}
+
+/// <summary>
+/// A DML statement was refused because it would affect more rows than the row cap. The message is surface-neutral;
+/// the structured properties let each surface say how to proceed.
+/// </summary>
+public sealed class DmlRowCapExceededException : DmlSafetyRefusalException
+{
+    /// <summary>Creates the refusal.</summary>
+    public DmlRowCapExceededException(string operation, string entityLogicalName, int rowCap, string message)
+        : base(QueryErrorCode.DmlRowCapExceeded, message)
+    {
+        Operation = operation;
+        EntityLogicalName = entityLogicalName;
+        RowCap = rowCap;
+    }
+
+    /// <summary>The refused operation: INSERT, UPDATE or DELETE.</summary>
+    public string Operation { get; }
+
+    /// <summary>The target entity.</summary>
+    public string EntityLogicalName { get; }
+
+    /// <summary>The cap that would have been exceeded; at least <c>RowCap + 1</c> rows match.</summary>
+    public int RowCap { get; }
+}
+
+/// <summary>
 /// Structured error codes for query execution failures.
 /// </summary>
 /// <remarks>

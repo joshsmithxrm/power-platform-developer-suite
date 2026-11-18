@@ -97,7 +97,7 @@ public static class GetCommand
             }
             else
             {
-                WriteTextOutput(entry);
+                WriteTextOutput(entry, Console.Out, toTerminal: !Console.IsOutputRedirected);
             }
 
             return ExitCodes.Success;
@@ -110,23 +110,28 @@ public static class GetCommand
         }
     }
 
-    private static void WriteTextOutput(QueryHistoryEntry entry)
+    /// <summary>
+    /// Text output. The stored error message is display text, so it is always sanitised. The SQL is data: it is
+    /// written unchanged when stdout is redirected (so <c>history get id &gt; q.sql</c> keeps the statement exact) and
+    /// sanitised only when it is shown on a terminal, where control characters could change what is displayed.
+    /// </summary>
+    internal static void WriteTextOutput(QueryHistoryEntry entry, TextWriter output, bool toTerminal)
     {
-        Console.WriteLine($"ID:           {entry.Id}");
-        Console.WriteLine($"Executed At:  {entry.ExecutedAt.LocalDateTime:yyyy-MM-dd HH:mm:ss}");
-        Console.WriteLine($"Row Count:    {entry.RowCount?.ToString() ?? "-"}");
-        Console.WriteLine($"Duration:     {(entry.ExecutionTimeMs.HasValue ? $"{entry.ExecutionTimeMs}ms" : "-")}");
-        Console.WriteLine($"Success:      {entry.Success}");
+        output.WriteLine($"ID:           {entry.Id}");
+        output.WriteLine($"Executed At:  {entry.ExecutedAt.LocalDateTime:yyyy-MM-dd HH:mm:ss}");
+        output.WriteLine($"Row Count:    {entry.RowCount?.ToString() ?? "-"}");
+        output.WriteLine($"Duration:     {(entry.ExecutionTimeMs.HasValue ? $"{entry.ExecutionTimeMs}ms" : "-")}");
+        output.WriteLine($"Success:      {entry.Success}");
 
         if (!string.IsNullOrEmpty(entry.ErrorMessage))
         {
-            Console.WriteLine($"Error:        {entry.ErrorMessage}");
+            output.WriteLine($"Error:        {TerminalText.Sanitize(entry.ErrorMessage)}");
         }
 
-        Console.WriteLine();
-        Console.WriteLine("SQL:");
-        Console.WriteLine(new string('-', 40));
-        Console.WriteLine(entry.Sql);
+        output.WriteLine();
+        output.WriteLine("SQL:");
+        output.WriteLine(new string('-', 40));
+        output.WriteLine(toTerminal ? TerminalText.Sanitize(entry.Sql) : entry.Sql);
     }
 
 }
