@@ -28,6 +28,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Bound notebook runs independently to the selected environment and captured authentication identity during concurrent SQL/FetchXML runs, cancellation, queued execution, completion and conversion. Profile rename/reorder cannot redirect captured queries.
 - When the maximum number of Data Explorer panels is open and the oldest one, which a notebook query would reuse, is bound to a different environment or profile, opening the query now shows a warning and leaves that panel unchanged instead of loading the query into it.
 - Attributed outputs, errors, record links, exports and query history to the executed environment; preserved valid legacy notebooks with missing or partial environment metadata.
+- Data Explorer: failed DML rows show a banner with counts and, when the daemon reports one, the reason (#1607).
+
+### Security
+
+- **Notebook DML now asks for confirmation.** Notebook SQL cells were sent to the daemon without DML safety options, so the daemon's DML guard did not run: a cell such as `DELETE FROM account` ran with no confirmation, no missing-`WHERE` block and no row cap, behind only the once-per-notebook acknowledgement on production targets. Every SQL cell now sends `dmlSafety`, unconfirmed first. When the daemon requires confirmation, a modal names the target environment and profile and shows the statement; only "Execute Anyway" sends one confirmed request for that captured statement and target. Nothing is remembered across cells, runs or notebooks. A declined, refused, failed or partly failed DML cell stops the rest of the run, and the remaining cells show "Not run" with the cause. Daemon refusals and failed rows are shown as cell errors (#1607).
+- The DML confirmation dialog, shared by notebooks and the Data Explorer, lists "Show Full Statement" first. A statement longer than 24 lines or 1,500 characters shows its start and end with the hidden counts, and "Execute Anyway" is offered only after the full text has been opened. Escape, close and any failure never execute. Control, zero-width, bidirectional and line-separator characters are shown visibly; the text sent is unchanged (#1607).
+- Data Explorer: a DML confirmation no longer survives re-authentication, "Load More" can no longer re-execute a DML statement, and the target is pinned by profile identity so a change of environment or profile while the dialog is open sends nothing. DML from a panel whose profile is not the active profile is refused until that profile is made active (#1607).
 
 ## [1.6.2] - 2026-10-30
 

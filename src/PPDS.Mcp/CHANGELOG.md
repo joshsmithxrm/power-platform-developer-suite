@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Bounded Main-form authoring** - `ppds_forms_list`, `ppds_forms_get`, `ppds_forms_add_field` and `ppds_forms_publish` add inspection, an existing column in an existing section, verified draft saves and explicit table-scoped publication. Stable IDs and a fresh unpublished draft fingerprint support write-free preview and stale-draft preflight; results retain completed and uncertain phases. The catalog grows from 41 to 45 tools (#1215, partial).
+- `ppds_forms_add_field` results gain `controlId`: the planned id on a dry run, or the id submitted in the draft write. It is omitted when the field was already in the section or the draft write failed; when the write outcome is unknown or verification failed, the id is unconfirmed (#1601).
+- `ppds_metadata_update_choice` returns `validationMessages` (English-only label notices) and, on a dry run, `globalChoiceNameChecked: false`; `ppds_metadata_update_table` and `ppds_metadata_update_column` return `validationMessages`. Their label parameters are described as English (LCID 1033) (#1604).
 
 ### Changed
 
@@ -25,15 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Global-choice creation preserves omitted versus explicit-zero values and returns existing service warnings in additive validationMessages output (#1530). Explicit out-of-range values remain unchanged.
-- Metadata option-add reports Connection.Timeout for normalized pool acquisition timeouts and preserves cancellation from covered option-color SDK operations. CLI timeout/cancellation exits remain 4/2; raw service errors outside normalization retain their existing generic fallback.
-- `ppds_metadata_update_choice` and `ppds_metadata_add_option_value` accept a global choice name that differs from the stored name only by case, through the shared CLI metadata service. The stored name is looked up only when Dataverse reports the option set as not found; other errors are unchanged. If several stored names match by case the call fails; the MCP error for that case is the generic `Operation.Internal` (the CLI reports `INVALID_CONSTRAINT` for the same condition) (#1535).
+- Metadata option-add reports Connection.Timeout for normalized pool acquisition timeouts. The colour now travels on the insert itself; a failed or cancelled colour read-back afterwards is reported as `WRITE_NOT_CONFIRMED` (#1604). CLI timeout/cancellation exits remain 4/2; raw service errors outside normalization retain their existing generic fallback.
+- `ppds_metadata_update_choice` and `ppds_metadata_add_option_value` accept a global choice name that differs from the stored name only by case, through the shared CLI metadata service. The stored name is looked up only when Dataverse reports the option set as not found; other errors are unchanged. If several stored names match by case the call fails with `INVALID_CONSTRAINT`, as the CLI does. The not-found fault is recognised by the Dataverse fault code `0x80040217`, with the English server message as a fallback (#1535, #1604).
+- Metadata validation failures from the shared metadata service are reported with their own error code, message and `context.field` instead of the generic `Operation.Internal` (#1604).
+- Colour on `ppds_metadata_add_option_value` is now stored; a colour that cannot be confirmed by reading it back returns `WRITE_NOT_CONFIRMED` (#1604).
+- `ppds_forms_add_field` gives a repeated placement of a column its own control id (`<column>1`, `<column>2`, …, skipping other columns' logical names) instead of duplicating an existing id. Existing controls are untouched (#1601).
 - When `confirmEnvironment` is required because the environment has no saved type, the error now adds that the environment is treated as Production and how to record its type. The error code is unchanged (#1533).
 - Auth inspection reports the actual session target after `--environment` overrides and allowed environment switches, matching subsequent operations.
 - Captured profile/target snapshots and pool identity prevent external default changes or reused profile names from redirecting in-flight operations.
 
 ### Security
 
-- Metadata option-color failures keep their existing error code while structured MCP errors omit SDK diagnostic text from the bounded service-owned messages. Synthetic read/write checks cover fake ClientSecret and Bearer details; initial raw-failure fallback and covered cancellation/acquisition behavior remain. No repository-wide or log-privacy guarantee is implied.
+- Metadata option-color failures (colour read-back failures now use `WRITE_NOT_CONFIRMED`, #1604) return structured MCP errors whose bounded service-owned messages omit SDK diagnostic text. Synthetic read/write checks cover fake ClientSecret and Bearer details; initial raw-failure fallback and covered cancellation/acquisition behavior remain. No repository-wide or log-privacy guarantee is implied.
 - The CLI metadata service's fixed, diagnostic-free messages for covered SDK/catalog read failures also reach MCP `userMessage` text through `ppds_metadata_add_option_value` and `ppds_metadata_update_column` (primary ID labels). Error codes are unchanged.
 
 - Rejected disallowed or malformed environment URLs before direct authenticated resolution. Name-based selection now uses discovery only, then enforces the session allowlist; final switching rechecks the resolved target.
