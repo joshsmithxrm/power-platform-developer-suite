@@ -289,16 +289,43 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
         h.AssertNoMutation(attributeReadOnly: true);
     }
 
-    [Fact, Trait("AC", "AC-127")]
+    [Fact, Trait("AC", "AC-127"), Trait("AC", "AC-148")]
     public async Task UpdateAck_CancellationStopsPublishAndInvalidatesKnownAppliedCache()
     {
+        // The update was acknowledged, so the label is written: a cancellation from here on is reported as written but
+        // not confirmed (as on the typed path), never as a plain cancellation that hides the write.
         using var h = new ColumnLabelHarness("state", output);
         h.AfterAcknowledgement = name => { if (name == "UpdateAttribute") h.Cancel(); };
-        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.UpdateAsync(Request("display", publish: true)));
-        Assert.Equal(h.Token, error.CancellationToken);
+        var error = await Assert.ThrowsAsync<PpdsException>(() => h.UpdateAsync(Request("display", publish: true)));
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.Contains("was updated", error.Message);
+        Assert.Contains("could not be confirmed: the read was cancelled", error.Message);
+        Assert.Contains("Publication (--publish) was not attempted.", error.Message);
+        Assert.Equal(h.Token, Assert.IsAssignableFrom<OperationCanceledException>(error.InnerException).CancellationToken);
         Assert.Single(h.Requests.OfType<UpdateAttributeRequest>());
         Assert.DoesNotContain(h.Requests, r => r is PublishXmlRequest);
         Assert.Equal(1, h.CacheInvalidations);
+    }
+
+    [Theory, MemberData(nameof(AllShapes)), Trait("AC", "AC-148")]
+    public async Task ReadBackWithNoMetadata_IsWriteNotConfirmed_AndPublishesNothing(string shape)
+    {
+        using var h = new ColumnLabelHarness(shape, output) { ConfirmationFault = "missing-metadata" };
+        var error = await Assert.ThrowsAsync<PpdsException>(() => h.UpdateAsync(Request("both", publish: true)));
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.Contains("could not be confirmed: Dataverse returned no metadata for column", error.Message);
+        Assert.Single(h.Requests.OfType<UpdateAttributeRequest>());
+        Assert.DoesNotContain(h.Requests, r => r is PublishXmlRequest);
+    }
+
+    [Theory, MemberData(nameof(AllShapes)), Trait("AC", "AC-148")]
+    public async Task ALabelUpdateDataverseDidNotStore_IsWriteNotConfirmed_AndPublishesNothing(string shape)
+    {
+        using var h = new ColumnLabelHarness(shape, output) { IgnoreLabelWrites = true };
+        var error = await Assert.ThrowsAsync<PpdsException>(() => h.UpdateAsync(Request("display", publish: true)));
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.Contains("Dataverse did not store its display name", error.Message);
+        Assert.DoesNotContain(h.Requests, r => r is PublishXmlRequest);
     }
 
     public static IEnumerable<object[]> GenericTypes() => new[] { "string", "memo", "integer", "bigint", "decimal", "double", "money",

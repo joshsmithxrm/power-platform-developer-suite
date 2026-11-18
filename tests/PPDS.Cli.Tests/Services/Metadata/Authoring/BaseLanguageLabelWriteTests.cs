@@ -19,7 +19,7 @@ namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 
 /// <summary>
 /// Every label the authoring service writes is written in the organisation's base language (here 1036, as in the
-/// French Test organisation, where 1033 labels were silently ignored, written over the base label or rejected), and
+/// French-base organisation observed live, where 1033 labels were silently ignored, written over the base label or rejected), and
 /// every label write is confirmed by an as-if-published read-back: a label Dataverse did not store, or a read-back that
 /// fails, is WRITE_NOT_CONFIRMED and publication is not attempted (specs/metadata-authoring.md "Label languages",
 /// AC-142, AC-145, AC-147, AC-148).
@@ -95,6 +95,24 @@ public sealed class BaseLanguageLabelWriteTests
     }
 
     [Theory]
+    [InlineData("create-choice-column", "option 100000000 label: requested 'Un'", "option 100000001 label: requested 'Deux'")]
+    [InlineData("create-boolean-column", "true label: requested 'Oui'", "false label: requested 'Non'")]
+    [InlineData("create-choice", "option 100000000 label: requested 'Un'", "option 100000001 label: requested 'Deux'")]
+    [Trait("AC", "AC-148")]
+    public async Task ACreateWhoseOptionLabelsWereNotStored_IsWriteNotConfirmed_NamingEachOption(string path, string first, string second)
+    {
+        // The column or choice's own labels are stored; only the option labels the create carried are not.
+        var world = new World(French) { IgnoreCreatedOptionLabels = true };
+        var error = await Assert.ThrowsAsync<PpdsException>(() => world.RunAsync(path));
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.Contains("was created", error.Message);
+        Assert.Contains(first, error.Message);
+        Assert.Contains(second, error.Message);
+        Assert.DoesNotContain("display name", error.Message);
+        Assert.Single(world.ReadBacks);
+    }
+
+    [Theory]
     [MemberData(nameof(PublishingPaths))]
     [Trait("AC", "AC-148")]
     public async Task ALabelDataverseDidNotStore_WithPublish_SaysPublicationWasNotAttempted(string path)
@@ -165,6 +183,100 @@ public sealed class BaseLanguageLabelWriteTests
         var error = await Assert.ThrowsAsync<PpdsException>(() => world.RunAsync(path));
         Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
         Assert.Equal(true, error.Context!["requiresReauthentication"]);
+    }
+
+    public static TheoryData<string, string> EmptyReadBacks()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var path in AllPaths)
+            foreach (var shape in new[] { "null-metadata", "bare-response" })
+                data.Add(path, shape);
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(EmptyReadBacks))]
+    [Trait("AC", "AC-148")]
+    public async Task AReadBackThatReturnsNoMetadata_IsWriteNotConfirmed(string path, string shape)
+    {
+        var world = new World(French) { EmptyReadBack = shape, Publish = Publishing.Contains(path) };
+        var error = await Assert.ThrowsAsync<PpdsException>(() => world.RunAsync(path));
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.Contains("could not be confirmed: ", error.Message);
+        Assert.Contains("Dataverse returned no metadata", error.Message);
+        Assert.Contains("re-running the command", error.Message);
+        Assert.DoesNotContain(world.Requests, r => r is PublishXmlRequest);
+    }
+
+    /// <summary>Update paths: each writes a base-language label to a target that already has an English translation.</summary>
+    public static TheoryData<string> UpdatePaths => new()
+    {
+        "update-table", "update-column", "update-finite-column", "update-choice", "update-option", "update-statusreason",
+        "update-column-option", "update-state-value"
+    };
+
+    [Theory]
+    [MemberData(nameof(UpdatePaths))]
+    [Trait("AC", "AC-142")]
+    public async Task AStoredTranslation_SurvivesEveryUpdatePath(string path)
+    {
+        // The fake drops every language a write without MergeLabels does not carry (as Dataverse does), so a product
+        // that stopped sending MergeLabels would lose the English text here.
+        var world = new World(French, translation: English);
+        await world.RunAsync(path);
+        var written = world.ReadBackResponses.SelectMany(r => LabelsIn(r.Results.Values))
+            .Where(l => l.LocalizedLabels.Any(x => x.LanguageCode == French && World.Texts(path).Contains(x.Label))).ToList();
+        Assert.NotEmpty(written);
+        Assert.All(written, label => Assert.Contains(label.LocalizedLabels, l => l.LanguageCode == English && !string.IsNullOrEmpty(l.Label)));
+    }
+
+    [Fact]
+    [Trait("AC", "AC-142")]
+    public async Task TheFake_DropsOtherLanguages_WhenAWriteIsSentWithoutMergeLabels()
+    {
+        // Control for the test above: the same English translation is lost by a write without MergeLabels.
+        var store = new LabelWriteStore();
+        var write = new UpdateEntityRequest { Entity = new EntityMetadata { LogicalName = World.Table, DisplayName = new Label("Renommé", French) }, MergeLabels = false };
+        store.Record(write);
+        var read = new RetrieveEntityRequest { LogicalName = World.Table, EntityFilters = EntityFilters.Entity, RetrieveAsIfPublished = true };
+        var existing = new Label(); existing.LocalizedLabels.Add(new LocalizedLabel("Tableau", French)); existing.LocalizedLabels.Add(new LocalizedLabel("Table", English));
+        var response = store.Apply(read, new RetrieveEntityResponse { Results = new ParameterCollection { ["EntityMetadata"] = new EntityMetadata { LogicalName = World.Table, DisplayName = existing } } });
+        Assert.Equal(new[] { (French, "Renommé") }, ((RetrieveEntityResponse)response).EntityMetadata.DisplayName.LocalizedLabels.Select(l => (l.LanguageCode, l.Label)));
+    }
+
+    [Theory]
+    [MemberData(nameof(Paths))]
+    [Trait("AC", "AC-142")]
+    public async Task ABaseLanguageThatCannotBeRead_WritesNothing_AndKeepsItsClassifiedError(string path)
+    {
+        var failure = new PpdsException(MetadataErrorCodes.SdkOperationFailed, "synthetic: organization.languagecode could not be read");
+        var world = new World(French, provider: new FailingBaseLanguage(failure));
+        var error = await Assert.ThrowsAsync<PpdsException>(() => world.RunAsync(path));
+        Assert.Same(failure, error);
+        Assert.Empty(world.Writes);
+    }
+
+    private sealed class FailingBaseLanguage(Exception failure) : IOrganizationBaseLanguageProvider
+    {
+        public Task<int> GetBaseLanguageAsync(CancellationToken ct = default) => Task.FromException<int>(failure);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-145")]
+    public async Task OptionDescriptionUpdate_WhoseShownDescriptionIsAStoredTranslation_GivesTheNotice()
+    {
+        var world = new World(French, translation: English, callerLanguage: English);
+        var result = await world.Service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest
+        {
+            OptionSetName = World.Choice, Value = 1, Description = "Nouvelle description", SolutionUniqueName = World.Solution
+        });
+        var notice = Assert.Single(result.ValidationMessages);
+        Assert.Equal("Description", notice.Field);
+        Assert.Equal($"Only the base-language (LCID {French}) description is written. The description Dataverse shows you (LCID {English}) is not changed and still reads 'Option description'.", notice.Message);
+        Assert.Empty((await new World(French, translation: null, callerLanguage: English).Service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest
+        {
+            OptionSetName = World.Choice, Value = 1, Description = "Nouvelle description", SolutionUniqueName = World.Solution
+        })).ValidationMessages);
     }
 
     [Fact]
@@ -268,7 +380,7 @@ public sealed class BaseLanguageLabelWriteTests
     [Trait("AC", "AC-145")]
     public async Task OnAFrenchBaseWithoutTranslations_NoFalseNotice(string path)
     {
-        // D2 (French Test, 2026-11-17): the English write replaced the French base label while the notice said it was
+        // D2 (a French-base organisation, 2026-11-17): the English write replaced the French base label while the notice said it was
         // "not changed". The base-language write changes exactly the label the caller is shown, so there is no notice.
         var world = new World(French);
         Assert.Empty((await world.RunNoticeAsync(path, "Nouveau")).ValidationMessages);
@@ -308,7 +420,25 @@ public sealed class BaseLanguageLabelWriteTests
 
     [Fact]
     [Trait("AC", "AC-148")]
-    public async Task AnEmptyDescriptionOnCreate_IsNotSentAndNotConfirmed()
+    public async Task ACreatedGlobalChoice_IsReadBackByTheIdTheCreateReturned_WhateverSpellingIsStored()
+    {
+        // A mixed-case schema name: the read-back must not depend on how Dataverse stores the name's case.
+        var world = new World(French) { StoresChoiceNamesInLowerCase = true };
+        var result = await world.Service.CreateGlobalChoiceAsync(new CreateGlobalChoiceRequest
+        {
+            SolutionUniqueName = World.Solution, SchemaName = "new_MixedCase", DisplayName = "Créé",
+            Options = [new OptionDefinition { Label = "Un", Value = 100000000 }]
+        });
+        var read = Assert.IsType<RetrieveOptionSetRequest>(Assert.Single(world.ReadBacks));
+        Assert.Equal(world.CreatedChoiceId, read.MetadataId);
+        Assert.True(string.IsNullOrEmpty(read.Name));
+        Assert.True(read.RetrieveAsIfPublished);
+        Assert.Equal(world.CreatedChoiceId, result.MetadataId);
+    }
+
+    [Fact]
+    [Trait("AC", "AC-148")]
+    public async Task AnEmptyDescriptionOnCreate_IsNotSent_AndNeedsNoConfirmation()
     {
         var world = new World(French);
         await world.Service.CreateGlobalChoiceAsync(new CreateGlobalChoiceRequest
@@ -318,10 +448,16 @@ public sealed class BaseLanguageLabelWriteTests
         });
         var create = Assert.Single(world.Writes.OfType<CreateOptionSetRequest>());
         Assert.Null(create.OptionSet.Description);
+        // Nothing was sent, so nothing is compared: the read-back returns no description and the create still succeeds.
+        var read = Assert.IsType<RetrieveOptionSetResponse>(Assert.Single(world.ReadBackResponses));
+        Assert.Null(read.OptionSetMetadata.Description);
     }
 
     /// <summary>Every Label reachable from a request's parameters (metadata objects, options, nested option sets).</summary>
-    private static IEnumerable<Label> LabelsIn(OrganizationRequest request)
+    private static IEnumerable<Label> LabelsIn(OrganizationRequest request) => LabelsIn(request.Parameters.Values);
+
+    /// <summary>Every Label reachable from <paramref name="roots"/> (request parameters or response results).</summary>
+    private static IEnumerable<Label> LabelsIn(IEnumerable<object> roots)
     {
         var seen = new HashSet<object>(ReferenceEqualityComparer.Instance);
         var found = new List<Label>();
@@ -338,7 +474,7 @@ public sealed class BaseLanguageLabelWriteTests
                 Walk(child);
             }
         }
-        foreach (var parameter in request.Parameters.Values) Walk(parameter);
+        foreach (var root in roots) Walk(root);
         return found;
     }
 
@@ -361,7 +497,7 @@ public sealed class BaseLanguageLabelWriteTests
         private readonly int _caller;
         private readonly LabelWriteStore _store = new();
 
-        public World(int baseLanguage, int? translation = null, int? callerLanguage = null)
+        public World(int baseLanguage, int? translation = null, int? callerLanguage = null, IOrganizationBaseLanguageProvider? provider = null)
         {
             _base = baseLanguage;
             _translation = translation;
@@ -369,11 +505,15 @@ public sealed class BaseLanguageLabelWriteTests
             var pool = new Mock<IDataverseConnectionPool>(MockBehavior.Strict);
             pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>())).ReturnsAsync(() => NewClient());
             Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(),
-                baseLanguage: new FixedOrganizationBaseLanguage(baseLanguage));
+                baseLanguage: provider ?? new FixedOrganizationBaseLanguage(baseLanguage));
         }
 
         public DataverseMetadataAuthoringService Service { get; }
+        /// <summary>"null-metadata": the read-back response carries no metadata; "bare-response": an untyped response.</summary>
+        public string? EmptyReadBack { get; init; }
+        public List<OrganizationResponse> ReadBackResponses { get; } = [];
         public bool IgnoreWrites { get => _store.IgnoreWrites; init => _store.IgnoreWrites = value; }
+        public bool IgnoreCreatedOptionLabels { get => _store.IgnoreCreatedOptionLabels; init => _store.IgnoreCreatedOptionLabels = value; }
         public bool Publish { get; init; }
         public bool DryRun { get; init; }
         public Exception? ReadBackFailure { get; init; }
@@ -411,12 +551,26 @@ public sealed class BaseLanguageLabelWriteTests
             {
                 ReadBacks.Add(request);
                 if (ReadBackFailure != null) throw ReadBackFailure;
+                if (EmptyReadBack == "null-metadata")
+                    return request switch
+                    {
+                        RetrieveEntityRequest => new RetrieveEntityResponse { Results = new ParameterCollection { ["EntityMetadata"] = null } },
+                        RetrieveAttributeRequest => new RetrieveAttributeResponse { Results = new ParameterCollection { ["AttributeMetadata"] = null } },
+                        RetrieveOptionSetRequest => new RetrieveOptionSetResponse { Results = new ParameterCollection { ["OptionSetMetadata"] = null } },
+                        _ => new RetrieveEntityKeyResponse { Results = new ParameterCollection { ["EntityKeyMetadata"] = null } }
+                    };
+                if (EmptyReadBack == "bare-response")
+                    return new OrganizationResponse();
             }
             else
             {
                 Requests.Add(request);
                 _store.Record(request);
             }
+
+            if (StoresChoiceNamesInLowerCase && request is RetrieveOptionSetRequest { Name: { } asked } && asked != asked.ToLowerInvariant())
+                throw new System.ServiceModel.FaultException<OrganizationServiceFault>(
+                    new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040217), Message = $"Could not find an optionset with name {asked}" }, "not found");
 
             OrganizationResponse response = request switch
             {
@@ -430,7 +584,7 @@ public sealed class BaseLanguageLabelWriteTests
                 CreateAttributeRequest => new CreateAttributeResponse { Results = new ParameterCollection { ["AttributeId"] = Guid.NewGuid() } },
                 UpdateAttributeRequest => new UpdateAttributeResponse(),
                 SdkCreateOneToMany => new CreateOneToManyResponse { Results = new ParameterCollection { ["RelationshipId"] = Guid.NewGuid(), ["AttributeId"] = Guid.NewGuid() } },
-                CreateOptionSetRequest => new CreateOptionSetResponse { Results = new ParameterCollection { ["OptionSetId"] = Guid.NewGuid() } },
+                CreateOptionSetRequest c => CreatedChoice(c),
                 UpdateOptionSetRequest => new UpdateOptionSetResponse(),
                 SdkUpdateOption => new UpdateOptionValueResponse(),
                 SdkUpdateState => new UpdateStateValueResponse(),
@@ -440,7 +594,21 @@ public sealed class BaseLanguageLabelWriteTests
                 PublishXmlRequest => new PublishXmlResponse(),
                 _ => throw new InvalidOperationException("Unexpected SDK request in offline organisation: " + request.RequestName)
             };
-            return LabelWriteStore.IsReadBack(request) ? _store.Apply(request, response) : response;
+            response = LabelWriteStore.IsReadBack(request) ? _store.Apply(request, response) : response;
+            if (readBack) ReadBackResponses.Add(response);
+            return response;
+        }
+
+        /// <summary>Models a Dataverse that stores a created global choice's name in lower case (a mixed-case name is then not found).</summary>
+        public bool StoresChoiceNamesInLowerCase { get; init; }
+
+        public Guid? CreatedChoiceId { get; private set; }
+
+        private CreateOptionSetResponse CreatedChoice(CreateOptionSetRequest request)
+        {
+            CreatedChoiceId = Guid.NewGuid();
+            _store.ChoiceCreated(CreatedChoiceId.Value, request.OptionSet.Name);
+            return new CreateOptionSetResponse { Results = new ParameterCollection { ["OptionSetId"] = CreatedChoiceId.Value } };
         }
 
         /// <summary>A stored label: base text, an optional stored translation, and what the caller is shown.</summary>
@@ -479,6 +647,9 @@ public sealed class BaseLanguageLabelWriteTests
                 Pick => new PicklistAttributeMetadata { OptionSet = Options(global: false, status: false, state: false) },
                 "statuscode" => new StatusAttributeMetadata { OptionSet = Options(global: false, status: true, state: false) },
                 "statecode" => new StateAttributeMetadata { OptionSet = Options(global: false, status: false, state: true) },
+                // Created by the create-*-column paths: the read-back returns the created type, with only what was stored.
+                "new_flag" => new BooleanAttributeMetadata { OptionSet = new BooleanOptionSetMetadata(new OptionMetadata { Value = 1 }, new OptionMetadata { Value = 0 }) },
+                "new_choicecolumn" => new PicklistAttributeMetadata { OptionSet = new OptionSetMetadata { IsGlobal = false } },
                 _ => new StringAttributeMetadata()
             };
             attribute.LogicalName = logicalName;

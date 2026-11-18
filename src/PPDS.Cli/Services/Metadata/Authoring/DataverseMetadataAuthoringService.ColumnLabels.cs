@@ -72,9 +72,10 @@ public partial class DataverseMetadataAuthoringService
         }, ct).ConfigureAwait(false);
 
         // The SDK acknowledged the update. Invalidate after returning its lease,
-        // including when cancellation arrived with the acknowledgement; never replay.
+        // including when cancellation arrived with the acknowledgement; never replay. The label is written from here
+        // on, so a cancellation is reported by the read-back as WRITE_NOT_CONFIRMED (written, not confirmed), as on the
+        // typed path, never as a plain cancellation.
         _cacheProvider?.InvalidateEntity(source.EntityLogicalName);
-        ct.ThrowIfCancellationRequested();
         await ConfirmColumnLabelsAsync(request, lcid, ct).ConfigureAwait(false);
         if (request.Publish)
         {

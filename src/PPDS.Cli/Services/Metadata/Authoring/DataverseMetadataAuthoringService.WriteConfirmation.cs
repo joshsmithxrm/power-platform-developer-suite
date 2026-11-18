@@ -43,6 +43,8 @@ public partial class DataverseMetadataAuthoringService
         T read;
         try
         {
+            // The write is committed: a cancellation from here on is "written, not confirmed", never a bare cancellation.
+            ct.ThrowIfCancellationRequested();
             read = await target(ct).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -91,6 +93,7 @@ public partial class DataverseMetadataAuthoringService
         OptionMetadata stored;
         try
         {
+            ct.ThrowIfCancellationRequested(); // committed: a cancellation from here on is "written, not confirmed"
             stored = await ReadStoredOptionAsync(optionSetName, entityLogicalName, attributeLogicalName, value, ct).ConfigureAwait(false);
         }
         catch (Exception ex)

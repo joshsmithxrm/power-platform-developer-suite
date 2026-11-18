@@ -21,6 +21,17 @@ internal sealed class LabelWriteStore
     /// <summary>When set, writes are recorded but not stored (models Dataverse acknowledging a write it ignored).</summary>
     public bool IgnoreWrites { get; set; }
 
+    /// <summary>
+    /// When set, the option labels a create carries (local options, Boolean true/false labels, a new global choice's
+    /// options) are not stored, while the column or choice's own labels are: models a create that kept only part of
+    /// what it was sent.
+    /// </summary>
+    public bool IgnoreCreatedOptionLabels { get; set; }
+
+    private readonly HashSet<string> _booleans = new(StringComparer.OrdinalIgnoreCase);
+
+    private Label? OptionLabel(Label? label) => IgnoreCreatedOptionLabels ? null : label;
+
     /// <summary>False leaves option colours as the fixture returns them (fixtures that model stored colours themselves).</summary>
     public bool OverlayColors { get; set; } = true;
 
@@ -77,6 +88,9 @@ internal sealed class LabelWriteStore
             if (calls[_replayed].ReturnValue is Task<OrganizationResponse> { IsCompletedSuccessfully: true } done)
             {
                 if (done.Result is InsertOptionValueResponse inserted) InsertedValue(inserted.NewOptionValue);
+                if (done.Result is CreateOptionSetResponse { Results: var results } && request is CreateOptionSetRequest create
+                    && results.TryGetValue("OptionSetId", out var id) && id is Guid choiceId)
+                    ChoiceCreated(choiceId, create.OptionSet.Name);
             }
         }
     }
@@ -84,6 +98,10 @@ internal sealed class LabelWriteStore
     public void Record(OrganizationRequest request)
     {
         if (IgnoreWrites) return;
+        // An update sent without MergeLabels = true replaces the whole label: Dataverse drops the languages the
+        // request does not carry. Creates and inserts have nothing to merge with.
+        _replacing = request is UpdateEntityRequest or UpdateAttributeRequest or UpdateOptionSetRequest or SdkUpdateOption or SdkUpdateState
+            && !(request.Parameters.TryGetValue("MergeLabels", out var merge) && merge is true);
         switch (request)
         {
             case UpdateEntityRequest u:
@@ -98,7 +116,13 @@ internal sealed class LabelWriteStore
                 Attribute(c.EntityName, c.Attribute.SchemaName, c.Attribute);
                 if (c.Attribute is EnumAttributeMetadata { OptionSet: { IsGlobal: not true } local })
                     foreach (var o in local.Options.Where(o => o.Value.HasValue))
-                        Option(AttributeKey(c.EntityName, c.Attribute.SchemaName), o.Value!.Value, o.Label, o.Description, o.Color);
+                        Option(AttributeKey(c.EntityName, c.Attribute.SchemaName), o.Value!.Value, OptionLabel(o.Label), o.Description, o.Color);
+                if (c.Attribute is BooleanAttributeMetadata { OptionSet: { } flags })
+                {
+                    _booleans.Add(AttributeKey(c.EntityName, c.Attribute.SchemaName));
+                    foreach (var o in new[] { flags.TrueOption, flags.FalseOption }.Where(o => o?.Value is not null))
+                        Option(AttributeKey(c.EntityName, c.Attribute.SchemaName), o!.Value!.Value, OptionLabel(o.Label), null, null);
+                }
                 break;
             case CreateOneToManyRequest c:
                 Put(AttributeKey(c.OneToManyRelationship.ReferencingEntity, c.Lookup.SchemaName), "display", c.Lookup.DisplayName); break;
@@ -110,7 +134,7 @@ internal sealed class LabelWriteStore
                 Choice(c.OptionSet.Name, c.OptionSet);
                 if (c.OptionSet is OptionSetMetadata set)
                     foreach (var o in set.Options.Where(o => o.Value.HasValue))
-                        Option(ChoiceKey(c.OptionSet.Name), o.Value!.Value, o.Label, o.Description, o.Color);
+                        Option(ChoiceKey(c.OptionSet.Name), o.Value!.Value, OptionLabel(o.Label), o.Description, o.Color);
                 break;
             case SdkUpdateOption u:
                 Option(OptionTarget(u, P<string>(u, "OptionSetName")), P<int>(u, "Value"), P<Label>(u, "Label"), P<Label>(u, "Description"), Color(u)); break;
@@ -150,13 +174,22 @@ internal sealed class LabelWriteStore
         PendingInsert = null;
     }
 
+    private readonly Dictionary<Guid, string> _choiceIds = new();
+
+    /// <summary>Records the id the fake assigned to a created global choice, so a read-back by that id finds its labels.</summary>
+    public void ChoiceCreated(Guid id, string name) => _choiceIds[id] = name;
+
+    /// <summary>The global choice a RetrieveOptionSet names: by name, or by the id of a choice created through this store.</summary>
+    private string ChoiceName(RetrieveOptionSetRequest r)
+        => !string.IsNullOrEmpty(r.Name) ? r.Name : _choiceIds.TryGetValue(r.MetadataId, out var name) ? name : "";
+
     /// <summary>True for a read-back request (as-if-published read of a single target).</summary>
     public static bool IsReadBack(OrganizationRequest request) => request switch
     {
         RetrieveEntityRequest r => r.RetrieveAsIfPublished,
         RetrieveAttributeRequest r => r.RetrieveAsIfPublished,
         RetrieveOptionSetRequest r => r.RetrieveAsIfPublished,
-        RetrieveEntityKeyRequest => true,
+        RetrieveEntityKeyRequest r => r.RetrieveAsIfPublished,
         _ => false
     };
 
@@ -170,8 +203,8 @@ internal sealed class LabelWriteStore
             case RetrieveAttributeRequest { RetrieveAsIfPublished: true } r when response.Results.TryGetValue("AttributeMetadata", out var a) && a is AttributeMetadata attribute:
                 ApplyAttribute(r.EntityLogicalName, r.LogicalName, attribute); break;
             case RetrieveOptionSetRequest { RetrieveAsIfPublished: true } r when response.Results.TryGetValue("OptionSetMetadata", out var o) && o is OptionSetMetadataBase set:
-                ApplyChoice(r.Name, set); break;
-            case RetrieveEntityKeyRequest r when response.Results.TryGetValue("EntityKeyMetadata", out var k) && k is EntityKeyMetadata key:
+                ApplyChoice(ChoiceName(r), set); break;
+            case RetrieveEntityKeyRequest { RetrieveAsIfPublished: true } r when response.Results.TryGetValue("EntityKeyMetadata", out var k) && k is EntityKeyMetadata key:
                 if (Get($"key|{r.EntityLogicalName}|{r.LogicalName}", "display") is { } display) key.DisplayName = display;
                 break;
         }
@@ -188,12 +221,14 @@ internal sealed class LabelWriteStore
             {
                 Results = new ParameterCollection
                 {
-                    ["AttributeMetadata"] = _options.Keys.Any(k => k.StartsWith(AttributeKey(r.EntityLogicalName, r.LogicalName) + "|", StringComparison.OrdinalIgnoreCase))
+                    ["AttributeMetadata"] = _booleans.Contains(AttributeKey(r.EntityLogicalName, r.LogicalName))
+                        ? new BooleanAttributeMetadata { LogicalName = r.LogicalName, OptionSet = new BooleanOptionSetMetadata(new OptionMetadata { Value = 1 }, new OptionMetadata { Value = 0 }) }
+                        : _options.Keys.Any(k => k.StartsWith(AttributeKey(r.EntityLogicalName, r.LogicalName) + "|", StringComparison.OrdinalIgnoreCase))
                         ? new PicklistAttributeMetadata { LogicalName = r.LogicalName, OptionSet = new OptionSetMetadata() }
                         : new AttributeMetadata { LogicalName = r.LogicalName }
                 }
             },
-            RetrieveOptionSetRequest r => new RetrieveOptionSetResponse { Results = new ParameterCollection { ["OptionSetMetadata"] = new OptionSetMetadata { Name = r.Name } } },
+            RetrieveOptionSetRequest r => new RetrieveOptionSetResponse { Results = new ParameterCollection { ["OptionSetMetadata"] = new OptionSetMetadata { Name = ChoiceName(r) } } },
             RetrieveEntityKeyRequest r => new RetrieveEntityKeyResponse { Results = new ParameterCollection { ["EntityKeyMetadata"] = new EntityKeyMetadata { LogicalName = r.LogicalName } } },
             _ => throw new InvalidOperationException("Not a read-back request: " + request.RequestName)
         };
@@ -242,7 +277,7 @@ internal sealed class LabelWriteStore
     {
         var key = $"{target}|{value}";
         _options.TryGetValue(key, out var current);
-        _options[key] = (Merge(current.Label, label), Merge(current.Description, description), color ?? current.Color);
+        _options[key] = (Store(current.Label, label), Store(current.Description, description), color ?? current.Color);
     }
 
     private void Put(string target, string part, Label? label)
@@ -250,7 +285,19 @@ internal sealed class LabelWriteStore
         if (label is null) return;
         if (!_labels.TryGetValue(target, out var parts)) _labels[target] = parts = new(StringComparer.OrdinalIgnoreCase);
         parts.TryGetValue(part, out var current);
-        parts[part] = Merge(current, label)!;
+        parts[part] = Store(current, label)!;
+    }
+
+    private bool _replacing;
+    private readonly HashSet<Label> _replaced = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>Merges <paramref name="written"/> into <paramref name="stored"/>, or replaces it for a write without MergeLabels.</summary>
+    private Label? Store(Label? stored, Label? written)
+    {
+        if (written is null || !_replacing) return Merge(stored, written);
+        var replaced = Merge(null, written)!;
+        _replaced.Add(replaced);
+        return replaced;
     }
 
     private Label? Get(string target, string part) => _labels.TryGetValue(target, out var parts) && parts.TryGetValue(part, out var l) ? l : null;
@@ -270,10 +317,11 @@ internal sealed class LabelWriteStore
         return merged;
     }
 
-    private static Label? Overlay(Label? read, Label? stored)
+    private Label? Overlay(Label? read, Label? stored)
     {
         if (stored is null) return read;
-        var merged = Merge(read, stored)!;
+        // A label replaced by a write without MergeLabels keeps none of the languages the read had.
+        var merged = _replaced.Contains(stored) ? Merge(null, stored)! : Merge(read, stored)!;
         var shown = read?.UserLocalizedLabel;
         merged.UserLocalizedLabel = shown is null ? stored.UserLocalizedLabel
             : merged.LocalizedLabels.FirstOrDefault(l => l.LanguageCode == shown.LanguageCode) ?? shown;
@@ -293,6 +341,10 @@ internal sealed class LabelWriteStore
         a.Description = Overlay(a.Description, Get(AttributeKey(entity, attribute), "description"));
         if (a is EnumAttributeMetadata { OptionSet: { } set })
             ApplyOptions(AttributeKey(entity, attribute), set);
+        if (a is BooleanAttributeMetadata { OptionSet: { } flags })
+            foreach (var option in new[] { flags.TrueOption, flags.FalseOption }.Where(o => o?.Value is not null))
+                if (_options.TryGetValue($"{AttributeKey(entity, attribute)}|{option!.Value}", out var stored))
+                    option.Label = Overlay(option.Label, stored.Label);
     }
 
     private void ApplyChoice(string name, OptionSetMetadataBase s)

@@ -259,6 +259,7 @@ public sealed class MetadataCreateOptionAllocationTests(ITestOutputHelper output
                             Labels = set.Options.Select(o => Assert.Single(o.Label.LocalizedLabels).Label).ToArray();
                             if (FailCreate) throw SdkFailure;
                             _labels.Record(request);
+                            if (request is CreateOptionSetRequest created) _labels.ChoiceCreated(Guid.Parse("33333333-3333-3333-3333-333333333333"), created.OptionSet.Name);
                             return Task.FromResult(response);
                         });
                     return Task.FromResult(lease.Object);
