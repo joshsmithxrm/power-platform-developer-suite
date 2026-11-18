@@ -17,6 +17,13 @@ h = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(h)
 
 
+# Hang guard only, not a speed assertion. The bootstrap test launches pwsh with every external command stubbed,
+# so the work is process start-up (about 0.3 s idle) plus a few file copies; on a loaded hosted runner start-up
+# can stretch to many seconds, and a tight wall-clock budget would fail it with the behaviour still correct.
+# 300 s is ~1000x the idle time yet still ends a genuinely wedged shell well inside the job timeout.
+PWSH_HANG_BOUND_SECONDS = 300
+
+
 @pytest.fixture(autouse=True)
 def isolated_driver_module(monkeypatch):
     # driver_vocabulary/refusal_code read sys.modules; start every test without the driver entry
@@ -549,7 +556,8 @@ def test_transport_offline_contracts():
         pytest.skip("Node unavailable; transport contract not run")
     package = ROOT / "scripts/ci/hosted-signing-artifacts"
     result = subprocess.run([node, "--test", str(package / "test/transport.test.mjs"), str(package / "test/action.test.mjs")],
-                            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30, check=False)
+                            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                            timeout=PWSH_HANG_BOUND_SECONDS, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -586,7 +594,8 @@ $bootstrap = $args[0]
            "PPDS_EXPERIMENT": "fake-offline-only", "PPDS_AUTHORIZATION": "fake-offline-only"}
     env["PPDS_BOOTSTRAP_ONLY"] = str(bootstrap_only).lower()
     result = subprocess.run([pwsh, "-NoProfile", "-File", str(harness), str(ROOT / "scripts/ci/bootstrap_hosted_signing.ps1")],
-                            env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30, check=False)
+                            env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                            timeout=PWSH_HANG_BOUND_SECONDS, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     outputs = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8-sig").splitlines())
     assert outputs["python"] == first
