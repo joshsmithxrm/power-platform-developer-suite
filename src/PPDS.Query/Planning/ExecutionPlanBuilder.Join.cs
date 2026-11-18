@@ -121,6 +121,11 @@ public sealed partial class ExecutionPlanBuilder
         var inPredicates = new List<InPredicate>();
         var cleanedWhere = ExtractInSubqueryPredicates(querySpec.WhereClause?.SearchCondition, inPredicates);
 
+        // Only top-level AND conjuncts are extracted. One left behind (inside OR, parentheses or NOT) would route the
+        // statement back here for ever and overflow the stack, so it is refused instead.
+        if (cleanedWhere != null && ContainsInSubqueryPredicate(cleanedWhere))
+            throw new QueryParseException(SubqueryPlacementMessage("IN (subquery)"));
+
         // 1.5. Attempt anti-join rewrite: simple NOT IN → LEFT OUTER JOIN + IS NULL
         // This pushes the anti-semi-join to FetchXML instead of running it client-side.
         var rewritableAntiJoins = new List<(InPredicate Pred, AntiJoinRewriteInfo Info)>();
@@ -433,6 +438,11 @@ public sealed partial class ExecutionPlanBuilder
         return doc.ToString(SaveOptions.DisableFormatting);
     }
 
+    /// <summary>The refusal for an IN (subquery) or EXISTS that is not a top-level AND conjunct.</summary>
+    private static string SubqueryPlacementMessage(string what)
+        => $"{what} is supported only as a condition joined to the rest of the WHERE clause with AND; inside OR, parentheses " +
+           "or NOT it is not supported. Rewrite the condition, for example as two queries.";
+
     /// <summary>
     /// Extracts <see cref="InPredicate"/> nodes with subqueries from a boolean expression tree,
     /// collecting them into the provided list. Returns the remaining boolean expression
@@ -518,6 +528,10 @@ public sealed partial class ExecutionPlanBuilder
         // 1. Extract EXISTS predicates from WHERE, collecting them and building a cleaned expression
         var existsPredicates = new List<(ExistsPredicate exists, bool isNot)>();
         var cleanedWhere = ExtractExistsPredicates(querySpec.WhereClause?.SearchCondition, existsPredicates);
+
+        // As for IN (subquery): an EXISTS left behind would recurse without end.
+        if (cleanedWhere != null && ContainsExistsPredicate(cleanedWhere))
+            throw new QueryParseException(SubqueryPlacementMessage("EXISTS"));
 
         // 2. Temporarily modify the WHERE to exclude EXISTS predicates so FetchXML generation works
         var origWhereClause = querySpec.WhereClause;
