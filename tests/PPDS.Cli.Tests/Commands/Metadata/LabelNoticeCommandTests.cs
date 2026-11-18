@@ -102,7 +102,7 @@ public sealed class LabelNoticeCommandTests
     [InlineData("column", "update", "--display-name")]
     [InlineData("column", "update", "--description")]
     [Trait("AC", "AC-145")]
-    public void Help_SaysTheLabelIsEnglish(string group, string verb, string option)
+    public void Help_SaysTheLabelIsInTheBaseLanguage(string group, string verb, string option)
     {
         var command = MetadataCommandGroup.Create(null).Subcommands.Single(c => c.Name == group).Subcommands.Single(c => c.Name == verb);
         Assert.EndsWith("(in the organization's base language)", command.Options.Single(o => o.Name == option).Description);

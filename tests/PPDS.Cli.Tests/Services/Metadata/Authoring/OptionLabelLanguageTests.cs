@@ -13,8 +13,9 @@ using SdkUpdateState = Microsoft.Xrm.Sdk.Messages.UpdateStateValueRequest;
 namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 
 /// <summary>
-/// Label writes never change a label the caller did not ask to change, and a requested label is written for
-/// LCID 1033 with MergeLabels so other languages keep their text. The fake models a caller whose UI language is
+/// Label writes never change a label the caller did not ask to change, and a requested label is written in the
+/// base language (this fixture: an English-base organisation, LCID 1033; a non-1033 base is covered by
+/// BaseLanguageLabelWriteTests) with MergeLabels so other languages keep their text. The fake models a caller whose UI language is
 /// French (1036): every label carries English and French text and the user-localised label is the French one.
 /// </summary>
 [Trait("Category", "Unit")]

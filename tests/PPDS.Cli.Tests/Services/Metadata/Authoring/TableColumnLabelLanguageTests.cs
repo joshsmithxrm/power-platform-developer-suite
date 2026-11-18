@@ -11,9 +11,10 @@ using Xunit;
 namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 
 /// <summary>
-/// AC-147: table and typed-column label updates write English (LCID 1033) labels with MergeLabels, never re-send an
-/// unrequested label, and report <c>BASE_LANGUAGE_LABEL_ONLY</c> when the label Dataverse shows the caller is in another
-/// language and differs from the requested text.
+/// AC-147: table and typed-column label updates write base-language labels (here an English-base organisation, LCID 1033)
+/// with MergeLabels, never re-send an unrequested label, and report <c>BASE_LANGUAGE_LABEL_ONLY</c> when the label Dataverse
+/// shows the caller is a stored label in another language that differs from the requested text. A non-1033 base is
+/// covered by <see cref="BaseLanguageLabelWriteTests"/>.
 /// </summary>
 [Trait("Category", "Unit")]
 public sealed class TableColumnLabelLanguageTests

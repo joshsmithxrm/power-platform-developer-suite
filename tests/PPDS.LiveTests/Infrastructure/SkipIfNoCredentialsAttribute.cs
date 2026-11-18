@@ -213,7 +213,7 @@ public sealed class MetadataLiveFactAttribute : FactAttribute
 
 /// <summary>
 /// <see cref="MetadataLiveFactAttribute"/> plus a second provisioned language: requires PPDS_TEST_SECOND_LCID, the
-/// LCID (not 1033) of a language provisioned in the target organisation. Without it the test is reported as skipped,
+/// LCID of a provisioned language other than the organisation's base language (checked at run time). Without it the test is reported as skipped,
 /// never as passed. The test fails with a clear message if that LCID is not actually provisioned.
 /// </summary>
 public sealed class MetadataLiveMultiLanguageFactAttribute : FactAttribute
@@ -227,7 +227,7 @@ public sealed class MetadataLiveMultiLanguageFactAttribute : FactAttribute
     {
         Skip = MetadataLivePrerequisites.MissingReason(Configuration)
             ?? (MetadataLivePrerequisites.SecondLanguage is null
-                ? "Multi-language metadata test requires PPDS_TEST_SECOND_LCID: the LCID (other than 1033) of a language provisioned in the target organisation, e.g. 1036."
+                ? "Multi-language metadata test requires PPDS_TEST_SECOND_LCID: the LCID of a provisioned language other than the organisation's base language, e.g. 1036 on an English-base organisation."
                 : null);
     }
 }
@@ -249,7 +249,7 @@ public sealed class MetadataLiveSwitchUiLanguageFactAttribute : FactAttribute
     {
         Skip = MetadataLivePrerequisites.MissingReason(Configuration)
             ?? (MetadataLivePrerequisites.SecondLanguage is null
-                ? "UI-language metadata test requires PPDS_TEST_SECOND_LCID: the LCID (other than 1033) of a language provisioned in the target organisation, e.g. 1036."
+                ? "UI-language metadata test requires PPDS_TEST_SECOND_LCID: the LCID of a provisioned language other than the organisation's base language, e.g. 1036 on an English-base organisation."
                 : null)
             ?? (MetadataLivePrerequisites.SwitchUiLanguage
                 ? null
@@ -265,9 +265,9 @@ public static class MetadataLivePrerequisites
     /// <summary>True only when PPDS_TEST_SWITCH_UI_LANGUAGE is exactly "1".</summary>
     public static bool SwitchUiLanguage => Environment.GetEnvironmentVariable("PPDS_TEST_SWITCH_UI_LANGUAGE")?.Trim() == "1";
 
-    /// <summary>PPDS_TEST_SECOND_LCID parsed, or null when unset, invalid or 1033.</summary>
+    /// <summary>PPDS_TEST_SECOND_LCID parsed, or null when unset or invalid. The test checks at run time that it is provisioned and is not the base language.</summary>
     public static int? SecondLanguage =>
-        int.TryParse(Environment.GetEnvironmentVariable("PPDS_TEST_SECOND_LCID"), out var lcid) && lcid > 0 && lcid != 1033 ? lcid : null;
+        int.TryParse(Environment.GetEnvironmentVariable("PPDS_TEST_SECOND_LCID"), out var lcid) && lcid > 0 ? lcid : null;
 
     internal static string? MissingReason(LiveTestConfiguration configuration)
     {

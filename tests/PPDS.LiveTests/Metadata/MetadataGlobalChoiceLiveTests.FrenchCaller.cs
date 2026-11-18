@@ -103,7 +103,7 @@ public sealed partial class MetadataGlobalChoiceLiveTests
 
     // (c) and (d) through the service: BASE_LANGUAGE_LABEL_ONLY notices, their suppression, and what is written.
     [MetadataLiveSwitchUiLanguageFact]
-    public Task FrenchCaller_EnglishLabelOnlyNotices_ThroughTheService() => FrenchSceneAsync(async (scene, french) =>
+    public Task FrenchCaller_BaseLanguageLabelOnlyNotices_ThroughTheService() => FrenchSceneAsync(async (scene, french) =>
     {
         var (pool, service, fr) = (french.Pool, french.Service, french.Lcid);
         Func<Task<Label?>> ChoiceOption(int value) => async () => (await RetrieveChoiceAsync(pool, scene.Choice, asIfPublished: true)).Options.Single(o => o.Value == value).Label;
@@ -141,8 +141,8 @@ public sealed partial class MetadataGlobalChoiceLiveTests
             new ShownField("Description", "description", "Changed", Choice(c => c.Description)));
         ExpectNotices("service optionset update", result, ("DisplayName", "display name", "Choix FR"), ("Description", "description", "Description FR"));
         var choice = await RetrieveChoiceAsync(pool, scene.Choice, asIfPublished: true);
-        Text(choice.DisplayName, English).Should().Be("Renamed"); Text(choice.DisplayName, fr).Should().Be("Choix FR", "MergeLabels keeps the French display name");
-        Text(choice.Description, English).Should().Be("Changed"); Text(choice.Description, fr).Should().Be("Description FR", "MergeLabels keeps the French description");
+        Text(choice.DisplayName, Base).Should().Be("Renamed"); Text(choice.DisplayName, fr).Should().Be("Choix FR", "MergeLabels keeps the French display name");
+        Text(choice.Description, Base).Should().Be("Changed"); Text(choice.Description, fr).Should().Be("Description FR", "MergeLabels keeps the French description");
 
         // Local column option.
         result = await UpdateAndCheckNoticesAsync("service attribute update-option",
@@ -150,7 +150,7 @@ public sealed partial class MetadataGlobalChoiceLiveTests
             new ShownField("NewLabel", "label", "Closed", async () => (await RetrieveOptionsAsync(pool, scene.Entity, scene.Column)).Single(o => o.Value == scene.LocalOpen).Label));
         ExpectNotices("service attribute update-option", result, ("NewLabel", "label", "Ouvert"));
         var local = (await RetrieveOptionsAsync(pool, scene.Entity, scene.Column)).Single(o => o.Value == scene.LocalOpen);
-        Text(local.Label, English).Should().Be("Closed"); Text(local.Label, fr).Should().Be("Ouvert", "MergeLabels keeps the French local option label");
+        Text(local.Label, Base).Should().Be("Closed"); Text(local.Label, fr).Should().Be("Ouvert", "MergeLabels keeps the French local option label");
 
         // Status reason.
         result = await UpdateAndCheckNoticesAsync("service entity update-statusreason",
@@ -158,7 +158,7 @@ public sealed partial class MetadataGlobalChoiceLiveTests
             new ShownField("NewLabel", "label", "Live", async () => (await ReasonAsync(pool, scene.Entity, scene.Reason)).Label));
         ExpectNotices("service entity update-statusreason", result, ("NewLabel", "label", "Actif"));
         var reason = await ReasonAsync(pool, scene.Entity, scene.Reason);
-        Text(reason.Label, English).Should().Be("Live"); Text(reason.Label, fr).Should().Be("Actif", "MergeLabels keeps the French status label");
+        Text(reason.Label, Base).Should().Be("Live"); Text(reason.Label, fr).Should().Be("Actif", "MergeLabels keeps the French status label");
 
         // Table. The display and plural names have French labels and must give notices. The description was created
         // with English text only (run 3, 2026-11-17: stored under 1033 and 1036 alike; run 2: a notice naming LCID 1036
@@ -173,9 +173,9 @@ public sealed partial class MetadataGlobalChoiceLiveTests
             new ShownField("Description", "description", "Renamed description", Table(t => t.Description)));
         result.ValidationMessages.Select(m => m.Field).Should().Contain(new[] { "DisplayName", "PluralDisplayName" }, "labels with a French translation give the notice");
         var table = await ReadTableAsync(pool, scene.Entity, asIfPublished: true);
-        Text(table.DisplayName, English).Should().Be("Renamed"); Text(table.DisplayName, fr).Should().Be("Test FR", "MergeLabels keeps the French display name");
-        Text(table.DisplayCollectionName, English).Should().Be("Renamed plural"); Text(table.DisplayCollectionName, fr).Should().Be("Tests FR");
-        Text(table.Description, English).Should().Be("Renamed description");
+        Text(table.DisplayName, Base).Should().Be("Renamed"); Text(table.DisplayName, fr).Should().Be("Test FR", "MergeLabels keeps the French display name");
+        Text(table.DisplayCollectionName, Base).Should().Be("Renamed plural"); Text(table.DisplayCollectionName, fr).Should().Be("Tests FR");
+        Text(table.Description, Base).Should().Be("Renamed description");
 
         // Typed column.
         result = await UpdateAndCheckNoticesAsync("service column update",
@@ -187,19 +187,19 @@ public sealed partial class MetadataGlobalChoiceLiveTests
             new ShownField("Description", "description", "Changed", Column(scene.Column, c => c.Description)));
         ExpectNotices("service column update", result, ("DisplayName", "display name", "Choix FR"), ("Description", "description", "Choix description FR"));
         var column = await ReadColumnAsync(pool, scene.Entity, scene.Column, asIfPublished: true);
-        Text(column.DisplayName, English).Should().Be("Pick renamed"); Text(column.DisplayName, fr).Should().Be("Choix FR");
-        Text(column.Description, English).Should().Be("Changed"); Text(column.Description, fr).Should().Be("Choix description FR");
+        Text(column.DisplayName, Base).Should().Be("Pick renamed"); Text(column.DisplayName, fr).Should().Be("Choix FR");
+        Text(column.Description, Base).Should().Be("Changed"); Text(column.Description, fr).Should().Be("Choix description FR");
 
         // A column whose only stored label is English: recorded and checked for truth.
         await UpdateAndCheckNoticesAsync("service column update, English-only label",
             () => service.UpdateColumnAsync(new UpdateColumnRequest { SolutionUniqueName = Solution, EntityLogicalName = scene.Entity, ColumnLogicalName = scene.NameColumn, DisplayName = "Name renamed" }),
             new ShownField("DisplayName", "display name", "Name renamed", Column(scene.NameColumn, c => c.DisplayName)));
-        Text((await ReadColumnAsync(pool, scene.Entity, scene.NameColumn, asIfPublished: true)).DisplayName, English).Should().Be("Name renamed");
+        Text((await ReadColumnAsync(pool, scene.Entity, scene.NameColumn, asIfPublished: true)).DisplayName, Base).Should().Be("Name renamed");
     });
 
     // (c) and (d) through the CLI commands the unit tests cover (LabelNoticeCommandTests), on the real service.
     [MetadataLiveSwitchUiLanguageFact]
-    public Task FrenchCaller_EnglishLabelOnlyNotices_ThroughTheCliCommands() => FrenchSceneAsync(async (scene, french) =>
+    public Task FrenchCaller_BaseLanguageLabelOnlyNotices_ThroughTheCliCommands() => FrenchSceneAsync(async (scene, french) =>
     {
         var (pool, fr) = (french.Pool, french.Lcid);
         string[] Json(params string[] args) => [.. args, "--output-format", "json"];
@@ -212,23 +212,23 @@ public sealed partial class MetadataGlobalChoiceLiveTests
 
         await ExpectCliNoticesAsync(french, Json("optionset", "update", "--solution", Solution, "--name", scene.Choice, "--display-name", "Renamed"), ("DisplayName", "display name", "Choix FR"));
         var choice = await RetrieveChoiceAsync(pool, scene.Choice, asIfPublished: true);
-        Text(choice.DisplayName, English).Should().Be("Renamed"); Text(choice.DisplayName, fr).Should().Be("Choix FR");
+        Text(choice.DisplayName, Base).Should().Be("Renamed"); Text(choice.DisplayName, fr).Should().Be("Choix FR");
 
         await ExpectCliNoticesAsync(french, Json("attribute", "update-option", "--solution", Solution, "--entity", scene.Entity, "--column", scene.Column, "--value", $"{scene.LocalOpen}", "--new-label", "Closed"), ("NewLabel", "label", "Ouvert"));
         var local = (await RetrieveOptionsAsync(pool, scene.Entity, scene.Column)).Single(o => o.Value == scene.LocalOpen);
-        Text(local.Label, English).Should().Be("Closed"); Text(local.Label, fr).Should().Be("Ouvert");
+        Text(local.Label, Base).Should().Be("Closed"); Text(local.Label, fr).Should().Be("Ouvert");
 
         await ExpectCliNoticesAsync(french, Json("entity", "update-statusreason", "--solution", Solution, "--entity", scene.Entity, "--value", $"{scene.Reason}", "--new-label", "Live"), ("NewLabel", "label", "Actif"));
         var reason = await ReasonAsync(pool, scene.Entity, scene.Reason);
-        Text(reason.Label, English).Should().Be("Live"); Text(reason.Label, fr).Should().Be("Actif");
+        Text(reason.Label, Base).Should().Be("Live"); Text(reason.Label, fr).Should().Be("Actif");
 
         await ExpectCliNoticesAsync(french, Json("table", "update", "--solution", Solution, "--entity", scene.Entity, "--display-name", "Renamed"), ("DisplayName", "display name", "Test FR"));
         var table = await ReadTableAsync(pool, scene.Entity, asIfPublished: true);
-        Text(table.DisplayName, English).Should().Be("Renamed"); Text(table.DisplayName, fr).Should().Be("Test FR");
+        Text(table.DisplayName, Base).Should().Be("Renamed"); Text(table.DisplayName, fr).Should().Be("Test FR");
 
         await ExpectCliNoticesAsync(french, Json("column", "update", "--solution", Solution, "--entity", scene.Entity, "--column", scene.Column, "--description", "Changed"), ("Description", "description", "Choix description FR"));
         var column = await ReadColumnAsync(pool, scene.Entity, scene.Column, asIfPublished: true);
-        Text(column.Description, English).Should().Be("Changed"); Text(column.Description, fr).Should().Be("Choix description FR");
+        Text(column.Description, Base).Should().Be("Changed"); Text(column.Description, fr).Should().Be("Choix description FR");
 
         // Text mode: a Warning line on stderr, nothing on stdout, exit 0.
         var (exit, stdout, stderr) = await InvokeCliAsync(french, "column", "update", "--solution", Solution, "--entity", scene.Entity, "--column", scene.Column, "--display-name", "Renamed");
@@ -261,20 +261,20 @@ public sealed partial class MetadataGlobalChoiceLiveTests
             ("NewLabel", "label", "Ouvert"));
         (await OptionPairs(scene.Open)).Should().BeEquivalentTo(before, "a CLI dry-run writes nothing");
 
-        // Table and column dry-runs return no notices (AC-147) and write nothing.
+        // Table, column and choice dry-runs read the target like the update does and return the same notices
+        // (consistent with the option dry-runs above, AC-145); they write nothing.
         var tableBefore = await ReadTableAsync(pool, scene.Entity, asIfPublished: true);
         result = await service.UpdateTableAsync(new UpdateTableRequest { SolutionUniqueName = Solution, EntityLogicalName = scene.Entity, DisplayName = "Renamed", DryRun = true });
-        ExpectNotices("service table update --dry-run", result);
+        ExpectNotices("service table update --dry-run", result, ("DisplayName", "display name", "Test FR"));
         Pairs((await ReadTableAsync(pool, scene.Entity, asIfPublished: true)).DisplayName).Should().BeEquivalentTo(Pairs(tableBefore.DisplayName), "a dry-run writes nothing");
         var columnBefore = await ReadColumnAsync(pool, scene.Entity, scene.Column, asIfPublished: true);
         result = await service.UpdateColumnAsync(new UpdateColumnRequest { SolutionUniqueName = Solution, EntityLogicalName = scene.Entity, ColumnLogicalName = scene.Column, DisplayName = "Renamed", DryRun = true });
-        ExpectNotices("service column update --dry-run", result);
+        ExpectNotices("service column update --dry-run", result, ("DisplayName", "display name", "Choix FR"));
         Pairs((await ReadColumnAsync(pool, scene.Entity, scene.Column, asIfPublished: true)).DisplayName).Should().BeEquivalentTo(Pairs(columnBefore.DisplayName), "a dry-run writes nothing");
 
-        // Choice update dry-run: recorded (it returns before reading the choice); nothing is written.
         var choiceBefore = Pairs((await RetrieveChoiceAsync(pool, scene.Choice, asIfPublished: true)).DisplayName);
         result = await service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = Solution, Name = scene.Choice, DisplayName = "Renamed", DryRun = true });
-        _output.WriteLine($"OBSERVED service optionset update --dry-run: {result.ValidationMessages.Count} notice(s)");
+        ExpectNotices("service optionset update --dry-run", result, ("DisplayName", "display name", "Choix FR"));
         Pairs((await RetrieveChoiceAsync(pool, scene.Choice, asIfPublished: true)).DisplayName).Should().BeEquivalentTo(choiceBefore, "a dry-run writes nothing");
 
         // Case resolution: a mis-cased name resolves to the stored one, with the same notices.
@@ -288,13 +288,13 @@ public sealed partial class MetadataGlobalChoiceLiveTests
         result = await service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = Solution, Name = misCased, DisplayName = "Renamed" });
         ExpectNotices("service optionset update with a mis-cased name", result, ("DisplayName", "display name", "Choix FR"));
         var renamed = await RetrieveChoiceAsync(pool, stored, asIfPublished: true);
-        Text(renamed.DisplayName, English).Should().Be("Renamed"); Text(renamed.DisplayName, fr).Should().Be("Choix FR");
+        Text(renamed.DisplayName, Base).Should().Be("Renamed"); Text(renamed.DisplayName, fr).Should().Be("Choix FR");
 
         var added = await service.AddOptionValueAsync(new AddOptionValueRequest { OptionSetName = misCased, Label = "Added", SolutionUniqueName = Solution });
         var addedOptions = (await RetrieveChoiceAsync(pool, stored, asIfPublished: true)).Options.Where(o => o.Value == added).ToList();
         _output.WriteLine($"OBSERVED add-option with a mis-cased name as the French caller: value {added}; labels {string.Join(", ", addedOptions.SelectMany(o => Pairs(o.Label)))}");
         addedOptions.Should().ContainSingle("the retried add writes exactly once");
-        Text(addedOptions[0].Label, English).Should().Be("Added", "add-option writes the English (1033) label");
+        Text(addedOptions[0].Label, Base).Should().Be("Added", "add-option writes the base-language label");
         (await new DataverseMetadataQueryService(pool).GetOptionSetAsync(misCased)).Name.Should().Be(stored);
 
         // Label targeting uses the label shown to the caller (here the French one).
@@ -328,7 +328,7 @@ public sealed partial class MetadataGlobalChoiceLiveTests
             catch (Exception ex) when (FindFault(ex) is { } fault)
             {
                 var english = fault.Message?.Contains("Could not find", StringComparison.OrdinalIgnoreCase) == true;
-                return (operation, fault.ErrorCode, $"0x{unchecked((uint)fault.ErrorCode):x8} '{fault.Message}' (message language: {(english ? "English wording" : "not the English wording")})");
+                return (operation, fault.ErrorCode, $"0x{unchecked((uint)fault.ErrorCode):x8} '{fault.Message}' (message language: {(english ? "Base wording" : "not the Base wording")})");
             }
         }
 
@@ -341,9 +341,9 @@ public sealed partial class MetadataGlobalChoiceLiveTests
         {
             await Observe("RetrieveOptionSet unknown (published)", new RetrieveOptionSetRequest { Name = missing }),
             await Observe("RetrieveOptionSet unknown (as-if-published)", new RetrieveOptionSetRequest { Name = missing, RetrieveAsIfPublished = true }),
-            await Observe("InsertOptionValue unknown", new InsertOptionValueRequest { OptionSetName = missing, Label = new Label("Probe", English), SolutionUniqueName = Solution }),
+            await Observe("InsertOptionValue unknown", new InsertOptionValueRequest { OptionSetName = missing, Label = new Label("Probe", Base), SolutionUniqueName = Solution }),
             await Observe("OrderOption unknown", new OrderOptionRequest { OptionSetName = missing, Values = [1], SolutionUniqueName = Solution }),
-            await Observe("UpdateOptionValue unknown", new SdkUpdateOptionValue { OptionSetName = missing, Value = 1, Label = new Label("Probe", English), MergeLabels = true, SolutionUniqueName = Solution })
+            await Observe("UpdateOptionValue unknown", new SdkUpdateOptionValue { OptionSetName = missing, Value = 1, Label = new Label("Probe", Base), MergeLabels = true, SolutionUniqueName = Solution })
         };
         foreach (var (operation, _, outcome) in misCasedReads.Concat(unknown))
             _output.WriteLine($"OBSERVED French caller {operation}: {outcome}");
@@ -379,27 +379,27 @@ public sealed partial class MetadataGlobalChoiceLiveTests
         var second = await RequireSecondLanguageAsync(pool);
         // Checked before anything is created: refuses when the caller is not on the base language.
         var uiSwitch = await CallerUiLanguageSwitch.PrepareAsync(pool, second, _output.WriteLine);
-        if (uiSwitch.BaseLanguage != English)
-            throw new XunitException($"These tests expect base language 1033; the organisation's is {uiSwitch.BaseLanguage}.");
+        if (uiSwitch.BaseLanguage != Base)
+            throw new XunitException($"The base language read for the UI switch ({uiSwitch.BaseLanguage}) differs from the one read on connect ({Base}).");
 
         var name = NewName("frc");
         await WithChoiceAsync(pool, name, "Choice EN", Labels("Description EN", (second, "Description FR")),
-            [Labels("Open", (second, "Ouvert")), Labels("Same", (second, "Pareil")), new Label("English only", English), new Label("Seulement", second)], async () =>
+            [Labels("Open", (second, "Ouvert")), Labels("Same", (second, "Pareil")), new Label("English only", Base), new Label("Seulement", second)], async () =>
         {
             var set = await RetrieveChoiceAsync(pool, name, asIfPublished: true);
             set.DisplayName = Labels("Choice EN", (second, "Choix FR"));
             await ExecuteAsync(pool, new UpdateOptionSetRequest { OptionSet = set, MergeLabels = true, SolutionUniqueName = Solution });
             var options = (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options;
             int ValueOf(Func<OptionMetadata, bool> match) => options.Single(match).Value!.Value;
-            var open = ValueOf(o => Text(o.Label, English) == "Open");
-            var same = ValueOf(o => Text(o.Label, English) == "Same");
-            var englishOnly = ValueOf(o => Text(o.Label, English) == "English only");
+            var open = ValueOf(o => Text(o.Label, Base) == "Open");
+            var same = ValueOf(o => Text(o.Label, Base) == "Same");
+            var englishOnly = ValueOf(o => Text(o.Label, Base) == "English only");
             var frenchOnly = ValueOf(o => Text(o.Label, second) == "Seulement");
-            // The create stores the French-only label under 1033 too (observed 2026-11-17); give 1033 empty text.
+            // The create stores the French-only label under the base language too (observed 2026-11-17 with base 1033); give the base language empty text.
             await ExecuteAsync(pool, new SdkUpdateOptionValue
             {
                 OptionSetName = name, Value = frenchOnly, MergeLabels = false, SolutionUniqueName = Solution,
-                Label = new Label(new LocalizedLabel("", English), new[] { new LocalizedLabel("", English), new LocalizedLabel("Seulement", second) })
+                Label = new Label(new LocalizedLabel("", Base), new[] { new LocalizedLabel("", Base), new LocalizedLabel("Seulement", second) })
             });
             await PublishChoiceAsync(pool, name);
 
@@ -432,7 +432,7 @@ public sealed partial class MetadataGlobalChoiceLiveTests
                 var scene = new FrenchScene(name, open, same, englishOnly, frenchOnly, entity, column, nameColumn, localOpen, reason);
                 _output.WriteLine($"Scene: {scene}");
                 Shown("base-language caller, choice display name before the switch", (await RetrieveChoiceAsync(pool, name, asIfPublished: false)).DisplayName)
-                    .Should().Be(((int?)English, "Choice EN"), "precondition: before the switch the caller is served the base language");
+                    .Should().Be(((int?)Base, "Choice EN"), "precondition: before the switch the caller is served the base language");
 
                 // What is STORED for every kind of target as created, read by the base caller. Recorded, not assumed:
                 // run 3 (2026-11-17) showed a table description created with English text only stored under 1033 AND
@@ -581,7 +581,7 @@ public sealed partial class MetadataGlobalChoiceLiveTests
 
     /// <summary>The BASE_LANGUAGE_LABEL_ONLY message the spec defines (AC-145).</summary>
     private static string EnglishOnlyMessage(string noun, int lcid, string shown)
-        => $"Only the base-language (LCID 1033) {noun} is written. The {noun} Dataverse shows you (LCID {lcid}) is not changed and still reads '{shown}'.";
+        => $"Only the base-language (LCID {Base}) {noun} is written. The {noun} Dataverse shows you (LCID {lcid}) is not changed and still reads '{shown}'.";
 
     /// <summary>A requested label and how to read the target's current (as-if-published) label as the French caller.</summary>
     private sealed record ShownField(string Field, string Noun, string Requested, Func<Task<Label?>> Read);
@@ -686,7 +686,7 @@ public sealed partial class MetadataGlobalChoiceLiveTests
     private static async Task ExpectGlobalOptionAsync(IDataverseConnectionPool pool, string choice, int value, string english, string french, int lcid)
     {
         var label = (await RetrieveChoiceAsync(pool, choice, asIfPublished: true)).Options.Single(o => o.Value == value).Label;
-        Text(label, English).Should().Be(english, "the English (1033) label is the one written");
+        Text(label, Base).Should().Be(english, "the base-language label is the one written");
         Text(label, lcid).Should().Be(french, "MergeLabels keeps the French label");
     }
 
