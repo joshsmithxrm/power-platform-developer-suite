@@ -994,9 +994,9 @@ These options are available on all commands:
 ### Short alias for `--environment`
 
 Use `-env` as the short form of `--environment` on every command that accepts it. `-e` keeps its existing
-meaning per command for now (entity, entity list, or environment depending on the command); using `-e` to
+meaning per command (entity, entity list, or environment depending on the command); using `-e` to
 select an entity is deprecated and prints a notice on stderr, so prefer `--entity`, `--entities` and
-`--environment` in scripts. `-e` will be standardized for environments only in CLI 2.0.
+`--environment` in scripts. Use `--environment` or `-env` for environments.
 
 ---
 

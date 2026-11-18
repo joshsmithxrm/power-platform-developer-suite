@@ -182,6 +182,10 @@ public sealed class EnvironmentAliasPolicyTests
         Assert.Single(writer.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
         Assert.Contains("deprecat", writer.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("--entity", writer.ToString());
+        Assert.Contains("--environment", writer.ToString());
+        Assert.DoesNotContain("this release", writer.ToString());
+        Assert.DoesNotContain("90 days", writer.ToString());
+        Assert.DoesNotContain("CLI 2.0", writer.ToString());
         Assert.DoesNotContain("fixture.invalid", writer.ToString());
         Assert.DoesNotContain("account", writer.ToString());
         Assert.DoesNotContain("contact", writer.ToString());

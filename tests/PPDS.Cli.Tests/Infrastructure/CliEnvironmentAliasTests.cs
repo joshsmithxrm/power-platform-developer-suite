@@ -101,13 +101,13 @@ public sealed class CliEnvironmentAliasTests(ITestOutputHelper output)
         }
     }
 
-    // Legacy cross-command short-alias clashes scheduled for CLI 2.0 (#1536). Exact: alias plus the precise
+    // Legacy cross-command short-alias clashes, recorded as the set of existing clashes and tracked in #1536 and #1671. Exact: alias plus the precise
     // set of long names, aggregated over the whole tree. A new clashing alias, or a new long name for an
     // allowlisted alias, fails. Not covered here: a new command re-using an already-listed (alias, long name)
     // pair; one command binding an alias twice is covered by EveryCommand_ShortAliasesAreNeverBoundTwice.
     private static readonly Dictionary<string, string[]> LegacyAliasClashes = new(StringComparer.Ordinal)
     {
-        // -e: entity / entity list / environment; reassigned to environment only in CLI 2.0.
+        // -e: entity / entity list / environment.
         ["-e"] = ["--entities", "--entity", "--environment"],
         // Other legacy short aliases found by the inventory; each is bound to different long options in
         // different commands (e.g. -f is --output-format on most commands but --file on data load and
