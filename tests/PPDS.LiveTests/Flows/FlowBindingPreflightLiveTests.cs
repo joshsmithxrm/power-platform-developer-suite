@@ -25,7 +25,8 @@ namespace PPDS.LiveTests.Flows;
 public sealed class FlowBindingPreflightLiveTests(ITestOutputHelper output)
 {
     // The only environment this gate may touch comes from an explicitly set variable; there is no default.
-    private static string Target => EnvironmentConfirmationService.NormalizeUrl(Required("PPDS_FLOW_BINDING_LIVE_URL"));
+    private static readonly Lazy<string> TargetValue = new(() => EnvironmentConfirmationService.NormalizeUrl(Required("PPDS_FLOW_BINDING_LIVE_URL")));
+    private static string Target => TargetValue.Value;
     private const string Run = "6d83b1f0";
     private const string Prefix = "pfl6d83";
     private const string Publisher = "PPDSFlowsBindingPublisher_" + Run;

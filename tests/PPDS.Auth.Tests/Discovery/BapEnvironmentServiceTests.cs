@@ -175,7 +175,7 @@ public class BapEnvironmentServiceTests
     {
         var json = @"{ ""value"": [
             { ""name"": ""env-2"", ""properties"": { ""displayName"": ""Zebra"", ""environmentSku"": ""Sandbox"", ""linkedEnvironmentMetadata"": { ""resourceId"": ""00000000-0000-0000-0000-000000000001"", ""friendlyName"": ""Zebra"", ""uniqueName"": ""unq2"", ""domainName"": ""org2"", ""instanceUrl"": ""https://org2.crm.dynamics.com/"", ""instanceState"": ""Ready"" } } },
-            { ""name"": ""env-1"", ""properties"": { ""displayName"": ""Alpha"", ""environmentSku"": ""Developer"", ""linkedEnvironmentMetadata"": { ""resourceId"": ""4b604f43-85d7-f011-95c7-000d3a5cc636"", ""friendlyName"": ""Alpha"", ""uniqueName"": ""unq1"", ""domainName"": ""org1"", ""instanceUrl"": ""https://org1.crm.dynamics.com/"", ""instanceState"": ""Ready"" } } }
+            { ""name"": ""env-1"", ""properties"": { ""displayName"": ""Alpha"", ""environmentSku"": ""Developer"", ""linkedEnvironmentMetadata"": { ""resourceId"": ""00000000-0000-0000-0000-000000000003"", ""friendlyName"": ""Alpha"", ""uniqueName"": ""unq1"", ""domainName"": ""org1"", ""instanceUrl"": ""https://org1.crm.dynamics.com/"", ""instanceState"": ""Ready"" } } }
         ] }";
 
         using var client = CreateMockHttpClient(HttpStatusCode.OK, json);
