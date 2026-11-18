@@ -186,7 +186,10 @@ public partial class DataverseMetadataAuthoringService
     /// not document which code an unknown global choice name returns; observed live 2026-11-17
     /// (MetadataGlobalChoiceLiveTests.MisCasedName_ResolvesAndRecordsTheFaultCode): a mis-cased name returns 0x80040217
     /// from RetrieveOptionSet (published and as-if-published), InsertOptionValue and OrderOption, and a missing solution
-    /// on InsertOptionValue returns it too. Not observed: the other option messages and a non-English organisation.
+    /// on InsertOptionValue returns it too. Also observed 2026-11-17 for a French-UI caller on an English-base organisation
+    /// (RetrieveOptionSet, InsertOptionValue, OrderOption, UpdateOptionValue) and on an organisation whose base language is
+    /// French (MisCasedName_ResolvesAndRecordsTheFaultCode, UnknownGlobalChoiceName_IsReportedAsNotFound): the same code,
+    /// with the message text in English. Not observed: the other option messages.
     /// The offline fakes model the same code. Keep in step with DataverseMetadataQueryService.
     /// </summary>
     private const int ObjectDoesNotExistErrorCode = unchecked((int)0x80040217);

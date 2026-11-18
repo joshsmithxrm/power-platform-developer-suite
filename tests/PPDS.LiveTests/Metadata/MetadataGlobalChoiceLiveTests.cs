@@ -185,6 +185,18 @@ public sealed partial class MetadataGlobalChoiceLiveTests : LiveTestBase
         await WithTableAsync(pool, Labels("Open", (second, "Ouvert")), async (entity, column) =>
         {
             var option = (await RetrieveOptionsAsync(pool, entity, column)).Single();
+            // What the create stored is recorded, not assumed: on 2026-11-17 one run kept the second-language label of a
+            // local option given at CreateAttribute and a later run did not. The label is then set explicitly (raw,
+            // MergeLabels), as for the status reason below, so the check never depends on create-time behaviour.
+            _output.WriteLine($"OBSERVED local option labels as created: {string.Join(", ", Pairs(option.Label))}");
+            if (Text(option.Label, second) != "Ouvert")
+            {
+                var setLocal = new Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest { Value = option.Value!.Value, Label = Labels("Open", (second, "Ouvert")), MergeLabels = true, SolutionUniqueName = Solution };
+                setLocal["EntityLogicalName"] = entity;
+                setLocal["AttributeLogicalName"] = column;
+                await ExecuteAsync(pool, setLocal);
+                option = (await RetrieveOptionsAsync(pool, entity, column)).Single();
+            }
             Text(option.Label, second).Should().Be("Ouvert", "precondition: the local option carries a second-language label");
             await service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = entity, ColumnLogicalName = column, Value = option.Value, NewLabel = "Closed", SolutionUniqueName = Solution });
             option = (await RetrieveOptionsAsync(pool, entity, column)).Single();
