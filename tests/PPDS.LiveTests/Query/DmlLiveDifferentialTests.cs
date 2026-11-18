@@ -28,13 +28,14 @@ namespace PPDS.LiveTests.Query;
 /// then compares the table's actual contents with the result computed independently here (T-SQL semantics, with the
 /// organisation's case- and accent-insensitive collation). One statement of every refused category is run too, to
 /// confirm nothing changed. The table and solution are deleted at the end, waiting out other suites' customisation locks.
-/// Only for https://orgcabef92d.crm.dynamics.com with a solution named ppds_DmlLive*.
+/// It runs only against the organisation named in PPDS_DML_LIVE_CONFIRM_URL, which must be set explicitly and equal both
+/// DATAVERSE_URL and the URL of the organisation the profile connects to, and only with a solution named ppds_DmlLive*.
 /// Set PPDS_DML_LIVE_CLEANUP_ONLY=1 to only remove this suite's leftover tables and solution.
 /// </summary>
 [Trait("Category", "Integration")]
 public sealed partial class DmlLiveDifferentialTests : LiveTestBase
 {
-    private const string ExpectedUrl = "https://orgcabef92d.crm.dynamics.com";
+    private const string ConfirmUrlVariable = "PPDS_DML_LIVE_CONFIRM_URL";
     private static readonly Regex OwnTable = new("^ppds_dmllive[0-9a-f]{8}$");
     private readonly ITestOutputHelper _output;
     private readonly List<string> _failures = new();
@@ -60,13 +61,15 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
     [MetadataLiveFact]
     public async Task EveryAllowlistedShape_ChangesExactlyTheRowsAndValuesItsTextSays()
     {
-        Assert.Equal(ExpectedUrl, Configuration.DataverseUrl?.TrimEnd('/'));
+        // The organisation this suite may change is named explicitly for each run; nothing in the repository names it.
+        var expectedUrl = ConfirmedUrl(Environment.GetEnvironmentVariable(ConfirmUrlVariable));
+        Assert.Equal(expectedUrl, Configuration.DataverseUrl?.TrimEnd('/'));
         Assert.StartsWith("ppds_DmlLive", Solution, StringComparison.Ordinal);
 
         using var source = await LiveTestProfileConnectionSource.CreateAsync(Configuration, "DmlLiveDifferentialTests", maxPoolSize: 2);
         var seedClient = source.GetSeedClient();
         var connected = seedClient.ConnectedOrgUriActual?.GetLeftPart(UriPartial.Authority);
-        Assert.Equal(ExpectedUrl, connected);
+        Assert.Equal(expectedUrl, connected);
         _output.WriteLine($"Connected to {connected} ({seedClient.ConnectedOrgFriendlyName}).");
         _client = seedClient;
 
@@ -83,7 +86,7 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
             NullLogger<BulkOperationExecutor>.Instance);
         _service = new SqlQueryService(new QueryExecutor(pool), new Guard(), bulkOperationExecutor: bulk,
             metadataProvider: new CachedMetadataProvider(new DataverseMetadataQueryService(pool)));
-        _service.ConfigureEnvironment(ExpectedUrl, null);
+        _service.ConfigureEnvironment(expectedUrl, null);
         _service.EnvironmentProtectionLevel = ProtectionLevel.Development;
 
         // Leftovers of an earlier run of this suite (its own tables only) go first.
@@ -102,6 +105,29 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
         }
 
         Assert.True(_failures.Count == 0, "Differences between observed and expected:\n" + string.Join("\n", _failures));
+    }
+
+    /// <summary>
+    /// The organisation URL the run is confirmed for: required, https, scheme and host only (as the connection reports it).
+    /// Anything else stops the suite before it connects.
+    /// </summary>
+    internal static string ConfirmedUrl(string? value)
+    {
+        var url = value?.Trim().TrimEnd('/');
+        if (string.IsNullOrEmpty(url))
+        {
+            throw new InvalidOperationException(
+                $"{ConfirmUrlVariable} is not set. Set it to the URL of the development organisation this suite may change " +
+                "(the same value as DATAVERSE_URL); the suite does not run without it.");
+        }
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps
+            || uri.GetLeftPart(UriPartial.Authority) != url)
+        {
+            throw new InvalidOperationException($"{ConfirmUrlVariable} must be an https organisation URL with no path, for example https://<org>.crm.dynamics.com.");
+        }
+
+        return url;
     }
 
     private Task Locked(Func<Task> operation, string what) => CustomizationLockRetry.RunAsync(operation, what, _output.WriteLine);
