@@ -19,14 +19,14 @@ namespace PPDS.LiveTests.Metadata;
 /// provisioned (PPDS_TEST_SECOND_LCID).
 /// <para>
 /// Second-language setup labels are set with <see cref="SetSecondLanguageAsync"/>: Dataverse was observed to acknowledge
-/// metadata writes and drop their second-language labels for several minutes after a table is created shortly after a
-/// global choice was published and deleted (specs/metadata-authoring.md "Label languages", "Second-language labels
-/// dropped for a while"); the helper waits that out instead of failing on it.
+/// metadata writes and drop their second-language labels for stretches of several minutes after other metadata activity
+/// (specs/metadata-authoring.md "Label languages", "Second-language labels dropped for a while"); the helper waits up to
+/// 12 minutes for it to pass, then fails saying the precondition could not be set up.
 /// </para>
 /// </summary>
 public sealed partial class MetadataGlobalChoiceLiveTests
 {
-    /// <summary>How long a setup write that carries a second-language label is retried (the window lasted about 6 minutes).</summary>
+    /// <summary>How long a setup write that carries a second-language label is retried (stretches of 6 to more than 45 minutes were observed).</summary>
     private static readonly TimeSpan SecondLanguageWindow = TimeSpan.FromMinutes(12);
 
     [MetadataLiveMultiLanguageFact]
@@ -167,8 +167,8 @@ public sealed partial class MetadataGlobalChoiceLiveTests
 
     /// <summary>
     /// Sends a setup write that carries a second-language label and checks the label is stored. Dataverse was observed to
-    /// acknowledge such writes and drop the second-language label for several minutes after a table create that followed
-    /// a global choice publish and delete, so the write is repeated every 30 seconds until the label is stored, for up to
+    /// acknowledge such writes and drop the second-language label for stretches of several minutes (once more than 45)
+    /// after other metadata activity, so the write is repeated every 30 seconds until the label is stored, for up to
     /// <see cref="SecondLanguageWindow"/>; then the test fails saying the precondition could not be set up. Each retry is
     /// written to the output.
     /// </summary>

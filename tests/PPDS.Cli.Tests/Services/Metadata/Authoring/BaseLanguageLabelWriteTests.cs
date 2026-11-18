@@ -256,6 +256,18 @@ public sealed class BaseLanguageLabelWriteTests
         Assert.Empty(world.Writes);
     }
 
+    [Fact]
+    [Trait("AC", "AC-142")]
+    public async Task ChoiceUpdateWithoutALabel_DoesNotReadTheBaseLanguage()
+    {
+        // Review A-O6: the base language is read only when a label is about to be written. A choice update that writes
+        // no label re-sends the stored labels as read, so it needs no base language (a provider that fails proves it).
+        var world = new World(French, provider: new FailingBaseLanguage(new PpdsException(MetadataErrorCodes.SdkOperationFailed, "must not be read")));
+        await world.Service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = World.Solution, Name = World.Choice });
+        Assert.Single(world.Writes.OfType<UpdateOptionSetRequest>());
+        Assert.Empty(world.ReadBacks);
+    }
+
     private sealed class FailingBaseLanguage(Exception failure) : IOrganizationBaseLanguageProvider
     {
         public Task<int> GetBaseLanguageAsync(CancellationToken ct = default) => Task.FromException<int>(failure);

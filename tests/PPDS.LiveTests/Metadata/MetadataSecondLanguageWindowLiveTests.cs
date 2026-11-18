@@ -16,11 +16,11 @@ namespace PPDS.LiveTests.Metadata;
 
 /// <summary>
 /// Pins a Dataverse behaviour observed on an English-base organisation with French provisioned (2026-11-17/18, see
-/// specs/metadata-authoring.md "Second-language labels dropped for a while"): after a global choice is created,
-/// published, updated and deleted, the first table a process creates can open a window of several minutes in which
-/// Dataverse acknowledges metadata writes but stores none of their second-language labels (local options, column
-/// display names, new global choice options), while it still returns translations stored before. It reproduced in 3 of
-/// 4 fresh processes and in no process without that sequence.
+/// specs/metadata-authoring.md "Second-language labels dropped for a while"): for stretches of several minutes to more
+/// than 45 minutes, Dataverse acknowledges metadata writes from a process but stores none of their second-language
+/// labels (local options, column display names, new global choice options), while it still returns translations stored
+/// before. A global choice created, published, updated and deleted, then the first table a fresh process creates,
+/// brought it about in 3 of 4 processes; it also occurred without that sequence after other metadata activity.
 /// <para>
 /// What the product depends on is asserted whether or not the window opens: through the real service, a base-language
 /// label write in that state (option label, choice display name and description) is confirmed and keeps every

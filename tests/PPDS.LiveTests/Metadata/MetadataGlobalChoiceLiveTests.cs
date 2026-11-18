@@ -188,10 +188,10 @@ public sealed partial class MetadataGlobalChoiceLiveTests : LiveTestBase
         await WithTableAsync(pool, Labels("Open", (second, "Ouvert")), async (entity, column) =>
         {
             var option = (await RetrieveOptionsAsync(pool, entity, column)).Single();
-            // What the create stored is recorded, not assumed. Dataverse was observed (2026-11-17) to drop the
-            // second-language labels of metadata writes for several minutes after a table create that followed a global
-            // choice publish and delete (this test after ChoiceUpdate_ChangesOnlyTheDisplayName_KeepsAnotherDescriptionEdit),
-            // so the label is set explicitly, retrying until it is stored.
+            // What the create stored is recorded, not assumed. Dataverse was observed (2026-11-17/18) to drop the
+            // second-language labels of metadata writes for stretches of several minutes after other metadata activity
+            // (this test after ChoiceUpdate_ChangesOnlyTheDisplayName_KeepsAnotherDescriptionEdit, among others), so the
+            // label is set explicitly, retrying until it is stored.
             _output.WriteLine($"OBSERVED local option labels as created (as-if-published): {string.Join(", ", Pairs(option.Label))}");
             var setLocal = new Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest { Value = option.Value!.Value, Label = Labels("Open", (second, "Ouvert")), MergeLabels = true, SolutionUniqueName = Solution };
             setLocal["EntityLogicalName"] = entity;
