@@ -43,7 +43,7 @@ public sealed class ColumnLabelFailureClassificationTests(ITestOutputHelper outp
             "RetrieveAttribute" => ["RetrieveAttribute"],
             "RetrieveEntity" => ["RetrieveAttribute", "RetrieveEntity"],
             "UpdateAttribute" => ["RetrieveAttribute", "UpdateAttribute"],
-            "PublishXml" => ["RetrieveAttribute", "UpdateAttribute", "PublishXml"],
+            "PublishXml" => ["RetrieveAttribute", "UpdateAttribute", "RetrieveAttribute", "PublishXml"], // the label read-back precedes publish
             _ => throw new ArgumentOutOfRangeException(nameof(operation))
         };
         PpdsException? error = null;

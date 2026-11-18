@@ -36,13 +36,13 @@ public class MetadataAuthoringRpcTests
     {
         var notice = new ValidationMessage
         {
-            Field = "PluralDisplayName", Rule = PPDS.Cli.Services.Metadata.Authoring.MetadataLabelWriteResult.EnglishLabelOnlyRule,
-            Message = "Only the English (LCID 1033) plural name is written."
+            Field = "PluralDisplayName", Rule = PPDS.Cli.Services.Metadata.Authoring.MetadataLabelWriteResult.BaseLanguageLabelOnlyRule,
+            Message = "Only the base-language (LCID 1033) plural name is written."
         };
         var mapped = RpcMethodHandler.MapLabelNotices(new PPDS.Cli.Services.Metadata.Authoring.MetadataLabelWriteResult { ValidationMessages = [notice] });
         var dto = mapped.Should().ContainSingle().Subject;
         dto.Field.Should().Be("PluralDisplayName");
-        dto.Rule.Should().Be("ENGLISH_LABEL_ONLY");
+        dto.Rule.Should().Be("BASE_LANGUAGE_LABEL_ONLY");
         dto.Message.Should().Be(notice.Message);
 
         RpcMethodHandler.MapLabelNotices(PPDS.Cli.Services.Metadata.Authoring.MetadataLabelWriteResult.None).Should().BeNull("an empty list is omitted from the response");

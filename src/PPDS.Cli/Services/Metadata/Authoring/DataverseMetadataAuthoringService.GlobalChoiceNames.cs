@@ -49,8 +49,10 @@ public partial class DataverseMetadataAuthoringService
     /// case variant of the requested name exists, and that retry's own failure surfaces. Every other failure
     /// (privilege, duplicate value, validation, managed property, plugin, timeout, throttle, connection,
     /// cancellation, and faults with other codes and no English not-found wording) propagates untouched with no
-    /// listing and no retry. The design assumes, pending live confirmation, that a not-found fault means nothing
-    /// was written under the first spelling.
+    /// listing and no retry. The design relies on a not-found fault meaning nothing was written under the first
+    /// spelling; asserted live 2026-11-17 for a mis-cased name on InsertOptionValue
+    /// (MetadataGlobalChoiceLiveTests.MisCasedName_ResolvesAndRecordsTheFaultCode: the retried add writes exactly once)
+    /// and for a missing solution (MissingSolution_OnAddOption_SurfacesTheErrorAndWritesNothing).
     /// Each attempt and the catalog lookup acquire and release their own pooled lease.
     /// </remarks>
     /// <returns>The name the successful attempt used (the stored name when Dataverse reports it) and its result.</returns>
@@ -180,10 +182,15 @@ public partial class DataverseMetadataAuthoringService
             : requested;
 
     /// <summary>
-    /// Dataverse's language-independent "object not found" fault code (ObjectDoesNotExist, 0x80040217). ASSUMPTION,
-    /// pending live confirmation: Microsoft does not document which code an unknown global choice name returns; this
-    /// is the generic not-found code the offline fakes model (see the live test
-    /// MetadataGlobalChoiceLiveTests). Keep in step with DataverseMetadataQueryService.
+    /// Dataverse's language-independent "object not found" fault code (ObjectDoesNotExist, 0x80040217). Microsoft does
+    /// not document which code an unknown global choice name returns; observed live 2026-11-17
+    /// (MetadataGlobalChoiceLiveTests.MisCasedName_ResolvesAndRecordsTheFaultCode): a mis-cased name returns 0x80040217
+    /// from RetrieveOptionSet (published and as-if-published), InsertOptionValue and OrderOption, and a missing solution
+    /// on InsertOptionValue returns it too. Also observed 2026-11-17 for a French-UI caller on an English-base organisation
+    /// (RetrieveOptionSet, InsertOptionValue, OrderOption, UpdateOptionValue) and on an organisation whose base language is
+    /// French (MisCasedName_ResolvesAndRecordsTheFaultCode, UnknownGlobalChoiceName_IsReportedAsNotFound): the same code,
+    /// with the message text in English. Not observed: the other option messages.
+    /// The offline fakes model the same code. Keep in step with DataverseMetadataQueryService.
     /// </summary>
     private const int ObjectDoesNotExistErrorCode = unchecked((int)0x80040217);
 

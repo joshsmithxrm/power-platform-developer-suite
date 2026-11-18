@@ -28,13 +28,13 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
         {
             await operation;
             Assert.Equal("Changed", h.StoredLabel);
-            Assert.Equal(new[] { "read", "update", "publish" }, h.SuccessfulSdk);
+            Assert.Equal(new[] { "read", "update", "confirm", "publish" }, h.SuccessfulSdk);
             Assert.Equal(new[]
             {
                 "checkout:read", "acquired:1", "sdk:read:1", "success:read:1", "dispose:1",
                 "checkout:update", "acquired:2", "sdk:update:2", "success:update:2", "dispose:2",
-                "cache:list", "cache:entity", "checkout:publish", "acquired:3", "sdk:publish:3",
-                "success:publish:3", "dispose:3", "info"
+                "cache:list", "cache:entity", "checkout:confirm", "acquired:3", "sdk:confirm:3", "success:confirm:3", "dispose:3",
+                "checkout:publish", "acquired:4", "sdk:publish:4", "success:publish:4", "dispose:4", "info"
             }, h.Events.Select(e => e.Action));
             h.AssertSequentialOwnership();
         }
@@ -50,12 +50,12 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
         try
         {
             await operation;
-            Assert.Equal(new[] { "read", "update" }, h.SuccessfulSdk);
+            Assert.Equal(new[] { "read", "update", "confirm" }, h.SuccessfulSdk);
             Assert.Equal(new[]
             {
                 "checkout:read", "acquired:1", "sdk:read:1", "success:read:1", "dispose:1",
                 "checkout:update", "acquired:2", "sdk:update:2", "success:update:2", "dispose:2",
-                "cache:list", "cache:entity", "info"
+                "cache:list", "cache:entity", "checkout:confirm", "acquired:3", "sdk:confirm:3", "success:confirm:3", "dispose:3", "info"
             }, h.Events.Select(e => e.Action));
             h.AssertSequentialOwnership();
         }
@@ -73,7 +73,7 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
         {
             await operation;
             Assert.Equal("Changed", h.StoredLabel);
-            Assert.Equal(new[] { "read", "update", "publish" }, h.SuccessfulSdk);
+            Assert.Equal(new[] { "read", "update", "confirm", "publish" }, h.SuccessfulSdk);
             Assert.Equal(new[] { "list", "entity" }, h.Cache.Select(e => e.Name));
             Assert.Single(h.Infos);
             h.AssertReturned();
@@ -126,15 +126,57 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
             Assert.Equal(boundary switch
             {
                 "update-checkout" => new[] { "read" },
-                "publish-sdk" => ["read", "update", "publish"],
+                "publish-checkout" => ["read", "update", "confirm"],
+                "publish-sdk" => ["read", "update", "confirm", "publish"],
                 _ => ["read", "update"]
             }, h.AttemptedSdk);
-            Assert.Equal(afterUpdate ? new[] { "read", "update" } : ["read"], h.SuccessfulSdk);
+            Assert.Equal(afterUpdate ? new[] { "read", "update", "confirm" } : ["read"], h.SuccessfulSdk);
             Assert.Empty(h.Infos);
             Assert.All(h.AttemptedSdk.GroupBy(s => s), group => Assert.Single(group));
             h.AssertReturned();
         }
         finally { output.WriteLine(h.Snapshot(operation)); }
+    }
+
+    /// <summary>
+    /// The label read-back after a committed table update: a failed read (checkout or SDK) or labels that were not
+    /// stored are WRITE_NOT_CONFIRMED naming what was written; publication is not attempted; the cause is kept.
+    /// </summary>
+    [Theory]
+    [InlineData("confirm-checkout", "ordinary")]
+    [InlineData("confirm-checkout", "timeout")]
+    [InlineData("confirm-sdk", "ordinary")]
+    [InlineData("confirm-sdk", "timeout")]
+    [InlineData("confirm-sdk", "auth")]
+    [InlineData("not-stored", null)]
+    [Trait("AC", "AC-148")]
+    public async Task LabelReadBackFailure_IsWriteNotConfirmed_AndSkipsPublication(string boundary, string? kind)
+    {
+        using var h = new Harness(publish: true, capacity: 2, failureBoundary: boundary == "not-stored" ? null : boundary, failureKind: kind);
+        h.ConfirmStores = boundary != "not-stored";
+        var operation = h.Invoke();
+        try
+        {
+            var error = Assert.IsType<PpdsException>(await Record.ExceptionAsync(() => operation));
+            Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+            Assert.StartsWith($"Table '{Harness.Table}' was updated.", error.Message);
+            Assert.Contains("Publication (--publish) was not attempted.", error.Message);
+            if (boundary == "not-stored")
+                Assert.Contains("did not store its display name: requested 'Changed' (LCID 1033), stored 'Existing'", error.Message);
+            else
+                Assert.Contains(h.Injected, Chain(error)); // the read failure is kept as the cause
+            if (kind == "auth") Assert.Equal(true, error.Context?["requiresReauthentication"]);
+            Assert.Equal("Changed", h.StoredLabel);
+            Assert.DoesNotContain("publish", h.AttemptedSdk);
+            Assert.Empty(h.Infos);
+            h.AssertReturned();
+        }
+        finally { output.WriteLine(h.Snapshot(operation)); }
+    }
+
+    private static IEnumerable<Exception> Chain(Exception error)
+    {
+        for (var current = error.InnerException; current != null; current = current.InnerException) yield return current;
     }
 
     public static IEnumerable<object[]> ReadFailures()
@@ -327,6 +369,10 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
         internal Exception? ModeledTimeout { get; private set; }
         internal OrganizationRequest? ReadRequest { get; private set; }
         internal OrganizationRequest? UpdateRequest { get; private set; }
+        internal OrganizationRequest? ConfirmRequest { get; private set; }
+
+        /// <summary>False: the read-back returns the old labels, as if Dataverse acknowledged the update without storing it.</summary>
+        internal bool ConfirmStores { get; set; } = true;
         internal OrganizationRequest? PublishRequest { get; private set; }
         internal List<Trace> Events { get; } = [];
         internal List<CacheEvent> Cache { get; } = [];
@@ -356,7 +402,7 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
             });
             Reporter = reporter.Object;
             Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(),
-                blocked ? new ActiveFakeShakedownGuard() : new InactiveFakeShakedownGuard(), cacheProvider: cache.Object);
+                blocked ? new ActiveFakeShakedownGuard() : new InactiveFakeShakedownGuard(), cacheProvider: cache.Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
             Request = new UpdateTableRequest
             {
                 SolutionUniqueName = Solution, EntityLogicalName = Table, DisplayName = "Changed",
@@ -404,7 +450,7 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
         private async Task<IPooledClient> Acquire()
         {
             var id = ++Checkouts;
-            var stage = id switch { 1 => "read", 2 => "update", 3 => "publish", _ => throw new InvalidOperationException("Unexpected retry checkout") };
+            var stage = id switch { 1 => "read", 2 => "update", 3 => "confirm", 4 => "publish", _ => throw new InvalidOperationException("Unexpected retry checkout") };
             Record("checkout:" + stage);
             MaybeFail(stage + "-checkout");
             if (!await _slots.WaitAsync(TimeSpan.FromMilliseconds(40), Token))
@@ -427,6 +473,7 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
                     Assert.False(disposed); Assert.Equal(Token, token);
                     var sdkStage = request switch
                     {
+                        RetrieveEntityRequest { RetrieveAsIfPublished: true } => "confirm", // the label read-back
                         RetrieveEntityRequest => "read", UpdateEntityRequest => "update", PublishXmlRequest => "publish",
                         _ => throw new InvalidOperationException("Unexpected SDK operation")
                     };
@@ -434,7 +481,12 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
                     AttemptedSdk.Add(sdkStage); Record("sdk:" + sdkStage + ":" + id, id);
                     await Task.Yield(); // Fault/cancel after an asynchronous boundary while the actual service awaits SDK work.
                     MaybeFail(sdkStage + "-sdk");
-                    if (request is RetrieveEntityRequest read)
+                    if (request is RetrieveEntityRequest { RetrieveAsIfPublished: true } confirm)
+                    {
+                        Assert.Equal(Table, confirm.LogicalName);
+                        ConfirmRequest = confirm;
+                    }
+                    else if (request is RetrieveEntityRequest read)
                     {
                         // AC-147: the current (published) labels are read before a label update, like the column read.
                         Assert.Equal(Table, read.LogicalName);
@@ -450,6 +502,19 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
                     SuccessfulSdk.Add(sdkStage); Record("success:" + sdkStage + ":" + id, id);
                     return request switch
                     {
+                        RetrieveEntityRequest { RetrieveAsIfPublished: true } when ConfirmStores is false => new RetrieveEntityResponse { Results = new ParameterCollection
+                        {
+                            ["EntityMetadata"] = new Microsoft.Xrm.Sdk.Metadata.EntityMetadata { LogicalName = Table, DisplayName = new Label("Existing", 1033) }
+                        } },
+                        RetrieveEntityRequest { RetrieveAsIfPublished: true } => new RetrieveEntityResponse { Results = new ParameterCollection
+                        {
+                            ["EntityMetadata"] = new Microsoft.Xrm.Sdk.Metadata.EntityMetadata
+                            {
+                                LogicalName = Table, DisplayName = ((UpdateEntityRequest)UpdateRequest!).Entity.DisplayName,
+                                DisplayCollectionName = ((UpdateEntityRequest)UpdateRequest).Entity.DisplayCollectionName,
+                                Description = ((UpdateEntityRequest)UpdateRequest).Entity.Description
+                            }
+                        } },
                         RetrieveEntityRequest when _emptyRead => new OrganizationResponse(),
                         RetrieveEntityRequest => new RetrieveEntityResponse { Results = new ParameterCollection
                         {

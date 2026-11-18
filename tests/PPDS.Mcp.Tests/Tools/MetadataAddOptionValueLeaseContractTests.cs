@@ -144,7 +144,7 @@ public sealed class MetadataAddOptionValueLeaseContractTests
         var pool = new Mock<IDataverseConnectionPool>(MockBehavior.Strict);
         pool.Setup(p => p.GetClientAsync(null, null, CancellationToken.None)).ThrowsAsync(timeout);
         var service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(),
-            new Mock<PPDS.Cli.Infrastructure.Safety.IShakedownGuard>().Object);
+            new Mock<PPDS.Cli.Infrastructure.Safety.IShakedownGuard>().Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
         using var fixture = await Fixture.CreateAsync((request, token) => service.AddOptionValueAsync(request, token));
 
         var task = fixture.InvokeAsync();
@@ -213,7 +213,7 @@ public sealed class MetadataAddOptionValueLeaseContractTests
             return lease.Object;
         });
         var service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(),
-            new Mock<PPDS.Cli.Infrastructure.Safety.IShakedownGuard>().Object);
+            new Mock<PPDS.Cli.Infrastructure.Safety.IShakedownGuard>().Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
         using var fixture = await Fixture.CreateAsync((request, token) => service.AddOptionValueAsync(request, token));
 
         var task = fixture.InvokeAsync(cancellation.Token);

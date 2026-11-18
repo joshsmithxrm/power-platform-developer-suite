@@ -212,8 +212,47 @@ public sealed class MetadataLiveFactAttribute : FactAttribute
 }
 
 /// <summary>
+/// <see cref="MetadataLiveFactAttribute"/> for a test that can also decide at run time that it does not apply to the
+/// connected organisation (for example a regression that needs a base language other than 1033): it calls
+/// <c>Skip.If</c>/<c>Skip.IfNot</c> with a reason and is then reported as skipped with that reason, never as passed.
+/// </summary>
+public sealed class MetadataLiveSkippableFactAttribute : SkippableFactAttribute
+{
+    private static readonly LiveTestConfiguration Configuration = new();
+
+    /// <summary>
+    /// Initializes a new instance that skips when prerequisites are missing.
+    /// </summary>
+    public MetadataLiveSkippableFactAttribute()
+    {
+        Skip = MetadataLivePrerequisites.MissingReason(Configuration);
+    }
+}
+
+/// <summary>
+/// The opt-in test that pins Dataverse's second-language label window (MetadataSecondLanguageWindowLiveTests): needs the
+/// metadata live-test settings, PPDS_TEST_SECOND_LCID and PPDS_TEST_LABEL_WINDOW=1, and is meant to run in a test
+/// process of its own. Without them it is reported as skipped; it can also skip at run time with the reason.
+/// </summary>
+public sealed class MetadataLiveWindowFactAttribute : SkippableFactAttribute
+{
+    private static readonly LiveTestConfiguration Configuration = new();
+
+    /// <summary>
+    /// Initializes a new instance that skips when prerequisites are missing.
+    /// </summary>
+    public MetadataLiveWindowFactAttribute()
+    {
+        Skip = MetadataLivePrerequisites.MissingReason(Configuration)
+            ?? (MetadataLivePrerequisites.SecondLanguage is null ? "Requires PPDS_TEST_SECOND_LCID (a provisioned language other than the base language)." : null)
+            ?? (Environment.GetEnvironmentVariable("PPDS_TEST_LABEL_WINDOW")?.Trim() == "1" ? null
+                : "Opt-in (PPDS_TEST_LABEL_WINDOW=1): pins Dataverse's second-language label window; run it on its own so its table create is the first of the test process.");
+    }
+}
+
+/// <summary>
 /// <see cref="MetadataLiveFactAttribute"/> plus a second provisioned language: requires PPDS_TEST_SECOND_LCID, the
-/// LCID (not 1033) of a language provisioned in the target organisation. Without it the test is reported as skipped,
+/// LCID of a provisioned language other than the organisation's base language (checked at run time). Without it the test is reported as skipped,
 /// never as passed. The test fails with a clear message if that LCID is not actually provisioned.
 /// </summary>
 public sealed class MetadataLiveMultiLanguageFactAttribute : FactAttribute
@@ -227,17 +266,47 @@ public sealed class MetadataLiveMultiLanguageFactAttribute : FactAttribute
     {
         Skip = MetadataLivePrerequisites.MissingReason(Configuration)
             ?? (MetadataLivePrerequisites.SecondLanguage is null
-                ? "Multi-language metadata test requires PPDS_TEST_SECOND_LCID: the LCID (other than 1033) of a language provisioned in the target organisation, e.g. 1036."
+                ? "Multi-language metadata test requires PPDS_TEST_SECOND_LCID: the LCID of a provisioned language other than the organisation's base language, e.g. 1036 on an English-base organisation."
                 : null);
+    }
+}
+
+/// <summary>
+/// <see cref="MetadataLiveMultiLanguageFactAttribute"/> plus the explicit opt-in PPDS_TEST_SWITCH_UI_LANGUAGE=1. These
+/// tests temporarily switch the CALLING user's Dataverse UI language (usersettings.uilanguageid, nothing else) to
+/// PPDS_TEST_SECOND_LCID and restore it afterwards (<see cref="CallerUiLanguageSwitch"/>). Without the opt-in they are
+/// reported as skipped, never as passed.
+/// </summary>
+public sealed class MetadataLiveSwitchUiLanguageFactAttribute : FactAttribute
+{
+    private static readonly LiveTestConfiguration Configuration = new();
+
+    /// <summary>
+    /// Initializes a new instance that skips when prerequisites are missing.
+    /// </summary>
+    public MetadataLiveSwitchUiLanguageFactAttribute()
+    {
+        Skip = MetadataLivePrerequisites.MissingReason(Configuration)
+            ?? (MetadataLivePrerequisites.SecondLanguage is null
+                ? "UI-language metadata test requires PPDS_TEST_SECOND_LCID: the LCID of a provisioned language other than the organisation's base language, e.g. 1036 on an English-base organisation."
+                : null)
+            ?? (MetadataLivePrerequisites.SwitchUiLanguage
+                ? null
+                : "UI-language metadata test requires the opt-in PPDS_TEST_SWITCH_UI_LANGUAGE=1: it temporarily sets the calling user's " +
+                  "Dataverse UI language (usersettings.uilanguageid) to PPDS_TEST_SECOND_LCID and restores the original value afterwards. " +
+                  "Run these tests on their own (filter FullyQualifiedName~MetadataGlobalChoiceLiveTests.FrenchCaller_).");
     }
 }
 
 /// <summary>Shared prerequisite checks for the metadata live-test attributes.</summary>
 public static class MetadataLivePrerequisites
 {
-    /// <summary>PPDS_TEST_SECOND_LCID parsed, or null when unset, invalid or 1033.</summary>
+    /// <summary>True only when PPDS_TEST_SWITCH_UI_LANGUAGE is exactly "1".</summary>
+    public static bool SwitchUiLanguage => Environment.GetEnvironmentVariable("PPDS_TEST_SWITCH_UI_LANGUAGE")?.Trim() == "1";
+
+    /// <summary>PPDS_TEST_SECOND_LCID parsed, or null when unset or invalid. The test checks at run time that it is provisioned and is not the base language.</summary>
     public static int? SecondLanguage =>
-        int.TryParse(Environment.GetEnvironmentVariable("PPDS_TEST_SECOND_LCID"), out var lcid) && lcid > 0 && lcid != 1033 ? lcid : null;
+        int.TryParse(Environment.GetEnvironmentVariable("PPDS_TEST_SECOND_LCID"), out var lcid) && lcid > 0 ? lcid : null;
 
     internal static string? MissingReason(LiveTestConfiguration configuration)
     {

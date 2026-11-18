@@ -73,9 +73,9 @@ public sealed class MetadataDraftOptionReadTests
     {
         using var f = new Fixture(kind);
         Assert.Equal(77, await f.AddAsync(value: 77, color: "#123456"));
-        Assert.Equal(2, f.Reads.Count());
-        Assert.All(f.Reads, r => Assert.True(r.RetrieveAsIfPublished));
-        // The colour rides on the insert (observed live to be stored); the second draft read confirms it. No option
+        Assert.True(Assert.Single(f.Reads).RetrieveAsIfPublished);
+        Assert.True(Assert.IsType<RetrieveAttributeRequest>(Assert.Single(f.ReadBacks)).RetrieveAsIfPublished);
+        // The colour rides on the insert (observed live to be stored); one draft read-back confirms it with the label. No option
         // collection or attribute is re-sent, so the other draft options and their labels cannot be touched.
         var insert = Assert.Single(f.Requests, r => r is InsertOptionValueRequest or InsertStatusValueRequest);
         Assert.Equal("#123456", insert["Color"]);
@@ -135,7 +135,8 @@ public sealed class MetadataDraftOptionReadTests
             Label = "New", Value = 77, Color = "#123456"
         }, f.Token);
         Assert.Equal(77, value);
-        Assert.True(Assert.Single(f.Reads).RetrieveAsIfPublished); // the colour read-back
+        Assert.Empty(f.Reads);
+        Assert.True(Assert.IsType<RetrieveAttributeRequest>(Assert.Single(f.ReadBacks)).RetrieveAsIfPublished); // the label and colour read-back
         Assert.Equal("#123456", Assert.Single(f.Requests.OfType<InsertOptionValueRequest>())["Color"]);
         Assert.DoesNotContain(f.Requests, r => r is SdkUpdateOption);
         f.AssertRoutingAndCancellation();
@@ -375,7 +376,7 @@ public sealed class MetadataDraftOptionReadTests
     [InlineData("choice")]
     public async Task ColorReadCancellation_AfterTheInsert_IsWriteNotConfirmed(string kind)
     {
-        using var f = new Fixture(kind) { CancelReadNumber = 2 };
+        using var f = new Fixture(kind) { CancelReadBack = true };
         var error = await Assert.ThrowsAsync<PpdsException>(() => f.AddAsync(value: 77, color: "#123456"));
         Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
         Assert.Same(f.Cancellation, error.InnerException);
@@ -424,12 +425,17 @@ public sealed class MetadataDraftOptionReadTests
         public CancellationToken Token => _cancellationSource.Token;
         public OperationCanceledException Cancellation { get; }
         public int CancelReadNumber { get; init; }
+        /// <summary>Cancels the service's read-back (the as-if-published read after a write).</summary>
+        public bool CancelReadBack { get; init; }
         public Exception? InsertFailure { get; init; }
         public Exception? WriteFailure { get; init; }
         public Func<Exception>? WriteFailureFactory { get; set; }
         public void Cancel() => _cancellationSource.Cancel();
         public string Attribute => _kind == "status" ? "statuscode" : "new_choice";
         public DataverseMetadataAuthoringService Service { get; }
+
+        private readonly LabelWriteStore _labels = new() { OverlayColors = false };
+        public List<OrganizationRequest> ReadBacks { get; } = [];
 
         public Fixture(string kind, List<(int Value, string Label)>? draft = null, List<(int Value, string Label)>? published = null)
         {
@@ -444,11 +450,15 @@ public sealed class MetadataDraftOptionReadTests
                 .Returns<OrganizationRequest, CancellationToken>((request, token) =>
                 {
                     _tokens.Add(token);
-                    Requests.Add(request);
+                    // The service's read-back after a write is answered by this fixture (which models stored colours, with
+                    // _labels overlaying the written labels) but kept out of Requests/Reads.
+                    var readBack = _labels.FollowsRecordedWrite(request);
+                    if (readBack) ReadBacks.Add(request); else Requests.Add(request);
+                    _labels.Record(request);
                     switch (request)
                     {
                         case RetrieveAttributeRequest read:
-                            if (Reads.Count() == CancelReadNumber) throw Cancellation;
+                            if (readBack ? CancelReadBack : Reads.Count() == CancelReadNumber) throw Cancellation;
                             var values = read.RetrieveAsIfPublished ? _draft : _published;
                             var set = new OptionSetMetadata { IsGlobal = false };
                             foreach (var (value, label) in values)
@@ -468,7 +478,7 @@ public sealed class MetadataDraftOptionReadTests
                             attribute.OptionSet = set;
                             attribute.LogicalName = Attribute;
                             attribute.RequiredLevel = new AttributeRequiredLevelManagedProperty(AttributeRequiredLevel.ApplicationRequired);
-                            return Task.FromResult<OrganizationResponse>(new RetrieveAttributeResponse { Results = new ParameterCollection { ["AttributeMetadata"] = attribute } });
+                            return Task.FromResult(_labels.Apply(request, new RetrieveAttributeResponse { Results = new ParameterCollection { ["AttributeMetadata"] = attribute } }));
                         case InsertStatusValueRequest:
                         case InsertOptionValueRequest:
                             if (InsertFailure != null) throw InsertFailure;
@@ -500,7 +510,7 @@ public sealed class MetadataDraftOptionReadTests
                     else row["customizationoptionvalueprefix"] = 1;
                     return Task.FromResult(new EntityCollection(new List<Entity> { row }));
                 });
-            Service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard());
+            Service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
         }
 
         public Task<int> AddAsync(int? value = null, bool dryRun = false, string? color = null) => _kind == "status"

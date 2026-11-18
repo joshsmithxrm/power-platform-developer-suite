@@ -38,25 +38,36 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     private readonly IShakedownGuard _guard;
     private readonly ILogger<DataverseMetadataAuthoringService>? _logger;
     private readonly ICachedMetadataProvider? _cacheProvider;
+    private readonly IOrganizationBaseLanguageProvider _baseLanguage;
     private readonly ConcurrentDictionary<string, string> _publisherPrefixCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, int> _publisherOptionValuePrefixCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DataverseMetadataAuthoringService"/> class.
     /// </summary>
+    /// <param name="baseLanguage">
+    /// The environment's base language, which every label is written in. When null, it is read from
+    /// <paramref name="connectionPool"/> (organization.languagecode) the first time a label is written, and cached for
+    /// this instance.
+    /// </param>
     public DataverseMetadataAuthoringService(
         IDataverseConnectionPool connectionPool,
         SchemaValidator validator,
         IShakedownGuard guard,
         ILogger<DataverseMetadataAuthoringService>? logger = null,
-        ICachedMetadataProvider? cacheProvider = null)
+        ICachedMetadataProvider? cacheProvider = null,
+        IOrganizationBaseLanguageProvider? baseLanguage = null)
     {
         _connectionPool = connectionPool ?? throw new ArgumentNullException(nameof(connectionPool));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
         _guard = guard ?? throw new ArgumentNullException(nameof(guard));
         _logger = logger;
         _cacheProvider = cacheProvider;
+        _baseLanguage = baseLanguage ?? new OrganizationBaseLanguageProvider(connectionPool);
     }
+
+    /// <summary>The organisation's base language: the LCID every label PPDS writes is authored in.</summary>
+    private Task<int> BaseLanguageAsync(CancellationToken ct) => _baseLanguage.GetBaseLanguageAsync(ct);
 
     #region Tables
 
@@ -95,13 +106,14 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         var primaryAttrSchemaName = request.PrimaryAttributeSchemaName ?? prefix + "_Name";
         var primaryAttrDisplayName = request.PrimaryAttributeDisplayName ?? "Name";
         var primaryAttrMaxLength = request.PrimaryAttributeMaxLength ?? 100;
+        var lcid = await BaseLanguageAsync(ct).ConfigureAwait(false);
 
         var entityMetadata = new EntityMetadata
         {
             SchemaName = request.SchemaName,
-            DisplayName = new Label(request.DisplayName, 1033),
-            DisplayCollectionName = new Label(request.PluralDisplayName, 1033),
-            Description = string.IsNullOrEmpty(request.Description) ? null : new Label(request.Description, 1033),
+            DisplayName = new Label(request.DisplayName, lcid),
+            DisplayCollectionName = new Label(request.PluralDisplayName, lcid),
+            Description = string.IsNullOrEmpty(request.Description) ? null : new Label(request.Description, lcid),
             OwnershipType = ownershipType,
         };
 
@@ -127,7 +139,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         var primaryAttribute = new StringAttributeMetadata
         {
             SchemaName = primaryAttrSchemaName,
-            DisplayName = new Label(primaryAttrDisplayName, 1033),
+            DisplayName = new Label(primaryAttrDisplayName, lcid),
             RequiredLevel = new AttributeRequiredLevelManagedProperty(AttributeRequiredLevel.ApplicationRequired),
             MaxLength = primaryAttrMaxLength
         };
@@ -147,6 +159,18 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         _cacheProvider?.InvalidateEntityList();
         _cacheProvider?.InvalidateEntity(request.SchemaName.ToLowerInvariant());
+
+        var created = request.SchemaName.ToLowerInvariant();
+        reporter?.ReportPhase("Confirming table labels", created);
+        await ConfirmLabelsAsync("table", $"Table '{created}' was created.", request.Publish, lcid,
+            token => ReadTableForConfirmationAsync(created, token), ct,
+            new LabelExpectation<EntityMetadata>("display name", request.DisplayName, t => t.DisplayName),
+            new LabelExpectation<EntityMetadata>("plural name", request.PluralDisplayName, t => t.DisplayCollectionName),
+            new LabelExpectation<EntityMetadata>("description", string.IsNullOrEmpty(request.Description) ? null : request.Description, t => t.Description)).ConfigureAwait(false);
+        var primaryName = primaryAttrSchemaName.ToLowerInvariant();
+        await ConfirmLabelsAsync("table", $"Table '{created}' was created.", request.Publish, lcid,
+            token => ReadColumnForConfirmationAsync(created, primaryName, token), ct,
+            new LabelExpectation<AttributeMetadata>("primary column display name", primaryAttrDisplayName, a => a.DisplayName)).ConfigureAwait(false);
 
         if (request.Publish)
             await PublishEntityInternalAsync(request.SchemaName.ToLowerInvariant(), ct).ConfigureAwait(false);
@@ -176,20 +200,26 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _validator.ValidateRequiredString(request.SolutionUniqueName, "SolutionUniqueName");
         _validator.ValidateRequiredString(request.EntityLogicalName, "EntityLogicalName");
 
+        // A dry-run is input-only (its documented scope, MetadataDryRunScope.Inputs): it reads nothing, so it neither
+        // checks that the table exists nor computes notices.
         if (request.DryRun)
         {
             _logger?.LogInformation("Dry-run: UpdateTable {Entity} validated successfully", request.EntityLogicalName);
             return MetadataLabelWriteResult.None;
         }
 
-        // Labels are written for LCID 1033 only. The table's current labels are read (only when a label is
-        // requested) so the update can say when the label Dataverse shows the caller is in another language.
+        // Labels are written in the organisation's base language only. The table's current labels are read (only when
+        // a label is requested) so the update can say when the label Dataverse shows the caller is a stored translation
+        // the write leaves unchanged; the written labels are then read back.
         var notices = MetadataLabelWriteResult.None;
-        if (request.DisplayName != null || request.PluralDisplayName != null || request.Description != null)
+        var labelsRequested = request.DisplayName != null || request.PluralDisplayName != null || request.Description != null;
+        var lcid = 0;
+        if (labelsRequested)
         {
+            lcid = await BaseLanguageAsync(ct).ConfigureAwait(false);
             reporter?.ReportPhase("Retrieving existing table labels", request.EntityLogicalName);
             var existing = await ReadTableLabelsAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
-            notices = EnglishOnlyNotices(
+            notices = BaseLanguageNotices(lcid,
                 ("DisplayName", "display name", request.DisplayName, existing.DisplayName),
                 ("PluralDisplayName", "plural name", request.PluralDisplayName, existing.DisplayCollectionName),
                 ("Description", "description", request.Description, existing.Description));
@@ -203,11 +233,11 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         };
 
         if (request.DisplayName != null)
-            entityMetadata.DisplayName = new Label(request.DisplayName, 1033);
+            entityMetadata.DisplayName = new Label(request.DisplayName, lcid);
         if (request.PluralDisplayName != null)
-            entityMetadata.DisplayCollectionName = new Label(request.PluralDisplayName, 1033);
+            entityMetadata.DisplayCollectionName = new Label(request.PluralDisplayName, lcid);
         if (request.Description != null)
-            entityMetadata.Description = new Label(request.Description, 1033);
+            entityMetadata.Description = new Label(request.Description, lcid);
         if (request.HasActivities.HasValue)
             entityMetadata.HasActivities = request.HasActivities.Value;
         if (request.HasNotes.HasValue)
@@ -237,7 +267,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         var sdkRequest = new UpdateEntityRequest
         {
             Entity = entityMetadata,
-            MergeLabels = true, // The request carries only LCID 1033 labels. Preserve other translations.
+            MergeLabels = true, // The request carries only base-language labels. Preserve other translations.
             SolutionUniqueName = request.SolutionUniqueName
         };
 
@@ -248,6 +278,16 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         _cacheProvider?.InvalidateEntityList();
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
+
+        if (labelsRequested)
+        {
+            reporter?.ReportPhase("Confirming table labels", request.EntityLogicalName);
+            await ConfirmLabelsAsync("table", $"Table '{request.EntityLogicalName}' was updated.", request.Publish, lcid,
+                token => ReadTableForConfirmationAsync(request.EntityLogicalName, token), ct,
+                new LabelExpectation<EntityMetadata>("display name", request.DisplayName, t => t.DisplayName),
+                new LabelExpectation<EntityMetadata>("plural name", request.PluralDisplayName, t => t.DisplayCollectionName),
+                new LabelExpectation<EntityMetadata>("description", request.Description, t => t.Description)).ConfigureAwait(false);
+        }
 
         if (request.Publish)
             await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
@@ -362,7 +402,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             };
         }
 
-        var attribute = BuildAttributeMetadata(request, options);
+        var lcid = await BaseLanguageAsync(ct).ConfigureAwait(false);
+        var attribute = BuildAttributeMetadata(request, options, lcid);
 
         var sdkRequest = new CreateAttributeRequest
         {
@@ -385,6 +426,12 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         }
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
+
+        var createdColumn = request.SchemaName.ToLowerInvariant();
+        reporter?.ReportPhase("Confirming column labels", createdColumn);
+        await ConfirmLabelsAsync("column", $"Column '{createdColumn}' was created on '{request.EntityLogicalName}'.", request.Publish, lcid,
+            token => ReadColumnForConfirmationAsync(request.EntityLogicalName, createdColumn, token), ct,
+            CreatedColumnExpectations(attribute, request).ToArray()).ConfigureAwait(false);
 
         if (request.Publish)
             await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
@@ -418,6 +465,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _validator.ValidateRequiredString(request.ColumnLogicalName, "ColumnLogicalName");
         ct.ThrowIfCancellationRequested();
 
+        // A dry-run is input-only (MetadataDryRunScope.Inputs): it reads nothing and computes no notices.
+        var columnLabelsRequested = request.DisplayName != null || request.Description != null;
         if (request.DryRun)
         {
             _logger?.LogInformation("Dry-run: UpdateColumn {Column} on {Entity} validated",
@@ -437,12 +486,13 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         // Keep the existing typed and exact-base primary-ID contracts separate from
         // the finite, identity-checked State/Status/GUID label-only transition.
-        var notices = EnglishOnlyNotices(
+        var lcid = columnLabelsRequested ? await BaseLanguageAsync(ct).ConfigureAwait(false) : 0;
+        var notices = BaseLanguageNotices(lcid,
             ("DisplayName", "display name", request.DisplayName, existingAttr.DisplayName),
             ("Description", "description", request.Description, existingAttr.Description));
         if (IsFiniteLabelOnlyColumn(existingAttr))
         {
-            await UpdateFiniteColumnLabelsAsync(request, existingAttr, reporter, ct).ConfigureAwait(false);
+            await UpdateFiniteColumnLabelsAsync(request, existingAttr, lcid, reporter, ct).ConfigureAwait(false);
             return notices;
         }
 
@@ -462,9 +512,9 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         updateAttr.SchemaName = existingAttr.SchemaName;
 
         if (request.DisplayName != null)
-            updateAttr.DisplayName = new Label(request.DisplayName, 1033);
+            updateAttr.DisplayName = new Label(request.DisplayName, lcid);
         if (request.Description != null)
-            updateAttr.Description = new Label(request.Description, 1033);
+            updateAttr.Description = new Label(request.Description, lcid);
         if (request.RequiredLevel != null)
             updateAttr.RequiredLevel = new AttributeRequiredLevelManagedProperty(ParseRequiredLevel(request.RequiredLevel));
         if (request.IsAuditEnabled.HasValue)
@@ -480,7 +530,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         {
             EntityName = request.EntityLogicalName,
             Attribute = updateAttr,
-            MergeLabels = true, // The request carries only LCID 1033 labels. Preserve other translations.
+            MergeLabels = true, // The request carries only base-language labels. Preserve other translations.
             SolutionUniqueName = request.SolutionUniqueName
         };
 
@@ -490,6 +540,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         }
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
+        await ConfirmColumnLabelsAsync(request, lcid, ct).ConfigureAwait(false);
 
         if (request.Publish)
             await PublishEntityInternalAsync(request.EntityLogicalName, ct).ConfigureAwait(false);
@@ -585,10 +636,11 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         if (request.IsHierarchical.HasValue)
             relationship.IsHierarchical = request.IsHierarchical.Value;
 
+        var lcid = await BaseLanguageAsync(ct).ConfigureAwait(false);
         var lookup = new LookupAttributeMetadata
         {
             SchemaName = request.LookupSchemaName,
-            DisplayName = new Label(request.LookupDisplayName, 1033)
+            DisplayName = new Label(request.LookupDisplayName, lcid)
         };
 
         var sdkRequest = new SdkCreateOneToManyRequest
@@ -598,11 +650,19 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             SolutionUniqueName = request.SolutionUniqueName
         };
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-        var response = (CreateOneToManyResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        CreateOneToManyResponse response;
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        {
+            response = (CreateOneToManyResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
 
         _cacheProvider?.InvalidateEntity(request.ReferencedEntity);
         _cacheProvider?.InvalidateEntity(request.ReferencingEntity);
+
+        var lookupColumn = request.LookupSchemaName.ToLowerInvariant();
+        await ConfirmLabelsAsync("lookup column", $"1:N relationship '{request.SchemaName}' was created.", publishRequested: false, lcid,
+            token => ReadColumnForConfirmationAsync(request.ReferencingEntity, lookupColumn, token), ct,
+            new LabelExpectation<AttributeMetadata>("lookup display name", request.LookupDisplayName, a => a.DisplayName)).ConfigureAwait(false);
 
         reporter?.ReportInfo($"1:N relationship '{request.SchemaName}' created.");
         _logger?.LogInformation("Created 1:N relationship {SchemaName} with MetadataId {MetadataId}",
@@ -821,11 +881,12 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         reporter?.ReportPhase("Creating global choice", request.SchemaName);
 
+        var lcid = await BaseLanguageAsync(ct).ConfigureAwait(false);
         var optionSet = new OptionSetMetadata
         {
             Name = request.SchemaName,
-            DisplayName = new Label(request.DisplayName, 1033),
-            Description = string.IsNullOrEmpty(request.Description) ? null : new Label(request.Description, 1033),
+            DisplayName = new Label(request.DisplayName, lcid),
+            Description = string.IsNullOrEmpty(request.Description) ? null : new Label(request.Description, lcid),
             IsGlobal = true,
             OptionSetType = OptionSetType.Picklist // SDK uses Picklist for all choice types; multi-select is determined by the attribute type (MultiSelectPicklistAttributeMetadata), not the option set
         };
@@ -834,7 +895,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         {
             foreach (var opt in options)
             {
-                optionSet.Options.Add(new OptionMetadata(new Label(opt.Label, 1033), opt.Value));
+                optionSet.Options.Add(new OptionMetadata(new Label(opt.Label, lcid), opt.Value));
             }
         }
 
@@ -844,10 +905,32 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             SolutionUniqueName = request.SolutionUniqueName
         };
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-        var response = (CreateOptionSetResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        CreateOptionSetResponse response;
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        {
+            response = (CreateOptionSetResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
 
         _cacheProvider?.InvalidateGlobalOptionSets();
+
+        reporter?.ReportPhase("Confirming global choice labels", request.SchemaName);
+        var expectations = new List<LabelExpectation<OptionSetMetadataBase>>
+        {
+            new("display name", request.DisplayName, c => c.DisplayName),
+            new("description", string.IsNullOrEmpty(request.Description) ? null : request.Description, c => c.Description)
+        };
+        if (request.Options != null)
+            foreach (var option in options)
+                expectations.Add(new($"option {option.Value} label", option.Label,
+                    c => (c as OptionSetMetadata)?.Options.FirstOrDefault(o => o.Value == option.Value)?.Label));
+        // Read back by the id the create returned, not by the caller's spelling: the confirmation must not depend on how
+        // Dataverse stores the case of the name (a name lookup is case-sensitive, AC-133).
+        await ConfirmLabelsAsync("global choice", $"Global choice '{request.SchemaName}' was created.", publishRequested: false, lcid,
+            token => response.OptionSetId != Guid.Empty
+                ? ReadForConfirmationAsync(new RetrieveOptionSetRequest { MetadataId = response.OptionSetId, RetrieveAsIfPublished = true },
+                    r => (r as RetrieveOptionSetResponse)?.OptionSetMetadata, $"global choice '{request.SchemaName}' (id {response.OptionSetId})", token)
+                : ReadChoiceForConfirmationAsync(request.SchemaName, token),
+            ct, expectations.ToArray()).ConfigureAwait(false);
 
         reporter?.ReportInfo($"Global choice '{request.SchemaName}' created.");
         _logger?.LogInformation("Created global choice {SchemaName} with MetadataId {MetadataId}",
@@ -875,6 +958,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _validator.ValidateRequiredString(request.SolutionUniqueName, "SolutionUniqueName");
         _validator.ValidateRequiredString(request.Name, "Name");
 
+        // A dry-run is input-only (MetadataDryRunScope.Inputs, globalChoiceNameChecked=false, AC-143): it does not read
+        // the choice, so it neither resolves the name nor computes notices.
         if (request.DryRun)
         {
             _logger?.LogInformation("Dry-run: UpdateGlobalChoice {Name} validated", request.Name);
@@ -892,16 +977,19 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         reporter?.ReportPhase("Updating global choice", request.Name);
 
         var existingOs = retrieveResponse.OptionSetMetadata;
-        var notices = EnglishOnlyNotices(
+        // The base language is read only when a label is about to be written (the unrequested labels are re-sent
+        // exactly as read, in every language they have).
+        var lcid = request.DisplayName != null || request.Description != null ? await BaseLanguageAsync(ct).ConfigureAwait(false) : 0;
+        var notices = BaseLanguageNotices(lcid,
             ("DisplayName", "display name", request.DisplayName, existingOs.DisplayName),
             ("Description", "description", request.Description, existingOs.Description));
 
         if (request.DisplayName != null)
-            existingOs.DisplayName = new Label(request.DisplayName, 1033);
+            existingOs.DisplayName = new Label(request.DisplayName, lcid);
         if (request.Description != null)
-            existingOs.Description = new Label(request.Description, 1033);
+            existingOs.Description = new Label(request.Description, lcid);
 
-        // A requested label is written for LCID 1033 only; MergeLabels keeps the other languages' text.
+        // A requested label is written in the base language only; MergeLabels keeps the other languages' text.
         var sdkRequest = new UpdateOptionSetRequest
         {
             OptionSet = existingOs,
@@ -915,6 +1003,13 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         }
 
         _cacheProvider?.InvalidateGlobalOptionSets();
+
+        var storedName = existingOs.Name ?? request.Name;
+        reporter?.ReportPhase("Confirming global choice labels", storedName);
+        await ConfirmLabelsAsync("global choice", $"Global choice '{storedName}' was updated.", publishRequested: false, lcid,
+            token => ReadChoiceForConfirmationAsync(storedName, token), ct,
+            new LabelExpectation<OptionSetMetadataBase>("display name", request.DisplayName, c => c.DisplayName),
+            new LabelExpectation<OptionSetMetadataBase>("description", request.Description, c => c.Description)).ConfigureAwait(false);
 
         reporter?.ReportInfo($"Global choice '{request.Name}' updated. Changes must be published to take effect.");
         _logger?.LogInformation("Updated global choice {Name}", request.Name);
@@ -978,18 +1073,19 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             return request.Value ?? 0;
         }
 
+        var lcid = await BaseLanguageAsync(ct).ConfigureAwait(false);
         async Task<InsertOptionValueResponse> InsertAsync(string optionSetName)
         {
             var sdkRequest = new InsertOptionValueRequest
             {
                 OptionSetName = optionSetName,
-                Label = new Label(request.Label, 1033),
+                Label = new Label(request.Label, lcid),
                 Value = request.Value,
                 SolutionUniqueName = OptionSolution(request.SolutionUniqueName)
             };
 
             if (!string.IsNullOrEmpty(request.Description))
-                sdkRequest.Description = new Label(request.Description, 1033);
+                sdkRequest.Description = new Label(request.Description, lcid);
             if (!string.IsNullOrEmpty(request.EntityLogicalName))
                 sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
             if (!string.IsNullOrEmpty(request.AttributeLogicalName))
@@ -1009,11 +1105,11 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         else
             (optionSetName, response) = await WithGlobalChoiceNameAsync(optionSetName, "OptionSetName", InsertAsync, null, ct).ConfigureAwait(false);
 
-        // The insert is committed: invalidate first, then confirm the colour that rode on it.
+        // The insert is committed: invalidate first, then confirm the label, description and colour that rode on it.
         InvalidateOptionCache(request.EntityLogicalName, request.AttributeLogicalName);
-        if (!string.IsNullOrEmpty(request.Color))
-            await ConfirmColorAsync(optionSetName, request.EntityLogicalName, request.AttributeLogicalName, response.NewOptionValue, request.Color,
-                $"Option '{request.Label}' was added with value {response.NewOptionValue}.", publishRequested: false, ct).ConfigureAwait(false);
+        await ConfirmOptionWriteAsync(optionSetName, request.EntityLogicalName, request.AttributeLogicalName, response.NewOptionValue, lcid,
+            request.Label, string.IsNullOrEmpty(request.Description) ? null : request.Description, request.Color,
+            $"Option '{request.Label}' was added with value {response.NewOptionValue}.", publishRequested: false, ct).ConfigureAwait(false);
 
         _logger?.LogInformation("Added option value {Value} to {OptionSet}", response.NewOptionValue, request.OptionSetName);
 
@@ -1041,7 +1137,10 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         // #1170: resolve the target by value or label; the current label is preserved when
         // NewLabel is omitted (e.g. color-only updates), mirroring the local column-option variant.
         var target = await ResolveGlobalOptionAsync(request.OptionSetName, request.Value, request.Label, ct).ConfigureAwait(false);
-        var notices = EnglishOnlyNotices(("NewLabel", "label", request.NewLabel, target.Labels));
+        var lcid = request.NewLabel != null || request.Description != null ? await BaseLanguageAsync(ct).ConfigureAwait(false) : 0;
+        var notices = BaseLanguageNotices(lcid,
+            ("NewLabel", "label", request.NewLabel, target.Labels),
+            ("Description", "description", request.Description, target.Descriptions));
 
         if (request.DryRun)
         {
@@ -1056,12 +1155,12 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             MergeLabels = true,
             SolutionUniqueName = OptionSolution(request.SolutionUniqueName)
         };
-        if (OptionLabelForUpdate(request.NewLabel) is { } globalLabel)
+        if (BaseLanguageLabel(request.NewLabel, lcid) is { } globalLabel)
             sdkRequest.Label = globalLabel;
 
-        // An empty description is sent as an empty English description (clears it, as optionset update does).
-        if (request.Description != null)
-            sdkRequest.Description = new Label(request.Description, 1033);
+        // An empty description is sent as an empty base-language description (clears it, as optionset update does).
+        if (BaseLanguageLabel(request.Description, lcid) is { } globalDescription)
+            sdkRequest.Description = globalDescription;
         if (!string.IsNullOrEmpty(request.EntityLogicalName))
             sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
         if (!string.IsNullOrEmpty(request.AttributeLogicalName))
@@ -1073,11 +1172,11 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
         }
 
-        // The update is committed: invalidate first, then confirm the colour that rode on it.
+        // The update is committed: invalidate first, then confirm the label, description and colour that rode on it.
         InvalidateOptionCache(request.EntityLogicalName, request.AttributeLogicalName);
-        if (!string.IsNullOrEmpty(request.Color))
-            await ConfirmColorAsync(target.OptionSetName, request.EntityLogicalName, request.AttributeLogicalName, target.Value, request.Color,
-                $"Option {target.Value} was updated ({Sent(request.NewLabel, request.Description, request.Color)}).", publishRequested: false, ct).ConfigureAwait(false);
+        await ConfirmOptionWriteAsync(target.OptionSetName, request.EntityLogicalName, request.AttributeLogicalName, target.Value, lcid,
+            request.NewLabel, request.Description, request.Color,
+            $"Option {target.Value} was updated ({Sent(request.NewLabel, request.Description, request.Color)}).", publishRequested: false, ct).ConfigureAwait(false);
 
         _logger?.LogInformation("Updated option value {Value} in {OptionSet}", target.Value, request.OptionSetName);
         return notices;
@@ -1131,7 +1230,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     /// Retrieves a global option set (as-if-published, so unpublished edits are visible) and
     /// resolves the target option by value or label (#1169). Mirrors <see cref="ResolveColumnOption"/>.
     /// </summary>
-    private async Task<(int Value, string Label, string OptionSetName, Label? Labels)> ResolveGlobalOptionAsync(
+    private async Task<(int Value, string Label, string OptionSetName, Label? Labels, Label? Descriptions)> ResolveGlobalOptionAsync(
         string optionSetName, int? value, string? label, CancellationToken ct)
     {
         RetrieveOptionSetResponse retrieveResponse;
@@ -1168,7 +1267,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                     var matchedLabel = option.Label?.UserLocalizedLabel?.Label
                         ?? option.Label?.LocalizedLabels?.FirstOrDefault()?.Label
                         ?? "";
-                    return (value.Value, matchedLabel, optionSetName, option.Label);
+                    return (value.Value, matchedLabel, optionSetName, option.Label, option.Description);
                 }
             }
 
@@ -1179,7 +1278,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         // Label targeting: duplicate labels are legal in Dataverse. Collect every match and refuse to act when
         // more than one matches (#1235) — silently picking the first could mutate or delete the wrong option.
-        var labelMatches = new List<(int Value, string Label, Label? Labels)>();
+        var labelMatches = new List<(int Value, string Label, Label? Labels, Label? Descriptions)>();
         foreach (var option in optionSet.Options)
         {
             // An option without a concrete value can't be a selectable --value target; skip it so a null
@@ -1190,7 +1289,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 ?? option.Label?.LocalizedLabels?.FirstOrDefault()?.Label
                 ?? "";
             if (string.Equals(optionLabel, label, StringComparison.OrdinalIgnoreCase))
-                labelMatches.Add((optionValue, optionLabel, option.Label));
+                labelMatches.Add((optionValue, optionLabel, option.Label, option.Description));
         }
 
         // #1531 follow-up: 'optionset <name>' lists published labels, so a draft-resolved label must not act on
@@ -1210,7 +1309,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 $"(values: {string.Join(", ", labelMatches.Select(m => m.Value))}). " +
                 "Select the target option with --value instead.");
 
-        return (labelMatches[0].Value, labelMatches[0].Label, optionSetName, labelMatches[0].Labels);
+        return (labelMatches[0].Value, labelMatches[0].Label, optionSetName, labelMatches[0].Labels, labelMatches[0].Descriptions);
     }
 
     /// <inheritdoc />
@@ -1260,17 +1359,25 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _validator.ValidateRequiredString(request.AttributeLogicalName, "AttributeLogicalName");
         _validator.ValidateRequiredString(request.Label, "Label");
 
+        var lcid = await BaseLanguageAsync(ct).ConfigureAwait(false);
         var sdkRequest = new SdkUpdateStateValueRequest
         {
             EntityLogicalName = request.EntityLogicalName,
             AttributeLogicalName = request.AttributeLogicalName,
             Value = request.Value,
-            Label = new Label(request.Label, 1033),
-            MergeLabels = true // The request carries only LCID 1033. Preserve other translations.
+            Label = new Label(request.Label, lcid),
+            MergeLabels = true // The request carries only the base-language label. Preserve other translations.
         };
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-        await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        {
+            await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
+
+        _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
+        await ConfirmOptionWriteAsync(null, request.EntityLogicalName, request.AttributeLogicalName, request.Value, lcid,
+            request.Label, description: null, color: null,
+            $"State value {request.Value} on '{request.EntityLogicalName}.{request.AttributeLogicalName}' was updated (label).", publishRequested: false, ct).ConfigureAwait(false);
 
         _logger?.LogInformation("Updated state value {Value} label to '{Label}' on {Entity}.{Attribute}",
             request.Value, request.Label, request.EntityLogicalName, request.AttributeLogicalName);
@@ -1309,10 +1416,11 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         reporter?.ReportPhase("Creating alternate key", request.SchemaName);
 
+        var lcid = await BaseLanguageAsync(ct).ConfigureAwait(false);
         var entityKey = new EntityKeyMetadata
         {
             SchemaName = request.SchemaName,
-            DisplayName = new Label(request.DisplayName, 1033),
+            DisplayName = new Label(request.DisplayName, lcid),
             KeyAttributes = request.KeyAttributes
         };
 
@@ -1323,10 +1431,18 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             SolutionUniqueName = request.SolutionUniqueName
         };
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-        var response = (CreateEntityKeyResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        CreateEntityKeyResponse response;
+        await using (var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false))
+        {
+            response = (CreateEntityKeyResponse)await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
+        var keyName = request.SchemaName.ToLowerInvariant();
+        await ConfirmLabelsAsync("alternate key", $"Alternate key '{request.SchemaName}' was created on '{request.EntityLogicalName}'.", publishRequested: false, lcid,
+            token => ReadForConfirmationAsync(new RetrieveEntityKeyRequest { EntityLogicalName = request.EntityLogicalName, LogicalName = keyName, RetrieveAsIfPublished = true },
+                r => (r as RetrieveEntityKeyResponse)?.EntityKeyMetadata, $"alternate key '{keyName}'", token), ct,
+            new LabelExpectation<EntityKeyMetadata>("display name", request.DisplayName, k => k.DisplayName)).ConfigureAwait(false);
 
         reporter?.ReportInfo($"Alternate key '{request.SchemaName}' created on '{request.EntityLogicalName}'.");
         _logger?.LogInformation("Created alternate key {SchemaName} on {Entity} with MetadataId {MetadataId}",
@@ -1439,13 +1555,14 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             return value;
         }
 
+        var lcid = await BaseLanguageAsync(ct).ConfigureAwait(false);
         var sdkRequest = new InsertStatusValueRequest
         {
             EntityLogicalName = request.EntityLogicalName,
             AttributeLogicalName = "statuscode",
             StateCode = request.StateCode,
             Value = value,
-            Label = new Label(request.Label, 1033),
+            Label = new Label(request.Label, lcid),
             SolutionUniqueName = OptionSolution(request.SolutionUniqueName)
         };
         WithColor(sdkRequest, request.Color);
@@ -1469,9 +1586,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         }
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
-        if (!string.IsNullOrEmpty(request.Color))
-            await ConfirmColorAsync(null, request.EntityLogicalName, "statuscode", response.NewOptionValue, request.Color,
-                $"Status reason '{request.Label}' was added with value {response.NewOptionValue}.", request.Publish, ct).ConfigureAwait(false);
+        await ConfirmOptionWriteAsync(null, request.EntityLogicalName, "statuscode", response.NewOptionValue, lcid, request.Label, description: null, request.Color,
+            $"Status reason '{request.Label}' was added with value {response.NewOptionValue}.", request.Publish, ct).ConfigureAwait(false);
 
         _logger?.LogInformation("Added status reason '{Label}' with value {Value} to '{Entity}'", request.Label, response.NewOptionValue, request.EntityLogicalName);
 
@@ -1491,7 +1607,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         => (await ReadStatusReasonEntriesAsync(entityLogicalName, retrieveAsIfPublished, ct).ConfigureAwait(false))
             .Select(entry => entry.Info).ToList();
 
-    // Each reason with its full label, for target resolution and the English-only label notice.
+    // Each reason with its full label, for target resolution and the base-language label notice.
     private async Task<IReadOnlyList<(StatusReasonInfo Info, Label? Labels)>> ReadStatusReasonEntriesAsync(
         string entityLogicalName, bool retrieveAsIfPublished, CancellationToken ct)
     {
@@ -1567,7 +1683,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         int targetValue;
         Label? currentLabels;
 
-        // Read the reasons to resolve the target and the label shown to the caller (for the English-only notice).
+        // Read the reasons to resolve the target and the label shown to the caller (for the base-language label notice).
         // #1531: resolve the target from draft (as-if-published) metadata so a reason added moments earlier,
         // and its unpublished label, are visible. The public list stays published.
         var statusEntries = await ReadStatusReasonEntriesAsync(request.EntityLogicalName, retrieveAsIfPublished: true, ct).ConfigureAwait(false);
@@ -1613,14 +1729,15 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             currentLabels = statusEntries.First(entry => ReferenceEquals(entry.Info, labelMatches[0])).Labels;
         }
 
-        var notices = EnglishOnlyNotices(("NewLabel", "label", request.NewLabel, currentLabels));
+        var lcid = request.NewLabel != null ? await BaseLanguageAsync(ct).ConfigureAwait(false) : 0;
+        var notices = BaseLanguageNotices(lcid, ("NewLabel", "label", request.NewLabel, currentLabels));
         var sdkRequest = new SdkUpdateOptionValueRequest
         {
             Value = targetValue,
             MergeLabels = true,
             SolutionUniqueName = OptionSolution(request.SolutionUniqueName)
         };
-        if (OptionLabelForUpdate(request.NewLabel) is { } statusLabel)
+        if (BaseLanguageLabel(request.NewLabel, lcid) is { } statusLabel)
             sdkRequest.Label = statusLabel;
 
         sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
@@ -1643,9 +1760,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         }
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
-        if (!string.IsNullOrEmpty(request.Color))
-            await ConfirmColorAsync(null, request.EntityLogicalName, "statuscode", targetValue, request.Color,
-                $"Status reason {targetValue} was updated ({Sent(request.NewLabel, null, request.Color)}).", request.Publish, ct).ConfigureAwait(false);
+        await ConfirmOptionWriteAsync(null, request.EntityLogicalName, "statuscode", targetValue, lcid, request.NewLabel, description: null, request.Color,
+            $"Status reason {targetValue} was updated ({Sent(request.NewLabel, null, request.Color)}).", request.Publish, ct).ConfigureAwait(false);
 
         _logger?.LogInformation("Updated status reason (value {Value}) on '{Entity}'", targetValue, request.EntityLogicalName);
 
@@ -1755,7 +1871,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         => (await ReadColumnOptionEntriesAsync(entityLogicalName, columnLogicalName, retrieveAsIfPublished, ct).ConfigureAwait(false))
             .Select(entry => entry.Info).ToList();
 
-    // Each option with its full label, for target resolution and the English-only label notice.
+    // Each option with its full label, for target resolution and the base-language label notice.
     private async Task<IReadOnlyList<(ColumnOptionInfo Info, Label? Labels)>> ReadColumnOptionEntriesAsync(
         string entityLogicalName, string columnLogicalName, bool retrieveAsIfPublished, CancellationToken ct)
     {
@@ -1842,9 +1958,10 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             return value;
         }
 
+        var lcid = await BaseLanguageAsync(ct).ConfigureAwait(false);
         var sdkRequest = new InsertOptionValueRequest
         {
-            Label = new Label(request.Label, 1033),
+            Label = new Label(request.Label, lcid),
             Value = value,
             SolutionUniqueName = OptionSolution(request.SolutionUniqueName)
         };
@@ -1869,9 +1986,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         }
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
-        if (!string.IsNullOrEmpty(request.Color))
-            await ConfirmColorAsync(null, request.EntityLogicalName, request.ColumnLogicalName, response.NewOptionValue, request.Color,
-                $"Option '{request.Label}' was added with value {response.NewOptionValue} to '{request.EntityLogicalName}.{request.ColumnLogicalName}'.", request.Publish, ct).ConfigureAwait(false);
+        await ConfirmOptionWriteAsync(null, request.EntityLogicalName, request.ColumnLogicalName, response.NewOptionValue, lcid, request.Label, description: null, request.Color,
+            $"Option '{request.Label}' was added with value {response.NewOptionValue} to '{request.EntityLogicalName}.{request.ColumnLogicalName}'.", request.Publish, ct).ConfigureAwait(false);
         if (request.Publish)
             await PublishAfterWriteAsync(request.EntityLogicalName,
                 $"Option '{request.Label}' was added with value {response.NewOptionValue} to '{request.EntityLogicalName}.{request.ColumnLogicalName}'.", ct).ConfigureAwait(false);
@@ -1897,7 +2013,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         // #1531: resolve the target (and its current label) from draft metadata so an unpublished option is visible.
         var (target, targetLabels) = await ResolveDraftColumnOptionAsync(request.EntityLogicalName, request.ColumnLogicalName, request.Value, request.Label, ct).ConfigureAwait(false);
 
-        var notices = EnglishOnlyNotices(("NewLabel", "label", request.NewLabel, targetLabels));
+        var lcid = request.NewLabel != null ? await BaseLanguageAsync(ct).ConfigureAwait(false) : 0;
+        var notices = BaseLanguageNotices(lcid, ("NewLabel", "label", request.NewLabel, targetLabels));
         if (request.DryRun)
         {
             _logger?.LogInformation("Dry-run: UpdateColumnOption (value {Value}) on '{Entity}.{Column}' validated", target.Value, request.EntityLogicalName, request.ColumnLogicalName);
@@ -1910,7 +2027,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             MergeLabels = true,
             SolutionUniqueName = OptionSolution(request.SolutionUniqueName)
         };
-        if (OptionLabelForUpdate(request.NewLabel) is { } columnLabel)
+        if (BaseLanguageLabel(request.NewLabel, lcid) is { } columnLabel)
             sdkRequest.Label = columnLabel;
         sdkRequest["EntityLogicalName"] = request.EntityLogicalName;
         sdkRequest["AttributeLogicalName"] = request.ColumnLogicalName;
@@ -1928,9 +2045,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         }
 
         _cacheProvider?.InvalidateEntity(request.EntityLogicalName);
-        if (!string.IsNullOrEmpty(request.Color))
-            await ConfirmColorAsync(null, request.EntityLogicalName, request.ColumnLogicalName, target.Value, request.Color,
-                $"Option {target.Value} on '{request.EntityLogicalName}.{request.ColumnLogicalName}' was updated ({Sent(request.NewLabel, null, request.Color)}).", request.Publish, ct).ConfigureAwait(false);
+        await ConfirmOptionWriteAsync(null, request.EntityLogicalName, request.ColumnLogicalName, target.Value, lcid, request.NewLabel, description: null, request.Color,
+            $"Option {target.Value} on '{request.EntityLogicalName}.{request.ColumnLogicalName}' was updated ({Sent(request.NewLabel, null, request.Color)}).", request.Publish, ct).ConfigureAwait(false);
         if (request.Publish)
             await PublishAfterWriteAsync(request.EntityLogicalName,
                 $"Option {target.Value} on '{request.EntityLogicalName}.{request.ColumnLogicalName}' was updated ({Sent(request.NewLabel, null, request.Color)}).", ct).ConfigureAwait(false);
@@ -2118,7 +2234,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         return prefix;
     }
 
-    private static AttributeMetadata BuildAttributeMetadata(CreateColumnRequest request, OptionDefinition[]? options)
+    private static AttributeMetadata BuildAttributeMetadata(CreateColumnRequest request, OptionDefinition[]? options, int lcid)
     {
         var requiredLevel = ParseRequiredLevel(request.RequiredLevel);
 
@@ -2160,10 +2276,10 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 Precision = request.Precision,
                 ImeMode = ParseImeMode(request.ImeMode)
             },
-            SchemaColumnType.Boolean => BuildBooleanAttribute(request),
+            SchemaColumnType.Boolean => BuildBooleanAttribute(request, lcid),
             SchemaColumnType.DateTime => BuildDateTimeAttribute(request),
-            SchemaColumnType.Choice => BuildChoiceAttribute(request, options),
-            SchemaColumnType.Choices => BuildMultiSelectChoiceAttribute(request, options),
+            SchemaColumnType.Choice => BuildChoiceAttribute(request, options, lcid),
+            SchemaColumnType.Choices => BuildMultiSelectChoiceAttribute(request, options, lcid),
             SchemaColumnType.Image => new ImageAttributeMetadata
             {
                 MaxSizeInKB = request.MaxSizeInKB,
@@ -2180,11 +2296,11 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         };
 
         attr.SchemaName = request.SchemaName;
-        attr.DisplayName = new Label(request.DisplayName, 1033);
+        attr.DisplayName = new Label(request.DisplayName, lcid);
         attr.RequiredLevel = new AttributeRequiredLevelManagedProperty(requiredLevel);
 
         if (!string.IsNullOrEmpty(request.Description))
-            attr.Description = new Label(request.Description, 1033);
+            attr.Description = new Label(request.Description, lcid);
         if (request.IsAuditEnabled.HasValue)
             attr.IsAuditEnabled = new BooleanManagedProperty(request.IsAuditEnabled.Value);
         if (request.IsSecured.HasValue)
@@ -2195,7 +2311,33 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         return attr;
     }
 
-    private static BooleanAttributeMetadata BuildBooleanAttribute(CreateColumnRequest request)
+    /// <summary>
+    /// Every label a column create sent, for the one read-back: the display name, the description when sent, each local
+    /// option's label (Choice/Choices with inline options) and a Boolean column's true and false labels. A column that
+    /// uses a global choice sends no option labels (the choice's own labels are not written by this command).
+    /// </summary>
+    private static IEnumerable<LabelExpectation<AttributeMetadata>> CreatedColumnExpectations(AttributeMetadata sent, CreateColumnRequest request)
+    {
+        yield return new("display name", request.DisplayName, a => a.DisplayName);
+        yield return new("description", string.IsNullOrEmpty(request.Description) ? null : request.Description, a => a.Description);
+        if (sent is EnumAttributeMetadata { OptionSet: { IsGlobal: false } local })
+            foreach (var option in local.Options.Where(o => o.Value.HasValue))
+            {
+                var value = option.Value!.Value;
+                yield return new($"option {value} label", BaseLabelText(option.Label),
+                    a => (a as EnumAttributeMetadata)?.OptionSet?.Options?.FirstOrDefault(o => o.Value == value)?.Label);
+            }
+        if (sent is BooleanAttributeMetadata { OptionSet: { } flags })
+        {
+            yield return new("true label", BaseLabelText(flags.TrueOption?.Label), a => (a as BooleanAttributeMetadata)?.OptionSet?.TrueOption?.Label);
+            yield return new("false label", BaseLabelText(flags.FalseOption?.Label), a => (a as BooleanAttributeMetadata)?.OptionSet?.FalseOption?.Label);
+        }
+    }
+
+    /// <summary>The single text of a label this service built (one base-language entry), or null when there is none.</summary>
+    private static string? BaseLabelText(Label? label) => label?.LocalizedLabels?.FirstOrDefault()?.Label;
+
+    private static BooleanAttributeMetadata BuildBooleanAttribute(CreateColumnRequest request, int lcid)
     {
         var trueLabel = request.TrueLabel ?? "Yes";
         var falseLabel = request.FalseLabel ?? "No";
@@ -2203,8 +2345,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         var attr = new BooleanAttributeMetadata
         {
             OptionSet = new BooleanOptionSetMetadata(
-                new OptionMetadata(new Label(trueLabel, 1033), 1),
-                new OptionMetadata(new Label(falseLabel, 1033), 0))
+                new OptionMetadata(new Label(trueLabel, lcid), 1),
+                new OptionMetadata(new Label(falseLabel, lcid), 0))
         };
 
         if (request.DefaultValue.HasValue)
@@ -2213,7 +2355,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         return attr;
     }
 
-    private static PicklistAttributeMetadata BuildChoiceAttribute(CreateColumnRequest request, OptionDefinition[]? options)
+    private static PicklistAttributeMetadata BuildChoiceAttribute(CreateColumnRequest request, OptionDefinition[]? options, int lcid)
     {
         var attr = new PicklistAttributeMetadata();
 
@@ -2224,7 +2366,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         }
         else if (options != null && options.Length > 0)
         {
-            attr.OptionSet = BuildLocalOptionSet(options);
+            attr.OptionSet = BuildLocalOptionSet(options, lcid);
         }
 
         if (request.DefaultValue.HasValue)
@@ -2265,53 +2407,6 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         }
         foreach (var warning in warnings) reporter?.ReportInfo("Warning: " + warning.Message);
         return (normalized, warnings.ToArray());
-    }
-
-    /// <summary>
-    /// Confirms, after a committed insert/update, that the <paramref name="color"/> it carried was stored. The option
-    /// is read back from draft metadata on its own lease. Every failure from here on is reported as
-    /// <c>WRITE_NOT_CONFIRMED</c> with <paramref name="written"/> (what was committed) and, when publication was
-    /// requested, that it was not attempted; the original failure is the inner exception. A colour Dataverse accepted
-    /// but did not store therefore can never be reported as applied (#1234), and a caller can tell "written but not
-    /// confirmed" (the write request returned success) from <c>SDK_OPERATION_FAILED</c> (the request itself failed; its
-    /// message says whether the outcome is known) and must not blindly retry an insert. When the read-back failed
-    /// because the sign-in expired, <c>Context["requiresReauthentication"]</c> is true and the inner exception chain
-    /// keeps the authentication failure.
-    /// </summary>
-    /// <remarks>
-    /// The colour itself rides on the write request as the message's <c>Color</c> parameter (see <see cref="WithColor"/>);
-    /// specs/metadata-authoring.md "Option colours" lists what the live tests assert about that parameter and about the
-    /// ignored <see cref="OptionMetadata.Color"/> routes.
-    /// </remarks>
-    private async Task ConfirmColorAsync(
-        string? optionSetName, string? entityLogicalName, string? attributeLogicalName, int value, string color,
-        string written, bool publishRequested, CancellationToken ct)
-    {
-        var notPublished = publishRequested ? " Publication (--publish) was not attempted." : "";
-        string? stored;
-        try
-        {
-            stored = await ReadStoredOptionColorAsync(optionSetName, entityLogicalName, attributeLogicalName, value, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            // Only fixed, service-authored text is quoted: PPDS errors carry no provider diagnostics in their message.
-            var reason = ex switch
-            {
-                TaskCanceledException => "the read timed out or was cancelled",
-                OperationCanceledException => "the read was cancelled",
-                PpdsException or MetadataValidationException => ex.Message.TrimEnd('.'),
-                _ => "the read failed"
-            };
-            throw new PpdsException(MetadataErrorCodes.WriteNotConfirmed,
-                $"{written} Its color '{color}' could not be confirmed: {reason}.{notPublished} Check the option before re-running the command.",
-                ReauthenticationContext(ex), ex);
-        }
-
-        if (!ColorsMatch(stored, color))
-            throw new PpdsException(MetadataErrorCodes.WriteNotConfirmed,
-                $"{written} Dataverse did not store its color: requested '{color}', stored '{stored ?? "none"}'.{notPublished} Check the option before re-running the command.");
-        _logger?.LogInformation("Confirmed color {Color} on option {Value}", color, value);
     }
 
     /// <summary>
@@ -2394,8 +2489,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 $"Nothing to update: provide {what}.", "NewLabel");
     }
 
-    /// <summary>Reads the stored colour of one option from draft metadata (global choice or entity + attribute).</summary>
-    private Task<string?> ReadStoredOptionColorAsync(
+    /// <summary>Reads one option from draft metadata (global choice or entity + attribute), to confirm a write.</summary>
+    private Task<OptionMetadata> ReadStoredOptionAsync(
         string? optionSetName,
         string? entityLogicalName,
         string? attributeLogicalName,
@@ -2405,48 +2500,51 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         // Local (column option or status reason) takes precedence: the entity + attribute pair fully
         // identifies a column-scoped option set, even when an OptionSetName is also present.
         if (!string.IsNullOrEmpty(entityLogicalName) && !string.IsNullOrEmpty(attributeLogicalName))
-            return ReadLocalOptionColorAsync(entityLogicalName, attributeLogicalName, value, ct);
+            return ReadLocalOptionAsync(entityLogicalName, attributeLogicalName, value, ct);
 
         if (!string.IsNullOrEmpty(optionSetName))
-            return ReadGlobalOptionColorAsync(optionSetName, value, ct);
+            return ReadGlobalOptionAsync(optionSetName, value, ct);
 
         throw new MetadataValidationException(
             MetadataErrorCodes.MissingRequiredField,
-            "Confirming an option color requires either a global choice name or an entity + attribute.",
-            "Color");
+            "Confirming an option write requires either a global choice name or an entity + attribute.",
+            "OptionSetName");
     }
 
-    private async Task<string?> ReadGlobalOptionColorAsync(string optionSetName, int value, CancellationToken ct)
+    private async Task<OptionMetadata> ReadGlobalOptionAsync(string optionSetName, int value, CancellationToken ct)
     {
         OptionSetMetadata? optionSet;
         try
         {
             // #1531: read as-if-published so an option inserted moments earlier (add-option --color) is found.
             // #1535: the exact spelling is retrieved first; a case variant resolves to the stored name.
-            RetrieveOptionSetResponse retrieveResponse;
-            (optionSetName, retrieveResponse) = await WithGlobalChoiceNameAsync(optionSetName, "OptionSetName", async name =>
+            OptionSetMetadataBase? read;
+            (optionSetName, read) = await WithGlobalChoiceNameAsync(optionSetName, "OptionSetName", async name =>
             {
                 await using var client = await GetMetadataClientAsync(ct).ConfigureAwait(false);
-                return (RetrieveOptionSetResponse)await client
+                var response = await client
                     .ExecuteAsync(new RetrieveOptionSetRequest { Name = name, RetrieveAsIfPublished = true }, ct).ConfigureAwait(false);
-            }, response => response?.OptionSetMetadata?.Name, ct).ConfigureAwait(false);
+                return (response as RetrieveOptionSetResponse)?.Results.TryGetValue("OptionSetMetadata", out var metadata) == true
+                    ? metadata as OptionSetMetadataBase : null;
+            }, metadata => metadata?.Name, ct).ConfigureAwait(false);
+            if (read is null)
+                throw new PpdsException(MetadataErrorCodes.SdkOperationFailed, $"Dataverse returned no metadata for global choice '{optionSetName}'.");
             // RetrieveOptionSetResponse.OptionSetMetadata is typed as the base; the Options collection lives on
             // the picklist-typed OptionSetMetadata. A boolean choice (no Options) falls through to OptionNotFound.
-            optionSet = retrieveResponse.OptionSetMetadata as OptionSetMetadata;
+            optionSet = read as OptionSetMetadata;
         }
         catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException and not OperationCanceledException)
         {
             throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                $"Failed to read global choice '{optionSetName}' to confirm the color.", ex);
+                $"Failed to read global choice '{optionSetName}' to confirm the write.", ex);
         }
 
-        var target = optionSet?.Options?.FirstOrDefault(o => o.Value == value)
+        return optionSet?.Options?.FirstOrDefault(o => o.Value == value)
             ?? throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
                 $"Option {value} not found in global choice '{optionSetName}'.", "Value");
-        return target.Color;
     }
 
-    private async Task<string?> ReadLocalOptionColorAsync(
+    private async Task<OptionMetadata> ReadLocalOptionAsync(
         string entityLogicalName, string attributeLogicalName, int value, CancellationToken ct)
     {
         AttributeMetadata? attribute;
@@ -2454,7 +2552,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         {
             try
             {
-                var retrieveResponse = (RetrieveAttributeResponse)await client.ExecuteAsync(
+                var retrieveResponse = await client.ExecuteAsync(
                     new RetrieveAttributeRequest
                     {
                         EntityLogicalName = entityLogicalName,
@@ -2463,7 +2561,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                         RetrieveAsIfPublished = true
                     },
                     ct).ConfigureAwait(false);
-                attribute = retrieveResponse.AttributeMetadata;
+                attribute = (retrieveResponse as RetrieveAttributeResponse)?.Results.TryGetValue("AttributeMetadata", out var metadata) == true
+                    ? metadata as AttributeMetadata : null;
             }
             catch (OperationCanceledException)
             {
@@ -2472,19 +2571,22 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
             {
                 throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                    $"Failed to read attribute '{attributeLogicalName}' on '{entityLogicalName}' to confirm the color.", ex);
+                    $"Failed to read attribute '{attributeLogicalName}' on '{entityLogicalName}' to confirm the write.", ex);
             }
         }
+
+        if (attribute is null)
+            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                $"Dataverse returned no metadata for attribute '{attributeLogicalName}' on '{entityLogicalName}'.");
 
         // EnumAttributeMetadata is the base for Picklist / MultiSelectPicklist / State / Status — all expose OptionSet.
         var enumAttribute = attribute as EnumAttributeMetadata
             ?? throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
                 $"Attribute '{attributeLogicalName}' on '{entityLogicalName}' is not a choice or status column.", "ColumnLogicalName");
 
-        var target = enumAttribute.OptionSet?.Options?.FirstOrDefault(o => o.Value == value)
+        return enumAttribute.OptionSet?.Options?.FirstOrDefault(o => o.Value == value)
             ?? throw new MetadataValidationException(MetadataErrorCodes.OptionNotFound,
                 $"Option {value} not found on '{entityLogicalName}.{attributeLogicalName}'.", "Value");
-        return target.Color;
     }
 
     /// <summary>Adds the option-value messages' <c>Color</c> parameter to <paramref name="request"/> when a colour is requested.</summary>
@@ -2509,7 +2611,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     /// Builds an inline (column-scoped) option set. IsGlobal MUST be explicitly false and
     /// OptionSetType set, or Dataverse rejects column creation with "IsGlobal is not specified" (#1161).
     /// </summary>
-    private static OptionSetMetadata BuildLocalOptionSet(OptionDefinition[] options)
+    private static OptionSetMetadata BuildLocalOptionSet(OptionDefinition[] options, int lcid)
     {
         var optionSet = new OptionSetMetadata
         {
@@ -2518,7 +2620,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         };
         foreach (var opt in options)
         {
-            var om = new OptionMetadata(new Label(opt.Label, 1033), opt.Value);
+            var om = new OptionMetadata(new Label(opt.Label, lcid), opt.Value);
             if (!string.IsNullOrEmpty(opt.Color))
                 om.Color = opt.Color;
             optionSet.Options.Add(om);
@@ -2526,7 +2628,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         return optionSet;
     }
 
-    private static MultiSelectPicklistAttributeMetadata BuildMultiSelectChoiceAttribute(CreateColumnRequest request, OptionDefinition[]? options)
+    private static MultiSelectPicklistAttributeMetadata BuildMultiSelectChoiceAttribute(CreateColumnRequest request, OptionDefinition[]? options, int lcid)
     {
         var attr = new MultiSelectPicklistAttributeMetadata();
 
@@ -2536,7 +2638,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         }
         else if (options != null && options.Length > 0)
         {
-            attr.OptionSet = BuildLocalOptionSet(options);
+            attr.OptionSet = BuildLocalOptionSet(options, lcid);
         }
 
         if (request.DefaultValue.HasValue)

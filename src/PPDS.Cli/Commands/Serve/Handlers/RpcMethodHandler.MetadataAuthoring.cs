@@ -163,7 +163,7 @@ public partial class RpcMethodHandler
                     Success = true,
                     LogicalName = entityLogicalName,
                     WasDryRun = dryRun,
-                    // English-only label notices; omitted when there are none.
+                    // Base-language-only label notices; omitted when there are none.
                     ValidationMessages = MapLabelNotices(labelResult),
                     RequiresPublish = !dryRun,
                     PublishHint = dryRun ? null : $"ppds metadata publish {entityLogicalName}",
@@ -349,7 +349,7 @@ public partial class RpcMethodHandler
                     Success = true,
                     LogicalName = columnLogicalName,
                     WasDryRun = dryRun,
-                    // English-only label notices; omitted when there are none.
+                    // Base-language-only label notices; omitted when there are none.
                     ValidationMessages = MapLabelNotices(labelResult),
                     RequiresPublish = !dryRun,
                     PublishHint = dryRun ? null : $"ppds metadata publish {entityLogicalName}",
@@ -783,7 +783,7 @@ public partial class RpcMethodHandler
         new() { Field = vm.Field, Rule = vm.Rule, Message = vm.Message };
 
     /// <summary>
-    /// English-only label notices of a table or column update for <c>validationMessages</c>; null (omitted from the
+    /// Base-language-only label notices of a table or column update for <c>validationMessages</c>; null (omitted from the
     /// response) when there are none or no result.
     /// </summary>
     internal static List<ValidationMessageDto>? MapLabelNotices(PPDS.Cli.Services.Metadata.Authoring.MetadataLabelWriteResult? result) =>

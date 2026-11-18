@@ -37,8 +37,8 @@ public sealed class MetadataUpdateChoiceTool : McpToolBase
     public async Task<MetadataUpdateChoiceResult> ExecuteAsync(
         [Description("Unique name of the solution containing the global choice.")] string solution,
         [Description("Name of the global choice to update.")] string name,
-        [Description("Updated display name (optional; English, LCID 1033).")] string? displayName = null,
-        [Description("Updated description (optional; English, LCID 1033).")] string? description = null,
+        [Description("Updated display name (optional; in the organization's base language).")] string? displayName = null,
+        [Description("Updated description (optional; in the organization's base language).")] string? description = null,
         [Description("If true, validates without persisting changes.")] bool dryRun = false,
         CancellationToken cancellationToken = default)
     {
@@ -106,7 +106,7 @@ public sealed class MetadataUpdateChoiceResult
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? GlobalChoiceNameChecked { get; set; }
 
-    /// <summary>Notices such as only the English (LCID 1033) label being written; empty when there are none.</summary>
+    /// <summary>Notices such as only the base-language label being written while a stored translation is shown; empty when there are none.</summary>
     [JsonPropertyName("validationMessages")]
     public List<ValidationMessageDto> ValidationMessages { get; set; } = [];
 }

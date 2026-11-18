@@ -341,7 +341,7 @@ public sealed partial class MetadataLeaseLifetimeTests
                 CacheEvents.Add(("entity", capacity - _slots.CurrentCount));
             });
             cache.Setup(c => c.InvalidateGlobalOptionSets()).Callback(() => CacheEvents.Add(("global", capacity - _slots.CurrentCount)));
-            Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(), cacheProvider: cache.Object);
+            Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(), cacheProvider: cache.Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
         }
 
         internal static string[] Stages(string route, bool color, bool publish)
@@ -359,18 +359,22 @@ public sealed partial class MetadataLeaseLifetimeTests
                 "table-create" => ["solution", "publisher", "table-create"],
                 _ => throw new ArgumentOutOfRangeException(nameof(route))
             };
-            if (color)
+            // Every add/update route writes a label, so the read-back always follows the write; it also confirms the
+            // colour when one rode on the insert/update.
+            if (color || route is not ("status-remove" or "column-remove" or "table-create"))
             {
                 var prefix = route is "global-add" or "global-update" ? "global" : "local";
-                stages.Add(prefix + "-color-read"); // The colour rides on the insert/update; this read confirms it.
+                stages.Add(prefix + "-color-read");
             }
+            if (route == "table-create") stages.AddRange(["table-confirm", "primary-confirm"]); // label read-backs
             if (publish && route is not ("global-add" or "global-update" or "generic-local-add")) stages.Add("publish");
             return stages.ToArray();
         }
 
         internal static string? ExpectedFailureCode(string route, string stage, string fault)
         {
-            if (stage.Contains("color", StringComparison.Ordinal)) return MetadataErrorCodes.WriteNotConfirmed; // After the committed write (AC-146).
+            if (stage.Contains("color", StringComparison.Ordinal) || stage.EndsWith("confirm", StringComparison.Ordinal))
+                return MetadataErrorCodes.WriteNotConfirmed; // After the committed write (AC-146, AC-148).
             if (stage == "publish" && IsOptionWriteRoute(route)) return PublishAfterWrite;
             if (route == "column-add" && stage == "insert")
                 return fault == "coded" ? null : MetadataErrorCodes.SdkOperationFailed; // Existing try also owns checkout.
@@ -488,6 +492,8 @@ public sealed partial class MetadataLeaseLifetimeTests
         {
             var stage = request switch
             {
+                RetrieveEntityRequest when _route == "table-create" => "table-confirm",
+                RetrieveAttributeRequest when _route == "table-create" => "primary-confirm",
                 RetrieveOptionSetRequest => _mutated ? "global-color-read" : "global-target",
                 RetrieveAttributeRequest a => _mutated ? "local-color-read" : a.LogicalName == "statuscode" ? "status-target" : "local-target",
                 InsertOptionValueRequest => "insert", InsertStatusValueRequest => "status-insert",
@@ -499,6 +505,20 @@ public sealed partial class MetadataLeaseLifetimeTests
             OrganizationResponse response;
             switch (request)
             {
+                case RetrieveEntityRequest r:
+                    Assert.True(r.RetrieveAsIfPublished);
+                    response = new RetrieveEntityResponse { Results = new ParameterCollection
+                    {
+                        ["EntityMetadata"] = new EntityMetadata { LogicalName = r.LogicalName, DisplayName = new Label("Table", 1033), DisplayCollectionName = new Label("Tables", 1033) }
+                    } };
+                    break;
+                case RetrieveAttributeRequest r when _route == "table-create":
+                    Assert.True(r.RetrieveAsIfPublished);
+                    response = new RetrieveAttributeResponse { Results = new ParameterCollection
+                    {
+                        ["AttributeMetadata"] = new StringAttributeMetadata { LogicalName = r.LogicalName, DisplayName = new Label("Name", 1033) }
+                    } };
+                    break;
                 case RetrieveOptionSetRequest r:
                     Assert.Equal(Global, r.Name);
                     Assert.True(r.RetrieveAsIfPublished); // Target and color reads both see drafts (#1531).
@@ -549,7 +569,7 @@ public sealed partial class MetadataLeaseLifetimeTests
                     break;
                 default: throw new InvalidOperationException();
             }
-            if (request is not (RetrieveAttributeRequest or RetrieveOptionSetRequest)) _mutated = true;
+            if (request is not (RetrieveAttributeRequest or RetrieveOptionSetRequest or RetrieveEntityRequest)) _mutated = true;
             SuccessfulStages.Add(stage);
             return response;
         }

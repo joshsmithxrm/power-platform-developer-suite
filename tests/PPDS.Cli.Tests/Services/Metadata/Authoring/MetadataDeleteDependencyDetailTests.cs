@@ -218,7 +218,7 @@ public sealed class MetadataDeleteDependencyDetailTests
                         });
                     return Task.FromResult(client.Object);
                 });
-            Service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), guard.Object, cacheProvider: _cache.Object);
+            Service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), guard.Object, cacheProvider: _cache.Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
         }
         private static MetadataBase EntityName(RetrieveEntityRequest r) { Assert.Equal(DependentId, r.MetadataId); Assert.True(r.RetrieveAsIfPublished); Assert.Equal(EntityFilters.Entity, r.EntityFilters); return new EntityMetadata { MetadataId = DependentId, LogicalName = "dep_name" }; }
         private static MetadataBase AttributeName(RetrieveAttributeRequest r) { Assert.Equal(DependentId, r.MetadataId); Assert.True(r.RetrieveAsIfPublished); return new StringAttributeMetadata { MetadataId = DependentId, LogicalName = "dep_name" }; }

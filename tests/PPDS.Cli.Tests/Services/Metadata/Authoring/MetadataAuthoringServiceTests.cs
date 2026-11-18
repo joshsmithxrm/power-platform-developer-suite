@@ -40,11 +40,12 @@ public class MetadataAuthoringServiceTests
         // Default ExecuteAsync to return a valid response (prevents NRE from await null)
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new OrganizationResponse());
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         SetupPublisherPrefixQuery("new");
         SetupTableRead();
 
-        _service = new DataverseMetadataAuthoringService(_pool.Object, _validator, new InactiveFakeShakedownGuard());
+        _service = new DataverseMetadataAuthoringService(_pool.Object, _validator, new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
     }
 
     /// <summary>
@@ -52,11 +53,14 @@ public class MetadataAuthoringServiceTests
     /// for RetrieveEntity.
     /// </summary>
     private void SetupTableRead()
-        => _client.Setup(c => c.ExecuteAsync(It.IsAny<RetrieveEntityRequest>(), It.IsAny<CancellationToken>()))
+    {
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<RetrieveEntityRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new RetrieveEntityResponse { Results = new ParameterCollection
             {
                 ["EntityMetadata"] = new EntityMetadata { LogicalName = "account", DisplayName = new Label("Account", 1033) }
             } });
+        LabelWriteStore.Attach(_client); // the read-back after the update is answered from the update itself
+    }
 
     private void SetupPublisherPrefixQuery(string prefix)
     {
@@ -93,6 +97,7 @@ public class MetadataAuthoringServiceTests
 
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(response);
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new CreateTableRequest
         {
@@ -143,6 +148,7 @@ public class MetadataAuthoringServiceTests
                 if (req is CreateEntityRequest ce) capturedRequest = ce;
             })
             .ReturnsAsync(response);
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new CreateTableRequest
         {
@@ -178,6 +184,7 @@ public class MetadataAuthoringServiceTests
                 if (req is CreateEntityRequest) return Task.FromResult<OrganizationResponse>(response);
                 return Task.FromResult(new OrganizationResponse());
             });
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new CreateTableRequest
         {
@@ -210,6 +217,7 @@ public class MetadataAuthoringServiceTests
                 if (req is UpdateEntityRequest update) capturedRequest = update;
             })
             .ReturnsAsync(new OrganizationResponse());
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
         SetupTableRead();
 
         var request = new UpdateTableRequest
@@ -257,6 +265,7 @@ public class MetadataAuthoringServiceTests
                 if (req is UpdateEntityRequest update) capturedRequest = update;
             })
             .ReturnsAsync(new OrganizationResponse());
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new UpdateTableRequest
         {
@@ -286,6 +295,7 @@ public class MetadataAuthoringServiceTests
                 if (req is Microsoft.Crm.Sdk.Messages.PublishXmlRequest pxr) publishRequest = pxr;
             })
             .ReturnsAsync(new OrganizationResponse());
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
         SetupTableRead();
 
         var request = new UpdateTableRequest
@@ -326,6 +336,7 @@ public class MetadataAuthoringServiceTests
     {
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .Returns<OrganizationRequest, CancellationToken>((r, _) => Task.FromResult(MetadataDeleteTestResponses.For(r)));
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
         var request = new DeleteTableRequest
         {
             SolutionUniqueName = "TestSolution",
@@ -351,6 +362,7 @@ public class MetadataAuthoringServiceTests
                 if (req is DeleteEntityRequest del) capturedRequest = del;
             })
             .Returns<OrganizationRequest, CancellationToken>((r, _) => Task.FromResult(MetadataDeleteTestResponses.For(r)));
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new DeleteTableRequest
         {
@@ -387,6 +399,7 @@ public class MetadataAuthoringServiceTests
                     capturedRequest = ua;
                 return Task.FromResult(new OrganizationResponse());
             });
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new UpdateColumnRequest
         {
@@ -432,6 +445,7 @@ public class MetadataAuthoringServiceTests
                     capturedRequest = ua;
                 return Task.FromResult(new OrganizationResponse());
             });
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new UpdateColumnRequest
         {
@@ -480,6 +494,7 @@ public class MetadataAuthoringServiceTests
                     capturedRequest = ua;
                 return Task.FromResult(new OrganizationResponse());
             });
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new UpdateColumnRequest
         {
@@ -515,6 +530,7 @@ public class MetadataAuthoringServiceTests
                     return Task.FromResult<OrganizationResponse>(retrieveResponse);
                 return Task.FromResult(new OrganizationResponse());
             });
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var message = await CaptureSingleInfoMessageAsync(reporter =>
             _service.UpdateColumnAsync(new UpdateColumnRequest
@@ -548,6 +564,7 @@ public class MetadataAuthoringServiceTests
                     return Task.FromResult<OrganizationResponse>(retrieveResponse);
                 return Task.FromResult(new OrganizationResponse());
             });
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         await _service.UpdateColumnAsync(new UpdateColumnRequest
         {
@@ -596,6 +613,7 @@ public class MetadataAuthoringServiceTests
                     return Task.FromResult<OrganizationResponse>(retrieveResponse);
                 return Task.FromResult(new OrganizationResponse());
             });
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var message = await CaptureSingleInfoMessageAsync(reporter =>
             _service.UpdateRelationshipAsync(new AuthoringUpdateRelationshipRequest
@@ -624,6 +642,7 @@ public class MetadataAuthoringServiceTests
                     return Task.FromResult<OrganizationResponse>(retrieveResponse);
                 return Task.FromResult(new OrganizationResponse());
             });
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var message = await CaptureSingleInfoMessageAsync(reporter =>
             _service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest
@@ -678,6 +697,7 @@ public class MetadataAuthoringServiceTests
                     capturedRequest = ur;
                 return Task.FromResult(new OrganizationResponse());
             });
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new AuthoringUpdateRelationshipRequest
         {
@@ -719,6 +739,7 @@ public class MetadataAuthoringServiceTests
                 if (req is SdkCreateManyToManyRequest m2m) capturedRequest = m2m;
             })
             .ReturnsAsync(response);
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new AuthoringCreateManyToManyRequest
         {
@@ -749,6 +770,7 @@ public class MetadataAuthoringServiceTests
                 if (req is SdkCreateManyToManyRequest m2m) capturedRequest = m2m;
             })
             .ReturnsAsync(response);
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new AuthoringCreateManyToManyRequest
         {
@@ -802,6 +824,7 @@ public class MetadataAuthoringServiceTests
                 if (req is OrderOptionRequest oor) capturedRequest = oor;
             })
             .ReturnsAsync(new OrganizationResponse());
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new ReorderOptionsRequest
         {
@@ -832,6 +855,7 @@ public class MetadataAuthoringServiceTests
                 if (req is Microsoft.Xrm.Sdk.Messages.UpdateStateValueRequest usv) capturedRequest = usv;
             })
             .ReturnsAsync(new OrganizationResponse());
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new AuthoringUpdateStateValueRequest
         {
@@ -892,6 +916,7 @@ public class MetadataAuthoringServiceTests
         response.Results["EntityId"] = Guid.NewGuid();
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(response);
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new CreateTableRequest
         {
@@ -938,7 +963,7 @@ public class MetadataAuthoringServiceTests
     [Fact]
     public void Constructor_ThrowsOnNullConnectionPool()
     {
-        var act = () => new DataverseMetadataAuthoringService(null!, _validator, new InactiveFakeShakedownGuard());
+        var act = () => new DataverseMetadataAuthoringService(null!, _validator, new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
 
         act.Should().Throw<ArgumentNullException>()
             .And.ParamName.Should().Be("connectionPool");
@@ -947,7 +972,7 @@ public class MetadataAuthoringServiceTests
     [Fact]
     public void Constructor_ThrowsOnNullValidator()
     {
-        var act = () => new DataverseMetadataAuthoringService(_pool.Object, null!, new InactiveFakeShakedownGuard());
+        var act = () => new DataverseMetadataAuthoringService(_pool.Object, null!, new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
 
         act.Should().Throw<ArgumentNullException>()
             .And.ParamName.Should().Be("validator");

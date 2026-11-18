@@ -713,6 +713,8 @@ internal sealed class GlobalChoiceServerFake : IDisposable
 
     internal static Exception PrivilegeFault() => Fault("Principal user is missing prvWriteOptionSet privilege.", 0x80040220);
 
+    private readonly LabelWriteStore _labels = new();
+
     internal GlobalChoiceServerFake()
     {
         var pool = new Mock<IDataverseConnectionPool>(MockBehavior.Strict);
@@ -731,11 +733,14 @@ internal sealed class GlobalChoiceServerFake : IDisposable
                 {
                     Assert.False(released);
                     Requests.Add(request);
-                    return Task.FromResult(Execute(request));
+                    var response = Execute(request);
+                    _labels.Record(request);
+                    if (response is InsertOptionValueResponse inserted) _labels.InsertedValue(inserted.NewOptionValue);
+                    return Task.FromResult(_labels.Apply(request, response));
                 });
             return client.Object;
         });
-        Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard());
+        Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
     }
 
     internal static OptionSetMetadata Choice(string name, Guid? id = null)

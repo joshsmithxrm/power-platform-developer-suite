@@ -38,7 +38,7 @@ public sealed class MetadataAcquisitionPrivacyTests
         pool.Setup(p => p.GetClientAsync(null, null, CancellationToken.None)).ThrowsAsync(original);
         var guard = new Mock<IShakedownGuard>(MockBehavior.Strict);
         guard.Setup(g => g.EnsureCanMutate("metadata.option.add"));
-        var service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), guard.Object);
+        var service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), guard.Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
 
         var error = await Assert.ThrowsAsync<PpdsAuthException>(() => service.AddOptionValueAsync(new AddOptionValueRequest
         {

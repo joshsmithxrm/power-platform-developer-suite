@@ -424,8 +424,12 @@ public class DataverseMetadataQueryService : IMetadataQueryService
     }
 
     /// <summary>
-    /// Dataverse's language-independent "object not found" fault code (ObjectDoesNotExist, 0x80040217). ASSUMPTION,
-    /// pending live confirmation: Microsoft does not document which code an unknown global choice name returns.
+    /// Dataverse's language-independent "object not found" fault code (ObjectDoesNotExist, 0x80040217). Microsoft does
+    /// not document which code an unknown global choice name returns; observed live 2026-11-17: a mis-cased name returns
+    /// it from RetrieveOptionSet, published and as-if-published
+    /// (MetadataGlobalChoiceLiveTests.MisCasedName_ResolvesAndRecordsTheFaultCode), and an unknown name returns it on both
+    /// reads, on an English-base and on a French-base organisation, with the message in English
+    /// (MetadataGlobalChoiceLiveTests.UnknownGlobalChoiceName_IsReportedAsNotFound, 2026-11-17).
     /// Keep in step with the authoring service's copy.
     /// </summary>
     private const int ObjectDoesNotExistErrorCode = unchecked((int)0x80040217);

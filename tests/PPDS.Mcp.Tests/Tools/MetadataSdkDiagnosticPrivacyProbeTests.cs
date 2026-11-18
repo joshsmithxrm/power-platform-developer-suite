@@ -176,7 +176,7 @@ public sealed class MetadataSdkDiagnosticPrivacyProbeTests
                     });
                 return lease.Object;
             });
-            Service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), _guard.Object);
+            Service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), _guard.Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
         }
 
         public void AssertComplete()

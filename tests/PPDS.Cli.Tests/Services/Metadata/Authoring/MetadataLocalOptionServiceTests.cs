@@ -43,7 +43,7 @@ public class MetadataLocalOptionServiceTests
     {
         _pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(_client.Object);
-        _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard());
+        _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
     }
 
     /// <summary>
@@ -93,6 +93,7 @@ public class MetadataLocalOptionServiceTests
                         return Task.FromResult(new OrganizationResponse());
                 }
             });
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
     }
 
     private string? StoredColorFor(int value) => _options.Single(o => o.Value == value).Color;
