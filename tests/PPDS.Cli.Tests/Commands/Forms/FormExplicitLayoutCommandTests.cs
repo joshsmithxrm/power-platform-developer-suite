@@ -59,7 +59,8 @@ public sealed class FormExplicitLayoutCommandTests
         using var json = JsonDocument.Parse(stdout);
         Assert.Equal(new[] { "section", "fields", "message" }, json.RootElement.GetProperty("data").EnumerateObject().Select(property => property.Name));
         Assert.DoesNotContain("deprecated", stdout); Assert.Contains("deprecated", stderr);
-        Assert.Contains("CLI 2.0", stderr); Assert.Contains("90 days", stderr); Assert.Contains("stable release", stderr);
+        Assert.Contains("reorder-fields-strict", stderr); Assert.Contains("add-field", stderr); Assert.Contains("move-field", stderr);
+        Assert.DoesNotContain("90 days", stderr); Assert.DoesNotContain("CLI 2.0", stderr);
         Assert.Single(actual.Writes); actual.AssertIsolation();
     }
 
