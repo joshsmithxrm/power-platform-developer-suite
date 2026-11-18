@@ -1,5 +1,7 @@
 """Unit tests for scripts/ci/check_pr_size.py.
 
+PR size is informational: the script reports the numbers and always exits 0.
+
 Run with: python -m pytest tests/ci/test_check_pr_size.py -v
 """
 from __future__ import annotations
@@ -28,199 +30,101 @@ def make_pr(*, additions=0, deletions=0, files=0, title="", body=""):
 
 
 # ---------------------------------------------------------------------------
-# Limits
+# Reporting
 # ---------------------------------------------------------------------------
 
-class TestSizeLimits:
-    def test_under_both_limits_passes(self):
-        passed, msg = check_pr_size.check_pr_size(
+class TestDescribeSize:
+    def test_small_pr_reports_numbers(self):
+        msg = check_pr_size.describe_size(
             make_pr(additions=100, deletions=50, files=10),
         )
-        assert passed
-        assert "OK" in msg
         assert "10 files" in msg
         assert "150 LoC" in msg
+        assert "100 added" in msg
+        assert "50 deleted" in msg
+        assert "informational" in msg.lower()
+        assert "large" not in msg.lower()
 
-    def test_at_file_limit_passes(self):
-        # MAX_FILES=50; equal is OK (limit is strictly greater than).
-        passed, _ = check_pr_size.check_pr_size(make_pr(files=50, additions=10))
-        assert passed
+    def test_large_by_files_is_flagged_but_informational(self):
+        msg = check_pr_size.describe_size(make_pr(files=131, additions=10))
+        assert "131 files" in msg
+        assert "large" in msg.lower()
+        assert "informational" in msg.lower()
 
-    def test_at_loc_limit_passes(self):
-        passed, _ = check_pr_size.check_pr_size(make_pr(additions=2000))
-        assert passed
-
-    def test_just_over_file_limit_fails(self):
-        passed, msg = check_pr_size.check_pr_size(make_pr(files=51))
-        assert not passed
-        assert "51 files > 50" in msg
-
-    def test_just_over_loc_limit_fails(self):
-        passed, msg = check_pr_size.check_pr_size(
-            make_pr(additions=1500, deletions=501),
+    def test_large_by_loc_is_flagged(self):
+        msg = check_pr_size.describe_size(
+            make_pr(additions=4500, deletions=3000, files=3),
         )
-        assert not passed
-        assert "2001 LoC > 2000" in msg
+        assert "7500 LoC" in msg
+        assert "large" in msg.lower()
+
+    def test_at_thresholds_is_not_flagged(self):
+        msg = check_pr_size.describe_size(make_pr(files=50, additions=2000))
+        assert "large" not in msg.lower()
 
     def test_loc_counts_additions_plus_deletions(self):
-        # Pure additions
-        p1, _ = check_pr_size.check_pr_size(make_pr(additions=2001))
-        assert not p1
-        # Pure deletions
-        p2, _ = check_pr_size.check_pr_size(make_pr(deletions=2001))
-        assert not p2
-        # Mix
-        p3, _ = check_pr_size.check_pr_size(make_pr(additions=1001, deletions=1001))
-        assert not p3
-
-    def test_both_limits_breached_reports_both(self):
-        passed, msg = check_pr_size.check_pr_size(
-            make_pr(files=200, additions=5000, deletions=2500),
+        assert "2002 LoC" in check_pr_size.describe_size(
+            make_pr(additions=1001, deletions=1001),
         )
-        assert not passed
-        assert "200 files > 50" in msg
-        assert "7500 LoC > 2000" in msg
 
-    def test_pr792_scenario(self):
-        # The retro item: 131 files / 7.5K LoC.
-        passed, msg = check_pr_size.check_pr_size(
-            make_pr(files=131, additions=4500, deletions=3000),
+    def test_waiver_text_is_not_parsed(self):
+        msg = check_pr_size.describe_size(
+            make_pr(files=100, title="x [size-waived: reason]",
+                    body="[size-waived: reason]"),
         )
-        assert not passed
-        assert "131 files > 50" in msg
+        assert "waiver" not in msg.lower()
+        assert "waived" not in msg.lower()
+        assert "large" in msg.lower()
+        assert not hasattr(check_pr_size, "find_size_waiver")
+        assert not hasattr(check_pr_size, "SIZE_WAIVED_RE")
 
-
-# ---------------------------------------------------------------------------
-# Waiver detection
-# ---------------------------------------------------------------------------
-
-class TestWaiver:
-    def test_waiver_in_title_bypasses(self):
-        passed, msg = check_pr_size.check_pr_size(
-            make_pr(
-                files=100,
-                title="huge refactor [size-waived: vendored 3p code, no review needed]",
-            ),
+    def test_missing_and_null_fields_default_to_zero(self):
+        assert "0 files" in check_pr_size.describe_size({})
+        msg = check_pr_size.describe_size(
+            {"additions": None, "deletions": None, "changedFiles": None},
         )
-        assert passed
-        assert "waiver accepted" in msg
-        assert "vendored 3p code" in msg
-
-    def test_waiver_in_body_bypasses(self):
-        passed, msg = check_pr_size.check_pr_size(
-            make_pr(
-                files=100,
-                body="some description\n\n[size-waived: codegen output]\n\nmore text",
-            ),
-        )
-        assert passed
-        assert "codegen output" in msg
-
-    def test_waiver_with_empty_reason_rejected(self):
-        passed, _ = check_pr_size.check_pr_size(
-            make_pr(files=100, title="big change [size-waived: ]"),
-        )
-        assert not passed
-
-    def test_waiver_with_whitespace_only_reason_rejected(self):
-        passed, _ = check_pr_size.check_pr_size(
-            make_pr(files=100, title="big change [size-waived:    ]"),
-        )
-        assert not passed
-
-    def test_waiver_is_case_sensitive(self):
-        # `[Size-Waived:` should NOT bypass — exact match required.
-        passed, _ = check_pr_size.check_pr_size(
-            make_pr(files=100, title="big change [Size-Waived: reason here]"),
-        )
-        assert not passed
-
-    def test_no_waiver_when_under_limits_still_passes(self):
-        passed, msg = check_pr_size.check_pr_size(
-            make_pr(files=10, additions=10),
-        )
-        assert passed
-        assert "OK" in msg
-
-    def test_find_size_waiver_returns_reason(self):
-        assert check_pr_size.find_size_waiver(
-            "[size-waived: foo bar]", "",
-        ) == "foo bar"
-
-    def test_find_size_waiver_none_when_missing(self):
-        assert check_pr_size.find_size_waiver("plain title", "plain body") is None
-
-
-# ---------------------------------------------------------------------------
-# Malformed input
-# ---------------------------------------------------------------------------
-
-class TestMalformedInput:
-    def test_non_numeric_additions_fails(self):
-        passed, msg = check_pr_size.check_pr_size(
-            {"additions": "abc", "deletions": 0, "changedFiles": 0, "title": "", "body": ""},
-        )
-        assert not passed
-        assert "malformed" in msg
-
-    def test_missing_fields_default_to_zero(self):
-        passed, _ = check_pr_size.check_pr_size({})
-        assert passed  # all zeros — under limits
-
-    def test_null_additions_treated_as_zero(self):
-        passed, msg = check_pr_size.check_pr_size(
-            {"additions": None, "deletions": 0, "changedFiles": 5,
-             "title": "", "body": ""},
-        )
-        assert passed
-        assert "OK" in msg
-
-    def test_null_deletions_treated_as_zero(self):
-        passed, msg = check_pr_size.check_pr_size(
-            {"additions": 10, "deletions": None, "changedFiles": 5,
-             "title": "", "body": ""},
-        )
-        assert passed
-        assert "OK" in msg
-
-    def test_null_changed_files_treated_as_zero(self):
-        passed, msg = check_pr_size.check_pr_size(
-            {"additions": 10, "deletions": 0, "changedFiles": None,
-             "title": "", "body": ""},
-        )
-        assert passed
         assert "0 files" in msg
+        assert "0 LoC" in msg
 
-    def test_all_null_size_fields_treated_as_zero(self):
-        passed, _ = check_pr_size.check_pr_size(
-            {"additions": None, "deletions": None, "changedFiles": None,
-             "title": "", "body": ""},
-        )
-        assert passed
+    def test_non_numeric_data_is_reported_not_raised(self):
+        msg = check_pr_size.describe_size({"additions": "abc"})
+        assert "could not" in msg.lower()
+        assert "informational" in msg.lower()
 
 
 # ---------------------------------------------------------------------------
-# CLI entry
+# CLI entry: always exit 0
 # ---------------------------------------------------------------------------
 
 class TestMain:
-    def test_main_with_json_arg_under_limits_returns_0(self):
+    def test_small_pr_exits_0(self, capsys):
         rc = check_pr_size.main([
             "--json", json.dumps(make_pr(files=10, additions=100)),
         ])
         assert rc == 0
+        assert "10 files" in capsys.readouterr().out
 
-    def test_main_with_json_arg_over_limits_returns_1(self):
+    def test_large_pr_exits_0_and_reports_numbers(self, capsys):
         rc = check_pr_size.main([
-            "--json", json.dumps(make_pr(files=200)),
+            "--json", json.dumps(make_pr(files=200, additions=5000, deletions=2500)),
         ])
-        assert rc == 1
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "200 files" in out
+        assert "7500 LoC" in out
 
-    def test_main_invalid_json_returns_2(self):
+    def test_large_pr_without_any_waiver_still_exits_0(self):
+        rc = check_pr_size.main(["--json", json.dumps(make_pr(files=1000))])
+        assert rc == 0
+
+    def test_invalid_json_exits_0_with_warning(self, capsys):
         rc = check_pr_size.main(["--json", "{not valid"])
-        assert rc == 2
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert "::warning" in captured.out
+        assert "could not be read" in captured.out
 
-    def test_main_with_pr_calls_fetch(self):
+    def test_with_pr_calls_fetch(self):
         with patch.object(
             check_pr_size, "fetch_pr_json",
             return_value=make_pr(files=10, additions=10),
@@ -229,10 +133,44 @@ class TestMain:
         assert rc == 0
         m.assert_called_once_with(42)
 
-    def test_main_with_pr_gh_failure_returns_2(self):
+    def test_unreadable_pr_exits_0_with_warning(self, capsys):
         with patch.object(
             check_pr_size, "fetch_pr_json",
             side_effect=RuntimeError("gh boom"),
         ):
             rc = check_pr_size.main(["--pr", "42"])
-        assert rc == 2
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "::warning" in out
+        assert "gh boom" in out
+        assert "informational" in out.lower()
+
+    def test_summary_written_to_github_step_summary(self, tmp_path, monkeypatch):
+        summary = tmp_path / "summary.md"
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+        rc = check_pr_size.main([
+            "--json", json.dumps(make_pr(files=60, additions=10)),
+        ])
+        assert rc == 0
+        text = summary.read_text(encoding="utf-8")
+        assert "60 files" in text
+        assert "informational" in text.lower()
+
+    def test_unreadable_pr_summary_notes_error(self, tmp_path, monkeypatch):
+        summary = tmp_path / "summary.md"
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+        with patch.object(
+            check_pr_size, "fetch_pr_json", side_effect=RuntimeError("gh boom"),
+        ):
+            rc = check_pr_size.main(["--pr", "7"])
+        assert rc == 0
+        assert "gh boom" in summary.read_text(encoding="utf-8")
+
+    def test_unwritable_summary_does_not_fail(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "no" / "dir" / "s.md"))
+        rc = check_pr_size.main(["--json", json.dumps(make_pr(files=1))])
+        assert rc == 0
+
+    def test_no_summary_env_is_fine(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+        assert check_pr_size.main(["--json", json.dumps(make_pr(files=1))]) == 0
