@@ -201,7 +201,7 @@ Output:
 ```
 Name:           PPDS MDA
 Unique Name:    new_PPDSMDA
-App ID:         961fa5c7-385e-f111-a826-0022480af817
+App ID:         00000000-0000-0000-0000-000000000001
 Description:    (none)
 Publisher:      Default Publisher
 

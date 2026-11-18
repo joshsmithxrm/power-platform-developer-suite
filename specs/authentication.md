@@ -507,7 +507,7 @@ clientCts.CancelAfter(TimeSpan.FromSeconds(60));
 
 ### Why BAP API Alongside Global Discovery?
 
-**Context:** Service principals cannot resolve environment names to URLs because Global Discovery Service (`globaldisco.crm.dynamics.com`) requires delegated (user-present) permissions. SPNs must provide full environment URLs, making CI/CD configuration harder — operators need to know `https://orgcabef92d.crm.dynamics.com` instead of just `PPDS Demo - Dev`.
+**Context:** Service principals cannot resolve environment names to URLs because Global Discovery Service (`globaldisco.crm.dynamics.com`) requires delegated (user-present) permissions. SPNs must provide full environment URLs, making CI/CD configuration harder — operators need to know `https://contoso.crm.dynamics.com` instead of just `Contoso Dev`.
 
 **Decision:** Add `BapEnvironmentService` as a separate discovery service using the BAP API (`api.bap.microsoft.com`), which supports application (client_credentials) authentication. Keep `GlobalDiscoveryService` unchanged for interactive users.
 

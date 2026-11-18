@@ -225,7 +225,7 @@ Total MCP tests: 58 passed, 3 skipped (pre-existing).
 | Splash screen | PASS | Title, menu bar, status bar all render correctly |
 | Profile selector (Alt+P) | PASS | Shows all profiles with identity, select works |
 | Environment auto-populate | PASS | Environment loads from profile default |
-| Status bar | PASS | Shows "Profile: [2] ... Environment: PPDS Demo - Dev [DEV]" with clickable selectors |
+| Status bar | PASS | Shows "Profile: [2] ... Environment: <development organisation> [DEV]" with clickable selectors |
 | SQL Query screen | PASS | Opens via Tools menu, tab bar shows env name |
 | Query execution (F5) | PASS | "Returned 100 rows in 552ms via Dataverse" |
 | Results table | PASS | Virtual table with accountid, name columns, row count footer |
