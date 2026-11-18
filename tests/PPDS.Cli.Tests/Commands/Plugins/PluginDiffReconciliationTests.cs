@@ -466,7 +466,7 @@ public sealed class PluginDiffReconciliationTests
         f.Env.FilteringAttributes = "telephone1";
         var input = FileJson("1.0", AssemblyJson(step: ",\"unrecognizedSetting\":\"x\""));
         var (exit, output, _) = await Invoke(f.Service.Object, input, json: true);
-        Assert.Equal(2, exit);
+        Assert.Equal(ExitCodes.Incomplete, exit);
         using var document = JsonDocument.Parse(output);
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
         var metadata = document.RootElement.GetProperty("metadata");
@@ -878,8 +878,8 @@ public sealed class PluginDiffReconciliationTests
     [Theory]
     [InlineData("match", 0, false)]
     [InlineData("drift", 1, true)]
-    [InlineData("unknown", 2, false)]
-    [InlineData("both", 2, true)]
+    [InlineData("unknown", 12, false)]
+    [InlineData("both", 12, true)]
     [InlineData("secret", 0, false)]
     [Trait("AC", "AC-93")]
     public async Task RealCommand_JsonAndExitCode_ReportTruthfulStatus(string scenario, int expectedExit, bool expectedDrift)
@@ -904,9 +904,9 @@ public sealed class PluginDiffReconciliationTests
         Assert.Equal("OfflineFixture", data[0].GetProperty("assemblyName").GetString());
         var metadata = document.RootElement.GetProperty("metadata");
         Assert.Equal(expectedDrift, metadata.GetProperty("hasDrift").GetBoolean());
-        Assert.Equal(expectedExit != 2, metadata.GetProperty("isComplete").GetBoolean());
-        Assert.Equal(expectedExit == 2 ? "incomplete" : expectedDrift ? "drift" : "match", metadata.GetProperty("status").GetString());
-        Assert.Equal(expectedExit != 2, document.RootElement.GetProperty("success").GetBoolean()); // success=false only when incomplete
+        Assert.Equal(expectedExit != ExitCodes.Incomplete, metadata.GetProperty("isComplete").GetBoolean());
+        Assert.Equal(expectedExit == ExitCodes.Incomplete ? "incomplete" : expectedDrift ? "drift" : "match", metadata.GetProperty("status").GetString());
+        Assert.Equal(expectedExit != ExitCodes.Incomplete, document.RootElement.GetProperty("success").GetBoolean()); // success=false only when incomplete
     }
 
     [Fact]
@@ -942,7 +942,7 @@ public sealed class PluginDiffReconciliationTests
 
     [Theory]
     [Trait("AC", "AC-93")]
-    [InlineData(false, 2)]
+    [InlineData(false, 12)]
     [InlineData(true, 0)]
     public async Task RealCommand_IncludeHidden_ReversesReadExclusion(bool includeHidden, int expectedExit)
     {
@@ -960,6 +960,21 @@ public sealed class PluginDiffReconciliationTests
         Assert.Equal(1, coverage.GetProperty("totalSteps").GetInt32());
         Assert.Equal(1, coverage.GetProperty("hiddenSteps").GetInt32());
         Assert.Equal(includeHidden ? 0 : 1, coverage.GetProperty("excludedHiddenSteps").GetInt32());
+    }
+
+    [Fact]
+    public async Task RealCommand_UnexpectedFailure_ExitsFailureNotIncomplete()
+    {
+        var f = Fixture();
+        f.Service.Setup(s => s.GetAssemblyByNameAsync("OfflineFixture", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("synthetic failure"));
+        var (exit, output, _) = await Invoke(f.Service.Object,
+            JsonSerializer.Serialize(new PluginRegistrationConfig { Assemblies = [f.Config] }), json: true);
+        Assert.Equal(ExitCodes.Failure, exit);
+        Assert.Equal(2, exit);
+        using var document = JsonDocument.Parse(output);
+        Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+        Assert.False(document.RootElement.TryGetProperty("metadata", out _));
     }
 
     [Theory]

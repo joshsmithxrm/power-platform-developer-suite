@@ -78,8 +78,16 @@ public sealed class MetadataDeletePreviewResult
     [JsonIgnore] internal Exception? FailureCause { get; set; }
     [JsonIgnore] internal bool IsClear => Status == "no-blocking-dependencies";
 
-    internal PpdsException Refusal() => new(
+    /// <summary>The exit code for this observation: blocked 10, incomplete 12, any other status 2.</summary>
+    internal int RefusalExitCode => Status switch
+    {
+        "blocked" => ExitCodes.PreconditionFailed,
+        "incomplete" => ExitCodes.Incomplete,
+        _ => ExitCodes.Failure
+    };
+
+    internal PpdsException Refusal() => new DeleteRefusalException(
         Status == "blocked" ? PPDS.Dataverse.Metadata.Authoring.MetadataErrorCodes.DependencyConflict : ErrorCodes.Operation.Internal,
         Status == "blocked" ? $"Deletion is blocked by {DistinctComponentCount} component(s) across {DependencyRowCount} dependency row(s)." : "Deletion dependency inspection is incomplete; no deletion is permitted.",
-        new Dictionary<string, object> { ["preview"] = this }, FailureCause);
+        RefusalExitCode, new Dictionary<string, object> { ["preview"] = this }, FailureCause);
 }

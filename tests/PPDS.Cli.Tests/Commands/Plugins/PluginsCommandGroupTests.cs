@@ -139,9 +139,13 @@ public class PluginsCommandGroupTests
         Assert.Contains("Under a missing or 1.0 registration version, step filteringAttributes and image attributes are always compared", diff);
         Assert.Contains("an unset value as none (as in PPDS 1.4.2)", diff);
         Assert.Contains("other omitted optional properties are not compared", diff);
+        Assert.Contains("12 incomplete (the comparison could not be completed; the result is unknown)", diff);
+        Assert.Contains("other failures exit with their own non-zero code (see the exit code table in the CLI README)", diff);
         var deploy = _command.Subcommands.Single(c => c.Name == "deploy").Description!;
         Assert.Contains("diff compares an omitted step filteringAttributes or image attributes against none", deploy);
         Assert.Contains("remove it from the step or image and list it in resetFields", deploy);
+        Assert.Contains("verification drift exits 1; verification that could not be completed exits 12", deploy);
+        Assert.Contains("a failed deploy exits with its own non-zero code, see the exit code table in the CLI README", deploy);
     }
 
     [Fact]

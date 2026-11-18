@@ -327,7 +327,7 @@ nonpublic token members or use global string-based option lookup.
 
 ### Exit Codes
 
-Standard exit codes ([`ExitCodes.cs:6-40`](../src/PPDS.Cli/Infrastructure/Errors/ExitCodes.cs#L6-L40)):
+Standard exit codes ([`ExitCodes.cs:6-46`](../src/PPDS.Cli/Infrastructure/Errors/ExitCodes.cs#L6-L46)):
 
 | Code | Constant | Meaning |
 |------|----------|---------|
@@ -342,6 +342,8 @@ Standard exit codes ([`ExitCodes.cs:6-40`](../src/PPDS.Cli/Infrastructure/Errors
 | 8 | `ValidationError` | Schema mismatch |
 | 9 | `Forbidden` | Managed component protection |
 | 10 | `PreconditionFailed` | State prevents operation |
+| 11 | `ConfirmationRequired` | Interactive confirmation needed but stdin is redirected; use `--force` |
+| 12 | `Incomplete` | The check could not be completed; the result is unknown (neither match nor drift). Used by `plugins diff` (0 match, 1 drift, 12 incomplete), version 2.0 `plugins deploy` post-deploy verification, and schema-delete dependency checks, both for `--dry-run` and for a real delete that is refused (blocked is 10) |
 
 ### Exception Mapping
 

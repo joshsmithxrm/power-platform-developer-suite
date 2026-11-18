@@ -69,6 +69,9 @@ public static class ExceptionMapper
             // Preserve only the explicitly captured metadata-acquisition mapping.
             MetadataConnectionAcquisitionException acquisition => acquisition.ExitCode,
 
+            // Schema-delete refusals keep the exit code the dependency preview reports (blocked 10, incomplete 12).
+            DeleteRefusalException refusal => refusal.ExitCode,
+
             // PPDS exceptions - use error code category to determine exit code
             PpdsNotFoundException => ExitCodes.NotFoundError,
             PpdsValidationException => ExitCodes.InvalidArguments,
