@@ -35,7 +35,9 @@ public sealed partial class DmlLiveDifferentialTests
     {
         public T? Get<T>(string column) => V.TryGetValue(column, out var value) && value is not null ? (T)value : default;
 
-        public Row With(string column, object? value) => new(Id, new Dictionary<string, object?>(V) { [column] = value });
+        /// <summary>A copy with <paramref name="column"/> set; a whole number written to a decimal, currency or float column is held as a decimal, as it is stored.</summary>
+        public Row With(string column, object? value)
+            => new(Id, new Dictionary<string, object?>(V) { [column] = column is Amount or MoneyCol or FloatCol && value is int i ? (decimal)i : value });
 
         public string Key => string.Join("|", Columns.Select(c => Format(V.GetValueOrDefault(c))));
 
