@@ -56,6 +56,7 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
     private int[] _choices = [];
     private Guid _me;
     private Microsoft.PowerPlatform.Dataverse.Client.ServiceClient _client = null!;
+    private PPDS.Dataverse.Pooling.IDataverseConnectionPool? _pool;
     private SqlQueryService _service = null!;
     private int _passed;
     private int _refused;
@@ -76,6 +77,7 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
         _me = ((WhoAmIResponse)await _client.ExecuteAsync(new WhoAmIRequest())).UserId;
         using var source = _source!;
         using var pool = LiveTestHelpers.CreateConnectionPool(new[] { source });
+        _pool = pool;
         var bulk = new BulkOperationExecutor(pool, LiveTestHelpers.CreateThrottleTracker(),
             Options.Create(new DataverseOptions { BulkOperations = new BulkOperationOptions { BatchSize = 10, MaxParallelBatches = 1 } }),
             NullLogger<BulkOperationExecutor>.Instance);
@@ -89,6 +91,7 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
         try
         {
             await CreateTableAsync();
+            await CheckShapeAsync();
             _seed = await SeedAsync();
             await RunAllCasesAsync();
         }
@@ -117,6 +120,74 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
     }
 
     private LiveTestProfileConnectionSource? _source;
+
+    // -- the catalogue: the same cases, listed without a connection (for the offline admission matrix) --
+
+    /// <summary>A case of this suite: its SQL, whether it proves the statement runs as T-SQL says (a differential case),
+    /// or must fail with <paramref name="ExpectedCode"/> having changed nothing.</summary>
+    internal sealed record LiveCase(string Sql, bool Proves, string? ExpectedCode);
+
+    private List<LiveCase>? _catalogue;
+
+    /// <summary>
+    /// Every case this suite runs, built exactly as the live run builds them (same methods, same order) but recorded
+    /// instead of executed, against <see cref="DmlLiveTableShape.Table"/> and fixed ids. Nothing connects.
+    /// </summary>
+    internal static async Task<IReadOnlyList<LiveCase>> CatalogueAsync()
+    {
+        var suite = new DmlLiveDifferentialTests(new SilentOutput())
+        {
+            _catalogue = new List<LiveCase>(),
+            _table = DmlLiveTableShape.Table,
+            _choices = DmlLiveTableShape.Choices,
+            _me = Guid.Parse("00000000-0000-0000-0000-0000000000ee"),
+        };
+        suite._ids = Enumerable.Range(1, 8).Select(i => Guid.Parse($"aaaaaaaa-bbbb-cccc-dddd-{i:D12}")).ToArray();
+        suite._seed = suite.SeedRows().Select((r, i) => r with { Id = suite._ids[i] }).ToList();
+        await suite.RunAllCasesAsync();
+        return suite._catalogue;
+    }
+
+    private sealed class SilentOutput : ITestOutputHelper
+    {
+        public void WriteLine(string message)
+        {
+        }
+
+        public void WriteLine(string format, params object[] args)
+        {
+        }
+    }
+
+    /// <summary>Runs <paramref name="cases"/> with the environment's DML safety settings replaced (not when cataloguing).</summary>
+    private async Task WithSettingsAsync(QuerySafetySettings settings, Func<Task> cases)
+    {
+        if (_catalogue != null)
+        {
+            await cases();
+            return;
+        }
+        _service.EnvironmentSafetySettings = settings;
+        try
+        {
+            await cases();
+        }
+        finally
+        {
+            _service.EnvironmentSafetySettings = null;
+        }
+    }
+
+    /// <summary>The real table's metadata must match <see cref="DmlLiveTableShape"/>, which the offline matrix asks about.</summary>
+    private async Task CheckShapeAsync()
+    {
+        var provider = new CachedMetadataProvider(new DataverseMetadataQueryService(_pool!));
+        var differences = DmlLiveTableShape.Differences(_table, _choices, await provider.GetAttributesAsync(_table));
+        foreach (var difference in differences)
+            Fail("table metadata", difference + " (update DmlLiveTableShape so the admission matrix asks about this table)");
+        if (differences.Count == 0)
+            _output.WriteLine("PASS the table's metadata matches DmlLiveTableShape (the admission matrix's fake).");
+    }
 
     private async Task<string> ConnectAsync()
     {
@@ -163,8 +234,21 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
 
     // ── one case ────────────────────────────────────────────────────────────────────────────
 
-    private async Task CaseAsync(string sql, Func<List<Row>, List<Row>> expected, bool observe = false, int? rowCap = null)
+    /// <summary>
+    /// Runs <paramref name="sql"/> confirmed and compares the table afterwards with <paramref name="expected"/>, computed
+    /// here from the rows before it. <paramref name="selects"/> is the model of which rows an UPDATE or DELETE selects:
+    /// exactly those rows must be written (their row version moves even when no value changes) or removed, and the
+    /// reported count must be their number. For INSERT the new rows of <paramref name="expected"/> are the selected ones.
+    /// </summary>
+    private async Task CaseAsync(string sql, Func<List<Row>, List<Row>> expected, Func<Row, bool>? selects = null, bool observe = false, int? rowCap = null)
     {
+        if (_catalogue != null)
+        {
+            _catalogue.Add(new LiveCase(sql, Proves: true, ExpectedCode: null));
+            return;
+        }
+        if (Verb(sql) is "UPDATE" or "DELETE" && selects is null)
+            throw new InvalidOperationException($"The case {sql} does not say which rows it selects.");
         await ResetAsync();
         var before = await ReadAsync();
         SqlQueryResult result;
@@ -189,34 +273,52 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
         if (observe || !same)
             _output.WriteLine($"OBSERVED {sql} -> changed [{string.Join(", ", changed.Select(Label))}] removed [{string.Join(", ", removed.Select(Label))}] added [{string.Join(", ", added.Select(Label))}]");
 
-        // C-S1: the counts the product reports are what changed in Dataverse: rows written (their row version moved),
-        // removed or added, and no failures.
-        var written = Verb(sql) switch
+        // C-M2: the rows the text selects (the model's, not the product's) are exactly the rows written (row version
+        // moved, including rows whose value did not change), removed or added, and the reported count is their number.
+        var verb = Verb(sql);
+        var selected = verb == "INSERT"
+            ? want.Count(r => r.Id == Guid.Empty)
+            : before.Count(r => selects!(r));
+        var selectedIds = verb == "INSERT" ? new HashSet<Guid>() : before.Where(r => selects!(r)).Select(r => r.Id).ToHashSet();
+        var touchedIds = verb switch
         {
-            "DELETE" => removed.Count,
-            "INSERT" => added.Count,
-            _ => actual.Count(a => before.Any(b => b.Id == a.Id && b.Version != a.Version))
+            "DELETE" => removed.Select(r => r.Id).ToHashSet(),
+            "INSERT" => new HashSet<Guid>(),
+            _ => actual.Where(a => before.Any(b => b.Id == a.Id && b.Version != a.Version)).Select(a => a.Id).ToHashSet()
         };
+        var written = verb == "INSERT" ? added.Count : touchedIds.Count;
         var reported = result.DmlOutcome;
-        var countsMatch = reported is { FailedRows: 0 } && reported.AffectedRows == written;
+        var rowsMatch = verb == "INSERT" ? added.Count == selected : touchedIds.SetEquals(selectedIds);
+        var countsMatch = reported is { FailedRows: 0 } && reported.AffectedRows == selected;
 
         if (!same)
             Fail(sql, $"expected\n    {string.Join("\n    ", wantKeys.Except(actualKeys))}\n  actual\n    {string.Join("\n    ", actualKeys.Except(wantKeys))}");
+        else if (!rowsMatch)
+            Fail(sql, $"the text selects {selected} row(s) [{string.Join(", ", before.Where(r => selectedIds.Contains(r.Id)).Select(Label))}], " +
+                      $"but {written} were written [{string.Join(", ", before.Where(r => touchedIds.Contains(r.Id)).Select(Label))}]");
         else if (!countsMatch)
-            Fail(sql, $"reported {reported?.AffectedRows.ToString() ?? "no"} affected / {reported?.FailedRows.ToString() ?? "no"} failed, but {written} rows changed in Dataverse");
+            Fail(sql, $"reported {reported?.AffectedRows.ToString() ?? "no"} affected / {reported?.FailedRows.ToString() ?? "no"} failed, but the text selects {selected} row(s)");
         else
         {
             _passed++;
-            _output.WriteLine($"PASS {sql} (reported {reported!.AffectedRows} affected = {written} changed)");
+            _output.WriteLine($"PASS {sql} (selects {selected}, reported {reported!.AffectedRows} affected, {written} written)");
         }
     }
 
     private static string Verb(string sql)
         => Regex.Match(Regex.Replace(sql, "--[^\n]*", ""), @"\b(UPDATE|DELETE|INSERT)\b", RegexOptions.IgnoreCase).Value.ToUpperInvariant();
 
-    /// <summary>The statement must fail (a refusal, or a clean error such as divide by zero) and change nothing.</summary>
-    private async Task RefusedAsync(string sql, int? rowCap = null)
+    /// <summary>
+    /// The statement must fail with <paramref name="code"/> (a refusal before anything runs, or a clean error such as
+    /// divide by zero) and change nothing: every column and the row version of every row are compared.
+    /// </summary>
+    private async Task RefusedAsync(string sql, string code = Blocked, int? rowCap = null)
     {
+        if (_catalogue != null)
+        {
+            _catalogue.Add(new LiveCase(sql, Proves: false, ExpectedCode: code));
+            return;
+        }
         await ResetAsync();
         var before = (await ReadAsync()).Select(r => r.Key + "|" + r.Version).OrderBy(k => k, StringComparer.Ordinal).ToList();
         try
@@ -224,10 +326,14 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
             await _service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = new DmlSafetyOptions { IsConfirmed = true, RowCap = rowCap } });
             Fail(sql, "was expected to be refused but ran");
         }
-        catch (PpdsException ex)
+        catch (PpdsException ex) when (ex.ErrorCode == code)
         {
             _refused++;
             _output.WriteLine($"REFUSED ({ex.ErrorCode}) {sql}: {ex.UserMessage}");
+        }
+        catch (PpdsException ex)
+        {
+            Fail(sql, $"failed with {ex.ErrorCode}, expected {code}: {ex.UserMessage}");
         }
         catch (Exception ex)
         {
@@ -239,6 +345,9 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
         if (!before.SequenceEqual(after))
             Fail(sql, "a refused statement changed the table");
     }
+
+    private const string Blocked = ErrorCodes.Query.DmlBlocked;
+    private const string ExecutionFailed = ErrorCodes.Query.ExecutionFailed;
 
     private void Fail(string sql, string what)
     {
@@ -368,8 +477,19 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
     private async Task ResetAsync()
     {
         var current = await ReadAsync();
-        foreach (var extra in current.Where(c => !_ids.Contains(c.Id)))
-            await _client.DeleteAsync(_table, extra.Id);
+        // Rows a case added (up to 1,000 at once) are deleted in batches of 100.
+        foreach (var chunk in current.Where(c => !_ids.Contains(c.Id)).Chunk(100))
+        {
+            var batch = new ExecuteMultipleRequest
+            {
+                Settings = new ExecuteMultipleSettings { ContinueOnError = false, ReturnResponses = false },
+                Requests = new OrganizationRequestCollection()
+            };
+            batch.Requests.AddRange(chunk.Select(extra => new DeleteRequest { Target = new EntityReference(_table, extra.Id) }));
+            var response = (ExecuteMultipleResponse)await _client.ExecuteAsync(batch);
+            if (response.IsFaulted)
+                throw new InvalidOperationException("Removing the rows a case added failed: " + response.Responses.FirstOrDefault(r => r.Fault != null)?.Fault?.Message);
+        }
         var recreated = false;
         for (var i = 0; i < _ids.Length; i++)
         {
