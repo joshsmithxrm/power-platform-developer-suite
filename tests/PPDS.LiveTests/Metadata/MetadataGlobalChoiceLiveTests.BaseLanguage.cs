@@ -26,11 +26,12 @@ namespace PPDS.LiveTests.Metadata;
 public sealed partial class MetadataGlobalChoiceLiveTests
 {
     // D1: option, local option and global choice label updates, and clearing a description, are stored.
-    [MetadataLiveFact]
+    [MetadataLiveSkippableFact]
     public async Task BaseLanguage_D1_LabelUpdatesAreStored_NotSilentlyIgnored()
     {
         var (pool, service) = await ConnectAsync();
         var replayOld = await ReplaysTheOld1033ShapeAsync(pool);
+        Skip.IfNot(replayOld, OldShapeDoesNotApply);
         var name = NewName("bd1");
         await WithChoiceAsync(pool, name, "Base choice", new Label("Base description", Base), [new Label("Open", Base)], async () =>
         {
@@ -41,21 +42,35 @@ public sealed partial class MetadataGlobalChoiceLiveTests
                 var rawOutcome = await Record.ExceptionAsync(() => ExecuteAsync(pool, raw));
                 var afterRaw = (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single();
                 _output.WriteLine($"OBSERVED D1 before (raw UpdateOptionValue with a 1033 label, base {Base}): {Describe(rawOutcome)}; stored {string.Join(", ", Pairs(afterRaw.Label))}");
+                // The old failure: the 1033 label is never stored (accepted and ignored, or rejected with 0x80044195);
+                // either way the old command could not have changed the label.
+                Pairs(afterRaw.Label).Should().Equal(new[] { (Base, "Open") }, "D1 before: the old 1033 label write changes nothing");
+                if (rawOutcome is not null)
+                    FindFault(rawOutcome)?.ErrorCode.Should().Be(InvalidLanguageCode, "D1 before: a rejected 1033 label is the invalid-language fault");
+
+                var rawChoice = await RetrieveChoiceAsync(pool, name, asIfPublished: true);
+                rawChoice.DisplayName = new Label("Raw 1033 choice", 1033);
+                var rawChoiceOutcome = await Record.ExceptionAsync(() => ExecuteAsync(pool, new UpdateOptionSetRequest { OptionSet = rawChoice, MergeLabels = true, SolutionUniqueName = Solution }));
+                var choiceAfterRaw = await RetrieveChoiceAsync(pool, name, asIfPublished: true);
+                _output.WriteLine($"OBSERVED D1 before (raw UpdateOptionSet with a 1033 display name, base {Base}): {Describe(rawChoiceOutcome)}; stored {string.Join(", ", Pairs(choiceAfterRaw.DisplayName))}");
+                Pairs(choiceAfterRaw.DisplayName).Should().Equal(new[] { (Base, "Base choice") }, "D1 before: the old 1033 display-name write changes nothing");
+                if (rawChoiceOutcome is not null)
+                    FindFault(rawChoiceOutcome)?.ErrorCode.Should().Be(InvalidLanguageCode);
             }
 
             // Global option label.
             var result = await service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = name, Value = value, NewLabel = "Closed", SolutionUniqueName = Solution });
             var option = (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single();
             _output.WriteLine($"OBSERVED D1 after (service update-option --new-label Closed): stored {string.Join(", ", Pairs(option.Label))}; shown {ShownText(option.Label)}; notices {result.ValidationMessages.Count}");
-            Text(option.Label, Base).Should().Be("Closed", "the label is written in the base language and stored");
+            Pairs(option.Label).Should().Equal(new[] { (Base, "Closed") }, "the label is written in the base language only, and stored");
             result.ValidationMessages.Should().BeEmpty("the caller is shown the base-language label, which this write changed");
 
             // Global choice display name and description.
             result = await service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = Solution, Name = name, DisplayName = "Base choice renamed", Description = "Base description changed" });
             var choice = await RetrieveChoiceAsync(pool, name, asIfPublished: true);
             _output.WriteLine($"OBSERVED D1 after (service optionset update --display-name --description): display {string.Join(", ", Pairs(choice.DisplayName))}; description {string.Join(", ", Pairs(choice.Description))}; notices {result.ValidationMessages.Count}");
-            Text(choice.DisplayName, Base).Should().Be("Base choice renamed");
-            Text(choice.Description, Base).Should().Be("Base description changed");
+            Pairs(choice.DisplayName).Should().Equal(new[] { (Base, "Base choice renamed") });
+            Pairs(choice.Description).Should().Equal(new[] { (Base, "Base description changed") });
 
             // Clearing the description clears the base-language text only.
             await service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = Solution, Name = name, Description = "" });
@@ -70,16 +85,17 @@ public sealed partial class MetadataGlobalChoiceLiveTests
             await service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = entity, ColumnLogicalName = column, Value = local, NewLabel = "Closed", SolutionUniqueName = Solution });
             var option = (await RetrieveOptionsAsync(pool, entity, column)).Single();
             _output.WriteLine($"OBSERVED D1 after (service attribute update-option --new-label Closed): stored {string.Join(", ", Pairs(option.Label))}");
-            Text(option.Label, Base).Should().Be("Closed");
+            Pairs(option.Label).Should().Equal(new[] { (Base, "Closed") });
         });
     }
 
     // D2: table and column label updates write the base label, and give no notice claiming it was not changed.
-    [MetadataLiveFact]
+    [MetadataLiveSkippableFact]
     public async Task BaseLanguage_D2_TableAndColumnUpdates_WriteTheBaseLabel_WithoutAFalseNotice()
     {
         var (pool, service) = await ConnectAsync();
         var replayOld = await ReplaysTheOld1033ShapeAsync(pool);
+        Skip.IfNot(replayOld, OldShapeDoesNotApply);
         await WithTableAsync(pool, Labels("Open", null), async (entity, column) =>
         {
             if (replayOld)
@@ -90,6 +106,9 @@ public sealed partial class MetadataGlobalChoiceLiveTests
                 }));
                 var afterRaw = await RetrieveTableAsync(pool, entity);
                 _output.WriteLine($"OBSERVED D2 before (raw UpdateEntity with a 1033 display name, base {Base}): {Describe(raw)}; stored display {string.Join(", ", Pairs(afterRaw.DisplayName))}");
+                // The old failure: the 1033 text is accepted and stored as the base label, which the old notice called unchanged.
+                raw.Should().BeNull("D2 before: the old 1033 table label write is accepted");
+                Pairs(afterRaw.DisplayName).Should().Equal(new[] { (Base, "Raw 1033 table") }, "D2 before: the 1033 text replaced the base label");
             }
 
             var tableShownBefore = ShownText((await RetrieveTableAsync(pool, entity)).DisplayName);
@@ -97,16 +116,16 @@ public sealed partial class MetadataGlobalChoiceLiveTests
             var table = await RetrieveTableAsync(pool, entity);
             _output.WriteLine($"OBSERVED D2 after (service table update): shown before {tableShownBefore}; display {string.Join(", ", Pairs(table.DisplayName))}; description {string.Join(", ", Pairs(table.Description))}; shown after {ShownText(table.DisplayName)}; " +
                 $"notices {result.ValidationMessages.Count}{string.Concat(result.ValidationMessages.Select(m => $"; [{m.Field} {m.Rule}] {m.Message}"))}");
-            Text(table.DisplayName, Base).Should().Be("Base table renamed");
-            Text(table.Description, Base).Should().Be("Base table description");
+            Pairs(table.DisplayName).Should().Equal(new[] { (Base, "Base table renamed") });
+            Pairs(table.Description).Should().Equal(new[] { (Base, "Base table description") });
             AssertNoticesAreTrue(result, table.DisplayName, table.Description);
 
             var result2 = await service.UpdateColumnAsync(new UpdateColumnRequest { SolutionUniqueName = Solution, EntityLogicalName = entity, ColumnLogicalName = column, DisplayName = "Base pick renamed", Description = "Base pick description" });
             var after = await RetrieveColumnAsync(pool, entity, column);
             _output.WriteLine($"OBSERVED D2 after (service column update): display {string.Join(", ", Pairs(after.DisplayName))}; description {string.Join(", ", Pairs(after.Description))}; " +
                 $"notices {result2.ValidationMessages.Count}{string.Concat(result2.ValidationMessages.Select(m => $"; [{m.Field} {m.Rule}] {m.Message}"))}");
-            Text(after.DisplayName, Base).Should().Be("Base pick renamed");
-            Text(after.Description, Base).Should().Be("Base pick description");
+            Pairs(after.DisplayName).Should().Equal(new[] { (Base, "Base pick renamed") });
+            Pairs(after.Description).Should().Equal(new[] { (Base, "Base pick description") });
             AssertNoticesAreTrue(result2, after.DisplayName, after.Description);
 
             // Clearing a column and a table description clears the base text only.
@@ -118,11 +137,12 @@ public sealed partial class MetadataGlobalChoiceLiveTests
     }
 
     // D3: inserts and status-reason label updates succeed (no raw 0x80044195 "language code 1033 is not valid" fault).
-    [MetadataLiveFact]
+    [MetadataLiveSkippableFact]
     public async Task BaseLanguage_D3_InsertsAndStatusReasonUpdates_Succeed()
     {
         var (pool, service) = await ConnectAsync();
         var replayOld = await ReplaysTheOld1033ShapeAsync(pool);
+        Skip.IfNot(replayOld, OldShapeDoesNotApply);
         var name = NewName("bd3");
         await WithChoiceAsync(pool, name, "Base insert", new Label("Base insert", Base), [new Label("One", Base)], async () =>
         {
@@ -130,12 +150,13 @@ public sealed partial class MetadataGlobalChoiceLiveTests
             {
                 var raw = await ObserveAsync(pool, "InsertOptionValue with a 1033 label", new InsertOptionValueRequest { OptionSetName = name, Label = new Label("Raw 1033", 1033), SolutionUniqueName = Solution });
                 _output.WriteLine($"OBSERVED D3 before (raw {raw.Operation}, base {Base}): {raw.Outcome}");
+                raw.Code.Should().Be(InvalidLanguageCode, "D3 before: the old 1033 insert is rejected with the invalid-language fault");
             }
             var added = await service.AddOptionValueAsync(new AddOptionValueRequest { OptionSetName = name, Label = "Added", Description = "Added description", SolutionUniqueName = Solution });
             var option = (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single(o => o.Value == added);
             _output.WriteLine($"OBSERVED D3 after (service add-option): value {added}; label {string.Join(", ", Pairs(option.Label))}; description {string.Join(", ", Pairs(option.Description))}");
-            Text(option.Label, Base).Should().Be("Added");
-            Text(option.Description, Base).Should().Be("Added description");
+            Pairs(option.Label).Should().Equal(new[] { (Base, "Added") });
+            Pairs(option.Description).Should().Equal(new[] { (Base, "Added description") });
         });
 
         await WithTableAsync(pool, Labels("Open", null), async (entity, column) =>
@@ -147,25 +168,27 @@ public sealed partial class MetadataGlobalChoiceLiveTests
                 raw["EntityLogicalName"] = entity; raw["AttributeLogicalName"] = "statuscode";
                 var outcome = await ObserveAsync(pool, "status-reason UpdateOptionValue with a 1033 label", raw);
                 _output.WriteLine($"OBSERVED D3 before (raw {outcome.Operation}, base {Base}): {outcome.Outcome}");
+                outcome.Code.Should().Be(InvalidLanguageCode, "D3 before: the old 1033 status-reason update is rejected");
                 var insert = await ObserveAsync(pool, "InsertStatusValue with a 1033 label",
                     new InsertStatusValueRequest { EntityLogicalName = entity, AttributeLogicalName = "statuscode", StateCode = 0, Label = new Label("Raw 1033", 1033), SolutionUniqueName = Solution });
                 _output.WriteLine($"OBSERVED D3 before (raw {insert.Operation}, base {Base}): {insert.Outcome}");
+                insert.Code.Should().Be(InvalidLanguageCode, "D3 before: the old 1033 status-reason insert is rejected");
             }
 
             await service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = entity, Value = reason, NewLabel = "Live", SolutionUniqueName = Solution });
             var status = await ReasonAsync(pool, entity, reason);
             _output.WriteLine($"OBSERVED D3 after (service update-statusreason --new-label Live): label {string.Join(", ", Pairs(status.Label))}");
-            Text(status.Label, Base).Should().Be("Live");
+            Pairs(status.Label).Should().Equal(new[] { (Base, "Live") });
 
             var addedReason = await service.AddStatusReasonAsync(new AddStatusReasonRequest { EntityLogicalName = entity, Label = "Extra", StateCode = 0, SolutionUniqueName = Solution });
             var extra = await ReasonAsync(pool, entity, addedReason);
             _output.WriteLine($"OBSERVED D3 after (service add-statusreason): value {addedReason}; label {string.Join(", ", Pairs(extra.Label))}");
-            Text(extra.Label, Base).Should().Be("Extra");
+            Pairs(extra.Label).Should().Equal(new[] { (Base, "Extra") });
 
             var addedLocal = await service.AddColumnOptionAsync(new AddColumnOptionRequest { EntityLogicalName = entity, ColumnLogicalName = column, Label = "Second", SolutionUniqueName = Solution });
             var second = (await RetrieveOptionsAsync(pool, entity, column)).Single(o => o.Value == addedLocal);
             _output.WriteLine($"OBSERVED D3 after (service attribute add-option): value {addedLocal}; label {string.Join(", ", Pairs(second.Label))}");
-            Text(second.Label, Base).Should().Be("Second");
+            Pairs(second.Label).Should().Equal(new[] { (Base, "Second") });
         });
     }
 
@@ -195,7 +218,8 @@ public sealed partial class MetadataGlobalChoiceLiveTests
                 if (stored == text)
                     outcome.Should().BeNull($"Dataverse stored {Quote(text)} verbatim, so the read-back must confirm it");
                 else
-                    (outcome as PpdsException)?.ErrorCode.Should().Be(MetadataErrorCodes.WriteNotConfirmed, "a label not stored as sent is reported, never as applied");
+                    outcome.Should().BeOfType<PpdsException>("a label not stored as sent is reported, never as applied")
+                        .Which.ErrorCode.Should().Be(MetadataErrorCodes.WriteNotConfirmed);
             }
 
         });
@@ -207,12 +231,15 @@ public sealed partial class MetadataGlobalChoiceLiveTests
                 await ExecuteAsync(pool, new UpdateEntityRequest { Entity = new EntityMetadata { LogicalName = entity, DisplayName = new Label(text, Base) }, MergeLabels = true, SolutionUniqueName = Solution });
                 var stored = Text((await RetrieveTableAsync(pool, entity)).DisplayName, Base);
                 _output.WriteLine($"OBSERVED raw UpdateEntity display name {Quote(text)}: stored {Quote(stored)}");
+                // Reset first, so the service's own write (not the raw probe) is what the read-back can confirm.
+                await ExecuteAsync(pool, new UpdateEntityRequest { Entity = new EntityMetadata { LogicalName = entity, DisplayName = new Label("Reset", Base) }, MergeLabels = true, SolutionUniqueName = Solution });
                 var outcome = await Record.ExceptionAsync(() => service.UpdateTableAsync(new UpdateTableRequest { SolutionUniqueName = Solution, EntityLogicalName = entity, DisplayName = text }));
                 _output.WriteLine($"OBSERVED service table update --display-name {Quote(text)}: {Describe(outcome)}");
                 if (stored == text)
                     outcome.Should().BeNull($"Dataverse stored {Quote(text)} verbatim, so the read-back must confirm it");
                 else
-                    (outcome as PpdsException)?.ErrorCode.Should().Be(MetadataErrorCodes.WriteNotConfirmed);
+                    outcome.Should().BeOfType<PpdsException>("a label not stored as sent is reported, never as applied")
+                        .Which.ErrorCode.Should().Be(MetadataErrorCodes.WriteNotConfirmed);
             }
         });
     }
@@ -265,9 +292,16 @@ public sealed partial class MetadataGlobalChoiceLiveTests
             .Should().Be(ObjectDoesNotExist, "nothing was created");
     }
 
+    /// <summary>Dataverse's "the language code is not a valid language for this organization" fault (observed live for 1033 on a French-base organisation).</summary>
+    private const int InvalidLanguageCode = unchecked((int)0x80044195);
+
+    private const string OldShapeDoesNotApply = "This regression replays the old 1033 label requests, which only misbehave on an organisation whose base " +
+        "language is not 1033 and where 1033 is not provisioned. Here the base language is 1033 or 1033 is provisioned, so there is nothing to " +
+        "reproduce; the ordinary live tests cover base-language writes on this organisation.";
+
     /// <summary>
     /// True when the old request shape (a 1033 label) is worth replaying: the base language is not 1033 and 1033 is
-    /// not provisioned (the French Test case). Prints what was read.
+    /// not provisioned (the French-base organisation case). Prints what was read.
     /// </summary>
     private async Task<bool> ReplaysTheOld1033ShapeAsync(IDataverseConnectionPool pool)
     {

@@ -148,6 +148,9 @@ public sealed partial class MetadataGlobalChoiceLiveTests : LiveTestBase
         await WithChoiceAsync(pool, name, "Label test", new Label("Label test", Base), [Labels("Open", (second, "Ouvert"))], async () =>
         {
             var value = (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single().Value!.Value;
+            await SetSecondLanguageAsync("global option label",
+                () => ExecuteAsync(pool, new Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest { OptionSetName = name, Value = value, MergeLabels = true, SolutionUniqueName = Solution, Label = Labels("Open", (second, "Ouvert")) }),
+                async () => Text((await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single().Label, second) == "Ouvert");
             await service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = name, Value = value, NewLabel = "Closed", SolutionUniqueName = Solution });
             var option = (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single();
             Text(option.Label, Base).Should().Be("Closed");
@@ -185,28 +188,17 @@ public sealed partial class MetadataGlobalChoiceLiveTests : LiveTestBase
         await WithTableAsync(pool, Labels("Open", (second, "Ouvert")), async (entity, column) =>
         {
             var option = (await RetrieveOptionsAsync(pool, entity, column)).Single();
-            // What the create stored is recorded, not assumed: on 2026-11-17 one run kept the second-language label of a
-            // local option given at CreateAttribute and a later run did not. The label is then set explicitly (raw,
-            // MergeLabels), as for the status reason below, so the check never depends on create-time behaviour.
-            _output.WriteLine($"OBSERVED local option labels as created (as-if-published): {string.Join(", ", Pairs(option.Label))}; " +
-                $"published: {string.Join(", ", Pairs((await RetrieveOptionsAsync(pool, entity, column, asIfPublished: false)).Single().Label))}");
-            if (Text(option.Label, second) != "Ouvert")
-            {
-                var setLocal = new Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest { Value = option.Value!.Value, Label = Labels("Open", (second, "Ouvert")), MergeLabels = true, SolutionUniqueName = Solution };
-                setLocal["EntityLogicalName"] = entity;
-                setLocal["AttributeLogicalName"] = column;
-                await ExecuteAsync(pool, setLocal);
-                option = (await RetrieveOptionsAsync(pool, entity, column)).Single();
-                _output.WriteLine($"OBSERVED local option labels after a raw UpdateOptionValue with both languages (as-if-published): {string.Join(", ", Pairs(option.Label))}");
-                if (Text(option.Label, second) != "Ouvert")
-                {
-                    await ExecuteAsync(pool, new PublishXmlRequest { ParameterXml = $"<importexportxml><entities><entity>{entity}</entity></entities></importexportxml>" });
-                    option = (await RetrieveOptionsAsync(pool, entity, column)).Single();
-                    _output.WriteLine($"OBSERVED local option labels after PublishXml: as-if-published {string.Join(", ", Pairs(option.Label))}; " +
-                        $"published {string.Join(", ", Pairs((await RetrieveOptionsAsync(pool, entity, column, asIfPublished: false)).Single().Label))}");
-                }
-            }
-            Text(option.Label, second).Should().Be("Ouvert", "precondition: the local option carries a second-language label");
+            // What the create stored is recorded, not assumed. Dataverse was observed (2026-11-17) to drop the
+            // second-language labels of metadata writes for several minutes after a table create that followed a global
+            // choice publish and delete (this test after ChoiceUpdate_ChangesOnlyTheDisplayName_KeepsAnotherDescriptionEdit),
+            // so the label is set explicitly, retrying until it is stored.
+            _output.WriteLine($"OBSERVED local option labels as created (as-if-published): {string.Join(", ", Pairs(option.Label))}");
+            var setLocal = new Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest { Value = option.Value!.Value, Label = Labels("Open", (second, "Ouvert")), MergeLabels = true, SolutionUniqueName = Solution };
+            setLocal["EntityLogicalName"] = entity;
+            setLocal["AttributeLogicalName"] = column;
+            await SetSecondLanguageAsync("local option label", () => ExecuteAsync(pool, setLocal),
+                async () => Text((await RetrieveOptionsAsync(pool, entity, column)).Single().Label, second) == "Ouvert");
+            option = (await RetrieveOptionsAsync(pool, entity, column)).Single();
             await service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = entity, ColumnLogicalName = column, Value = option.Value, NewLabel = "Closed", SolutionUniqueName = Solution });
             option = (await RetrieveOptionsAsync(pool, entity, column)).Single();
             Text(option.Label, Base).Should().Be("Closed");
@@ -221,8 +213,8 @@ public sealed partial class MetadataGlobalChoiceLiveTests : LiveTestBase
             };
             setup["EntityLogicalName"] = entity;
             setup["AttributeLogicalName"] = "statuscode";
-            await ExecuteAsync(pool, setup);
-            Text((await ReasonAsync(pool, entity, reason.Value!.Value)).Label, second).Should().Be("Actif", "precondition: the status reason carries a second-language label");
+            await SetSecondLanguageAsync("status reason label", () => ExecuteAsync(pool, setup),
+                async () => Text((await ReasonAsync(pool, entity, reason.Value!.Value)).Label, second) == "Actif");
 
             await service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = entity, Value = reason.Value, NewLabel = "Live", SolutionUniqueName = Solution });
             var after = await ReasonAsync(pool, entity, reason.Value!.Value);
@@ -276,7 +268,7 @@ public sealed partial class MetadataGlobalChoiceLiveTests : LiveTestBase
         await WithTableAsync(pool, Labels("Open", null), async (entity, column) =>
         {
             // Give the table and the column explicit second-language labels first.
-            await ExecuteAsync(pool, new UpdateEntityRequest
+            await SetSecondLanguageAsync("table labels", () => ExecuteAsync(pool, new UpdateEntityRequest
             {
                 Entity = new EntityMetadata
                 {
@@ -286,17 +278,18 @@ public sealed partial class MetadataGlobalChoiceLiveTests : LiveTestBase
                     Description = Labels("Temporary metadata. Safe to delete.", (second, "Description " + second))
                 },
                 MergeLabels = true, SolutionUniqueName = Solution
-            });
-            await ExecuteAsync(pool, new UpdateAttributeRequest
+            }), async () => (await RetrieveTableAsync(pool, entity)) is var t && Text(t.DisplayName, second) == "Test " + second
+                && Text(t.DisplayCollectionName, second) == "Tests " + second && Text(t.Description, second) == "Description " + second);
+            await SetSecondLanguageAsync("column labels", () => ExecuteAsync(pool, new UpdateAttributeRequest
             {
                 EntityName = entity, MergeLabels = true, SolutionUniqueName = Solution,
                 Attribute = new PicklistAttributeMetadata
                 {
                     LogicalName = column, DisplayName = Labels("Pick", (second, "Choix " + second)), Description = Labels("Pick description", (second, "Choix description " + second))
                 }
-            });
+            }), async () => (await RetrieveColumnAsync(pool, entity, column)) is var c && Text(c.DisplayName, second) == "Choix " + second
+                && Text(c.Description, second) == "Choix description " + second);
             var table = await RetrieveTableAsync(pool, entity);
-            Text(table.DisplayName, second).Should().Be("Test " + second, "precondition: the table carries a second-language label");
 
             await service.UpdateTableAsync(new UpdateTableRequest
             {
@@ -428,6 +421,12 @@ public sealed partial class MetadataGlobalChoiceLiveTests : LiveTestBase
         var name = NewName("clm");
         await WithChoiceAsync(pool, name, "Clear test", Labels("English description", (second, "Description " + second)), [new Label("One", Base)], async () =>
         {
+            await SetSecondLanguageAsync("global choice description", async () =>
+            {
+                var set = await RetrieveChoiceAsync(pool, name, asIfPublished: true);
+                set.Description = Labels("English description", (second, "Description " + second));
+                await ExecuteAsync(pool, new UpdateOptionSetRequest { OptionSet = set, MergeLabels = true, SolutionUniqueName = Solution });
+            }, async () => Text((await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Description, second) == "Description " + second);
             var outcome = await ClearDescriptionAsync(pool, service, name);
             outcome.Should().BeOneOf("cleared", "kept", "rejected");
             Text((await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Description, second)
@@ -782,15 +781,25 @@ public sealed partial class MetadataGlobalChoiceLiveTests : LiveTestBase
             : await LiveTestProfileConnectionSource.CreateAsync(Configuration, "MetadataGlobalChoiceLiveTests", maxPoolSize: 3);
         _pool = LiveTestHelpers.CreateConnectionPool(new[] { _source });
         s_base = await LiveOrganizationLanguage.ReadBaseLanguageAsync(_pool);
-        _output.WriteLine($"Organisation base language: {s_base}.");
+        // Every test here assumes a caller whose UI language is the base language (the FrenchCaller_ tests switch it
+        // only after this check). A UI language left switched by an interrupted run would change what is shown and what
+        // a create stores, so stop before anything is created.
+        var (ui, _) = await CallerAndBaseLanguageAsync(_pool);
+        _output.WriteLine($"Organisation base language: {s_base}; calling user's UI language {ui} (0 = the base language).");
+        if (ui != 0 && ui != s_base)
+            throw new XunitException(
+                $"The calling user's UI language (usersettings.uilanguageid) is {ui}, not the organisation's base language {s_base}; these tests assume " +
+                "a base-language caller. A run of the FrenchCaller_ tests may have stopped before restoring it. Restore it by hand before re-running: " +
+                $"Settings > Personalization Settings > Languages > User Interface Language, set to the language with LCID {s_base}.");
         return (_pool, new DataverseMetadataAuthoringService(_pool, new SchemaValidator(), guard));
     }
 
     /// <summary>
     /// Creates an owned object, runs <paramref name="body"/>, then deletes the object. The name is printed before
-    /// creation. A create that fails without a Dataverse fault (e.g. a client timeout after the server committed) is
-    /// followed by a best-effort delete of that exact name. A failed delete fails the test with the leftover name,
-    /// unless the body already failed, in which case it is written to the output and the body's failure stands.
+    /// creation. A create that fails in any way (a client timeout after the server committed, a fault raised after the
+    /// object was created, or the service's WRITE_NOT_CONFIRMED after a committed create) is followed by a best-effort
+    /// delete of that exact name. A failed delete fails the test with the leftover name, unless the body already
+    /// failed, in which case it is written to the output and the body's failure stands.
     /// </summary>
     private async Task RunOwnedAsync(string what, Func<Task> create, Func<Task> delete, Func<Task> body)
     {
@@ -799,10 +808,10 @@ public sealed partial class MetadataGlobalChoiceLiveTests : LiveTestBase
         {
             await create();
         }
-        catch (Exception ex) when (FindFault(ex) is null)
+        catch (Exception ex)
         {
-            _output.WriteLine($"Create of {what} failed without a Dataverse fault ({ex.Message}); attempting a best-effort delete.");
-            try { await delete(); _output.WriteLine($"Best-effort delete of {what} succeeded."); }
+            _output.WriteLine($"Create of {what} failed ({Describe(ex)}); attempting a best-effort delete in case the server committed it.");
+            try { await delete(); _output.WriteLine($"Best-effort delete of {what} succeeded: it had been created."); }
             catch (Exception cleanup) { _output.WriteLine($"Best-effort delete of {what} failed (it may not exist; if it does, delete it manually): {cleanup.Message}"); }
             throw;
         }

@@ -16,8 +16,10 @@ namespace PPDS.LiveTests.Infrastructure;
 /// Guards: <see cref="PrepareAsync"/> records the original value and refuses to start when it is not the organisation's
 /// base language, so a value left behind by a crashed run is reported instead of being adopted as the "original".
 /// <see cref="RestoreAsync"/> writes the original value back (retrying a failed write), re-reads it and throws, naming
-/// the user and both values, when it is not back. The caller runs it in a finally block. A killed test process cannot
-/// restore; the scratch tool's <c>restore-ui-language 1033</c> is the manual safety net.
+/// both values, when it is not back. The caller runs it in a finally block. A killed test process cannot restore: the
+/// message <see cref="PrepareAsync"/> gives on the next run says which setting to put back and to what value (the
+/// calling user's UI language, Settings > Personalization Settings > Languages > User Interface Language, which is
+/// <c>usersettings.uilanguageid</c>, set back to the organisation's base language). Output never prints the user id.
 /// </para>
 /// </summary>
 public sealed class CallerUiLanguageSwitch
@@ -54,13 +56,12 @@ public sealed class CallerUiLanguageSwitch
         var current = await ReadUiLanguageAsync(client, userId);
         var org = (await client.RetrieveMultipleAsync(new QueryExpression("organization") { ColumnSet = new ColumnSet("languagecode") })).Entities.Single();
         var baseLanguage = org.GetAttributeValue<int>("languagecode");
-        log($"OBSERVED UI language before the switch: user {userId} usersettings.uilanguageid {current}; organisation base language {baseLanguage}.");
+        log($"OBSERVED UI language before the switch: calling user's usersettings.uilanguageid {current}; organisation base language {baseLanguage}.");
 
         if (current != baseLanguage)
             throw new XunitException(
-                $"Refusing to switch the UI language of user {userId}: usersettings.uilanguageid is {current}, not the organisation's base " +
-                $"language {baseLanguage}. A previous run may have stopped before restoring it. Check it with the scratch tool's " +
-                "'ui-language-status' and restore it by hand ('restore-ui-language 1033') before re-running.");
+                $"Refusing to switch the calling user's UI language: usersettings.uilanguageid is {current}, not the organisation's base " +
+                $"language {baseLanguage}. A previous run may have stopped before restoring it. {RestoreInstruction(baseLanguage)}");
         if (target == baseLanguage)
             throw new XunitException($"The target UI language {target} is the base language; nothing would be switched.");
         return new CallerUiLanguageSwitch(userId, current, target, baseLanguage, log);
@@ -74,7 +75,7 @@ public sealed class CallerUiLanguageSwitch
             var current = await ReadUiLanguageAsync(client, UserId);
             if (current != Original)
                 throw new XunitException(
-                    $"Refusing to switch: user {UserId} usersettings.uilanguageid changed from {Original} to {current} since it was read.");
+                    $"Refusing to switch: the calling user's usersettings.uilanguageid changed from {Original} to {current} since it was read.");
             // Marked before the write: a write that fails ambiguously (e.g. a timeout after the server committed)
             // must still be restored.
             _writeAttempted = true;
@@ -83,9 +84,9 @@ public sealed class CallerUiLanguageSwitch
 
         await using var reread = await pool.GetClientAsync();
         var now = await ReadUiLanguageAsync(reread, UserId);
-        _log($"OBSERVED UI language during the test: user {UserId} usersettings.uilanguageid {now} (switched from {Original}).");
+        _log($"OBSERVED UI language during the test: calling user's usersettings.uilanguageid {now} (switched from {Original}).");
         if (now != Target)
-            throw new XunitException($"The switch did not take: user {UserId} usersettings.uilanguageid reads {now}, expected {Target}.");
+            throw new XunitException($"The switch did not take: the calling user's usersettings.uilanguageid reads {now}, expected {Target}. {RestoreInstruction(Original)}");
     }
 
     /// <summary>
@@ -110,7 +111,7 @@ public sealed class CallerUiLanguageSwitch
                 catch (Exception ex)
                 {
                     last = ex;
-                    _log($"Restore attempt {attempt} for user {UserId} failed: {ex.GetType().Name}: {ex.Message}");
+                    _log($"Restore attempt {attempt} of the calling user's UI language failed: {ex.GetType().Name}: {ex.Message}");
                     await Task.Delay(TimeSpan.FromSeconds(5));
                 }
             }
@@ -128,16 +129,22 @@ public sealed class CallerUiLanguageSwitch
         catch (Exception ex)
         {
             throw new XunitException(
-                $"UI LANGUAGE NOT CONFIRMED RESTORED: could not re-read usersettings.uilanguageid of user {UserId} " +
-                $"(original {Original}, switched to {Target}): {ex.GetType().Name}: {ex.Message}. Check with 'ui-language-status'.");
+                $"UI LANGUAGE NOT CONFIRMED RESTORED: could not re-read the calling user's usersettings.uilanguageid " +
+                $"(original {Original}, switched to {Target}): {ex.GetType().Name}: {ex.Message}. {RestoreInstruction(Original)}");
         }
 
-        _log($"OBSERVED UI language after the restore: user {UserId} usersettings.uilanguageid {after} (original {Original}).");
+        _log($"OBSERVED UI language after the restore: calling user's usersettings.uilanguageid {after} (original {Original}).");
         if (after != Original)
             throw new XunitException(
-                $"UI LANGUAGE NOT RESTORED: user {UserId} usersettings.uilanguageid is {after}, expected the original {Original} " +
-                $"(the test switched it to {Target}). Restore it with the scratch tool: 'restore-ui-language {Original}'.");
+                $"UI LANGUAGE NOT RESTORED: the calling user's usersettings.uilanguageid is {after}, expected the original {Original} " +
+                $"(the test switched it to {Target}). {RestoreInstruction(Original)}");
     }
+
+    /// <summary>How to put the setting back by hand: which setting, and the value it had.</summary>
+    private static string RestoreInstruction(int value)
+        => $"Restore it by hand before re-running: sign in to the organisation as the same user and set Settings > Personalization " +
+           $"Settings > Languages > User Interface Language to the language with LCID {value} (the usersettings.uilanguageid column of " +
+           $"that user's usersettings row; {value} is the value it had before the test).";
 
     private static async Task<int> ReadUiLanguageAsync(IPooledClient client, Guid userId)
     {
@@ -146,7 +153,7 @@ public sealed class CallerUiLanguageSwitch
         query.Criteria.AddCondition("systemuserid", ConditionOperator.Equal, userId);
         var rows = (await client.RetrieveMultipleAsync(query)).Entities;
         if (rows.Count != 1 || rows[0].GetAttributeValue<Guid>("systemuserid") != userId)
-            throw new XunitException($"Expected exactly one usersettings row for user {userId}; found {rows.Count}.");
+            throw new XunitException($"Expected exactly one usersettings row for the calling user; found {rows.Count}.");
         return rows[0].GetAttributeValue<int>("uilanguageid");
     }
 
@@ -162,6 +169,6 @@ public sealed class CallerUiLanguageSwitch
     {
         var caller = ((WhoAmIResponse)await client.ExecuteAsync(new WhoAmIRequest())).UserId;
         if (caller != userId)
-            throw new XunitException($"Refusing: this connection is user {caller}, not the user {userId} whose UI language is being switched.");
+            throw new XunitException("Refusing: this connection signs in as a different user from the one whose UI language is being switched.");
     }
 }

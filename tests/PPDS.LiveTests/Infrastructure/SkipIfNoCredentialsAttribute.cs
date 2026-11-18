@@ -212,6 +212,45 @@ public sealed class MetadataLiveFactAttribute : FactAttribute
 }
 
 /// <summary>
+/// <see cref="MetadataLiveFactAttribute"/> for a test that can also decide at run time that it does not apply to the
+/// connected organisation (for example a regression that needs a base language other than 1033): it calls
+/// <c>Skip.If</c>/<c>Skip.IfNot</c> with a reason and is then reported as skipped with that reason, never as passed.
+/// </summary>
+public sealed class MetadataLiveSkippableFactAttribute : SkippableFactAttribute
+{
+    private static readonly LiveTestConfiguration Configuration = new();
+
+    /// <summary>
+    /// Initializes a new instance that skips when prerequisites are missing.
+    /// </summary>
+    public MetadataLiveSkippableFactAttribute()
+    {
+        Skip = MetadataLivePrerequisites.MissingReason(Configuration);
+    }
+}
+
+/// <summary>
+/// The opt-in test that pins Dataverse's second-language label window (MetadataSecondLanguageWindowLiveTests): needs the
+/// metadata live-test settings, PPDS_TEST_SECOND_LCID and PPDS_TEST_LABEL_WINDOW=1, and is meant to run in a test
+/// process of its own. Without them it is reported as skipped; it can also skip at run time with the reason.
+/// </summary>
+public sealed class MetadataLiveWindowFactAttribute : SkippableFactAttribute
+{
+    private static readonly LiveTestConfiguration Configuration = new();
+
+    /// <summary>
+    /// Initializes a new instance that skips when prerequisites are missing.
+    /// </summary>
+    public MetadataLiveWindowFactAttribute()
+    {
+        Skip = MetadataLivePrerequisites.MissingReason(Configuration)
+            ?? (MetadataLivePrerequisites.SecondLanguage is null ? "Requires PPDS_TEST_SECOND_LCID (a provisioned language other than the base language)." : null)
+            ?? (Environment.GetEnvironmentVariable("PPDS_TEST_LABEL_WINDOW")?.Trim() == "1" ? null
+                : "Opt-in (PPDS_TEST_LABEL_WINDOW=1): pins Dataverse's second-language label window; run it on its own so its table create is the first of the test process.");
+    }
+}
+
+/// <summary>
 /// <see cref="MetadataLiveFactAttribute"/> plus a second provisioned language: requires PPDS_TEST_SECOND_LCID, the
 /// LCID of a provisioned language other than the organisation's base language (checked at run time). Without it the test is reported as skipped,
 /// never as passed. The test fails with a clear message if that LCID is not actually provisioned.
