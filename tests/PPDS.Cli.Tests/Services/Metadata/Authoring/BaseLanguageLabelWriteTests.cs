@@ -500,7 +500,16 @@ public sealed class BaseLanguageLabelWriteTests
         {
             if (value is null || value is string || value.GetType().IsValueType || !seen.Add(value)) return;
             if (value is Label label) { found.Add(label); return; }
-            if (value is IEnumerable sequence) { foreach (var item in sequence) Walk(item); return; }
+            if (value is IEnumerable sequence)
+            {
+                foreach (var item in sequence)
+                {
+                    Walk(item);
+                }
+
+                return;
+            }
+
             if (value is not MetadataBase) return;
             foreach (var property in value.GetType().GetProperties().Where(p => p.CanRead && p.GetIndexParameters().Length == 0))
             {

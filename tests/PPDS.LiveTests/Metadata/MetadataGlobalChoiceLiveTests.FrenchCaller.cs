@@ -651,7 +651,7 @@ public sealed partial class MetadataGlobalChoiceLiveTests
         var fr = french.Lcid;
         data.GetProperty("validationMessages").EnumerateArray()
             .Select(m => (m.GetProperty("field").GetString(), m.GetProperty("rule").GetString(), m.GetProperty("message").GetString()))
-            .Should().BeEquivalentTo(expected.Select(e => ((string?)e.Field, (string?)MetadataLabelWriteResult.BaseLanguageLabelOnlyRule, (string?)EnglishOnlyMessage(e.Noun, fr, e.Shown))), what);
+            .Should().BeEquivalentTo(expected.Select(e => (e.Field, MetadataLabelWriteResult.BaseLanguageLabelOnlyRule, EnglishOnlyMessage(e.Noun, fr, e.Shown))), what);
     }
 
     /// <summary>Runs a metadata CLI command in-process on the real authoring service bound to the French-caller pool.</summary>
