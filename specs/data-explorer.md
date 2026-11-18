@@ -568,10 +568,10 @@ confirmation covers the whole text, every statement in the script. When the daem
 environment the request writes to, marks each one that is not the bound environment
 ("OTHER ENVIRONMENT"; a target without a URL is never the bound environment), each production
 one ("PRODUCTION / PROTECTED") and each with a missing or unknown type ("TYPE UNKNOWN, TREATED
-AS PROTECTED"), and its title counts the other environments. Without that field (today's daemon)
-the modal states that SQL naming another environment (`[LABEL].entity`) also writes there and
-that other named environments are not listed, because the daemon does not report them before
-execution. When the field is sent but empty or any entry is malformed, no entry is trusted and
+AS PROTECTED"), and its title counts the other environments. The daemon sends that field (and refuses writes to
+another environment before the prompt, so it lists the bound environment); a daemon that does not
+send it gets a modal that states that SQL naming another environment (`[LABEL].entity`) also
+writes there and that other named environments are not listed. When the field is sent but empty or any entry is malformed, no entry is trusted and
 the modal says the reported write targets could not be read and other named environments are
 not listed. The
 daemon's confirmation text is shown only when it is not the CLI's `--confirm` wording.
@@ -624,11 +624,12 @@ attempt starts unconfirmed and its modal says the earlier confirmed attempt may 
 applied.
 
 **Refusals.** `Query.DmlBlocked`, `Query.DmlRowCapExceeded`, `Safety.ShakedownActive` and
-`data.dmlBlocked` render as errors with the daemon's reason. With today's daemon only the
-no-WHERE block arrives before the prompt. Shakedown and the cross-environment policy are
-checked after planning, so they refuse the confirmed request, after "Execute Anyway". Today's
-daemon stops DML at the row cap without an error (`affected_rows` is the cap), so no row-cap
-refusal is shown; `Query.DmlRowCapExceeded` is handled for a daemon that raises it.
+`data.dmlBlocked` render as errors with the daemon's reason. The daemon refuses before the prompt: the no-WHERE
+block, the DML allowlist and the column checks, writes to another environment, and the hint and
+bypass checks (`specs/query.md`, "DML allowlist"). The row cap needs the rows, so it refuses the
+confirmed request with `Query.DmlRowCapExceeded` before anything changes; the shakedown guard
+refuses at execution. A confirmed request must carry the environment URL and the profile identity
+the user confirmed for; both surfaces send them.
 
 **Failed rows.** A daemon that reports DML outcomes sends `success: false` with `affectedRows`,
 `failedRows` and `dmlError`; these are read whenever present, and only they carry a reason.

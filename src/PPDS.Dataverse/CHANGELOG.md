@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Refreshed MSAL and its cache extensions from 4.90.1 to 4.92.0 (#1513).
 - **DML execution (`DmlExecuteNode`, #1698):** a statement over the row cap is refused before anything is written (`DmlRowCapExceededException`, `QueryErrorCode.DmlRowCapExceeded`) instead of writing the first rows; values are not written without column metadata or for a column missing from it (`DmlSafetyRefusalException`); a bulk write that is cancelled or reports fewer rows than it was given is recorded as interrupted (`DmlStatementOutcome.Interrupted`) instead of complete; per-statement outcomes are collected in `QueryPlanStatistics`; DML hints overlay the executor's configured bulk options (`IBulkOperationExecutor.ConfiguredOptions`, a default interface member, and `BulkOperationOptions.Clone`).
-- `CastConverter`: a number converted to `nvarchar(n)`/`nchar(n)` that does not fit is an overflow error (`varchar`/`char` of an integer gives `*`, as in T-SQL), and a value that does not fit `decimal(p, s)` is an overflow error; TRY_CAST/TRY_CONVERT return NULL for both (#1698).
+- `CastConverter`: a number converted to `nvarchar(n)`/`nchar(n)` that does not fit is an overflow error (`varchar`/`char` of an integer gives `*`, as in T-SQL), and a value that does not fit `decimal(p, s)` is an overflow error; TRY_CAST/TRY_CONVERT return NULL for both; a `decimal(p, s)` above 28 digits, which the engine cannot compute exactly, is a `NotSupportedException`, never NULL (#1698).
 
 ### Fixed
 
