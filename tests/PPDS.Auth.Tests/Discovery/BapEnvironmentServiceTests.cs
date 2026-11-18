@@ -21,7 +21,7 @@ public class BapEnvironmentServiceTests
     [Fact]
     public async Task DiscoverEnvironments_MapsJsonToDiscoveredEnvironments()
     {
-        var json = @"{ ""value"": [{ ""name"": ""env-id-1"", ""properties"": { ""displayName"": ""PPDS Demo - Dev"", ""azureRegion"": ""westus"", ""environmentSku"": ""Developer"", ""tenantId"": ""34502e2f-89bb-4550-8a28-1d734e433e88"", ""linkedEnvironmentMetadata"": { ""resourceId"": ""3a504f43-85d7-f011-95c7-000d3a5cc636"", ""friendlyName"": ""PPDS Demo - Dev"", ""uniqueName"": ""unq3a504f43"", ""domainName"": ""orgcabef92d"", ""version"": ""9.2.26033.179"", ""instanceUrl"": ""https://orgcabef92d.crm.dynamics.com/"", ""instanceState"": ""Ready"" } } }] }";
+        var json = @"{ ""value"": [{ ""name"": ""env-id-1"", ""properties"": { ""displayName"": ""Contoso Dev"", ""azureRegion"": ""westus"", ""environmentSku"": ""Developer"", ""tenantId"": ""00000000-0000-0000-0000-000000000002"", ""linkedEnvironmentMetadata"": { ""resourceId"": ""00000000-0000-0000-0000-000000000001"", ""friendlyName"": ""Contoso Dev"", ""uniqueName"": ""unq00000001"", ""domainName"": ""contoso"", ""version"": ""9.2.26033.179"", ""instanceUrl"": ""https://contoso.crm.dynamics.com/"", ""instanceState"": ""Ready"" } } }] }";
 
         using var client = CreateMockHttpClient(HttpStatusCode.OK, json);
         using var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
@@ -30,24 +30,24 @@ public class BapEnvironmentServiceTests
 
         result.Should().HaveCount(1);
         var env = result[0];
-        env.FriendlyName.Should().Be("PPDS Demo - Dev");
-        env.UniqueName.Should().Be("unq3a504f43");
-        env.ApiUrl.Should().Be("https://orgcabef92d.crm.dynamics.com/");
-        env.UrlName.Should().Be("orgcabef92d");
+        env.FriendlyName.Should().Be("Contoso Dev");
+        env.UniqueName.Should().Be("unq00000001");
+        env.ApiUrl.Should().Be("https://contoso.crm.dynamics.com/");
+        env.UrlName.Should().Be("contoso");
         env.EnvironmentId.Should().Be("env-id-1");
         env.Region.Should().Be("westus");
         env.State.Should().Be(0); // Ready
         env.OrganizationType.Should().Be(6); // Developer
         env.Version.Should().Be("9.2.26033.179");
-        env.Id.Should().Be(System.Guid.Parse("3a504f43-85d7-f011-95c7-000d3a5cc636"));
-        env.TenantId.Should().Be(System.Guid.Parse("34502e2f-89bb-4550-8a28-1d734e433e88"));
+        env.Id.Should().Be(System.Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        env.TenantId.Should().Be(System.Guid.Parse("00000000-0000-0000-0000-000000000002"));
     }
 
     [Fact]
     public async Task DiscoverEnvironments_SkipsNonDataverseEnvironments()
     {
         var json = @"{ ""value"": [
-            { ""name"": ""env-1"", ""properties"": { ""displayName"": ""With Dataverse"", ""azureRegion"": ""westus"", ""environmentSku"": ""Developer"", ""linkedEnvironmentMetadata"": { ""resourceId"": ""3a504f43-85d7-f011-95c7-000d3a5cc636"", ""friendlyName"": ""With Dataverse"", ""uniqueName"": ""unq1"", ""domainName"": ""org1"", ""instanceUrl"": ""https://org1.crm.dynamics.com/"", ""instanceState"": ""Ready"" } } },
+            { ""name"": ""env-1"", ""properties"": { ""displayName"": ""With Dataverse"", ""azureRegion"": ""westus"", ""environmentSku"": ""Developer"", ""linkedEnvironmentMetadata"": { ""resourceId"": ""00000000-0000-0000-0000-000000000001"", ""friendlyName"": ""With Dataverse"", ""uniqueName"": ""unq1"", ""domainName"": ""org1"", ""instanceUrl"": ""https://org1.crm.dynamics.com/"", ""instanceState"": ""Ready"" } } },
             { ""name"": ""env-2"", ""properties"": { ""displayName"": ""Default (no Dataverse)"", ""environmentSku"": ""Default"" } }
         ] }";
 
@@ -145,7 +145,7 @@ public class BapEnvironmentServiceTests
     [InlineData("Default", -1)]
     public async Task DiscoverEnvironments_MapsEnvironmentSku(string sku, int expectedOrgType)
     {
-        var json = $@"{{ ""value"": [{{ ""name"": ""env-1"", ""properties"": {{ ""displayName"": ""Test"", ""environmentSku"": ""{sku}"", ""linkedEnvironmentMetadata"": {{ ""resourceId"": ""3a504f43-85d7-f011-95c7-000d3a5cc636"", ""friendlyName"": ""Test"", ""uniqueName"": ""unq1"", ""domainName"": ""org1"", ""instanceUrl"": ""https://org1.crm.dynamics.com/"", ""instanceState"": ""Ready"" }} }} }}] }}";
+        var json = $@"{{ ""value"": [{{ ""name"": ""env-1"", ""properties"": {{ ""displayName"": ""Test"", ""environmentSku"": ""{sku}"", ""linkedEnvironmentMetadata"": {{ ""resourceId"": ""00000000-0000-0000-0000-000000000001"", ""friendlyName"": ""Test"", ""uniqueName"": ""unq1"", ""domainName"": ""org1"", ""instanceUrl"": ""https://org1.crm.dynamics.com/"", ""instanceState"": ""Ready"" }} }} }}] }}";
 
         using var client = CreateMockHttpClient(HttpStatusCode.OK, json);
         using var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
@@ -159,7 +159,7 @@ public class BapEnvironmentServiceTests
     [Fact]
     public async Task DiscoverEnvironments_MapsNonReadyState()
     {
-        var json = @"{ ""value"": [{ ""name"": ""env-1"", ""properties"": { ""displayName"": ""Test"", ""environmentSku"": ""Sandbox"", ""linkedEnvironmentMetadata"": { ""resourceId"": ""3a504f43-85d7-f011-95c7-000d3a5cc636"", ""friendlyName"": ""Test"", ""uniqueName"": ""unq1"", ""domainName"": ""org1"", ""instanceUrl"": ""https://org1.crm.dynamics.com/"", ""instanceState"": ""Provisioning"" } } }] }";
+        var json = @"{ ""value"": [{ ""name"": ""env-1"", ""properties"": { ""displayName"": ""Test"", ""environmentSku"": ""Sandbox"", ""linkedEnvironmentMetadata"": { ""resourceId"": ""00000000-0000-0000-0000-000000000001"", ""friendlyName"": ""Test"", ""uniqueName"": ""unq1"", ""domainName"": ""org1"", ""instanceUrl"": ""https://org1.crm.dynamics.com/"", ""instanceState"": ""Provisioning"" } } }] }";
 
         using var client = CreateMockHttpClient(HttpStatusCode.OK, json);
         using var service = new BapEnvironmentService(client, "https://api.bap.microsoft.com", _ => Task.FromResult("fake-token"));
@@ -174,7 +174,7 @@ public class BapEnvironmentServiceTests
     public async Task DiscoverEnvironments_ResultsOrderedByFriendlyName()
     {
         var json = @"{ ""value"": [
-            { ""name"": ""env-2"", ""properties"": { ""displayName"": ""Zebra"", ""environmentSku"": ""Sandbox"", ""linkedEnvironmentMetadata"": { ""resourceId"": ""3a504f43-85d7-f011-95c7-000d3a5cc636"", ""friendlyName"": ""Zebra"", ""uniqueName"": ""unq2"", ""domainName"": ""org2"", ""instanceUrl"": ""https://org2.crm.dynamics.com/"", ""instanceState"": ""Ready"" } } },
+            { ""name"": ""env-2"", ""properties"": { ""displayName"": ""Zebra"", ""environmentSku"": ""Sandbox"", ""linkedEnvironmentMetadata"": { ""resourceId"": ""00000000-0000-0000-0000-000000000001"", ""friendlyName"": ""Zebra"", ""uniqueName"": ""unq2"", ""domainName"": ""org2"", ""instanceUrl"": ""https://org2.crm.dynamics.com/"", ""instanceState"": ""Ready"" } } },
             { ""name"": ""env-1"", ""properties"": { ""displayName"": ""Alpha"", ""environmentSku"": ""Developer"", ""linkedEnvironmentMetadata"": { ""resourceId"": ""4b604f43-85d7-f011-95c7-000d3a5cc636"", ""friendlyName"": ""Alpha"", ""uniqueName"": ""unq1"", ""domainName"": ""org1"", ""instanceUrl"": ""https://org1.crm.dynamics.com/"", ""instanceState"": ""Ready"" } } }
         ] }";
 

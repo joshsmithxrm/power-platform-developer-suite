@@ -2,7 +2,7 @@
 
 **Scope:** Broad multi-surface validation of Extension, TUI, MCP, and CLI against
 live Dataverse, with parity comparison and architecture audit.
-**Environment:** `PPDS Demo - Dev` (only declared blast radius; in
+**Environment:** `<development organisation>` (only declared blast radius; in
 `.claude/settings.json` `safety.shakedown_safe_envs` allowlist).
 **Duration:** single continuous session, branch `verify/v1-shakedown`.
 **Conducted by:** Claude Opus 4.7 coordinating 5 Sonnet subagents (CLI, TUI, MCP,
@@ -20,7 +20,7 @@ worktree).
 
 ## Real mutations that occurred during this shakedown
 
-All against `PPDS Demo - Dev` (declared blast radius, documented here for
+All against `<development organisation>` (declared blast radius, documented here for
 transparency):
 
 1. `ppds_EnableFeatureX` environment variable flipped from unset (default
@@ -941,7 +941,7 @@ Called out explicitly so the gap is visible.
 - **Performance**: no load tests, no memory profiling, no concurrency stress.
   Not part of shakedown charter.
 - **Multi-env / multi-profile workflows**: single profile (PPDS) + single env
-  (PPDS Demo - Dev) used throughout. Profile-switching UX was exercised but
+  (<development organisation>) used throughout. Profile-switching UX was exercised but
   cross-env data operations were not.
 - **Sovereign clouds (GovHigh / GovDoD / China)**: Public cloud only.
   Related finding (M7) surfaced via audit.
@@ -950,7 +950,7 @@ Called out explicitly so the gap is visible.
   library consumer scenarios not exercised. Important because `feat/shakedown-
   guard` must explicitly preserve NuGet-consumer behavior.
 - **Plugin deploy / registration push**: All plugin tests were read-only.
-  No plugin was deployed against `PPDS Demo - Dev`. This is intentional
+  No plugin was deployed against `<development organisation>`. This is intentional
   given the blast radius — plugin deploys are mutation-heavy and the
   safety architecture is itself under repair.
 - **Data import / export / migration end-to-end**: `data export` smoke only;
@@ -1028,7 +1028,7 @@ improve the product and should be prioritized into the first post-v1 milestone.
 
 - **Sentinel**: still armed at `.claude/state/shakedown-active.json`.
   Phase 7 cleanup deletes it before this session closes.
-- **`ppds_EnableFeatureX`** in `PPDS Demo - Dev`: **still `true`**. User
+- **`ppds_EnableFeatureX`** in `<development organisation>`: **still `true`**. User
   elected to leave it (not material; feature flag not observed to have
   readers).
 - **Plugin traces**: the 100 deleted have been replaced by new ones

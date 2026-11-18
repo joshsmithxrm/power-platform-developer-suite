@@ -10,21 +10,21 @@ public sealed class EnvironmentInfo
 {
     /// <summary>
     /// Gets or sets the environment URL.
-    /// Example: https://orgcabef92d.crm.dynamics.com/
+    /// Example: https://contoso.crm.dynamics.com/
     /// </summary>
     [JsonPropertyName("url")]
     public string Url { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the display name (friendly name).
-    /// Example: PPDS Demo - Dev
+    /// Example: Contoso Dev
     /// </summary>
     [JsonPropertyName("displayName")]
     public string DisplayName { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the unique name.
-    /// Example: unq3a504f4385d7f01195c7000d3a5cc
+    /// Example: unq00000000000000000000000000000001
     /// </summary>
     [JsonPropertyName("uniqueName")]
     public string? UniqueName { get; set; }

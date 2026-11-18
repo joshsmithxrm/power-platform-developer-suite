@@ -24,7 +24,8 @@ namespace PPDS.LiveTests.Flows;
 [Collection("LiveDataverse")]
 public sealed class FlowBindingPreflightLiveTests(ITestOutputHelper output)
 {
-    private const string Target = "https://orgcabef92d.crm.dynamics.com";
+    // The only environment this gate may touch comes from an explicitly set variable; there is no default.
+    private static string Target => EnvironmentConfirmationService.NormalizeUrl(Required("PPDS_FLOW_BINDING_LIVE_URL"));
     private const string Run = "6d83b1f0";
     private const string Prefix = "pfl6d83";
     private const string Publisher = "PPDSFlowsBindingPublisher_" + Run;
@@ -38,7 +39,8 @@ public sealed class FlowBindingPreflightLiveTests(ITestOutputHelper output)
     [FlowBindingFixtureOptIn]
     public async Task CandidateCli_UnboundReference_BlocksWholeBatchWithoutStateWrites()
     {
-        EnvironmentConfirmationService.NormalizeUrl(Required("PPDS_FLOW_BINDING_LIVE_CONFIRM")).Should().Be(Target);
+        var target = Target;
+        EnvironmentConfirmationService.NormalizeUrl(Required("PPDS_FLOW_BINDING_LIVE_CONFIRM")).Should().Be(target);
         Required("PPDS_FLOW_BINDING_LIVE_RUN_ID").Should().Be(Run);
         var assembly = Required("PPDS_FLOW_BINDING_LIVE_CLI_ASSEMBLY");
         Path.IsPathFullyQualified(assembly).Should().BeTrue();
@@ -368,7 +370,8 @@ public sealed class FlowBindingFixtureOptInAttribute : FactAttribute
 {
     public FlowBindingFixtureOptInAttribute()
     {
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PPDS_FLOW_BINDING_LIVE_CONFIRM")))
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PPDS_FLOW_BINDING_LIVE_CONFIRM")) ||
+            string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PPDS_FLOW_BINDING_LIVE_URL")))
             Skip = "Requires separate approval of the unbound-reference inventory; see Fixtures/Flows/binding-amendment.md.";
     }
 }
