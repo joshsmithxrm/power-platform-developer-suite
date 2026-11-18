@@ -280,19 +280,30 @@ public sealed class BaseLanguageLabelWriteTests
     };
 
     [Theory]
-    [InlineData("update-table")]
-    [InlineData("update-column")]
-    [InlineData("update-choice")]
     [InlineData("update-option")]
     [InlineData("update-column-option")]
     [Trait("AC", "AC-145")]
-    public async Task DryRun_ReturnsTheSameNotices_AndWritesNothing(string path)
+    public async Task OptionDryRun_ReadsTheTarget_ReturnsTheSameNotices_AndWritesNothing(string path)
     {
         var world = new World(French, translation: English, callerLanguage: English) { DryRun = true };
         var result = await world.RunNoticeAsync(path, "Nouveau");
         Assert.Single(result.ValidationMessages);
         Assert.Empty(world.Writes);
         Assert.Empty(world.ReadBacks);
+    }
+
+    [Theory]
+    [InlineData("update-table")]
+    [InlineData("update-column")]
+    [InlineData("update-choice")]
+    [Trait("AC", "AC-145")]
+    public async Task InputOnlyDryRun_ReadsNothing_AndGivesNoNotice(string path)
+    {
+        // Table, column and choice update dry-runs are input-only (MetadataDryRunScope.Inputs; AC-143 for the choice
+        // name): computing a notice would need a read the preview says was not made.
+        var world = new World(French, translation: English, callerLanguage: English) { DryRun = true };
+        Assert.Empty((await world.RunNoticeAsync(path, "Nouveau")).ValidationMessages);
+        Assert.Empty(world.All);
     }
 
     [Fact]

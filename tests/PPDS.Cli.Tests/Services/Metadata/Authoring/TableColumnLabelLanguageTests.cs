@@ -124,29 +124,20 @@ public sealed class TableColumnLabelLanguageTests
 
     [Fact]
     [Trait("AC", "AC-147")]
-    public async Task DryRuns_ReturnTheSameNotices_AndWriteNothing()
+    public async Task DryRuns_ReturnNoNotices_AndSendNothing()
     {
-        // Every label-writing dry-run reads what the update would read and returns the same notices; it writes nothing.
+        // Table and column update dry-runs are input-only (their documented scope): they read nothing, so they give
+        // no notice, with or without a requested label.
         var f = new Fixture(userLanguage: 1036);
-        var table = await f.Service.UpdateTableAsync(new UpdateTableRequest
+        Assert.Same(MetadataLabelWriteResult.None, await f.Service.UpdateTableAsync(new UpdateTableRequest
         {
             SolutionUniqueName = "Sol", EntityLogicalName = Table, DisplayName = "Customer", DryRun = true
-        });
-        Assert.Equal("DisplayName", Assert.Single(table.ValidationMessages).Field);
-        var column = await f.Service.UpdateColumnAsync(new UpdateColumnRequest
+        }));
+        Assert.Same(MetadataLabelWriteResult.None, await f.Service.UpdateColumnAsync(new UpdateColumnRequest
         {
             SolutionUniqueName = "Sol", EntityLogicalName = Table, ColumnLogicalName = Column, DisplayName = "Name", DryRun = true
-        });
-        Assert.Equal("DisplayName", Assert.Single(column.ValidationMessages).Field);
-        Assert.All(f.Requests, r => Assert.True(r is RetrieveEntityRequest or RetrieveAttributeRequest, r.RequestName));
-
-        // Without a requested label a dry-run reads nothing.
-        var quiet = new Fixture(userLanguage: 1036);
-        Assert.Same(MetadataLabelWriteResult.None, await quiet.Service.UpdateTableAsync(new UpdateTableRequest
-        {
-            SolutionUniqueName = "Sol", EntityLogicalName = Table, HasNotes = true, DryRun = true
         }));
-        Assert.Empty(quiet.Requests);
+        Assert.Empty(f.Requests);
     }
 
     private static (int, string) Single(Label label)

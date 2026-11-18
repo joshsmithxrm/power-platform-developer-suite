@@ -293,18 +293,16 @@ public sealed class PrimaryIdLabelUpdateTests : IDisposable
     }
 
     [Fact]
-    public async Task DryRun_ReadsTheShownLabels_AndWritesNothing()
+    public async Task DryRun_ValidatesInputsWithoutMetadata()
     {
-        // A label dry-run reads the column (for the notices, as the update would) and writes nothing.
         var request = NewRequest("New", publish: true);
         request.DryRun = true;
-        request.MaxLength = 0; // The target's type is not validated in dry-run.
+        request.MaxLength = 0; // The target's type is unknown in dry-run.
         await UpdateAsync(request);
-        Assert.IsType<RetrieveAttributeRequest>(Assert.Single(_requests));
         request.SolutionUniqueName = " ";
         var error = await Assert.ThrowsAsync<MetadataValidationException>(() => UpdateAsync(request));
         Assert.Equal(MetadataErrorCodes.MissingRequiredField, error.ErrorCode);
-        Assert.Single(_requests); // validation fails before any read
+        _pool.VerifyNoOtherCalls();
         _cache.VerifyNoOtherCalls();
     }
 

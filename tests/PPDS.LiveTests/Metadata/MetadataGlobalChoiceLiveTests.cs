@@ -188,7 +188,8 @@ public sealed partial class MetadataGlobalChoiceLiveTests : LiveTestBase
             // What the create stored is recorded, not assumed: on 2026-11-17 one run kept the second-language label of a
             // local option given at CreateAttribute and a later run did not. The label is then set explicitly (raw,
             // MergeLabels), as for the status reason below, so the check never depends on create-time behaviour.
-            _output.WriteLine($"OBSERVED local option labels as created: {string.Join(", ", Pairs(option.Label))}");
+            _output.WriteLine($"OBSERVED local option labels as created (as-if-published): {string.Join(", ", Pairs(option.Label))}; " +
+                $"published: {string.Join(", ", Pairs((await RetrieveOptionsAsync(pool, entity, column, asIfPublished: false)).Single().Label))}");
             if (Text(option.Label, second) != "Ouvert")
             {
                 var setLocal = new Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest { Value = option.Value!.Value, Label = Labels("Open", (second, "Ouvert")), MergeLabels = true, SolutionUniqueName = Solution };
@@ -196,6 +197,14 @@ public sealed partial class MetadataGlobalChoiceLiveTests : LiveTestBase
                 setLocal["AttributeLogicalName"] = column;
                 await ExecuteAsync(pool, setLocal);
                 option = (await RetrieveOptionsAsync(pool, entity, column)).Single();
+                _output.WriteLine($"OBSERVED local option labels after a raw UpdateOptionValue with both languages (as-if-published): {string.Join(", ", Pairs(option.Label))}");
+                if (Text(option.Label, second) != "Ouvert")
+                {
+                    await ExecuteAsync(pool, new PublishXmlRequest { ParameterXml = $"<importexportxml><entities><entity>{entity}</entity></entities></importexportxml>" });
+                    option = (await RetrieveOptionsAsync(pool, entity, column)).Single();
+                    _output.WriteLine($"OBSERVED local option labels after PublishXml: as-if-published {string.Join(", ", Pairs(option.Label))}; " +
+                        $"published {string.Join(", ", Pairs((await RetrieveOptionsAsync(pool, entity, column, asIfPublished: false)).Single().Label))}");
+                }
             }
             Text(option.Label, second).Should().Be("Ouvert", "precondition: the local option carries a second-language label");
             await service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = entity, ColumnLogicalName = column, Value = option.Value, NewLabel = "Closed", SolutionUniqueName = Solution });

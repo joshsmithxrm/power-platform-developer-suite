@@ -236,7 +236,7 @@ public class MetadataAuthoringServiceTests
     }
 
     [Fact]
-    public async Task UpdateTableAsync_DryRun_ReadsTheLabels_AndWritesNothing()
+    public async Task UpdateTableAsync_DryRun_DoesNotCallSdk()
     {
         var request = new UpdateTableRequest
         {
@@ -248,9 +248,7 @@ public class MetadataAuthoringServiceTests
 
         await _service.UpdateTableAsync(request);
 
-        // A label dry-run reads the shown labels (for the notices) and writes nothing.
-        _client.Verify(c => c.ExecuteAsync(It.IsAny<RetrieveEntityRequest>(), It.IsAny<CancellationToken>()), Times.Once);
-        _client.Verify(c => c.ExecuteAsync(It.IsAny<UpdateEntityRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _client.Verify(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

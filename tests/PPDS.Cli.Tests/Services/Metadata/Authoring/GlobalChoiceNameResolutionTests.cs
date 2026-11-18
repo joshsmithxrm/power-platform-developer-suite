@@ -369,8 +369,7 @@ public sealed class GlobalChoiceNameResolutionTests
     {
         using var f = new GlobalChoiceServerFake();
         if (operation == "choice-update")
-            // A choice-update dry-run without a requested label reads nothing (a label dry-run reads the choice for its notices).
-            await f.Service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = "Sol", Name = Typed, DryRun = true }, ct: f.Token);
+            await f.Service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = "Sol", Name = Typed, DisplayName = "X", DryRun = true }, ct: f.Token);
         else
             Assert.Equal(0, await f.Service.AddOptionValueAsync(new AddOptionValueRequest { OptionSetName = Typed, Label = "New", DryRun = true }, f.Token));
         Assert.Empty(f.Requests);

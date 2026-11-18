@@ -200,6 +200,14 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _validator.ValidateRequiredString(request.SolutionUniqueName, "SolutionUniqueName");
         _validator.ValidateRequiredString(request.EntityLogicalName, "EntityLogicalName");
 
+        // A dry-run is input-only (its documented scope, MetadataDryRunScope.Inputs): it reads nothing, so it neither
+        // checks that the table exists nor computes notices.
+        if (request.DryRun)
+        {
+            _logger?.LogInformation("Dry-run: UpdateTable {Entity} validated successfully", request.EntityLogicalName);
+            return MetadataLabelWriteResult.None;
+        }
+
         // Labels are written in the organisation's base language only. The table's current labels are read (only when
         // a label is requested) so the update can say when the label Dataverse shows the caller is a stored translation
         // the write leaves unchanged; the written labels are then read back.
@@ -215,14 +223,6 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
                 ("DisplayName", "display name", request.DisplayName, existing.DisplayName),
                 ("PluralDisplayName", "plural name", request.PluralDisplayName, existing.DisplayCollectionName),
                 ("Description", "description", request.Description, existing.Description));
-        }
-
-        // A dry-run reads what the update would read (the shown labels, when a label is requested) and returns the
-        // same notices, but writes nothing.
-        if (request.DryRun)
-        {
-            _logger?.LogInformation("Dry-run: UpdateTable {Entity} validated successfully", request.EntityLogicalName);
-            return notices;
         }
 
         reporter?.ReportPhase("Updating table", request.EntityLogicalName);
@@ -466,8 +466,9 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _validator.ValidateRequiredString(request.ColumnLogicalName, "ColumnLogicalName");
         ct.ThrowIfCancellationRequested();
 
+        // A dry-run is input-only (MetadataDryRunScope.Inputs): it reads nothing and computes no notices.
         var columnLabelsRequested = request.DisplayName != null || request.Description != null;
-        if (request.DryRun && !columnLabelsRequested)
+        if (request.DryRun)
         {
             _logger?.LogInformation("Dry-run: UpdateColumn {Column} on {Entity} validated",
                 request.ColumnLogicalName, request.EntityLogicalName);
@@ -490,14 +491,6 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         var notices = BaseLanguageNotices(lcid,
             ("DisplayName", "display name", request.DisplayName, existingAttr.DisplayName),
             ("Description", "description", request.Description, existingAttr.Description));
-        // A dry-run with a requested label reads the column as the update would and returns the same notices, but
-        // writes nothing.
-        if (request.DryRun)
-        {
-            _logger?.LogInformation("Dry-run: UpdateColumn {Column} on {Entity} validated",
-                request.ColumnLogicalName, request.EntityLogicalName);
-            return notices;
-        }
         if (IsFiniteLabelOnlyColumn(existingAttr))
         {
             await UpdateFiniteColumnLabelsAsync(request, existingAttr, lcid, reporter, ct).ConfigureAwait(false);
@@ -960,7 +953,9 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _validator.ValidateRequiredString(request.SolutionUniqueName, "SolutionUniqueName");
         _validator.ValidateRequiredString(request.Name, "Name");
 
-        if (request.DryRun && request.DisplayName == null && request.Description == null)
+        // A dry-run is input-only (MetadataDryRunScope.Inputs, globalChoiceNameChecked=false, AC-143): it does not read
+        // the choice, so it neither resolves the name nor computes notices.
+        if (request.DryRun)
         {
             _logger?.LogInformation("Dry-run: UpdateGlobalChoice {Name} validated", request.Name);
             return MetadataLabelWriteResult.None;
@@ -981,14 +976,6 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         var notices = BaseLanguageNotices(lcid,
             ("DisplayName", "display name", request.DisplayName, existingOs.DisplayName),
             ("Description", "description", request.Description, existingOs.Description));
-
-        // A dry-run with a requested label reads the choice as the update would and returns the same notices, but
-        // writes nothing.
-        if (request.DryRun)
-        {
-            _logger?.LogInformation("Dry-run: UpdateGlobalChoice {Name} validated", request.Name);
-            return notices;
-        }
 
         if (request.DisplayName != null)
             existingOs.DisplayName = new Label(request.DisplayName, lcid);

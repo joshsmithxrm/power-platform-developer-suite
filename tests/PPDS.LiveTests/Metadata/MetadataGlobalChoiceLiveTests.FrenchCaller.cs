@@ -261,20 +261,20 @@ public sealed partial class MetadataGlobalChoiceLiveTests
             ("NewLabel", "label", "Ouvert"));
         (await OptionPairs(scene.Open)).Should().BeEquivalentTo(before, "a CLI dry-run writes nothing");
 
-        // Table, column and choice dry-runs read the target like the update does and return the same notices
-        // (consistent with the option dry-runs above, AC-145); they write nothing.
+        // Table, column and choice update dry-runs are input-only (their documented scope): they read nothing, so they
+        // return no notices (AC-145, AC-147) and write nothing. Option dry-runs (above) read the target and do.
         var tableBefore = await ReadTableAsync(pool, scene.Entity, asIfPublished: true);
         result = await service.UpdateTableAsync(new UpdateTableRequest { SolutionUniqueName = Solution, EntityLogicalName = scene.Entity, DisplayName = "Renamed", DryRun = true });
-        ExpectNotices("service table update --dry-run", result, ("DisplayName", "display name", "Test FR"));
+        ExpectNotices("service table update --dry-run", result);
         Pairs((await ReadTableAsync(pool, scene.Entity, asIfPublished: true)).DisplayName).Should().BeEquivalentTo(Pairs(tableBefore.DisplayName), "a dry-run writes nothing");
         var columnBefore = await ReadColumnAsync(pool, scene.Entity, scene.Column, asIfPublished: true);
         result = await service.UpdateColumnAsync(new UpdateColumnRequest { SolutionUniqueName = Solution, EntityLogicalName = scene.Entity, ColumnLogicalName = scene.Column, DisplayName = "Renamed", DryRun = true });
-        ExpectNotices("service column update --dry-run", result, ("DisplayName", "display name", "Choix FR"));
+        ExpectNotices("service column update --dry-run", result);
         Pairs((await ReadColumnAsync(pool, scene.Entity, scene.Column, asIfPublished: true)).DisplayName).Should().BeEquivalentTo(Pairs(columnBefore.DisplayName), "a dry-run writes nothing");
 
         var choiceBefore = Pairs((await RetrieveChoiceAsync(pool, scene.Choice, asIfPublished: true)).DisplayName);
         result = await service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = Solution, Name = scene.Choice, DisplayName = "Renamed", DryRun = true });
-        ExpectNotices("service optionset update --dry-run", result, ("DisplayName", "display name", "Choix FR"));
+        ExpectNotices("service optionset update --dry-run", result);
         Pairs((await RetrieveChoiceAsync(pool, scene.Choice, asIfPublished: true)).DisplayName).Should().BeEquivalentTo(choiceBefore, "a dry-run writes nothing");
 
         // Case resolution: a mis-cased name resolves to the stored one, with the same notices.

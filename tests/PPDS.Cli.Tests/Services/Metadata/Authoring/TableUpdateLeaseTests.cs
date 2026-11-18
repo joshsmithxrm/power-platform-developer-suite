@@ -285,15 +285,7 @@ public sealed partial class TableUpdateLeaseTests(ITestOutputHelper output)
         if (scenario == "missing-entity") h.Request.EntityLogicalName = "";
         var operation = scenario == "null" ? h.Service.UpdateTableAsync(null!, h.Reporter, h.Token) : h.Invoke();
         var error = await Record.ExceptionAsync(() => operation);
-        if (scenario == "dry-run")
-        {
-            // A label dry-run reads the shown labels (for the notices) on one lease and writes nothing.
-            Assert.Null(error);
-            Assert.Equal(new[] { "read" }, h.SuccessfulSdk);
-            Assert.Empty(h.Cache);
-            h.AssertReturned();
-            return;
-        }
+        if (scenario == "dry-run") Assert.Null(error);
         else if (scenario == "guard") Assert.Equal(ErrorCodes.Safety.ShakedownActive, Assert.IsType<PpdsException>(error).ErrorCode);
         else if (scenario == "null") Assert.IsType<ArgumentNullException>(error);
         else Assert.Equal(MetadataErrorCodes.MissingRequiredField, Assert.IsType<MetadataValidationException>(error).ErrorCode);

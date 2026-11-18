@@ -345,18 +345,12 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
     [InlineData(false)]
     [InlineData(true)]
     [Trait("AC", "AC-129")]
-    public async Task GuardAndDryRun_DoNotWrite(bool dryRun)
+    public async Task GuardAndDryRun_DoNotReadMetadata(bool dryRun)
     {
         using var h = new ColumnLabelHarness("state", output, activeGuard: !dryRun);
         var request = Request("display", publish: true); request.DryRun = dryRun; request.MaxLength = 0;
-        if (dryRun)
-        {
-            // A dry-run with a requested label reads the column as the update would (for the notices) and writes nothing.
-            await h.UpdateAsync(request);
-            h.AssertNoMutation(attributeReadOnly: true);
-            return;
-        }
-        Assert.Equal(ErrorCodes.Safety.ShakedownActive, (await Assert.ThrowsAsync<PpdsException>(() => h.UpdateAsync(request))).ErrorCode);
+        if (dryRun) await h.UpdateAsync(request);
+        else Assert.Equal(ErrorCodes.Safety.ShakedownActive, (await Assert.ThrowsAsync<PpdsException>(() => h.UpdateAsync(request))).ErrorCode);
         Assert.Empty(h.Requests); Assert.Equal(0, h.Checkouts); Assert.Equal(0, h.CacheInvalidations);
     }
 
