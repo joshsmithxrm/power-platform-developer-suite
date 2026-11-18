@@ -21,9 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Refreshed MSAL and its cache extensions from 4.90.1 to 4.92.0 (#1513).
+- **DML execution (`DmlExecuteNode`, #1698):** a statement over the row cap is refused before anything is written (`DmlRowCapExceededException`, `QueryErrorCode.DmlRowCapExceeded`) instead of writing the first rows; values are not written without column metadata or for a column missing from it (`DmlSafetyRefusalException`); a bulk write that is cancelled or reports fewer rows than it was given is recorded as interrupted (`DmlStatementOutcome.Interrupted`) instead of complete; per-statement outcomes are collected in `QueryPlanStatistics`; DML hints overlay the executor's configured bulk options (`IBulkOperationExecutor.ConfiguredOptions`, a default interface member, and `BulkOperationOptions.Clone`).
+- `CastConverter`: a number converted to `nvarchar(n)`/`nchar(n)` that does not fit is an overflow error (`varchar`/`char` of an integer gives `*`, as in T-SQL), and a value that does not fit `decimal(p, s)` is an overflow error; TRY_CAST/TRY_CONVERT return NULL for both (#1698).
 
 ### Fixed
 
+- `DmlValueCoercer` sends a date/time literal with `Z` or an offset as that UTC instant (an offset was converted to the machine's local time and stored hours off) and converts numbers to text with the invariant culture; out-of-range numeric conversions fail with a type-mismatch error instead of a raw exception. LEN, TRIM, LTRIM and RTRIM remove and ignore spaces only, as in T-SQL (#1698).
 - `DataverseMetadataQueryService.GetOptionSetAsync` finds a global choice whose stored name differs from the requested name only by case. The exact name is always tried first. Only when Dataverse reports that option set as not found does the service list global choices and retry once under a single case-insensitive match. Other faults, no match and several matches rethrow the original error unchanged. Recognition checks the Dataverse fault code `0x80040217` first and falls back to the English server message. The code treats `0x80040217` as an assumption for this case: #1604 reports observing it on one English-only organisation, and behaviour on a non-English organisation is unverified (#1535, #1604).
 - The `MetadataErrorCodes.SdkOperationFailed` documentation no longer implies that nothing was written (#1604).
 
