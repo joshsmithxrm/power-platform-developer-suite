@@ -1718,9 +1718,6 @@ public sealed class FetchXmlGenerator
     }
 
     /// <summary>
-    /// Normalizes an entity or attribute name to lowercase.
-    /// </summary>
-    /// <summary>
     /// Entity, attribute and link names are written into FetchXML as attribute values. Dataverse logical names are
     /// letters, digits and underscores (a dot separates an alias), so anything else is refused rather than written:
     /// a bracketed name could otherwise close the attribute and inject conditions.

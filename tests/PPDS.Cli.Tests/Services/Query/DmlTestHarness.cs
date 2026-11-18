@@ -214,16 +214,17 @@ internal sealed class DmlTestHarness
         var requested = entity.Elements("attribute")
             .Select(a => (Name: (string)a.Attribute("name")!, Key: (string?)a.Attribute("alias") ?? (string)a.Attribute("name")!))
             .ToList();
+        var returned = records
+            .Select(r => (IReadOnlyDictionary<string, QueryValue>)requested
+                .ToDictionary(q => q.Key, q => r.TryGetValue(q.Name, out var v) ? v : QueryValue.Null, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
         return new QueryResult
         {
             PageNumber = result.PageNumber,
             EntityLogicalName = result.EntityLogicalName,
             Columns = requested.Select(r => new QueryColumn { LogicalName = r.Key }).ToArray(),
-            Records = records
-                .Select(r => (IReadOnlyDictionary<string, QueryValue>)requested
-                    .ToDictionary(q => q.Key, q => r.TryGetValue(q.Name, out var v) ? v : QueryValue.Null, StringComparer.OrdinalIgnoreCase))
-                .ToArray(),
-            Count = result.Count,
+            Records = returned,
+            Count = returned.Length,
             MoreRecords = result.MoreRecords,
             PagingCookie = result.PagingCookie
         };

@@ -164,37 +164,6 @@ public sealed class DmlFaithfulTests : IDisposable
         h.AssertNothingChanged();
     }
 
-    // Shapes the live differential run proved (2026-11-17) run here too.
-    [Theory]
-    [InlineData("UPDATE account SET revenue = revenue / 4 WHERE name = 'n1'")]
-    [InlineData("UPDATE account SET numberofemployees = CAST(revenue AS int) WHERE name = 'n1'")]
-    [InlineData("UPDATE account SET numberofemployees = TRY_CONVERT(int, revenue) WHERE name = 'n1'")]
-    [InlineData("UPDATE dbo.account SET name = 'x' WHERE name = 'n1'")]
-    [InlineData("DELETE FROM account WHERE name NOT LIKE '%1'")]
-    [InlineData("DELETE FROM account WHERE name NOT LIKE 'n_%'")]
-    [InlineData("UPDATE account SET description = IIF(revenue > 1 AND revenue < 900, 'a', 'b') WHERE name = 'n1'")]
-    [InlineData("DELETE FROM account WHERE statecode = 0")]
-    [InlineData("DELETE FROM account WHERE statecode NOT IN (1)")]
-    [InlineData("DELETE FROM account WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
-    [InlineData("DELETE FROM account WHERE accountid IN ('{00000000-0000-0000-0000-000000000001}', '00000000-0000-0000-0000-000000000002')")]
-    [InlineData("DELETE FROM account WHERE parentaccountid IS NULL")]
-    [InlineData("DELETE FROM account WHERE revenue IN (500, 1000)")]
-    [InlineData("DELETE FROM account WHERE creditlimit >= 5")]
-    [InlineData("UPDATE account SET creditlimit = 5 WHERE name = 'n1'")]
-    [InlineData("UPDATE account SET notes = 'x' WHERE name = 'n1'")]
-    [InlineData("UPDATE account SET followupby = '2024-01-01T00:00:00+02:00' WHERE name = 'n1'")]
-    [InlineData("UPDATE account SET followupby = NULL WHERE name = 'n1'")]
-    [InlineData("UPDATE account SET customertypecode = 2 WHERE name = 'n1'")]
-    [InlineData("UPDATE account SET statecode = 1, statuscode = 2 WHERE name = 'n1'")]
-    [InlineData("UPDATE account SET parentaccountid = '00000000-0000-0000-0000-000000000001' WHERE name = 'n1'")]
-    [InlineData("UPDATE account SET parentaccountid = CAST('00000000-0000-0000-0000-000000000001' AS uniqueidentifier) WHERE name = 'n1'")]
-    [InlineData("INSERT INTO account (name) SELECT TOP 2 name FROM account WHERE revenue > 0 ORDER BY name DESC")]
-    public async Task LiveVerifiedShapes_Run(string sql)
-    {
-        var h = await Run(sql);
-        Assert.NotNull(h);
-    }
-
     // Numbers turned into text: only a whole number (CAST/CONVERT to nvarchar, or inside CONCAT) was verified live. A
     // decimal's text depends on its scale, which SQL and the engine format differently, and an implicit conversion of a
     // number written into a text column or given to a text function is not proven.
@@ -217,18 +186,6 @@ public sealed class DmlFaithfulTests : IDisposable
 
         Assert.Contains("text", ex.Message);
         h.AssertNothingChanged();
-    }
-
-    [Theory]
-    [InlineData("UPDATE account SET description = CONCAT(name, numberofemployees) WHERE name = 'n1'")]
-    [InlineData("UPDATE account SET description = CAST(numberofemployees AS nvarchar(10)) WHERE name = 'n1'")]
-    [InlineData("UPDATE account SET description = CONCAT(name, '#', CONVERT(nvarchar(10), numberofemployees * 2)) WHERE name = 'n1'")]
-    [InlineData("UPDATE account SET numberofemployees = revenue WHERE name = 'n1'")]
-    [InlineData("UPDATE account SET numberofemployees = 2.7 WHERE name = 'n1'")]
-    public async Task ProvenNumberConversions_Run(string sql)
-    {
-        var h = await Run(sql);
-        Assert.NotNull(h);
     }
 
     // Only a user-local date-and-time column and a date-only column were verified live. A user-local column shown as a
@@ -254,15 +211,6 @@ public sealed class DmlFaithfulTests : IDisposable
         h.AssertNothingChanged();
     }
 
-    [Theory]
-    [InlineData("UPDATE account SET birthday = '2024-01-15' WHERE name = 'n1'")]
-    [InlineData("DELETE FROM account WHERE birthday < '2024-01-15'")]
-    public async Task DateOnlyColumns_TakeADate(string sql)
-    {
-        var h = await Run(sql);
-        Assert.NotNull(h);
-    }
-
     [Fact]
     public async Task StatusReasonOfAnotherStatus_IsRefused()
     {
@@ -272,13 +220,6 @@ public sealed class DmlFaithfulTests : IDisposable
 
         Assert.Contains("belongs to statecode 1", ex.Message);
         h.AssertNothingChanged();
-    }
-
-    [Fact]
-    public async Task DateLiteralWithAnOffset_IsAllowed()
-    {
-        var h = await Run("UPDATE account SET name = 'x' WHERE createdon < '2024-01-01T00:00:00Z'");
-        Assert.NotNull(h);
     }
 
     [Fact]

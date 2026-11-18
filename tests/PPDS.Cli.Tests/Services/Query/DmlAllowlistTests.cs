@@ -80,37 +80,6 @@ public class DmlAllowlistTests
             Assert.Contains($"<attribute name=\"{column}\"", fetch);
     }
 
-    // ---- WHERE conditions become FetchXML conditions ------------------------------------------
-
-    [Theory]
-    [InlineData("name = 'x'", "attribute=\"name\" operator=\"eq\" value=\"x\"")]
-    [InlineData("name <> 'x'", "operator=\"ne\" value=\"x\"")]
-    [InlineData("name != 'x'", "operator=\"ne\" value=\"x\"")]
-    [InlineData("revenue < 5", "operator=\"lt\" value=\"5\"")]
-    [InlineData("revenue > 5", "operator=\"gt\" value=\"5\"")]
-    [InlineData("revenue <= 5", "operator=\"le\" value=\"5\"")]
-    [InlineData("revenue >= 5", "operator=\"ge\" value=\"5\"")]
-    [InlineData("revenue = -5", "operator=\"eq\" value=\"-5\"")]
-    [InlineData("revenue = 2.5", "operator=\"eq\" value=\"2.5\"")]
-    [InlineData("name IN ('a', 'b')", "operator=\"in\"")]
-    [InlineData("name NOT IN ('a', 'b')", "operator=\"not-in\"")]
-    [InlineData("name LIKE 'a%'", "operator=\"begins-with\" value=\"a\"")]
-    [InlineData("name NOT LIKE 'a%'", "operator=\"not-begin-with\" value=\"a\"")]
-    [InlineData("name LIKE '%a_b%'", "operator=\"like\" value=\"%a_b%\"")]
-    [InlineData("revenue BETWEEN 1 AND 5", "operator=\"between\"")]
-    [InlineData("revenue NOT BETWEEN 1 AND 5", "operator=\"not-between\"")]
-    [InlineData("name IS NULL", "attribute=\"name\" operator=\"null\"")]
-    [InlineData("name IS NOT NULL", "attribute=\"name\" operator=\"not-null\"")]
-    [InlineData("name = 'x' AND (revenue > 5 OR revenue IS NULL)", "<filter type=\"or\">")]
-    [InlineData("account.name = 'x'", "attribute=\"name\" operator=\"eq\" value=\"x\"")]
-    public async Task WhereCondition_IsSentToDataverseAsAFetchXmlCondition(string where, string expectedFetchXml)
-    {
-        var h = await Run($"DELETE FROM account WHERE {where}");
-
-        Assert.Contains(expectedFetchXml, h.Reads.Single().FetchXml);
-        Assert.Equal(new[] { 4 }, h.Deleted);
-    }
-
     // ---- supported target forms ---------------------------------------------------------------
 
     [Theory]

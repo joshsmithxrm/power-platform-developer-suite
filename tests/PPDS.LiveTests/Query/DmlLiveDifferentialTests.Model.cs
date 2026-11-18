@@ -22,14 +22,16 @@ public sealed partial class DmlLiveDifferentialTests
     private const string Parent = "ppds_parent";
     private const string State = "statecode";
     private const string Status = "statuscode";
+    private const string Owner = "ownerid";
 
-    private static readonly string[] Columns = [N, Num, Amount, MoneyCol, FloatCol, When, Day, Flag, Choice, Note, Memo, Parent, State, Status];
+    /// <summary>Every column of the table, including the two only refused cases touch, and the owner.</summary>
+    private static readonly string[] Columns = [N, Num, Amount, MoneyCol, FloatCol, When, Day, Tzi, LegacyDay, Flag, Choice, Note, Memo, Parent, State, Status, Owner];
 
     /// <summary>
     /// A row as the test models it. Money and float are held as decimals rounded to 2 places, the lookup as the index of
     /// the seed row it points to, date-only values as a date at midnight, date/time values in UTC.
     /// </summary>
-    private sealed record Row(Guid Id, Dictionary<string, object?> V)
+    private sealed record Row(Guid Id, Dictionary<string, object?> V, long? Version = null)
     {
         public T? Get<T>(string column) => V.TryGetValue(column, out var value) && value is not null ? (T)value : default;
 
@@ -48,7 +50,7 @@ public sealed partial class DmlLiveDifferentialTests
         };
     }
 
-    private Row Seed(string? name, int? num, decimal? amount, decimal? money, decimal? flt, DateTime? when, DateTime? day, bool flag,
+    private Row Seed(string? name, int? num, decimal? amount, decimal? money, decimal? flt, DateTime? when, DateTime? day, bool? flag,
         int? choice, string? note, string? memo, int? parent, int state)
         => new(Guid.Empty, new Dictionary<string, object?>
         {
@@ -64,7 +66,7 @@ public sealed partial class DmlLiveDifferentialTests
     [
         Seed("alpha", 1, 10.5m, 10.50m, 1.25m, Utc(2024, 1, 1, 0, 0), D(2024, 1, 15), true, _choices[0], "a", "line one", null, 0),
         Seed("Beta", 2, null, null, 2.5m, null, D(2024, 2, 29), false, _choices[1], null, null, 0, 0),
-        Seed("gamma", null, 30m, 30m, null, Utc(2024, 6, 15, 12, 0), null, false, null, "  pad  ", "memo gamma", 0, 1),
+        Seed("gamma", null, 30m, 30m, null, Utc(2024, 6, 15, 12, 0), null, null, null, "  pad  ", "memo gamma", 0, 1),
         Seed("alp_ha", 4, 40.25m, 40.25m, -3.75m, Utc(2023, 12, 31, 23, 30), D(2023, 12, 31), true, _choices[2], "x", null, 1, 0),
         Seed(null, 5, 50m, 0m, 0m, Utc(2025, 1, 1, 0, 0), D(2025, 1, 1), false, _choices[0], "d5", "Ünïcode memo", null, 1),
         Seed("Café", 0, -1.5m, -1.50m, 100.5m, Utc(2024, 1, 15, 0, 30), D(2024, 1, 15), true, _choices[1], "trail  ", "x", 4, 0),
@@ -118,13 +120,14 @@ public sealed partial class DmlLiveDifferentialTests
         return rows.Where(r => !match(r)).Select(r => r.Get<int?>(Parent) is { } p && deleted.Contains(p) ? r.With(Parent, null) : r).ToList();
     }
 
-    /// <summary>A newly inserted row: the given values, every other column empty, active, flag false (the column default).</summary>
-    private static Row Inserted(params (string Column, object? Value)[] values)
+    /// <summary>A newly inserted row: the given values, every other column empty, active, flag false (the column default), owned by the caller.</summary>
+    private Row Inserted(params (string Column, object? Value)[] values)
     {
         var v = Columns.ToDictionary(c => c, _ => (object?)null);
         v[Flag] = false;
         v[State] = 0;
         v[Status] = 1;
+        v[Owner] = _me;
         foreach (var (column, value) in values)
             v[column] = value;
         return new Row(Guid.Empty, v);

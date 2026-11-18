@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.RegularExpressions;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -25,18 +24,25 @@ namespace PPDS.LiveTests.Query;
 /// Live differential proof of the DML allowlist (specs/query.md "DML allowlist"). Creates one throwaway table (every
 /// column type the allowlist admits, with NULLs in each) in a throwaway solution, seeds a known set of rows, and for
 /// every allowlisted shape runs the real statement through the real <see cref="SqlQueryService"/> with confirmation,
-/// then compares the table's actual contents with the result computed independently here (T-SQL semantics, with the
-/// organisation's case- and accent-insensitive collation). One statement of every refused category is run too, to
-/// confirm nothing changed. The table and solution are deleted at the end, waiting out other suites' customisation locks.
-/// It runs only against the organisation named in PPDS_DML_LIVE_CONFIRM_URL, which must be set explicitly and equal both
-/// DATAVERSE_URL and the URL of the organisation the profile connects to, and only with a solution named ppds_DmlLive*.
-/// Set PPDS_DML_LIVE_CLEANUP_ONLY=1 to only remove this suite's leftover tables and solution.
+/// then compares the table's actual contents (every column, read through the SDK) with the result computed
+/// independently here (T-SQL semantics, with the organisation's case- and accent-insensitive collation), and the counts
+/// the product reports with what actually changed. One statement of every refused category is run too, to confirm
+/// nothing changed. The table (and the solution, when this run created it) is deleted at the end, waiting out other
+/// suites' customisation locks. It runs only against the organisation named in PPDS_DML_LIVE_CONFIRM_URL, which must
+/// equal both DATAVERSE_URL and the URL of the organisation the profile connects to, and only with a solution named
+/// ppds_DmlLive*. Leftovers of an interrupted run are removed by the separate cleanup-only operation.
 /// </summary>
 [Trait("Category", "Integration")]
 public sealed partial class DmlLiveDifferentialTests : LiveTestBase
 {
-    private const string ConfirmUrlVariable = "PPDS_DML_LIVE_CONFIRM_URL";
     private static readonly Regex OwnTable = new("^ppds_dmllive[0-9a-f]{8}$");
+
+    /// <summary>The description every table of this suite carries: the mark that it is this suite's to delete.</summary>
+    private const string TableMarker = "Temporary table for the PPDS DML live test. Safe to delete.";
+
+    /// <summary>The friendly-name suffix of a solution this suite created: the mark that it is this suite's to delete.</summary>
+    private const string SolutionMarker = " (disposable PPDS DML live test, safe to delete)";
+
     private readonly ITestOutputHelper _output;
     private readonly List<string> _failures = new();
 
@@ -45,10 +51,14 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
     private static string Solution => Environment.GetEnvironmentVariable("PPDS_TEST_SOLUTION")!.Trim();
 
     private string _table = "";
+    private bool _tableCreated;
+    private bool _solutionCreated;
     private int[] _choices = [];
     private Guid _me;
     private Microsoft.PowerPlatform.Dataverse.Client.ServiceClient _client = null!;
     private SqlQueryService _service = null!;
+    private int _passed;
+    private int _refused;
 
     /// <summary>The seed rows as stored (read back from Dataverse after seeding): the truth every case starts from.</summary>
     private List<Row> _seed = new();
@@ -58,28 +68,13 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
 
     private string Pk => _table + "id";
 
-    [MetadataLiveFact]
+    [DmlLiveFact]
     public async Task EveryAllowlistedShape_ChangesExactlyTheRowsAndValuesItsTextSays()
     {
-        // The organisation this suite may change is named explicitly for each run; nothing in the repository names it.
-        var expectedUrl = ConfirmedUrl(Environment.GetEnvironmentVariable(ConfirmUrlVariable));
-        Assert.Equal(expectedUrl, Configuration.DataverseUrl?.TrimEnd('/'));
-        Assert.StartsWith("ppds_DmlLive", Solution, StringComparison.Ordinal);
-
-        using var source = await LiveTestProfileConnectionSource.CreateAsync(Configuration, "DmlLiveDifferentialTests", maxPoolSize: 2);
-        var seedClient = source.GetSeedClient();
-        var connected = seedClient.ConnectedOrgUriActual?.GetLeftPart(UriPartial.Authority);
-        Assert.Equal(expectedUrl, connected);
-        _output.WriteLine($"Connected to {connected} ({seedClient.ConnectedOrgFriendlyName}).");
-        _client = seedClient;
-
-        if (Environment.GetEnvironmentVariable("PPDS_DML_LIVE_CLEANUP_ONLY") == "1")
-        {
-            await CleanupAsync();
-            return;
-        }
+        var expectedUrl = await ConnectAsync();
 
         _me = ((WhoAmIResponse)await _client.ExecuteAsync(new WhoAmIRequest())).UserId;
+        using var source = _source!;
         using var pool = LiveTestHelpers.CreateConnectionPool(new[] { source });
         var bulk = new BulkOperationExecutor(pool, LiveTestHelpers.CreateThrottleTracker(),
             Options.Create(new DataverseOptions { BulkOperations = new BulkOperationOptions { BatchSize = 10, MaxParallelBatches = 1 } }),
@@ -89,8 +84,6 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
         _service.ConfigureEnvironment(expectedUrl, null);
         _service.EnvironmentProtectionLevel = ProtectionLevel.Development;
 
-        // Leftovers of an earlier run of this suite (its own tables only) go first.
-        await RemoveOwnTablesAsync();
         await CreateSolutionAsync();
         _table = $"ppds_dmllive{Guid.NewGuid().ToString("N")[..8]}";
         try
@@ -104,7 +97,41 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
             await CleanupAsync();
         }
 
+        _output.WriteLine($"TOTALS pass {_passed}, refused {_refused}, fail {_failures.Count}");
         Assert.True(_failures.Count == 0, "Differences between observed and expected:\n" + string.Join("\n", _failures));
+    }
+
+    /// <summary>
+    /// Removes what an interrupted run of this suite left behind: tables named like this suite's tables that carry its
+    /// description and are older than an hour (so a run in progress is never touched), and the solution when its name
+    /// marks it as this suite's and it is empty. Nothing else.
+    /// </summary>
+    [DmlLiveCleanupFact]
+    public async Task CleanupOnly_RemovesOnlyThisSuitesLeftovers()
+    {
+        await ConnectAsync();
+        using var source = _source!;
+        var leftovers = await RemoveOwnTablesAsync(TimeSpan.FromHours(1));
+        leftovers.AddRange(await RemoveSolutionIfOursAsync());
+        Assert.True(leftovers.Count == 0, "Cleanup left: " + string.Join("; ", leftovers));
+    }
+
+    private LiveTestProfileConnectionSource? _source;
+
+    private async Task<string> ConnectAsync()
+    {
+        // The organisation this suite may change is named explicitly for each run; nothing in the repository names it.
+        var expectedUrl = ConfirmedUrl(Environment.GetEnvironmentVariable(DmlLiveSkip.ConfirmUrlVariable));
+        Assert.Equal(expectedUrl, Configuration.DataverseUrl?.TrimEnd('/'));
+        Assert.StartsWith("ppds_DmlLive", Solution, StringComparison.Ordinal);
+
+        _source = await LiveTestProfileConnectionSource.CreateAsync(Configuration, "DmlLiveDifferentialTests", maxPoolSize: 2);
+        var seedClient = _source.GetSeedClient();
+        var connected = seedClient.ConnectedOrgUriActual?.GetLeftPart(UriPartial.Authority);
+        Assert.Equal(expectedUrl, connected);
+        _output.WriteLine($"Connected to the organisation named in {DmlLiveSkip.ConfirmUrlVariable} ({seedClient.ConnectedOrgFriendlyName}).");
+        _client = seedClient;
+        return expectedUrl;
     }
 
     /// <summary>
@@ -117,14 +144,14 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
         if (string.IsNullOrEmpty(url))
         {
             throw new InvalidOperationException(
-                $"{ConfirmUrlVariable} is not set. Set it to the URL of the development organisation this suite may change " +
+                $"{DmlLiveSkip.ConfirmUrlVariable} is not set. Set it to the URL of the development organisation this suite may change " +
                 "(the same value as DATAVERSE_URL); the suite does not run without it.");
         }
 
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps
             || uri.GetLeftPart(UriPartial.Authority) != url)
         {
-            throw new InvalidOperationException($"{ConfirmUrlVariable} must be an https organisation URL with no path, for example https://<org>.crm.dynamics.com.");
+            throw new InvalidOperationException($"{DmlLiveSkip.ConfirmUrlVariable} must be an https organisation URL with no path, for example https://<org>.crm.dynamics.com.");
         }
 
         return url;
@@ -140,9 +167,10 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
     {
         await ResetAsync();
         var before = await ReadAsync();
+        SqlQueryResult result;
         try
         {
-            await _service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = new DmlSafetyOptions { IsConfirmed = true, RowCap = rowCap } });
+            result = await _service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = new DmlSafetyOptions { IsConfirmed = true, RowCap = rowCap } });
         }
         catch (Exception ex)
         {
@@ -155,25 +183,42 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
         var wantKeys = want.Select(r => r.Key).OrderBy(k => k, StringComparer.Ordinal).ToList();
         var actualKeys = actual.Select(r => r.Key).OrderBy(k => k, StringComparer.Ordinal).ToList();
         var same = wantKeys.SequenceEqual(actualKeys);
+        var changed = actual.Where(a => before.Any(b => b.Id == a.Id && b.Key != a.Key)).ToList();
+        var removed = before.Where(b => actual.All(a => a.Id != b.Id)).ToList();
+        var added = actual.Where(a => before.All(b => b.Id != a.Id)).ToList();
         if (observe || !same)
+            _output.WriteLine($"OBSERVED {sql} -> changed [{string.Join(", ", changed.Select(Label))}] removed [{string.Join(", ", removed.Select(Label))}] added [{string.Join(", ", added.Select(Label))}]");
+
+        // C-S1: the counts the product reports are what changed in Dataverse: rows written (their row version moved),
+        // removed or added, and no failures.
+        var written = Verb(sql) switch
         {
-            var changed = actual.Where(a => before.Any(b => b.Id == a.Id && b.Key != a.Key)).Select(Label);
-            var removed = before.Where(b => actual.All(a => a.Id != b.Id)).Select(Label);
-            var added = actual.Where(a => before.All(b => b.Id != a.Id)).Select(Label);
-            _output.WriteLine($"OBSERVED {sql} -> changed [{string.Join(", ", changed)}] removed [{string.Join(", ", removed)}] added [{string.Join(", ", added)}]");
-        }
+            "DELETE" => removed.Count,
+            "INSERT" => added.Count,
+            _ => actual.Count(a => before.Any(b => b.Id == a.Id && b.Version != a.Version))
+        };
+        var reported = result.DmlOutcome;
+        var countsMatch = reported is { FailedRows: 0 } && reported.AffectedRows == written;
 
         if (!same)
             Fail(sql, $"expected\n    {string.Join("\n    ", wantKeys.Except(actualKeys))}\n  actual\n    {string.Join("\n    ", actualKeys.Except(wantKeys))}");
+        else if (!countsMatch)
+            Fail(sql, $"reported {reported?.AffectedRows.ToString() ?? "no"} affected / {reported?.FailedRows.ToString() ?? "no"} failed, but {written} rows changed in Dataverse");
         else
-            _output.WriteLine($"PASS {sql}");
+        {
+            _passed++;
+            _output.WriteLine($"PASS {sql} (reported {reported!.AffectedRows} affected = {written} changed)");
+        }
     }
+
+    private static string Verb(string sql)
+        => Regex.Match(Regex.Replace(sql, "--[^\n]*", ""), @"\b(UPDATE|DELETE|INSERT)\b", RegexOptions.IgnoreCase).Value.ToUpperInvariant();
 
     /// <summary>The statement must fail (a refusal, or a clean error such as divide by zero) and change nothing.</summary>
     private async Task RefusedAsync(string sql, int? rowCap = null)
     {
         await ResetAsync();
-        var before = (await ReadAsync()).Select(r => r.Key).OrderBy(k => k, StringComparer.Ordinal).ToList();
+        var before = (await ReadAsync()).Select(r => r.Key + "|" + r.Version).OrderBy(k => k, StringComparer.Ordinal).ToList();
         try
         {
             await _service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = new DmlSafetyOptions { IsConfirmed = true, RowCap = rowCap } });
@@ -181,6 +226,7 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
         }
         catch (PpdsException ex)
         {
+            _refused++;
             _output.WriteLine($"REFUSED ({ex.ErrorCode}) {sql}: {ex.UserMessage}");
         }
         catch (Exception ex)
@@ -188,7 +234,8 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
             Fail(sql, $"failed without a PpdsException: {ex.GetType().Name}: {ex.Message}");
         }
 
-        var after = (await ReadAsync()).Select(r => r.Key).OrderBy(k => k, StringComparer.Ordinal).ToList();
+        // Every column and the row version: a refused statement wrote nothing at all.
+        var after = (await ReadAsync()).Select(r => r.Key + "|" + r.Version).OrderBy(k => k, StringComparer.Ordinal).ToList();
         if (!before.SequenceEqual(after))
             Fail(sql, "a refused statement changed the table");
     }
@@ -205,8 +252,12 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
 
     private async Task CreateSolutionAsync()
     {
-        if (await FindSolutionAsync() is not null)
+        if (await FindSolutionAsync() is { } existing)
+        {
+            // Reused, and deleted at the end only if its name marks it as this suite's (C-S5).
+            _output.WriteLine($"Using the existing solution {Solution} ({existing.GetAttributeValue<string>("friendlyname")}).");
             return;
+        }
         var publisherQuery = new QueryExpression("publisher") { ColumnSet = new ColumnSet("publisherid", "customizationprefix") };
         publisherQuery.Criteria.AddCondition("uniquename", ConditionOperator.Equal, "PPDSDemoPublisher");
         var publisher = (await _client.RetrieveMultipleAsync(publisherQuery)).Entities.Single();
@@ -214,14 +265,15 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
         _output.WriteLine($"Creating solution {Solution}.");
         await Locked(() => _client.CreateAsync(new Entity("solution")
         {
-            ["uniquename"] = Solution, ["friendlyname"] = Solution + " (disposable PPDS DML live test, safe to delete)",
+            ["uniquename"] = Solution, ["friendlyname"] = Solution + SolutionMarker,
             ["version"] = "1.0.0.0", ["publisherid"] = publisher.ToEntityReference()
         }), "create solution");
+        _solutionCreated = true;
     }
 
     private async Task<Entity?> FindSolutionAsync()
     {
-        var q = new QueryExpression("solution") { ColumnSet = new ColumnSet("solutionid") };
+        var q = new QueryExpression("solution") { ColumnSet = new ColumnSet("solutionid", "friendlyname") };
         q.Criteria.AddCondition("uniquename", ConditionOperator.Equal, Solution);
         return (await _client.RetrieveMultipleAsync(q)).Entities.FirstOrDefault();
     }
@@ -234,7 +286,7 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
             Entity = new EntityMetadata
             {
                 SchemaName = _table, DisplayName = new Label("PPDS DML live test", 1033), DisplayCollectionName = new Label("PPDS DML live tests", 1033),
-                Description = new Label("Temporary table for the PPDS DML live test. Safe to delete.", 1033), OwnershipType = OwnershipTypes.UserOwned
+                Description = new Label(TableMarker, 1033), OwnershipType = OwnershipTypes.UserOwned
             },
             PrimaryAttribute = new StringAttributeMetadata
             {
@@ -243,6 +295,7 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
             },
             SolutionUniqueName = Solution
         }), "create table");
+        _tableCreated = true;
 
         var none = new AttributeRequiredLevelManagedProperty(AttributeRequiredLevel.None);
         var choice = new OptionSetMetadata { IsGlobal = false, OptionSetType = OptionSetType.Picklist };
@@ -302,7 +355,13 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
 
         // The truth is what Dataverse stored (it may normalise on save), read back without PPDS.
         var stored = await ReadAsync();
-        return _ids.Select(id => stored.Single(r => r.Id == id)).ToList();
+        var seed = _ids.Select(id => stored.Single(r => r.Id == id)).ToList();
+        foreach (var column in new[] { N, Num, Amount, MoneyCol, FloatCol, When, Day, Flag, Choice, Note, Memo, Parent })
+        {
+            if (seed.All(r => r.V[column] is not null))
+                throw new InvalidOperationException($"The seed has no NULL in {column}.");
+        }
+        return seed;
     }
 
     /// <summary>Restores exactly the seed rows: deletes anything else, recreates deleted ones, rewrites changed ones.</summary>
@@ -341,6 +400,8 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
         entity[FloatCol] = row.Get<decimal?>(FloatCol) is { } f ? (double)f : null;
         entity[When] = row.Get<DateTime?>(When);
         entity[Day] = row.Get<DateTime?>(Day);
+        entity[Tzi] = row.Get<DateTime?>(Tzi);
+        entity[LegacyDay] = row.Get<DateTime?>(LegacyDay);
         entity[Flag] = row.Get<bool?>(Flag);
         entity[Choice] = row.Get<int?>(Choice) is { } c ? new OptionSetValue(c) : null;
         entity[Note] = row.Get<string>(Note);
@@ -354,9 +415,14 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
         return entity;
     }
 
+    /// <summary>Every column of the table (including those only refused cases touch, and the owner), and the row version.</summary>
     private async Task<List<Row>> ReadAsync()
     {
-        var q = new QueryExpression(_table) { ColumnSet = new ColumnSet(N, Num, Amount, MoneyCol, FloatCol, When, Day, Flag, Choice, Note, Memo, Parent, "statecode", "statuscode") };
+        var q = new QueryExpression(_table)
+        {
+            ColumnSet = new ColumnSet(N, Num, Amount, MoneyCol, FloatCol, When, Day, Tzi, LegacyDay, Flag, Choice, Note, Memo, Parent,
+                "statecode", "statuscode", "ownerid", "versionnumber")
+        };
         var entities = (await _client.RetrieveMultipleAsync(q)).Entities;
         return entities.Select(e =>
         {
@@ -371,6 +437,8 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
                 [FloatCol] = e.Contains(FloatCol) ? decimal.Round((decimal)e.GetAttributeValue<double>(FloatCol), 2) : null,
                 [When] = e.Contains(When) ? e.GetAttributeValue<DateTime>(When).ToUniversalTime() : null,
                 [Day] = e.Contains(Day) ? DateTime.SpecifyKind(e.GetAttributeValue<DateTime>(Day).Date, DateTimeKind.Unspecified) : null,
+                [Tzi] = e.Contains(Tzi) ? DateTime.SpecifyKind(e.GetAttributeValue<DateTime>(Tzi), DateTimeKind.Utc) : null,
+                [LegacyDay] = e.Contains(LegacyDay) ? e.GetAttributeValue<DateTime>(LegacyDay).ToUniversalTime() : null,
                 [Flag] = e.Contains(Flag) ? e.GetAttributeValue<bool>(Flag) : null,
                 [Choice] = e.GetAttributeValue<OptionSetValue>(Choice)?.Value,
                 [Note] = e.GetAttributeValue<string>(Note),
@@ -378,17 +446,19 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
                 [Parent] = parentIndex is -1 ? -1 : parentIndex,
                 [State] = e.GetAttributeValue<OptionSetValue>("statecode")?.Value,
                 [Status] = e.GetAttributeValue<OptionSetValue>("statuscode")?.Value,
-            });
+                [Owner] = e.GetAttributeValue<EntityReference>("ownerid")?.Id,
+            }, e.GetAttributeValue<long?>("versionnumber"));
         }).ToList();
     }
 
     // ── cleanup ─────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Deletes every table of this suite (named ppds_dmllive + 8 hex and a component of the ppds_DmlLive solution),
-    /// waiting out customisation locks held by other suites.
+    /// Deletes tables of this suite in the solution: named like this suite's tables, carrying its description, and
+    /// created at least <paramref name="minimumAge"/> ago (so another run in progress is never touched). Waits out
+    /// customisation locks held by other suites.
     /// </summary>
-    private async Task<List<string>> RemoveOwnTablesAsync()
+    private async Task<List<string>> RemoveOwnTablesAsync(TimeSpan minimumAge)
     {
         var leftovers = new List<string>();
         var solution = await FindSolutionAsync();
@@ -405,69 +475,87 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
         var all = ((RetrieveAllEntitiesResponse)await _client.ExecuteAsync(new RetrieveAllEntitiesRequest { EntityFilters = EntityFilters.Entity, RetrieveAsIfPublished = true })).EntityMetadata;
         foreach (var table in all.Where(e => e.MetadataId is { } id && tableIds.Contains(id)))
         {
-            if (!OwnTable.IsMatch(table.LogicalName))
+            var ours = OwnTable.IsMatch(table.LogicalName)
+                && table.Description?.UserLocalizedLabel?.Label == TableMarker;
+            if (!ours)
             {
-                leftovers.Add($"table {table.LogicalName} (in {Solution} but not named like this suite's tables, so not touched)");
+                leftovers.Add($"table {table.LogicalName} (in {Solution} but not marked as this suite's, so not touched)");
+                continue;
+            }
+            if (table.CreatedOn is { } created && DateTime.UtcNow - created.ToUniversalTime() < minimumAge)
+            {
+                _output.WriteLine($"Keeping table {table.LogicalName}: created {created:u}, possibly by a run in progress.");
                 continue;
             }
 
-            _output.WriteLine($"Deleting table {table.LogicalName}.");
-            try
-            {
-                await Locked(() => _client.ExecuteAsync(new DeleteEntityRequest { LogicalName = table.LogicalName }), $"delete table {table.LogicalName}");
-            }
-            catch (Exception ex)
-            {
-                leftovers.Add($"table {table.LogicalName} ({ex.Message})");
-            }
+            _output.WriteLine($"Deleting leftover table {table.LogicalName}.");
+            leftovers.AddRange(await DeleteTableAsync(table.LogicalName));
         }
         return leftovers;
     }
 
+    private async Task<List<string>> DeleteTableAsync(string logicalName)
+    {
+        try
+        {
+            await Locked(() => _client.ExecuteAsync(new DeleteEntityRequest { LogicalName = logicalName }), $"delete table {logicalName}");
+            return [];
+        }
+        catch (Exception ex)
+        {
+            return [$"table {logicalName} ({ex.Message})"];
+        }
+    }
+
+    /// <summary>Deletes the solution when this run created it, or its name marks it as this suite's, and it is empty.</summary>
+    private async Task<List<string>> RemoveSolutionIfOursAsync()
+    {
+        var solution = await FindSolutionAsync();
+        if (solution is null)
+            return [];
+        var marked = solution.GetAttributeValue<string>("friendlyname")?.EndsWith(SolutionMarker, StringComparison.Ordinal) == true;
+        if (!_solutionCreated && !marked)
+        {
+            _output.WriteLine($"CLEANUP solution {Solution} kept: this run did not create it and its name does not mark it as this suite's.");
+            return [];
+        }
+
+        var components = new QueryExpression("solutioncomponent") { ColumnSet = new ColumnSet("objectid") };
+        components.Criteria.AddCondition("solutionid", ConditionOperator.Equal, solution.Id);
+        var count = (await _client.RetrieveMultipleAsync(components)).Entities.Count;
+        if (count > 0)
+            return [$"solution {Solution} (still has {count} components, so kept)"];
+        try
+        {
+            await Locked(() => _client.DeleteAsync("solution", solution.Id), $"delete solution {Solution}");
+        }
+        catch (Exception ex)
+        {
+            return [$"solution {Solution} ({ex.Message})"];
+        }
+
+        var gone = await FindSolutionAsync() is null;
+        _output.WriteLine($"CLEANUP solution {Solution} gone: {gone}");
+        return gone ? [] : [$"solution {Solution}"];
+    }
+
+    /// <summary>Deletes the table this run created, then the solution if it is this suite's and empty.</summary>
     private async Task CleanupAsync()
     {
-        var leftovers = await RemoveOwnTablesAsync();
-
-        var remaining = ((RetrieveAllEntitiesResponse)await _client.ExecuteAsync(new RetrieveAllEntitiesRequest { EntityFilters = EntityFilters.Entity, RetrieveAsIfPublished = true }))
-            .EntityMetadata.Where(e => OwnTable.IsMatch(e.LogicalName)).Select(e => e.LogicalName).ToList();
-        if (_table.Length > 0)
-            _output.WriteLine($"CLEANUP table {_table} gone: {!remaining.Contains(_table)}");
-        foreach (var name in remaining)
+        var leftovers = new List<string>();
+        if (_tableCreated)
         {
-            _output.WriteLine($"CLEANUP table {name} still present");
-            if (!leftovers.Any(l => l.Contains(name, StringComparison.Ordinal)))
-                leftovers.Add($"table {name}");
+            leftovers.AddRange(await DeleteTableAsync(_table));
+            var remaining = ((RetrieveAllEntitiesResponse)await _client.ExecuteAsync(new RetrieveAllEntitiesRequest { EntityFilters = EntityFilters.Entity, RetrieveAsIfPublished = true }))
+                .EntityMetadata.Any(e => e.LogicalName == _table);
+            _output.WriteLine($"CLEANUP table {_table} gone: {!remaining}");
+            if (remaining && leftovers.Count == 0)
+                leftovers.Add($"table {_table}");
         }
 
-        var solution = await FindSolutionAsync();
-        if (solution != null)
-        {
-            var components = new QueryExpression("solutioncomponent") { ColumnSet = new ColumnSet("objectid") };
-            components.Criteria.AddCondition("solutionid", ConditionOperator.Equal, solution.Id);
-            var count = (await _client.RetrieveMultipleAsync(components)).Entities.Count;
-            if (count == 0)
-            {
-                try
-                {
-                    await Locked(() => _client.DeleteAsync("solution", solution.Id), $"delete solution {Solution}");
-                }
-                catch (Exception ex)
-                {
-                    leftovers.Add($"solution {Solution} ({ex.Message})");
-                }
-            }
-            else
-            {
-                leftovers.Add($"solution {Solution} (still has {count} components, so kept)");
-            }
-        }
-
-        var solutionGone = await FindSolutionAsync() is null;
-        _output.WriteLine($"CLEANUP solution {Solution} gone: {solutionGone}");
-        if (!solutionGone && !leftovers.Any(l => l.StartsWith("solution", StringComparison.Ordinal)))
-            leftovers.Add($"solution {Solution}");
-
-        Assert.True(leftovers.Count == 0, "Cleanup failed; leftovers: " + string.Join("; ", leftovers));
+        leftovers.AddRange(await RemoveSolutionIfOursAsync());
+        if (leftovers.Count > 0)
+            _failures.Add("Cleanup failed; leftovers: " + string.Join("; ", leftovers));
     }
 
     private sealed class Guard : IShakedownGuard
