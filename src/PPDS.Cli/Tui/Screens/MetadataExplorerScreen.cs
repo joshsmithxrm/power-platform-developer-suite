@@ -336,14 +336,8 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         }
         catch (Exception ex)
         {
-            Application.MainLoop?.Invoke(() =>
-            {
-                ErrorService.ReportError(CreateErrorTitle("table", ex), ex, "Metadata.CreateTable");
-                _statusLabel.Text = $"Error: {ex.Message}";
-            });
-            // The object exists (only its labels are unconfirmed): show it.
-            if (CreatedButNotConfirmed(ex))
-                await ReloadQuietlyAsync(LoadEntitiesAsync);
+            await ReportWriteFailureAsync(CreateErrorTitle("table", ex), ex, "Metadata.CreateTable", "entities",
+                LoadEntitiesAsync);
         }
     }
 
@@ -376,14 +370,8 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         }
         catch (Exception ex)
         {
-            Application.MainLoop?.Invoke(() =>
-            {
-                ErrorService.ReportError(CreateErrorTitle("column", ex), ex, "Metadata.CreateColumn");
-                _statusLabel.Text = $"Error: {ex.Message}";
-            });
-            // The object exists (only its labels are unconfirmed): show it.
-            if (CreatedButNotConfirmed(ex))
-                await ReloadQuietlyAsync(() => LoadEntityDetailAsync(_selectedEntity!.LogicalName));
+            await ReportWriteFailureAsync(CreateErrorTitle("column", ex), ex, "Metadata.CreateColumn", _selectedEntity?.LogicalName,
+                () => LoadEntityDetailAsync(_selectedEntity!.LogicalName));
         }
     }
 
@@ -422,14 +410,8 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         }
         catch (Exception ex)
         {
-            Application.MainLoop?.Invoke(() =>
-            {
-                ErrorService.ReportError(CreateErrorTitle("relationship", ex), ex, "Metadata.CreateRelationship");
-                _statusLabel.Text = $"Error: {ex.Message}";
-            });
-            // The object exists (only its labels are unconfirmed): show it.
-            if (CreatedButNotConfirmed(ex))
-                await ReloadQuietlyAsync(() => LoadEntityDetailAsync(_selectedEntity!.LogicalName));
+            await ReportWriteFailureAsync(CreateErrorTitle("relationship", ex), ex, "Metadata.CreateRelationship", _selectedEntity?.LogicalName,
+                () => LoadEntityDetailAsync(_selectedEntity!.LogicalName));
         }
     }
 
@@ -451,14 +433,8 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         }
         catch (Exception ex)
         {
-            Application.MainLoop?.Invoke(() =>
-            {
-                ErrorService.ReportError(CreateErrorTitle("relationship", ex), ex, "Metadata.CreateRelationship");
-                _statusLabel.Text = $"Error: {ex.Message}";
-            });
-            // The object exists (only its labels are unconfirmed): show it.
-            if (CreatedButNotConfirmed(ex))
-                await ReloadQuietlyAsync(() => LoadEntityDetailAsync(_selectedEntity!.LogicalName));
+            await ReportWriteFailureAsync(CreateErrorTitle("relationship", ex), ex, "Metadata.CreateRelationship", _selectedEntity?.LogicalName,
+                () => LoadEntityDetailAsync(_selectedEntity!.LogicalName));
         }
     }
 
@@ -494,14 +470,8 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         }
         catch (Exception ex)
         {
-            Application.MainLoop?.Invoke(() =>
-            {
-                ErrorService.ReportError(CreateErrorTitle("global choice", ex), ex, "Metadata.CreateChoice");
-                _statusLabel.Text = $"Error: {ex.Message}";
-            });
-            // The object exists (only its labels are unconfirmed): show it.
-            if (CreatedButNotConfirmed(ex))
-                await ReloadQuietlyAsync(() => _selectedEntity != null ? LoadEntityDetailAsync(_selectedEntity.LogicalName) : Task.CompletedTask);
+            await ReportWriteFailureAsync(CreateErrorTitle("global choice", ex), ex, "Metadata.CreateChoice", _selectedEntity?.LogicalName,
+                () => _selectedEntity != null ? LoadEntityDetailAsync(_selectedEntity.LogicalName) : Task.FromResult(true));
         }
     }
 
@@ -534,18 +504,14 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         }
         catch (Exception ex)
         {
-            Application.MainLoop?.Invoke(() =>
-            {
-                ErrorService.ReportError(CreateErrorTitle("key", ex), ex, "Metadata.CreateKey");
-                _statusLabel.Text = $"Error: {ex.Message}";
-            });
-            // The object exists (only its labels are unconfirmed): show it.
-            if (CreatedButNotConfirmed(ex))
-                await ReloadQuietlyAsync(() => LoadEntityDetailAsync(_selectedEntity!.LogicalName));
+            await ReportWriteFailureAsync(CreateErrorTitle("key", ex), ex, "Metadata.CreateKey", _selectedEntity?.LogicalName,
+                () => LoadEntityDetailAsync(_selectedEntity!.LogicalName));
         }
     }
 
-    /// <summary>A create that raised WRITE_NOT_CONFIRMED did create the object; only its labels could not be confirmed.</summary>
+    /// <summary>
+    /// A create or update that raised WRITE_NOT_CONFIRMED did write the object; only its labels could not be confirmed.
+    /// </summary>
     internal static bool CreatedButNotConfirmed(Exception ex)
         => ex is PPDS.Cli.Infrastructure.Errors.PpdsException { ErrorCode: MetadataErrorCodes.WriteNotConfirmed };
 
@@ -553,11 +519,46 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
     internal static string CreateErrorTitle(string what, Exception ex)
         => CreatedButNotConfirmed(ex) ? $"Created {what}, but its labels are not confirmed" : $"Failed to create {what}";
 
-    /// <summary>Reloads after an unconfirmed create; a reload failure keeps the create's error on screen.</summary>
-    private static async Task ReloadQuietlyAsync(Func<Task> reload)
+    /// <summary>The error title for a failed update: never "Failed to update" when the update was written.</summary>
+    internal static string UpdateErrorTitle(string what, Exception ex)
+        => CreatedButNotConfirmed(ex) ? $"Updated {what}, but its labels are not confirmed" : $"Failed to update {what}";
+
+    /// <summary>
+    /// Reports a failed create or update under <paramref name="title"/> and shows its message in the status line.
+    /// When the write happened and only its labels are unconfirmed (WRITE_NOT_CONFIRMED), the view is reloaded so it
+    /// shows what is stored, and the message is set again after the reload, which writes its own status, so the
+    /// "not confirmed" text is the line's final state; a failed reload is appended to it. The loaders report their
+    /// own failures, so an exception that escapes <paramref name="reload"/> is a programming error: it is not caught
+    /// here and reaches the caller's fire-and-forget error reporting.
+    /// </summary>
+    internal async Task ReportWriteFailureAsync(
+        string title, Exception ex, string context, string? reloadTarget, Func<Task<bool>> reload)
     {
-        try { await reload(); }
-        catch (Exception) { /* the unconfirmed-create error already shown stays; the next refresh retries */ }
+        var status = $"Error: {ex.Message}";
+        OnUiThread(() =>
+        {
+            ErrorService.ReportError(title, ex, context);
+            _statusLabel.Text = status;
+        });
+
+        if (!CreatedButNotConfirmed(ex)) return;
+
+        var reloaded = await reload();
+        OnUiThread(() => _statusLabel.Text = WithReloadOutcome(status, reloadTarget, reloaded));
+    }
+
+    /// <summary>Runs on the UI loop when there is one; inline otherwise (unit tests run without one).</summary>
+    private static void OnUiThread(Action action)
+    {
+        if (Application.MainLoop is { } loop) loop.Invoke(action);
+        else action();
+    }
+
+    /// <summary>The status line's text. Exposed for testing.</summary>
+    internal string StatusTextForTest
+    {
+        get => _statusLabel.Text?.ToString() ?? "";
+        set => _statusLabel.Text = value;
     }
 
     #endregion
@@ -630,11 +631,10 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         }
         catch (Exception ex)
         {
-            Application.MainLoop?.Invoke(() =>
-            {
-                ErrorService.ReportError("Failed to update column", ex, "Metadata.EditColumn");
-                _statusLabel.Text = $"Error: {ex.Message}";
-            });
+            // An update that was written but not confirmed is reloaded, as after a create.
+            var entity = _selectedEntity?.LogicalName;
+            await ReportWriteFailureAsync(UpdateErrorTitle("column", ex), ex, "Metadata.EditColumn", entity,
+                () => entity == null ? Task.FromResult(true) : LoadEntityDetailAsync(entity));
         }
     }
 
@@ -679,11 +679,10 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         }
         catch (Exception ex)
         {
-            Application.MainLoop?.Invoke(() =>
-            {
-                ErrorService.ReportError("Failed to update choice", ex, "Metadata.EditChoice");
-                _statusLabel.Text = $"Error: {ex.Message}";
-            });
+            // An update that was written but not confirmed is reloaded, as after a create.
+            var entity = _selectedEntity?.LogicalName;
+            await ReportWriteFailureAsync(UpdateErrorTitle("choice", ex), ex, "Metadata.EditChoice", entity,
+                () => entity == null ? Task.FromResult(true) : LoadEntityDetailAsync(entity));
         }
     }
 
@@ -940,7 +939,8 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
 
     #region Data Loading
 
-    private async Task LoadEntitiesAsync()
+    /// <summary>Loads the entity list; false when the load failed (its error is reported and shown).</summary>
+    private async Task<bool> LoadEntitiesAsync()
     {
         if (string.IsNullOrEmpty(EnvironmentUrl))
         {
@@ -948,7 +948,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
             {
                 _statusLabel.Text = "No environment selected. Use the status bar to connect.";
             });
-            return;
+            return false;
         }
 
         var oldCts = _loadCts;
@@ -978,8 +978,9 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
                 _lastSelectedIndex = -1;
                 ApplyFilterOnUiThread();
             });
+            return true;
         }
-        catch (OperationCanceledException) { /* screen closing or superseded */ }
+        catch (OperationCanceledException) { /* screen closing or superseded */ return true; }
         catch (Exception ex)
         {
             Application.MainLoop.Invoke(() =>
@@ -987,6 +988,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
                 ErrorService.ReportError("Failed to load entities", ex, "Metadata.LoadEntities");
                 _statusLabel.Text = "Error loading entities";
             });
+            return false;
         }
     }
 
