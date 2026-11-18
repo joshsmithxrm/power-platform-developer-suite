@@ -4,7 +4,7 @@ using System.CommandLine.Parsing;
 namespace PPDS.Cli.Infrastructure;
 
 /// <summary>
-/// Adds compatible environment aliases and explains the future entity-alias migration.
+/// Adds compatible environment aliases and explains the entity-alias deprecation.
 /// Existing option names and aliases keep their current meanings.
 /// </summary>
 internal static class EnvironmentAliasPolicy
