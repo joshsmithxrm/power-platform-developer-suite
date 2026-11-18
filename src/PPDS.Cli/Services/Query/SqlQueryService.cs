@@ -89,6 +89,27 @@ public sealed class SqlQueryService : ISqlQueryService
     }
 
     /// <summary>
+    /// Refuses a confirmed DML request that does not name the profile it was confirmed for (RPC <c>profileIdentity</c>),
+    /// or names another one than the profile it runs as: without it the request would run as whichever profile is
+    /// active when it arrives, which may see (and change) other rows than the confirming user was shown.
+    /// </summary>
+    private static void CheckConfirmedProfile(string? confirmedIdentity, string? executingIdentity)
+    {
+        if (string.IsNullOrWhiteSpace(confirmedIdentity))
+        {
+            throw new PpdsException(ErrorCodes.Query.DmlBlocked,
+                "A confirmed INSERT, UPDATE or DELETE request must name the profile it was confirmed for (profileIdentity). " +
+                "Nothing was executed. Send the request again with the profile identity that was shown when it was confirmed.");
+        }
+        if (executingIdentity != null && !string.Equals(confirmedIdentity.Trim(), executingIdentity, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new PpdsException(ErrorCodes.Query.DmlBlocked,
+                "This request was confirmed for another profile than the one it would run as. Nothing was executed. " +
+                "Confirm it again for the profile it runs as.");
+        }
+    }
+
+    /// <summary>
     /// Applies the connected environment's DML safety settings and protection level (from its configuration, when
     /// there is one; otherwise the defaults stay: Production protection) and records its identity, which is reported
     /// as the write target when confirmation is required. Every surface calls this, so they configure the guard alike.
@@ -900,6 +921,8 @@ public sealed class SqlQueryService : ISqlQueryService
         // A confirmation over RPC names the environment it was given for; it is applied only to that environment.
         if (safetyResult.ContainsDml && dmlSafety is { IsConfirmed: true, IsDryRun: false, RequireConfirmedTarget: true })
             CheckConfirmedTarget(dmlSafety.ConfirmedEnvironmentUrl);
+        if (safetyResult.ContainsDml && dmlSafety is { IsConfirmed: true, IsDryRun: false, RequireConfirmedProfile: true })
+            CheckConfirmedProfile(dmlSafety.ConfirmedProfileIdentity, dmlSafety.ExecutingProfileIdentity);
 
         if (safetyResult.ContainsDml && safetyResult.RequiresConfirmation && !safetyResult.IsDryRun)
         {
@@ -1359,7 +1382,9 @@ public sealed class SqlQueryService : ISqlQueryService
         {
             throw new PpdsException(
                 ErrorCodes.Query.DmlBlocked,
-                $"Cannot safely identify DML target '{targetAlias}' because multiple FROM tables match it.");
+                $"Cannot safely identify DML target '{targetAlias}' because multiple FROM tables match it. Nothing was executed. " +
+                "Name the target table alone in FROM (for example UPDATE a SET ... FROM account a WHERE ...), or leave FROM out " +
+                "and put the condition in the WHERE clause.");
         }
 
         return matches.Count == 1 ? GetRemoteTargetLabel(matches[0]) : null;

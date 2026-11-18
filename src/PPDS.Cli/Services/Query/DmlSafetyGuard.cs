@@ -367,6 +367,19 @@ public sealed class DmlSafetyOptions
 
     /// <summary>The environment URL the caller named for a confirmed request (RPC <c>environmentUrl</c>).</summary>
     public string? ConfirmedEnvironmentUrl { get; init; }
+
+    /// <summary>
+    /// When true (RPC), a confirmed request that contains DML must name, in <see cref="ConfirmedProfileIdentity"/>, the
+    /// profile it was confirmed for, and that must be the profile it runs as (<see cref="ExecutingProfileIdentity"/>);
+    /// otherwise it is refused, so a confirmation cannot run as whichever profile happens to be active.
+    /// </summary>
+    public bool RequireConfirmedProfile { get; init; }
+
+    /// <summary>The profile identity the caller named for a confirmed request (RPC <c>profileIdentity</c>).</summary>
+    public string? ConfirmedProfileIdentity { get; init; }
+
+    /// <summary>The identity of the profile the request executes as (set by the daemon from the resolved profile).</summary>
+    public string? ExecutingProfileIdentity { get; init; }
 }
 
 /// <summary>

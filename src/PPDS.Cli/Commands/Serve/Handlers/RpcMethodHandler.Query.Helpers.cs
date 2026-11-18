@@ -200,7 +200,7 @@ public partial class RpcMethodHandler
     /// the default (unconfirmed) options, so DML is refused with <c>Query.DmlConfirmationRequired</c>
     /// until the client explicitly sends <c>dmlSafety.isConfirmed</c> (or <c>isDryRun</c>).
     /// </summary>
-    internal static SqlQueryRequest BuildSqlRequest(QuerySqlRequest request) => new()
+    internal static SqlQueryRequest BuildSqlRequest(QuerySqlRequest request, string? executingProfileIdentity = null) => new()
     {
         Sql = request.Sql,
         TopOverride = request.Top,
@@ -218,6 +218,10 @@ public partial class RpcMethodHandler
                 // A confirmed DML request must name the environment it was confirmed for (both extension surfaces do).
                 RequireConfirmedTarget = true,
                 ConfirmedEnvironmentUrl = request.EnvironmentUrl,
+                // ... and the profile it was confirmed for (both extension surfaces pin it by profileIdentity).
+                RequireConfirmedProfile = true,
+                ConfirmedProfileIdentity = request.ProfileIdentity,
+                ExecutingProfileIdentity = executingProfileIdentity,
             }
             : new DmlSafetyOptions(),
     };

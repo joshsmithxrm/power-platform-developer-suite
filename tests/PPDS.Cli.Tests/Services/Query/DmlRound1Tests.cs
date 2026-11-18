@@ -355,13 +355,46 @@ public sealed class DmlRound1RefusalTests
 
     // ---- A-M2 / C-S3: over RPC a confirmation names its environment, and runs only there -------------------
 
-    private static SqlQueryRequest Rpc(string sql, string? environmentUrl, bool confirmed = true)
+    private static readonly string Identity = new('a', 64);
+
+    private static SqlQueryRequest Rpc(string sql, string? environmentUrl, bool confirmed = true, string? profileIdentity = "default", string? executingAs = "default")
         => RpcMethodHandler.BuildSqlRequest(new QuerySqlRequest
         {
             Sql = sql,
             EnvironmentUrl = environmentUrl,
+            ProfileIdentity = profileIdentity == "default" ? Identity : profileIdentity,
             DmlSafety = new DmlSafetyRpcOptions { IsConfirmed = confirmed }
-        });
+        }, executingAs == "default" ? Identity : executingAs);
+
+    // A round-2 S2: a confirmed request names the profile it was confirmed for and runs only as that profile.
+    [Theory]
+    [InlineData(null, "must name the profile it was confirmed for")]
+    [InlineData("  ", "must name the profile it was confirmed for")]
+    [InlineData("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "confirmed for another profile")]
+    public async Task Rpc_ConfirmedDml_WithoutOrForAnotherProfile_IsRefused(string? profileIdentity, string named)
+    {
+        var h = DmlTestHarness.Create(rows: 2);
+        h.Service.ConfigureEnvironment("https://dev.crm.dynamics.com", null);
+
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(Rpc(Update, "https://dev.crm.dynamics.com", profileIdentity: profileIdentity)));
+
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        Assert.Contains(named, ex.Message);
+        h.AssertNothingChanged();
+        Assert.Empty(h.Reads);
+    }
+
+    [Fact]
+    public async Task Rpc_UnconfirmedDml_WithoutAProfile_StillAsksForConfirmation()
+    {
+        var h = DmlTestHarness.Create(rows: 2);
+        h.Service.ConfigureEnvironment("https://dev.crm.dynamics.com", null);
+
+        var ex = await Assert.ThrowsAnyAsync<PpdsException>(() => h.Service.ExecuteAsync(Rpc(Update, "https://dev.crm.dynamics.com", confirmed: false, profileIdentity: null)));
+
+        Assert.Equal(ErrorCodes.Query.DmlConfirmationRequired, ex.ErrorCode);
+        h.AssertNothingChanged();
+    }
 
     [Theory]
     [InlineData(null, "must name the environment it was confirmed for")]

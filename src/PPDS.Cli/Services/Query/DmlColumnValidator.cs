@@ -215,6 +215,14 @@ internal static class DmlColumnValidator
         {
             if (!IsNumeric(value, readColumns))
                 throw Refuse($"{column} is a number column; the value {Sql(value)} is not a number. Write a number, or CAST(... AS int) or CAST(... AS decimal(p, s)) of a number column.");
+            var category = Category(value, readColumns);
+            // SQL Server rounds currency converted to a whole number; the engine would truncate it.
+            if (WholeNumberTypes.Contains(type) && category == Money)
+                throw Refuse(CurrencyToWholeNumber(value, $"writing it to the whole-number column {column}"));
+            // SQL Server keeps 17 significant digits of a floating-point value converted to a decimal or currency; the
+            // engine keeps 15, so the stored digits could differ.
+            if (type is "Decimal" or "Money" && category == Float)
+                throw Refuse(FloatToDecimal(value, $"the {Describe(type)} column {column}"));
             return;
         }
 
@@ -326,6 +334,10 @@ internal static class DmlColumnValidator
         fragment.Accept(textArguments);
         if (textArguments.Problem != null)
             throw Refuse(textArguments.Problem);
+        var typeRules = new TypeRuleCheck(columns);
+        fragment.Accept(typeRules);
+        if (typeRules.Problem != null)
+            throw Refuse(typeRules.Problem);
         Read(columns, table, fragment);
     }
 
@@ -543,6 +555,246 @@ internal static class DmlColumnValidator
         _ => false
     };
 
+    // ── static types (T-SQL data type precedence: float > decimal > money > bigint > int) ──────
+
+    internal const string Whole = "int";
+    internal const string Big = "bigint";
+    internal const string Money = "money";
+    internal const string Exact = "decimal";
+    internal const string Float = "float";
+    internal const string Text = "text";
+    internal const string Null = "null";
+    internal const string GuidValue = "uniqueidentifier";
+
+    private static int Precedence(string? category) => category switch
+    {
+        Float => 5,
+        Exact => 4,
+        Money => 3,
+        Big => 2,
+        Whole => 1,
+        _ => 0
+    };
+
+    /// <summary>The higher of two categories by T-SQL precedence (NULL takes the other's type).</summary>
+    private static string? Higher(string? a, string? b)
+    {
+        if (a is null or Null)
+            return b;
+        if (b is null or Null)
+            return a;
+        if (a == b)
+            return a;
+        return Precedence(a) == 0 || Precedence(b) == 0 ? null : Precedence(a) >= Precedence(b) ? a : b;
+    }
+
+    /// <summary>
+    /// The T-SQL type category of a value: int, bigint, money, decimal, float, text, null or uniqueidentifier (null when
+    /// it is none of these). A literal takes its T-SQL type (2 is int, 2.5 is decimal, 'x' is text).
+    /// </summary>
+    internal static string? Category(ScalarExpression expression, Dictionary<string, AttributeMetadataDto> columns)
+    {
+        switch (expression)
+        {
+            case IntegerLiteral:
+                return Whole;
+            case NumericLiteral:
+                return Exact;
+            case RealLiteral:
+                return Float;
+            case StringLiteral:
+                return Text;
+            case NullLiteral:
+                return Null;
+            case ColumnReferenceExpression column:
+                return TypeOf(column, columns) switch
+                {
+                    "Integer" => Whole,
+                    "BigInt" => Big,
+                    "Decimal" => Exact,
+                    "Money" => Money,
+                    "Double" => Float,
+                    "String" or "Memo" => Text,
+                    _ => null
+                };
+            case UnaryExpression unary:
+                return Category(unary.Expression, columns);
+            case ParenthesisExpression paren:
+                return Category(paren.Expression, columns);
+            case BinaryExpression binary:
+                return Higher(Category(binary.FirstExpression, columns), Category(binary.SecondExpression, columns));
+            case CastCall cast:
+                return TargetCategory(cast.DataType);
+            case ConvertCall convert:
+                return TargetCategory(convert.DataType);
+            case TryCastCall tryCast:
+                return TargetCategory(tryCast.DataType);
+            case TryConvertCall tryConvert:
+                return TargetCategory(tryConvert.DataType);
+            case FunctionCall function:
+                var name = function.FunctionName.Value.ToUpperInvariant();
+                return name switch
+                {
+                    "LEN" => Whole,
+                    "ABS" or "ROUND" when function.Parameters.Count > 0 => Category(function.Parameters[0], columns),
+                    // ISNULL takes the type of its first argument (of the second when the first is NULL).
+                    "ISNULL" when function.Parameters.Count == 2 => Category(function.Parameters[0], columns) is Null
+                        ? Category(function.Parameters[1], columns)
+                        : Category(function.Parameters[0], columns),
+                    _ when TextFunctions.Contains(name) || name == "CONCAT" => Text,
+                    _ => null
+                };
+            case CoalesceExpression coalesce:
+                return coalesce.Expressions.Select(e => Category(e, columns)).Aggregate((string?)Null, Higher);
+            case NullIfExpression nullIf:
+                return Category(nullIf.FirstExpression, columns);
+            case IIfCall iif:
+                return Higher(Category(iif.ThenExpression, columns), Category(iif.ElseExpression, columns));
+            case SearchedCaseExpression searched:
+                return searched.WhenClauses.Select(w => Category(w.ThenExpression, columns))
+                    .Append(searched.ElseExpression is null ? Null : Category(searched.ElseExpression, columns))
+                    .Aggregate((string?)Null, Higher);
+            case SimpleCaseExpression simple:
+                return simple.WhenClauses.Select(w => Category(w.ThenExpression, columns))
+                    .Append(simple.ElseExpression is null ? Null : Category(simple.ElseExpression, columns))
+                    .Aggregate((string?)Null, Higher);
+            default:
+                return null;
+        }
+    }
+
+    private static string? TargetCategory(DataTypeReference type) => type is SqlDataTypeReference sql
+        ? sql.SqlDataTypeOption switch
+        {
+            SqlDataTypeOption.Int => Whole,
+            SqlDataTypeOption.BigInt => Big,
+            SqlDataTypeOption.Decimal or SqlDataTypeOption.Numeric => Exact,
+            SqlDataTypeOption.NVarChar => Text,
+            SqlDataTypeOption.UniqueIdentifier => GuidValue,
+            _ => null
+        }
+        : null;
+
+    private static string DescribeCategory(string? category) => category switch
+    {
+        Whole => "whole-number",
+        Exact => "decimal",
+        Money => "currency",
+        Float => "floating-point",
+        Text => "text",
+        _ => category ?? "unknown"
+    };
+
+    private static string CurrencyToWholeNumber(ScalarExpression currency, string where, bool tryForm = false)
+        => $"Converting the currency value {Sql(currency)} to a whole number ({where}) is not supported: SQL Server rounds currency " +
+           "converted to a whole number, and the query engine would truncate it. To truncate it as SQL Server truncates a decimal, " +
+           $"write this instead: {(tryForm ? "TRY_CAST" : "CAST")}(CAST({Sql(currency)} AS decimal(19, 4)) AS int).";
+
+    /// <summary>
+    /// Type rules the engine could not honour as T-SQL does, refused before anything runs: currency converted to a whole
+    /// number (SQL Server rounds), floating point converted to decimal or currency (digits kept), % on floating point (SQL
+    /// Server refuses it) or currency (not proven), ISNULL whose second value would be narrowed to the first's type, and
+    /// arithmetic or COALESCE / IIF / CASE mixing decimal, currency and floating point (only a whole number mixes with another
+    /// number type: those are the combinations the live differential run proved).
+    /// </summary>
+    private sealed class TypeRuleCheck(Dictionary<string, AttributeMetadataDto> columns) : TSqlFragmentVisitor
+    {
+        public string? Problem { get; private set; }
+
+        public override void Visit(CastCall node) => Conversion(node, node.DataType, node.Parameter, tryForm: false);
+
+        public override void Visit(ConvertCall node) => Conversion(node, node.DataType, node.Parameter, tryForm: false);
+
+        public override void Visit(TryCastCall node) => Conversion(node, node.DataType, node.Parameter, tryForm: true);
+
+        public override void Visit(TryConvertCall node) => Conversion(node, node.DataType, node.Parameter, tryForm: true);
+
+        private void Conversion(TSqlFragment node, DataTypeReference type, ScalarExpression parameter, bool tryForm)
+        {
+            var from = Category(parameter, columns);
+            var to = TargetCategory(type);
+            if (to == Whole && from == Money)
+                Problem ??= CurrencyToWholeNumber(parameter, Sql(node), tryForm);
+            else if (to == Exact && from == Float)
+                Problem ??= FloatToDecimal(parameter, "a decimal in " + Sql(node));
+        }
+
+        public override void Visit(BinaryExpression node)
+        {
+            var left = Category(node.FirstExpression, columns);
+            var right = Category(node.SecondExpression, columns);
+            if (node.BinaryExpressionType == BinaryExpressionType.Modulo && (left is Float or Money || right is Float or Money))
+            {
+                Problem ??= $"{Sql(node)}: % on a {(left is Float or Money ? DescribeCategory(left) : DescribeCategory(right))} value is not supported " +
+                            "(SQL Server refuses % on floating point, and % on currency was not proven). Use % on whole numbers or decimals.";
+                return;
+            }
+            Mixed(node, "arithmetic", left, right);
+        }
+
+        public override void Visit(FunctionCall node)
+        {
+            if (!node.FunctionName.Value.Equals("ISNULL", StringComparison.OrdinalIgnoreCase) || node.Parameters.Count != 2)
+                return;
+            var first = Category(node.Parameters[0], columns);
+            var second = Category(node.Parameters[1], columns);
+            if (first is Null)
+            {
+                Problem ??= $"{Sql(node)}: ISNULL with NULL as its first value is not supported. Write the second value instead.";
+                return;
+            }
+            // ISNULL gives the type of its first value; a second value of a lower type (a whole number) is converted exactly.
+            if (second is Null || second == first || (second == Whole && first is Exact or Money or Float))
+                return;
+            var rewrite = first == Whole && second is Exact or Float
+                ? $" Write this instead: ISNULL({Sql(node.Parameters[0])}, CAST({Sql(node.Parameters[1])} AS int))."
+                : " Convert the second value to the type of the first with CAST first.";
+            Problem ??= $"{Sql(node)}: ISNULL gives the type of its first value ({DescribeCategory(first)}), so SQL Server converts the " +
+                        $"{DescribeCategory(second)} value {Sql(node.Parameters[1])} to it; that conversion is not supported here." + rewrite;
+        }
+
+        public override void Visit(CoalesceExpression node) => Branches(node, "COALESCE", node.Expressions);
+
+        public override void Visit(IIfCall node) => Branches(node, "IIF", [node.ThenExpression, node.ElseExpression]);
+
+        public override void Visit(SearchedCaseExpression node)
+            => Branches(node, "CASE", [.. node.WhenClauses.Select(w => w.ThenExpression), .. node.ElseExpression is null ? Array.Empty<ScalarExpression>() : [node.ElseExpression]]);
+
+        public override void Visit(SimpleCaseExpression node)
+            => Branches(node, "CASE", [.. node.WhenClauses.Select(w => w.ThenExpression), .. node.ElseExpression is null ? Array.Empty<ScalarExpression>() : [node.ElseExpression]]);
+
+        private void Branches(TSqlFragment node, string name, IEnumerable<ScalarExpression> values)
+        {
+            var categories = values.Select(v => Category(v, columns)).Where(c => c is not Null).Distinct().ToList();
+            for (var i = 0; i < categories.Count; i++)
+                for (var j = i + 1; j < categories.Count; j++)
+                    Mixed(node, name, categories[i], categories[j]);
+        }
+
+        /// <summary>Decimal, currency and floating point combine only with themselves or with whole numbers.</summary>
+        private void Mixed(TSqlFragment node, string what, string? a, string? b)
+        {
+            if (a is null || b is null || a == b || a is Null || b is Null || a == Whole || b == Whole)
+                return;
+            if (Precedence(a) == 0 || Precedence(b) == 0)
+                return;
+            Problem ??= $"{Sql(node)}: {what} combining a {DescribeCategory(a)} and a {DescribeCategory(b)} value is not supported " +
+                        "(only whole numbers combine with the other number types here). " +
+                        (a is Float || b is Float
+                            ? "Keep floating-point values apart from decimal and currency values."
+                            : "Convert one of them with CAST(... AS decimal(p, s)) first.");
+        }
+
+        public override void ExplicitVisit(ScalarSubquery node)
+        {
+        }
+    }
+
+    private static string FloatToDecimal(ScalarExpression value, string where)
+        => $"Converting the floating-point value {Sql(value)} to {where} is not supported: SQL Server keeps 17 significant digits " +
+           "of a floating-point value converted to a decimal or currency and the query engine keeps 15, so the stored digits could " +
+           "differ. Write it to a floating-point or whole-number column, or compute it from decimal columns.";
+
     private static string? TypeOf(ColumnReferenceExpression column, Dictionary<string, AttributeMetadataDto> columns)
         => columns.TryGetValue(column.MultiPartIdentifier.Identifiers.Last().Value, out var a) ? a.AttributeType : null;
 
@@ -632,7 +884,9 @@ internal static class DmlColumnValidator
             {
                 Problem ??= $"{Sql(node)}: {Sql(argument)} would be turned into text, which is supported only for text and whole " +
                             "numbers (the text SQL makes of a decimal, currency or floating-point value is not reproduced). Convert it " +
-                            "to a whole number first, for example CAST(... AS int).";
+                            "to a whole number first: " + (Category(argument, columns) == Money
+                                ? $"write this instead: CAST(CAST(CAST({Sql(argument)} AS decimal(19, 4)) AS int) AS nvarchar(20))."
+                                : $"write this instead: CAST(CAST({Sql(argument)} AS int) AS nvarchar(20)).");
             }
         }
     }
@@ -721,8 +975,12 @@ internal static class DmlColumnValidator
             // Only the table's own id was proven among unique-identifier columns (stageid, processid, ... were not).
             if (string.Equals(attribute.AttributeType, "Uniqueidentifier", StringComparison.OrdinalIgnoreCase) && !attribute.IsPrimaryId)
             {
+                // The id column named from metadata: activity tables (task, email, ...) use activityid, not <table>id.
+                var primaryId = columns.Values.FirstOrDefault(a => a.IsPrimaryId)?.LogicalName;
                 throw Refuse($"{table}.{attribute.LogicalName} is a unique-identifier column that is not the table's id, which is not " +
-                             $"supported in WHERE. Filter on the id column {table}id or on a lookup instead.");
+                             "supported in WHERE. " + (primaryId is null
+                                 ? "Filter on the table's id column or on a lookup instead."
+                                 : $"Filter on the id column {primaryId} or on a lookup instead."));
             }
             // An unverified date kind is refused for every use, including IS NULL (which has no literal to check).
             if (string.Equals(attribute.AttributeType, "DateTime", StringComparison.OrdinalIgnoreCase) && !IsVerifiedDateBehavior(attribute))

@@ -67,6 +67,26 @@ public class TsqlValueSemanticsTests
     public void TryConvert_GivesNull_WhereTsqlOverflows(string value, string type)
         => CastConverter.TryConvert(decimal.Parse(value, System.Globalization.CultureInfo.InvariantCulture), type).Should().BeNull();
 
+    // B-F1 (round 2): a precision the engine cannot compute exactly is an engine limitation, which must never become NULL.
+    [Theory]
+    [InlineData("decimal(38, 30)")]
+    [InlineData("decimal(30, 29)")]
+    [InlineData("decimal(29, 2)")]
+    public void TryConvert_ToAPrecisionAbove28_IsAnError_NotNull(string type)
+    {
+        var act = () => CastConverter.TryConvert(10.55m, type);
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    [Theory]
+    [InlineData("10.55", "decimal(28, 26)", "10.55")]
+    [InlineData("0.5", "decimal(28, 28)", "0.5")]
+    [InlineData("123456789012345678901234567", "decimal(28, 0)", "123456789012345678901234567")]
+    public void Decimal28_IsComputedExactly(string value, string type, string expected)
+        => ((decimal)CastConverter.Convert(decimal.Parse(value, System.Globalization.CultureInfo.InvariantCulture), type)!)
+            .Should().Be(decimal.Parse(expected, System.Globalization.CultureInfo.InvariantCulture));
+
     [Fact]
     public void TryConvert_ToInt_GivesNull_OutsideTheIntRange()
         => CastConverter.TryConvert(3000000000m, "int").Should().BeNull();
@@ -87,6 +107,49 @@ public class TsqlValueSemanticsTests
     [Fact]
     public void IntArithmeticThatFits_IsAnInt()
         => ExpressionCompiler.EvaluateArithmetic(5000, BinaryExpressionType.Multiply, 1000).Should().Be(5000000);
+
+    // B-F2 (round 2): int / int and int % int are int in T-SQL, so a later operation that overflows int is an error.
+    [Theory]
+    [InlineData(BinaryExpressionType.Divide, 7, 2, 3)]
+    [InlineData(BinaryExpressionType.Divide, -7, 2, -3)]
+    [InlineData(BinaryExpressionType.Modulo, 7, 2, 1)]
+    [InlineData(BinaryExpressionType.Modulo, -7, 2, -1)]
+    [InlineData(BinaryExpressionType.Modulo, int.MinValue, -1, 0)]
+    public void IntDivisionAndModulo_AreInts(BinaryExpressionType op, int left, int right, int expected)
+        => ExpressionCompiler.EvaluateArithmetic(left, op, right).Should().BeOfType<int>().And.Be(expected);
+
+    [Fact]
+    public void IntDivision_ThenAnOverflowingMultiplication_IsAnError()
+    {
+        var act = () => ExpressionCompiler.EvaluateArithmetic(
+            ExpressionCompiler.EvaluateArithmetic(100000, BinaryExpressionType.Divide, 2)!, BinaryExpressionType.Multiply, 100000);
+
+        act.Should().Throw<OverflowException>();
+    }
+
+    [Fact]
+    public void IntMinValueDividedByMinusOne_IsAnOverflow()
+    {
+        var act = () => ExpressionCompiler.EvaluateArithmetic(int.MinValue, BinaryExpressionType.Divide, -1);
+
+        act.Should().Throw<OverflowException>();
+    }
+
+    [Fact]
+    public void NegatingTheSmallestInt_IsAnOverflow()
+    {
+        var act = () => ExpressionCompiler.NegateValue(int.MinValue);
+
+        act.Should().Throw<OverflowException>();
+    }
+
+    [Fact]
+    public void NegatingTheSmallestBigInt_IsAnOverflow()
+    {
+        var act = () => ExpressionCompiler.NegateValue(long.MinValue);
+
+        act.Should().Throw<OverflowException>();
+    }
 
     [Fact]
     public void BigIntArithmeticThatOverflows_IsAnError()

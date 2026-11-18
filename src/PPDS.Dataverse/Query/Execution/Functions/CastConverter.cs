@@ -140,8 +140,19 @@ public static class CastConverter
         };
     }
 
+    /// <summary>The largest decimal precision the engine computes exactly (System.Decimal holds 28 digits).</summary>
+    public const int MaxExactDecimalPrecision = 28;
+
     private static decimal ConvertToDecimal(object value, int? precision, int? scale)
     {
+        // Beyond 28 digits the result would not be what T-SQL computes. That is a limitation of the engine, not a value
+        // that does not fit, so it is not an error TRY_CAST / TRY_CONVERT may turn into NULL.
+        if (precision > MaxExactDecimalPrecision || scale > MaxExactDecimalPrecision)
+        {
+            throw new NotSupportedException(
+                $"decimal({precision}, {scale ?? 0}) is not supported: at most {MaxExactDecimalPrecision} digits of precision are computed exactly.");
+        }
+
         decimal result = value switch
         {
             int i => i,

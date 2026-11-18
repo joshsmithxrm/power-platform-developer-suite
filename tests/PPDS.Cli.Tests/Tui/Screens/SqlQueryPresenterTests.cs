@@ -410,6 +410,28 @@ public sealed class SqlQueryPresenterTests : IDisposable
         Assert.EndsWith("Do you want to proceed?", prompt);
     }
 
+    // A round-2 S1: a long script is shown whole, and every statement that changes data is listed by verb and table first,
+    // so a DELETE past the first screen is never confirmed unseen.
+    [Fact]
+    public async Task ConfirmationPrompt_ShowsTheWholeScript_AndListsEveryStatementThatChangesData()
+    {
+        var fakeSqlService = await GetFakeSqlQueryService();
+        using var presenter = new SqlQueryPresenter(_session, TestEnvironmentUrl);
+        var confirmation = new PpdsDmlConfirmationRequiredException("This request changes data.",
+            [new DmlTarget("DEV", TestEnvironmentUrl, "Development", "Development")]);
+        fakeSqlService.ExceptionToThrow = confirmation;
+        var script = "UPDATE account SET description = '" + new string('x', 600) + "' WHERE name = 'a';\nDELETE FROM contact WHERE statecode = 0;\n"
+            + "INSERT INTO lead (subject) VALUES ('s')";
+        await presenter.ExecuteAsync(script, CancellationToken.None);
+
+        var prompt = presenter.ConfirmationPrompt(confirmation);
+
+        Assert.Contains("Statements that change data (3): UPDATE account; DELETE contact; INSERT lead", prompt);
+        Assert.Contains("DELETE FROM contact WHERE statecode = 0;", prompt);
+        Assert.Contains(new string('x', 600), prompt);
+        Assert.DoesNotContain("...", prompt);
+    }
+
     [Fact]
     public async Task ExecuteAsync_ScriptInterruptedAfterDmlRan_ErrorSaysWhatAlreadyRan()
     {

@@ -299,7 +299,7 @@ public partial class RpcMethodHandler
             }
 
             // Build the shared request
-            var sqlRequest = BuildSqlRequest(request);
+            var sqlRequest = BuildSqlRequest(request, RpcProfileIdentity.Create(profile));
 
             try
             {

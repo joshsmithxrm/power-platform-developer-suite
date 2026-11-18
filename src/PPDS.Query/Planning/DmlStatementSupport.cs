@@ -30,8 +30,8 @@ namespace PPDS.Query.Planning;
 /// <item>INSERT: an explicit column list without duplicates; up to 1,000 VALUES rows of the same length whose values are
 /// literals, NULL or CAST('&lt;guid&gt;' AS uniqueidentifier); or a SELECT from the same table whose list has the same
 /// length, where every item is a column or an aliased expression with a unique name that is not a column the SELECT reads
-/// (values are mapped by position). ORDER BY on columns is allowed; <c>TOP n</c> / <c>TOP (n)</c> up to 5,000 only with
-/// ORDER BY.</item>
+/// (values are mapped by position). <c>TOP n</c> / <c>TOP (n)</c> up to 5,000 only with ORDER BY on columns, and ORDER BY only
+/// with TOP.</item>
 /// <item>No OPTION (...) clause.</item>
 /// </list>
 /// </remarks>
@@ -333,6 +333,11 @@ internal static class DmlStatementSupport
             }
         }
 
+        // Without TOP, ORDER BY does not change which rows are copied, and paging over a sort on a column that is not
+        // unique was not proven to return every row exactly once.
+        if (select.OrderByClause != null && select.TopRowFilter == null)
+            return Unsupported("ORDER BY without TOP", context, " Remove the ORDER BY, or add TOP.");
+
         if (select.OrderByClause != null)
         {
             foreach (var order in select.OrderByClause.OrderByElements)
@@ -601,7 +606,7 @@ internal static class DmlStatementSupport
             case TryConvertCall { Style: null } tryConvert when IsNumberTarget(tryConvert.DataType):
                 return CheckValue(tryConvert.Parameter, columns, context);
             case TryCastCall or TryConvertCall:
-                return Unsupported(Sql(expression), context, " TRY_CAST and TRY_CONVERT are supported to int or decimal(p, s) only.");
+                return Unsupported(Sql(expression), context, " TRY_CAST and TRY_CONVERT are supported to int or decimal(p, s) (precision at most 28) only.");
             case LeftFunctionCall or RightFunctionCall:
                 return Unsupported(Sql(expression), context, " Use SUBSTRING(text, start, length) instead.");
             case FunctionCall function when function.CallTarget == null && function.OverClause == null
@@ -737,8 +742,8 @@ internal static class DmlStatementSupport
     }
 
     private const string ConversionTargets =
-        " Supported: nvarchar(n) with a length from 1 to 4000, int, decimal(p, s) with both precision and scale (for example " +
-        "decimal(10, 2)), and CAST('<guid>' AS uniqueidentifier).";
+        " Supported: nvarchar(n) with a length from 1 to 4000, int, decimal(p, s) with both precision (at most 28) and scale " +
+        "(for example decimal(10, 2)), and CAST('<guid>' AS uniqueidentifier).";
 
     /// <summary>The largest nvarchar(n) length a conversion may name.</summary>
     public const int MaxNVarCharLength = 4000;
@@ -749,12 +754,21 @@ internal static class DmlStatementSupport
             ? value
             : null;
 
-    /// <summary>int, or decimal(p, s) with both given (SQL's defaults would round to a whole number).</summary>
+    /// <summary>
+    /// The largest decimal precision a conversion may name: the engine computes decimals exactly up to 28 digits
+    /// (System.Decimal), and the live differential run proved decimal(28, 0), decimal(28, 28) and the precisions below.
+    /// </summary>
+    public const int MaxDecimalPrecision = 28;
+
+    /// <summary>The largest number of places ROUND may name (the live run proved 10, the most a decimal column holds).</summary>
+    public const int MaxRoundPlaces = 10;
+
+    /// <summary>int, or decimal(p, s) with both given (SQL's defaults would round to a whole number), p at most 28.</summary>
     private static bool IsNumberTarget(DataTypeReference type) => type switch
     {
         SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.Int, Parameters.Count: 0 } => true,
         SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.Decimal, Parameters.Count: 2 } d
-            => IntegerParameter(d, 0) is >= 1 and <= 38 and var p && IntegerParameter(d, 1) is { } s && s <= p,
+            => IntegerParameter(d, 0) is >= 1 and <= MaxDecimalPrecision and var p && IntegerParameter(d, 1) is { } s && s <= p,
         _ => false
     };
 
@@ -799,9 +813,9 @@ internal static class DmlStatementSupport
             case "SUBSTRING" when arguments.Count != 3 || Literal(arguments[1]) is not >= 1 || Literal(arguments[2]) is not >= 0:
                 return Unsupported(Sql(function), context,
                     " Give SUBSTRING a start of 1 or more and a length of 0 or more, written as numbers, for example SUBSTRING(name, 1, 10).");
-            case "ROUND" when arguments.Count != 2 || Literal(arguments[1]) is not >= 0:
+            case "ROUND" when arguments.Count != 2 || Literal(arguments[1]) is not (>= 0 and <= MaxRoundPlaces):
                 return Unsupported(Sql(function), context,
-                    " Give ROUND a value and a number of decimal places of 0 or more, written as a number, for example ROUND(amount, 1).");
+                    $" Give ROUND a value and a number of decimal places from 0 to {MaxRoundPlaces}, written as a number, for example ROUND(amount, 1).");
             default:
                 return null;
         }

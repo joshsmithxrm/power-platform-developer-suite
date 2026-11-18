@@ -830,13 +830,17 @@ public sealed class ExpressionCompiler
                 BinaryExpressionType.BitwiseXor => (long)ld ^ (long)rd,
                 _ => throw new NotSupportedException($"Operator {op} is not supported for arithmetic.")
             },
-            // T-SQL int (and bigint) arithmetic that overflows is an error, never a wrapped or widened value.
+            // T-SQL int (and bigint) arithmetic that overflows is an error, never a wrapped or widened value. int / int
+            // and int % int are int too, so the next operation sees an int (int.MinValue / -1 is an overflow).
             (long ld, long rd) when left is int && right is int && op is BinaryExpressionType.Add
-                or BinaryExpressionType.Subtract or BinaryExpressionType.Multiply => IntResult(op switch
+                or BinaryExpressionType.Subtract or BinaryExpressionType.Multiply
+                or BinaryExpressionType.Divide or BinaryExpressionType.Modulo => IntResult(op switch
             {
                 BinaryExpressionType.Add => ld + rd,
                 BinaryExpressionType.Subtract => ld - rd,
-                _ => ld * rd
+                BinaryExpressionType.Multiply => ld * rd,
+                BinaryExpressionType.Divide => rd == 0 ? throw new DivideByZeroException() : ld / rd,
+                _ => rd == 0 ? throw new DivideByZeroException() : ld % rd
             }),
             (long ld, long rd) => op switch
             {
@@ -870,8 +874,11 @@ public sealed class ExpressionCompiler
     {
         return value switch
         {
-            int i => -i,
-            long l => -l,
+            // -int.MinValue does not fit an int: an overflow error in T-SQL, never the same value back.
+            int i => i == int.MinValue
+                ? throw new OverflowException("Arithmetic overflow error converting expression to data type int.")
+                : -i,
+            long l => checked(-l),
             decimal d => -d,
             double d => -d,
             float f => -f,

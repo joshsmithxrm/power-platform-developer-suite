@@ -43,8 +43,6 @@ public sealed class DmlRefusalRewriteTests : IDisposable
     [InlineData("UPDATE account SET name = SUBSTRING(name, 0, 3) WHERE name = 'n1'", "SUBSTRING(name, 1, 10)", "UPDATE account SET name = SUBSTRING(name, 1, 2) WHERE name = 'n1'")]
     [InlineData("UPDATE account SET revenue = ROUND(revenue, 1, 1) WHERE name = 'n1'", "ROUND(amount, 1)", "UPDATE account SET revenue = ROUND(revenue, 1) WHERE name = 'n1'")]
     [InlineData("UPDATE account SET statecode = 1 WHERE name = 'n1'", "SET statecode = 1, statuscode = 2", "UPDATE account SET statecode = 1, statuscode = 2 WHERE name = 'n1'")]
-    [InlineData("UPDATE account SET description = CAST(revenue AS nvarchar(20)) WHERE name = 'n1'", "CAST(... AS int)", "UPDATE account SET description = CAST(CAST(revenue AS int) AS nvarchar(20)) WHERE name = 'n1'")]
-    [InlineData("UPDATE account SET description = CONCAT(name, revenue) WHERE name = 'n1'", "CAST(... AS int)", "UPDATE account SET description = CONCAT(name, CAST(revenue AS int)) WHERE name = 'n1'")]
     [InlineData("UPDATE account SET description = UPPER(numberofemployees) WHERE name = 'n1'", "CAST(... AS nvarchar(n)) first", "UPDATE account SET description = UPPER(CAST(numberofemployees AS nvarchar(10))) WHERE name = 'n1'")]
     [InlineData("UPDATE account SET description = 5 WHERE name = 'n1'", "CAST(... AS nvarchar(n))", "UPDATE account SET description = CAST(5 AS nvarchar(10)) WHERE name = 'n1'")]
     [InlineData("UPDATE account SET revenue = '5' WHERE name = 'n1'", "Write a number", "UPDATE account SET revenue = 5 WHERE name = 'n1'")]
@@ -65,6 +63,37 @@ public sealed class DmlRefusalRewriteTests : IDisposable
 
         var ok = DmlTestHarness.Create(rows: 4);
         await ok.Service.ExecuteAsync(new SqlQueryRequest { Sql = rewrite, DmlSafety = Confirmed });
+    }
+
+    /// <summary>
+    /// Refusals whose message gives a concrete rewrite ("write this instead: ..."): the rewrite is taken from the message
+    /// itself, put in place of the refused expression, and the resulting statement must run.
+    /// </summary>
+    [Theory]
+    [InlineData("UPDATE account SET numberofemployees = creditlimit WHERE name = 'n1'", "creditlimit")]
+    [InlineData("UPDATE account SET numberofemployees = CAST(creditlimit AS int) WHERE name = 'n1'", "CAST(creditlimit AS int)")]
+    [InlineData("UPDATE account SET numberofemployees = CONVERT(int, creditlimit) WHERE name = 'n1'", "CONVERT(int, creditlimit)")]
+    [InlineData("UPDATE account SET numberofemployees = TRY_CAST(creditlimit AS int) WHERE name = 'n1'", "TRY_CAST(creditlimit AS int)")]
+    [InlineData("UPDATE account SET numberofemployees = TRY_CONVERT(int, creditlimit) WHERE name = 'n1'", "TRY_CONVERT(int, creditlimit)")]
+    [InlineData("UPDATE account SET numberofemployees = ISNULL(numberofemployees, revenue) WHERE name = 'n1'", "ISNULL(numberofemployees, revenue)")]
+    [InlineData("UPDATE account SET description = CONCAT(name, revenue) WHERE name = 'n1'", "revenue")]
+    [InlineData("UPDATE account SET description = CONCAT(name, creditlimit) WHERE name = 'n1'", "creditlimit")]
+    [InlineData("UPDATE account SET description = CAST(revenue AS nvarchar(20)) WHERE name = 'n1'", "revenue")]
+    [InlineData("UPDATE account SET description = CAST(creditlimit AS nvarchar(20)) WHERE name = 'n1'", "creditlimit")]
+    public async Task TheRewriteInTheMessage_IsOnTheAllowlist(string refused, string replaced)
+    {
+        var h = DmlTestHarness.Create(rows: 4);
+        var ex = await Assert.ThrowsAnyAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = refused, DmlSafety = Confirmed }));
+        h.AssertNothingChanged();
+        var suggestion = System.Text.RegularExpressions.Regex.Match(ex.Message, @"write this instead: (?<sql>.+?)\.(?: Nothing was executed\.)?$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        Assert.True(suggestion.Success, "The refusal gives no rewrite: " + ex.Message);
+
+        var rewrite = refused.Replace(replaced, suggestion.Groups["sql"].Value, StringComparison.Ordinal);
+        Assert.NotEqual(refused, rewrite);
+        var ok = DmlTestHarness.Create(rows: 4);
+        await ok.Service.ExecuteAsync(new SqlQueryRequest { Sql = rewrite, DmlSafety = Confirmed });
+        Assert.NotEmpty(ok.Writes);
     }
 
     [Fact]

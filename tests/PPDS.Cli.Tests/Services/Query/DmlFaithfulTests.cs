@@ -101,7 +101,7 @@ public sealed class DmlFaithfulTests : IDisposable
     [InlineData("UPDATE account SET revenue = TRY_CAST(name AS int) WHERE name = 'n1'", "is not a number")]
     [InlineData("UPDATE account SET revenue = CAST(description AS int) WHERE name = 'n1'", "is not a number")]
     [InlineData("UPDATE account SET description = CAST(CAST(name AS int) AS nvarchar(10)) WHERE name = 'n1'", "converts a value that is not a number")]
-    [InlineData("UPDATE account SET name = TRY_CONVERT(nvarchar(10), revenue) WHERE name = 'n1'", "TRY_CAST and TRY_CONVERT are supported to int or decimal(p, s) only")]
+    [InlineData("UPDATE account SET name = TRY_CONVERT(nvarchar(10), revenue) WHERE name = 'n1'", "TRY_CAST and TRY_CONVERT are supported to int or decimal(p, s)")]
     [InlineData("UPDATE account SET followupby = CAST('2024-01-01T00:00:00Z' AS datetime) WHERE name = 'n1'", "CAST to DATETIME")]
     [InlineData("UPDATE account SET description = LEFT(name, 1) WHERE name = 'n1'", "SUBSTRING")]
     [InlineData("UPDATE account SET followupby = GETDATE() WHERE name = 'n1'", "once per statement")]

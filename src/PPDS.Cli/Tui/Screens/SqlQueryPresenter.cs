@@ -161,8 +161,9 @@ internal sealed class SqlQueryPresenter : IDisposable
     }
 
     /// <summary>
-    /// The text of the confirmation dialog: the service's message, the environment(s) the statement would change and the
-    /// statement itself (control characters escaped), then the question.
+    /// The text of the confirmation dialog: the service's message, the environment(s) the statement would change, every
+    /// statement that changes data (verb and table), the whole statement text (control characters escaped, never
+    /// shortened: the dialog scrolls), then the question.
     /// </summary>
     public string ConfirmationPrompt(PpdsException confirmation)
     {
@@ -179,10 +180,48 @@ internal sealed class SqlQueryPresenter : IDisposable
         }
 
         var statement = PPDS.Cli.Infrastructure.Output.TerminalText.Sanitize(_awaitingConfirmationSql ?? "");
-        lines.Add("Statement: " + (statement.Length > 400 ? statement[..397] + "..." : statement));
+        var changes = DataChangingStatements(_awaitingConfirmationSql ?? "");
+        lines.Add(changes is null
+            ? "Statements that change data: could not be listed; read the whole text below."
+            : $"Statements that change data ({changes.Count}): {string.Join("; ", changes)}");
+        lines.Add("Statement: " + statement);
         lines.Add("");
         lines.Add("Do you want to proceed?");
         return string.Join("\n", lines);
+    }
+
+    /// <summary>Each INSERT, UPDATE, DELETE and MERGE in <paramref name="sql"/> as "VERB table" (null when it does not parse).</summary>
+    internal static IReadOnlyList<string>? DataChangingStatements(string sql)
+    {
+        var parser = new Microsoft.SqlServer.TransactSql.ScriptDom.TSql160Parser(initialQuotedIdentifiers: false);
+        var fragment = parser.Parse(new StringReader(sql), out var errors);
+        if (errors.Count > 0 || fragment is null)
+            return null;
+        var collector = new DataChangeCollector();
+        fragment.Accept(collector);
+        return collector.Statements;
+    }
+
+    private sealed class DataChangeCollector : Microsoft.SqlServer.TransactSql.ScriptDom.TSqlFragmentVisitor
+    {
+        public List<string> Statements { get; } = new();
+
+        private static string Name(Microsoft.SqlServer.TransactSql.ScriptDom.TableReference? table)
+            => table is Microsoft.SqlServer.TransactSql.ScriptDom.NamedTableReference named
+                ? string.Join(".", named.SchemaObject.Identifiers.Select(i => i.Value))
+                : "(a table expression)";
+
+        public override void Visit(Microsoft.SqlServer.TransactSql.ScriptDom.InsertStatement node)
+            => Statements.Add("INSERT " + Name(node.InsertSpecification.Target));
+
+        public override void Visit(Microsoft.SqlServer.TransactSql.ScriptDom.UpdateStatement node)
+            => Statements.Add("UPDATE " + Name(node.UpdateSpecification.Target));
+
+        public override void Visit(Microsoft.SqlServer.TransactSql.ScriptDom.DeleteStatement node)
+            => Statements.Add("DELETE " + Name(node.DeleteSpecification.Target));
+
+        public override void Visit(Microsoft.SqlServer.TransactSql.ScriptDom.MergeStatement node)
+            => Statements.Add("MERGE " + Name(node.MergeSpecification.Target));
     }
 
     public void CancelQuery()

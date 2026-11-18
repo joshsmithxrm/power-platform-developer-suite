@@ -107,7 +107,13 @@ internal static class TestMetadata
             A("contactid", "Lookup"), A("createdon", "DateTime", create: false, update: false), A("followupby", "DateTime"),
             A("legacydate", "DateTime", behavior: "UserLocal", format: "DateOnly"), A("tzidate", "DateTime", behavior: "TimeZoneIndependent"),
             A("nobehaviordate", "DateTime", behavior: "-"), A("birthday", "DateTime", behavior: "DateOnly", format: "DateOnly"),
-            A("stageid", "Uniqueidentifier", primary: false), A("donotemail", "Boolean"), A("aging30", "BigInt")
+            A("stageid", "Uniqueidentifier", primary: false), A("donotemail", "Boolean"), A("aging30", "BigInt"),
+            A("address1_latitude", "Double")
+        ],
+        // An activity table: its primary id is activityid, not taskid.
+        ["task"] =
+        [
+            A("activityid", "Uniqueidentifier", update: false), A("subject", "String"), A("stageid", "Uniqueidentifier", primary: false)
         ],
         ["solution"] = [A("solutionid", "Uniqueidentifier", update: false), A("friendlyname", "String")],
         ["contact"] =
