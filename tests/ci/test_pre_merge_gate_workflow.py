@@ -68,8 +68,7 @@ def test_aggregate_depends_only_on_major_bump_evidence():
     # Cancelled, skipped or missing results cannot turn a queued event into a
     # pass.
     condition = script.split("then", 1)[0]
-    assert condition.replace("\
-", "").split() == [
+    assert condition.split() == [
         "if", "[[", '"${{', "needs.major-bump-tested.result", '}}"', "==",
         '"success"', "]];",
     ]

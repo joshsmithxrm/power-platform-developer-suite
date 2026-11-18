@@ -174,3 +174,43 @@ class TestMain:
     def test_no_summary_env_is_fine(self, monkeypatch):
         monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
         assert check_pr_size.main(["--json", json.dumps(make_pr(files=1))]) == 0
+
+    def test_unexpected_oserror_from_read_exits_0_with_warning(self, capsys):
+        with patch.object(
+            check_pr_size, "fetch_pr_json", side_effect=PermissionError("denied"),
+        ):
+            rc = check_pr_size.main(["--pr", "42"])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "::warning" in out
+        assert "denied" in out
+
+    def test_unicode_decode_error_from_read_exits_0(self, capsys):
+        err = UnicodeDecodeError("utf-8", bytes([255]), 0, 1, "bad byte")
+        with patch.object(check_pr_size, "fetch_pr_json", side_effect=err):
+            rc = check_pr_size.main(["--pr", "42"])
+        assert rc == 0
+        assert "::warning" in capsys.readouterr().out
+
+    def test_non_finite_number_exits_0_with_warning(self, capsys):
+        # json.loads accepts Infinity; int(inf) raises OverflowError.
+        rc = check_pr_size.main(["--json", '{"additions": Infinity}'])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "informational" in out.lower()
+
+    def test_describe_size_non_finite_does_not_raise(self):
+        msg = check_pr_size.describe_size({"additions": float("inf")})
+        assert "could not" in msg.lower()
+        msg = check_pr_size.describe_size({"additions": float("nan")})
+        assert "could not" in msg.lower()
+
+    def test_unexpected_error_in_describe_exits_0_with_warning(self, capsys):
+        with patch.object(
+            check_pr_size, "describe_size", side_effect=RuntimeError("kaboom"),
+        ):
+            rc = check_pr_size.main(["--json", "{}"])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "::warning" in out
+        assert "kaboom" in out

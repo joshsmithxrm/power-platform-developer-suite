@@ -59,7 +59,7 @@ def describe_size(pr: dict) -> str:
         additions = int(pr.get("additions") or 0)
         deletions = int(pr.get("deletions") or 0)
         files = int(pr.get("changedFiles") or 0)
-    except (TypeError, ValueError, AttributeError) as e:
+    except (TypeError, ValueError, OverflowError, AttributeError) as e:
         return f"PR size: could not read size numbers ({e}). {INFORMATIONAL}"
 
     loc = additions + deletions
@@ -102,13 +102,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             pr = fetch_pr_json(args.pr)
         else:
             pr = json.loads(args.json)
-    except (RuntimeError, json.JSONDecodeError) as e:
+        message = describe_size(pr)
+    except Exception as e:  # noqa: BLE001 - size is informational, never fail
         message = f"PR size could not be read: {e}. {INFORMATIONAL}"
         print(f"::warning::{message}")
         write_summary(f"### PR size\n\n{message}")
         return 0
 
-    message = describe_size(pr)
     print(message)
     write_summary(f"### PR size\n\n{message}")
     return 0
