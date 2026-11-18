@@ -18,18 +18,20 @@ internal static class PluginRegistrationPlanningService
         bool checkImageNames = true)
     {
         foreach (var type in assembly.Types)
-        foreach (var step in type.Steps)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            step.OperationIntent = PluginRegistrationContract.FileIntent(step.OperationIntent);
-            if (string.IsNullOrWhiteSpace(step.Message))
-                throw new PpdsException(ErrorCodes.Validation.InvalidValue, "Step message is required.");
-            _ = PluginRegistrationNormalizer.NormalizeStep(step, PluginRegistrationContract.FileIntent(step.OperationIntent));
-            foreach (var image in step.Images)
+            foreach (var step in type.Steps)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                image.OperationIntent = step.OperationIntent;
-                _ = PluginRegistrationNormalizer.NormalizeImage(image, step.Message, step.OperationIntent);
+                step.OperationIntent = PluginRegistrationContract.FileIntent(step.OperationIntent);
+                if (string.IsNullOrWhiteSpace(step.Message))
+                    throw new PpdsException(ErrorCodes.Validation.InvalidValue, "Step message is required.");
+                _ = PluginRegistrationNormalizer.NormalizeStep(step, PluginRegistrationContract.FileIntent(step.OperationIntent));
+                foreach (var image in step.Images)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    image.OperationIntent = step.OperationIntent;
+                    _ = PluginRegistrationNormalizer.NormalizeImage(image, step.Message, step.OperationIntent);
+                }
             }
         }
         if (checkImageNames) PluginImageNames.EnsureUniqueConfigured(assembly);
