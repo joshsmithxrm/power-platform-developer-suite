@@ -18,7 +18,7 @@ Retained evidence: `live-validation-1cba826c6-attempt2/flow-binding-6d83b1f0/man
 
 ## Exact approved inventory
 
-Target: `https://orgcabef92d.crm.dynamics.com`, existing profile `PPDS`, fixed run ID `6d83b1f0`.
+Target: `<environment URL>`, existing profile `PPDS`, fixed run ID `6d83b1f0`.
 
 | Resource | Exact identity |
 |---|---|
@@ -52,7 +52,8 @@ An interrupted dispatched CLI or unverifiable response triggers a bounded 30-sec
 The coordinator supplies the reviewed candidate hash and artifact root after approval. The candidate DLL is the root integration checkout's `src/PPDS.Cli/bin/Release/net8.0/ppds.dll`; the harness is compiled separately in Debug and must not rebuild that pinned Release output.
 
 ```powershell
-$env:PPDS_FLOW_BINDING_LIVE_CONFIRM = 'https://orgcabef92d.crm.dynamics.com'
+$env:PPDS_FLOW_BINDING_LIVE_URL = '<environment URL>'
+$env:PPDS_FLOW_BINDING_LIVE_CONFIRM = $env:PPDS_FLOW_BINDING_LIVE_URL
 $env:PPDS_FLOW_BINDING_LIVE_RUN_ID = '6d83b1f0'
 $env:PPDS_FLOW_BINDING_LIVE_CLI_ASSEMBLY = '<root-integration-checkout>/src/PPDS.Cli/bin/Release/net8.0/ppds.dll'
 $env:PPDS_FLOW_BINDING_LIVE_CLI_SHA256 = '<reviewed 64-character SHA-256>'

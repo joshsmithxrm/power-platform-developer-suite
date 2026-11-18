@@ -4,6 +4,7 @@ using Moq;
 using PPDS.Cli.Commands;
 using PPDS.Cli.Commands.Plugins;
 using PPDS.Cli.Infrastructure;
+using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Plugins.Registration;
 using Xunit;
@@ -56,7 +57,7 @@ public class PluginVersionedOutputTests
         finally { File.Delete(path); }
     }
 
-    // Exit 0/1/2 with success=false only for an incomplete comparison (AC-93). A supplied secure value
+    // Exit 0/1/12 with success=false only for an incomplete comparison (AC-93). A supplied secure value
     // is excluded and never makes a comparison incomplete (AC-81); an unknown property does (1.0 only,
     // because 2.0 rejects unknown fields before connecting).
     [Theory]
@@ -65,12 +66,12 @@ public class PluginVersionedOutputTests
     [InlineData("2.0", "plain", 1)]
     [InlineData("1.0", "secret", 1)]
     [InlineData("2.0", "secret", 1)]
-    [InlineData("1.0", "unknown", 2)]
-    [InlineData("1.0", "unknown-and-secret", 2)]
+    [InlineData("1.0", "unknown", 12)]
+    [InlineData("1.0", "unknown-and-secret", 12)]
     public async Task ActualDiff_RetainsArrayAndReportsTruthfulSuccessStatusAndExit(string version, string shape, int expectedExit)
     {
         var secret = shape.Contains("secret", StringComparison.Ordinal);
-        var incomplete = expectedExit == 2;
+        var incomplete = expectedExit == ExitCodes.Incomplete;
         const string sentinel = "SYNTHETIC-SECRET-OUTPUT-BOUNDARY";
         var service = new Mock<IPluginRegistrationService>(MockBehavior.Strict);
         PluginAssemblyInfo? missingAssembly = null;

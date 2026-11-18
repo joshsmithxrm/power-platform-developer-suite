@@ -368,3 +368,9 @@ tbody.all-selected td {
     text-align: center;
     border-top: 1px solid var(--vscode-panel-border);
 }
+
+/* Failed DML rows: counts and reason shown as an error above the summary row. */
+.dml-failure-banner {
+    white-space: pre-wrap;
+    font-size: 12px;
+}

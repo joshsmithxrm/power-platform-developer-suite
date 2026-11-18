@@ -261,7 +261,7 @@ Commands add these explicitly to maintain flexibility.
 
 ### Compatible environment alias transition
 
-Existing `-e` meanings remain unchanged in this release: depending on the command,
+Existing `-e` meanings remain unchanged: depending on the command,
 it can select an entity, an entity list, or an environment. Prefer `--entity`,
 `--entities`, and `--environment` in scripts. Every existing `--environment`
 option also accepts `-env`; this does not add `-e` where it was unsupported.
@@ -272,10 +272,8 @@ and values after `--` do not create an entity notice. Option values are never
 used to infer the meaning of an alias and are not printed in the notice. Help
 for the deprecated entity aliases identifies the replacement long option.
 
-The future CLI 2.0 transition will standardize `-e` for environments only after
-at least 90 days from the first stable release containing the complete replacement
-aliases and deprecation guidance. This release does not reassign or remove any working
-alias (the only aliases removed are the dead shared-option aliases described below), and no transition date is set here.
+No working alias is reassigned or removed (the only aliases removed are the dead
+shared-option aliases described below). Use `--environment` or `-env` for environments.
 
 Other short aliases (for example `-f` for `--output-format`, `--file` or `--force`) also differ between
 commands today. `CliEnvironmentAliasTests.CompleteTree_ShortAliasesDoNotClashAcrossCommandsBeyondLegacyAllowlist`
@@ -316,9 +314,9 @@ nonpublic token members or use global string-based option lookup.
 | AC-ALIAS-05 | Values and environment aliases do not create entity notices | CliEnvironmentAliasTests.NonLegacyTokenShapes_DoNotWarn; EnvironmentAliasPolicyTests.RealEnvironmentValues_DoNotBecomeEntityRoles, OtherOptionLiteralValues_DoNotBecomeEntityOptionTokens, Terminator_KeepsLegacyLookingValuesAsArguments | Pending validation |
 | AC-ALIAS-06 | Notice writes only stderr and omits input values | CliEnvironmentAliasTests.ProductionWarningOverload_UsesOnlyStderr | Pending validation |
 | AC-ALIAS-07 | Pure construction preserves the optional internal group and all registrations | CliEnvironmentAliasTests.PureFactory_ExistsAndControlsInternalGroup; registration source comparison | Pending validation |
-| AC-ALIAS-08 | Help and guidance state replacements and the minimum stable transition window | CliEnvironmentAliasTests.HelpMigration_IsVisible; source review of this section | Pending validation |
+| AC-ALIAS-08 | Help and guidance state the replacement long options | CliEnvironmentAliasTests.HelpMigration_IsVisible; source review of this section | Pending validation |
 | AC-ALIAS-09 | Reapplying the policy preserves names, aliases, descriptions and unsupported short forms | EnvironmentAliasPolicyTests.Apply_IsIdempotentAndRetainsUnsupportedShortAlias | Pending validation |
-| AC-ALIAS-10 | Across the whole tree, a short alias is bound only to its allowlisted set of long options (legacy clashes scheduled for CLI 2.0: `-e` plus `-a -c -f -i -l -m -n -o -p -s -t -u -v`); a new clashing alias or a new long name for a listed alias fails | CliEnvironmentAliasTests.CompleteTree_ShortAliasesDoNotClashAcrossCommandsBeyondLegacyAllowlist | ✅ |
+| AC-ALIAS-10 | Across the whole tree, a short alias is bound only to its allowlisted set of long options (the recorded set of existing clashes, tracked in #1536 and #1671: `-e` plus `-a -c -f -i -l -m -n -o -p -s -t -u -v`); a new clashing alias or a new long name for a listed alias fails | CliEnvironmentAliasTests.CompleteTree_ShortAliasesDoNotClashAcrossCommandsBeyondLegacyAllowlist | ✅ |
 | AC-ALIAS-11 | No command binds one short alias to more than one of its own options (empty allowlist). The shared option's shadowed alias is removed on exactly the 18 formerly clashing commands (exact `command|alias|owner|shared` keys, derived from the pre-policy tree); the command-specific option still owns the alias, parsing is identical before and after the policy, the long forms still work, a shared option registered first is left alone, and rendered help and generated reference pages list each short alias once | CliEnvironmentAliasTests.EveryCommand_ShortAliasesAreNeverBoundTwice, ShadowedAliasRemoval_CoversExactlyTheFormerSameCommandClashes, ShadowedAliasRemoval_DoesNotChangeParsing_ComparedWithPrePolicyTree, TwinOnViews_KeepsMutualExclusionAndOtherSharedOptions, TwinOnPluginsUnregister_KeepsOutputFormatValidationAndDefault, ShortAliasShadowPolicy_AppliedTwice_ChangesNothing, RenderedHelp_ListsEachShortAliasOnce, DoubleBoundShortAlias_ParserOutcome_IsCharacterized; ShortAliasShadowPolicyTests (QuietTwin_IsBuiltWhenCommandSpecificOptionOwnsMinusQ, CsvCapableOutputFormatTwin_KeepsCsvAndResolvesThroughHelpers, OwnerRegisteredBeforeSharedOption_SharedAliasIsStripped, SharedOptionRegisteredBeforeOwner_IsLeftAloneSoTheGuardCanFail, TwinLeafUnderParentCarryingSharedOptions_ReadsTheLeafsOutputFormat); CliReflectRealAssemblyTests.GeneratedPage_ListsEachShortAliasOnce | ✅ |
 
 ---
@@ -327,7 +325,7 @@ nonpublic token members or use global string-based option lookup.
 
 ### Exit Codes
 
-Standard exit codes ([`ExitCodes.cs:6-40`](../src/PPDS.Cli/Infrastructure/Errors/ExitCodes.cs#L6-L40)):
+Standard exit codes ([`ExitCodes.cs:6-46`](../src/PPDS.Cli/Infrastructure/Errors/ExitCodes.cs#L6-L46)):
 
 | Code | Constant | Meaning |
 |------|----------|---------|
@@ -342,6 +340,8 @@ Standard exit codes ([`ExitCodes.cs:6-40`](../src/PPDS.Cli/Infrastructure/Errors
 | 8 | `ValidationError` | Schema mismatch |
 | 9 | `Forbidden` | Managed component protection |
 | 10 | `PreconditionFailed` | State prevents operation |
+| 11 | `ConfirmationRequired` | Interactive confirmation needed but stdin is redirected; use `--force` |
+| 12 | `Incomplete` | The check could not be completed; the result is unknown (neither match nor drift). Used by `plugins diff` (0 match, 1 drift, 12 incomplete), version 2.0 `plugins deploy` post-deploy verification, and schema-delete dependency checks, both for `--dry-run` and for a real delete that is refused (blocked is 10) |
 
 ### Exception Mapping
 

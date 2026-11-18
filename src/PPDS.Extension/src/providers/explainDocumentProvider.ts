@@ -33,13 +33,17 @@ export class ExplainDocumentProvider implements vscode.TextDocumentContentProvid
      * Creates a new virtual document with the given content and opens it.
      * Returns the document URI.
      */
-    async show(content: string, languageId: string): Promise<void> {
-        const ext = languageId === 'xml' ? 'xml' : 'txt';
-        const uri = vscode.Uri.parse(`${ExplainDocumentProvider.scheme}:Execution Plan ${++this.counter}.${ext}`);
+    async show(content: string, languageId: string, title = 'Execution Plan'): Promise<void> {
+        const ext = languageId === 'xml' ? 'xml' : languageId === 'sql' ? 'sql' : 'txt';
+        const uri = vscode.Uri.parse(`${ExplainDocumentProvider.scheme}:${title} ${++this.counter}.${ext}`);
         this.contents.set(uri.toString(), content);
         this._onDidChange.fire(uri);
         const doc = await vscode.workspace.openTextDocument(uri);
-        await vscode.languages.setTextDocumentLanguage(doc, languageId);
+        try {
+            await vscode.languages.setTextDocumentLanguage(doc, languageId);
+        } catch {
+            // Language not installed (e.g. built-in SQL disabled): show as plain text.
+        }
         await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.Beside, preview: true });
     }
 

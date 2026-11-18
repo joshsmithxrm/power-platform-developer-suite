@@ -15,6 +15,7 @@ using PPDS.Cli.Commands.Metadata.Relationship;
 using PPDS.Cli.Commands.Metadata.Table;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Output;
 using PPDS.Cli.Services.Metadata.Authoring;
 using PPDS.Cli.Tests.Services.Shared;
 using DependencyFixture = PPDS.Cli.Tests.Services.Metadata.Authoring.MetadataDeleteDependencyTests.Fixture;
@@ -114,7 +115,7 @@ public sealed class MetadataDeletePreviewTests
         var help = fixture.Command(noun).Options.Single(o => o.Name == "--dry-run").Description!;
         Assert.Contains("dependencies", help, StringComparison.OrdinalIgnoreCase);
         if (noun is "global-option" or "local-option") Assert.Contains("not checked", help);
-        else { Assert.Contains("without deleting", help); Assert.Contains("incomplete", help); Assert.Contains("nonzero", help); }
+        else { Assert.Contains("without deleting", help); Assert.Contains("incomplete", help); Assert.Contains("exit 10", help); Assert.Contains("exit 12", help); Assert.Contains("for a dry run and for a real delete that is refused", help); Assert.Contains("the exit code table in the CLI README", help); }
     }
 
     [Theory]
@@ -131,6 +132,39 @@ public sealed class MetadataDeletePreviewTests
         Assert.DoesNotContain("[Dry-Run]", result.Error);
         Assert.Single(fixture.Requests);
         Assert.True(fixture.Requests[0] is RetrieveOptionSetRequest or RetrieveAttributeRequest);
+    }
+
+    [Theory]
+    [InlineData("no-blocking-dependencies", 0)]
+    [InlineData("blocked", 10)]
+    [InlineData("incomplete", 12)]
+    public void WriteDependencies_MapsEachPreviewStatusToItsOwnExitCode(string status, int expectedExit)
+    {
+        var preview = new MetadataDeletePreviewResult { Status = status };
+        var oldError = Console.Error;
+        using var stderr = new StringWriter();
+        Console.SetError(stderr);
+        try
+        {
+            Assert.Equal(expectedExit, MetadataDeletePreview.WriteDependencies(new TextOutputWriter(), new { dryRun = true, preview }, preview));
+        }
+        finally { Console.SetError(oldError); }
+        Assert.Equal(ExitCodes.Incomplete, 12);
+        Assert.NotEqual(ExitCodes.Failure, ExitCodes.Incomplete);
+    }
+
+    [Fact]
+    public void WriteDependencies_UnrecognisedStatus_FallsBackToFailure()
+    {
+        var preview = new MetadataDeletePreviewResult { Status = "unrecognised" };
+        var oldError = Console.Error;
+        using var stderr = new StringWriter();
+        Console.SetError(stderr);
+        try
+        {
+            Assert.Equal(ExitCodes.Failure, MetadataDeletePreview.WriteDependencies(new TextOutputWriter(), new { preview }, preview));
+        }
+        finally { Console.SetError(oldError); }
     }
 
     [Fact]

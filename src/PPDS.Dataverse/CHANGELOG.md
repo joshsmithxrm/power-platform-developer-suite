@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `DeleteGlobalChoiceRequest.ExpectedMetadataId` (default null), a request field for the CLI/MCP metadata authoring service. When it is set, that service refuses the delete unless its pre-delete check finds exactly that object under the requested name. This library does not act on it itself, and existing callers are unaffected (#1535).
 - A `MetadataValidationException(string errorCode, string message, string? field, Exception? innerException)` constructor that keeps the inner exception (#1535).
+- `MetadataErrorCodes.WriteNotConfirmed` (`WRITE_NOT_CONFIRMED`): a write request returned success but a follow-up confirmation, such as the stored option colour, failed or disagreed (#1604).
 - Keep the public int OptionDefinition.Value accessors and add a read-only HasExplicitValue presence getter. System.Text.Json preserves omission versus explicit zero across roundtrips; omit Value to request allocation. This is an additive public API change (#1530).
 
 ### Changed
@@ -23,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `DataverseMetadataQueryService.GetOptionSetAsync` finds a global choice whose stored name differs from the requested name only by case. The exact name is always tried first. Only when Dataverse reports that option set as not found does the service list global choices and retry once under a single case-insensitive match. Other faults, no match and several matches rethrow the original error unchanged. Recognition uses the English server message; a localized message keeps the old behavior (#1535).
+- `DataverseMetadataQueryService.GetOptionSetAsync` finds a global choice whose stored name differs from the requested name only by case. The exact name is always tried first. Only when Dataverse reports that option set as not found does the service list global choices and retry once under a single case-insensitive match. Other faults, no match and several matches rethrow the original error unchanged. Recognition checks the Dataverse fault code `0x80040217` first and falls back to the English server message. The code treats `0x80040217` as an assumption for this case: #1604 reports observing it on one English-only organisation, and behaviour on a non-English organisation is unverified (#1535, #1604).
+- The `MetadataErrorCodes.SdkOperationFailed` documentation no longer implies that nothing was written (#1604).
 
 ## [1.4.0] - 2026-11-01 (tagged, not published)
 

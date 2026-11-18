@@ -276,21 +276,48 @@ internal sealed class ContributorFormHarness
     internal bool AllowExplicitSideEffects { get; init; }
     internal bool IsManaged { get; init; }
     internal bool IsCustomizable { get; init; } = true;
+    /// <summary>systemform type code returned by the synthetic server (2 = Main).</summary>
+    internal int FormType { get; init; } = 2;
+    /// <summary>The synthetic server acknowledges updates but keeps its previous form XML (read-back shows the old text).</summary>
+    internal bool DiscardWrites { get; init; }
+    /// <summary>When set, a read after the first update throws this exception (a failed read-back).</summary>
+    internal Func<Exception>? FailReadBackWith { get; init; }
+    /// <summary>When set, the explicit solution association request throws this exception.</summary>
+    internal Func<Exception>? FailSolutionWith { get; init; }
+    /// <summary>When set, the explicit publication request throws this exception.</summary>
+    internal Func<Exception>? FailPublishWith { get; init; }
+    /// <summary>Replaces the read-back text returned after the first update (simulates a server that stores something else).</summary>
+    internal Func<string, string>? ReadBackTransform { get; init; }
+    /// <summary>When set, the form XML update throws this exception (for example a fault the server answered with).</summary>
+    internal Func<Exception>? FailUpdateWith { get; init; }
+    /// <summary>Runs after a successful explicit solution association request.</summary>
+    internal Action? AfterSolutionRequest { get; init; }
+    /// <summary>Reads after the first update that selected the form by ID (only counted with readBackById).</summary>
+    internal int ReadBackByIdRequests { get; private set; }
+    private readonly bool _readBackById;
+    private bool _awaitingReadBack; // set by an update: the next read is the read-back
+    private readonly IEnvironmentConfirmationService? _confirmationOverride;
     internal Action? BeforeMetadata { get; init; }
 
     internal ContributorFormHarness(CancellationToken token, string fixture = "base", bool emptyDisplayName = false, Action<XDocument>? transform = null,
-        IEnumerable<string>? extraColumns = null)
+        IEnumerable<string>? extraColumns = null, IEnvironmentConfirmationService? confirmation = null, string? rawXml = null,
+        bool noColumns = false, bool readBackById = false)
     {
         _token = token;
+        _readBackById = readBackById;
+        _confirmationOverride = confirmation;
         var initial = XDocument.Parse(ContributorFormFixture.Build(fixture));
         transform?.Invoke(initial);
-        StateXml = Original = initial.ToString(SaveOptions.DisableFormatting);
+        // rawXml seeds the synthetic server with exact text (not re-serialised), for byte-level preservation checks.
+        StateXml = Original = rawXml ?? initial.ToString(SaveOptions.DisableFormatting);
         IReadOnlyList<AttributeMetadataDto> attributes = [
             new() { LogicalName = "name", SchemaName = "Name", DisplayName = "Metadata account name", AttributeType = "String" },
             new() { LogicalName = "telephone1", SchemaName = "Telephone1", DisplayName = "Business phone", AttributeType = "String" },
             new() { LogicalName = ContributorFormFixture.Priority, SchemaName = "mayo_PriorityScore",
                 DisplayName = emptyDisplayName ? "" : "Priority score", AttributeType = "Integer" },
             .. (extraColumns ?? []).Select(c => new AttributeMetadataDto { LogicalName = c, SchemaName = c, DisplayName = c, AttributeType = "String" })];
+        if (noColumns) attributes = [];
+        _confirmation.SetupGet(c => c.Context).Returns(new EnvironmentConfirmationContext("synthetic-session", "synthetic-identity", "https://forms.example.test"));
         _confirmation.Setup(c => c.EnsureConfirmedAsync(It.IsAny<string>(), It.IsAny<string?>(), It.Is<CancellationToken>(t => t == _token)))
             .Returns(() => { Journal.Add("confirmation"); return DenyConfirmation
                 ? Task.FromException(new PpdsException("Environment.ReadOnly", "Synthetic confirmation denied.")) : Task.CompletedTask; });
@@ -298,7 +325,7 @@ internal sealed class ContributorFormHarness
         _metadata.Setup(m => m.GetAttributesAsync("account", null, It.Is<CancellationToken>(t => t == _token)))
             .Returns(() => { Assert.Equal(0, ActiveLeases); MetadataCalls++; Journal.Add("metadata-with-no-held-lease");
                 BeforeMetadata?.Invoke(); _token.ThrowIfCancellationRequested(); return Task.FromResult(attributes); });
-        Service = new FormService(_pool.Object, _metadata.Object, NullLogger<FormService>.Instance, _confirmation.Object);
+        Service = new FormService(_pool.Object, _metadata.Object, NullLogger<FormService>.Instance, confirmation ?? _confirmation.Object);
     }
 
     internal void AssertPreconditions(string fixture)
@@ -332,21 +359,37 @@ internal sealed class ContributorFormHarness
                 {
                     Assert.Equal(FormId, association.ComponentId); Assert.Equal(60, association.ComponentType);
                     Assert.Equal("fixture_solution", association.SolutionUniqueName); Assert.False(association.AddRequiredComponents);
-                    SolutionRequests++; Journal.Add("explicit-solution-request"); return Task.FromResult(new OrganizationResponse());
+                    SolutionRequests++; Journal.Add("explicit-solution-request");
+                    if (FailSolutionWith is not null) return Task.FromException<OrganizationResponse>(FailSolutionWith());
+                    AfterSolutionRequest?.Invoke();
+                    return Task.FromResult(new OrganizationResponse());
                 }
                 if (request is PublishXmlRequest publication)
                 {
                     Assert.Equal("<importexportxml><entities><entity>account</entity></entities></importexportxml>", publication.ParameterXml);
-                    PublishRequests++; Journal.Add("explicit-publication-request"); return Task.FromResult(new OrganizationResponse());
+                    PublishRequests++; Journal.Add("explicit-publication-request");
+                    if (FailPublishWith is not null) return Task.FromException<OrganizationResponse>(FailPublishWith());
+                    return Task.FromResult(new OrganizationResponse());
                 }
                 ReadRequests++; Journal.Add("read-unpublished");
+                if (Writes.Count > 0 && FailReadBackWith is not null) return Task.FromException<OrganizationResponse>(FailReadBackWith());
                 var query = Assert.IsType<QueryExpression>(((RetrieveUnpublishedMultipleRequest)request).Query);
                 Assert.Equal("systemform", query.EntityName);
                 Assert.Equal(2, query.TopCount);
                 Assert.Contains(query.Criteria.Conditions, c => c.AttributeName == "objecttypecode" && (string)c.Values.Single() == "account");
-                Assert.Contains(query.Criteria.Conditions, c => c.AttributeName == "name" && (string)c.Values.Single() == "Fixture");
-                var state = new Entity("systemform", FormId) { ["formid"] = FormId, ["name"] = "Fixture", ["type"] = new OptionSetValue(2),
-                    ["ismanaged"] = IsManaged, ["iscustomizable"] = new BooleanManagedProperty(IsCustomizable), ["formxml"] = StateXml };
+                if (_readBackById && _awaitingReadBack)
+                {
+                    // Binding repair reads its read-back by the resolved form ID.
+                    Assert.Contains(query.Criteria.Conditions, c => c.AttributeName == "formid" && c.Values.Single() is Guid id && id == FormId);
+                    ReadBackByIdRequests++; _awaitingReadBack = false;
+                }
+                else
+                {
+                    Assert.Contains(query.Criteria.Conditions, c => c.AttributeName == "name" && (string)c.Values.Single() == "Fixture");
+                }
+                var stateXml = Writes.Count > 0 && ReadBackTransform is not null ? ReadBackTransform(StateXml) : StateXml;
+                var state = new Entity("systemform", FormId) { ["formid"] = FormId, ["name"] = "Fixture", ["type"] = new OptionSetValue(FormType),
+                    ["ismanaged"] = IsManaged, ["iscustomizable"] = new BooleanManagedProperty(IsCustomizable), ["formxml"] = stateXml };
                 return Task.FromResult<OrganizationResponse>(new RetrieveUnpublishedMultipleResponse
                     { Results = new ParameterCollection { ["EntityCollection"] = new EntityCollection([state]) } });
             });
@@ -356,10 +399,11 @@ internal sealed class ContributorFormHarness
             .Returns<Entity, CancellationToken>((entity, _) =>
             {
                 lease.Operations++; Assert.Equal(1, ActiveLeases); Journal.Add("update-attempt");
+                if (FailUpdateWith is not null) return Task.FromException(FailUpdateWith()); _awaitingReadBack = true;
                 Assert.Equal("systemform", entity.LogicalName); Assert.Equal(FormId, entity.Id);
                 Assert.Equal(new[] { "formxml" }, entity.Attributes.Keys);
                 var xml = entity.GetAttributeValue<string>("formxml"); Assert.NotNull(xml);
-                Writes.Add(xml); StateXml = xml; // Synthetic server applies before the optional acknowledgement fault.
+                Writes.Add(xml); if (!DiscardWrites) StateXml = xml; // Synthetic server applies before the optional acknowledgement fault.
                 if (LoseFirstUpdateAcknowledgement && !_lostAcknowledgement)
                 {
                     _lostAcknowledgement = true; Journal.Add("synthetic-applied-before-lost-ack");
@@ -389,6 +433,7 @@ internal sealed class ContributorFormHarness
         _pool.Verify(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()), Times.Exactly(Acquisitions));
         _metadata.Verify(m => m.GetAttributesAsync("account", null, It.IsAny<CancellationToken>()), Times.Exactly(MetadataCalls));
         _confirmation.Verify(c => c.EnsureConfirmedAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        _confirmation.VerifyGet(c => c.Context, Times.AtMostOnce);
         _pool.VerifyNoOtherCalls(); _metadata.VerifyNoOtherCalls(); _confirmation.VerifyNoOtherCalls();
     }
 
@@ -398,7 +443,7 @@ internal sealed class ContributorFormHarness
     /// <summary>Provider for text-mode command runs, which print the connected-as header.</summary>
     internal ServiceProvider CreateTextProvider(IFormService? service = null) => new ServiceCollection()
         .AddSingleton(service ?? Service)
-        .AddSingleton<IEnvironmentConfirmationService>(_confirmation.Object)
+        .AddSingleton(_confirmationOverride ?? _confirmation.Object)
         .AddSingleton(new PPDS.Cli.Infrastructure.ResolvedConnectionInfo
             { Profile = new PPDS.Auth.Profiles.AuthProfile { Name = "offline-fixture" }, EnvironmentUrl = "https://forms.example.test" })
         .BuildServiceProvider();

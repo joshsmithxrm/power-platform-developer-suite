@@ -199,7 +199,25 @@ public sealed class MetadataDeleteDependencyTests
         await f.Run();
         var ex = await Assert.ThrowsAnyAsync<PpdsException>(() => f.Run(dryRun: false));
         Assert.Equal(MetadataErrorCodes.DependencyConflict, ex.ErrorCode);
+        Assert.Equal(ExitCodes.PreconditionFailed, ExceptionMapper.ToExitCode(ex)); // same as the command preflight
         Assert.Equal(2, f.Requests.OfType<RetrieveDependenciesForDeleteRequest>().Count());
+        f.AssertReadsAndReturned();
+    }
+
+    [Theory]
+    [InlineData("table")]
+    [InlineData("column")]
+    [InlineData("relationship")]
+    [InlineData("key")]
+    [InlineData("choice")]
+    [Trait("AC", "AC-119")]
+    public async Task ActualDelete_RecheckIncomplete_RefusesWithIncompleteExitAndUnchangedError(string family)
+    {
+        using var f = new Fixture(family) { AllowDelete = true, DependencyShape = "more-records" };
+        var ex = await Assert.ThrowsAnyAsync<PpdsException>(() => f.Run(dryRun: false));
+        Assert.Equal(ErrorCodes.Operation.Internal, ex.ErrorCode);
+        Assert.Equal("Deletion dependency inspection is incomplete; no deletion is permitted.", ex.UserMessage);
+        Assert.Equal(ExitCodes.Incomplete, ExceptionMapper.ToExitCode(ex));
         f.AssertReadsAndReturned();
     }
 
@@ -244,6 +262,7 @@ public sealed class MetadataDeleteDependencyTests
         internal bool FailName { get; init; }
         internal bool AllowDelete { get; init; }
         internal int BlockersFromDependencyRead { get; init; }
+        internal int IncompleteFromDependencyRead { get; init; }
         internal CancellationToken Token => _operationToken;
         internal OperationCanceledException Cancellation { get; private set; }
         internal Exception SdkFailure { get; } = new InvalidOperationException("ClientSecret=SyntheticClientSecret; fake provider diagnostic");
@@ -308,7 +327,7 @@ public sealed class MetadataDeleteDependencyTests
                                     rows.Entities.Add(view);
                                     if (blocked) rows.Entities.Add(new Entity("dependency") { ["dependentcomponentobjectid"] = UnknownId, ["dependentcomponenttype"] = new OptionSetValue(90000) });
                                 }
-                                rows.MoreRecords = DependencyShape == "more-records";
+                                rows.MoreRecords = DependencyShape == "more-records" || IncompleteFromDependencyRead > 0 && _dependencyReads >= IncompleteFromDependencyRead;
                                 return Task.FromResult<OrganizationResponse>(new RetrieveDependenciesForDeleteResponse { Results = new ParameterCollection { ["EntityCollection"] = DependencyShape == "null-collection" ? null! : rows } });
                             }
                             var metadataId = IdentityShape == "missing-id" ? (Guid?)null : TargetId;

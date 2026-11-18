@@ -6,7 +6,7 @@ Status: attempt 2 passed managed and unmanaged single-flow, idempotent and batch
 
 ## Exact proposed inventory
 
-Target `https://orgcabef92d.crm.dynamics.com`, explicit profile `PPDS`, run ID `6d83a2e4`:
+Target `<environment URL>`, explicit profile `PPDS`, run ID `6d83a2e4`:
 
 | Resource | Name |
 |---|---|
@@ -41,7 +41,7 @@ If a dispatched CLI command is interrupted or its response cannot be verified, t
 Only after approval of the inventory above, supply the explicit reviewed candidate assembly and local artifact root:
 
 ```powershell
-$env:PPDS_FLOWS_LIVE_URL = 'https://orgcabef92d.crm.dynamics.com'
+$env:PPDS_FLOWS_LIVE_URL = '<environment URL>'
 $env:PPDS_FLOWS_LIVE_CONFIRM = $env:PPDS_FLOWS_LIVE_URL
 $env:PPDS_FLOWS_LIVE_PROFILE = 'PPDS'
 $env:PPDS_FLOWS_LIVE_RUN_ID = '6d83a2e4'

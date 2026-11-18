@@ -6,7 +6,7 @@ Status: **live roundtrip passed on 2026-10-31**. Josh approved the exact target 
 
 ## Proposed release validation inventory
 
-Target: `https://orgcabef92d.crm.dynamics.com`. Explicit profile: `PPDS` (or `PPDSDevRefresh` only if chosen for the approved run). Active-profile selection does not change. Fixed proposed run ID: `4f9c2a71`. Reusing an artifact directory or colliding with existing fixture names is rejected before mutation.
+Target: `<environment URL>`. Explicit profile: `PPDS` (or `PPDSDevRefresh` only if chosen for the approved run). Active-profile selection does not change. Fixed proposed run ID: `4f9c2a71`. Reusing an artifact directory or colliding with existing fixture names is rejected before mutation.
 
 | Resource | Exact name / scope |
 |---|---|
@@ -36,7 +36,7 @@ The test is `Category=DestructiveE2E` and also skips without `PPDS_FORMS_LIVE_CO
 Run only after explicit approval of the inventory above. The recorded run is complete; use a fresh artifact root and repeat collision checks for any separately authorized rerun:
 
 ```powershell
-$env:PPDS_FORMS_LIVE_URL = 'https://orgcabef92d.crm.dynamics.com'
+$env:PPDS_FORMS_LIVE_URL = '<environment URL>'
 $env:PPDS_FORMS_LIVE_CONFIRM = $env:PPDS_FORMS_LIVE_URL
 $env:PPDS_FORMS_LIVE_PROFILE = 'PPDS'
 $env:PPDS_FORMS_LIVE_RUN_ID = '4f9c2a71'

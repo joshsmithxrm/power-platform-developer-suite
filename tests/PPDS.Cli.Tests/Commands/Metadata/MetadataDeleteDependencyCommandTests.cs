@@ -105,7 +105,7 @@ public sealed class MetadataDeleteDependencyCommandTests(ITestOutputHelper outpu
     {
         using var f = new Fixture(Family(noun)) { DependencyShape = "more-records" };
         var result = await Run(f, noun, true, dryRun: true);
-        Assert.NotEqual(0, result.Exit);
+        Assert.Equal(ExitCodes.Incomplete, result.Exit);
         using var document = JsonDocument.Parse(result.Out);
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
         Assert.Single(f.Requests.OfType<Microsoft.Crm.Sdk.Messages.RetrieveDependenciesForDeleteRequest>());
@@ -128,6 +128,76 @@ public sealed class MetadataDeleteDependencyCommandTests(ITestOutputHelper outpu
         var result = await Run(f, noun, true, dryRun: false);
         Assert.Equal(ExitCodes.PreconditionFailed, result.Exit);
         f.AssertReadsAndReturned();
+    }
+
+    [Theory]
+    [InlineData("entity")]
+    [InlineData("table")]
+    [InlineData("attribute")]
+    [InlineData("column")]
+    [InlineData("relationship")]
+    [InlineData("key")]
+    [InlineData("optionset")]
+    [InlineData("choice")]
+    [Trait("AC", "AC-119")]
+    public async Task Force_IncompleteDependencyRefusal_ExitsIncompleteAndDeletesNothing(string noun)
+    {
+        using var f = new Fixture(Family(noun)) { DependencyShape = "more-records" };
+        var result = await Run(f, noun, true, dryRun: false);
+        Assert.Equal(ExitCodes.Incomplete, result.Exit);
+        Assert.DoesNotContain(f.Requests, r => r.RequestName.StartsWith("Delete", StringComparison.Ordinal));
+        f.AssertReadsAndReturned();
+    }
+
+    [Theory]
+    [InlineData("entity")]
+    [InlineData("table")]
+    [InlineData("attribute")]
+    [InlineData("column")]
+    [InlineData("relationship")]
+    [InlineData("key")]
+    [InlineData("optionset")]
+    [InlineData("choice")]
+    [Trait("AC", "AC-119")]
+    public async Task Force_RecheckRefusal_ExitsThroughTheCommand(string noun)
+    {
+        // A clear preflight followed by a refusing service recheck reaches the command's catch path.
+        using var blocked = new Fixture(Family(noun)) { BlockersFromDependencyRead = 2 };
+        var blockedResult = await Run(blocked, noun, true, dryRun: false);
+        Assert.Equal(ExitCodes.PreconditionFailed, blockedResult.Exit);
+        using (var json = JsonDocument.Parse(blockedResult.Out))
+            Assert.Equal(PPDS.Dataverse.Metadata.Authoring.MetadataErrorCodes.DependencyConflict, json.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal(2, blocked.Requests.OfType<Microsoft.Crm.Sdk.Messages.RetrieveDependenciesForDeleteRequest>().Count());
+        blocked.AssertReadsAndReturned();
+
+        using var incomplete = new Fixture(Family(noun)) { IncompleteFromDependencyRead = 2 };
+        var incompleteResult = await Run(incomplete, noun, true, dryRun: false);
+        Assert.Equal(ExitCodes.Incomplete, incompleteResult.Exit);
+        using (var json = JsonDocument.Parse(incompleteResult.Out))
+            Assert.Equal(ErrorCodes.Operation.Internal, json.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal(2, incomplete.Requests.OfType<Microsoft.Crm.Sdk.Messages.RetrieveDependenciesForDeleteRequest>().Count());
+        incomplete.AssertReadsAndReturned();
+    }
+
+    [Theory]
+    [InlineData("entity")]
+    [InlineData("table")]
+    [InlineData("attribute")]
+    [InlineData("column")]
+    [InlineData("relationship")]
+    [InlineData("key")]
+    [InlineData("optionset")]
+    [InlineData("choice")]
+    [Trait("AC", "AC-118")]
+    public async Task DependencyReadFailure_StillExitsFailureNotIncomplete(string noun)
+    {
+        foreach (var dryRun in new[] { true, false })
+        {
+            using var f = new Fixture(Family(noun)) { FailDependency = true };
+            var result = await Run(f, noun, true, dryRun);
+            Assert.Equal(ExitCodes.Failure, result.Exit);
+            f.AssertReadsAndReturned();
+        }
     }
 
     private static string Family(string noun) => noun switch

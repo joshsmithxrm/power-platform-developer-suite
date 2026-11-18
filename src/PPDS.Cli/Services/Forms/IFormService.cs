@@ -80,6 +80,13 @@ public interface IFormService
     Task MoveFieldAsync(MoveFieldRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
         => Task.FromException(new NotSupportedException("This service does not implement field movement."));
 
+    /// <summary>
+    /// Rewrites control bindings that differ from a column logical name only by case (#1527) to the exact logical name.
+    /// Nothing but <c>datafieldname</c> changes; a form with nothing to repair gets no XML update.
+    /// </summary>
+    Task<RepairBindingsResult> RepairBindingsAsync(RepairBindingsRequest request, IProgressReporter? reporter = null, CancellationToken ct = default)
+        => Task.FromException<RepairBindingsResult>(new NotSupportedException("This service does not implement binding repair."));
+
     // ── Sub-grid management ───────────────────────────────────────────────
 
     Task AddSubgridAsync(AddSubgridRequest request, IProgressReporter? reporter = null, CancellationToken ct = default);
