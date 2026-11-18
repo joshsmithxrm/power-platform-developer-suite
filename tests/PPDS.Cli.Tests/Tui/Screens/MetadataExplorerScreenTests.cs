@@ -177,6 +177,25 @@ public sealed class MetadataExplorerScreenTests : IDisposable
         Assert.Null(exception);
     }
 
+    [Theory]
+    [InlineData("table")]
+    [InlineData("column")]
+    [InlineData("relationship")]
+    [InlineData("global choice")]
+    [InlineData("key")]
+    [Trait("AC", "AC-148")]
+    public void ACreateThatWroteButCouldNotConfirm_IsNotReportedAsAFailedCreate_AndReloads(string what)
+    {
+        // WRITE_NOT_CONFIRMED after a create: the object exists, only its labels could not be confirmed.
+        var unconfirmed = new PPDS.Cli.Infrastructure.Errors.PpdsException(PPDS.Dataverse.Metadata.Authoring.MetadataErrorCodes.WriteNotConfirmed, "Table 'x' was created. Its display name could not be confirmed.");
+        Assert.True(MetadataExplorerScreen.CreatedButNotConfirmed(unconfirmed));
+        Assert.Equal($"Created {what}, but its labels are not confirmed", MetadataExplorerScreen.CreateErrorTitle(what, unconfirmed));
+
+        var failed = new PPDS.Cli.Infrastructure.Errors.PpdsException(PPDS.Dataverse.Metadata.Authoring.MetadataErrorCodes.SdkOperationFailed, "The create failed.");
+        Assert.False(MetadataExplorerScreen.CreatedButNotConfirmed(failed));
+        Assert.Equal($"Failed to create {what}", MetadataExplorerScreen.CreateErrorTitle(what, failed));
+    }
+
     [Fact]
     public void Dispose_IsIdempotent()
     {

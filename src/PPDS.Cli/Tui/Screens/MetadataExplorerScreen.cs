@@ -338,9 +338,12 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         {
             Application.MainLoop?.Invoke(() =>
             {
-                ErrorService.ReportError("Failed to create table", ex, "Metadata.CreateTable");
+                ErrorService.ReportError(CreateErrorTitle("table", ex), ex, "Metadata.CreateTable");
                 _statusLabel.Text = $"Error: {ex.Message}";
             });
+            // The object exists (only its labels are unconfirmed): show it.
+            if (CreatedButNotConfirmed(ex))
+                await ReloadQuietlyAsync(LoadEntitiesAsync);
         }
     }
 
@@ -375,9 +378,12 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         {
             Application.MainLoop?.Invoke(() =>
             {
-                ErrorService.ReportError("Failed to create column", ex, "Metadata.CreateColumn");
+                ErrorService.ReportError(CreateErrorTitle("column", ex), ex, "Metadata.CreateColumn");
                 _statusLabel.Text = $"Error: {ex.Message}";
             });
+            // The object exists (only its labels are unconfirmed): show it.
+            if (CreatedButNotConfirmed(ex))
+                await ReloadQuietlyAsync(() => LoadEntityDetailAsync(_selectedEntity!.LogicalName));
         }
     }
 
@@ -418,9 +424,12 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         {
             Application.MainLoop?.Invoke(() =>
             {
-                ErrorService.ReportError("Failed to create relationship", ex, "Metadata.CreateRelationship");
+                ErrorService.ReportError(CreateErrorTitle("relationship", ex), ex, "Metadata.CreateRelationship");
                 _statusLabel.Text = $"Error: {ex.Message}";
             });
+            // The object exists (only its labels are unconfirmed): show it.
+            if (CreatedButNotConfirmed(ex))
+                await ReloadQuietlyAsync(() => LoadEntityDetailAsync(_selectedEntity!.LogicalName));
         }
     }
 
@@ -444,9 +453,12 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         {
             Application.MainLoop?.Invoke(() =>
             {
-                ErrorService.ReportError("Failed to create relationship", ex, "Metadata.CreateRelationship");
+                ErrorService.ReportError(CreateErrorTitle("relationship", ex), ex, "Metadata.CreateRelationship");
                 _statusLabel.Text = $"Error: {ex.Message}";
             });
+            // The object exists (only its labels are unconfirmed): show it.
+            if (CreatedButNotConfirmed(ex))
+                await ReloadQuietlyAsync(() => LoadEntityDetailAsync(_selectedEntity!.LogicalName));
         }
     }
 
@@ -484,9 +496,12 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         {
             Application.MainLoop?.Invoke(() =>
             {
-                ErrorService.ReportError("Failed to create global choice", ex, "Metadata.CreateChoice");
+                ErrorService.ReportError(CreateErrorTitle("global choice", ex), ex, "Metadata.CreateChoice");
                 _statusLabel.Text = $"Error: {ex.Message}";
             });
+            // The object exists (only its labels are unconfirmed): show it.
+            if (CreatedButNotConfirmed(ex))
+                await ReloadQuietlyAsync(() => _selectedEntity != null ? LoadEntityDetailAsync(_selectedEntity.LogicalName) : Task.CompletedTask);
         }
     }
 
@@ -521,10 +536,28 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
         {
             Application.MainLoop?.Invoke(() =>
             {
-                ErrorService.ReportError("Failed to create key", ex, "Metadata.CreateKey");
+                ErrorService.ReportError(CreateErrorTitle("key", ex), ex, "Metadata.CreateKey");
                 _statusLabel.Text = $"Error: {ex.Message}";
             });
+            // The object exists (only its labels are unconfirmed): show it.
+            if (CreatedButNotConfirmed(ex))
+                await ReloadQuietlyAsync(() => LoadEntityDetailAsync(_selectedEntity!.LogicalName));
         }
+    }
+
+    /// <summary>A create that raised WRITE_NOT_CONFIRMED did create the object; only its labels could not be confirmed.</summary>
+    internal static bool CreatedButNotConfirmed(Exception ex)
+        => ex is PPDS.Cli.Infrastructure.Errors.PpdsException { ErrorCode: MetadataErrorCodes.WriteNotConfirmed };
+
+    /// <summary>The error title for a failed create: never "Failed to create" when the object was created.</summary>
+    internal static string CreateErrorTitle(string what, Exception ex)
+        => CreatedButNotConfirmed(ex) ? $"Created {what}, but its labels are not confirmed" : $"Failed to create {what}";
+
+    /// <summary>Reloads after an unconfirmed create; a reload failure keeps the create's error on screen.</summary>
+    private static async Task ReloadQuietlyAsync(Func<Task> reload)
+    {
+        try { await reload(); }
+        catch (Exception) { /* the unconfirmed-create error already shown stays; the next refresh retries */ }
     }
 
     #endregion
