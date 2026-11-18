@@ -753,6 +753,23 @@ internal static class DmlColumnValidator
                         $"{DescribeCategory(second)} value {Sql(node.Parameters[1])} to it; that conversion is not supported here." + rewrite;
         }
 
+        /// <summary>NULLIF(a, b) gives a, or NULL where a = b: b of a's type, or a whole number, was proven.</summary>
+        public override void Visit(NullIfExpression node)
+        {
+            var first = Category(node.FirstExpression, columns);
+            var second = Category(node.SecondExpression, columns);
+            if (first is Null || second is Null)
+            {
+                Problem ??= $"{Sql(node)}: NULLIF with NULL as a value is not supported (NULLIF(x, NULL) is always x). Write the value instead.";
+                return;
+            }
+            if (second != first && !(second == Whole && first is Exact or Money or Float))
+            {
+                Problem ??= $"{Sql(node)}: NULLIF comparing a {DescribeCategory(first)} and a {DescribeCategory(second)} value is not supported. " +
+                            "Compare values of the same type, or with a whole number.";
+            }
+        }
+
         public override void Visit(CoalesceExpression node) => Branches(node, "COALESCE", node.Expressions);
 
         public override void Visit(IIfCall node) => Branches(node, "IIF", [node.ThenExpression, node.ElseExpression]);
@@ -940,7 +957,13 @@ internal static class DmlColumnValidator
 
         private void Check(params ScalarExpression[] operands)
         {
-            if (Problem == null && !operands.All(o => o is not NullLiteral && IsNumeric(o, columns)))
+            if (Problem == null && operands.Any(o => o is NullLiteral))
+            {
+                Problem = "Comparing with NULL inside a value (IIF, CASE or NULLIF) is not supported: the comparison is never true " +
+                          "(NULLIF(x, NULL) is always x). Use IS NULL in IIF or CASE, or leave the NULLIF out.";
+                return;
+            }
+            if (Problem == null && !operands.All(o => IsNumeric(o, columns)))
             {
                 Problem = "Comparing text inside a value (IIF, CASE or NULLIF) is not supported: Dataverse compares text without regard " +
                           "to accents or trailing spaces and the query engine would not. Compare numbers there, or filter with WHERE.";

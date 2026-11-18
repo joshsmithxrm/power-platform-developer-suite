@@ -48,6 +48,16 @@ public sealed class DmlRound2Tests
     [InlineData("UPDATE account SET revenue = COALESCE(revenue, creditlimit) WHERE name = 'n1'", "combining a decimal and a currency value")]
     [InlineData("UPDATE account SET address1_latitude = address1_latitude * revenue WHERE name = 'n1'", "combining a floating-point and a decimal value")]
     [InlineData("UPDATE account SET revenue = IIF(numberofemployees > 2, revenue, creditlimit) WHERE name = 'n1'", "combining a decimal and a currency value")]
+    // found by the admission matrix: the NULL constant where SQL Server refuses it, or where no case proved it
+    [InlineData("UPDATE account SET description = UPPER(NULL) WHERE name = 'n1'", "UPPER of NULL is NULL")]
+    [InlineData("UPDATE account SET description = CONCAT(name, NULL) WHERE name = 'n1'", "leave the NULL out")]
+    [InlineData("UPDATE account SET numberofemployees = CAST(NULL AS int) WHERE name = 'n1'", "The conversion of NULL is NULL")]
+    [InlineData("UPDATE account SET numberofemployees = TRY_CONVERT(int, NULL) WHERE name = 'n1'", "The conversion of NULL is NULL")]
+    [InlineData("UPDATE account SET description = COALESCE(NULL, NULL) WHERE name = 'n1'", "every result is NULL")]
+    [InlineData("UPDATE account SET description = IIF(numberofemployees > 2, NULL, NULL) WHERE name = 'n1'", "every result is NULL")]
+    [InlineData("UPDATE account SET description = CASE WHEN numberofemployees > 2 THEN NULL END WHERE name = 'n1'", "every result is NULL")]
+    [InlineData("UPDATE account SET revenue = NULLIF(revenue, NULL) WHERE name = 'n1'", "Comparing with NULL inside a value")]
+    [InlineData("UPDATE account SET numberofemployees = NULLIF(numberofemployees, revenue) WHERE name = 'n1'", "NULLIF comparing a whole-number and a decimal")]
     // B-F4: ORDER BY without TOP does not say which rows are copied, and paging over it was not proven
     [InlineData("INSERT INTO account (name) SELECT name FROM account ORDER BY name", "ORDER BY without TOP")]
     // D-3: the id column is named from metadata (activity tables use activityid)

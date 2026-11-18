@@ -571,12 +571,22 @@ internal static class DmlStatementSupport
                 return All([binary.FirstExpression, binary.SecondExpression]);
             case ParenthesisExpression paren:
                 return CheckValue(paren.Expression, columns, context);
+            case CoalesceExpression coalesce when coalesce.Expressions.All(e => e is NullLiteral):
+                return AllNull(coalesce, context);
             case CoalesceExpression coalesce:
                 return All(coalesce.Expressions);
             case NullIfExpression nullIf:
                 return All([nullIf.FirstExpression, nullIf.SecondExpression]);
+            case IIfCall { ThenExpression: NullLiteral, ElseExpression: NullLiteral } iif:
+                return AllNull(iif, context);
             case IIfCall iif:
                 return CheckValuePredicate(iif.Predicate, columns, context) ?? All([iif.ThenExpression, iif.ElseExpression]);
+            case SearchedCaseExpression searched when searched.WhenClauses.All(w => w.ThenExpression is NullLiteral)
+                && searched.ElseExpression is null or NullLiteral:
+                return AllNull(searched, context);
+            case SimpleCaseExpression simple when simple.WhenClauses.All(w => w.ThenExpression is NullLiteral)
+                && simple.ElseExpression is null or NullLiteral:
+                return AllNull(simple, context);
             case SearchedCaseExpression searched:
                 foreach (var when in searched.WhenClauses)
                 {
@@ -593,14 +603,20 @@ internal static class DmlStatementSupport
             // nor the forms whose length, precision or scale SQL would supply (nvarchar, nvarchar(max), decimal, numeric).
             case CastCall cast when !IsConversionTarget(cast.DataType, allowGuid: true):
                 return Unsupported($"{Sql(cast)} (CAST to {Sql(cast.DataType)})", context, ConversionTargets);
+            case CastCall { Parameter: NullLiteral } cast:
+                return Unsupported(Sql(cast), context, " The conversion of NULL is NULL: write NULL instead.");
             case CastCall cast:
                 return CheckValue(cast.Parameter, columns, context);
             case ConvertCall { Style: not null } convert:
                 return Unsupported($"{Sql(convert)} (a CONVERT style)", context, " Remove the style: CONVERT(type, value), to nvarchar(n), int or decimal(p, s).");
             case ConvertCall convert when !IsConversionTarget(convert.DataType, allowGuid: false):
                 return Unsupported($"{Sql(convert)} (CONVERT to {Sql(convert.DataType)})", context, ConversionTargets);
+            case ConvertCall { Parameter: NullLiteral } convert:
+                return Unsupported(Sql(convert), context, " The conversion of NULL is NULL: write NULL instead.");
             case ConvertCall convert:
                 return CheckValue(convert.Parameter, columns, context);
+            case TryCastCall { Parameter: NullLiteral } or TryConvertCall { Parameter: NullLiteral }:
+                return Unsupported(Sql(expression), context, " The conversion of NULL is NULL: write NULL instead.");
             case TryCastCall tryCast when IsNumberTarget(tryCast.DataType):
                 return CheckValue(tryCast.Parameter, columns, context);
             case TryConvertCall { Style: null } tryConvert when IsNumberTarget(tryConvert.DataType):
@@ -612,7 +628,7 @@ internal static class DmlStatementSupport
             case FunctionCall function when function.CallTarget == null && function.OverClause == null
                 && function.WithinGroupClause == null && function.UniqueRowFilter == UniqueRowFilter.NotSpecified
                 && AllowedFunctions.Contains(function.FunctionName.Value):
-                return CheckFunctionArguments(function, context) ?? All(function.Parameters);
+                return CheckFunctionArguments(function, context) ?? NullArgument(function, context) ?? All(function.Parameters);
             case FunctionCall function when function.FunctionName.Value.ToUpperInvariant() is "GETDATE" or "GETUTCDATE" or "SYSDATETIME"
                 or "SYSUTCDATETIME" or "SYSDATETIMEOFFSET" or "CURRENT_TIMESTAMP":
                 return Unsupported($"the function {function.FunctionName.Value}", context,
@@ -819,6 +835,28 @@ internal static class DmlStatementSupport
             default:
                 return null;
         }
+    }
+
+    /// <summary>
+    /// COALESCE, IIF or CASE whose every result is the NULL constant: an error in SQL Server ("at least one of the
+    /// arguments ... must be an expression that is not the NULL constant"), which the engine would not raise.
+    /// </summary>
+    private static string AllNull(TSqlFragment node, string context)
+        => Unsupported($"{Sql(node)} (every result is NULL)", context,
+            " SQL Server refuses COALESCE, IIF and CASE whose results are all the NULL constant. Write NULL instead.");
+
+    /// <summary>A NULL constant as an argument of a function: never proven, and its result is NULL (CONCAT: empty text).</summary>
+    private static string? NullArgument(FunctionCall function, string context)
+    {
+        if (!function.Parameters.Any(p => p is NullLiteral))
+            return null;
+        var name = function.FunctionName.Value.ToUpperInvariant();
+        return name switch
+        {
+            "ISNULL" => null,
+            "CONCAT" => Unsupported(Sql(function), context, " CONCAT treats NULL as empty text: leave the NULL out."),
+            _ => Unsupported(Sql(function), context, $" {name} of NULL is NULL: write NULL instead.")
+        };
     }
 
     private static string Unsupported(string part, string context, string? howTo = null)
