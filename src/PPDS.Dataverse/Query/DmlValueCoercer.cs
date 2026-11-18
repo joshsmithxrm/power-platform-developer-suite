@@ -167,8 +167,8 @@ public static class DmlValueCoercer
         {
             long l => l,
             int i => i,
-            decimal d => (long)d,
-            double dbl => (long)dbl,
+            decimal d when d >= long.MinValue && d <= long.MaxValue => (long)d,
+            double dbl when dbl >= long.MinValue && dbl < long.MaxValue => (long)dbl,
             string s when long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l) => l,
             _ => throw TypeMismatch(value, "Int64")
         };
@@ -245,7 +245,8 @@ public static class DmlValueCoercer
             decimal d => d,
             int i => i,
             long l => l,
-            double dbl => (decimal)dbl,
+            // Outside decimal's range (or NaN) the cast would throw a raw OverflowException.
+            double dbl when !double.IsNaN(dbl) && Math.Abs(dbl) < 7.9e28 => (decimal)dbl,
             string s when decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var d) => d,
             _ => throw TypeMismatch(value, "Decimal")
         };

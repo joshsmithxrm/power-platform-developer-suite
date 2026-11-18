@@ -279,35 +279,135 @@ public sealed class SqlQueryPresenterTests : IDisposable
         Assert.Contains(history, h => h.Sql == "SELECT accountid FROM account");
     }
 
+    private const string StatementA = "DELETE FROM account WHERE name = 'a'";
+    private const string StatementB = "DELETE FROM contact WHERE lastname = 'b'";
+
+    /// <summary>Runs <paramref name="sql"/> so the service asks for confirmation, then confirms it in the dialog.</summary>
+    private static async Task<string?> AskAndConfirm(SqlQueryPresenter presenter, FakeSqlQueryService service, string sql)
+    {
+        service.Reset();
+        service.ExceptionToThrow = new PpdsDmlConfirmationRequiredException("must be confirmed",
+            [new DmlTarget("DEV", TestEnvironmentUrl, "Development", "Development")]);
+        await presenter.ExecuteAsync(sql, CancellationToken.None);
+        service.Reset();
+        service.NextResult = CreateResultWithRows(0);
+        return presenter.ConfirmDml();
+    }
+
     /// <summary>
-    /// AC-13: ExecuteAsync atomically captures and resets DML confirmation flag.
+    /// AC-13 (A-M1): a confirmation applies once, to the statement it was asked for, in this presenter's environment.
     /// </summary>
     [Fact]
-    public async Task ExecuteAsync_CapturesAndResetsDmlFlag()
+    public async Task Confirmation_AppliesOnlyToTheStatementItWasGivenFor_AndOnlyOnce()
     {
-        // Arrange
         var fakeSqlService = await GetFakeSqlQueryService();
-        fakeSqlService.NextResult = CreateResultWithRows(0);
-
         using var presenter = new SqlQueryPresenter(_session, TestEnvironmentUrl);
 
-        // Confirm DML, then execute
-        presenter.ConfirmDml();
+        Assert.Equal(StatementA, await AskAndConfirm(presenter, fakeSqlService, StatementA));
+        await presenter.ExecuteAsync(StatementA, CancellationToken.None);
+        Assert.True(Assert.Single(fakeSqlService.ExecutedQueries).DmlSafety!.IsConfirmed);
 
-        // Act
-        await presenter.ExecuteAsync("DELETE FROM account WHERE name = 'test'", CancellationToken.None);
-
-        // Assert - the first query should have captured IsConfirmed=true
-        Assert.NotEmpty(fakeSqlService.ExecutedQueries);
-        Assert.True(fakeSqlService.ExecutedQueries[0].DmlSafety!.IsConfirmed);
-
-        // Execute again without confirming - flag should be reset
+        // The same statement again: asks again.
         fakeSqlService.Reset();
         fakeSqlService.NextResult = CreateResultWithRows(0);
-        await presenter.ExecuteAsync("DELETE FROM account WHERE name = 'test2'", CancellationToken.None);
+        await presenter.ExecuteAsync(StatementA, CancellationToken.None);
+        Assert.False(Assert.Single(fakeSqlService.ExecutedQueries).DmlSafety!.IsConfirmed);
+    }
 
-        Assert.NotEmpty(fakeSqlService.ExecutedQueries);
-        Assert.False(fakeSqlService.ExecutedQueries[0].DmlSafety!.IsConfirmed);
+    [Fact]
+    public async Task Confirmation_ForOneStatement_DoesNotConfirmADifferentStatement()
+    {
+        var fakeSqlService = await GetFakeSqlQueryService();
+        using var presenter = new SqlQueryPresenter(_session, TestEnvironmentUrl);
+
+        await AskAndConfirm(presenter, fakeSqlService, StatementA);
+        await presenter.ExecuteAsync(StatementB, CancellationToken.None);
+
+        Assert.False(Assert.Single(fakeSqlService.ExecutedQueries).DmlSafety!.IsConfirmed);
+    }
+
+    [Theory]
+    [InlineData("connection")]
+    [InlineData("sign-in declined")]
+    [InlineData("cancelled")]
+    public async Task Confirmation_IsClearedWhenTheConfirmedRunFailsToConnect(string failure)
+    {
+        // Another environment, so its service provider is created (and fails) on this run.
+        const string otherUrl = "https://other.crm.dynamics.com";
+        _session.UpdateDisplayedEnvironment(otherUrl, "Other");
+        using var presenter = new SqlQueryPresenter(_session, otherUrl);
+        presenter.DmlConfirmationRequired += _ => { };
+        _factory.ExceptionToThrow = new PpdsDmlConfirmationRequiredException("must be confirmed", []);
+
+        // The factory error surfaces like the service's confirmation request: the presenter now awaits confirmation.
+        await presenter.ExecuteAsync(StatementA, CancellationToken.None);
+        Assert.Equal(StatementA, presenter.ConfirmDml());
+
+        // The user presses Escape while the connection is made, the connection fails, or sign-in is declined.
+        _factory.ExceptionToThrow = failure switch
+        {
+            "connection" => new InvalidOperationException("connection failed"),
+            "cancelled" => new OperationCanceledException(),
+            _ => new DataverseAuthenticationException("sign-in required", requiresReauthentication: true)
+        };
+        await presenter.ExecuteAsync(StatementA, CancellationToken.None); // fails before the service is reached
+
+        _factory.ExceptionToThrow = null;
+        var service = (FakeSqlQueryService)Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+            .GetRequiredService<ISqlQueryService>(await _session.GetServiceProviderAsync(otherUrl));
+        service.Reset();
+        service.NextResult = CreateResultWithRows(0);
+        await presenter.ExecuteAsync(StatementA, CancellationToken.None); // the retry (or re-authentication) asks again
+        Assert.False(Assert.Single(service.ExecutedQueries).DmlSafety!.IsConfirmed);
+    }
+
+    [Fact]
+    public async Task Confirmation_DoesNotCarryOverToAnotherEnvironmentsPresenter()
+    {
+        var fakeSqlService = await GetFakeSqlQueryService();
+        using var presenter = new SqlQueryPresenter(_session, TestEnvironmentUrl);
+        using var other = new SqlQueryPresenter(_session, TestEnvironmentUrl + "/other");
+        await AskAndConfirm(presenter, fakeSqlService, StatementA);
+
+        Assert.Null(other.ConfirmDml());
+    }
+
+    [Fact]
+    public async Task DecliningTheConfirmation_LeavesNothingConfirmed()
+    {
+        var fakeSqlService = await GetFakeSqlQueryService();
+        using var presenter = new SqlQueryPresenter(_session, TestEnvironmentUrl);
+        fakeSqlService.ExceptionToThrow = new PpdsDmlConfirmationRequiredException("must be confirmed", []);
+        await presenter.ExecuteAsync(StatementA, CancellationToken.None);
+
+        presenter.DeclineDml();
+        Assert.Null(presenter.ConfirmDml());
+
+        fakeSqlService.Reset();
+        fakeSqlService.NextResult = CreateResultWithRows(0);
+        await presenter.ExecuteAsync(StatementA, CancellationToken.None);
+        Assert.False(Assert.Single(fakeSqlService.ExecutedQueries).DmlSafety!.IsConfirmed);
+    }
+
+    /// <summary>A-S5: the dialog names the environment the statement would change, and the statement.</summary>
+    [Fact]
+    public async Task ConfirmationPrompt_NamesTheTargetEnvironmentAndTheStatement()
+    {
+        var fakeSqlService = await GetFakeSqlQueryService();
+        using var presenter = new SqlQueryPresenter(_session, TestEnvironmentUrl);
+        var confirmation = new PpdsDmlConfirmationRequiredException("This request changes data.",
+            [new DmlTarget("DEV", TestEnvironmentUrl, "Development", "Development")]);
+        fakeSqlService.ExceptionToThrow = confirmation;
+        await presenter.ExecuteAsync(StatementA + "\u001b[2J", CancellationToken.None);
+
+        var prompt = presenter.ConfirmationPrompt(confirmation);
+
+        Assert.Contains("This request changes data.", prompt);
+        Assert.Contains($"Environment: DEV {TestEnvironmentUrl} (Development protection)", prompt);
+        Assert.Contains("Statement: " + StatementA, prompt);
+        Assert.DoesNotContain('\u001b', prompt); // escaped, not sent to the terminal
+        Assert.Contains("\\u001B[2J", prompt);
+        Assert.EndsWith("Do you want to proceed?", prompt);
     }
 
     [Fact]

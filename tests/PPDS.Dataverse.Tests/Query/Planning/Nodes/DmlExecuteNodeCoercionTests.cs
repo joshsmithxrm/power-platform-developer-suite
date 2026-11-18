@@ -66,7 +66,7 @@ public class DmlExecuteNodeCoercionTests
     }
 
     [Fact]
-    public async Task InsertValues_WithoutMetadataProvider_PassesRawValues()
+    public async Task InsertValues_WithoutMetadataProvider_IsRefused_InsteadOfSendingRawValues()
     {
         var bulk = new RecordingBulkExecutor();
         var context = new QueryPlanContext(
@@ -82,11 +82,31 @@ public class DmlExecuteNodeCoercionTests
                 new[] { speciesExpr }
             });
 
-        await ConsumeAsync(node, context);
+        // No provider: a raw int would reach a choice column, so nothing is sent at all.
+        var ex = await Assert.ThrowsAsync<DmlSafetyRefusalException>(() => ConsumeAsync(node, context));
 
-        // No provider → no coercion (documents the degraded fallback)
-        var entity = Assert.Single(bulk.Created);
-        Assert.IsType<int>(entity["hsl_species"]);
+        Assert.Contains("column metadata", ex.Message);
+        Assert.Empty(bulk.Created);
+    }
+
+    [Fact]
+    public async Task InsertValues_ColumnMissingFromMetadata_IsRefused()
+    {
+        var bulk = new RecordingBulkExecutor();
+        var context = new QueryPlanContext(
+            new StubQueryExecutor(),
+            bulkOperationExecutor: bulk,
+            metadataProvider: new StubMetadataProvider(PetAttributes()));
+        CompiledScalarExpression value = _ => "x";
+        var node = DmlExecuteNode.InsertValues(
+            "hsl_pet",
+            new[] { "hsl_nosuchcolumn" },
+            new IReadOnlyList<CompiledScalarExpression>[] { new[] { value } });
+
+        var ex = await Assert.ThrowsAsync<DmlSafetyRefusalException>(() => ConsumeAsync(node, context));
+
+        Assert.Contains("hsl_nosuchcolumn", ex.Message);
+        Assert.Empty(bulk.Created);
     }
 
     [Fact]
@@ -229,7 +249,8 @@ public class DmlExecuteNodeCoercionTests
     public async Task InsertValues_AllRowsFail_RecordsErrorInStatistics()
     {
         var bulk = new ConfigurableBulkExecutor(0, 1, "The 'CreateMultiple' method does not support entities of type 'solution'.");
-        var context = new QueryPlanContext(new StubQueryExecutor(), bulkOperationExecutor: bulk);
+        var context = new QueryPlanContext(new StubQueryExecutor(), bulkOperationExecutor: bulk,
+            metadataProvider: new StubMetadataProvider(new[] { new AttributeMetadataDto { LogicalName = "friendlyname", DisplayName = "friendlyname", SchemaName = "friendlyname", AttributeType = "String" } }));
         var node = DmlExecuteNode.InsertValues(
             "solution",
             new[] { "friendlyname" },
@@ -244,7 +265,8 @@ public class DmlExecuteNodeCoercionTests
     public async Task InsertValues_NoFailures_LeavesErrorNull()
     {
         var bulk = new ConfigurableBulkExecutor(1, 0, "ignored");
-        var context = new QueryPlanContext(new StubQueryExecutor(), bulkOperationExecutor: bulk);
+        var context = new QueryPlanContext(new StubQueryExecutor(), bulkOperationExecutor: bulk,
+            metadataProvider: new StubMetadataProvider(new[] { new AttributeMetadataDto { LogicalName = "name", DisplayName = "name", SchemaName = "name", AttributeType = "String" } }));
         var node = DmlExecuteNode.InsertValues(
             "account",
             new[] { "name" },
@@ -546,7 +568,8 @@ public class DmlExecuteNodeCoercionTests
     public async Task Update_AllFail_RecordsOutcomeWithOperationEntityCountsAndError()
     {
         var context = new QueryPlanContext(
-            new StubQueryExecutor(), bulkOperationExecutor: new ConfigurableBulkExecutor(0, 2, "update boom"));
+            new StubQueryExecutor(), bulkOperationExecutor: new ConfigurableBulkExecutor(0, 2, "update boom"),
+            metadataProvider: new StubMetadataProvider(PetAttributes()));
         CompiledScalarExpression expr = _ => "n";
         var node = DmlExecuteNode.Update("hsl_pet", IdRows("hsl_pet", 2), new[] { new CompiledSetClause("hsl_name", expr) });
 
@@ -575,7 +598,8 @@ public class DmlExecuteNodeCoercionTests
     public async Task InsertSelect_AllFail_RecordsOutcomeWithError()
     {
         var context = new QueryPlanContext(
-            new StubQueryExecutor(), bulkOperationExecutor: new ConfigurableBulkExecutor(0, 2, "insert-select boom"));
+            new StubQueryExecutor(), bulkOperationExecutor: new ConfigurableBulkExecutor(0, 2, "insert-select boom"),
+            metadataProvider: new StubMetadataProvider(PetAttributes()));
         var source = new StaticPlanNode(new[]
         {
             new QueryRow(new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase) { ["hsl_name"] = QueryValue.Simple("a") }, "hsl_pet"),
@@ -611,5 +635,91 @@ public class DmlExecuteNodeCoercionTests
         await Drain(DmlExecuteNode.Delete("b", IdRows("b", 1)), context);
 
         Assert.Equal(new[] { "a", "b" }, context.Statistics.DmlOutcomes.Select(o => o.EntityLogicalName));
+    }
+
+    // ---- B-M1: a cancelled bulk write is an interrupted statement, never a completed one ------------------
+
+    private sealed class ShortResultBulkExecutor : IBulkOperationExecutor
+    {
+        private readonly Func<int, CancellationToken, BulkOperationResult> _result;
+
+        public ShortResultBulkExecutor(Func<int, CancellationToken, BulkOperationResult> result) => _result = result;
+
+        public Task<BulkOperationResult> CreateMultipleAsync(string entityLogicalName, IEnumerable<Entity> entities, BulkOperationOptions? options = null,
+            DataverseClientOptions? clientOptions = null, IProgress<ProgressSnapshot>? progress = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(_result(entities.Count(), cancellationToken));
+
+        public Task<BulkOperationResult> UpdateMultipleAsync(string entityLogicalName, IEnumerable<Entity> entities, BulkOperationOptions? options = null,
+            DataverseClientOptions? clientOptions = null, IProgress<ProgressSnapshot>? progress = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(_result(entities.Count(), cancellationToken));
+
+        public Task<BulkOperationResult> UpsertMultipleAsync(string entityLogicalName, IEnumerable<Entity> entities, BulkOperationOptions? options = null,
+            DataverseClientOptions? clientOptions = null, IProgress<ProgressSnapshot>? progress = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(_result(entities.Count(), cancellationToken));
+
+        public Task<BulkOperationResult> DeleteMultipleAsync(string entityLogicalName, IEnumerable<Guid> ids, BulkOperationOptions? options = null,
+            DataverseClientOptions? clientOptions = null, IProgress<ProgressSnapshot>? progress = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(_result(ids.Count(), cancellationToken));
+    }
+
+    [Fact]
+    public async Task SequentialBulkWrite_CancelledPartWay_IsReportedInterrupted_WithWhatWasWritten()
+    {
+        // The sequential path returns normally when cancelled: the batches not sent report nothing.
+        using var cts = new CancellationTokenSource();
+        var bulk = new ShortResultBulkExecutor((submitted, _) =>
+        {
+            cts.Cancel();
+            return new BulkOperationResult { SuccessCount = 2 };
+        });
+        var context = new QueryPlanContext(new StubQueryExecutor(), bulkOperationExecutor: bulk);
+        var node = DmlExecuteNode.Delete("hsl_pet", IdRows("hsl_pet", 5));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (var _ in node.ExecuteAsync(context, cts.Token)) { }
+        });
+
+        var outcome = Assert.Single(context.Statistics.DmlOutcomes);
+        Assert.True(outcome.Interrupted);
+        Assert.Equal(2, outcome.AffectedRows);
+    }
+
+    [Fact]
+    public async Task BulkWrite_ReportingFewerRowsThanSubmitted_IsAnInterruption_NotASuccess()
+    {
+        var bulk = new ShortResultBulkExecutor((submitted, _) => new BulkOperationResult { SuccessCount = submitted - 1 });
+        var context = new QueryPlanContext(new StubQueryExecutor(), bulkOperationExecutor: bulk,
+            metadataProvider: new StubMetadataProvider(PetAttributes()));
+        CompiledScalarExpression expr = _ => "n";
+        var node = DmlExecuteNode.Update("hsl_pet", IdRows("hsl_pet", 3), new[] { new CompiledSetClause("hsl_name", expr) });
+
+        var ex = await Assert.ThrowsAsync<QueryExecutionException>(() => Drain(node, context));
+
+        Assert.Contains("2 of 3 rows", ex.Message);
+        var outcome = Assert.Single(context.Statistics.DmlOutcomes);
+        Assert.True(outcome.Interrupted);
+        Assert.Equal(2, outcome.AffectedRows);
+    }
+
+    [Fact]
+    public async Task ParallelBulkWrite_Cancelled_IsReportedInterrupted()
+    {
+        // The parallel path throws when cancelled; the statement is recorded as interrupted before it propagates.
+        using var cts = new CancellationTokenSource();
+        var bulk = new ShortResultBulkExecutor((_, _) =>
+        {
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        });
+        var context = new QueryPlanContext(new StubQueryExecutor(), bulkOperationExecutor: bulk);
+        var node = DmlExecuteNode.Delete("hsl_pet", IdRows("hsl_pet", 4));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (var _ in node.ExecuteAsync(context, cts.Token)) { }
+        });
+
+        Assert.True(Assert.Single(context.Statistics.DmlOutcomes).Interrupted);
     }
 }

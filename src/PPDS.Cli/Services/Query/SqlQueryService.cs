@@ -60,6 +60,33 @@ public sealed class SqlQueryService : ISqlQueryService
     private string? _environmentUrl;
     private string? _environmentLabel;
     private string? _environmentType;
+    private bool _environmentTypeUnknown;
+
+    /// <summary>
+    /// Refuses a confirmed DML request that does not name the environment it was confirmed for, or names another one than
+    /// the environment this service runs against.
+    /// </summary>
+    private void CheckConfirmedTarget(string? confirmedUrl)
+    {
+        static string? Normal(string? url) => string.IsNullOrWhiteSpace(url)
+            ? null
+            : Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri) ? uri.GetLeftPart(UriPartial.Authority).ToLowerInvariant() : url.Trim().TrimEnd('/').ToLowerInvariant();
+
+        var confirmed = Normal(confirmedUrl);
+        var actual = Normal(_environmentUrl);
+        if (confirmed == null)
+        {
+            throw new PpdsException(ErrorCodes.Query.DmlBlocked,
+                "A confirmed INSERT, UPDATE or DELETE request must name the environment it was confirmed for (environmentUrl). " +
+                "Nothing was executed. Send the request again with the environment URL that was shown when it was confirmed.");
+        }
+        if (actual == null || confirmed != actual)
+        {
+            throw new PpdsException(ErrorCodes.Query.DmlBlocked,
+                $"This request was confirmed for {confirmedUrl}, but it would run against {_environmentUrl ?? "an unknown environment"}. " +
+                "Nothing was executed. Confirm it again for the environment it runs against.");
+        }
+    }
 
     /// <summary>
     /// Applies the connected environment's DML safety settings and protection level (from its configuration, when
@@ -71,6 +98,9 @@ public sealed class SqlQueryService : ISqlQueryService
         _environmentUrl = environmentUrl;
         _environmentLabel = config?.Label;
         _environmentType = config?.Type?.ToString();
+        // A configuration that states neither a protection level nor a known type resolves to Development below; the
+        // bypass-hint gate treats it as Production instead (fail closed).
+        _environmentTypeUnknown = config != null && config.Protection == null && config.Type is null or EnvironmentType.Unknown;
         if (config == null)
             return;
 
@@ -325,6 +355,8 @@ public sealed class SqlQueryService : ISqlQueryService
         return wrapped;
     }
 
+    private const string NothingExecutedSentence = " Nothing was executed.";
+
     private static bool DmlRan(QueryPlanContext context)
         => context.Statistics.DmlOutcomes.Any(o => o.AffectedRows > 0 || o.FailedRows > 0 || o.Interrupted);
 
@@ -350,9 +382,15 @@ public sealed class SqlQueryService : ISqlQueryService
     }
 
     /// <summary>A planner refusal raised while a script ran, as a <see cref="PpdsException"/> with its own code.</summary>
-    private static PpdsException WrapRefusal(DmlSafetyRefusalException ex, QueryPlanContext context)
+    internal static PpdsException WrapRefusal(DmlSafetyRefusalException ex, QueryPlanContext context)
     {
-        var wrapped = new PpdsException(ex.ErrorCode, ex.Message, ex);
+        // After earlier statements changed data, "Nothing was executed" would be false: only this statement and the
+        // ones after it did not run (what did run is attached and reported by every surface).
+        var message = DmlRan(context)
+            ? ex.Message.Replace(NothingExecutedSentence, " This statement and the ones after it did not run.", StringComparison.Ordinal)
+                .Replace(", so nothing was executed.", ", so this statement and the ones after it did not run.", StringComparison.Ordinal)
+            : ex.Message;
+        var wrapped = new PpdsException(ex.ErrorCode, message, ex);
         RecordCommittedOutcome(wrapped, context);
         return wrapped;
     }
@@ -706,6 +744,17 @@ public sealed class SqlQueryService : ISqlQueryService
         // not ask for (the extension's default top over RPC) is not marked explicit and is simply ignored for DML.
         // The MAX_ROWS hint is text the user wrote, so ignoring it would change what the statement affects. The engine
         // cannot apply a row limit to DML, so the request is refused instead (on every surface, before anything runs).
+        // The TDS endpoint is a read-only replica. The pre-check above reads the statement text and can miss DML (for
+        // example behind a leading comment), so the parsed request decides: DML never runs with TDS selected, whether
+        // asked for by the caller (useTds, the TUI toggle) or by a -- ppds:USE_TDS hint.
+        if (safetyResult.ContainsDml && request.UseTdsEndpoint)
+        {
+            throw new PpdsException(
+                ErrorCodes.Query.TdsIncompatible,
+                "Cannot execute via TDS: DML statements (DELETE, UPDATE, INSERT) are not supported by the TDS Endpoint. " +
+                "Nothing was executed. Disable TDS mode (and remove any -- ppds:USE_TDS hint) to run this statement against Dataverse.");
+        }
+
         if (safetyResult.ContainsDml && dmlSafety.RowCap is <= 0)
         {
             throw new PpdsValidationException(
@@ -780,10 +829,37 @@ public sealed class SqlQueryService : ISqlQueryService
                 safetyResult.BlockReason ?? "DML operation blocked by safety guard.");
         }
 
+        // NOLOCK, HASH_GROUP and MAXDOP were not proven for DML, and NOLOCK changes which rows the statement selects
+        // (uncommitted rows). They are refused, like any OPTION (...) clause on the statement itself.
+        if (safetyResult.ContainsDml)
+        {
+            var unproven = new[]
+            {
+                hints.NoLock == true ? "NOLOCK" : null,
+                hints.ForceClientAggregation == true ? "HASH_GROUP" : null,
+                hints.MaxParallelism.HasValue ? "MAXDOP" : null
+            }.OfType<string>().FirstOrDefault();
+            if (unproven != null)
+            {
+                throw new PpdsException(
+                    ErrorCodes.Query.DmlBlocked,
+                    $"The -- ppds:{unproven} hint is not supported on INSERT, UPDATE or DELETE. Nothing was executed. " +
+                    "Remove the hint (only -- ppds:BATCH_SIZE, -- ppds:BYPASS_PLUGINS and -- ppds:BYPASS_FLOWS apply to DML).");
+            }
+        }
+
         // Every column the DML reads or writes must be a real attribute of its table (checked against metadata, so a
-        // display column such as owneridname or a misspelt name is refused instead of reading NULL).
-        if (safetyResult.ContainsDml && _metadataProvider != null)
+        // display column such as owneridname or a misspelt name is refused instead of reading NULL). Without metadata
+        // nothing can be checked, so DML is refused here, before any confirmation is asked for and also for a dry-run.
+        if (safetyResult.ContainsDml)
+        {
+            if (_metadataProvider == null)
+            {
+                throw new PpdsException(ErrorCodes.Query.DmlBlocked,
+                    "INSERT, UPDATE and DELETE need the table's column metadata to be checked before they run, and none is available here. Nothing was executed.");
+            }
             await DmlColumnValidator.ValidateAsync(plannedStatement, _metadataProvider, cancellationToken).ConfigureAwait(false);
+        }
 
         // BYPASS_PLUGINS / BYPASS_FLOWS weaken safeguards: one statement only (a hint is read from the whole request),
         // never in a Production-protected environment unless its settings already bypass the same logic.
@@ -801,10 +877,13 @@ public sealed class SqlQueryService : ISqlQueryService
                     "INSERT, UPDATE or DELETE statement. Nothing was executed. Run that statement on its own.");
             }
 
+            // BYPASS_PLUGINS bypasses synchronous logic, so only settings that already bypass synchronous plugins allow it.
+            // An environment whose configuration states neither a type nor a protection level counts as Production here.
             var settings = EnvironmentSafetySettings ?? new QuerySafetySettings();
-            var allowed = (hints.BypassPlugins != true || settings.BypassCustomPlugins != BypassPluginMode.None)
+            var allowed = (hints.BypassPlugins != true || settings.BypassCustomPlugins is BypassPluginMode.Synchronous or BypassPluginMode.All)
                 && (hints.BypassFlows != true || settings.BypassPowerAutomateFlows);
-            if (EnvironmentProtectionLevel == ProtectionLevel.Production && !allowed)
+            var gateProtection = _environmentTypeUnknown ? ProtectionLevel.Production : EnvironmentProtectionLevel;
+            if (gateProtection == ProtectionLevel.Production && !allowed)
             {
                 throw new PpdsException(
                     ErrorCodes.Query.DmlBlocked,
@@ -818,6 +897,10 @@ public sealed class SqlQueryService : ISqlQueryService
         // still gated, but do not require --confirm merely to build the side-effect-free
         // plan. Hard safety blocks above (for example, UPDATE/DELETE without WHERE) still
         // apply to previews.
+        // A confirmation over RPC names the environment it was given for; it is applied only to that environment.
+        if (safetyResult.ContainsDml && dmlSafety is { IsConfirmed: true, IsDryRun: false, RequireConfirmedTarget: true })
+            CheckConfirmedTarget(dmlSafety.ConfirmedEnvironmentUrl);
+
         if (safetyResult.ContainsDml && safetyResult.RequiresConfirmation && !safetyResult.IsDryRun)
         {
             // Surface-neutral: the CLI replaces it with its --confirm/--dry-run wording, the TUI and the extension ask.
@@ -828,13 +911,6 @@ public sealed class SqlQueryService : ISqlQueryService
             {
                 Bypasses = bypasses
             };
-        }
-
-        // Without metadata the column types cannot be checked, so DML never executes unchecked (a dry-run executes nothing).
-        if (safetyResult.ContainsDml && !safetyResult.IsDryRun && _metadataProvider == null)
-        {
-            throw new PpdsException(ErrorCodes.Query.DmlBlocked,
-                "INSERT, UPDATE and DELETE need the table's column metadata to be checked before they run, and none is available here. Nothing was executed.");
         }
 
         dmlRowCap = safetyResult.RowCap;
@@ -1387,8 +1463,8 @@ public sealed class SqlQueryService : ISqlQueryService
             throw new PpdsException(
                 ErrorCodes.Query.DmlBlocked,
                 $"Writing to another environment ([{targetLabel}]) is not supported: the statement would not run against " +
-                $"[{targetLabel}]. Nothing was executed. Connect to that environment and run the statement there; reading " +
-                "from another environment (for example INSERT ... SELECT ... FROM [LABEL].entity) is supported.");
+                $"[{targetLabel}]. Nothing was executed. Connect to that environment and run the statement there, " +
+                "naming the table without the environment label.");
         }
     }
 

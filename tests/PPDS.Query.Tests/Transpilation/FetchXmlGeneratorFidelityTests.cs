@@ -125,4 +125,15 @@ public class FetchXmlGeneratorFidelityTests
     [Fact]
     public void NotBetween_IsNotPaired_DataverseAlreadyExcludesNull()
         => Fetch("SELECT name FROM account WHERE revenue NOT BETWEEN 1 AND 2").Should().NotContain("not-null");
+    [Fact]
+    public void ComputedItemOverAGroupByColumn_ReadsTheGroupedColumn_NotAnUngroupedAttribute()
+    {
+        // SELECT name AS n, COUNT(*) AS c, UPPER(name) AS u ... GROUP BY name: u needs name, which an aggregate query
+        // may return only grouped (an ungrouped attribute is not allowed there).
+        var fetch = Fetch("SELECT name AS n, COUNT(*) AS c, UPPER(name) AS u FROM account GROUP BY name");
+
+        fetch.Should().Contain("<attribute name=\"name\" alias=\"n\" groupby=\"true\" />");
+        fetch.Should().Contain("<attribute name=\"name\" groupby=\"true\" alias=\"name\" />");
+        fetch.Should().NotContain("<attribute name=\"name\" />");
+    }
 }

@@ -215,6 +215,9 @@ public partial class RpcMethodHandler
                 IsDryRun = request.DmlSafety.IsDryRun,
                 NoLimit = request.DmlSafety.NoLimit,
                 RowCap = request.DmlSafety.RowCap,
+                // A confirmed DML request must name the environment it was confirmed for (both extension surfaces do).
+                RequireConfirmedTarget = true,
+                ConfirmedEnvironmentUrl = request.EnvironmentUrl,
             }
             : new DmlSafetyOptions(),
     };
@@ -255,12 +258,14 @@ public partial class RpcMethodHandler
                         .Select(t => new DmlTargetDto { Label = t.Label, Url = t.Url, Type = t.Type, Protection = t.Protection })
                         .ToList(),
                 }),
+            // A refusal raised part-way through a script reports what the earlier statements committed, as the CLI does.
             PpdsException { ErrorCode: ErrorCodes.Query.DmlBlocked } blocked =>
-                new RpcException(ErrorCodes.Query.DmlBlocked, blocked.UserMessage, new DmlSafetyErrorData
+                new RpcException(ErrorCodes.Query.DmlBlocked, WithCommitted(blocked.UserMessage), new DmlSafetyErrorData
                 {
                     Code = ErrorCodes.Query.DmlBlocked,
-                    Message = blocked.UserMessage,
+                    Message = WithCommitted(blocked.UserMessage),
                     DmlBlocked = true,
+                    DmlCommitted = committed,
                 }),
             PpdsException { ErrorCode: ErrorCodes.Query.DmlRowCapExceeded } cap =>
                 new RpcException(ErrorCodes.Query.DmlRowCapExceeded, WithCommitted(cap.UserMessage), new DmlSafetyErrorData

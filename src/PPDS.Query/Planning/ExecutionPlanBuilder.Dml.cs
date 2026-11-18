@@ -29,8 +29,10 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private QueryPlanResult PlanInsert(InsertStatement insert, QueryPlanOptions options)
     {
-        var targetEntity = GetInsertTargetEntity(insert);
-        var columns = GetInsertColumns(insert);
+        RefuseRowLimits(options, "INSERT");
+        // Dataverse logical names are lower case; the allowlist admits only plain names, so lower-casing is exact.
+        var targetEntity = GetInsertTargetEntity(insert).ToLowerInvariant();
+        var columns = GetInsertColumns(insert).Select(c => c.ToLowerInvariant()).ToList();
 
         IQueryPlanNode rootNode;
 
@@ -95,13 +97,15 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private QueryPlanResult PlanUpdate(UpdateStatement update, QueryPlanOptions options)
     {
+        RefuseRowLimits(options, "UPDATE");
         // Extract entity name directly from ScriptDom
         if (update.UpdateSpecification.Target is not NamedTableReference targetNamed)
             throw new QueryParseException("UPDATE target must be a named table.");
         // The target may be the alias of the FROM table (UPDATE a ... FROM account a): write to that table.
         var resolved = DmlStatementSupport.ResolveTarget(targetNamed, update.UpdateSpecification.FromClause);
-        var entityName = GetMultiPartName(resolved.SchemaObject);
-        var baseName = resolved.SchemaObject.BaseIdentifier?.Value ?? entityName;
+        // Dataverse logical names are lower case; the allowlist admits only plain names, so lower-casing is exact.
+        var entityName = GetMultiPartName(resolved.SchemaObject).ToLowerInvariant();
+        var baseName = (resolved.SchemaObject.BaseIdentifier?.Value ?? entityName).ToLowerInvariant();
 
         // Compile SET clauses directly from ScriptDom AST to delegates
         var compiledClauses = new List<CompiledSetClause>();
@@ -113,7 +117,7 @@ public sealed partial class ExecutionPlanBuilder
             {
                 var colName = assignment.Column?.MultiPartIdentifier?.Identifiers?.Count > 0
                     ? assignment.Column.MultiPartIdentifier.Identifiers[
-                        assignment.Column.MultiPartIdentifier.Identifiers.Count - 1].Value
+                        assignment.Column.MultiPartIdentifier.Identifiers.Count - 1].Value.ToLowerInvariant()
                     : "unknown";
                 var compiled = _expressionCompiler.CompileScalar(assignment.NewValue);
                 compiledClauses.Add(new CompiledSetClause(colName, compiled));
@@ -191,13 +195,15 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private QueryPlanResult PlanDelete(DeleteStatement delete, QueryPlanOptions options)
     {
+        RefuseRowLimits(options, "DELETE");
         // Extract entity name directly from ScriptDom
         if (delete.DeleteSpecification.Target is not NamedTableReference targetNamed)
             throw new QueryParseException("DELETE target must be a named table.");
         // The target may be the alias of the FROM table (DELETE a FROM account a): delete from that table.
         var resolved = DmlStatementSupport.ResolveTarget(targetNamed, delete.DeleteSpecification.FromClause);
-        var entityName = GetMultiPartName(resolved.SchemaObject);
-        var baseName = resolved.SchemaObject.BaseIdentifier?.Value ?? entityName;
+        // Dataverse logical names are lower case; the allowlist admits only plain names, so lower-casing is exact.
+        var entityName = GetMultiPartName(resolved.SchemaObject).ToLowerInvariant();
+        var baseName = (resolved.SchemaObject.BaseIdentifier?.Value ?? entityName).ToLowerInvariant();
 
         // Build a synthetic SELECT SQL string: SELECT [entityid] FROM target [JOINs] [WHERE ...]
         // Use baseName for columns (simple identifiers), ScriptDom for FROM (preserves multi-part names).
@@ -242,6 +248,22 @@ public sealed partial class ExecutionPlanBuilder
             VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
             EntityLogicalName = entityName
         };
+    }
+
+    /// <summary>
+    /// Row limits, page numbers and paging cookies select returned rows; applied to the scan that selects the rows a DML
+    /// statement changes, they would change only some of them. The service never passes them for DML; any other caller
+    /// that does is refused here.
+    /// </summary>
+    private static void RefuseRowLimits(QueryPlanOptions options, string verb)
+    {
+        if (options.MaxRows.HasValue || options.PageNumber.HasValue || options.PagingCookie != null)
+        {
+            throw new DmlSafetyRefusalException(
+                QueryErrorCode.DmlBlocked,
+                $"{verb} cannot be planned with a row limit, page number or paging cookie: they select returned rows only, " +
+                "and would change only some of the rows the statement selects. Nothing was executed. Plan it without them.");
+        }
     }
 
     /// <summary>

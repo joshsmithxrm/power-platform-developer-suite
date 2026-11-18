@@ -35,6 +35,12 @@ internal sealed class DmlTestHarness
     /// <summary>Called before each bulk write returns; lets a test throw or cancel mid-statement.</summary>
     public Action<string, int, IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>? OnWrite { get; set; }
 
+    /// <summary>The id of row <paramref name="index"/> of page <paramref name="page"/> (distinct across pages).</summary>
+    public static Guid Id(int index, int page = 1) => Guid.Parse($"00000000-0000-0000-{page:D4}-{index + 1:D12}");
+
+    /// <summary>The lookup value of the odd rows (parentaccountid); even rows have none.</summary>
+    public static readonly Guid ParentId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+
     public static QueryResult Rows(int count, bool moreRecords = false, int pageNumber = 1) => new()
     {
         PageNumber = pageNumber,
@@ -42,13 +48,23 @@ internal sealed class DmlTestHarness
         Columns = new[] { new QueryColumn { LogicalName = "accountid" }, new QueryColumn { LogicalName = "name" } },
         Records = Enumerable.Range(0, count).Select(i => (IReadOnlyDictionary<string, QueryValue>)new Dictionary<string, QueryValue>
         {
-            ["accountid"] = QueryValue.Simple(Guid.NewGuid()),
+            ["accountid"] = QueryValue.Simple(Id(i, pageNumber)),
             ["contactid"] = QueryValue.Simple(Guid.NewGuid()),
             ["name"] = QueryValue.Simple("n" + i),
             // revenue 500, 1000, 1500, ...; description null on even rows, "d<i>" on odd rows
             ["revenue"] = QueryValue.Simple(500m * (i + 1)),
             ["numberofemployees"] = QueryValue.Simple(10 * (i + 1)),
-            ["description"] = i % 2 == 0 ? QueryValue.Null : QueryValue.Simple("d" + i)
+            ["description"] = i % 2 == 0 ? QueryValue.Null : QueryValue.Simple("d" + i),
+            // status 0 (active) on even rows, 1 on odd rows; the other columns alternate or count up the same way
+            ["statecode"] = QueryValue.Simple(i % 2),
+            ["statuscode"] = QueryValue.Simple(i % 2 == 0 ? 1 : 2),
+            ["creditlimit"] = QueryValue.Simple(5m * i),
+            ["customertypecode"] = QueryValue.Simple(i % 2 + 1),
+            ["parentaccountid"] = i % 2 == 1 ? QueryValue.Simple(ParentId) : QueryValue.Null,
+            ["notes"] = QueryValue.Simple("note" + i),
+            ["donotemail"] = QueryValue.Simple(i % 2 == 0),
+            ["followupby"] = QueryValue.Simple(new DateTime(2024, 1, i + 1, 0, 0, 0, DateTimeKind.Utc)),
+            ["birthday"] = QueryValue.Simple(new DateTime(2024, 1, 15 + i, 0, 0, 0, DateTimeKind.Unspecified))
         }).ToArray(),
         Count = count,
         MoreRecords = moreRecords,
@@ -183,10 +199,13 @@ internal sealed class DmlTestHarness
                     ? records.OrderByDescending(Key, Comparer<object?>.Create(CompareValues))
                     : records.OrderBy(Key, Comparer<object?>.Create(CompareValues));
             }
-            var limit = (string?)doc.Root.Attribute("count") ?? (string?)doc.Root.Attribute("top");
-            if (limit != null)
-                records = records.Take(int.Parse(limit, System.Globalization.CultureInfo.InvariantCulture));
         }
+
+        // Like Dataverse, count/top limit the rows (always, not only in faithful mode), so a row limit that reached a DML
+        // source scan would change fewer rows and the test would see it.
+        var limit = (string?)doc.Root.Attribute("count") ?? (string?)doc.Root.Attribute("top");
+        if (limit != null)
+            records = records.Take(int.Parse(limit, System.Globalization.CultureInfo.InvariantCulture));
 
         if (entity.Element("all-attributes") != null)
             return With(result, records.ToArray());

@@ -35,7 +35,7 @@ public static class CastConverter
             "decimal" or "numeric" => ConvertToDecimal(value, precision, scale),
             "float" => ConvertToFloat(value),
             "real" => ConvertToFloat(value),
-            "nvarchar" or "varchar" or "nchar" or "char" => ConvertToString(value, maxLength, style),
+            "nvarchar" or "varchar" or "nchar" or "char" => ConvertToString(value, maxLength, style, unicode: baseType is "nvarchar" or "nchar"),
             "datetime" => ConvertToDateTime(value, style),
             "date" => ConvertToDate(value, style),
             "bit" => ConvertToBit(value),
@@ -162,7 +162,23 @@ public static class CastConverter
             result = Math.Round(result, scale.Value, MidpointRounding.AwayFromZero);
         }
 
+        // decimal(p, s) holds p - s digits before the point; a larger value is an arithmetic overflow in T-SQL (an error,
+        // or NULL from TRY_CAST / TRY_CONVERT), never a wider value.
+        if (precision.HasValue && Math.Abs(result) >= Pow10(precision.Value - (scale ?? 0)))
+        {
+            throw new OverflowException(
+                $"Arithmetic overflow error converting {result.ToString(CultureInfo.InvariantCulture)} to data type decimal({precision}, {scale ?? 0}).");
+        }
+
         return result;
+    }
+
+    private static decimal Pow10(int exponent)
+    {
+        var value = 1m;
+        for (var i = 0; i < exponent && i < 28; i++)
+            value *= 10m;
+        return exponent > 28 ? decimal.MaxValue : value;
     }
 
     private static double ConvertToFloat(object value)
@@ -182,7 +198,7 @@ public static class CastConverter
         };
     }
 
-    private static string ConvertToString(object value, int? maxLength, int? style)
+    private static string ConvertToString(object value, int? maxLength, int? style, bool unicode = true)
     {
         string result;
 
@@ -208,6 +224,15 @@ public static class CastConverter
         // Truncate to max length if specified
         if (maxLength.HasValue && maxLength.Value != int.MaxValue && result.Length > maxLength.Value)
         {
+            // T-SQL truncates text, but a number that does not fit is an error (an integer into char/varchar gives '*').
+            if (value is int or long or short or byte)
+            {
+                if (!unicode)
+                    return "*";
+                throw new OverflowException($"Arithmetic overflow error converting {result} to data type nvarchar({maxLength}).");
+            }
+            if (value is decimal or double or float)
+                throw new OverflowException($"Arithmetic overflow error converting {result} to data type {(unicode ? "nvarchar" : "varchar")}({maxLength}).");
             result = result.Substring(0, maxLength.Value);
         }
 

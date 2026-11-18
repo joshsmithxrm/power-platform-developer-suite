@@ -22,7 +22,7 @@ public class SqlQueryServiceTests
     public SqlQueryServiceTests()
     {
         _mockQueryExecutor = new Mock<IQueryExecutor>();
-        _service = new SqlQueryService(_mockQueryExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        _service = new SqlQueryService(_mockQueryExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
     }
 
     #region Constructor Tests
@@ -322,7 +322,7 @@ public class SqlQueryServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(aggregateResult);
 
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
         var request = new SqlQueryRequest { Sql = "SELECT COUNT(*) FROM account" };
 
         // Act
@@ -358,7 +358,7 @@ public class SqlQueryServiceTests
                 Count = 0
             });
 
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
         var request = new SqlQueryRequest { Sql = "SELECT name FROM account" };
 
         // Act
@@ -379,7 +379,7 @@ public class SqlQueryServiceTests
     {
         // Arrange & Act: constructing with poolCapacity should not throw
         var mockExecutor = new Mock<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, poolCapacity: 8, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, poolCapacity: 8, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         // Assert: the service was created (poolCapacity is used internally during planning)
         Assert.NotNull(service);
@@ -400,7 +400,7 @@ public class SqlQueryServiceTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Executor should not be called during dry-run"));
 
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
         var request = new SqlQueryRequest
         {
             Sql = "-- ppds:BATCH_SIZE 50\nDELETE FROM account WHERE name = 'test'",
@@ -458,7 +458,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development
         };
@@ -500,7 +500,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development
         };
@@ -535,7 +535,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development
         };
@@ -565,7 +565,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development
         };
@@ -593,7 +593,7 @@ public class SqlQueryServiceTests
     public async Task ExecuteAsync_DmlWithoutDryRunOrConfirmation_StillRequiresConfirmation()
     {
         var service = new SqlQueryService(
-            Mock.Of<IQueryExecutor>(), guard: new InactiveFakeShakedownGuard())
+            Mock.Of<IQueryExecutor>(), guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development
         };
@@ -614,7 +614,7 @@ public class SqlQueryServiceTests
     public async Task ExecuteAsync_WhereLessDmlDryRun_RemainsBlocked()
     {
         var service = new SqlQueryService(
-            Mock.Of<IQueryExecutor>(), guard: new InactiveFakeShakedownGuard());
+            Mock.Of<IQueryExecutor>(), guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
         var request = new SqlQueryRequest
         {
             Sql = "UPDATE account SET name = 'test'",
@@ -633,7 +633,7 @@ public class SqlQueryServiceTests
     {
         var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
         var service = new SqlQueryService(
-            mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+            mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
         var request = new SqlQueryRequest
         {
             Sql = "-- ppds:BATCH_SIZE 50\nDELETE FROM account WHERE name = 'test'",
@@ -988,7 +988,7 @@ public class SqlQueryServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(tdsResult);
 
-        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         // The -- ppds:USE_TDS hint should force TDS routing
         var request = new SqlQueryRequest
@@ -1077,7 +1077,7 @@ public class SqlQueryServiceTests
                 Count = records.Count
             });
 
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
         var request = new SqlQueryRequest
         {
             Sql = "-- ppds:MAX_ROWS 100\nSELECT name FROM account"
@@ -1100,7 +1100,7 @@ public class SqlQueryServiceTests
     {
         // Arrange: service with pool capacity of 8; MAXDOP 2 should cap it at 2
         var mockExecutor = new Mock<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, poolCapacity: 8, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, poolCapacity: 8, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         // Act
         var plan = await service.ExplainAsync("-- ppds:MAXDOP 2\nSELECT name FROM account");
@@ -1170,7 +1170,7 @@ public class SqlQueryServiceTests
                 Count = 0
             });
 
-        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         // Caller explicitly sets UseTdsEndpoint = false, but hint overrides it
         var request = new SqlQueryRequest
@@ -1274,7 +1274,7 @@ public class SqlQueryServiceTests
     {
         // Arrange
         var mockExecutor = new Mock<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         // Act
         var plan = await service.ExplainAsync("-- ppds:NOLOCK\nSELECT name FROM account");
@@ -1293,7 +1293,7 @@ public class SqlQueryServiceTests
         // Arrange: service with TDS executor configured
         var mockExecutor = new Mock<IQueryExecutor>();
         var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         // Act
         var plan = await service.ExplainAsync("-- ppds:USE_TDS\nSELECT name FROM account");
@@ -1309,7 +1309,7 @@ public class SqlQueryServiceTests
     {
         // Arrange
         var mockExecutor = new Mock<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         // Act
         var plan = await service.ExplainAsync("-- ppds:MAX_ROWS 50\nSELECT name FROM account");
@@ -1329,7 +1329,7 @@ public class SqlQueryServiceTests
     {
         // Arrange: service with RemoteExecutorFactory set
         var mockExecutor = new Mock<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         var factoryCalled = false;
         var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
@@ -1358,7 +1358,7 @@ public class SqlQueryServiceTests
     {
         // Arrange: service WITHOUT RemoteExecutorFactory
         var mockExecutor = new Mock<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
         // RemoteExecutorFactory is null (default)
 
         // Act & Assert: cross-env query fails with actionable error
@@ -1375,7 +1375,7 @@ public class SqlQueryServiceTests
         // Arrange: service with Development protection level — DML dry-run should pass
         // without execution confirmation.
         var mockExecutor = new Mock<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard())
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development
         };
@@ -1402,7 +1402,7 @@ public class SqlQueryServiceTests
         // Arrange: service with RemoteExecutorFactory and cross-env DML
         var mockExecutor = new Mock<IQueryExecutor>();
         var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         service.RemoteExecutorFactory = label =>
             label == "QA" ? mockRemoteExecutor : null;
@@ -1449,7 +1449,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development,
             RemoteExecutorFactory = label => label == "QA" ? mockRemoteExecutor.Object : null
@@ -1485,7 +1485,7 @@ public class SqlQueryServiceTests
         var mockExecutor = new Mock<IQueryExecutor>();
         var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
         var service = new SqlQueryService(
-            mockExecutor.Object, guard: new InactiveFakeShakedownGuard())
+            mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider)
         {
             RemoteExecutorFactory = label => label == "QA" ? mockRemoteExecutor : null,
             ProfileResolver = new ProfileResolutionService(
@@ -1519,7 +1519,7 @@ public class SqlQueryServiceTests
     public async Task ExecuteAsync_CompoundCrossEnvDml_ReadOnlyPolicy_BlocksBeforeDeferredExecution()
     {
         var service = new SqlQueryService(
-            Mock.Of<IQueryExecutor>(), guard: new InactiveFakeShakedownGuard())
+            Mock.Of<IQueryExecutor>(), guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider)
         {
             RemoteExecutorFactory = label => label == "QA" ? Mock.Of<IQueryExecutor>() : null,
             ProfileResolver = new ProfileResolutionService(
@@ -1560,7 +1560,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development,
             RemoteExecutorFactory = label =>
@@ -1614,7 +1614,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development,
             RemoteExecutorFactory = label =>
@@ -1659,7 +1659,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development,
             RemoteExecutorFactory = label => label == "PROD" ? remoteExecutor : null,
@@ -1702,7 +1702,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development,
             RemoteExecutorFactory = label =>
@@ -1759,7 +1759,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development,
             RemoteExecutorFactory = label => label == "DEV" ? remoteExecutor.Object : null
@@ -1820,7 +1820,7 @@ public class SqlQueryServiceTests
         var service = new SqlQueryService(
             mockExecutor.Object,
             guard: new InactiveFakeShakedownGuard(),
-            bulkOperationExecutor: mockBulkExecutor.Object)
+            bulkOperationExecutor: mockBulkExecutor.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development,
             RemoteExecutorFactory = label => label == "DEV" ? remoteExecutor : null
@@ -1871,7 +1871,7 @@ public class SqlQueryServiceTests
         var mockExecutor = new Mock<IQueryExecutor>();
         var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
         var service = new SqlQueryService(
-            mockExecutor.Object, guard: new InactiveFakeShakedownGuard())
+            mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider)
         {
             RemoteExecutorFactory = label => label == "QA" ? mockRemoteExecutor : null,
             ProfileResolver = new ProfileResolutionService(
@@ -1913,7 +1913,7 @@ public class SqlQueryServiceTests
         // Dry-run verifies the safety checks pass without requiring BulkOperationExecutor.
         var mockExecutor = new Mock<IQueryExecutor>();
         var mockRemoteExecutor = Mock.Of<IQueryExecutor>();
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         service.RemoteExecutorFactory = label =>
             label == "DEV" ? mockRemoteExecutor : null;
@@ -1967,7 +1967,7 @@ public class SqlQueryServiceTests
                 Count = 0
             });
 
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         service.RemoteExecutorFactory = label =>
             label == "QA" ? mockRemoteExecutor.Object : null;
@@ -2031,7 +2031,7 @@ public class SqlQueryServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(tdsResult);
 
-        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         var request = new SqlQueryRequest
         {
@@ -2093,7 +2093,7 @@ public class SqlQueryServiceTests
     {
         // Arrange: service with a TDS executor, but DML query
         var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
-        var service = new SqlQueryService(_mockQueryExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(_mockQueryExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         var request = new SqlQueryRequest
         {
@@ -2114,7 +2114,7 @@ public class SqlQueryServiceTests
     {
         // Arrange: service with TDS executor, query targets incompatible entity
         var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
-        var service = new SqlQueryService(_mockQueryExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(_mockQueryExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         var request = new SqlQueryRequest
         {
@@ -2175,7 +2175,7 @@ public class SqlQueryServiceTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Connection refused on port 5558"));
 
-        var service = new SqlQueryService(_mockQueryExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(_mockQueryExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         var request = new SqlQueryRequest
         {
@@ -2272,7 +2272,7 @@ public class SqlQueryServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(tdsResult);
 
-        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         var request = new SqlQueryRequest
         {
@@ -2326,7 +2326,7 @@ public class SqlQueryServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(tdsResult);
 
-        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        var service = new SqlQueryService(mockExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         var request = new SqlQueryRequest
         {

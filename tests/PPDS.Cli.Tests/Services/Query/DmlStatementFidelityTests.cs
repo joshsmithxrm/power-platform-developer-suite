@@ -210,7 +210,7 @@ public class DmlStatementFidelityTests
 
         var result = await h.Service.ExecuteAsync(new SqlQueryRequest
         {
-            Sql = "INSERT INTO account (name) SELECT TOP 2 name FROM account WHERE name = 'x'",
+            Sql = "INSERT INTO account (name) SELECT TOP 2 name FROM account WHERE name = 'x' ORDER BY name",
             DmlSafety = Confirmed
         });
 

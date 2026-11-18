@@ -224,7 +224,7 @@ public sealed class DmlSafetyGuard
                 {
                     IsBlocked = true,
                     ContainsDml = true,
-                    BlockReason = $"DELETE without WHERE is not allowed. Use 'ppds truncate {targetName}' for bulk deletion.",
+                    BlockReason = $"DELETE without WHERE is not allowed. Use 'ppds data truncate --entity {targetName}' for bulk deletion.",
                     ErrorCode = ErrorCodes.Query.DmlBlocked
                 };
             }
@@ -357,6 +357,16 @@ public sealed class DmlSafetyOptions
 
     /// <summary>Custom row cap (default: 10,000).</summary>
     public int? RowCap { get; init; }
+
+    /// <summary>
+    /// When true (RPC), a confirmed request that contains DML must name, in <see cref="ConfirmedEnvironmentUrl"/>, the
+    /// environment it was confirmed for, and that must be the environment it runs against; otherwise it is refused, so a
+    /// confirmation cannot be applied to an environment the user did not see.
+    /// </summary>
+    public bool RequireConfirmedTarget { get; init; }
+
+    /// <summary>The environment URL the caller named for a confirmed request (RPC <c>environmentUrl</c>).</summary>
+    public string? ConfirmedEnvironmentUrl { get; init; }
 }
 
 /// <summary>

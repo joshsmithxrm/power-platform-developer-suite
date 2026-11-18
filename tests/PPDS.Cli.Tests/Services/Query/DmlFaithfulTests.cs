@@ -101,7 +101,7 @@ public sealed class DmlFaithfulTests : IDisposable
     [InlineData("UPDATE account SET revenue = TRY_CAST(name AS int) WHERE name = 'n1'", "is not a number")]
     [InlineData("UPDATE account SET revenue = CAST(description AS int) WHERE name = 'n1'", "is not a number")]
     [InlineData("UPDATE account SET description = CAST(CAST(name AS int) AS nvarchar(10)) WHERE name = 'n1'", "converts a value that is not a number")]
-    [InlineData("UPDATE account SET name = TRY_CONVERT(nvarchar(10), revenue) WHERE name = 'n1'", "TRY_CAST and TRY_CONVERT are supported to int or decimal only")]
+    [InlineData("UPDATE account SET name = TRY_CONVERT(nvarchar(10), revenue) WHERE name = 'n1'", "TRY_CAST and TRY_CONVERT are supported to int or decimal(p, s) only")]
     [InlineData("UPDATE account SET followupby = CAST('2024-01-01T00:00:00Z' AS datetime) WHERE name = 'n1'", "CAST to DATETIME")]
     [InlineData("UPDATE account SET description = LEFT(name, 1) WHERE name = 'n1'", "SUBSTRING")]
     [InlineData("UPDATE account SET followupby = GETDATE() WHERE name = 'n1'", "once per statement")]
@@ -379,7 +379,7 @@ public sealed class DmlFaithfulTests : IDisposable
     [InlineData("UPDATE account SET description = IIF(NOT (revenue > 1000), 'a', 'b') WHERE revenue > 0", "NOT")]
     [InlineData("UPDATE account SET name = 'a', name = 'b' WHERE revenue > 0", "more than once")]
     [InlineData("INSERT INTO account (contact.name) VALUES ('x')", "plain column name")]
-    [InlineData("INSERT INTO account (name, description) SELECT TOP 5 description AS name, name AS description FROM account ORDER BY name", "also the alias")]
+    [InlineData("INSERT INTO account (name, description) SELECT TOP 5 description AS name, name AS description FROM account ORDER BY name", "also the name of a column")]
     public async Task NotOnTheAllowlist_IsRefused(string sql, string named)
     {
         var h = DmlTestHarness.Create(rows: 4);
@@ -502,13 +502,39 @@ public class DmlHintGateTests
         Assert.Single(h.Writes);
     }
 
+    // D-M6 / B-S6: hints not proven for DML (NOLOCK changes which rows are selected) are refused, before anything runs.
+    [Theory]
+    [InlineData("-- ppds:HASH_GROUP\n", "HASH_GROUP")]
+    [InlineData("-- ppds:NOLOCK\n", "NOLOCK")]
+    [InlineData("-- ppds:MAXDOP 2\n", "MAXDOP")]
+    public async Task UnprovenHintOnDml_IsRefused(string hint, string named)
+    {
+        foreach (var options in new[] { new DmlSafetyOptions { IsConfirmed = true }, new DmlSafetyOptions(), new DmlSafetyOptions { IsDryRun = true } })
+        {
+            var h = DmlTestHarness.Create(rows: 1);
+
+            var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = hint + Update, DmlSafety = options }));
+
+            Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+            Assert.Contains($"-- ppds:{named} hint is not supported", ex.Message);
+            h.AssertNothingChanged();
+            Assert.Empty(h.Reads);
+        }
+    }
+
     [Fact]
-    public async Task HashGroupOnDml_IsNotReportedAsApplied()
+    public async Task UseTdsHintOnDml_IsRefused()
     {
         var h = DmlTestHarness.Create(rows: 1);
 
-        var result = await h.Service.ExecuteAsync(new SqlQueryRequest { Sql = "-- ppds:HASH_GROUP\n" + Update, DmlSafety = new DmlSafetyOptions { IsConfirmed = true } });
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest
+        {
+            Sql = "-- ppds:USE_TDS\n" + Update,
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = true }
+        }));
 
-        Assert.True(result.AppliedHints is null || !result.AppliedHints.Contains("HASH_GROUP"));
+        Assert.Equal(ErrorCodes.Query.TdsIncompatible, ex.ErrorCode);
+        h.AssertNothingChanged();
+        Assert.Empty(h.Reads);
     }
 }

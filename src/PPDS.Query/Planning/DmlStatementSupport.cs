@@ -23,12 +23,16 @@ namespace PPDS.Query.Planning;
 /// (no <c>[ ]</c> or ESCAPE), <c>column [NOT] BETWEEN constant AND constant</c> and <c>column IS [NOT] NULL</c>. These are
 /// sent to Dataverse as FetchXML conditions; a constant is a string or number literal. NOT, functions, variables,
 /// subqueries, column-to-column comparisons and comparisons with NULL are refused.</item>
-/// <item>Values (UPDATE SET, INSERT VALUES, INSERT ... SELECT list): literals, the target's (or source's) columns,
-/// arithmetic, COALESCE, ISNULL, NULLIF, IIF, CASE, CAST, CONVERT, TRY_CAST, TRY_CONVERT and the functions in
-/// <see cref="AllowedFunctions"/>. Columns are not allowed in INSERT VALUES. Variables and subqueries are refused.</item>
-/// <item>INSERT: an explicit column list without duplicates; VALUES rows of the same length, or a single-table SELECT of
-/// the connected environment whose list has the same length, where every item is a column or an aliased expression with
-/// a unique name (values are mapped by position). <c>SELECT TOP (n)</c> and ORDER BY on columns are allowed.</item>
+/// <item>Values (UPDATE SET, INSERT ... SELECT list): literals, the target's (or source's) columns, arithmetic,
+/// COALESCE, ISNULL, NULLIF, IIF, CASE, CAST/CONVERT to nvarchar(n), int or decimal(p, s), TRY_CAST/TRY_CONVERT to int or
+/// decimal(p, s) and the functions in <see cref="AllowedFunctions"/> with their proven argument forms. Variables and
+/// subqueries are refused.</item>
+/// <item>INSERT: an explicit column list without duplicates; up to 1,000 VALUES rows of the same length whose values are
+/// literals, NULL or CAST('&lt;guid&gt;' AS uniqueidentifier); or a SELECT from the same table whose list has the same
+/// length, where every item is a column or an aliased expression with a unique name that is not a column the SELECT reads
+/// (values are mapped by position). ORDER BY on columns is allowed; <c>TOP n</c> / <c>TOP (n)</c> up to 5,000 only with
+/// ORDER BY.</item>
+/// <item>No OPTION (...) clause.</item>
 /// </list>
 /// </remarks>
 internal static class DmlStatementSupport
@@ -141,7 +145,7 @@ internal static class DmlStatementSupport
         if (spec.TopRowFilter != null)
         {
             return "INSERT TOP (n) is not supported." + NothingExecuted +
-                   " Put TOP in the SELECT instead: INSERT INTO table (columns) SELECT TOP (n) ...";
+                   " Put TOP in the SELECT instead: INSERT INTO table (columns) SELECT TOP (n) ... FROM table ORDER BY column.";
         }
 
         var problem = CommonChecks(insert, "INSERT", null, spec.OutputClause, spec.OutputIntoClause)
@@ -172,6 +176,9 @@ internal static class DmlStatementSupport
 
         switch (spec.InsertSource)
         {
+            case ValuesInsertSource { RowValues.Count: > MaxValuesRows } tooMany:
+                return $"INSERT ... VALUES gives {tooMany.RowValues.Count} rows; at most {MaxValuesRows} are supported in one " +
+                       "statement (as in SQL Server)." + NothingExecuted + $" Split it into several INSERT statements of at most {MaxValuesRows} rows.";
             case ValuesInsertSource values:
                 for (var i = 0; i < values.RowValues.Count; i++)
                 {
@@ -184,14 +191,14 @@ internal static class DmlStatementSupport
 
                     foreach (var value in row)
                     {
-                        problem = CheckValue(value, columns: null, "INSERT ... VALUES");
+                        problem = CheckInsertValue(value);
                         if (problem != null)
                             return problem;
                     }
                 }
                 return null;
             case SelectInsertSource { Select: QuerySpecification select }:
-                return CheckInsertSelect(select, columnCount);
+                return CheckInsertSelect(select, columnCount, (NamedTableReference)spec.Target);
             case SelectInsertSource:
                 return "INSERT ... SELECT with UNION, INTERSECT, EXCEPT or a parenthesised query is not supported." +
                        NothingExecuted + " Insert from each SELECT separately.";
@@ -200,7 +207,34 @@ internal static class DmlStatementSupport
         }
     }
 
-    private static string? CheckInsertSelect(QuerySpecification select, int columnCount)
+    /// <summary>
+    /// A VALUES item: a literal (text, whole or decimal number, NULL), a negative number, or CAST('&lt;guid&gt;' AS
+    /// uniqueidentifier). Only these were proven live; an expression would be evaluated by the engine, not SQL.
+    /// </summary>
+    private static string? CheckInsertValue(ScalarExpression value)
+    {
+        const string context = "INSERT ... VALUES";
+        switch (value)
+        {
+            case StringLiteral or IntegerLiteral or NumericLiteral or NullLiteral:
+            case UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative, Expression: IntegerLiteral or NumericLiteral }:
+            case CastCall { DataType: SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.UniqueIdentifier }, Parameter: StringLiteral }:
+                return null;
+            case RealLiteral or UnaryExpression { Expression: RealLiteral }:
+                return Unsupported($"{Sql(value)} (a floating-point literal)", context, RealLiteralHowTo);
+            case ColumnReferenceExpression column:
+                return Unsupported($"the column {Sql(column)}", context, " VALUES takes constants; use INSERT ... SELECT to copy columns.");
+            case VariableReference or GlobalVariableExpression:
+                return Unsupported($"the variable {Sql(value)}", context, " Use a literal value instead.");
+            case FunctionCall function when function.FunctionName.Value.Equals("NEWID", StringComparison.OrdinalIgnoreCase):
+                return Unsupported("the function NEWID", context, " Dataverse generates row ids; leave the id column out.");
+            default:
+                return Unsupported(Sql(value), context,
+                    " VALUES takes literal values only (text, numbers, NULL, or CAST('<guid>' AS uniqueidentifier)); write the value you want stored as a literal.");
+        }
+    }
+
+    private static string? CheckInsertSelect(QuerySpecification select, int columnCount, NamedTableReference target)
     {
         const string context = "INSERT ... SELECT";
         if (select.SelectElements.Any(e => e is SelectStarExpression))
@@ -221,8 +255,16 @@ internal static class DmlStatementSupport
             return Unsupported("GROUP BY / HAVING", context);
         if (select.OffsetClause != null || select.ForClause != null)
             return Unsupported("OFFSET or FOR", context);
-        if (select.TopRowFilter is { } top && (top.Percent || top.WithTies || top.Expression is not IntegerLiteral and not ParenthesisExpression { Expression: IntegerLiteral }))
-            return Unsupported("TOP other than TOP (number)", context);
+        if (select.TopRowFilter is { } top)
+        {
+            if (top.Percent || top.WithTies || (top.Expression is ParenthesisExpression p ? p.Expression : top.Expression) is not IntegerLiteral topValue)
+                return Unsupported("TOP other than TOP (number)", context);
+            if (!int.TryParse(topValue.Value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) || n > MaxInsertSelectTop)
+                return Unsupported($"TOP {topValue.Value}", context, $" TOP can be at most {MaxInsertSelectTop} here; insert the rows in several statements.");
+            // Without ORDER BY, SQL does not say which rows TOP takes, so the rows Dataverse returns first could differ.
+            if (select.OrderByClause == null)
+                return Unsupported("TOP without ORDER BY", context, " Add ORDER BY so the statement says which rows TOP takes.");
+        }
 
         if (select.FromClause is not { TableReferences.Count: 1 } || select.FromClause.TableReferences[0] is not NamedTableReference source)
         {
@@ -233,7 +275,35 @@ internal static class DmlStatementSupport
         var problem = CheckLocalTable(context, source, reading: true);
         if (problem != null)
             return problem;
+        // Only a copy within the same table was proven live.
+        if (!string.Equals(source.SchemaObject.BaseIdentifier.Value, target.SchemaObject.BaseIdentifier.Value, StringComparison.OrdinalIgnoreCase))
+        {
+            return $"INSERT ... SELECT from another table ({source.SchemaObject.BaseIdentifier.Value} into {target.SchemaObject.BaseIdentifier.Value}) " +
+                   "is not supported; only a copy within the same table is." + NothingExecuted +
+                   " Select the rows first, then insert them with INSERT ... VALUES.";
+        }
         var names = Names(source);
+
+        // T-SQL reads a column by its name even when another item's alias has that name; the FetchXML result would
+        // return both under one key, so such an alias is refused.
+        var readColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var element in select.SelectElements.OfType<SelectScalarExpression>())
+        {
+            var visitor = new ColumnNames();
+            element.Expression.Accept(visitor);
+            readColumns.UnionWith(visitor.Names);
+        }
+        foreach (var element in select.SelectElements.OfType<SelectScalarExpression>())
+        {
+            var alias = element.ColumnName?.Value;
+            var isSameColumn = element.Expression is ColumnReferenceExpression self
+                && string.Equals(self.MultiPartIdentifier.Identifiers.Last().Value, alias, StringComparison.OrdinalIgnoreCase);
+            if (alias != null && !isSameColumn && readColumns.Contains(alias))
+            {
+                return Unsupported($"the alias {alias}, which is also the name of a column the SELECT reads", context,
+                    " Give it an alias that is not a column name of the table.");
+            }
+        }
 
         var outputNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var element in select.SelectElements)
@@ -384,8 +454,14 @@ internal static class DmlStatementSupport
     private static string? CheckCondition(BooleanExpression condition, HashSet<string> names, string verb)
     {
         var context = $"the WHERE clause of {verb}";
+        var real = RealLiteralIn(condition);
+        if (real != null)
+            return Unsupported($"{Sql(real)} (a floating-point literal)", context, RealLiteralHowTo);
         switch (condition)
         {
+            case InPredicate { Subquery: null } tooLong when tooLong.Values.Count > MaxInValues:
+                return Unsupported($"IN with {tooLong.Values.Count} values", context,
+                    $" Split the statement into several, each with at most {MaxInValues} values in IN (...).");
             case BooleanBinaryExpression binary:
                 return CheckCondition(binary.FirstExpression, names, verb) ?? CheckCondition(binary.SecondExpression, names, verb);
             case BooleanParenthesisExpression paren:
@@ -418,17 +494,43 @@ internal static class DmlStatementSupport
         }
     }
 
+    /// <summary>A floating-point literal directly in this condition (not inside nested AND/OR, which recurse).</summary>
+    private static ScalarExpression? RealLiteralIn(BooleanExpression condition)
+    {
+        static bool Real(ScalarExpression? e) => e is RealLiteral or UnaryExpression { Expression: RealLiteral };
+        IEnumerable<ScalarExpression?> operands = condition switch
+        {
+            BooleanComparisonExpression c => [c.FirstExpression, c.SecondExpression],
+            InPredicate i => i.Values,
+            BooleanTernaryExpression b => [b.SecondExpression, b.ThirdExpression],
+            _ => []
+        };
+        return operands.FirstOrDefault(Real);
+    }
+
     private static bool IsComparison(BooleanComparisonType type) => type is BooleanComparisonType.Equals
         or BooleanComparisonType.NotEqualToBrackets or BooleanComparisonType.NotEqualToExclamation
         or BooleanComparisonType.LessThan or BooleanComparisonType.GreaterThan
         or BooleanComparisonType.LessThanOrEqualTo or BooleanComparisonType.GreaterThanOrEqualTo;
 
+    // A floating-point literal (2.5E0) was not proven; a decimal literal (2.5) was.
     private static bool IsConstant(ScalarExpression expression) => expression switch
     {
-        StringLiteral or IntegerLiteral or NumericLiteral or RealLiteral => true,
-        UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative, Expression: IntegerLiteral or NumericLiteral or RealLiteral } => true,
+        StringLiteral or IntegerLiteral or NumericLiteral => true,
+        UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative, Expression: IntegerLiteral or NumericLiteral } => true,
         _ => false
     };
+
+    /// <summary>The longest IN list the live differential run proved.</summary>
+    public const int MaxInValues = 1000;
+
+    /// <summary>The most rows one INSERT ... VALUES may give (SQL Server's own limit).</summary>
+    public const int MaxValuesRows = 1000;
+
+    /// <summary>The largest TOP of an INSERT ... SELECT (a single FetchXML page).</summary>
+    public const int MaxInsertSelectTop = 5000;
+
+    private const string RealLiteralHowTo = " Write the number as a decimal, for example 2.5 instead of 2.5E0.";
 
     // ── values: expressions the engine evaluates against the row ───────
 
@@ -443,7 +545,9 @@ internal static class DmlStatementSupport
 
         switch (expression)
         {
-            case StringLiteral or IntegerLiteral or NumericLiteral or RealLiteral or NullLiteral:
+            case RealLiteral:
+                return Unsupported($"{Sql(expression)} (a floating-point literal)", context, RealLiteralHowTo);
+            case StringLiteral or IntegerLiteral or NumericLiteral or NullLiteral:
                 return null;
             case ColumnReferenceExpression column:
                 return columns == null
@@ -479,14 +583,15 @@ internal static class DmlStatementSupport
             case SimpleCaseExpression simple:
                 return All(new[] { simple.InputExpression, simple.ElseExpression }
                     .Concat(simple.WhenClauses.SelectMany(w => new[] { w.WhenExpression, w.ThenExpression })));
-            // Conversions verified live: to nvarchar, int, decimal/numeric, and (CAST of a GUID literal) uniqueidentifier;
-            // TRY_CAST/TRY_CONVERT to int or decimal. Date/time conversions are not (time zones), nor CONVERT styles.
+            // Conversions verified live: to nvarchar(n), int, decimal(p, s), and (CAST of a GUID literal) uniqueidentifier;
+            // TRY_CAST/TRY_CONVERT to int or decimal(p, s). Date/time conversions are not (time zones), nor CONVERT styles,
+            // nor the forms whose length, precision or scale SQL would supply (nvarchar, nvarchar(max), decimal, numeric).
             case CastCall cast when !IsConversionTarget(cast.DataType, allowGuid: true):
                 return Unsupported($"{Sql(cast)} (CAST to {Sql(cast.DataType)})", context, ConversionTargets);
             case CastCall cast:
                 return CheckValue(cast.Parameter, columns, context);
             case ConvertCall { Style: not null } convert:
-                return Unsupported($"{Sql(convert)} (a CONVERT style)", context, " Use CONVERT without a style, or CAST.");
+                return Unsupported($"{Sql(convert)} (a CONVERT style)", context, " Remove the style: CONVERT(type, value), to nvarchar(n), int or decimal(p, s).");
             case ConvertCall convert when !IsConversionTarget(convert.DataType, allowGuid: false):
                 return Unsupported($"{Sql(convert)} (CONVERT to {Sql(convert.DataType)})", context, ConversionTargets);
             case ConvertCall convert:
@@ -496,13 +601,13 @@ internal static class DmlStatementSupport
             case TryConvertCall { Style: null } tryConvert when IsNumberTarget(tryConvert.DataType):
                 return CheckValue(tryConvert.Parameter, columns, context);
             case TryCastCall or TryConvertCall:
-                return Unsupported(Sql(expression), context, " TRY_CAST and TRY_CONVERT are supported to int or decimal only.");
+                return Unsupported(Sql(expression), context, " TRY_CAST and TRY_CONVERT are supported to int or decimal(p, s) only.");
             case LeftFunctionCall or RightFunctionCall:
                 return Unsupported(Sql(expression), context, " Use SUBSTRING(text, start, length) instead.");
             case FunctionCall function when function.CallTarget == null && function.OverClause == null
                 && function.WithinGroupClause == null && function.UniqueRowFilter == UniqueRowFilter.NotSpecified
                 && AllowedFunctions.Contains(function.FunctionName.Value):
-                return All(function.Parameters);
+                return CheckFunctionArguments(function, context) ?? All(function.Parameters);
             case FunctionCall function when function.FunctionName.Value.ToUpperInvariant() is "GETDATE" or "GETUTCDATE" or "SYSDATETIME"
                 or "SYSUTCDATETIME" or "SYSDATETIMEOFFSET" or "CURRENT_TIMESTAMP":
                 return Unsupported($"the function {function.FunctionName.Value}", context,
@@ -575,16 +680,29 @@ internal static class DmlStatementSupport
                    " Put the condition in the statement's WHERE clause instead.";
         }
 
-        // OPTION (MAXDOP n) only changes parallelism; any other query hint could change behaviour and is refused.
-        var hint = statement.OptimizerHints.FirstOrDefault(h => h.HintKind != OptimizerHintKind.MaxDop);
-        if (hint != null)
-            return Unsupported($"OPTION ({Sql(hint)})", verb);
+        // No query hint was proven against Dataverse for DML (and none limits which rows change), so OPTION is refused.
+        if (statement.OptimizerHints.Count > 0)
+        {
+            return Unsupported($"OPTION ({string.Join(", ", statement.OptimizerHints.Select(Sql))})", verb,
+                " Remove the OPTION clause.");
+        }
 
         return null;
     }
 
     /// <summary>A Dataverse logical name: letters, digits and underscores, not starting with a digit.</summary>
     public static bool IsLogicalName(string name) => System.Text.RegularExpressions.Regex.IsMatch(name, "^[A-Za-z_][A-Za-z0-9_]*$");
+
+    private sealed class ColumnNames : TSqlFragmentVisitor
+    {
+        public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public override void Visit(ColumnReferenceExpression node)
+        {
+            if (node.MultiPartIdentifier?.Identifiers is { Count: > 0 } ids)
+                Names.Add(ids[ids.Count - 1].Value);
+        }
+    }
 
     /// <summary>
     /// Decorations that the node-kind checks above would not notice, and that the engine does not apply: COLLATE on any
@@ -618,15 +736,76 @@ internal static class DmlStatementSupport
         public override void Visit(IdentityFunctionCall node) => _found ??= Unsupported("IDENTITY()", "INSERT, UPDATE or DELETE");
     }
 
-    private const string ConversionTargets = " Supported: nvarchar(n), int, decimal(p, s), and CAST('<guid>' AS uniqueidentifier).";
+    private const string ConversionTargets =
+        " Supported: nvarchar(n) with a length from 1 to 4000, int, decimal(p, s) with both precision and scale (for example " +
+        "decimal(10, 2)), and CAST('<guid>' AS uniqueidentifier).";
 
-    private static bool IsNumberTarget(DataTypeReference type)
-        => type is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.Int or SqlDataTypeOption.Decimal or SqlDataTypeOption.Numeric };
+    /// <summary>The largest nvarchar(n) length a conversion may name.</summary>
+    public const int MaxNVarCharLength = 4000;
+
+    private static int? IntegerParameter(SqlDataTypeReference type, int index)
+        => type.Parameters.Count > index && type.Parameters[index] is IntegerLiteral literal
+           && int.TryParse(literal.Value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var value)
+            ? value
+            : null;
+
+    /// <summary>int, or decimal(p, s) with both given (SQL's defaults would round to a whole number).</summary>
+    private static bool IsNumberTarget(DataTypeReference type) => type switch
+    {
+        SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.Int, Parameters.Count: 0 } => true,
+        SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.Decimal, Parameters.Count: 2 } d
+            => IntegerParameter(d, 0) is >= 1 and <= 38 and var p && IntegerParameter(d, 1) is { } s && s <= p,
+        _ => false
+    };
+
+    /// <summary>nvarchar(n) with an explicit length (SQL's default is 30, and max was not proven).</summary>
+    private static bool IsTextTarget(DataTypeReference type)
+        => type is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.NVarChar, Parameters.Count: 1 } t
+           && IntegerParameter(t, 0) is >= 1 and <= MaxNVarCharLength;
 
     private static bool IsConversionTarget(DataTypeReference type, bool allowGuid)
-        => IsNumberTarget(type)
-           || type is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.NVarChar }
+        => IsNumberTarget(type) || IsTextTarget(type)
            || (allowGuid && type is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.UniqueIdentifier });
+
+    /// <summary>
+    /// The argument forms of the allowed functions that were proven: one argument for the text functions and ABS (no TRIM
+    /// options), SUBSTRING with a literal start of 1 or more and a literal length of 0 or more, ROUND with a literal number
+    /// of places of 0 or more.
+    /// </summary>
+    private static string? CheckFunctionArguments(FunctionCall function, string context)
+    {
+        var name = function.FunctionName.Value.ToUpperInvariant();
+        var arguments = function.Parameters;
+        static int? Literal(ScalarExpression e) => e is IntegerLiteral i
+            && int.TryParse(i.Value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
+
+        if (function.TrimOptions != null)
+        {
+            return Unsupported($"{Sql(function)} (TRIM with LEADING, TRAILING, BOTH or FROM)", context,
+                " Use LTRIM(text), RTRIM(text) or TRIM(text), which remove spaces.");
+        }
+
+        switch (name)
+        {
+            case "LTRIM" or "RTRIM" or "TRIM" when arguments.Count != 1:
+                return Unsupported(Sql(function), context,
+                    $" {name} takes one argument here (no LEADING, TRAILING, BOTH or FROM, and no characters to remove), for example {name}(name).");
+            case "UPPER" or "LOWER" or "LEN" or "ABS" when arguments.Count != 1:
+                return Unsupported(Sql(function), context, $" {name} takes one argument here, for example {name}(name).");
+            case "ISNULL" when arguments.Count != 2:
+                return Unsupported(Sql(function), context, " ISNULL takes two arguments.");
+            case "CONCAT" when arguments.Count < 2:
+                return Unsupported(Sql(function), context, " CONCAT takes two or more arguments.");
+            case "SUBSTRING" when arguments.Count != 3 || Literal(arguments[1]) is not >= 1 || Literal(arguments[2]) is not >= 0:
+                return Unsupported(Sql(function), context,
+                    " Give SUBSTRING a start of 1 or more and a length of 0 or more, written as numbers, for example SUBSTRING(name, 1, 10).");
+            case "ROUND" when arguments.Count != 2 || Literal(arguments[1]) is not >= 0:
+                return Unsupported(Sql(function), context,
+                    " Give ROUND a value and a number of decimal places of 0 or more, written as a number, for example ROUND(amount, 1).");
+            default:
+                return null;
+        }
+    }
 
     private static string Unsupported(string part, string context, string? howTo = null)
         => $"{part} is not supported in {context}." + NothingExecuted + (howTo ?? string.Empty);

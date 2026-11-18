@@ -50,6 +50,8 @@ internal static class FetchXmlFilter
         {
             string s => string.Compare(s, value, StringComparison.OrdinalIgnoreCase),
             Guid g => Guid.TryParse(value, out var other) ? g.CompareTo(other) : 1,
+            bool b => b.CompareTo(value == "1"),
+            DateTime d => d.CompareTo(DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal).UtcDateTime),
             _ => Convert.ToDecimal(actual, CultureInfo.InvariantCulture).CompareTo(decimal.Parse(value, CultureInfo.InvariantCulture))
         };
         bool Like(string pattern)
@@ -82,11 +84,11 @@ internal static class FetchXmlFilter
 internal static class TestMetadata
 {
     private static AttributeMetadataDto A(string name, string type, bool create = true, bool update = true, string? attributeOf = null,
-        List<OptionValueDto>? options = null, List<string>? targets = null, string? behavior = null, string? format = null) => new()
+        List<OptionValueDto>? options = null, List<string>? targets = null, string? behavior = null, string? format = null, bool? primary = null) => new()
     {
         LogicalName = name, DisplayName = name, SchemaName = name, AttributeType = type,
         IsValidForCreate = create, IsValidForUpdate = update, IsValidForRead = true, AttributeOf = attributeOf,
-        Options = options, Targets = targets, IsPrimaryId = type == "Uniqueidentifier",
+        Options = options, Targets = targets, IsPrimaryId = primary ?? type == "Uniqueidentifier",
         DateTimeBehavior = type == "DateTime" && behavior != "-" ? behavior ?? "UserLocal" : null, Format = type == "DateTime" ? format ?? "DateAndTime" : null
     };
 
@@ -104,7 +106,8 @@ internal static class TestMetadata
             A("owneridname", "String", create: false, update: false, attributeOf: "ownerid"), A("domainname", "String"),
             A("contactid", "Lookup"), A("createdon", "DateTime", create: false, update: false), A("followupby", "DateTime"),
             A("legacydate", "DateTime", behavior: "UserLocal", format: "DateOnly"), A("tzidate", "DateTime", behavior: "TimeZoneIndependent"),
-            A("nobehaviordate", "DateTime", behavior: "-"), A("birthday", "DateTime", behavior: "DateOnly", format: "DateOnly")
+            A("nobehaviordate", "DateTime", behavior: "-"), A("birthday", "DateTime", behavior: "DateOnly", format: "DateOnly"),
+            A("stageid", "Uniqueidentifier", primary: false), A("donotemail", "Boolean"), A("aging30", "BigInt")
         ],
         ["solution"] = [A("solutionid", "Uniqueidentifier", update: false), A("friendlyname", "String")],
         ["contact"] =

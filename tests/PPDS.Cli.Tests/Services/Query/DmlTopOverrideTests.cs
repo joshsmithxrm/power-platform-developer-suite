@@ -33,8 +33,21 @@ public class DmlTopOverrideTests
             Records = records,
             Count = records.Length
         };
-        executor.Setup(x => x.ExecuteFetchXmlAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(fetched);
-        executor.Setup(x => x.ExecuteFetchXmlAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<QueryExecutionOptions?>(), It.IsAny<CancellationToken>())).ReturnsAsync(fetched);
+        // Like Dataverse, the fake honours a top or count in the FetchXML it receives, so a row limit that leaked into the
+        // DML source scan would make these statements change fewer rows and the tests fail.
+        QueryResult Limited(string fetchXml)
+        {
+            var root = System.Xml.Linq.XDocument.Parse(fetchXml).Root!;
+            var limit = (string?)root.Attribute("top") ?? (string?)root.Attribute("count");
+            if (limit == null)
+                return fetched;
+            var taken = records.Take(int.Parse(limit, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+            return new QueryResult { EntityLogicalName = "account", Columns = fetched.Columns, Records = taken, Count = taken.Length };
+        }
+        executor.Setup(x => x.ExecuteFetchXmlAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string f, int? _, string? _, bool _, CancellationToken _) => Limited(f));
+        executor.Setup(x => x.ExecuteFetchXmlAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<QueryExecutionOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string f, int? _, string? _, bool _, QueryExecutionOptions? _, CancellationToken _) => Limited(f));
 
         var deleted = new List<int>();
         var updated = new List<int>();
@@ -122,5 +135,15 @@ public class DmlTopOverrideTests
         })) { }
 
         Assert.Equal(new[] { 3 }, deleted);
+    }
+
+    [Fact]
+    public async Task TheFake_HonoursTop_SoALeakedLimitWouldBeSeen()
+    {
+        var (service, _, _, _) = Create();
+
+        var result = await service.ExecuteAsync(new SqlQueryRequest { Sql = "SELECT TOP 1 accountid FROM account" });
+
+        Assert.Equal(1, result.Result.Count);
     }
 }

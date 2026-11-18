@@ -41,7 +41,7 @@ public class DmlSafetyGuardTests
     {
         var result = _guard.Check(Parse("DELETE FROM account"), new DmlSafetyOptions());
 
-        Assert.Contains("ppds truncate", result.BlockReason);
+        Assert.Contains("ppds data truncate --entity account", result.BlockReason);
     }
 
     [Fact]

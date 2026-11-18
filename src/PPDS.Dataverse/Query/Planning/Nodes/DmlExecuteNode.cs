@@ -277,17 +277,40 @@ public sealed class DmlExecuteNode : IQueryPlanNode
     /// </summary>
     private async System.Threading.Tasks.Task<BulkOperationResult> RunBulkAsync(
         QueryPlanContext context,
+        int submitted,
+        CancellationToken cancellationToken,
         Func<IProgress<ProgressSnapshot>, System.Threading.Tasks.Task<BulkOperationResult>> bulkCall)
     {
         var tracker = new ProgressTracker(CreateProgressAdapter(context));
+        BulkOperationResult result;
         try
         {
-            return await bulkCall(tracker).ConfigureAwait(false);
+            result = await bulkCall(tracker).ConfigureAwait(false);
         }
         catch (Exception) when (RecordInterrupted(context, tracker))
         {
             throw; // never reached: the filter records the interrupted statement and returns false
         }
+
+        // The sequential path returns normally when cancelled: the batches not yet sent report nothing, so the result
+        // covers fewer rows than were submitted. That is an interrupted statement (some rows may be written, the rest
+        // were not), never a completed one.
+        if (cancellationToken.IsCancellationRequested || result.SuccessCount + result.FailureCount < submitted)
+        {
+            var error = result.Errors.FirstOrDefault(e => !string.IsNullOrWhiteSpace(e.Message))?.Message;
+            context.Statistics.AddDmlOutcome(new DmlStatementOutcome(
+                Operation, EntityLogicalName, result.SuccessCount, result.FailureCount, error,
+                context.Statistics.CurrentStatementPosition, Interrupted: true));
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new QueryExecutionException(
+                QueryErrorCode.ExecutionFailed,
+                $"{Operation.ToString().ToUpperInvariant()} {EntityLogicalName} stopped before it finished: the bulk operation reported " +
+                $"{(result.SuccessCount + result.FailureCount).ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} of " +
+                $"{submitted.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} rows" +
+                (error != null ? $" ({error})." : "."));
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -376,7 +399,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             entities.Add(entity);
         }
 
-        var result = await RunBulkAsync(context, progress => context.BulkOperationExecutor!.CreateMultipleAsync(
+        var result = await RunBulkAsync(context, entities.Count, cancellationToken, progress => context.BulkOperationExecutor!.CreateMultipleAsync(
             EntityLogicalName,
             entities,
             options: BulkOptions(context),
@@ -430,7 +453,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
 
         if (entities.Count == 0) return NoRows(context);
 
-        var result = await RunBulkAsync(context, progress => context.BulkOperationExecutor!.CreateMultipleAsync(
+        var result = await RunBulkAsync(context, entities.Count, cancellationToken, progress => context.BulkOperationExecutor!.CreateMultipleAsync(
             EntityLogicalName,
             entities,
             options: BulkOptions(context),
@@ -488,7 +511,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
 
         if (entities.Count == 0) return NoRows(context);
 
-        var result = await RunBulkAsync(context, progress => context.BulkOperationExecutor!.UpdateMultipleAsync(
+        var result = await RunBulkAsync(context, entities.Count, cancellationToken, progress => context.BulkOperationExecutor!.UpdateMultipleAsync(
             EntityLogicalName,
             entities,
             options: BulkOptions(context),
@@ -529,7 +552,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
 
         if (ids.Count == 0) return NoRows(context);
 
-        var result = await RunBulkAsync(context, progress => context.BulkOperationExecutor!.DeleteMultipleAsync(
+        var result = await RunBulkAsync(context, ids.Count, cancellationToken, progress => context.BulkOperationExecutor!.DeleteMultipleAsync(
             EntityLogicalName,
             ids,
             options: BulkOptions(context),
@@ -548,8 +571,15 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         QueryPlanContext context,
         CancellationToken cancellationToken)
     {
+        // Without metadata a value cannot be given the column's type (a lookup id, a choice, money, an instant), so the
+        // statement is refused instead of sending raw values.
         if (context.MetadataProvider == null)
-            return null;
+        {
+            throw new DmlSafetyRefusalException(
+                QueryErrorCode.DmlBlocked,
+                $"{Operation.ToString().ToUpperInvariant()} {EntityLogicalName} needs the table's column metadata to write values, and none " +
+                "is available here. Nothing was executed.");
+        }
 
         var attrs = await context.MetadataProvider
             .GetAttributesAsync(EntityLogicalName, cancellationToken)
@@ -572,9 +602,12 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         object? value,
         IReadOnlyDictionary<string, AttributeMetadataDto>? attributeMap)
     {
-        if (attributeMap == null)
-            return value;
-        attributeMap.TryGetValue(columnName, out var attr);
+        if (attributeMap == null || !attributeMap.TryGetValue(columnName, out var attr))
+        {
+            throw new DmlSafetyRefusalException(
+                QueryErrorCode.DmlBlocked,
+                $"The column '{columnName}' is not in the table's metadata, so its value cannot be written with the right type. Nothing was executed.");
+        }
         return DmlValueCoercer.Coerce(value, attr);
     }
 

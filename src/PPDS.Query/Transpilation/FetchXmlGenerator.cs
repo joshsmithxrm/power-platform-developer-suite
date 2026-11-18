@@ -787,7 +787,7 @@ public sealed class FetchXmlGenerator
         }
 
         // Computed expression (CASE, IIF, arithmetic, etc.) - emit referenced columns
-        EmitReferencedColumnsFromExpression(expression, emittedBaseColumns, lines);
+        EmitReferencedColumnsFromExpression(expression, emittedBaseColumns, lines, groupBySet);
     }
 
     /// <summary>
@@ -1051,7 +1051,7 @@ public sealed class FetchXmlGenerator
     /// Used for computed columns (CASE/IIF) so the base data is retrieved from Dataverse.
     /// </summary>
     private void EmitReferencedColumnsFromExpression(
-        ScalarExpression expression, HashSet<string> emitted, List<string> lines)
+        ScalarExpression expression, HashSet<string> emitted, List<string> lines, HashSet<string>? groupBySet = null)
     {
         var columnNames = new List<string>();
         CollectColumnsFromScalar(expression, columnNames);
@@ -1061,7 +1061,11 @@ public sealed class FetchXmlGenerator
             var attrName = NormalizeName(colName);
             if (emitted.Add(attrName))
             {
-                lines.Add($"    <attribute name=\"{attrName}\" />");
+                // In an aggregate query every attribute must be grouped or aggregated; a computed item over a GROUP BY
+                // column reads that column under its own name.
+                lines.Add(groupBySet != null && groupBySet.Contains(attrName)
+                    ? $"    <attribute name=\"{attrName}\" groupby=\"true\" alias=\"{EscapeXml(attrName)}\" />"
+                    : $"    <attribute name=\"{attrName}\" />");
             }
         }
     }
@@ -1229,35 +1233,27 @@ public sealed class FetchXmlGenerator
         if (like.SecondExpression is not StringLiteral patternLiteral) return;
 
         var attr = NormalizeName(GetColumnName(colRef));
-        var pattern = patternLiteral.Value;
-        var isNegated = like.NotDefined;
-
-        string op, value;
-
-        if (pattern.StartsWith('%') && pattern.EndsWith('%'))
-        {
-            op = isNegated ? "not-like" : "like";
-            value = pattern;
-        }
-        else if (pattern.StartsWith('%'))
-        {
-            op = isNegated ? "not-end-with" : "ends-with";
-            value = pattern[1..];
-        }
-        else if (pattern.EndsWith('%'))
-        {
-            op = isNegated ? "not-begin-with" : "begins-with";
-            value = pattern[..^1];
-        }
-        else
-        {
-            op = isNegated ? "not-like" : "like";
-            value = pattern;
-        }
+        var (op, value) = LikeCondition(patternLiteral.Value, like.NotDefined);
 
         lines.Add($"{indent}<filter>");
         lines.Add($"{indent}  <condition attribute=\"{attr}\" operator=\"{op}\" value=\"{EscapeXml(value)}\" />");
         lines.Add($"{indent}</filter>");
+    }
+
+    /// <summary>
+    /// The FetchXML operator and value for a LIKE pattern. begins-with / ends-with are used only when the rest of the
+    /// pattern is plain text: whether Dataverse reads a %, _ or [ inside their value as a wildcard is not established, so
+    /// any other pattern is sent whole as like / not-like, which has SQL's wildcard meaning.
+    /// </summary>
+    internal static (string Operator, string Value) LikeCondition(string pattern, bool negated)
+    {
+        static bool Plain(string text) => text.IndexOfAny(['%', '_', '[', ']']) < 0;
+
+        if (pattern.Length > 1 && pattern.StartsWith('%') && !pattern.EndsWith('%') && Plain(pattern[1..]))
+            return (negated ? "not-end-with" : "ends-with", pattern[1..]);
+        if (pattern.Length > 1 && pattern.EndsWith('%') && !pattern.StartsWith('%') && Plain(pattern[..^1]))
+            return (negated ? "not-begin-with" : "begins-with", pattern[..^1]);
+        return (negated ? "not-like" : "like", pattern);
     }
 
     /// <summary>
@@ -1409,30 +1405,7 @@ public sealed class FetchXmlGenerator
                 if (like.SecondExpression is not StringLiteral patternLiteral) break;
 
                 var attr = NormalizeName(GetColumnName(colRef));
-                var pattern = patternLiteral.Value;
-                var isNegated = like.NotDefined;
-
-                string op, val;
-                if (pattern.StartsWith('%') && pattern.EndsWith('%'))
-                {
-                    op = isNegated ? "not-like" : "like";
-                    val = pattern;
-                }
-                else if (pattern.StartsWith('%'))
-                {
-                    op = isNegated ? "not-end-with" : "ends-with";
-                    val = pattern[1..];
-                }
-                else if (pattern.EndsWith('%'))
-                {
-                    op = isNegated ? "not-begin-with" : "begins-with";
-                    val = pattern[..^1];
-                }
-                else
-                {
-                    op = isNegated ? "not-like" : "like";
-                    val = pattern;
-                }
+                var (op, val) = LikeCondition(patternLiteral.Value, like.NotDefined);
                 lines.Add($"{indent}<condition attribute=\"{attr}\" operator=\"{op}\" value=\"{EscapeXml(val)}\" />");
                 break;
             }

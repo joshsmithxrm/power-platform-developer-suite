@@ -22,7 +22,7 @@ public class DmlGuardFailClosedTests
     {
         var executor = new Mock<IQueryExecutor>(behavior);
         var bulk = new Mock<IBulkOperationExecutor>(behavior);
-        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard(), bulkOperationExecutor: bulk.Object)
+        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard(), bulkOperationExecutor: bulk.Object, metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = level
         };

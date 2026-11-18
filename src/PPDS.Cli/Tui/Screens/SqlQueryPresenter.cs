@@ -34,7 +34,11 @@ internal sealed class SqlQueryPresenter : IDisposable
     private bool _useTdsEndpoint;
     private bool _useFetchXmlMode;
     private bool _lastExecutionUsedFetchXml;
-    private bool _confirmedDml;
+
+    // A confirmation is bound to the exact statement text it was asked for and the environment it was asked in; it is
+    // taken (and cleared) at the start of the next execution of any kind, whatever happens after that.
+    private string? _awaitingConfirmationSql;
+    private (string Sql, string EnvironmentUrl)? _confirmation;
 
     // Read-only properties
     public string? LastSql => _lastSql;
@@ -122,9 +126,63 @@ internal sealed class SqlQueryPresenter : IDisposable
             : "Input: SQL");
     }
 
-    public void ConfirmDml()
+    /// <summary>The statement the last DmlConfirmationRequired was raised for, until it is confirmed, declined or replaced.</summary>
+    public string? AwaitingConfirmationSql => _awaitingConfirmationSql;
+
+    /// <summary>
+    /// Confirms the statement the last confirmation request was raised for, in this presenter's environment, and returns
+    /// that statement (run it with <see cref="ExecuteAsync"/>); null when nothing is awaiting confirmation. The
+    /// confirmation applies only to the next execution, and only when it is that exact statement.
+    /// </summary>
+    public string? ConfirmDml()
     {
-        _confirmedDml = true;
+        var sql = _awaitingConfirmationSql;
+        _awaitingConfirmationSql = null;
+        _confirmation = sql == null ? null : (sql, _environmentUrl);
+        return sql;
+    }
+
+    /// <summary>Drops a pending confirmation request (the user cancelled the dialog).</summary>
+    public void DeclineDml()
+    {
+        _awaitingConfirmationSql = null;
+        _confirmation = null;
+    }
+
+    /// <summary>Takes the confirmation for <paramref name="sql"/>: true only for the statement and environment it was given for.</summary>
+    private bool TakeConfirmation(string? sql)
+    {
+        var confirmation = _confirmation;
+        _confirmation = null;
+        _awaitingConfirmationSql = null;
+        return confirmation is { } c && sql != null
+            && string.Equals(c.Sql, sql, StringComparison.Ordinal)
+            && string.Equals(c.EnvironmentUrl, _environmentUrl, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The text of the confirmation dialog: the service's message, the environment(s) the statement would change and the
+    /// statement itself (control characters escaped), then the question.
+    /// </summary>
+    public string ConfirmationPrompt(PpdsException confirmation)
+    {
+        var targets = (confirmation as PpdsDmlConfirmationRequiredException)?.Targets;
+        var lines = new List<string> { confirmation.Message, "" };
+        if (targets is { Count: > 0 })
+        {
+            foreach (var t in targets)
+                lines.Add($"Environment: {(t.Label != null ? t.Label + " " : "")}{t.Url ?? _environmentUrl} ({t.Protection} protection)");
+        }
+        else
+        {
+            lines.Add($"Environment: {_environmentUrl}");
+        }
+
+        var statement = PPDS.Cli.Infrastructure.Output.TerminalText.Sanitize(_awaitingConfirmationSql ?? "");
+        lines.Add("Statement: " + (statement.Length > 400 ? statement[..397] + "..." : statement));
+        lines.Add("");
+        lines.Add("Do you want to proceed?");
+        return string.Join("\n", lines);
     }
 
     public void CancelQuery()
@@ -139,6 +197,9 @@ internal sealed class SqlQueryPresenter : IDisposable
     /// </summary>
     public async Task ExecuteAsync(string sql, CancellationToken screenCancellation)
     {
+        // Taken before anything else (and before any await), so no failure, cancellation or retry can leave it set.
+        var isConfirmed = TakeConfirmation(sql);
+
         // Validation
         if (string.IsNullOrWhiteSpace(sql))
         {
@@ -165,10 +226,6 @@ internal sealed class SqlQueryPresenter : IDisposable
 
             var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, _profileName, queryCt);
             TuiDebugLog.Log("Got service, executing streaming query...");
-
-            // AC-13: capture and reset DML confirmation flag
-            var isConfirmed = _confirmedDml;
-            _confirmedDml = false;
 
             var request = new SqlQueryRequest
             {
@@ -286,6 +343,7 @@ internal sealed class SqlQueryPresenter : IDisposable
         catch (PpdsException dmlEx) when (dmlEx.ErrorCode == ErrorCodes.Query.DmlConfirmationRequired)
         {
             _isExecuting = false;
+            _awaitingConfirmationSql = sql;
             DmlConfirmationRequired?.Invoke(dmlEx);
         }
         catch (Exception ex)
@@ -335,6 +393,7 @@ internal sealed class SqlQueryPresenter : IDisposable
 
     public async Task ExecuteFetchXmlAsync(string fetchXml, CancellationToken screenCancellation)
     {
+        TakeConfirmation(null); // any execution ends a pending confirmation
         if (string.IsNullOrWhiteSpace(fetchXml))
         {
             ErrorOccurred?.Invoke("FetchXML cannot be empty.");
@@ -410,6 +469,7 @@ internal sealed class SqlQueryPresenter : IDisposable
     /// </summary>
     public async Task LoadMoreAsync(CancellationToken cancellationToken)
     {
+        TakeConfirmation(null); // any execution ends a pending confirmation
         if (_lastSql == null) return;
 
         try

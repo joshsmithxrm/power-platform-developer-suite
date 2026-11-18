@@ -830,11 +830,19 @@ public sealed class ExpressionCompiler
                 BinaryExpressionType.BitwiseXor => (long)ld ^ (long)rd,
                 _ => throw new NotSupportedException($"Operator {op} is not supported for arithmetic.")
             },
-            (long ld, long rd) => op switch
+            // T-SQL int (and bigint) arithmetic that overflows is an error, never a wrapped or widened value.
+            (long ld, long rd) when left is int && right is int && op is BinaryExpressionType.Add
+                or BinaryExpressionType.Subtract or BinaryExpressionType.Multiply => IntResult(op switch
             {
                 BinaryExpressionType.Add => ld + rd,
                 BinaryExpressionType.Subtract => ld - rd,
-                BinaryExpressionType.Multiply => ld * rd,
+                _ => ld * rd
+            }),
+            (long ld, long rd) => op switch
+            {
+                BinaryExpressionType.Add => checked(ld + rd),
+                BinaryExpressionType.Subtract => checked(ld - rd),
+                BinaryExpressionType.Multiply => checked(ld * rd),
                 BinaryExpressionType.Divide => rd == 0 ? throw new DivideByZeroException() : ld / rd,
                 BinaryExpressionType.Modulo => rd == 0 ? throw new DivideByZeroException() : ld % rd,
                 BinaryExpressionType.BitwiseAnd => ld & rd,
@@ -848,6 +856,12 @@ public sealed class ExpressionCompiler
                 $"{left.GetType().Name} and {right.GetType().Name}.")
         };
     }
+
+    /// <summary>The result of int-by-int arithmetic, which T-SQL types as int: outside its range it is an overflow error.</summary>
+    private static object IntResult(long value)
+        => value is < int.MinValue or > int.MaxValue
+            ? throw new OverflowException($"Arithmetic overflow error converting expression to data type int ({value.ToString(CultureInfo.InvariantCulture)}).")
+            : (int)value;
 
     /// <summary>
     /// Negates a numeric value.

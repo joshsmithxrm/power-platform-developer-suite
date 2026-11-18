@@ -108,7 +108,12 @@ internal static class DmlColumnValidator
                         if (select.OrderByClause != null)
                         {
                             foreach (var column in ScalarColumnCollector.Collect(select.OrderByClause))
-                                Proven(Column(sourceColumns, sourceTable, column), sourceTable, OrderByTypes, "ORDER BY");
+                            {
+                                var ordered = Column(sourceColumns, sourceTable, column);
+                                Proven(ordered, sourceTable, OrderByTypes, "ORDER BY");
+                                if (string.Equals(ordered.AttributeType, "DateTime", StringComparison.OrdinalIgnoreCase) && !IsVerifiedDateBehavior(ordered))
+                                    throw Refuse(UnverifiedDate($"{sourceTable}.{ordered.LogicalName}", ordered) + " It cannot be used in ORDER BY.");
+                            }
                         }
                     }
                     else
@@ -209,7 +214,7 @@ internal static class DmlColumnValidator
         if (NumericTypes.Contains(type))
         {
             if (!IsNumeric(value, readColumns))
-                throw Refuse($"{column} is a number column; the value {Sql(value)} is not a number. Write a number, or CAST(... AS int/decimal) of a number column.");
+                throw Refuse($"{column} is a number column; the value {Sql(value)} is not a number. Write a number, or CAST(... AS int) or CAST(... AS decimal(p, s)) of a number column.");
             return;
         }
 
@@ -222,11 +227,12 @@ internal static class DmlColumnValidator
             case "Picklist" or "State" or "Status" when Unwrap(value) is IntegerLiteral choice:
                 // Dataverse stored a value that is not one of the column's choices without complaint (observed live), so
                 // the value is checked here.
-                var number = int.Parse(choice.Value, CultureInfo.InvariantCulture);
-                if (target.Options is not { Count: > 0 } options || options.All(o => o.Value != number))
+                // A literal too large for a whole number cannot be a choice (and must not throw a raw exception).
+                if (!int.TryParse(choice.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var number)
+                    || target.Options is not { Count: > 0 } options || options.All(o => o.Value != number))
                 {
                     var known = target.Options is { Count: > 0 } ? string.Join(", ", target.Options.Select(o => $"{o.Value} ({o.Label})")) : "unknown";
-                    throw Refuse($"{number} is not a choice of {column}. Its choices are: {known}.");
+                    throw Refuse($"{choice.Value} is not a choice of {column}. Its choices are: {known}.");
                 }
                 return;
             case "Picklist" or "State" or "Status":
@@ -260,9 +266,12 @@ internal static class DmlColumnValidator
             return;
 
         // Each status reason belongs to one status; a mismatched pair would be rejected row by row, or not at all.
+        // (WrittenValue already refused values that are not choices of the columns, so both parse.)
         if (Unwrap(state.Value) is IntegerLiteral s && Unwrap(status.Value) is IntegerLiteral r
-            && status.Column.Options?.FirstOrDefault(o => o.Value == int.Parse(r.Value, CultureInfo.InvariantCulture)) is { State: { } owner }
-            && owner != int.Parse(s.Value, CultureInfo.InvariantCulture))
+            && int.TryParse(r.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var reason)
+            && int.TryParse(s.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var stateValue)
+            && status.Column.Options?.FirstOrDefault(o => o.Value == reason) is { State: { } owner }
+            && owner != stateValue)
         {
             throw Refuse($"statuscode {r.Value} belongs to statecode {owner}, not {s.Value}.");
         }
@@ -418,6 +427,12 @@ internal static class DmlColumnValidator
         {
             if (!IsLiteral<IntegerLiteral>(value))
                 throw Refuse($"{column} holds whole numbers; compare it with a whole number, not {Sql(value)}.");
+            var digits = (literal as IntegerLiteral ?? (IntegerLiteral)((UnaryExpression)literal).Expression).Value;
+            if (!long.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var magnitude) || magnitude > int.MaxValue + 1L
+                || (magnitude == int.MaxValue + 1L && literal is IntegerLiteral))
+            {
+                throw Refuse($"{Sql(value)} is outside the range of the whole-number column {column} (-2,147,483,648 to 2,147,483,647).");
+            }
             return;
         }
         if (NumericTypes.Contains(type))
@@ -432,10 +447,11 @@ internal static class DmlColumnValidator
                 return;
             case "Boolean":
                 throw Refuse($"{column} is a yes/no column; compare it with 1 or 0.");
-            case "Uniqueidentifier" or "Lookup" or "Owner" when literal is StringLiteral s && Guid.TryParse(s.Value, out _):
+            case "Uniqueidentifier" or "Lookup" or "Owner" when literal is StringLiteral s && IsGuidText(s.Value):
                 return;
             case "Uniqueidentifier" or "Lookup" or "Owner":
-                throw Refuse($"{column} holds row ids; compare it with a quoted GUID such as '00000000-0000-0000-0000-000000000000', not {Sql(value)}.");
+                throw Refuse($"{column} holds row ids; compare it with a quoted GUID such as '00000000-0000-0000-0000-000000000000' " +
+                             $"(or in braces), not {Sql(value)}.");
             case "DateTime" when literal is StringLiteral s:
                 CheckDateLiteral(attribute, column, s.Value);
                 return;
@@ -455,10 +471,14 @@ internal static class DmlColumnValidator
 
     private static bool IsGuidValue(ScalarExpression value) => Unwrap(value) switch
     {
-        StringLiteral s => Guid.TryParse(s.Value, out _),
-        CastCall { DataType: SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.UniqueIdentifier }, Parameter: StringLiteral s } => Guid.TryParse(s.Value, out _),
+        StringLiteral s => IsGuidText(s.Value),
+        CastCall { DataType: SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.UniqueIdentifier }, Parameter: StringLiteral s } => IsGuidText(s.Value),
         _ => false
     };
+
+    /// <summary>The GUID forms proven live: with dashes, with or without braces, any case.</summary>
+    private static bool IsGuidText(string text)
+        => Guid.TryParseExact(text, "D", out _) || Guid.TryParseExact(text, "B", out _);
 
     /// <summary>An expression the engine evaluates to a number: number literals, number columns and arithmetic, functions and conversions of them.</summary>
     private static bool IsNumeric(ScalarExpression expression, Dictionary<string, AttributeMetadataDto> columns) => expression switch
@@ -698,6 +718,15 @@ internal static class DmlColumnValidator
                 return;
             var attribute = Column(columns, table, column);
             Proven(attribute, table, types, use);
+            // Only the table's own id was proven among unique-identifier columns (stageid, processid, ... were not).
+            if (string.Equals(attribute.AttributeType, "Uniqueidentifier", StringComparison.OrdinalIgnoreCase) && !attribute.IsPrimaryId)
+            {
+                throw Refuse($"{table}.{attribute.LogicalName} is a unique-identifier column that is not the table's id, which is not " +
+                             $"supported in WHERE. Filter on the id column {table}id or on a lookup instead.");
+            }
+            // An unverified date kind is refused for every use, including IS NULL (which has no literal to check).
+            if (string.Equals(attribute.AttributeType, "DateTime", StringComparison.OrdinalIgnoreCase) && !IsVerifiedDateBehavior(attribute))
+                throw Refuse(UnverifiedDate($"{table}.{attribute.LogicalName}", attribute));
             foreach (var literal in literals)
                 CheckFilterLiteral(attribute, $"{table}.{attribute.LogicalName}", literal);
         }

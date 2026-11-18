@@ -158,13 +158,31 @@ public class DmlAllowlistTests
         Assert.Equal(new object?[] { null, "d1", null, "d3" }, Values(h, "name"));
     }
 
-    [Fact]
-    public async Task InsertValues_WithFunctionsAndArithmetic_Work()
+    // D-M2: only literals and NULL were proven live in VALUES; an expression is refused.
+    [Theory]
+    [InlineData("INSERT INTO account (name, description) VALUES (UPPER('a'), 'b')")]
+    [InlineData("INSERT INTO account (name, description) VALUES ('a', CONCAT('b', 1 + 2))")]
+    [InlineData("INSERT INTO account (name, numberofemployees) VALUES ('a', 1 + 2)")]
+    [InlineData("INSERT INTO account (name, numberofemployees) VALUES ('a', -(5))")]
+    public async Task InsertValues_WithExpressions_AreRefused(string sql)
     {
-        var h = await Run("INSERT INTO account (name, description) VALUES (UPPER('a'), CONCAT('b', 1 + 2))");
+        var h = DmlTestHarness.Create(rows: 1);
 
-        Assert.Equal(new object?[] { "A" }, Values(h, "name"));
-        Assert.Equal(new object?[] { "b3" }, Values(h, "description"));
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
+
+        Assert.Contains("VALUES takes literal values only", ex.Message);
+        h.AssertNothingChanged();
+    }
+
+    [Fact]
+    public async Task InsertValues_WithLiteralsNegativeNumbersAndNull_Work()
+    {
+        var h = await Run("INSERT INTO account (name, numberofemployees, revenue, description) VALUES ('a', -5, -2.5, NULL)");
+
+        Assert.Equal(new object?[] { "a" }, Values(h, "name"));
+        Assert.Equal(new object?[] { "-5" }, Values(h, "numberofemployees"));
+        Assert.Equal(new object?[] { "-2.5" }, Values(h, "revenue"));
+        Assert.Equal(new object?[] { null }, Values(h, "description"));
     }
 
     // ---- refused: every shape that is not on the allowlist ------------------------------------
