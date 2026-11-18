@@ -830,6 +830,13 @@ public sealed class SqlQueryService : ISqlQueryService
             };
         }
 
+        // Without metadata the column types cannot be checked, so DML never executes unchecked (a dry-run executes nothing).
+        if (safetyResult.ContainsDml && !safetyResult.IsDryRun && _metadataProvider == null)
+        {
+            throw new PpdsException(ErrorCodes.Query.DmlBlocked,
+                "INSERT, UPDATE and DELETE need the table's column metadata to be checked before they run, and none is available here. Nothing was executed.");
+        }
+
         dmlRowCap = safetyResult.RowCap;
 
         // For aggregate queries, fetch metadata needed for partitioning decisions.

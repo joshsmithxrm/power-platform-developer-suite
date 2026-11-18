@@ -204,10 +204,16 @@ public static class DmlValueCoercer
         {
             DateTime dt => dt,
             DateTimeOffset dto => dto.UtcDateTime,
+            // A literal with Z or an offset is one instant: send it as UTC. RoundtripKind would turn '+02:00' into the
+            // machine's local time, which the SDK then sent hours off (observed live, 2026-11-17).
+            string s when HasZone(s) && DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out var zoned) => zoned.UtcDateTime,
             string s when DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt) => dt,
             _ => throw TypeMismatch(value, "DateTime")
         };
     }
+
+    private static bool HasZone(string text)
+        => System.Text.RegularExpressions.Regex.IsMatch(text.Trim(), @"(Z|[+-]\d{2}:?\d{2})$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     private static object CoerceGuid(object value)
     {

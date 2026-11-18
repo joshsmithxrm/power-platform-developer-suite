@@ -49,6 +49,7 @@ internal static class FetchXmlFilter
         int Cmp(string value) => actual switch
         {
             string s => string.Compare(s, value, StringComparison.OrdinalIgnoreCase),
+            Guid g => Guid.TryParse(value, out var other) ? g.CompareTo(other) : 1,
             _ => Convert.ToDecimal(actual, CultureInfo.InvariantCulture).CompareTo(decimal.Parse(value, CultureInfo.InvariantCulture))
         };
         bool Like(string pattern)
@@ -80,21 +81,32 @@ internal static class FetchXmlFilter
 /// <summary>Attribute metadata for the fake account and contact tables used by the DML tests.</summary>
 internal static class TestMetadata
 {
-    private static AttributeMetadataDto A(string name, string type, bool create = true, bool update = true, string? attributeOf = null) => new()
+    private static AttributeMetadataDto A(string name, string type, bool create = true, bool update = true, string? attributeOf = null,
+        List<OptionValueDto>? options = null, List<string>? targets = null, string? behavior = null, string? format = null) => new()
     {
         LogicalName = name, DisplayName = name, SchemaName = name, AttributeType = type,
-        IsValidForCreate = create, IsValidForUpdate = update, IsValidForRead = true, AttributeOf = attributeOf
+        IsValidForCreate = create, IsValidForUpdate = update, IsValidForRead = true, AttributeOf = attributeOf,
+        Options = options, Targets = targets, IsPrimaryId = type == "Uniqueidentifier",
+        DateTimeBehavior = type == "DateTime" && behavior != "-" ? behavior ?? "UserLocal" : null, Format = type == "DateTime" ? format ?? "DateAndTime" : null
     };
+
+    private static List<OptionValueDto> O(params (int Value, int? State)[] values)
+        => values.Select(v => new OptionValueDto { Value = v.Value, Label = "o" + v.Value, State = v.State }).ToList();
 
     private static readonly Dictionary<string, AttributeMetadataDto[]> Tables = new(StringComparer.OrdinalIgnoreCase)
     {
         ["account"] =
         [
             A("accountid", "Uniqueidentifier", update: false), A("name", "String"), A("description", "String"),
-            A("revenue", "Decimal"), A("creditlimit", "Money"), A("numberofemployees", "Integer"), A("notes", "Memo"), A("customertypecode", "Picklist"), A("statecode", "State"), A("parentaccountid", "Lookup"), A("ownerid", "Owner"),
+            A("revenue", "Decimal"), A("creditlimit", "Money"), A("numberofemployees", "Integer"), A("notes", "Memo"), A("customertypecode", "Picklist", options: O((1, null), (2, null))),
+            A("statecode", "State", options: O((0, null), (1, null))), A("statuscode", "Status", options: O((1, 0), (2, 1))),
+            A("parentaccountid", "Lookup", targets: ["account"]), A("ownerid", "Owner"),
             A("owneridname", "String", create: false, update: false, attributeOf: "ownerid"), A("domainname", "String"),
-            A("contactid", "Lookup"), A("createdon", "DateTime", create: false, update: false), A("followupby", "DateTime")
+            A("contactid", "Lookup"), A("createdon", "DateTime", create: false, update: false), A("followupby", "DateTime"),
+            A("legacydate", "DateTime", behavior: "UserLocal", format: "DateOnly"), A("tzidate", "DateTime", behavior: "TimeZoneIndependent"),
+            A("nobehaviordate", "DateTime", behavior: "-"), A("birthday", "DateTime", behavior: "DateOnly", format: "DateOnly")
         ],
+        ["solution"] = [A("solutionid", "Uniqueidentifier", update: false), A("friendlyname", "String")],
         ["contact"] =
         [
             A("contactid", "Uniqueidentifier", update: false), A("lastname", "String"), A("fullname", "String"),

@@ -2361,7 +2361,8 @@ public class SqlQueryServiceTests
     private static SqlQueryService ServiceWithBulk(Mock<IBulkOperationExecutor> bulk) => new(
         new Mock<IQueryExecutor>().Object,
         guard: new InactiveFakeShakedownGuard(),
-        bulkOperationExecutor: bulk.Object)
+        bulkOperationExecutor: bulk.Object,
+        metadataProvider: TestMetadata.Provider)
     {
         EnvironmentProtectionLevel = ProtectionLevel.Development
     };

@@ -54,7 +54,7 @@ public class DmlTopOverrideTests
                 return Task.FromResult(new BulkOperationResult { SuccessCount = n });
             });
 
-        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard(), bulkOperationExecutor: bulk.Object)
+        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard(), bulkOperationExecutor: bulk.Object, metadataProvider: PPDS.Cli.Tests.Services.Query.TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development
         };

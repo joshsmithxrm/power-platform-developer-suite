@@ -55,7 +55,7 @@ public class DmlRowCapTests
         var harness = new Harness
         {
             Bulk = bulk,
-            Service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard(), bulkOperationExecutor: bulk.Object)
+            Service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard(), bulkOperationExecutor: bulk.Object, metadataProvider: PPDS.Cli.Tests.Services.Query.TestMetadata.Provider)
             {
                 EnvironmentProtectionLevel = ProtectionLevel.Development
             }
@@ -146,7 +146,7 @@ public class DmlRowCapTests
                 deleted.Add(ids.Count());
                 return Task.FromResult(new BulkOperationResult { SuccessCount = ids.Count() });
             });
-        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard(), bulkOperationExecutor: bulk.Object)
+        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard(), bulkOperationExecutor: bulk.Object, metadataProvider: PPDS.Cli.Tests.Services.Query.TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = ProtectionLevel.Development
         };

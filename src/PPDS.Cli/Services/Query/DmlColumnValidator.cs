@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Dataverse.Metadata;
@@ -9,26 +11,34 @@ namespace PPDS.Cli.Services.Query;
 /// <summary>
 /// Checks every column a DML statement reads or writes against the table's metadata before anything executes: it must
 /// be a real, readable attribute of that table (not a display column such as <c>owneridname</c> that the query engine
-/// computes, and not a column of another table), written columns must be valid for create or update, and arithmetic
-/// must be between numeric columns or numbers. Anything else is refused with <c>Query.DmlBlocked</c>, naming the column.
+/// computes, and not a column of another table), its type must have been verified live for the way it is used (specs/
+/// query.md "DML allowlist"), each literal must have the form that type needs (a GUID for an id, a whole number for a
+/// choice, a date with Z or an offset for a date/time), and a written value must be of the column's kind. Anything else is
+/// refused with <c>Query.DmlBlocked</c>, naming the column and what to write instead.
 /// </summary>
 internal static class DmlColumnValidator
 {
-    private static readonly HashSet<string> NumericTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Integer", "BigInt", "Decimal", "Double", "Money"
-    };
+    private static readonly HashSet<string> NumericTypes = Set("Integer", "BigInt", "Decimal", "Double", "Money");
+    private static readonly HashSet<string> WholeNumberTypes = Set("Integer", "BigInt");
+    private static readonly HashSet<string> TextTypes = Set("String", "Memo");
+    private static readonly HashSet<string> IdTypes = Set("Uniqueidentifier", "Lookup", "Owner");
+    private static readonly HashSet<string> ChoiceTypes = Set("Picklist", "State", "Status");
 
     // The column types each use was verified with in the live differential run (specs/query.md, "DML allowlist").
     // Anything else is refused: a shape that was not proven against Dataverse does not run.
-    private static readonly HashSet<string> WriteTypes = new(StringComparer.OrdinalIgnoreCase) { "String", "Integer", "Decimal", "Boolean" };
-    private static readonly HashSet<string> ValueReadTypes = new(StringComparer.OrdinalIgnoreCase) { "String", "Integer", "Decimal" };
-    private static readonly HashSet<string> FilterTypes = new(StringComparer.OrdinalIgnoreCase) { "String", "Integer", "Decimal", "Boolean", "Picklist" };
-    private static readonly HashSet<string> IsNullTypes = new(StringComparer.OrdinalIgnoreCase) { "String", "Integer", "Decimal", "DateTime" };
-    private static readonly HashSet<string> OrderedFilterTypes = new(StringComparer.OrdinalIgnoreCase) { "Integer", "Decimal", "DateTime" };
-    private static readonly HashSet<string> InTypes = new(StringComparer.OrdinalIgnoreCase) { "String" };
-    private static readonly HashSet<string> LikeTypes = new(StringComparer.OrdinalIgnoreCase) { "String" };
-    private static readonly HashSet<string> OrderByTypes = new(StringComparer.OrdinalIgnoreCase) { "Integer" };
+    private static readonly HashSet<string> WriteTypes = Set("String", "Memo", "Integer", "Decimal", "Money", "Double", "Boolean", "Picklist", "DateTime", "Lookup", "State", "Status");
+    private static readonly HashSet<string> ValueReadTypes = Set("String", "Memo", "Integer", "Decimal", "Money", "Double");
+    private static readonly HashSet<string> EqualityTypes = Set("String", "Memo", "Integer", "Decimal", "Money", "Double", "Boolean", "Picklist", "State", "Status", "DateTime", "Uniqueidentifier", "Lookup", "Owner");
+    private static readonly HashSet<string> OrderedTypes = Set("Integer", "Decimal", "Money", "Double", "DateTime");
+    private static readonly HashSet<string> InTypes = Set("String", "Integer", "Decimal", "Money", "Picklist", "State", "Status", "Uniqueidentifier", "Lookup");
+    private static readonly HashSet<string> LikeTypes = Set("String", "Memo");
+    private static readonly HashSet<string> IsNullTypes = Set("String", "Memo", "Integer", "Decimal", "Money", "Double", "Picklist", "DateTime", "Lookup");
+    private static readonly HashSet<string> OrderByTypes = Set("Integer", "String", "DateTime");
+
+    private static readonly Regex Offset = new(@"(Z|[+-]\d{2}:\d{2})$");
+    private static readonly Regex DateOnlyLiteral = new(@"^\d{4}-\d{2}-\d{2}$");
+
+    private static HashSet<string> Set(params string[] values) => new(values, StringComparer.OrdinalIgnoreCase);
 
     public static async Task ValidateAsync(TSqlStatement planned, ICachedMetadataProvider metadata, CancellationToken ct)
     {
@@ -41,11 +51,14 @@ internal static class DmlColumnValidator
                     var spec = update.UpdateSpecification;
                     var table = TableName(DmlStatementSupport.ResolveTarget(spec.Target, spec.FromClause));
                     var columns = await ColumnsAsync(metadata, table, ct);
-                    foreach (var set in spec.SetClauses.OfType<AssignmentSetClause>())
+                    var assignments = spec.SetClauses.OfType<AssignmentSetClause>().ToList();
+                    foreach (var set in assignments)
                     {
-                        Written(columns, table, set.Column, forCreate: false);
+                        var target = Written(columns, table, set.Column, forCreate: false);
+                        WrittenValue(target, table, set.NewValue, columns);
                         ReadValue(columns, table, set.NewValue);
                     }
+                    StatusTogether(assignments.Select(a => (Column(columns, table, a.Column), a.NewValue)).ToList(), table);
                     if (spec.WhereClause?.SearchCondition != null)
                         ReadFilter(columns, table, spec.WhereClause.SearchCondition);
                     break;
@@ -64,21 +77,32 @@ internal static class DmlColumnValidator
                     var spec = insert.InsertSpecification;
                     var table = TableName((NamedTableReference)spec.Target);
                     var columns = await ColumnsAsync(metadata, table, ct);
-                    foreach (var column in spec.Columns)
-                        Written(columns, table, column, forCreate: true);
+                    var targets = spec.Columns.Select(column => Written(columns, table, column, forCreate: true)).ToList();
+                    foreach (var target in targets.Where(t => ChoiceTypes.Contains(t.AttributeType) && t.AttributeType != "Picklist"))
+                        throw Refuse($"INSERT cannot set {table}.{target.LogicalName}: a new row always starts active. Insert it, then UPDATE statecode and statuscode together.");
 
                     if (spec.InsertSource is ValuesInsertSource values)
                     {
-                        foreach (var value in values.RowValues.SelectMany(row => row.ColumnValues))
-                            ReadValue(columns, table, value);
+                        foreach (var row in values.RowValues)
+                        {
+                            for (var i = 0; i < row.ColumnValues.Count && i < targets.Count; i++)
+                            {
+                                WrittenValue(targets[i], table, row.ColumnValues[i], columns);
+                                ReadValue(columns, table, row.ColumnValues[i]);
+                            }
+                        }
                     }
                     else if (spec.InsertSource is SelectInsertSource { Select: QuerySpecification select }
                              && select.FromClause?.TableReferences.FirstOrDefault() is NamedTableReference source)
                     {
                         var sourceTable = TableName(source);
                         var sourceColumns = await ColumnsAsync(metadata, sourceTable, ct);
-                        foreach (var item in select.SelectElements)
-                            ReadValue(sourceColumns, sourceTable, item);
+                        for (var i = 0; i < select.SelectElements.Count; i++)
+                        {
+                            if (select.SelectElements[i] is SelectScalarExpression item && i < targets.Count)
+                                WrittenValue(targets[i], table, item.Expression, sourceColumns);
+                            ReadValue(sourceColumns, sourceTable, select.SelectElements[i]);
+                        }
                         if (select.WhereClause?.SearchCondition != null)
                             ReadFilter(sourceColumns, sourceTable, select.WhereClause.SearchCondition);
                         if (select.OrderByClause != null)
@@ -87,21 +111,35 @@ internal static class DmlColumnValidator
                                 Proven(Column(sourceColumns, sourceTable, column), sourceTable, OrderByTypes, "ORDER BY");
                         }
                     }
+                    else
+                    {
+                        // The allowlist admits no other source; anything else is refused here too rather than written unchecked.
+                        throw Refuse("INSERT is supported only with VALUES or a SELECT from a single table.");
+                    }
                     break;
                 }
             }
         }
     }
 
-    private static IEnumerable<TSqlStatement> DataStatements(TSqlStatement statement) => statement switch
+    /// <summary>Every INSERT, UPDATE and DELETE anywhere in the request, whatever block, IF, WHILE or TRY contains it.</summary>
+    private static IReadOnlyList<TSqlStatement> DataStatements(TSqlStatement statement)
     {
-        InsertStatement or UpdateStatement or DeleteStatement => [statement],
-        BeginEndBlockStatement block => block.StatementList.Statements.SelectMany(DataStatements),
-        IfStatement @if => DataStatements(@if.ThenStatement).Concat(@if.ElseStatement is { } e ? DataStatements(e) : []),
-        WhileStatement @while => DataStatements(@while.Statement),
-        TryCatchStatement tryCatch => tryCatch.TryStatements.Statements.Concat(tryCatch.CatchStatements.Statements).SelectMany(DataStatements),
-        _ => []
-    };
+        var collector = new DataStatementCollector();
+        statement.Accept(collector);
+        return collector.Statements;
+    }
+
+    private sealed class DataStatementCollector : TSqlFragmentVisitor
+    {
+        public List<TSqlStatement> Statements { get; } = new();
+
+        public override void Visit(InsertStatement node) => Statements.Add(node);
+
+        public override void Visit(UpdateStatement node) => Statements.Add(node);
+
+        public override void Visit(DeleteStatement node) => Statements.Add(node);
+    }
 
     private static string TableName(NamedTableReference table) => table.SchemaObject.BaseIdentifier.Value.ToLowerInvariant();
 
@@ -124,14 +162,106 @@ internal static class DmlColumnValidator
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
     }
 
+    // ── written columns ────────────────────────────────────────────────
+
     private static AttributeMetadataDto Written(Dictionary<string, AttributeMetadataDto> columns, string table, ColumnReferenceExpression column, bool forCreate)
     {
         var attribute = Column(columns, table, column);
+        var verb = forCreate ? "INSERT" : "UPDATE";
+        if (attribute.IsPrimaryId || string.Equals(attribute.AttributeType, "Uniqueidentifier", StringComparison.OrdinalIgnoreCase))
+            throw Refuse($"{verb} cannot set the id column {table}.{attribute.LogicalName}: Dataverse generates row ids.");
+        if (string.Equals(attribute.AttributeType, "Owner", StringComparison.OrdinalIgnoreCase))
+        {
+            throw Refuse($"{verb} cannot set the owner ({table}.{attribute.LogicalName}): assigning a row also moves its sharing and cascades " +
+                         "to related rows, which SQL does not show. Assign the rows in Dataverse instead.");
+        }
         if (forCreate ? !attribute.IsValidForCreate : !attribute.IsValidForUpdate)
-            throw Refuse($"The column {table}.{attribute.LogicalName} cannot be set by {(forCreate ? "INSERT" : "UPDATE")}.");
+            throw Refuse($"The column {table}.{attribute.LogicalName} cannot be set by {verb}.");
         Proven(attribute, table, WriteTypes, forCreate ? "INSERT" : "UPDATE ... SET");
+        if (string.Equals(attribute.AttributeType, "Lookup", StringComparison.OrdinalIgnoreCase) && attribute.Targets is not { Count: 1 })
+            throw Refuse($"{table}.{attribute.LogicalName} can point at more than one table, so a row id alone does not say which. It cannot be set by {verb}.");
+        if (string.Equals(attribute.AttributeType, "DateTime", StringComparison.OrdinalIgnoreCase) && !IsVerifiedDateBehavior(attribute))
+            throw Refuse(UnverifiedDate($"{table}.{attribute.LogicalName}", attribute) + $" It cannot be set by {verb}.");
         return attribute;
     }
+
+    /// <summary>A written value must be of the column's kind, in the form Dataverse was shown to store exactly.</summary>
+    private static void WrittenValue(AttributeMetadataDto target, string table, ScalarExpression value, Dictionary<string, AttributeMetadataDto> readColumns)
+    {
+        var column = $"{table}.{target.LogicalName}";
+        var type = target.AttributeType;
+        if (Unwrap(value) is NullLiteral)
+        {
+            if (ChoiceTypes.Contains(type) && type != "Picklist")
+                throw Refuse($"{column} cannot be set to NULL: every row has a status.");
+            return;
+        }
+
+        if (TextTypes.Contains(type))
+            return;
+        if (NumericTypes.Contains(type))
+        {
+            if (!IsNumeric(value, readColumns))
+                throw Refuse($"{column} is a number column; the value {Sql(value)} is not a number. Write a number, or CAST(... AS int/decimal) of a number column.");
+            return;
+        }
+
+        switch (type)
+        {
+            case "Boolean" when Unwrap(value) is IntegerLiteral { Value: "0" or "1" }:
+                return;
+            case "Boolean":
+                throw Refuse($"{column} is a yes/no column; write 1, 0 or NULL.");
+            case "Picklist" or "State" or "Status" when Unwrap(value) is IntegerLiteral choice:
+                // Dataverse stored a value that is not one of the column's choices without complaint (observed live), so
+                // the value is checked here.
+                var number = int.Parse(choice.Value, CultureInfo.InvariantCulture);
+                if (target.Options is not { Count: > 0 } options || options.All(o => o.Value != number))
+                {
+                    var known = target.Options is { Count: > 0 } ? string.Join(", ", target.Options.Select(o => $"{o.Value} ({o.Label})")) : "unknown";
+                    throw Refuse($"{number} is not a choice of {column}. Its choices are: {known}.");
+                }
+                return;
+            case "Picklist" or "State" or "Status":
+                throw Refuse($"{column} is a choice column; write the choice's whole-number value (for example 1), or NULL.");
+            case "Lookup" when IsGuidValue(value):
+                return;
+            case "Lookup":
+                throw Refuse($"{column} is a lookup; write the row id as a quoted GUID ('00000000-0000-0000-0000-000000000000'), or NULL.");
+            case "DateTime":
+                if (Unwrap(value) is not StringLiteral literal)
+                    throw Refuse($"{column} is a date/time column; write the value as a quoted literal ({DateHint(target)}), or NULL.");
+                CheckDateLiteral(target, column, literal.Value);
+                return;
+            default:
+                throw Refuse($"{column} cannot be set by SQL.");
+        }
+    }
+
+    /// <summary>Dataverse checks statecode against statuscode, so they are written together (verified live) or not at all.</summary>
+    private static void StatusTogether(List<(AttributeMetadataDto Column, ScalarExpression Value)> written, string table)
+    {
+        var state = written.FirstOrDefault(a => a.Column.AttributeType == "State");
+        var status = written.FirstOrDefault(a => a.Column.AttributeType == "Status");
+        if ((state.Column is null) != (status.Column is null))
+        {
+            var set = state.Column is null ? "statuscode" : "statecode";
+            var missing = state.Column is null ? "statecode" : "statuscode";
+            throw Refuse($"UPDATE {table} sets {set} without {missing}. Set both together, for example SET statecode = 1, statuscode = 2.");
+        }
+        if (state.Column is null || status.Column is null)
+            return;
+
+        // Each status reason belongs to one status; a mismatched pair would be rejected row by row, or not at all.
+        if (Unwrap(state.Value) is IntegerLiteral s && Unwrap(status.Value) is IntegerLiteral r
+            && status.Column.Options?.FirstOrDefault(o => o.Value == int.Parse(r.Value, CultureInfo.InvariantCulture)) is { State: { } owner }
+            && owner != int.Parse(s.Value, CultureInfo.InvariantCulture))
+        {
+            throw Refuse($"statuscode {r.Value} belongs to statecode {owner}, not {s.Value}.");
+        }
+    }
+
+    // ── read columns ───────────────────────────────────────────────────
 
     /// <summary>Refuses a column whose type was not verified live for this use.</summary>
     private static void Proven(AttributeMetadataDto attribute, string table, HashSet<string> types, string use)
@@ -139,7 +269,7 @@ internal static class DmlColumnValidator
         if (!types.Contains(attribute.AttributeType ?? ""))
         {
             throw Refuse($"{table}.{attribute.LogicalName} is a {Describe(attribute.AttributeType)} column, which is not supported in {use} " +
-                         $"(supported there: {string.Join(", ", types.Select(Describe))} columns).");
+                         $"(supported there: {string.Join(", ", types.Select(Describe).Distinct())} columns).");
         }
     }
 
@@ -172,10 +302,14 @@ internal static class DmlColumnValidator
         fragment.Accept(comparisons);
         if (comparisons.Problem != null)
             throw Refuse(comparisons.Problem);
+        var conversions = new ConversionCheck(columns);
+        fragment.Accept(conversions);
+        if (conversions.Problem != null)
+            throw Refuse(conversions.Problem);
         Read(columns, table, fragment);
     }
 
-    /// <summary>A WHERE condition: each column's type must have been verified with the operator used on it.</summary>
+    /// <summary>A WHERE condition: each column's type must have been verified with the operator used on it, and each literal must suit the type.</summary>
     private static void ReadFilter(Dictionary<string, AttributeMetadataDto> columns, string table, BooleanExpression condition)
     {
         var filter = new FilterTypeCheck(columns, table);
@@ -196,11 +330,6 @@ internal static class DmlColumnValidator
         fragment.Accept(arithmetic);
         if (arithmetic.Problem != null)
             throw Refuse(arithmetic.Problem);
-
-        var dates = new DateLiteralCheck(columns);
-        fragment.Accept(dates);
-        if (dates.Problem != null)
-            throw Refuse(dates.Problem);
     }
 
     private static AttributeMetadataDto Column(Dictionary<string, AttributeMetadataDto> columns, string table, ColumnReferenceExpression column)
@@ -215,6 +344,148 @@ internal static class DmlColumnValidator
         }
         return attribute;
     }
+
+    // ── literal forms ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// The two date column kinds the live run verified: user-local date and time, and date only. A user-local column
+    /// shown as a date only (it stores a time in UTC), a time-zone-independent column, and a column whose behaviour the
+    /// metadata does not state are not verified.
+    /// </summary>
+    private static bool IsVerifiedDateBehavior(AttributeMetadataDto attribute)
+        => IsDateOnly(attribute)
+           || (string.Equals(attribute.DateTimeBehavior, "UserLocal", StringComparison.OrdinalIgnoreCase)
+               && string.Equals(attribute.Format, "DateAndTime", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsDateOnly(AttributeMetadataDto attribute)
+        => string.Equals(attribute.DateTimeBehavior, "DateOnly", StringComparison.OrdinalIgnoreCase);
+
+    private static string UnverifiedDate(string column, AttributeMetadataDto attribute)
+        => $"{column} is a date/time column of a kind that has not been verified ({attribute.DateTimeBehavior ?? "behaviour unknown"}, " +
+           $"{attribute.Format ?? "format unknown"}); only user-local date-and-time and date-only columns are supported.";
+
+    private static string DateHint(AttributeMetadataDto attribute)
+        => IsDateOnly(attribute) ? "a date such as '2024-01-15'" : "with Z (UTC) or an offset, for example '2024-01-15T09:30:00Z'";
+
+    /// <summary>
+    /// A date-only column takes 'yyyy-MM-dd'. A user-local date/time column takes a literal with Z or an offset:
+    /// Dataverse reads one without an offset in the calling user's time zone (observed live), while SQL has no time zone.
+    /// </summary>
+    private static void CheckDateLiteral(AttributeMetadataDto attribute, string column, string literal)
+    {
+        var text = literal.Trim();
+        if (!IsVerifiedDateBehavior(attribute))
+            throw Refuse(UnverifiedDate(column, attribute));
+        if (IsDateOnly(attribute))
+        {
+            if (!DateOnlyLiteral.IsMatch(text) || !DateTime.TryParseExact(text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+                throw Refuse($"{column} is a date-only column; write the date as 'yyyy-MM-dd' (for example '2024-01-15'), not '{literal}'.");
+            return;
+        }
+
+        if (!Offset.IsMatch(text))
+        {
+            throw Refuse($"The date/time literal '{literal}' has no time zone; Dataverse would read it in your time zone. " +
+                         "Add Z (UTC) or an offset such as +01:00.");
+        }
+        if (!DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+            throw Refuse($"'{literal}' is not a date/time; write it as, for example, '2024-01-15T09:30:00Z'.");
+    }
+
+    /// <summary>The constant a WHERE condition compares a column with must have the form the column's type needs.</summary>
+    private static void CheckFilterLiteral(AttributeMetadataDto attribute, string column, ScalarExpression value)
+    {
+        var type = attribute.AttributeType;
+        var literal = Unwrap(value);
+        if (TextTypes.Contains(type))
+        {
+            if (literal is not StringLiteral)
+                throw Refuse($"{column} is a text column; compare it with a quoted string, not {Sql(value)}.");
+            return;
+        }
+        if (WholeNumberTypes.Contains(type) || ChoiceTypes.Contains(type))
+        {
+            if (!IsLiteral<IntegerLiteral>(value))
+                throw Refuse($"{column} holds whole numbers; compare it with a whole number, not {Sql(value)}.");
+            return;
+        }
+        if (NumericTypes.Contains(type))
+        {
+            if (!IsLiteral<IntegerLiteral>(value) && !IsLiteral<NumericLiteral>(value) && !IsLiteral<RealLiteral>(value))
+                throw Refuse($"{column} is a number column; compare it with a number, not {Sql(value)}.");
+            return;
+        }
+        switch (type)
+        {
+            case "Boolean" when literal is IntegerLiteral { Value: "0" or "1" }:
+                return;
+            case "Boolean":
+                throw Refuse($"{column} is a yes/no column; compare it with 1 or 0.");
+            case "Uniqueidentifier" or "Lookup" or "Owner" when literal is StringLiteral s && Guid.TryParse(s.Value, out _):
+                return;
+            case "Uniqueidentifier" or "Lookup" or "Owner":
+                throw Refuse($"{column} holds row ids; compare it with a quoted GUID such as '00000000-0000-0000-0000-000000000000', not {Sql(value)}.");
+            case "DateTime" when literal is StringLiteral s:
+                CheckDateLiteral(attribute, column, s.Value);
+                return;
+            case "DateTime":
+                throw Refuse($"{column} is a date/time column; compare it with a quoted literal ({DateHint(attribute)}).");
+        }
+    }
+
+    private static bool IsLiteral<T>(ScalarExpression value) where T : Literal => Unwrap(value) switch
+    {
+        T => true,
+        UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative, Expression: T } => true,
+        _ => false
+    };
+
+    private static ScalarExpression Unwrap(ScalarExpression value) => value is ParenthesisExpression paren ? Unwrap(paren.Expression) : value;
+
+    private static bool IsGuidValue(ScalarExpression value) => Unwrap(value) switch
+    {
+        StringLiteral s => Guid.TryParse(s.Value, out _),
+        CastCall { DataType: SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.UniqueIdentifier }, Parameter: StringLiteral s } => Guid.TryParse(s.Value, out _),
+        _ => false
+    };
+
+    /// <summary>An expression the engine evaluates to a number: number literals, number columns and arithmetic, functions and conversions of them.</summary>
+    private static bool IsNumeric(ScalarExpression expression, Dictionary<string, AttributeMetadataDto> columns) => expression switch
+    {
+        IntegerLiteral or NumericLiteral or RealLiteral or NullLiteral => true,
+        UnaryExpression unary => IsNumeric(unary.Expression, columns),
+        ParenthesisExpression paren => IsNumeric(paren.Expression, columns),
+        BinaryExpression binary => IsNumeric(binary.FirstExpression, columns) && IsNumeric(binary.SecondExpression, columns),
+        ColumnReferenceExpression column => columns.TryGetValue(column.MultiPartIdentifier.Identifiers.Last().Value, out var a) && NumericTypes.Contains(a.AttributeType ?? ""),
+        CastCall cast => IsNumberType(cast.DataType) && IsNumeric(cast.Parameter, columns),
+        ConvertCall convert => IsNumberType(convert.DataType) && IsNumeric(convert.Parameter, columns),
+        TryCastCall tryCast => IsNumberType(tryCast.DataType) && IsNumeric(tryCast.Parameter, columns),
+        TryConvertCall tryConvert => IsNumberType(tryConvert.DataType) && IsNumeric(tryConvert.Parameter, columns),
+        FunctionCall { FunctionName.Value: var name } when name.Equals("LEN", StringComparison.OrdinalIgnoreCase) => true,
+        FunctionCall { FunctionName.Value: var name } function when name.Equals("ABS", StringComparison.OrdinalIgnoreCase) || name.Equals("ROUND", StringComparison.OrdinalIgnoreCase)
+            => function.Parameters.Count > 0 && IsNumeric(function.Parameters[0], columns),
+        FunctionCall { FunctionName.Value: var name } function when name.Equals("ISNULL", StringComparison.OrdinalIgnoreCase)
+            => function.Parameters.All(p => IsNumeric(p, columns)),
+        CoalesceExpression coalesce => coalesce.Expressions.All(e => IsNumeric(e, columns)),
+        NullIfExpression nullIf => IsNumeric(nullIf.FirstExpression, columns),
+        IIfCall iif => IsNumeric(iif.ThenExpression, columns) && IsNumeric(iif.ElseExpression, columns),
+        SearchedCaseExpression searched => searched.WhenClauses.All(w => IsNumeric(w.ThenExpression, columns)) && (searched.ElseExpression is null || IsNumeric(searched.ElseExpression, columns)),
+        SimpleCaseExpression simple => simple.WhenClauses.All(w => IsNumeric(w.ThenExpression, columns)) && (simple.ElseExpression is null || IsNumeric(simple.ElseExpression, columns)),
+        _ => false
+    };
+
+    private static bool IsNumberType(DataTypeReference type) => type is SqlDataTypeReference
+    {
+        SqlDataTypeOption: SqlDataTypeOption.Int or SqlDataTypeOption.BigInt or SqlDataTypeOption.Decimal or SqlDataTypeOption.Numeric
+    };
+
+    private static string Sql(TSqlFragment fragment)
+    {
+        new Sql160ScriptGenerator().GenerateScript(fragment, out var text);
+        return text.Trim();
+    }
+
+    // ── visitors ───────────────────────────────────────────────────────
 
     /// <summary>Arithmetic only between numbers (SQL would convert text to a number; the evaluator would join text).</summary>
     private sealed class ArithmeticCheck(Dictionary<string, AttributeMetadataDto> columns) : TSqlFragmentVisitor
@@ -233,7 +504,7 @@ internal static class DmlColumnValidator
                 };
                 if (type != null && !NumericTypes.Contains(type))
                 {
-                    Problem ??= $"Arithmetic ({node.BinaryExpressionType}) on a {type} value is not supported. Use CONCAT(...) to join text; " +
+                    Problem ??= $"Arithmetic ({node.BinaryExpressionType}) on a {Describe(type)} value is not supported. Use CONCAT(...) to join text; " +
                                 "arithmetic needs number columns or numbers.";
                 }
             }
@@ -241,6 +512,33 @@ internal static class DmlColumnValidator
 
         public override void ExplicitVisit(ScalarSubquery node)
         {
+        }
+    }
+
+    /// <summary>
+    /// Conversions to a number must convert a number: the engine parses text more loosely than SQL ('1,000' and '$5' would
+    /// become numbers, where SQL raises an error or TRY_CAST returns NULL). A conversion to uniqueidentifier takes a GUID literal.
+    /// </summary>
+    private sealed class ConversionCheck(Dictionary<string, AttributeMetadataDto> columns) : TSqlFragmentVisitor
+    {
+        public string? Problem { get; private set; }
+
+        public override void Visit(CastCall node) => Check(node, node.DataType, node.Parameter);
+
+        public override void Visit(ConvertCall node) => Check(node, node.DataType, node.Parameter);
+
+        public override void Visit(TryCastCall node) => Check(node, node.DataType, node.Parameter);
+
+        public override void Visit(TryConvertCall node) => Check(node, node.DataType, node.Parameter);
+
+        private void Check(TSqlFragment node, DataTypeReference type, ScalarExpression parameter)
+        {
+            if (Problem != null)
+                return;
+            if (IsNumberType(type) && !IsNumeric(parameter, columns))
+                Problem = $"{Sql(node)} converts a value that is not a number. Converting text to a number is not supported (SQL Server and the query engine parse text differently).";
+            else if (type is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.UniqueIdentifier } && !IsGuidValue((ScalarExpression)node))
+                Problem = $"{Sql(node)}: CAST to uniqueidentifier takes a quoted GUID literal.";
         }
     }
 
@@ -266,23 +564,12 @@ internal static class DmlColumnValidator
 
         private void Check(params ScalarExpression[] operands)
         {
-            if (Problem == null && !operands.All(IsNumber))
+            if (Problem == null && !operands.All(o => o is not NullLiteral && IsNumeric(o, columns)))
             {
                 Problem = "Comparing text inside a value (IIF, CASE or NULLIF) is not supported: Dataverse compares text without regard " +
                           "to accents or trailing spaces and the query engine would not. Compare numbers there, or filter with WHERE.";
             }
         }
-
-        private bool IsNumber(ScalarExpression expression) => expression switch
-        {
-            IntegerLiteral or NumericLiteral or RealLiteral => true,
-            UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative } unary => IsNumber(unary.Expression),
-            ParenthesisExpression paren => IsNumber(paren.Expression),
-            BinaryExpression binary => IsNumber(binary.FirstExpression) && IsNumber(binary.SecondExpression),
-            ColumnReferenceExpression column => columns.TryGetValue(column.MultiPartIdentifier.Identifiers.Last().Value, out var a)
-                                                && NumericTypes.Contains(a.AttributeType ?? ""),
-            _ => false
-        };
     }
 
     private sealed class FilterTypeCheck(Dictionary<string, AttributeMetadataDto> columns, string table) : TSqlFragmentVisitor
@@ -291,58 +578,26 @@ internal static class DmlColumnValidator
         {
             var equality = node.ComparisonType is BooleanComparisonType.Equals or BooleanComparisonType.NotEqualToBrackets
                 or BooleanComparisonType.NotEqualToExclamation;
-            Check(node.FirstExpression, equality ? FilterTypes : OrderedFilterTypes, equality ? "a WHERE comparison" : "a WHERE comparison with < > <= >=");
+            Check(node.FirstExpression, equality ? EqualityTypes : OrderedTypes, equality ? "a WHERE comparison" : "a WHERE comparison with < > <= >=", node.SecondExpression);
         }
 
-        public override void Visit(BooleanTernaryExpression node) => Check(node.FirstExpression, OrderedFilterTypes, "BETWEEN");
+        public override void Visit(BooleanTernaryExpression node)
+            => Check(node.FirstExpression, OrderedTypes, "BETWEEN", node.SecondExpression, node.ThirdExpression);
 
-        public override void Visit(InPredicate node) => Check(node.Expression, InTypes, "IN");
+        public override void Visit(InPredicate node) => Check(node.Expression, InTypes, "IN", [.. node.Values]);
 
-        public override void Visit(LikePredicate node) => Check(node.FirstExpression, LikeTypes, "LIKE");
+        public override void Visit(LikePredicate node) => Check(node.FirstExpression, LikeTypes, "LIKE", node.SecondExpression);
 
         public override void Visit(BooleanIsNullExpression node) => Check(node.Expression, IsNullTypes, "IS NULL");
 
-        private void Check(ScalarExpression expression, HashSet<string> types, string use)
+        private void Check(ScalarExpression expression, HashSet<string> types, string use, params ScalarExpression[] literals)
         {
-            if (expression is ColumnReferenceExpression column)
-                Proven(Column(columns, table, column), table, types, use);
-        }
-    }
-
-    /// <summary>
-    /// Dataverse reads a date/time literal without an offset in the calling user's time zone (observed live), while SQL has
-    /// no time zone, so a comparison with one is refused unless the literal ends with Z or +hh:mm / -hh:mm.
-    /// </summary>
-    private sealed class DateLiteralCheck(Dictionary<string, AttributeMetadataDto> columns) : TSqlFragmentVisitor
-    {
-        private static readonly System.Text.RegularExpressions.Regex Offset = new(@"(Z|[+-]\d{2}:\d{2})$");
-
-        public string? Problem { get; private set; }
-
-        public override void Visit(BooleanComparisonExpression node) => Check(node.FirstExpression, node.SecondExpression);
-
-        public override void Visit(BooleanTernaryExpression node)
-        {
-            Check(node.FirstExpression, node.SecondExpression);
-            Check(node.FirstExpression, node.ThirdExpression);
-        }
-
-        public override void Visit(InPredicate node)
-        {
-            foreach (var value in node.Values)
-                Check(node.Expression, value);
-        }
-
-        private void Check(ScalarExpression left, ScalarExpression right)
-        {
-            if (left is ColumnReferenceExpression column
-                && columns.TryGetValue(column.MultiPartIdentifier.Identifiers.Last().Value, out var attribute)
-                && string.Equals(attribute.AttributeType, "DateTime", StringComparison.OrdinalIgnoreCase)
-                && right is StringLiteral literal && !Offset.IsMatch(literal.Value.Trim()))
-            {
-                Problem ??= $"The date/time literal '{literal.Value}' has no time zone; Dataverse would read it in your time zone. " +
-                            "Add Z (UTC) or an offset such as +01:00.";
-            }
+            if (expression is not ColumnReferenceExpression column)
+                return;
+            var attribute = Column(columns, table, column);
+            Proven(attribute, table, types, use);
+            foreach (var literal in literals)
+                CheckFilterLiteral(attribute, $"{table}.{attribute.LogicalName}", literal);
         }
     }
 

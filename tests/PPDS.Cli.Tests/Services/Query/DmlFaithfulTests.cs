@@ -83,8 +83,8 @@ public sealed class DmlFaithfulTests : IDisposable
     [Theory]
     [InlineData("DELETE FROM account WHERE createdon < '2024-01-01'", "no time zone")]
     [InlineData("DELETE FROM account WHERE createdon BETWEEN '2024-01-01' AND '2024-02-01Z'", "no time zone")]
-    [InlineData("UPDATE account SET followupby = '2024-01-01T00:00:00Z' WHERE revenue > 0", "date/time column")]
-    [InlineData("INSERT INTO account (name, followupby) VALUES ('a', '2024-01-01Z')", "date/time column")]
+    [InlineData("UPDATE account SET followupby = '2024-01-01T00:00:00' WHERE revenue > 0", "no time zone")]
+    [InlineData("INSERT INTO account (name, followupby) VALUES ('a', '2024-01-01')", "no time zone")]
     public async Task DateLiteralsWithoutAnOffset_AndDateWrites_AreRefused(string sql, string named)
     {
         var h = DmlTestHarness.Create(rows: 4);
@@ -95,36 +95,39 @@ public sealed class DmlFaithfulTests : IDisposable
         h.AssertNothingChanged();
     }
 
-    // Shapes the live differential run did not prove (specs/query.md "DML allowlist") are refused.
+    // Shapes the live differential run did not prove, or proved wrong (specs/query.md "DML allowlist"), are refused
+    // with what to write instead.
     [Theory]
-    [InlineData("UPDATE account SET revenue = revenue / 3 WHERE name = 'n1'", "(division)")]
-    [InlineData("UPDATE account SET revenue = CAST(revenue AS int) WHERE name = 'n1'", "CAST to a type other than nvarchar")]
-    [InlineData("UPDATE account SET revenue = CONVERT(int, revenue) WHERE name = 'n1'", "CONVERT to a type other than nvarchar")]
-    [InlineData("UPDATE account SET revenue = TRY_CAST(name AS int) WHERE name = 'n1'", "TRY_CAST")]
-    [InlineData("UPDATE account SET name = TRY_CONVERT(nvarchar(10), revenue) WHERE name = 'n1'", "TRY_CONVERT")]
-    [InlineData("UPDATE dbo.account SET name = 'x' WHERE name = 'n1'", "dbo. prefix")]
-    [InlineData("DELETE FROM account WHERE name NOT LIKE '%1'", "NOT LIKE is supported only as NOT LIKE 'text%'")]
-    [InlineData("DELETE FROM account WHERE name NOT LIKE 'n_%'", "NOT LIKE is supported only as NOT LIKE 'text%'")]
-    [InlineData("UPDATE account SET name = IIF(revenue > 1 AND revenue < 9, 'a', 'b') WHERE name = 'n1'", "AND/OR inside IIF or CASE")]
-    [InlineData("DELETE FROM account WHERE statecode = 0", "status column")]
-    [InlineData("DELETE FROM account WHERE accountid = '00000000-0000-0000-0000-000000000001'", "unique identifier column")]
-    [InlineData("DELETE FROM account WHERE parentaccountid IS NULL", "lookup column")]
-    [InlineData("DELETE FROM account WHERE name > 'n1'", "text column, which is not supported in a WHERE comparison with < > <= >=")]
-    [InlineData("DELETE FROM account WHERE revenue IN (500, 1000)", "decimal column, which is not supported in IN")]
-    [InlineData("DELETE FROM account WHERE creditlimit > 5", "currency column")]
-    [InlineData("DELETE FROM account WHERE createdon = '2024-01-01T00:00:00Z'", "date/time column, which is not supported in a WHERE comparison")]
-    [InlineData("DELETE FROM account WHERE customertypecode IS NULL", "choice column, which is not supported in IS NULL")]
-    [InlineData("UPDATE account SET creditlimit = 5 WHERE name = 'n1'", "currency column")]
-    [InlineData("UPDATE account SET customertypecode = 1 WHERE name = 'n1'", "choice column")]
-    [InlineData("UPDATE account SET notes = 'x' WHERE name = 'n1'", "multiline text column")]
-    [InlineData("UPDATE account SET followupby = NULL WHERE name = 'n1'", "date/time column")]
-    [InlineData("UPDATE account SET name = CONCAT(name, customertypecode) WHERE name = 'n1'", "choice column, which is not supported in a value")]
-    [InlineData("INSERT INTO account (name) SELECT TOP 2 name FROM account WHERE revenue > 0 ORDER BY revenue", "not supported in ORDER BY")]
+    [InlineData("UPDATE account SET revenue = TRY_CAST(name AS int) WHERE name = 'n1'", "is not a number")]
+    [InlineData("UPDATE account SET revenue = CAST(description AS int) WHERE name = 'n1'", "is not a number")]
+    [InlineData("UPDATE account SET description = CAST(CAST(name AS int) AS nvarchar(10)) WHERE name = 'n1'", "converts a value that is not a number")]
+    [InlineData("UPDATE account SET name = TRY_CONVERT(nvarchar(10), revenue) WHERE name = 'n1'", "TRY_CAST and TRY_CONVERT are supported to int or decimal only")]
+    [InlineData("UPDATE account SET followupby = CAST('2024-01-01T00:00:00Z' AS datetime) WHERE name = 'n1'", "CAST to DATETIME")]
+    [InlineData("UPDATE account SET description = LEFT(name, 1) WHERE name = 'n1'", "SUBSTRING")]
+    [InlineData("UPDATE account SET followupby = GETDATE() WHERE name = 'n1'", "once per statement")]
+    [InlineData("UPDATE account SET followupby = GETUTCDATE() WHERE name = 'n1'", "once per statement")]
+    [InlineData("INSERT INTO account (accountid, name) VALUES (NEWID(), 'x')", "Dataverse generates row ids")]
+    [InlineData("INSERT INTO account (accountid, name) VALUES ('00000000-0000-0000-0000-000000000001', 'x')", "Dataverse generates row ids")]
+    [InlineData("UPDATE account SET description = REPLACE(name, 'n', 'm') WHERE name = 'n1'", "the function REPLACE")]
     [InlineData("UPDATE account SET description = NULLIF(name, 'n1') WHERE name = 'n1'", "Comparing text inside a value")]
     [InlineData("UPDATE account SET description = CASE name WHEN 'n0' THEN 'a' END WHERE name = 'n1'", "Comparing text inside a value")]
     [InlineData("UPDATE account SET description = IIF(name = 'n0', 'a', 'b') WHERE name = 'n1'", "Comparing text inside a value")]
     [InlineData("UPDATE account SET description = IIF(UPPER(name) > 'N', 'a', 'b') WHERE name = 'n1'", "Comparing text inside a value")]
-    [InlineData("UPDATE account SET description = REPLACE(name, 'n', 'm') WHERE name = 'n1'", "the function REPLACE")]
+    [InlineData("DELETE FROM account WHERE name > 'n1'", "text column, which is not supported in a WHERE comparison with < > <= >=")]
+    [InlineData("DELETE FROM account WHERE name BETWEEN 'a' AND 'z'", "text column, which is not supported in BETWEEN")]
+    [InlineData("DELETE FROM account WHERE accountid = 'not-a-guid'", "holds row ids")]
+    [InlineData("DELETE FROM account WHERE parentaccountid = 5", "holds row ids")]
+    [InlineData("DELETE FROM account WHERE numberofemployees = 5.0", "compare it with a whole number")]
+    [InlineData("DELETE FROM account WHERE name = 5", "compare it with a quoted string")]
+    [InlineData("DELETE FROM account WHERE followupby < '2024-01-01'", "no time zone")]
+    [InlineData("UPDATE account SET customertypecode = 7 WHERE name = 'n1'", "is not a choice")]
+    [InlineData("UPDATE account SET statecode = 1 WHERE name = 'n1'", "without statuscode")]
+    [InlineData("UPDATE account SET ownerid = '00000000-0000-0000-0000-000000000001' WHERE name = 'n1'", "cannot set the owner")]
+    [InlineData("UPDATE account SET parentaccountid = 'x' WHERE name = 'n1'", "is a lookup")]
+    [InlineData("UPDATE contact SET parentcustomerid = '00000000-0000-0000-0000-000000000001' WHERE name = 'n1'", "lookup column, which is not supported in UPDATE ... SET")]
+    [InlineData("UPDATE account SET followupby = '2024-01-01' WHERE name = 'n1'", "no time zone")]
+    [InlineData("UPDATE account SET revenue = '5' WHERE name = 'n1'", "not a number")]
+    [InlineData("INSERT INTO account (name) SELECT TOP 2 name FROM account WHERE revenue > 0 ORDER BY revenue", "not supported in ORDER BY")]
     public async Task NotLiveVerified_IsRefused(string sql, string named)
     {
         var h = DmlTestHarness.Create(rows: 4);
@@ -158,6 +161,80 @@ public sealed class DmlFaithfulTests : IDisposable
         var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = "DELETE FROM account WHERE NOT (name = 'n1')", DmlSafety = Confirmed }));
 
         Assert.StartsWith("NOT (name = 'n1') is not supported", ex.Message);
+        h.AssertNothingChanged();
+    }
+
+    // Shapes the live differential run proved (2026-11-17) run here too.
+    [Theory]
+    [InlineData("UPDATE account SET revenue = revenue / 4 WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET numberofemployees = CAST(revenue AS int) WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET numberofemployees = TRY_CONVERT(int, revenue) WHERE name = 'n1'")]
+    [InlineData("UPDATE dbo.account SET name = 'x' WHERE name = 'n1'")]
+    [InlineData("DELETE FROM account WHERE name NOT LIKE '%1'")]
+    [InlineData("DELETE FROM account WHERE name NOT LIKE 'n_%'")]
+    [InlineData("UPDATE account SET description = IIF(revenue > 1 AND revenue < 900, 'a', 'b') WHERE name = 'n1'")]
+    [InlineData("DELETE FROM account WHERE statecode = 0")]
+    [InlineData("DELETE FROM account WHERE statecode NOT IN (1)")]
+    [InlineData("DELETE FROM account WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
+    [InlineData("DELETE FROM account WHERE accountid IN ('{00000000-0000-0000-0000-000000000001}', '00000000-0000-0000-0000-000000000002')")]
+    [InlineData("DELETE FROM account WHERE parentaccountid IS NULL")]
+    [InlineData("DELETE FROM account WHERE revenue IN (500, 1000)")]
+    [InlineData("DELETE FROM account WHERE creditlimit >= 5")]
+    [InlineData("UPDATE account SET creditlimit = 5 WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET notes = 'x' WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET followupby = '2024-01-01T00:00:00+02:00' WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET followupby = NULL WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET customertypecode = 2 WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET statecode = 1, statuscode = 2 WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET parentaccountid = '00000000-0000-0000-0000-000000000001' WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET parentaccountid = CAST('00000000-0000-0000-0000-000000000001' AS uniqueidentifier) WHERE name = 'n1'")]
+    [InlineData("INSERT INTO account (name) SELECT TOP 2 name FROM account WHERE revenue > 0 ORDER BY name DESC")]
+    public async Task LiveVerifiedShapes_Run(string sql)
+    {
+        var h = await Run(sql);
+        Assert.NotNull(h);
+    }
+
+    // Only a user-local date-and-time column and a date-only column were verified live. A user-local column shown as a
+    // date only stores a time in UTC, a time-zone-independent column has no zone at all, and a column whose behaviour is
+    // not known cannot be classified: all refused, for reading in WHERE and for writing.
+    [Theory]
+    [InlineData("UPDATE account SET legacydate = '2024-01-01' WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET legacydate = '2024-01-01T00:00:00Z' WHERE name = 'n1'")]
+    [InlineData("DELETE FROM account WHERE legacydate = '2024-01-01T00:00:00Z'")]
+    [InlineData("DELETE FROM account WHERE legacydate < '2024-01-01'")]
+    [InlineData("UPDATE account SET tzidate = '2024-01-01T00:00:00Z' WHERE name = 'n1'")]
+    [InlineData("DELETE FROM account WHERE tzidate >= '2024-01-01T00:00:00Z'")]
+    [InlineData("UPDATE account SET nobehaviordate = '2024-01-01T00:00:00Z' WHERE name = 'n1'")]
+    [InlineData("DELETE FROM account WHERE nobehaviordate = '2024-01-01T00:00:00Z'")]
+    [InlineData("INSERT INTO account (name, legacydate) VALUES ('a', '2024-01-01')")]
+    public async Task DateColumnsOfAnUnverifiedBehaviour_AreRefused(string sql)
+    {
+        var h = DmlTestHarness.Create(rows: 4);
+
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
+
+        Assert.Contains("has not been verified", ex.Message);
+        h.AssertNothingChanged();
+    }
+
+    [Theory]
+    [InlineData("UPDATE account SET birthday = '2024-01-15' WHERE name = 'n1'")]
+    [InlineData("DELETE FROM account WHERE birthday < '2024-01-15'")]
+    public async Task DateOnlyColumns_TakeADate(string sql)
+    {
+        var h = await Run(sql);
+        Assert.NotNull(h);
+    }
+
+    [Fact]
+    public async Task StatusReasonOfAnotherStatus_IsRefused()
+    {
+        var h = DmlTestHarness.Create(rows: 4);
+
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = "UPDATE account SET statecode = 0, statuscode = 2 WHERE name = 'n1'", DmlSafety = Confirmed }));
+
+        Assert.Contains("belongs to statecode 1", ex.Message);
         h.AssertNothingChanged();
     }
 
@@ -218,9 +295,9 @@ public sealed class DmlFaithfulTests : IDisposable
     [InlineData("UPDATE account SET nosuchcolumn = 'x' WHERE revenue > 0", "has no column 'nosuchcolumn'")]
     [InlineData("DELETE FROM account WHERE nosuchcolumn = 'x'", "has no column 'nosuchcolumn'")]
     [InlineData("INSERT INTO account (createdon) VALUES ('2024-01-01')", "cannot be set by INSERT")]
-    [InlineData("UPDATE account SET accountid = 'x' WHERE revenue > 0", "cannot be set by UPDATE")]
+    [InlineData("UPDATE account SET accountid = 'x' WHERE revenue > 0", "Dataverse generates row ids")]
     [InlineData("UPDATE account SET revenue = revenue + '100' WHERE revenue > 0", "+ with text")]
-    [InlineData("UPDATE account SET revenue = revenue + description WHERE revenue > 0", "Arithmetic")]
+    [InlineData("UPDATE account SET revenue = revenue + description WHERE revenue > 0", "not a number")]
     [InlineData("UPDATE account SET description = name * 2 WHERE revenue > 0", "Arithmetic")]
     public async Task ColumnsNotProvenToReadOrWriteCorrectly_AreRefused(string sql, string named)
     {

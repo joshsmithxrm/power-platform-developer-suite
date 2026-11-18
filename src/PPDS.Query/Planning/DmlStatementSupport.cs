@@ -334,14 +334,8 @@ internal static class DmlStatementSupport
         if (!IsLogicalName(schemaObject.BaseIdentifier.Value) || (named.Alias != null && !IsLogicalName(named.Alias.Value)))
             return $"{Sql(named)} is not a valid Dataverse table name or alias." + NothingExecuted;
         var schema = schemaObject.SchemaIdentifier?.Value;
-        if (schemaObject.ServerIdentifier == null && schemaObject.DatabaseIdentifier == null
-            && schema != null && schema.Equals("dbo", StringComparison.OrdinalIgnoreCase))
-        {
-            // Not part of the live-verified allowlist (specs/query.md); the plain table name is.
-            return $"{Sql(named)} (a dbo. prefix) is not supported in {verb}." + NothingExecuted +
-                   $" Name the table without the prefix: {schemaObject.BaseIdentifier.Value}.";
-        }
-        if (schemaObject.ServerIdentifier != null || schemaObject.DatabaseIdentifier != null || schema != null)
+        if (schemaObject.ServerIdentifier != null || schemaObject.DatabaseIdentifier != null
+            || (schema != null && !schema.Equals("dbo", StringComparison.OrdinalIgnoreCase)))
         {
             return $"{Sql(named)} names another environment or schema: {verb} can {(reading ? "read" : "write")} only tables " +
                    "of the connected environment." + NothingExecuted;
@@ -411,10 +405,6 @@ internal static class DmlStatementSupport
             case InPredicate { Subquery: null, Expression: ColumnReferenceExpression column } inPredicate
                 when inPredicate.Values.All(IsConstant):
                 return CheckColumn(column, names, context);
-            case LikePredicate { EscapeExpression: null, NotDefined: true, SecondExpression: StringLiteral pattern }
-                when !IsPrefixPattern(pattern.Value):
-                // Only NOT LIKE 'text%' (not-begin-with) was verified live; other NOT LIKE patterns are not proven.
-                return Unsupported(Sql(condition), context, " NOT LIKE is supported only as NOT LIKE 'text%'.");
             case LikePredicate { EscapeExpression: null, FirstExpression: ColumnReferenceExpression column, SecondExpression: StringLiteral pattern }
                 when !pattern.Value.Contains('[') && !pattern.Value.Contains(']'):
                 return CheckColumn(column, names, context);
@@ -427,10 +417,6 @@ internal static class DmlStatementSupport
                     "BETWEEN, IS [NOT] NULL, combined with AND, OR and parentheses.");
         }
     }
-
-    /// <summary>'text%' with no other wildcard.</summary>
-    private static bool IsPrefixPattern(string pattern)
-        => pattern.Length > 1 && pattern.EndsWith('%') && pattern[..^1].IndexOfAny(['%', '_', '[', ']']) < 0;
 
     private static bool IsComparison(BooleanComparisonType type) => type is BooleanComparisonType.Equals
         or BooleanComparisonType.NotEqualToBrackets or BooleanComparisonType.NotEqualToExclamation
@@ -470,11 +456,9 @@ internal static class DmlStatementSupport
             case BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add } add
                 when add.FirstExpression is StringLiteral || add.SecondExpression is StringLiteral:
                 return Unsupported($"{Sql(add)} (+ with text)", context, " Use CONCAT(...) to join text.");
-            case BinaryExpression { BinaryExpressionType: BinaryExpressionType.Divide } divide:
-                // SQL divides whole numbers without a remainder; not verified against the evaluator live.
-                return Unsupported($"{Sql(divide)} (division)", context);
             case BinaryExpression binary when binary.BinaryExpressionType is BinaryExpressionType.Add
-                or BinaryExpressionType.Subtract or BinaryExpressionType.Multiply or BinaryExpressionType.Modulo:
+                or BinaryExpressionType.Subtract or BinaryExpressionType.Multiply or BinaryExpressionType.Divide
+                or BinaryExpressionType.Modulo:
                 return All([binary.FirstExpression, binary.SecondExpression]);
             case ParenthesisExpression paren:
                 return CheckValue(paren.Expression, columns, context);
@@ -495,26 +479,42 @@ internal static class DmlStatementSupport
             case SimpleCaseExpression simple:
                 return All(new[] { simple.InputExpression, simple.ElseExpression }
                     .Concat(simple.WhenClauses.SelectMany(w => new[] { w.WhenExpression, w.ThenExpression })));
-            // Only conversion to text (nvarchar) was verified live; other target types and the TRY_ forms are not proven.
-            case CastCall cast when !IsText(cast.DataType):
-                return Unsupported($"{Sql(cast)} (CAST to a type other than nvarchar)", context);
+            // Conversions verified live: to nvarchar, int, decimal/numeric, and (CAST of a GUID literal) uniqueidentifier;
+            // TRY_CAST/TRY_CONVERT to int or decimal. Date/time conversions are not (time zones), nor CONVERT styles.
+            case CastCall cast when !IsConversionTarget(cast.DataType, allowGuid: true):
+                return Unsupported($"{Sql(cast)} (CAST to {Sql(cast.DataType)})", context, ConversionTargets);
             case CastCall cast:
                 return CheckValue(cast.Parameter, columns, context);
             case ConvertCall { Style: not null } convert:
                 return Unsupported($"{Sql(convert)} (a CONVERT style)", context, " Use CONVERT without a style, or CAST.");
-            case ConvertCall convert when !IsText(convert.DataType):
-                return Unsupported($"{Sql(convert)} (CONVERT to a type other than nvarchar)", context);
+            case ConvertCall convert when !IsConversionTarget(convert.DataType, allowGuid: false):
+                return Unsupported($"{Sql(convert)} (CONVERT to {Sql(convert.DataType)})", context, ConversionTargets);
             case ConvertCall convert:
                 return CheckValue(convert.Parameter, columns, context);
+            case TryCastCall tryCast when IsNumberTarget(tryCast.DataType):
+                return CheckValue(tryCast.Parameter, columns, context);
+            case TryConvertCall { Style: null } tryConvert when IsNumberTarget(tryConvert.DataType):
+                return CheckValue(tryConvert.Parameter, columns, context);
             case TryCastCall or TryConvertCall:
-                return Unsupported(Sql(expression), context, " Use CAST(... AS nvarchar(n)) or CONVERT(nvarchar(n), ...).");
+                return Unsupported(Sql(expression), context, " TRY_CAST and TRY_CONVERT are supported to int or decimal only.");
+            case LeftFunctionCall or RightFunctionCall:
+                return Unsupported(Sql(expression), context, " Use SUBSTRING(text, start, length) instead.");
             case FunctionCall function when function.CallTarget == null && function.OverClause == null
                 && function.WithinGroupClause == null && function.UniqueRowFilter == UniqueRowFilter.NotSpecified
                 && AllowedFunctions.Contains(function.FunctionName.Value):
                 return All(function.Parameters);
+            case FunctionCall function when function.FunctionName.Value.ToUpperInvariant() is "GETDATE" or "GETUTCDATE" or "SYSDATETIME"
+                or "SYSUTCDATETIME" or "SYSDATETIMEOFFSET" or "CURRENT_TIMESTAMP":
+                return Unsupported($"the function {function.FunctionName.Value}", context,
+                    " The engine would evaluate it again for every row, where SQL evaluates it once per statement. Write the time as a literal with Z, for example '2024-01-15T09:30:00Z'.");
+            case FunctionCall function when function.FunctionName.Value.Equals("NEWID", StringComparison.OrdinalIgnoreCase):
+                return Unsupported("the function NEWID", context, " Dataverse generates row ids; leave the id column out.");
+            case FunctionCall function when function.FunctionName.Value.Equals("REPLACE", StringComparison.OrdinalIgnoreCase):
+                return Unsupported("the function REPLACE", context,
+                    " Dataverse matches text without regard to accents and the query engine would not, so REPLACE could change different characters than SQL would.");
             case FunctionCall function:
                 return Unsupported($"the function {function.FunctionName.Value}", context,
-                    $" Supported functions: {string.Join(", ", AllowedFunctions.OrderBy(f => f))}, and COALESCE, NULLIF, IIF, CASE, CAST and CONVERT to nvarchar.");
+                    $" Supported functions: {string.Join(", ", AllowedFunctions.OrderBy(f => f))}, and COALESCE, NULLIF, IIF, CASE, CAST, CONVERT, TRY_CAST and TRY_CONVERT.");
             case ScalarSubquery:
                 return Unsupported("a subquery", context);
             default:
@@ -527,9 +527,9 @@ internal static class DmlStatementSupport
     {
         switch (predicate)
         {
-            case BooleanBinaryExpression:
-                // Only single conditions inside IIF/CASE were verified live; AND/OR over NULLs there is not proven.
-                return Unsupported($"{Sql(predicate)} (AND/OR inside IIF or CASE)", context, " Use one condition per WHEN.");
+            case BooleanBinaryExpression binary:
+                // AND/OR over number comparisons with NULLs was verified live (unknown takes the ELSE branch, as in SQL).
+                return CheckValuePredicate(binary.FirstExpression, columns, context) ?? CheckValuePredicate(binary.SecondExpression, columns, context);
             case BooleanParenthesisExpression paren:
                 return CheckValuePredicate(paren.Expression, columns, context);
             case BooleanNotExpression:
@@ -618,8 +618,15 @@ internal static class DmlStatementSupport
         public override void Visit(IdentityFunctionCall node) => _found ??= Unsupported("IDENTITY()", "INSERT, UPDATE or DELETE");
     }
 
-    private static bool IsText(DataTypeReference type)
-        => type is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.NVarChar };
+    private const string ConversionTargets = " Supported: nvarchar(n), int, decimal(p, s), and CAST('<guid>' AS uniqueidentifier).";
+
+    private static bool IsNumberTarget(DataTypeReference type)
+        => type is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.Int or SqlDataTypeOption.Decimal or SqlDataTypeOption.Numeric };
+
+    private static bool IsConversionTarget(DataTypeReference type, bool allowGuid)
+        => IsNumberTarget(type)
+           || type is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.NVarChar }
+           || (allowGuid && type is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.UniqueIdentifier });
 
     private static string Unsupported(string part, string context, string? howTo = null)
         => $"{part} is not supported in {context}." + NothingExecuted + (howTo ?? string.Empty);

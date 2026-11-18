@@ -68,7 +68,7 @@ public class HistoryExecuteCommandTests : IDisposable
     {
         var executor = new Mock<IQueryExecutor>(behavior);
         var bulk = new Mock<IBulkOperationExecutor>(behavior);
-        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard(), bulkOperationExecutor: bulk.Object);
+        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard(), bulkOperationExecutor: bulk.Object, metadataProvider: PPDS.Cli.Tests.Services.Query.TestMetadata.Provider);
         return (service, executor, bulk);
     }
 
