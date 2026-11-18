@@ -4,11 +4,7 @@
     "picasso@picasso": false
   },
   "safety": {
-    "shakedown_safe_envs": [
-      "PPDS Demo - Dev",
-      "Picasso - Dev",
-      "PPDS Dev"
-    ],
+    "shakedown_safe_envs": [],
     "readonly_env_var": "PPDS_SHAKEDOWN"
   },
   "permissions": {
