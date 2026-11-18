@@ -170,6 +170,29 @@ public sealed class BaseLanguageLabelWriteTests
     }
 
     [Theory]
+    [InlineData("add-option")]
+    [InlineData("update-option")]
+    [InlineData("add-statusreason")]
+    [InlineData("update-statusreason")]
+    [InlineData("add-column-option")]
+    [InlineData("update-column-option")]
+    [InlineData("update-state-value")]
+    [Trait("AC", "AC-127")]
+    [Trait("AC", "AC-148")]
+    public async Task ACancellationAfterAnOptionWriteIsAcknowledged_IsWriteNotConfirmed(string path)
+    {
+        // The option write is committed when the SDK acknowledges it: a cancellation from there on is "written, not
+        // confirmed", not a plain cancellation that hides the write (ConfirmOptionWriteAsync's checkpoint).
+        var world = new World(French) { CancelAfterOptionWrite = true, Publish = Publishing.Contains(path) };
+        var error = await Assert.ThrowsAsync<PpdsException>(() => world.RunAsync(path));
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.Contains("could not be confirmed: the read was cancelled", error.Message);
+        Assert.Equal(world.Token, Assert.IsAssignableFrom<OperationCanceledException>(error.InnerException).CancellationToken);
+        Assert.Single(world.Writes);
+        Assert.DoesNotContain(world.Requests, r => r is PublishXmlRequest);
+    }
+
+    [Theory]
     [InlineData("update-table")]
     [InlineData("create-column")]
     [InlineData("update-choice")]
@@ -529,6 +552,10 @@ public sealed class BaseLanguageLabelWriteTests
         public bool Publish { get; init; }
         public bool DryRun { get; init; }
         public Exception? ReadBackFailure { get; init; }
+        /// <summary>Cancels <see cref="Token"/> as an option write (insert or update of an option, status reason or state value) is acknowledged.</summary>
+        public bool CancelAfterOptionWrite { get; init; }
+        private readonly CancellationTokenSource _cancellation = new();
+        public CancellationToken Token => _cancellation.Token;
 
         /// <summary>Every request except the read-backs, in order.</summary>
         public List<OrganizationRequest> Requests { get; } = [];
@@ -578,6 +605,8 @@ public sealed class BaseLanguageLabelWriteTests
             {
                 Requests.Add(request);
                 _store.Record(request);
+                if (CancelAfterOptionWrite && request is SdkUpdateOption or SdkUpdateState or InsertOptionValueRequest or InsertStatusValueRequest)
+                    _cancellation.Cancel();
             }
 
             if (StoresChoiceNamesInLowerCase && request is RetrieveOptionSetRequest { Name: { } asked } && asked != asked.ToLowerInvariant())
@@ -774,13 +803,13 @@ public sealed class BaseLanguageLabelWriteTests
                 Options = [new OptionDefinition { Label = "Un", Value = 100000000 }, new OptionDefinition { Label = "Deux", Value = 100000001 }]
             }),
             "update-choice" => Service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = Solution, Name = Choice, DisplayName = "Renommé", Description = "Redécrit" }),
-            "add-option" => Service.AddOptionValueAsync(new AddOptionValueRequest { OptionSetName = Choice, Label = "Ajouté", Description = "Ajouté décrit", Value = 100000005, SolutionUniqueName = Solution }),
-            "update-option" => Service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = Choice, Value = 1, NewLabel = "Fermé", Description = "Fermé décrit", SolutionUniqueName = Solution }),
-            "add-statusreason" => Service.AddStatusReasonAsync(new AddStatusReasonRequest { EntityLogicalName = Table, Label = "Nouveau statut", StateCode = 0, Value = 7, SolutionUniqueName = Solution, Publish = Publish }),
-            "update-statusreason" => Service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = Table, Value = 1, NewLabel = "Statut renommé", SolutionUniqueName = Solution, Publish = Publish }),
-            "add-column-option" => Service.AddColumnOptionAsync(new AddColumnOptionRequest { EntityLogicalName = Table, ColumnLogicalName = Pick, Label = "Ajouté", Value = 7, SolutionUniqueName = Solution, Publish = Publish }),
-            "update-column-option" => Service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = Table, ColumnLogicalName = Pick, Value = 1, NewLabel = "Fermé", SolutionUniqueName = Solution, Publish = Publish }),
-            "update-state-value" => Service.UpdateStateValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateStateValueRequest { EntityLogicalName = Table, AttributeLogicalName = "statecode", Value = 0, Label = "Actif renommé" }),
+            "add-option" => Service.AddOptionValueAsync(new AddOptionValueRequest { OptionSetName = Choice, Label = "Ajouté", Description = "Ajouté décrit", Value = 100000005, SolutionUniqueName = Solution }, ct: Token),
+            "update-option" => Service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = Choice, Value = 1, NewLabel = "Fermé", Description = "Fermé décrit", SolutionUniqueName = Solution }, ct: Token),
+            "add-statusreason" => Service.AddStatusReasonAsync(new AddStatusReasonRequest { EntityLogicalName = Table, Label = "Nouveau statut", StateCode = 0, Value = 7, SolutionUniqueName = Solution, Publish = Publish }, ct: Token),
+            "update-statusreason" => Service.UpdateStatusReasonAsync(new UpdateStatusReasonRequest { EntityLogicalName = Table, Value = 1, NewLabel = "Statut renommé", SolutionUniqueName = Solution, Publish = Publish }, ct: Token),
+            "add-column-option" => Service.AddColumnOptionAsync(new AddColumnOptionRequest { EntityLogicalName = Table, ColumnLogicalName = Pick, Label = "Ajouté", Value = 7, SolutionUniqueName = Solution, Publish = Publish }, ct: Token),
+            "update-column-option" => Service.UpdateColumnOptionAsync(new UpdateColumnOptionRequest { EntityLogicalName = Table, ColumnLogicalName = Pick, Value = 1, NewLabel = "Fermé", SolutionUniqueName = Solution, Publish = Publish }, ct: Token),
+            "update-state-value" => Service.UpdateStateValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateStateValueRequest { EntityLogicalName = Table, AttributeLogicalName = "statecode", Value = 0, Label = "Actif renommé" }, ct: Token),
             "create-key" => Service.CreateKeyAsync(new CreateKeyRequest { SolutionUniqueName = Solution, EntityLogicalName = Table, SchemaName = "new_key", DisplayName = "Clé", KeyAttributes = [NameColumn] }),
             _ => throw new ArgumentOutOfRangeException(nameof(path))
         };
