@@ -55,8 +55,8 @@ internal static class DmlColumnValidator
                     foreach (var set in assignments)
                     {
                         var target = Written(columns, table, set.Column, forCreate: false);
-                        WrittenValue(target, table, set.NewValue, columns);
                         ReadValue(columns, table, set.NewValue);
+                        WrittenValue(target, table, set.NewValue, columns);
                     }
                     StatusTogether(assignments.Select(a => (Column(columns, table, a.Column), a.NewValue)).ToList(), table);
                     if (spec.WhereClause?.SearchCondition != null)
@@ -87,8 +87,8 @@ internal static class DmlColumnValidator
                         {
                             for (var i = 0; i < row.ColumnValues.Count && i < targets.Count; i++)
                             {
-                                WrittenValue(targets[i], table, row.ColumnValues[i], columns);
                                 ReadValue(columns, table, row.ColumnValues[i]);
+                                WrittenValue(targets[i], table, row.ColumnValues[i], columns);
                             }
                         }
                     }
@@ -99,9 +99,9 @@ internal static class DmlColumnValidator
                         var sourceColumns = await ColumnsAsync(metadata, sourceTable, ct);
                         for (var i = 0; i < select.SelectElements.Count; i++)
                         {
+                            ReadValue(sourceColumns, sourceTable, select.SelectElements[i]);
                             if (select.SelectElements[i] is SelectScalarExpression item && i < targets.Count)
                                 WrittenValue(targets[i], table, item.Expression, sourceColumns);
-                            ReadValue(sourceColumns, sourceTable, select.SelectElements[i]);
                         }
                         if (select.WhereClause?.SearchCondition != null)
                             ReadFilter(sourceColumns, sourceTable, select.WhereClause.SearchCondition);
@@ -198,7 +198,14 @@ internal static class DmlColumnValidator
         }
 
         if (TextTypes.Contains(type))
+        {
+            if (!IsText(value, readColumns))
+            {
+                throw Refuse($"{column} is a text column; the value {Sql(value)} is not text. Write text, or convert a whole number " +
+                             "with CAST(... AS nvarchar(n)).");
+            }
             return;
+        }
         if (NumericTypes.Contains(type))
         {
             if (!IsNumeric(value, readColumns))
@@ -306,6 +313,10 @@ internal static class DmlColumnValidator
         fragment.Accept(conversions);
         if (conversions.Problem != null)
             throw Refuse(conversions.Problem);
+        var textArguments = new TextArgumentCheck(columns);
+        fragment.Accept(textArguments);
+        if (textArguments.Problem != null)
+            throw Refuse(textArguments.Problem);
         Read(columns, table, fragment);
     }
 
@@ -474,6 +485,49 @@ internal static class DmlColumnValidator
         _ => false
     };
 
+    /// <summary>An expression the engine evaluates to text: text literals and columns, and text functions of them.</summary>
+    private static bool IsText(ScalarExpression expression, Dictionary<string, AttributeMetadataDto> columns) => expression switch
+    {
+        StringLiteral or NullLiteral => true,
+        ParenthesisExpression paren => IsText(paren.Expression, columns),
+        ColumnReferenceExpression column => TypeOf(column, columns) is { } type && TextTypes.Contains(type),
+        // Their arguments are checked by TextArgumentCheck.
+        FunctionCall { FunctionName.Value: var name } when TextFunctions.Contains(name) || name.Equals("CONCAT", StringComparison.OrdinalIgnoreCase) => true,
+        FunctionCall { FunctionName.Value: var name } function when name.Equals("ISNULL", StringComparison.OrdinalIgnoreCase)
+            => function.Parameters.All(p => IsText(p, columns)),
+        CoalesceExpression coalesce => coalesce.Expressions.All(e => IsText(e, columns)),
+        NullIfExpression nullIf => IsText(nullIf.FirstExpression, columns),
+        IIfCall iif => IsText(iif.ThenExpression, columns) && IsText(iif.ElseExpression, columns),
+        SearchedCaseExpression searched => searched.WhenClauses.All(w => IsText(w.ThenExpression, columns))
+                                           && (searched.ElseExpression is null || IsText(searched.ElseExpression, columns)),
+        SimpleCaseExpression simple => simple.WhenClauses.All(w => IsText(w.ThenExpression, columns))
+                                       && (simple.ElseExpression is null || IsText(simple.ElseExpression, columns)),
+        CastCall { DataType: SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.NVarChar } } => true,
+        ConvertCall { DataType: SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.NVarChar } } => true,
+        _ => false
+    };
+
+    /// <summary>An expression the engine evaluates to a whole number (its text is the same in SQL and in the engine).</summary>
+    private static bool IsWholeNumber(ScalarExpression expression, Dictionary<string, AttributeMetadataDto> columns) => expression switch
+    {
+        IntegerLiteral => true,
+        UnaryExpression unary => IsWholeNumber(unary.Expression, columns),
+        ParenthesisExpression paren => IsWholeNumber(paren.Expression, columns),
+        BinaryExpression binary => IsWholeNumber(binary.FirstExpression, columns) && IsWholeNumber(binary.SecondExpression, columns),
+        ColumnReferenceExpression column => TypeOf(column, columns) is { } type && WholeNumberTypes.Contains(type),
+        FunctionCall { FunctionName.Value: var name } when name.Equals("LEN", StringComparison.OrdinalIgnoreCase) => true,
+        FunctionCall { FunctionName.Value: var name } function when name.Equals("ABS", StringComparison.OrdinalIgnoreCase)
+            => function.Parameters.Count == 1 && IsWholeNumber(function.Parameters[0], columns),
+        CastCall { DataType: SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.Int } } cast => IsNumeric(cast.Parameter, columns),
+        ConvertCall { DataType: SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.Int } } convert => IsNumeric(convert.Parameter, columns),
+        _ => false
+    };
+
+    private static string? TypeOf(ColumnReferenceExpression column, Dictionary<string, AttributeMetadataDto> columns)
+        => columns.TryGetValue(column.MultiPartIdentifier.Identifiers.Last().Value, out var a) ? a.AttributeType : null;
+
+    private static readonly HashSet<string> TextFunctions = Set("UPPER", "LOWER", "LTRIM", "RTRIM", "TRIM", "SUBSTRING");
+
     private static bool IsNumberType(DataTypeReference type) => type is SqlDataTypeReference
     {
         SqlDataTypeOption: SqlDataTypeOption.Int or SqlDataTypeOption.BigInt or SqlDataTypeOption.Decimal or SqlDataTypeOption.Numeric
@@ -512,6 +566,54 @@ internal static class DmlColumnValidator
 
         public override void ExplicitVisit(ScalarSubquery node)
         {
+        }
+    }
+
+    /// <summary>
+    /// Text functions take text; CONCAT and CAST/CONVERT to nvarchar take text or a whole number. The text SQL makes of a
+    /// decimal, currency or floating-point value depends on its type and scale, which the engine does not reproduce, and an
+    /// implicit conversion of a number given to a text function was not verified.
+    /// </summary>
+    private sealed class TextArgumentCheck(Dictionary<string, AttributeMetadataDto> columns) : TSqlFragmentVisitor
+    {
+        public string? Problem { get; private set; }
+
+        public override void Visit(FunctionCall node)
+        {
+            var name = node.FunctionName.Value;
+            if (name.Equals("CONCAT", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var argument in node.Parameters)
+                    TextOrWhole(node, argument);
+            }
+            else if ((TextFunctions.Contains(name) || name.Equals("LEN", StringComparison.OrdinalIgnoreCase)) && node.Parameters.Count > 0
+                     && !IsText(node.Parameters[0], columns))
+            {
+                Problem ??= $"{Sql(node)}: {name.ToUpperInvariant()} takes text, and {Sql(node.Parameters[0])} is not text. " +
+                            "Convert a whole number with CAST(... AS nvarchar(n)) first.";
+            }
+        }
+
+        public override void Visit(CastCall node)
+        {
+            if (node.DataType is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.NVarChar })
+                TextOrWhole(node, node.Parameter);
+        }
+
+        public override void Visit(ConvertCall node)
+        {
+            if (node.DataType is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.NVarChar })
+                TextOrWhole(node, node.Parameter);
+        }
+
+        private void TextOrWhole(TSqlFragment node, ScalarExpression argument)
+        {
+            if (!IsText(argument, columns) && !IsWholeNumber(argument, columns))
+            {
+                Problem ??= $"{Sql(node)}: {Sql(argument)} would be turned into text, which is supported only for text and whole " +
+                            "numbers (the text SQL makes of a decimal, currency or floating-point value is not reproduced). Convert it " +
+                            "to a whole number first, for example CAST(... AS int).";
+            }
         }
     }
 

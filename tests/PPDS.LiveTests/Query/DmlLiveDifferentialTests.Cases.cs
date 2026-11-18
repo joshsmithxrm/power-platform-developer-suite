@@ -295,6 +295,8 @@ public sealed partial class DmlLiveDifferentialTests
             ("CAST(ppds_num AS nvarchar(10))", r => I(r, Num)?.ToString(System.Globalization.CultureInfo.InvariantCulture)),
             ("CONVERT(nvarchar(10), ppds_num)", r => I(r, Num)?.ToString(System.Globalization.CultureInfo.InvariantCulture)),
             ("'lit'", _ => "lit"),
+            ("CONCAT(ppds_name, ppds_num)", r => (S(r, N) ?? "") + (I(r, Num)?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "")),
+            ("CONCAT(ppds_name, '#', CONVERT(nvarchar(10), ppds_num * 2))", r => (S(r, N) ?? "") + "#" + ((I(r, Num) * 2)?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "")),
         };
         foreach (var (expr, value) in notes)
             await Set($"ppds_note = {expr}", r => r.With(Note, value(r)));
@@ -311,6 +313,12 @@ public sealed partial class DmlLiveDifferentialTests
             ("CONVERT(int, ppds_amount)", r => Trunc(M(r, Amount))),
             ("TRY_CAST(ppds_amount AS int)", r => Trunc(M(r, Amount))),
             ("TRY_CONVERT(int, ppds_amount)", r => Trunc(M(r, Amount))),
+            // implicit conversions to a whole number truncate toward zero, as in SQL
+            ("ppds_amount", r => Trunc(M(r, Amount))),
+            ("ppds_money", r => Trunc(M(r, MoneyCol))),
+            ("ppds_float", r => Trunc(M(r, FloatCol))),
+            ("2.7", _ => 2),
+            ("-2.7", _ => -2),
         };
         foreach (var (expr, value) in nums)
             await Set($"ppds_num = {expr}", r => r.With(Num, value(r)));
@@ -454,6 +462,11 @@ public sealed partial class DmlLiveDifferentialTests
             $"UPDATE {t} SET ppds_flag = 2 WHERE ppds_num = 1",
             $"UPDATE {t} SET ppds_note = 'x' WHERE ppds_num = 5.0",
             $"UPDATE {t} SET ppds_note = 'x' WHERE ppds_name = 5",
+            $"UPDATE {t} SET ppds_note = ppds_amount WHERE ppds_num = 1",
+            $"UPDATE {t} SET ppds_note = 5 WHERE ppds_num = 1",
+            $"UPDATE {t} SET ppds_note = CONCAT(ppds_name, ppds_amount) WHERE ppds_num = 1",
+            $"UPDATE {t} SET ppds_note = CAST(ppds_money AS nvarchar(20)) WHERE ppds_num = 1",
+            $"UPDATE {t} SET ppds_num = LEN(ppds_num) WHERE ppds_num = 1",
             $"UPDATE {t} SET ppds_tzi = '2024-01-01T00:00:00Z' WHERE ppds_num = 1",
             $"UPDATE {t} SET ppds_note = 'x' WHERE ppds_tzi < '2024-01-01T00:00:00Z'",
             $"UPDATE {t} SET ppds_legacy = '2024-01-01' WHERE ppds_num = 1",

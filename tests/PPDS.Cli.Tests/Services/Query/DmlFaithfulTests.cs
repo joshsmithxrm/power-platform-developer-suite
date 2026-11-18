@@ -195,6 +195,42 @@ public sealed class DmlFaithfulTests : IDisposable
         Assert.NotNull(h);
     }
 
+    // Numbers turned into text: only a whole number (CAST/CONVERT to nvarchar, or inside CONCAT) was verified live. A
+    // decimal's text depends on its scale, which SQL and the engine format differently, and an implicit conversion of a
+    // number written into a text column or given to a text function is not proven.
+    [Theory]
+    [InlineData("UPDATE account SET description = revenue WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET description = 5 WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET description = 2.5 WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET description = CONCAT(name, revenue) WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET description = CAST(revenue AS nvarchar(20)) WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET description = UPPER(numberofemployees) WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET numberofemployees = LEN(numberofemployees) WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET description = IIF(revenue > 1, revenue, 0) WHERE name = 'n1'")]
+    [InlineData("INSERT INTO account (name) VALUES (5)")]
+    [InlineData("INSERT INTO account (name, description) SELECT name, revenue FROM account WHERE name = 'n1'")]
+    public async Task NumbersIntoText_AreRefusedUnlessProven(string sql)
+    {
+        var h = DmlTestHarness.Create(rows: 4);
+
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
+
+        Assert.Contains("text", ex.Message);
+        h.AssertNothingChanged();
+    }
+
+    [Theory]
+    [InlineData("UPDATE account SET description = CONCAT(name, numberofemployees) WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET description = CAST(numberofemployees AS nvarchar(10)) WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET description = CONCAT(name, '#', CONVERT(nvarchar(10), numberofemployees * 2)) WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET numberofemployees = revenue WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET numberofemployees = 2.7 WHERE name = 'n1'")]
+    public async Task ProvenNumberConversions_Run(string sql)
+    {
+        var h = await Run(sql);
+        Assert.NotNull(h);
+    }
+
     // Only a user-local date-and-time column and a date-only column were verified live. A user-local column shown as a
     // date only stores a time in UTC, a time-zone-independent column has no zone at all, and a column whose behaviour is
     // not known cannot be classified: all refused, for reading in WHERE and for writing.
@@ -297,7 +333,7 @@ public sealed class DmlFaithfulTests : IDisposable
     [InlineData("INSERT INTO account (createdon) VALUES ('2024-01-01')", "cannot be set by INSERT")]
     [InlineData("UPDATE account SET accountid = 'x' WHERE revenue > 0", "Dataverse generates row ids")]
     [InlineData("UPDATE account SET revenue = revenue + '100' WHERE revenue > 0", "+ with text")]
-    [InlineData("UPDATE account SET revenue = revenue + description WHERE revenue > 0", "not a number")]
+    [InlineData("UPDATE account SET revenue = revenue + description WHERE revenue > 0", "Arithmetic")]
     [InlineData("UPDATE account SET description = name * 2 WHERE revenue > 0", "Arithmetic")]
     public async Task ColumnsNotProvenToReadOrWriteCorrectly_AreRefused(string sql, string named)
     {
