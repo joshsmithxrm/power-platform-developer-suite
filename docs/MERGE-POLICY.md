@@ -85,20 +85,15 @@ To add or remove a package: edit the list above (between the `BEGIN`/`END` marke
 
 ## Pre-Merge Gate Rules
 
-The [`pre-merge-gate.yml`](../.github/workflows/pre-merge-gate.yml) workflow enforces two rules on every PR before merge. Both are **enforcing from day one** — there is no soft-warn period (per the v1-launch retro). Each rule is its own job in the PR Checks tab; the aggregate `Pre-Merge Gate` check is what branch protection should require.
+The [`pre-merge-gate.yml`](../.github/workflows/pre-merge-gate.yml) workflow enforces one rule (Rule 3, below) on every PR before merge, with no soft-warn period (per the v1-launch retro), and reports PR size for information. Each check is its own job in the PR Checks tab; the aggregate `Pre-Merge Gate` check succeeds iff the enforcing rule passes.
 
-Rule logic lives in `scripts/ci/`. Bypass markers are **case-sensitive** in the PR title or body — a deliberate copy-paste is required, not a casual mention.
+Rule logic lives in `scripts/ci/`.
 
-### Rule 1 — PR size (`scripts/ci/check_pr_size.py`)
+### PR size (informational, `scripts/ci/check_pr_size.py`)
 
-Blocks merge when:
+Not a rule and never a merge blocker. The `PR size (informational)` job writes the PR's changed files, additions and deletions to the job log and the GitHub step summary, and marks the PR "large" when it exceeds 50 files or 2000 LoC (additions + deletions) so reviewers can plan for it. It always exits 0. If the PR data cannot be read (for example a `gh` failure) the job still succeeds and shows a `::warning::` annotation and a summary note instead of numbers. There is no bypass marker because there is nothing to bypass.
 
-- Changed files > **50**, OR
-- Total LoC (additions + deletions) > **2000**
-
-Bypass: `[size-waived: <reason>]` in the PR title or body. The reason must be non-empty (whitespace-only is rejected). Use sparingly and explain why review of a large diff is acceptable (e.g., vendored 3p code, codegen output, mechanical rename).
-
-Catches the failure mode from PR #792 (131 files / 7.5K LoC merged unreviewed).
+Large diffs remain a review-quality concern (PR #792 merged 131 files / 7.5K LoC unreviewed): prefer splitting, and say in the description how a large diff was reviewed.
 
 ### Rule 3 — Major dependency evidence (`scripts/ci/check_major_bump_tested.py`)
 
