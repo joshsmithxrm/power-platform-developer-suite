@@ -105,7 +105,7 @@ public static class ReorderFieldsCommand
 
         try
         {
-            Console.Error.WriteLine("Warning: forms reorder-fields is deprecated. Use reorder-fields-strict, add-field or move-field for explicit operations. Removal is planned for CLI 2.0, no earlier than 90 days after the replacements' stable release.");
+            Console.Error.WriteLine("Warning: forms reorder-fields is deprecated. Use reorder-fields-strict, add-field or move-field for explicit operations. Current behavior is unchanged.");
             var fieldNames = fields.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
             if (fieldNames.Length == 0)

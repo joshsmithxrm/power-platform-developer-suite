@@ -9,7 +9,7 @@ namespace PPDS.Cli.Infrastructure;
 /// </summary>
 internal static class EnvironmentAliasPolicy
 {
-    private const string Notice = "warning: '-e' for --entity/--entities is deprecated; use the long option. Use --environment or -env for environments. Existing -e meanings are retained in this release.";
+    private const string Notice = "warning: '-e' for --entity/--entities is deprecated; use the long option. Use --environment or -env for environments. Existing -e meanings are unchanged.";
 
     internal static void Apply(Command root)
     {
