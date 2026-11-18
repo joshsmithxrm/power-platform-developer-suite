@@ -26,8 +26,8 @@ public sealed class LabelNoticeCommandTests
         [
             new ValidationMessage
             {
-                Field = "NewLabel", Rule = MetadataLabelWriteResult.EnglishLabelOnlyRule,
-                Message = "Only the English (LCID 1033) label is written. The label in your language (LCID 1036) is not changed and still reads 'Ouvert'."
+                Field = "NewLabel", Rule = MetadataLabelWriteResult.BaseLanguageLabelOnlyRule,
+                Message = "Only the base-language (LCID 1033) label is written. The label in your language (LCID 1036) is not changed and still reads 'Ouvert'."
             }
         ]
     };
@@ -54,7 +54,7 @@ public sealed class LabelNoticeCommandTests
         var (exit, stdout, stderr) = await Invoke(command, Notice);
         Assert.Equal(0, exit);
         Assert.Empty(stdout);
-        Assert.Contains("Warning: Only the English (LCID 1033) label is written.", stderr);
+        Assert.Contains("Warning: Only the base-language (LCID 1033) label is written.", stderr);
     }
 
     [Theory]
@@ -66,7 +66,7 @@ public sealed class LabelNoticeCommandTests
         Assert.Equal(0, exit);
         using var doc = JsonDocument.Parse(stdout);
         var message = Assert.Single(doc.RootElement.GetProperty("data").GetProperty("validationMessages").EnumerateArray());
-        Assert.Equal(MetadataLabelWriteResult.EnglishLabelOnlyRule, message.GetProperty("rule").GetString());
+        Assert.Equal(MetadataLabelWriteResult.BaseLanguageLabelOnlyRule, message.GetProperty("rule").GetString());
         Assert.Equal("NewLabel", message.GetProperty("field").GetString());
     }
 
@@ -105,7 +105,7 @@ public sealed class LabelNoticeCommandTests
     public void Help_SaysTheLabelIsEnglish(string group, string verb, string option)
     {
         var command = MetadataCommandGroup.Create(null).Subcommands.Single(c => c.Name == group).Subcommands.Single(c => c.Name == verb);
-        Assert.EndsWith("(English, LCID 1033)", command.Options.Single(o => o.Name == option).Description);
+        Assert.EndsWith("(in the organization's base language)", command.Options.Single(o => o.Name == option).Description);
     }
 
     [Fact]
@@ -115,7 +115,7 @@ public sealed class LabelNoticeCommandTests
         Assert.Equal("Choice updated: new_choice", PPDS.Cli.Tui.Screens.MetadataExplorerScreen.ChoiceUpdatedStatus("new_choice", MetadataLabelWriteResult.None));
         Assert.Equal("Choice updated: new_choice", PPDS.Cli.Tui.Screens.MetadataExplorerScreen.ChoiceUpdatedStatus("new_choice", null));
         var status = PPDS.Cli.Tui.Screens.MetadataExplorerScreen.ChoiceUpdatedStatus("new_choice", Notice);
-        Assert.StartsWith("Choice updated: new_choice Warning: Only the English (LCID 1033) label is written.", status);
+        Assert.StartsWith("Choice updated: new_choice Warning: Only the base-language (LCID 1033) label is written.", status);
     }
 
     [Theory]
@@ -158,7 +158,7 @@ public sealed class LabelNoticeCommandTests
     public void Tui_ColumnUpdateStatus_ShowsTheNotice()
     {
         Assert.Equal("Column updated: new_text", PPDS.Cli.Tui.Screens.MetadataExplorerScreen.UpdatedStatus("Column", "new_text", MetadataLabelWriteResult.None));
-        Assert.StartsWith("Column updated: new_text Warning: Only the English (LCID 1033) label is written.",
+        Assert.StartsWith("Column updated: new_text Warning: Only the base-language (LCID 1033) label is written.",
             PPDS.Cli.Tui.Screens.MetadataExplorerScreen.UpdatedStatus("Column", "new_text", Notice));
     }
 

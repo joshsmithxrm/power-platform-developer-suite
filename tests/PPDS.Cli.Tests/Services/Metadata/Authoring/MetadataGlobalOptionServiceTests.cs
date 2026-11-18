@@ -41,7 +41,7 @@ public class MetadataGlobalOptionServiceTests
     {
         _pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(_client.Object);
-        _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard());
+        _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
 
         // Default mock: stateful add-option (Insert, which stores a Color parameter) plus the colour read-back.
         // Tests that target an existing option by value/label call SetupGlobalOptions, which re-setups the
@@ -112,8 +112,20 @@ public class MetadataGlobalOptionServiceTests
     /// <summary>Models Dataverse storing the Color parameter on the addressed option (unless told to ignore it).</summary>
     private void StoreColor(IEnumerable<OptionMetadata> options, SdkUpdateOptionValueRequest update)
     {
+        var option = options.Single(o => o.Value == update.Value);
         if (!_ignoreColor && update.Parameters.TryGetValue("Color", out var color))
-            options.Single(o => o.Value == update.Value).Color = (string)color;
+            option.Color = (string)color;
+        // Labels and descriptions are stored too (merged by LCID), so the read-back sees what was written.
+        if (update.Parameters.TryGetValue("Label", out var label) && label is Label written) option.Label = Merge(option.Label, written);
+        if (update.Parameters.TryGetValue("Description", out var description) && description is Label text) option.Description = Merge(option.Description, text);
+    }
+
+    private static Label Merge(Label? stored, Label written)
+    {
+        var merged = new Label();
+        foreach (var l in stored?.LocalizedLabels ?? []) if (written.LocalizedLabels.All(w => w.LanguageCode != l.LanguageCode)) merged.LocalizedLabels.Add(l);
+        foreach (var l in written.LocalizedLabels) merged.LocalizedLabels.Add(l);
+        return merged;
     }
 
     // ---- add/update-option color forwarding (#1233) ----
@@ -154,8 +166,9 @@ public class MetadataGlobalOptionServiceTests
 
         var insert = _captured.Should().BeOfType<InsertOptionValueRequest>().Subject;
         insert.Parameters.ContainsKey("Color").Should().BeFalse();
-        // No color requested → no colour read-back.
-        _retrieveRequest.Should().BeNull();
+        // The label is still read back (one as-if-published read), with no colour to confirm.
+        _retrieveRequest.Should().NotBeNull();
+        _retrieveRequest!.RetrieveAsIfPublished.Should().BeTrue();
     }
 
     [Fact]

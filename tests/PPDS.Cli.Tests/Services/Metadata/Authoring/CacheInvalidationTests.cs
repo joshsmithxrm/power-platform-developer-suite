@@ -41,7 +41,7 @@ public class CacheInvalidationTests
             _validator,
             new InactiveFakeShakedownGuard(),
             logger: null,
-            cacheProvider: _cache.Object);
+            cacheProvider: _cache.Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
     }
 
     private void SetupPublisherPrefixQuery(string prefix)
@@ -75,6 +75,7 @@ public class CacheInvalidationTests
 
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(response);
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new CreateTableRequest
         {
@@ -96,6 +97,7 @@ public class CacheInvalidationTests
     {
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .Returns<OrganizationRequest, CancellationToken>((r, _) => Task.FromResult(MetadataDeleteTestResponses.For(r)));
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new DeleteTableRequest
         {
@@ -121,6 +123,7 @@ public class CacheInvalidationTests
 
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(response);
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new CreateColumnRequest
         {
@@ -146,6 +149,7 @@ public class CacheInvalidationTests
 
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(response);
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new CreateColumnRequest
         {
@@ -174,6 +178,7 @@ public class CacheInvalidationTests
 
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(response);
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new CreateGlobalChoiceRequest
         {
@@ -192,6 +197,7 @@ public class CacheInvalidationTests
     {
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .Returns<OrganizationRequest, CancellationToken>((r, _) => Task.FromResult(MetadataDeleteTestResponses.For(r)));
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new DeleteGlobalChoiceRequest
         {
@@ -278,13 +284,14 @@ public class CacheInvalidationTests
         var serviceWithoutCache = new DataverseMetadataAuthoringService(
             _pool.Object,
             _validator,
-            new InactiveFakeShakedownGuard());
+            new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
 
         var response = new CreateEntityResponse();
         response.Results["EntityId"] = Guid.NewGuid();
 
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(response);
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         var request = new CreateTableRequest
         {

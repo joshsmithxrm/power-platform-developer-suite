@@ -45,7 +45,7 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
         h.Attribute.Description.UserLocalizedLabel = new LocalizedLabel("Description francaise", 1036);
         var result = await h.UpdateAsync(Request("both"));
         Assert.Equal(new[] { "DisplayName", "Description" }, result.ValidationMessages.Select(m => m.Field));
-        Assert.All(result.ValidationMessages, m => Assert.Equal(MetadataLabelWriteResult.EnglishLabelOnlyRule, m.Rule));
+        Assert.All(result.ValidationMessages, m => Assert.Equal(MetadataLabelWriteResult.BaseLanguageLabelOnlyRule, m.Rule));
         Assert.Contains("'Original French'", result.ValidationMessages[0].Message);
         Assert.True(Assert.Single(h.Requests.OfType<UpdateAttributeRequest>()).MergeLabels);
 
@@ -345,12 +345,18 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
     [InlineData(false)]
     [InlineData(true)]
     [Trait("AC", "AC-129")]
-    public async Task GuardAndDryRun_DoNotReadMetadata(bool dryRun)
+    public async Task GuardAndDryRun_DoNotWrite(bool dryRun)
     {
         using var h = new ColumnLabelHarness("state", output, activeGuard: !dryRun);
         var request = Request("display", publish: true); request.DryRun = dryRun; request.MaxLength = 0;
-        if (dryRun) await h.UpdateAsync(request);
-        else Assert.Equal(ErrorCodes.Safety.ShakedownActive, (await Assert.ThrowsAsync<PpdsException>(() => h.UpdateAsync(request))).ErrorCode);
+        if (dryRun)
+        {
+            // A dry-run with a requested label reads the column as the update would (for the notices) and writes nothing.
+            await h.UpdateAsync(request);
+            h.AssertNoMutation(attributeReadOnly: true);
+            return;
+        }
+        Assert.Equal(ErrorCodes.Safety.ShakedownActive, (await Assert.ThrowsAsync<PpdsException>(() => h.UpdateAsync(request))).ErrorCode);
         Assert.Empty(h.Requests); Assert.Equal(0, h.Checkouts); Assert.Equal(0, h.CacheInvalidations);
     }
 
@@ -377,9 +383,9 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
     public void PublicRequestAndServiceContracts_RemainCompatible()
     {
         var constructor = Assert.Single(typeof(DataverseMetadataAuthoringService).GetConstructors());
-        Assert.Equal(5, constructor.GetParameters().Length);
+        Assert.Equal(6, constructor.GetParameters().Length); // + the optional base-language provider
         var method = typeof(IMetadataAuthoringService).GetMethod(nameof(IMetadataAuthoringService.UpdateColumnAsync))!;
-        Assert.Equal(typeof(Task<MetadataLabelWriteResult>), method.ReturnType); // AC-147: English-only label notices.
+        Assert.Equal(typeof(Task<MetadataLabelWriteResult>), method.ReturnType); // AC-147: base-language label notices.
         Assert.Equal(new[] { typeof(UpdateColumnRequest), typeof(IMetadataAuthoringProgressReporter), typeof(CancellationToken) }, method.GetParameters().Select(p => p.ParameterType));
         Assert.Equal(new[] { "AutoNumberFormat", "ColumnLogicalName", "Description", "DisplayName", "DryRun", "EntityLogicalName", "Format", "IsAuditEnabled",
             "IsSecured", "IsValidForAdvancedFind", "MaxLength", "MaxValue", "MinValue", "Precision", "Publish", "RequiredLevel", "SolutionUniqueName" },

@@ -38,9 +38,9 @@ public sealed class MetadataUpdateTableTool : McpToolBase
     public async Task<MetadataUpdateTableResult> ExecuteAsync(
         [Description("Unique name of the solution containing the table.")] string solution,
         [Description("Logical name of the entity to update.")] string entityName,
-        [Description("Updated display name (optional; English, LCID 1033).")] string? displayName = null,
-        [Description("Updated plural display name (optional; English, LCID 1033).")] string? pluralName = null,
-        [Description("Updated description (optional; English, LCID 1033).")] string? description = null,
+        [Description("Updated display name (optional; in the organization's base language).")] string? displayName = null,
+        [Description("Updated plural display name (optional; in the organization's base language).")] string? pluralName = null,
+        [Description("Updated description (optional; in the organization's base language).")] string? description = null,
         [Description("If true, validates without persisting changes.")] bool dryRun = false,
         CancellationToken cancellationToken = default)
     {
@@ -99,7 +99,7 @@ public sealed class MetadataUpdateTableResult
     [JsonPropertyName("wasDryRun")]
     public bool WasDryRun { get; set; }
 
-    /// <summary>Notices such as only the English (LCID 1033) label being written; empty when there are none.</summary>
+    /// <summary>Notices such as only the base-language label being written while a stored translation is shown; empty when there are none.</summary>
     [JsonPropertyName("validationMessages")]
     public List<ValidationMessageDto> ValidationMessages { get; set; } = [];
 }

@@ -101,7 +101,7 @@ public sealed partial class MetadataGlobalChoiceLiveTests
         }
     });
 
-    // (c) and (d) through the service: ENGLISH_LABEL_ONLY notices, their suppression, and what is written.
+    // (c) and (d) through the service: BASE_LANGUAGE_LABEL_ONLY notices, their suppression, and what is written.
     [MetadataLiveSwitchUiLanguageFact]
     public Task FrenchCaller_EnglishLabelOnlyNotices_ThroughTheService() => FrenchSceneAsync(async (scene, french) =>
     {
@@ -579,9 +579,9 @@ public sealed partial class MetadataGlobalChoiceLiveTests
         return (shown?.LanguageCode, shown?.Label);
     }
 
-    /// <summary>The ENGLISH_LABEL_ONLY message the spec defines (AC-145).</summary>
+    /// <summary>The BASE_LANGUAGE_LABEL_ONLY message the spec defines (AC-145).</summary>
     private static string EnglishOnlyMessage(string noun, int lcid, string shown)
-        => $"Only the English (LCID 1033) {noun} is written. The {noun} Dataverse shows you (LCID {lcid}) is not changed and still reads '{shown}'.";
+        => $"Only the base-language (LCID 1033) {noun} is written. The {noun} Dataverse shows you (LCID {lcid}) is not changed and still reads '{shown}'.";
 
     /// <summary>A requested label and how to read the target's current (as-if-published) label as the French caller.</summary>
     private sealed record ShownField(string Field, string Noun, string Requested, Func<Task<Label?>> Read);
@@ -615,7 +615,7 @@ public sealed partial class MetadataGlobalChoiceLiveTests
                 continue;
             }
 
-            notice.Rule.Should().Be(MetadataLabelWriteResult.EnglishLabelOnlyRule, what);
+            notice.Rule.Should().Be(MetadataLabelWriteResult.BaseLanguageLabelOnlyRule, what);
             notice.Message.Should().Be(EnglishOnlyMessage(field.Noun, before[i].Lcid ?? 0, before[i].Text ?? ""), $"{what}: the notice quotes the label shown before");
             after.Text.Should().Be(before[i].Text,
                 $"{what}: the {field.Field} notice says the {field.Noun} Dataverse shows the caller (LCID {before[i].Lcid}) is not changed and still reads " +
@@ -631,7 +631,7 @@ public sealed partial class MetadataGlobalChoiceLiveTests
         _output.WriteLine($"OBSERVED {what}: {result.ValidationMessages.Count} notice(s)" +
             string.Concat(result.ValidationMessages.Select(m => $"; [{m.Field} {m.Rule}] {m.Message}")));
         result.ValidationMessages.Select(m => (m.Field, m.Rule, m.Message)).Should().BeEquivalentTo(
-            expected.Select(e => (e.Field, MetadataLabelWriteResult.EnglishLabelOnlyRule, EnglishOnlyMessage(e.Noun, fr, e.Shown))), what);
+            expected.Select(e => (e.Field, MetadataLabelWriteResult.BaseLanguageLabelOnlyRule, EnglishOnlyMessage(e.Noun, fr, e.Shown))), what);
     }
 
     private async Task ExpectCliNoticesAsync(FrenchCaller french, string[] args, params (string Field, string Noun, string Shown)[] expected)
@@ -651,7 +651,7 @@ public sealed partial class MetadataGlobalChoiceLiveTests
         var fr = french.Lcid;
         data.GetProperty("validationMessages").EnumerateArray()
             .Select(m => (m.GetProperty("field").GetString(), m.GetProperty("rule").GetString(), m.GetProperty("message").GetString()))
-            .Should().BeEquivalentTo(expected.Select(e => ((string?)e.Field, (string?)MetadataLabelWriteResult.EnglishLabelOnlyRule, (string?)EnglishOnlyMessage(e.Noun, fr, e.Shown))), what);
+            .Should().BeEquivalentTo(expected.Select(e => ((string?)e.Field, (string?)MetadataLabelWriteResult.BaseLanguageLabelOnlyRule, (string?)EnglishOnlyMessage(e.Noun, fr, e.Shown))), what);
     }
 
     /// <summary>Runs a metadata CLI command in-process on the real authoring service bound to the French-caller pool.</summary>

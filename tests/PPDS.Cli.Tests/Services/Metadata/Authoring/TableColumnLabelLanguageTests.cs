@@ -12,7 +12,7 @@ namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 
 /// <summary>
 /// AC-147: table and typed-column label updates write English (LCID 1033) labels with MergeLabels, never re-send an
-/// unrequested label, and report <c>ENGLISH_LABEL_ONLY</c> when the label Dataverse shows the caller is in another
+/// unrequested label, and report <c>BASE_LANGUAGE_LABEL_ONLY</c> when the label Dataverse shows the caller is in another
 /// language and differs from the requested text.
 /// </summary>
 [Trait("Category", "Unit")]
@@ -32,8 +32,8 @@ public sealed class TableColumnLabelLanguageTests
             DisplayName = "Customer", PluralDisplayName = "Customers", Description = "Customer table"
         });
 
-        var read = Assert.Single(f.Requests.OfType<RetrieveEntityRequest>());
-        Assert.False(read.RetrieveAsIfPublished); // published, like the column read (list commands show published labels)
+        var read = Assert.Single(f.Requests.OfType<RetrieveEntityRequest>(), r => !r.RetrieveAsIfPublished); // published, like the column read
+        Assert.Single(f.Requests.OfType<RetrieveEntityRequest>(), r => r.RetrieveAsIfPublished); // the label read-back
         Assert.Equal(EntityFilters.Entity, read.EntityFilters);
         var update = Assert.Single(f.Requests.OfType<UpdateEntityRequest>());
         Assert.True(update.MergeLabels);
@@ -44,8 +44,8 @@ public sealed class TableColumnLabelLanguageTests
         Assert.Equal(new[] { "DisplayName", "PluralDisplayName", "Description" }, result.ValidationMessages.Select(m => m.Field));
         Assert.All(result.ValidationMessages, m =>
         {
-            Assert.Equal(MetadataLabelWriteResult.EnglishLabelOnlyRule, m.Rule);
-            Assert.Contains("English (LCID 1033)", m.Message);
+            Assert.Equal(MetadataLabelWriteResult.BaseLanguageLabelOnlyRule, m.Rule);
+            Assert.Contains("base-language (LCID 1033)", m.Message);
             Assert.Contains("LCID 1036", m.Message);
         });
         Assert.Contains("'Compte'", result.ValidationMessages[0].Message);
@@ -123,18 +123,29 @@ public sealed class TableColumnLabelLanguageTests
 
     [Fact]
     [Trait("AC", "AC-147")]
-    public async Task DryRuns_ReturnNoNotices_AndSendNothing()
+    public async Task DryRuns_ReturnTheSameNotices_AndWriteNothing()
     {
+        // Every label-writing dry-run reads what the update would read and returns the same notices; it writes nothing.
         var f = new Fixture(userLanguage: 1036);
-        Assert.Same(MetadataLabelWriteResult.None, await f.Service.UpdateTableAsync(new UpdateTableRequest
+        var table = await f.Service.UpdateTableAsync(new UpdateTableRequest
         {
             SolutionUniqueName = "Sol", EntityLogicalName = Table, DisplayName = "Customer", DryRun = true
-        }));
-        Assert.Same(MetadataLabelWriteResult.None, await f.Service.UpdateColumnAsync(new UpdateColumnRequest
+        });
+        Assert.Equal("DisplayName", Assert.Single(table.ValidationMessages).Field);
+        var column = await f.Service.UpdateColumnAsync(new UpdateColumnRequest
         {
             SolutionUniqueName = "Sol", EntityLogicalName = Table, ColumnLogicalName = Column, DisplayName = "Name", DryRun = true
+        });
+        Assert.Equal("DisplayName", Assert.Single(column.ValidationMessages).Field);
+        Assert.All(f.Requests, r => Assert.True(r is RetrieveEntityRequest or RetrieveAttributeRequest, r.RequestName));
+
+        // Without a requested label a dry-run reads nothing.
+        var quiet = new Fixture(userLanguage: 1036);
+        Assert.Same(MetadataLabelWriteResult.None, await quiet.Service.UpdateTableAsync(new UpdateTableRequest
+        {
+            SolutionUniqueName = "Sol", EntityLogicalName = Table, HasNotes = true, DryRun = true
         }));
-        Assert.Empty(f.Requests);
+        Assert.Empty(quiet.Requests);
     }
 
     private static (int, string) Single(Label label)
@@ -146,6 +157,7 @@ public sealed class TableColumnLabelLanguageTests
     private sealed class Fixture
     {
         private readonly int _userLanguage;
+        private readonly LabelWriteStore _store = new();
         public List<OrganizationRequest> Requests { get; } = [];
         public DataverseMetadataAuthoringService Service { get; }
 
@@ -157,6 +169,7 @@ public sealed class TableColumnLabelLanguageTests
                 .Returns<OrganizationRequest, CancellationToken>((request, _) =>
                 {
                     Requests.Add(request);
+                    _store.Record(request);
                     OrganizationResponse response = request switch
                     {
                         RetrieveEntityRequest => new RetrieveEntityResponse { Results = new ParameterCollection
@@ -181,11 +194,11 @@ public sealed class TableColumnLabelLanguageTests
                         UpdateAttributeRequest => new UpdateAttributeResponse(),
                         _ => throw new InvalidOperationException("Unexpected SDK request: " + request.RequestName)
                     };
-                    return Task.FromResult(response);
+                    return Task.FromResult(_store.Apply(request, response));
                 });
             var pool = new Mock<IDataverseConnectionPool>();
             pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>())).ReturnsAsync(client.Object);
-            Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard());
+            Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
         }
 
         /// <summary>English and French text; the user-localised label is the caller's UI language.</summary>

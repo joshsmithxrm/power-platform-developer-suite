@@ -348,12 +348,12 @@ public static class OptionSetCommand
 
         var displayNameOption = new Option<string?>("--display-name")
         {
-            Description = "Updated display name (English, LCID 1033)"
+            Description = "Updated display name (in the organization's base language)"
         };
 
         var descriptionOption = new Option<string?>("--description")
         {
-            Description = "Updated description (English, LCID 1033)"
+            Description = "Updated description (in the organization's base language)"
         };
 
         var dryRunOption = new Option<bool>("--dry-run")
@@ -856,7 +856,7 @@ public static class OptionSetCommand
 
         var newLabelOption = new Option<string?>("--new-label")
         {
-            Description = "New label to apply (English, LCID 1033)"
+            Description = "New label to apply (in the organization's base language)"
         };
 
         var colorOption = new Option<string?>("--color")

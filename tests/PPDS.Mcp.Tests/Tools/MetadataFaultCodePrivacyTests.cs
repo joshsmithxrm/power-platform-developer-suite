@@ -158,7 +158,7 @@ public sealed class MetadataFaultCodePrivacyTests
                     });
                 return lease.Object;
             });
-            _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), _guard.Object);
+            _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), _guard.Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
         }
 
         public Task<PpdsException> InvokeAsync() => Assert.ThrowsAsync<PpdsException>(() => _kind == "status"

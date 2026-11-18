@@ -116,9 +116,9 @@ public sealed class OptionLabelLanguageTests
         var f = new Fixture();
         var result = await f.UpdateAsync(kind, value: 1, newLabel: "Fermé");
         var notice = Assert.Single(result.ValidationMessages);
-        Assert.Equal(MetadataLabelWriteResult.EnglishLabelOnlyRule, notice.Rule);
+        Assert.Equal(MetadataLabelWriteResult.BaseLanguageLabelOnlyRule, notice.Rule);
         Assert.Equal("NewLabel", notice.Field);
-        Assert.Contains("English (LCID 1033)", notice.Message);
+        Assert.Contains("base-language (LCID 1033)", notice.Message);
         Assert.Contains("LCID 1036", notice.Message);
         Assert.Contains("'Ouvert'", notice.Message);
     }
@@ -202,6 +202,7 @@ public sealed class OptionLabelLanguageTests
         public Func<Label>? OpenLabel { get; init; }
 
         private string? _storedColor;
+        private readonly LabelWriteStore _store = new();
 
         private Label French(string english, string french) => new(
             UserLanguage == 1033 ? new LocalizedLabel(english, 1033) : new LocalizedLabel(french, 1036),
@@ -236,6 +237,7 @@ public sealed class OptionLabelLanguageTests
                 .Returns<OrganizationRequest, CancellationToken>((request, _) =>
                 {
                     Requests.Add(request);
+                    _store.Record(request);
                     if (request is SdkUpdateOption { Value: 1 } written && written.Parameters.TryGetValue("Color", out var color))
                         _storedColor = (string?)color;
                     OrganizationResponse response = request switch
@@ -255,9 +257,9 @@ public sealed class OptionLabelLanguageTests
                         UpdateOptionSetRequest => new UpdateOptionSetResponse(),
                         _ => throw new InvalidOperationException("Unexpected SDK request in offline fixture: " + request.RequestName)
                     };
-                    return Task.FromResult(response);
+                    return Task.FromResult(_store.Apply(request, response));
                 });
-            Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard());
+            Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
         }
 
         public Task<MetadataLabelWriteResult> UpdateAsync(string kind, int value, string? newLabel) => kind switch

@@ -223,7 +223,7 @@ public sealed class MetadataDeleteReadFailureContractTests(ITestOutputHelper out
                         });
                     return Task.FromResult(client.Object);
                 });
-            Service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), _guard.Object, cacheProvider: _cache.Object);
+            Service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), _guard.Object, cacheProvider: _cache.Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
         }
 
         private int ExpectedStageCount => _stage == "identity" ? 1 : _stage == "dependency" ? 2 : 3;

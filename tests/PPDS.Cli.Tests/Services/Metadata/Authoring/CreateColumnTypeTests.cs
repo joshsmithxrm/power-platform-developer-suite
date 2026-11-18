@@ -32,10 +32,12 @@ public class CreateColumnTypeTests
         // Default ExecuteAsync to return a valid response (prevents NRE from await null)
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new OrganizationResponse());
+        // The label read-back after the create is answered from the create request itself.
+        LabelWriteStore.Attach(_client);
 
         SetupPublisherPrefixQuery("new");
 
-        _service = new DataverseMetadataAuthoringService(_pool.Object, _validator, new InactiveFakeShakedownGuard());
+        _service = new DataverseMetadataAuthoringService(_pool.Object, _validator, new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
     }
 
     private void SetupPublisherPrefixQuery(string prefix)

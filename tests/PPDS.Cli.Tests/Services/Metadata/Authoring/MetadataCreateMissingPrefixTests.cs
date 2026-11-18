@@ -45,6 +45,7 @@ public sealed class MetadataCreateMissingPrefixTests
     private sealed class Fixture : IDisposable
     {
         private readonly bool _global;
+        private readonly LabelWriteStore _labels;
         private readonly CancellationTokenSource _cts = new();
         private readonly Mock<IDataverseConnectionPool> _pool = new(MockBehavior.Strict);
         private readonly List<int> _operations = [], _returned = [];
@@ -54,6 +55,7 @@ public sealed class MetadataCreateMissingPrefixTests
         internal Fixture(bool global)
         {
             _global = global;
+            _labels = new LabelWriteStore();
             _pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>()))
                 .Returns<DataverseClientOptions?, string?, CancellationToken>((_, _, ct) =>
                 {
@@ -75,6 +77,8 @@ public sealed class MetadataCreateMissingPrefixTests
                         .Returns<OrganizationRequest, CancellationToken>((request, token) =>
                         {
                             Assert.Equal(_cts.Token, token); _operations.Add(id);
+                            if (LabelWriteStore.IsReadBack(request)) return Task.FromResult(_labels.Synthesize(request)); // label read-back
+                            _labels.Record(request);
                             if (request is CreateAttributeRequest a)
                             {
                                 Values.AddRange(Assert.IsAssignableFrom<EnumAttributeMetadata>(a.Attribute).OptionSet.Options.Select(o => o.Value!.Value));
@@ -86,7 +90,7 @@ public sealed class MetadataCreateMissingPrefixTests
                         });
                     return Task.FromResult(client.Object);
                 });
-            Service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard());
+            Service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
         }
         internal async Task<ValidationMessage[]> Run(OptionDefinition option)
         {

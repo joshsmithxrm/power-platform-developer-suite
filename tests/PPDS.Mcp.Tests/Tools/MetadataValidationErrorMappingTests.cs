@@ -111,7 +111,7 @@ public sealed class MetadataValidationErrorMappingTests
             return client.Object;
         });
         var service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(),
-            new Mock<PPDS.Cli.Infrastructure.Safety.IShakedownGuard>().Object);
+            new Mock<PPDS.Cli.Infrastructure.Safety.IShakedownGuard>().Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
         using var fixture = await ToolFixture.CreateAsync(service);
 
         var ex = await Assert.ThrowsAsync<McpException>(() => fixture.InvokeAsync("update-choice", choiceName: "Mayo_X"));
@@ -132,7 +132,7 @@ public sealed class MetadataValidationErrorMappingTests
     [Trait("AC", "AC-145")]
     public async Task UpdateChoiceTool_ReportsTheUncheckedNameOnDryRun_AndLabelNotices(bool dryRun)
     {
-        var notice = new ValidationMessage { Field = "DisplayName", Rule = MetadataLabelWriteResult.EnglishLabelOnlyRule, Message = "Only the English (LCID 1033) display name is written." };
+        var notice = new ValidationMessage { Field = "DisplayName", Rule = MetadataLabelWriteResult.BaseLanguageLabelOnlyRule, Message = "Only the base-language (LCID 1033) display name is written." };
         var service = new Mock<IMetadataAuthoringService>(MockBehavior.Strict);
         service.Setup(s => s.UpdateGlobalChoiceAsync(It.IsAny<UpdateGlobalChoiceRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new MetadataLabelWriteResult { ValidationMessages = [notice] });
@@ -143,14 +143,14 @@ public sealed class MetadataValidationErrorMappingTests
         var json = JsonSerializer.SerializeToElement(result);
         if (dryRun) Assert.False(json.GetProperty("globalChoiceNameChecked").GetBoolean());
         else Assert.False(json.TryGetProperty("globalChoiceNameChecked", out _));
-        Assert.Equal(MetadataLabelWriteResult.EnglishLabelOnlyRule, Assert.Single(json.GetProperty("validationMessages").EnumerateArray()).GetProperty("rule").GetString());
+        Assert.Equal(MetadataLabelWriteResult.BaseLanguageLabelOnlyRule, Assert.Single(json.GetProperty("validationMessages").EnumerateArray()).GetProperty("rule").GetString());
     }
 
     [Fact]
     [Trait("AC", "AC-147")]
     public async Task UpdateTableAndColumnTools_ReportLabelNotices()
     {
-        var notice = new ValidationMessage { Field = "DisplayName", Rule = MetadataLabelWriteResult.EnglishLabelOnlyRule, Message = "Only the English (LCID 1033) display name is written." };
+        var notice = new ValidationMessage { Field = "DisplayName", Rule = MetadataLabelWriteResult.BaseLanguageLabelOnlyRule, Message = "Only the base-language (LCID 1033) display name is written." };
         var service = new Mock<IMetadataAuthoringService>(MockBehavior.Strict);
         service.Setup(s => s.UpdateTableAsync(It.IsAny<UpdateTableRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new MetadataLabelWriteResult { ValidationMessages = [notice] });
@@ -160,7 +160,7 @@ public sealed class MetadataValidationErrorMappingTests
 
         var table = JsonSerializer.SerializeToElement(await new MetadataUpdateTableTool(fixture.Context).ExecuteAsync("Sol", "new_table", displayName: "Renamed"));
         var message = Assert.Single(table.GetProperty("validationMessages").EnumerateArray());
-        Assert.Equal(MetadataLabelWriteResult.EnglishLabelOnlyRule, message.GetProperty("rule").GetString());
+        Assert.Equal(MetadataLabelWriteResult.BaseLanguageLabelOnlyRule, message.GetProperty("rule").GetString());
         Assert.Equal("DisplayName", message.GetProperty("field").GetString());
 
         var column = JsonSerializer.SerializeToElement(await new MetadataUpdateColumnTool(fixture.Context).ExecuteAsync("Sol", "new_table", "new_text", displayName: "Renamed"));

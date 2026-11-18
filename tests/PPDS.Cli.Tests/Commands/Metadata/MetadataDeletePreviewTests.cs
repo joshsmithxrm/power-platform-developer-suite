@@ -233,7 +233,7 @@ public sealed class MetadataDeletePreviewTests
                     return Task.FromResult(response);
                 });
             var services = new ServiceCollection();
-            services.AddSingleton<IMetadataAuthoringService>(new DataverseMetadataAuthoringService(Pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard()));
+            services.AddSingleton<IMetadataAuthoringService>(new DataverseMetadataAuthoringService(Pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033)));
             services.AddSingleton(new ResolvedConnectionInfo { Profile = new AuthProfile { Name = "offline-test" }, EnvironmentUrl = "https://example.invalid" });
             return Task.FromResult(services.BuildServiceProvider());
         }

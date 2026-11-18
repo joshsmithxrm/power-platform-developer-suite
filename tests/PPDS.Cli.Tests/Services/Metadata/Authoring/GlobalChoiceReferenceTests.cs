@@ -25,6 +25,8 @@ namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 [Trait("Category", "Unit")]
 public sealed class GlobalChoiceReferenceTests : IDisposable
 {
+    private readonly LabelWriteStore _labels = new();
+    private int ReadBacks { get; set; }
     private const string Stored = "new_ServiceType";
     private readonly CancellationTokenSource _cancellation = new();
     private readonly Mock<IDataverseConnectionPool> _pool = new(MockBehavior.Strict);
@@ -45,7 +47,7 @@ public sealed class GlobalChoiceReferenceTests : IDisposable
     {
         _pool.Setup(p => p.GetClientAsync(null, null, _cancellation.Token)).ReturnsAsync(CheckOutClient);
         _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(),
-            new InactiveFakeShakedownGuard(), cacheProvider: _cache.Object);
+            new InactiveFakeShakedownGuard(), cacheProvider: _cache.Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
     }
 
     private IPooledClient CheckOutClient()
@@ -72,7 +74,10 @@ public sealed class GlobalChoiceReferenceTests : IDisposable
         client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), _cancellation.Token))
             .Returns<OrganizationRequest, CancellationToken>((request, _) =>
             {
+                // Read-backs after the create are answered by _labels and kept out of the asserted request list.
+                if (_labels.FollowsRecordedWrite(request)) { ReadBacks++; _leaseEvents.Add($"{request.RequestName} {lease}"); return Task.FromResult(_labels.Synthesize(request)); }
                 _requests.Add(request);
+                _labels.Record(request);
                 _leaseEvents.Add($"{request.RequestName} {lease}");
                 OrganizationResponse response = request switch
                 {
@@ -88,9 +93,10 @@ public sealed class GlobalChoiceReferenceTests : IDisposable
                         Results = new ParameterCollection { ["AttributeId"] = Guid.NewGuid() }
                     },
                     PublishXmlRequest => new PublishXmlResponse(),
+                    _ when LabelWriteStore.IsReadBack(request) => _labels.Synthesize(request),
                     _ => throw new InvalidOperationException("Unexpected SDK request.")
                 };
-                return Task.FromResult(response);
+                return Task.FromResult(_labels.Apply(request, response));
             });
         return client.Object;
     }
@@ -211,7 +217,8 @@ public sealed class GlobalChoiceReferenceTests : IDisposable
             "checkout 1", "dispose 1", // solution query
             "checkout 2", "dispose 2", // publisher query
             "checkout 3", "RetrieveAllOptionSets 3", "dispose 3",
-            "checkout 4", "CreateAttribute 4", "dispose 4"
+            "checkout 4", "CreateAttribute 4", "dispose 4",
+            "checkout 5", "RetrieveAttribute 5", "dispose 5" // label read-back
         }, _leaseEvents);
     }
 
@@ -226,7 +233,8 @@ public sealed class GlobalChoiceReferenceTests : IDisposable
             "checkout 2", "dispose 2",
             "checkout 3", "RetrieveAllOptionSets 3", "dispose 3",
             "checkout 4", "CreateAttribute 4", "dispose 4",
-            "invalidate", "checkout 5", "PublishXml 5", "dispose 5"
+            "invalidate", "checkout 5", "RetrieveAttribute 5", "dispose 5", // label read-back before publish
+            "checkout 6", "PublishXml 6", "dispose 6"
         }, _leaseEvents);
     }
 
@@ -356,7 +364,7 @@ public sealed class GlobalChoiceReferenceTests : IDisposable
     [Fact, Trait("AC", "AC-81")]
     public async Task Guard_PrecedesAllLookups()
     {
-        var blocked = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), new ActiveFakeShakedownGuard());
+        var blocked = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), new ActiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
         var failure = await Assert.ThrowsAsync<PpdsException>(() => blocked.CreateColumnAsync(Request(SchemaColumnType.Choice, Stored), ct: _cancellation.Token));
         Assert.Equal(ErrorCodes.Safety.ShakedownActive, failure.ErrorCode);
         _pool.VerifyNoOtherCalls();

@@ -20,6 +20,14 @@ namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 // One strict fresh lease per operation. This harness never constructs an actual provider/client.
 internal sealed class ColumnLabelHarness : IDisposable
 {
+    private readonly LabelWriteStore _store = new();
+
+    /// <summary>"missing-metadata" makes the label read-back return no metadata.</summary>
+    internal string? ConfirmationFault { get; set; }
+
+    /// <summary>Models Dataverse acknowledging the label update without storing it.</summary>
+    internal bool IgnoreLabelWrites { get => _store.IgnoreWrites; set => _store.IgnoreWrites = value; }
+
     internal const string Table = "new_table";
     internal const string Column = "new_recordkey"; // Deliberately not an 'id' suffix.
     internal const string Schema = "new_RecordKey";
@@ -84,7 +92,7 @@ internal sealed class ColumnLabelHarness : IDisposable
         _cache.Setup(cache => cache.InvalidateEntity(Table)).Callback(() =>
         { Assert.Equal(0, _active); CacheInvalidations++; _lifecycle.Add("invalidate"); });
         IShakedownGuard guard = activeGuard ? new ActiveFakeShakedownGuard() : new InactiveFakeShakedownGuard();
-        _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), guard, cacheProvider: _cache.Object);
+        _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), guard, cacheProvider: _cache.Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
     }
 
     internal Task<MetadataLabelWriteResult> UpdateAsync(UpdateColumnRequest request, IMetadataAuthoringProgressReporter? reporter = null)
@@ -110,9 +118,18 @@ internal sealed class ColumnLabelHarness : IDisposable
         {
             Assert.False(released); Assert.Equal(1, ++operations); Assert.Equal(Token, token);
             Assert.NotNull(_input); Requests.Add(request); _lifecycle.Add(request.RequestName);
+            _store.Record(request);
             OrganizationResponse response;
             switch (request)
             {
+                case RetrieveAttributeRequest { RetrieveAsIfPublished: true } confirm:
+                    // The read-back after the label update: only after the update was acknowledged.
+                    Assert.Contains(Requests, r => r is UpdateAttributeRequest);
+                    Assert.Equal(_input.ColumnLogicalName, confirm.LogicalName, ignoreCase: true);
+                    response = ConfirmationFault == "missing-metadata"
+                        ? new RetrieveAttributeResponse { Results = new ParameterCollection { ["AttributeMetadata"] = null } }
+                        : _store.Synthesize(confirm);
+                    break;
                 case RetrieveAttributeRequest read:
                     Assert.Equal(_input.EntityLogicalName, read.EntityLogicalName, ignoreCase: true);
                     Assert.Equal(_input.ColumnLogicalName, read.LogicalName, ignoreCase: true);
@@ -155,6 +172,7 @@ internal sealed class ColumnLabelHarness : IDisposable
         var operations = new List<string> { "RetrieveAttribute" };
         if (tableRead) operations.Add("RetrieveEntity");
         operations.Add("UpdateAttribute");
+        operations.Add("RetrieveAttribute"); // read-back of the written labels, before any publish
         if (publish) operations.Add("PublishXml");
         Assert.Equal(operations, Requests.Select(request => request.RequestName));
         Assert.Equal(1, CacheInvalidations);

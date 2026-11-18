@@ -369,7 +369,8 @@ public sealed class GlobalChoiceNameResolutionTests
     {
         using var f = new GlobalChoiceServerFake();
         if (operation == "choice-update")
-            await f.Service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = "Sol", Name = Typed, DisplayName = "X", DryRun = true }, ct: f.Token);
+            // A choice-update dry-run without a requested label reads nothing (a label dry-run reads the choice for its notices).
+            await f.Service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = "Sol", Name = Typed, DryRun = true }, ct: f.Token);
         else
             Assert.Equal(0, await f.Service.AddOptionValueAsync(new AddOptionValueRequest { OptionSetName = Typed, Label = "New", DryRun = true }, f.Token));
         Assert.Empty(f.Requests);
@@ -713,6 +714,8 @@ internal sealed class GlobalChoiceServerFake : IDisposable
 
     internal static Exception PrivilegeFault() => Fault("Principal user is missing prvWriteOptionSet privilege.", 0x80040220);
 
+    private readonly LabelWriteStore _labels = new();
+
     internal GlobalChoiceServerFake()
     {
         var pool = new Mock<IDataverseConnectionPool>(MockBehavior.Strict);
@@ -731,11 +734,14 @@ internal sealed class GlobalChoiceServerFake : IDisposable
                 {
                     Assert.False(released);
                     Requests.Add(request);
-                    return Task.FromResult(Execute(request));
+                    var response = Execute(request);
+                    _labels.Record(request);
+                    if (response is InsertOptionValueResponse inserted) _labels.InsertedValue(inserted.NewOptionValue);
+                    return Task.FromResult(_labels.Apply(request, response));
                 });
             return client.Object;
         });
-        Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard());
+        Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
     }
 
     internal static OptionSetMetadata Choice(string name, Guid? id = null)

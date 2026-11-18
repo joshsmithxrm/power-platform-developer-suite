@@ -606,7 +606,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
     }
 
     /// <summary>
-    /// Status text after a choice update. English-only label notices are appended so a caller shown another
+    /// Status text after a choice update. Base-language-only label notices are appended so a caller shown another
     /// language's label learns why the list still shows the old text.
     /// </summary>
     internal static string ChoiceUpdatedStatus(string name, MetadataLabelWriteResult? result)
@@ -616,7 +616,7 @@ internal sealed class MetadataExplorerScreen : TuiScreenBase
     internal static string WithReloadOutcome(string status, string? entity, bool reloaded)
         => reloaded ? status : $"{status} Error loading {entity}";
 
-    /// <summary>Status text after a label-writing update, with any English-only label notices appended.</summary>
+    /// <summary>Status text after a label-writing update, with any base-language-only label notices appended.</summary>
     internal static string UpdatedStatus(string what, string name, MetadataLabelWriteResult? result)
     {
         var status = new System.Text.StringBuilder($"{what} updated: {name}");

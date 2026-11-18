@@ -135,17 +135,17 @@ public static class TableCommandGroup
 
         var displayNameOption = new Option<string?>("--display-name")
         {
-            Description = "Updated display name (English, LCID 1033)"
+            Description = "Updated display name (in the organization's base language)"
         };
 
         var pluralNameOption = new Option<string?>("--plural-name")
         {
-            Description = "Updated plural display name (English, LCID 1033)"
+            Description = "Updated plural display name (in the organization's base language)"
         };
 
         var descriptionOption = new Option<string?>("--description")
         {
-            Description = "Updated description (English, LCID 1033)"
+            Description = "Updated description (in the organization's base language)"
         };
 
         var iconSmallOption = new Option<string?>("--icon-small")
