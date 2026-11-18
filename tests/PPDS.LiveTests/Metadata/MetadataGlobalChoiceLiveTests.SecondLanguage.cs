@@ -35,7 +35,10 @@ public sealed partial class MetadataGlobalChoiceLiveTests
         var (pool, service) = await ConnectAsync();
         var second = await RequireSecondLanguageAsync(pool);
         var name = NewName("sld");
-        await WithChoiceAsync(pool, name, "Second language", new Label("Second language", Base), [new Label("Open", Base)], async () =>
+        // The translations are given at create and then checked (and re-sent until stored). Adding a translation
+        // afterwards to a global option created without one, by UpdateOptionValue, was not stored for 12 minutes in two
+        // full runs here (observed 2026-11-18; the product never sends such a write), while a create carrying it was.
+        await WithChoiceAsync(pool, name, "Second language", new Label("Second language", Base), [Labels("Open", (second, "Ouvert"))], async () =>
         {
             var value = (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single().Value!.Value;
             await SetSecondLanguageAsync("global option label and description",
@@ -56,7 +59,7 @@ public sealed partial class MetadataGlobalChoiceLiveTests
             _output.WriteLine($"OBSERVED option description cleared: description {string.Join(", ", Pairs(option.Description))}");
             Text(option.Description, Base).Should().BeNullOrEmpty("clearing empties the base-language description");
             Text(option.Description, second).Should().Be("Description de l'option", "clearing keeps the other language's description");
-        });
+        }, optionDescriptions: [Labels("Option description", (second, "Description de l'option"))]);
 
         await WithTableAsync(pool, Labels("Open", null), async (entity, column) =>
         {
@@ -152,7 +155,8 @@ public sealed partial class MetadataGlobalChoiceLiveTests
         });
 
         var name = NewName("slc");
-        await WithChoiceAsync(pool, name, "Second language", new Label("Second language", Base), [new Label("Open", Base)], async () =>
+        // The translation is given at create (see SecondLanguage_SurvivesOptionDescriptionAndStateValueUpdates_AndClearingDescriptions).
+        await WithChoiceAsync(pool, name, "Second language", new Label("Second language", Base), [Labels("Open", (second, "Ouvert"))], async () =>
         {
             var value = (await RetrieveChoiceAsync(pool, name, asIfPublished: true)).Options.Single().Value!.Value;
             await SetSecondLanguageAsync("global option label",

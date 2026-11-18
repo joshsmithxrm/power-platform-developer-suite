@@ -843,15 +843,16 @@ public sealed partial class MetadataGlobalChoiceLiveTests : LiveTestBase
         }
     }
 
-    private Task WithChoiceAsync(IDataverseConnectionPool pool, string name, string displayName, Label description, Label[] options, Func<Task> body)
+    private Task WithChoiceAsync(IDataverseConnectionPool pool, string name, string displayName, Label description, Label[] options, Func<Task> body,
+        Label?[]? optionDescriptions = null)
     {
         var set = new OptionSetMetadata
         {
             Name = name, IsGlobal = true, OptionSetType = OptionSetType.Picklist,
             DisplayName = new Label(displayName, Base), Description = description
         };
-        foreach (var label in options)
-            set.Options.Add(new OptionMetadata(label, null));
+        for (var i = 0; i < options.Length; i++)
+            set.Options.Add(new OptionMetadata(options[i], null) { Description = optionDescriptions?[i] });
         return RunOwnedAsync($"global choice '{name}'",
             () => ExecuteAsync(pool, new CreateOptionSetRequest { OptionSet = set, SolutionUniqueName = Solution }),
             () => ExecuteAsync(pool, new DeleteOptionSetRequest { Name = name }),
