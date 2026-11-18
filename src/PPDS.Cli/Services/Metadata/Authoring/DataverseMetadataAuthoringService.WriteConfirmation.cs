@@ -13,8 +13,9 @@ using PPDS.Dataverse.Metadata.Authoring;
 namespace PPDS.Cli.Services.Metadata.Authoring;
 
 /// <summary>
-/// Read-back of committed label (and colour) writes. Dataverse can acknowledge a label write without storing it (an
-/// organisation whose base language is 1036 silently ignored 1033 labels on UpdateOptionValue and UpdateOptionSet), so
+/// Read-back of committed label (and colour) writes. Dataverse can acknowledge a label write without storing it (on an
+/// organisation whose base language is 1036, a 1033 label on UpdateOptionSet, and in one probe on UpdateOptionValue, was
+/// accepted and not stored; a later replay of UpdateOptionValue was rejected with 0x80044195 instead), so
 /// every write that sends a label is followed by one as-if-published read of the target, after the caches are
 /// invalidated and before any publish, and the base-language text must equal what was sent (exact, ordinal). An empty
 /// requested text is confirmed by an empty or absent base-language label. A mismatch or a failed read raises

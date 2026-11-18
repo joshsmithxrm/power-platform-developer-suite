@@ -58,9 +58,10 @@ public partial class DataverseMetadataAuthoringService
     /// A requested label as the single label in the organisation's base language <paramref name="baseLanguage"/> (every
     /// label write also sets MergeLabels, so other languages keep their text); null when the caller did not ask to change
     /// it. Writing any other LCID is unsafe: in an organisation whose base language is 1036 without English provisioned,
-    /// a 1033 label was silently ignored by UpdateOptionValue/UpdateOptionSet, rejected (0x80044195) by
-    /// InsertOptionValue/InsertStatusValue and the status-reason update, and stored as the 1036 label by UpdateEntity/
-    /// UpdateAttribute and the create messages (live probe 2026-11-17, French Test). Asserted live on an English-base
+    /// a 1033 label was silently ignored by UpdateOptionSet and (in one probe) UpdateOptionValue, rejected (0x80044195) by
+    /// InsertOptionValue/InsertStatusValue, the status-reason update and (in a later replay) UpdateOptionValue, and stored
+    /// as the 1036 label by UpdateEntity/UpdateAttribute and the create messages (live, 2026-11-17, a French-base
+    /// organisation; MetadataGlobalChoiceLiveTests.BaseLanguage_D1/D2/D3 record the replay). Asserted live on an English-base
     /// organisation: an UpdateOptionValue without a Label leaves the label unchanged, so a colour- or description-only
     /// update never rewrites it, and a requested base-language label with MergeLabels keeps the French translation.
     /// </summary>
