@@ -11,6 +11,6 @@ Detail, reasons and the new-panel recipe are in `src/PPDS.Extension/DEVELOPMENT.
 - Host panels extend `WebviewPanelBase` and use its `initializePanel` / `handleEnvironmentPickerClick` flows; pass `this.environmentUrl` and `this.profileName` to every daemon call.
 - Talk to the daemon only through `daemonClient.ts`; no business logic in the extension.
 - Escape untrusted data with `escapeHtml` / `escapeAttr` from `dom-utils.ts` before `innerHTML`; use `getNonce()` for CSP nonces.
-- Keep the toolbar order and shared classes described in DEVELOPMENT.md ("Styling and theming"); the content wrapper is `class="content"`.
+- Keep the toolbar order and shared classes described in DEVELOPMENT.md ("Styling and theming"); most list panels wrap their content in `class="content"`, styled in the panel's own CSS.
 - New panels need entries in the `builds` array in `esbuild.js`, a command in `package.json`, registration in `src/extension.ts`, and an `instanceCount` in the `registerDebugCommands` call.
 - The `PPDS` LogOutputChannel writes to `exthost/<extId>/PPDS.log`, not a numbered `N-PPDS.log`; check that location when looking for logs on disk.

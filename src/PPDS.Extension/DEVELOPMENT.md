@@ -20,7 +20,7 @@ So when you run the extension from source, it uses your local CLI debug build if
 
 ## Build, run and debug
 
-Run scripts from `src/PPDS.Extension/`, or from the repository root with the `ext:` prefix (`npm run ext:test` runs `npm run test` here).
+Run scripts from `src/PPDS.Extension/` (`npm run <script>`). Most also have a repository-root alias with the `ext:` prefix (`npm run ext:test` runs `npm run test` here): `compile`, `watch`, `package`, `lint`, `test`, `test:watch`, `test:e2e`, `local`, `local:install`, `local:uninstall`, `local:revert` and `release:test`. `lint:css`, `typecheck:all`, `test:notebook-host` and `dead-code` have no root alias; run them from `src/PPDS.Extension/`.
 
 | Script | What it does |
 |---|---|
@@ -85,7 +85,7 @@ Copy an existing panel rather than starting from scratch. `EnvironmentVariablesP
 
 Steps:
 
-1. **Message types.** Add `{Name}PanelWebviewToHost` and `{Name}PanelHostToWebview` to `message-types.ts`. Every panel includes the shared commands the base class and shared components rely on: `ready`, `requestEnvironmentList`, `copyToClipboard` and `webviewError` from the webview; `updateEnvironment` and `daemonReconnected` from the host, plus `error` for failures (the base class posts it if initialization fails).
+1. **Message types.** Add `{Name}PanelWebviewToHost` and `{Name}PanelHostToWebview` to `message-types.ts`. Every panel includes the shared commands the base class and shared components rely on: `ready`, `requestEnvironmentList`, `copyToClipboard` and `webviewError` from the webview; `updateEnvironment` and `daemonReconnected` from the host, plus `error` for failures (the base class posts it if initialization fails). The Data Explorer (`QueryPanel`) is the exception: it has no `error` variant and reports failures with `queryError`.
 2. **Host class.** Extend `WebviewPanelBase<TIncoming, TOutgoing>`. In the constructor, create the `WebviewPanel` (with `localResourceRoots` for `dist` and `node_modules`), set `webview.html = this.getHtmlContent(...)`, then call `this.initPanel(panel)` and `this.subscribeToDaemonReconnect(this.daemon)`. Implement:
    - `panelLabel`: the title text. `updatePanelTitle` builds the full title as `profile · environment — Label`; do not set titles yourself.
    - `handleMessage(message)`: the typed switch. `ready` calls `this.initializePanel(daemon, panelId, multipleInstances)`; `requestEnvironmentList` calls `this.handleEnvironmentPickerClick(...)`; `copyToClipboard` and `webviewError` call `handleCopyToClipboard` and `logWebviewError`.
@@ -116,7 +116,7 @@ Steps:
 
 ## Styling and theming
 
-Every panel uses the three-zone layout from `shared.css`: `.toolbar`, a `.content` area (`flex: 1`, scrolls itself), and a `.status-bar` that always shows something (counts, timing, or "Ready"). Use the shared `.empty-state`, `.error-state` and `.loading-state` classes rather than new ones. Use `class="content"` for the content wrapper in every panel.
+Every panel has a `.toolbar` at the top and a `.status-bar` at the bottom, both styled in `shared.css`, with the panel's content between them. Most list panels wrap that content in `<div class="content">`, styled in the panel's own CSS file (`shared.css` has no `.content` rule); `QueryPanel` and `MetadataBrowserPanel` use their own layouts. Use the shared `.empty-state`, `.error-state` and `.loading-state` classes rather than new ones.
 
 **Toolbar order**, left to right:
 
@@ -135,11 +135,12 @@ The spacer is `<span class="toolbar-spacer"></span>`; search is `<input class="t
 | Solution picker with persisted choice | `shared/solution-filter.ts` (`SolutionFilter`) |
 | Tree/list with expand chevrons, detail cards | `.solution-list`, `.detail-card`, `.component-detail-card` in `solutions-panel.css` |
 | Dropdown and context menus | `.dropdown-menu`, `.context-menu` in `query-panel.css` |
-| Detail pane below a table | `.detail-pane` in `environment-variables-panel.css`, `plugin-traces-panel.css`, `connection-references-panel.css` |
+| Detail pane below a table | `.detail-pane` in `environment-variables-panel.css`, `plugin-traces-panel.css` |
+| Expandable detail row inside a table | `.cr-inline-detail` in `connection-references-panel.css` |
 
 A detail pane sits under the table, is hidden until a row is selected, and closes with its close button or Escape.
 
-**Values.** Use `var(--vscode-*)` theme tokens for colours, so panels follow the user's theme; a hex value is acceptable only as a token fallback. Existing panels use 11px for labels and badges, 12px for secondary text and 13px for body text and inputs, and a 2px border radius on inputs and badges (4px on menus). Match them rather than adding new sizes.
+**Values.** Use `var(--vscode-*)` theme tokens for colours, so panels follow the user's theme; a hex value is acceptable only as a token fallback. Most panel text is 12px (including the toolbar search and status bar), with 11px for labels, badges and table headers and 13px in a few places; panels use a 2px border radius on inputs and badges (4px on menus). Match them rather than adding new sizes.
 
 **Environment accents.** `initializePanel` and the picker send `updateEnvironment` with `envType` and `envColor` (from the daemon's `env/config/get`). The webview sets lower-cased `data-env-type` and `data-env-color` attributes on `.toolbar`, and `shared.css` styles them:
 
@@ -149,7 +150,7 @@ A detail pane sits under the table, is hidden until a row is selected, and close
 ## Naming RPC methods and MCP tools
 
 - **RPC methods**: `{domain}/{operation}`, with a camelCase domain: `connectionReferences/list`, `environmentVariables/syncDeploymentSettings`, `importJobs/get`. Sub-resources add a segment: `env/config/get`, `query/history/list`.
-- **MCP tools** (`src/PPDS.Mcp/Tools/`): `ppds_{domain}_{operation}` in snake_case, set with `[McpServerTool(Name = "...")]`: `ppds_connection_references_list`, `ppds_auth_who`. MCP tools cover read and query operations; UI-only actions such as opening a browser or copying to the clipboard do not need one.
+- **MCP tools** (`src/PPDS.Mcp/Tools/`): `ppds_{domain}_{operation}` in snake_case, set with `[McpServerTool(Name = "...")]`: `ppds_connection_references_list`, `ppds_auth_who`. MCP tools cover reads and queries and some writes (for example `ppds_metadata_create_table`, `ppds_environment_variables_set`, `ppds_forms_publish`); UI-only actions such as opening a browser or copying to the clipboard do not need one.
 - **Daemon client methods**: the RPC name in camelCase: `environmentVariables/list` becomes `environmentVariablesList`.
 
 ## Panels and cross-panel consistency

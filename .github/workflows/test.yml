@@ -75,7 +75,6 @@ jobs:
               - 'specs/**'
               - 'docs/**'
               - 'CLAUDE.md'
-              - 'AGENTS.md'
               - 'CONTRIBUTING.md'
               - 'README.md'
               - 'package*.json'

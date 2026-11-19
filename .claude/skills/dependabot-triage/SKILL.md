@@ -18,7 +18,7 @@ Stop and tell the user if any of these hold:
 ## Procedure
 
 1. List the PRs: `gh pr list --author "app/dependabot" --state open --json number,title,labels,headRefName,files,body,url`. None open: say so and stop.
-2. Classify each PR with `scripts/dependabot/classify.py` (it returns a group and a reason). Groups:
+2. Classify each PR with `scripts/dependabot/classify.py` (it returns a group and a reason): pipe the step 1 JSON array to it on stdin, `gh pr list ... | python scripts/dependabot/classify.py`, and it writes a JSON array of classifications to stdout. Groups:
    - **A, auto-merge:** `gh pr merge <n> --squash --delete-branch --auto`.
    - **B, verify then merge:** run the area's tests below, then enable auto-merge as for A. On failure, comment with the failing tests and stop on that PR.
    - **C, manual review:** do not enable auto-merge. Comment with the group and the classifier's reason so the maintainer can decide.

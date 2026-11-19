@@ -48,22 +48,24 @@ Compile-time enforcement of architectural patterns. Analyzers run during build a
 
 ### Implemented Rules (All 16)
 
+Severity is the effective level: each analyzer defaults to Warning, and `.editorconfig` lowers PPDS001-PPDS013 to suggestion.
+
 | ID | Name | Description | Severity |
 |----|------|-------------|----------|
-| PPDS001 | NoDirectFileIoInUi | Flags direct File I/O in presentation layer | Warning |
-| PPDS002 | NoConsoleInServices | Flags Console usage in Application Services | Warning |
-| PPDS003 | NoUiFrameworkInServices | Flags Terminal.Gui/Spectre.Console in Services | Warning |
-| PPDS004 | UseStructuredExceptions | Flags raw exception throws in Application Services | Warning |
-| PPDS005 | NoSdkInPresentation | Flags direct SDK access in presentation layer | Warning |
-| PPDS006 | UseEarlyBoundEntities | Flags string literals in QueryExpression | Warning |
-| PPDS007 | PoolClientInParallel | Flags pooled clients held across multiple awaits | Warning |
-| PPDS008 | UseBulkOperations | Flags individual CRUD calls inside loops | Warning |
-| PPDS009 | UseAggregateForCount | Flags RetrieveMultiple used only for counting | Warning |
-| PPDS010 | ValidateTopCount | Flags unbounded QueryExpression without TopCount | Warning |
-| PPDS011 | PropagateCancellation | Flags async methods that drop CancellationToken | Warning |
-| PPDS012 | NoSyncOverAsync | Flags `.GetAwaiter().GetResult()`, `.Result`, `.Wait()` | Warning |
-| PPDS013 | NoFireAndForgetInCtor | Flags async calls in constructors without await | Warning |
-| PPDS014 | XmlDocOnPublicApi | Flags public API in library projects without XML documentation | Warning |
+| PPDS001 | NoDirectFileIoInUi | Flags direct File I/O in presentation layer | Suggestion |
+| PPDS002 | NoConsoleInServices | Flags Console usage in Application Services | Suggestion |
+| PPDS003 | NoUiFrameworkInServices | Flags Terminal.Gui/Spectre.Console in Services | Suggestion |
+| PPDS004 | UseStructuredExceptions | Flags raw exception throws in Application Services | Suggestion |
+| PPDS005 | NoSdkInPresentation | Flags direct SDK access in presentation layer | Suggestion |
+| PPDS006 | UseEarlyBoundEntities | Flags string literals in QueryExpression | Suggestion |
+| PPDS007 | PoolClientInParallel | Flags pooled clients held across multiple awaits | Suggestion |
+| PPDS008 | UseBulkOperations | Flags individual CRUD calls inside loops | Suggestion |
+| PPDS009 | UseAggregateForCount | Flags RetrieveMultiple used only for counting | Suggestion |
+| PPDS010 | ValidateTopCount | Flags unbounded QueryExpression without TopCount | Suggestion |
+| PPDS011 | PropagateCancellation | Flags async methods that drop CancellationToken | Suggestion |
+| PPDS012 | NoSyncOverAsync | Flags `.GetAwaiter().GetResult()`, `.Result`, `.Wait()` | Suggestion |
+| PPDS013 | NoFireAndForgetInCtor | Flags async calls in constructors without await | Suggestion |
+| PPDS014 | XmlDocOnPublicApi | Flags public API in library projects without XML documentation | Warning (error in `PPDS.Auth`) |
 | PPDS015 | CliCommandNeedsDescription | Flags System.CommandLine commands, options and arguments without a Description | Warning |
 | PPDS016 | McpToolNeedsMetadata | Flags `[McpServerTool]` methods missing Name or Description | Warning |
 

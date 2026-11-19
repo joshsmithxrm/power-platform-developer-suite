@@ -7,7 +7,7 @@ Part 1 applies to all code. Part 2 applies only when a spec in `specs/` is being
 
 # Part 1 — Architecture Principles
 
-These apply to all code and all contributors. Every implementation and review must comply. Violations are defects — not style issues, not suggestions, not "nice to haves."
+Non-negotiable principles. Every spec, plan, implementation, and review MUST comply. Violations are defects — not style issues, not suggestions, not "nice to haves." These apply to all code and all contributors.
 
 ## Architecture Laws
 

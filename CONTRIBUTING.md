@@ -11,13 +11,18 @@ Install only what the surface you are changing needs:
 
 | You are changing | You need |
 |------------------|----------|
-| CLI, TUI, MCP server or a NuGet library | .NET SDK 10.0.115 or a later 10.0.1xx patch (selected by `global.json`); install the .NET 8 and 9 runtimes too if you want to run tests for every target framework |
+| CLI, TUI, MCP server or a NuGet library | .NET SDK 10.0.115 or a later 10.0.1xx patch (selected by `global.json`), plus the .NET 8 and 9 runtimes to run the test commands below |
 | VS Code extension | The .NET SDK above, Node.js 26 (the version in `.nvmrc`) and VS Code |
 | TUI snapshot tests | The .NET SDK and Node.js |
 | Python scripts under `scripts/` or `tests/` | Python 3 with `pytest` and `pyyaml` |
 | PowerShell scripts under `scripts/` | PowerShell 7 |
 
-A CLI fix needs only the .NET SDK and Git.
+Building a CLI fix needs only the .NET SDK and Git. Running the tests needs the
+.NET 8 and 9 runtimes as well: most test projects target `net8.0;net9.0;net10.0`
+and the `PPDS.DocsGen.*` test projects target `net8.0` only, so `dotnet test
+PPDS.sln` runs on all three. With only the SDK, test one multi-targeted project
+on .NET 10, for example
+`dotnet test tests/PPDS.Cli.Tests/PPDS.Cli.Tests.csproj -f net10.0 --filter "Category!=Integration"`.
 
 The Node version above is for repository tooling. The extension itself runs on
 the Node bundled with VS Code and must stay compatible with Node 22 and the
@@ -120,7 +125,10 @@ If you do run them locally, do not point them at an environment you care about.
 Changes to plugin extraction are checked by the `single-file-extraction` job in
 `.github/workflows/test.yml`, which publishes the real single-file CLI for every
 shipped runtime and runs `scripts/ci/smoke_single_file_extraction.py` against it.
-The job's steps are the commands to reproduce it locally.
+The job's steps are the commands to reproduce it locally. The smoke script requires
+the account's reference-assembly cache to be absent and never removes an existing
+one: use `--allow-existing-cache` for an explicitly reported local warm-cache
+check, which does not prove cold creation.
 
 ## Writing tests
 
@@ -145,8 +153,9 @@ tests/PPDS.Cli.Tests/Services/ConnectionServiceTests.cs
 When a test covers an acceptance criterion from a spec in `specs/`, tag it with
 `[Trait("AC", "AC-12")]` and reference the test from the spec's AC table.
 
-Codecov reports patch coverage on each PR against an 80% target for new code.
-It is not a required check, but untested new code is likely to be questioned.
+`codecov.yml` sets an 80% patch-coverage target for new code, and Codecov posts a
+failing status on a PR whose patch coverage is below it. Branch protection requires
+only `build-status` and `test-status`, so the Codecov status does not block merging.
 `scripts/Test-NewCodeCoverage.ps1` gives a similar local view.
 
 ## The optional pre-commit hook
@@ -228,7 +237,9 @@ but a maintainer reviews every outside contribution before merging.
 
 1. Open the PR against `main` and fill in the template: a summary, what you ran
    to test it, and any breaking changes. Put `Closes #N` on its own line for
-   each issue it resolves.
+   each issue it resolves. Give the PR a conventional-commit title,
+   `type(scope): summary` (for example `fix(cli): ...` or `docs: ...`): PRs are
+   squash-merged and the title becomes the commit subject on `main`.
 2. Update the affected package's `src/<package>/CHANGELOG.md` for user-visible changes.
    Do not change version numbers; versions come from git tags (MinVer).
 3. Wait for CI, then respond to review comments.
