@@ -245,9 +245,10 @@ public sealed partial class MetadataGlobalChoiceLiveTests
     }
 
     // Read-only: what Dataverse returns for a global choice name that does not exist, on the retrieve paths the product
-    // uses, and that the product reports it as not found (not a generic failure) whatever the organisation's language.
-    // The not-found recognition relies on the fault code 0x80040217 with the English wording as a fallback; the CLI's
-    // `optionset get` hint matches the English wording of the message it is given.
+    // uses, and that the product reports it as not found (Operation.NotFound, exit 6; #1759) whatever the organisation's
+    // language. The not-found recognition relies on the fault code 0x80040217 with the English wording as a fallback.
+    // The mutating probes are rejected before anything is written (the choice does not exist); the update and
+    // add-option requests are never accepted, and the final read proves nothing was created.
     [MetadataLiveFact]
     public async Task UnknownGlobalChoiceName_IsReportedAsNotFound()
     {
@@ -263,33 +264,46 @@ public sealed partial class MetadataGlobalChoiceLiveTests
             raw.Code.Should().Be(ObjectDoesNotExist, $"the not-found recognition assumes 0x80040217, but Dataverse returned {raw.Outcome}");
         }
 
-        // Query service (CLI `optionset get`): the original fault surfaces, with its code and a message the CLI's
-        // not-found hint recognises ("Could not find" / "optionset").
+        // Query service (CLI `optionset get`, RPC metadata/globalOptionSet): the name is absent in every spelling, so the
+        // query service reports OptionSetNotFoundException (#1759), keeping the original fault (with its code) as the cause.
+        // The CLI maps it to Operation.NotFound and exit 6 in text and JSON mode.
         var query = await Record.ExceptionAsync(() => new DataverseMetadataQueryService(pool).GetOptionSetAsync(missing));
         _output.WriteLine($"OBSERVED query service GetOptionSetAsync on an unknown name: {Describe(query)}");
-        query.Should().NotBeNull();
+        query.Should().BeOfType<OptionSetNotFoundException>();
         FindFault(query!)?.ErrorCode.Should().Be(ObjectDoesNotExist);
-        (query!.Message.Contains("Could not find", StringComparison.OrdinalIgnoreCase) || query.Message.Contains("optionset", StringComparison.OrdinalIgnoreCase))
-            .Should().BeTrue("`optionset get` reports 'not found' (exit NotFoundError) only for this wording");
+        AssertReportedAsNotFound("optionset get", query!, missing);
 
-        // Authoring service: the original not-found fault surfaces untouched (AC-134), so a caller can recognise it by
-        // its code. How the CLI then classifies it is recorded: ExceptionMapper has no rule for this fault code.
+        // Authoring service: every path whose target is the choice reports PpdsNotFoundException (#1759, AC-133/AC-134)
+        // with the original fault kept as the cause, so a caller can still read its code. The delete preview and the exact-name
+        // service delete (RPC metadata/deleteGlobalChoice) read the choice by name, so they report it too, and nothing is deleted.
+        // `column create` / `attribute create` with an unknown choice are not covered: they report OPTION_NOT_FOUND, exit 8 (AC-79).
         foreach (var (operation, call) in new (string, Func<Task>)[]
         {
             ("optionset update", () => service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = Solution, Name = missing, DisplayName = "Never" })),
-            ("optionset update-option", () => service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = missing, Value = 1, NewLabel = "Never", SolutionUniqueName = Solution }))
+            ("optionset update-option", () => service.UpdateOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateOptionValueRequest { OptionSetName = missing, Value = 1, NewLabel = "Never", SolutionUniqueName = Solution })),
+            ("optionset add-option", () => service.AddOptionValueAsync(new PPDS.Dataverse.Metadata.Authoring.AddOptionValueRequest { OptionSetName = missing, Label = "Never", SolutionUniqueName = Solution })),
+            ("optionset delete (preview)", () => service.PreviewDeleteAsync(new MetadataDeleteTarget(MetadataDeleteKind.GlobalChoice, Solution, Name: missing))),
+            ("service delete (RPC)", () => service.DeleteGlobalChoiceAsync(new DeleteGlobalChoiceRequest { SolutionUniqueName = Solution, Name = missing }))
         })
         {
             var ex = await Record.ExceptionAsync(call);
             _output.WriteLine($"OBSERVED service {operation} on an unknown name: {Describe(ex)}");
-            ex.Should().NotBeNull(operation);
-            FindFault(ex!).Should().NotBeNull($"{operation} keeps the Dataverse fault");
+            ex.Should().BeOfType<PpdsNotFoundException>(operation);
+            FindFault(ex!).Should().NotBeNull($"{operation} keeps the Dataverse fault as the cause");
             FindFault(ex!)!.ErrorCode.Should().Be(ObjectDoesNotExist, operation);
-            var (error, exit) = ExceptionMapper.MapWithExitCode(ex!);
-            _output.WriteLine($"OBSERVED CLI classification of {operation} on an unknown name: code {error.Code}, exit {exit} (not-found exit is {ExitCodes.NotFoundError})");
+            AssertReportedAsNotFound(operation, ex!, missing);
         }
         (await ObserveAsync(pool, "RetrieveOptionSet unknown after the probes", new RetrieveOptionSetRequest { Name = missing, RetrieveAsIfPublished = true })).Code
             .Should().Be(ObjectDoesNotExist, "nothing was created");
+    }
+
+    private void AssertReportedAsNotFound(string operation, Exception ex, string name)
+    {
+        var (error, exit) = ExceptionMapper.MapWithExitCode(ex);
+        _output.WriteLine($"OBSERVED CLI classification of {operation} on an unknown name: code {error.Code}, exit {exit}");
+        error.Code.Should().Be(ErrorCodes.Operation.NotFound, operation);
+        exit.Should().Be(ExitCodes.NotFoundError, operation);
+        error.Message.Should().Contain(name, operation);
     }
 
     /// <summary>Dataverse's "the language code is not a valid language for this organization" fault (observed live for 1033 on a French-base organisation).</summary>

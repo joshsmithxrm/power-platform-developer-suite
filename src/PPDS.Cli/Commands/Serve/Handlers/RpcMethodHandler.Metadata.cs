@@ -135,12 +135,20 @@ public partial class RpcMethodHandler
         return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var metadataService = sp.GetRequiredService<IMetadataQueryService>();
-            var optionSet = await metadataService.GetOptionSetAsync(name, ct).ConfigureAwait(false);
-
-            return new MetadataGlobalOptionSetDetailResponse
+            try
             {
-                OptionSet = MapOptionSetToRpc(optionSet),
-            };
+                var optionSet = await metadataService.GetOptionSetAsync(name, ct).ConfigureAwait(false);
+
+                return new MetadataGlobalOptionSetDetailResponse
+                {
+                    OptionSet = MapOptionSetToRpc(optionSet),
+                };
+            }
+            catch (PPDS.Dataverse.Metadata.OptionSetNotFoundException ex)
+            {
+                // #1759: an unknown choice is Operation.NotFound, like the CLI, not a generic internal error.
+                throw new RpcException(ErrorCodes.Operation.NotFound, ex.Message);
+            }
         }, cancellationToken);
     }
 

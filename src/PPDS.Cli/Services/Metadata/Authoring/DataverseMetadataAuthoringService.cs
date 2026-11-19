@@ -1245,7 +1245,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         {
             throw; // R2: cancellation must propagate
         }
-        catch (Exception ex) when (ex is not MetadataValidationException)
+        catch (Exception ex) when (ex is not MetadataValidationException and not PpdsNotFoundException)
         {
             throw new PpdsException(MetadataErrorCodes.EntityNotFound,
                 $"Could not retrieve option set '{optionSetName}'.", ex);

@@ -1,5 +1,6 @@
 using PPDS.Auth.Credentials;
 using PPDS.Dataverse.Configuration;
+using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Resilience;
 using PPDS.Dataverse.Security;
@@ -55,6 +56,7 @@ public static class ExceptionMapper
             // Not found errors
             FileNotFoundException => ExitCodes.NotFoundError,
             DirectoryNotFoundException => ExitCodes.NotFoundError,
+            OptionSetNotFoundException => ExitCodes.NotFoundError,
 
             // Validation/argument errors
             ArgumentException => ExitCodes.InvalidArguments,
@@ -142,6 +144,10 @@ public static class ExceptionMapper
 
             DirectoryNotFoundException =>
                 (ErrorCodes.Validation.DirectoryNotFound, null),
+
+            // A global choice that exists in no spelling (the query service cannot throw PpdsNotFoundException)
+            OptionSetNotFoundException =>
+                (ErrorCodes.Operation.NotFound, null),
 
             // Argument exceptions
             ArgumentNullException argNullEx =>
