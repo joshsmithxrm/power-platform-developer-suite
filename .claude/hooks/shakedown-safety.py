@@ -1024,8 +1024,9 @@ _GH_SUBCOMMAND_OPTIONS = {
                      ("search", "issues")], _GH_READ),
 }
 _CHECKED_PROGRAMS = {"printf", "rg", "git", "gh"}
-# The only options whose value may be a `"$(...)"` (the commit-message idiom).
-_MESSAGE_OPTIONS = {"-m", "--message", "--title", "--body"}
+# The only options whose value may be a `"$(...)"` (the commit-message
+# idiom), plus `--message="$(...)"`. Of git's short clusters only `-am`.
+_MESSAGE_OPTIONS = {"-m", "-am", "--message", "--title", "--body"}
 
 
 def _shell_value(raw: str) -> Optional[str]:
@@ -1096,11 +1097,15 @@ def _data_command(cmd, s: str) -> bool:
         return True
     args = []
     for a, b in cmd.spans[1:]:
-        value = _shell_value(s[a:b])
+        raw = s[a:b]
+        value = _shell_value(raw)
         if value is None:
-            if not (args and args[-1] in _MESSAGE_OPTIONS and _whole_substitution(s[a:b])):
+            if args and args[-1] in _MESSAGE_OPTIONS and _whole_substitution(raw):
+                value = "$(...)"
+            elif raw.startswith("--message=") and _whole_substitution(raw[len("--message="):]):
+                value = "--message=$(...)"
+            else:
                 return False
-            value = "$(...)"
         args.append(value)
     if prog == "printf":
         return not any(arg.startswith("-v") for arg in args)
@@ -1461,7 +1466,7 @@ def _new_invocations(parse, cwd: Optional[str], depth: int, out: list) -> None:
         prog = _program_name(prog_word)
 
         if prog in _PPDS_PROGRAMS:
-            out.append([re.split(r"[\/]", prog_word)[-1]] + args)
+            out.append([re.split(r"[\\/]", prog_word)[-1]] + args)
         elif prog == "dotnet":
             out.extend(_dotnet_argvs(args, cwd_box[0]))
         elif prog == "dnx":
@@ -1512,14 +1517,13 @@ def _new_invocations(parse, cwd: Optional[str], depth: int, out: list) -> None:
             for text in cmd.herestrings + cmd.heredoc_bodies:
                 scan(text)
 
-        launched = _launched_index(words, start)
-        if launched is not None:
-            handle(cmd, words, launched)
-
     cwd_box = [cwd]
     for cmd in parse.commands:
-        if cmd.start < len(cmd.words):
-            handle(cmd, cmd.words, cmd.start)
+        # Walk a launcher chain (sudo env nohup ... ppds) iteratively.
+        start = cmd.start if cmd.start < len(cmd.words) else None
+        while start is not None:
+            handle(cmd, cmd.words, start)
+            start = _launched_index(cmd.words, start)
     for text in parse.nested_strings:
         scan(text)
 
@@ -1533,24 +1537,22 @@ def find_ppds_invocations(command: str, cwd: Optional[str] = None) -> list:
     precisely (the .NET host forms normalised to the same shape), or ``[]``
     when the recognisers found nothing and the whole string is all data;
     see the design note above. ``cwd``, when given, is the directory the
-    command starts in.
+    command starts in. If anything in the new code raises, the result is
+    exactly the legacy hits, so it can never catch less than the legacy
+    matcher.
     """
     if not command:
         return []
+    out = [argv for _, argv in _legacy_invocations(command)]
     try:
         parse = _ShellParse(command)
-    except RecursionError:
-        parse = None
-    found = []
-    if parse is not None:
+        found = []
         _new_invocations(parse, cwd, 0, found)
         if not found and _all_data(parse):
             return []
-    out = []
-    seen = set()
-    for _, argv in _legacy_invocations(command):
-        out.append(argv)
-        seen.add(tuple(argv))
+    except Exception:  # noqa: BLE001 -- fall back to the legacy matcher
+        return out
+    seen = {tuple(argv) for argv in out}
     for argv in found:
         key = tuple(argv)
         if key not in seen:

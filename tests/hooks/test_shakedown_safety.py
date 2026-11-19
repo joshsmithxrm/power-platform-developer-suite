@@ -1081,6 +1081,63 @@ class TestExpandedOptions:
         assert not hook._all_data(hook._ShellParse('git commit -m "a $(cat x)"'))
 
 
+_MSG = "\"$(cat <<'EOF'\nfix: ppds data delete --entity account\nEOF\n)\""
+MESSAGE_FORMS = [
+    # (id, allowed, nearest blocked counterpart)
+    ("dash-am", f"git commit -am {_MSG}", f"git commit -a {_MSG}"),
+    ("message-equals", f"git commit --message={_MSG}", f"git commit --messag={_MSG}"),
+    ("dash-m", f"git commit -m {_MSG}",
+     "git commit -m \"$(sh <<'EOF'\nfix: ppds data delete --entity account\nEOF\n)\""),
+]
+LAUNCHER_CHAIN = "sudo " + "env " * 1000 + "ppds data delete --entity account"
+LAUNCHER_CHAIN_DOTNET = "nohup " * 1000 + "dotnet run --project src/PPDS.Cli -- data delete --entity account"
+
+
+class TestMessageForms:
+    @pytest.mark.parametrize("cmd", [a for _, a, _ in MESSAGE_FORMS], ids=[i for i, _, _ in MESSAGE_FORMS])
+    def test_allowed(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        r = _run_hook(cmd, env_extra=_gate_env(config_dir, project_dir, PPDS_SHAKEDOWN="1"))
+        assert r.returncode == 0, r.stderr
+        assert r.stderr == ""
+
+    @pytest.mark.parametrize("cmd", [b for _, _, b in MESSAGE_FORMS], ids=[i for i, _, _ in MESSAGE_FORMS])
+    def test_nearest_blocked(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        r = _run_hook(cmd, env_extra=_gate_env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert ENV_BLOCK in r.stderr
+
+
+class TestRobustness:
+    @pytest.mark.parametrize("cmd", [LAUNCHER_CHAIN, LAUNCHER_CHAIN_DOTNET], ids=["sudo-env-x1000", "nohup-x1000-dotnet"])
+    def test_long_launcher_chain_blocks_both_gates(self, fake_profile_dir, project_dir, cmd):
+        prod = fake_profile_dir(active_env_name="ppds-prod")
+        r = _run_hook(cmd, env_extra=_gate_env(prod, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert ENV_BLOCK in r.stderr
+        r = _run_hook(cmd, env_extra=_gate_env(prod, project_dir, PPDS_SAFE_ENVS="ppds-prod", PPDS_SHAKEDOWN="1"))
+        assert r.returncode == 2, r.stderr
+        assert "Pattern: data delete" in r.stderr
+
+    def test_dotnet_chain_found_by_the_walk(self):
+        assert ["ppds", "data", "delete", "--entity", "account"] in hook.find_ppds_invocations(LAUNCHER_CHAIN_DOTNET)
+
+    def test_new_code_failure_returns_legacy_hits(self, monkeypatch):
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("bug in new code")
+
+        cmd = 'echo "a && ppds data delete --entity account"'
+        monkeypatch.setattr(hook, "_all_data", boom)
+        assert hook.find_ppds_invocations(cmd) == [hook._legacy_invocations(cmd)[0][1]]
+        monkeypatch.setattr(hook, "_ShellParse", boom)
+        assert hook.find_ppds_invocations("dotnet run --project src/PPDS.Cli -- x") == []
+        assert hook.find_ppds_invocations(cmd) == [hook._legacy_invocations(cmd)[0][1]]
+
+    def test_backslash_path_program_word(self):
+        assert hook.find_ppds_invocations(r'"C:\Tools\PPDS\ppds.exe" env who') == [["ppds.exe", "env", "who"]]
+
+
 class TestHeredocs:
     @pytest.mark.parametrize("cmd,blocked", [(c, b) for _, c, b in HEREDOC_CASES],
                              ids=[i for i, _, _ in HEREDOC_CASES])
