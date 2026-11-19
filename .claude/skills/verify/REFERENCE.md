@@ -12,7 +12,8 @@ slashes.
 Applies to every flow that reaches live Dataverse (CLI, TUI, extension, MCP).
 The `.claude/hooks/shakedown-safety.py` PreToolUse hook inspects each Bash
 command that invokes `ppds` or `ppds-mcp-server` by program name (a path
-ending in `ppds` counts). Full model: `docs/SAFE-SHAKEDOWN.md`.
+ending in `ppds` counts) or through `dotnet` (`dotnet run --project
+src/PPDS.Cli`, `dotnet .../ppds.dll`). Full model: `docs/SAFE-SHAKEDOWN.md`.
 
 - **Env allowlist (opt-in).** Off until a list names an env. The hook reads,
   first match wins: `$PPDS_SAFE_ENVS` (comma-separated, read from the
@@ -36,9 +37,9 @@ Before running anything below:
    mean to touch, and in the allowlist if one is configured.
 2. When invoked from `/shakedown`, confirm `.claude/state/shakedown-active.json`
    exists so writes fail closed.
-3. Invoke the CLI as `ppds` or `src/PPDS.Cli/bin/Debug/net10.0/ppds`, not
-   through `dotnet run --project src/PPDS.Cli/...` or `scripts/ppds-dev.ps1`:
-   the hook matches the program name and does not see those forms.
+3. Invoke the CLI as `ppds`, `src/PPDS.Cli/bin/Debug/net10.0/ppds` or
+   `dotnet run --project src/PPDS.Cli -- ...`, not through
+   `scripts/ppds-dev.ps1`: the hook does not see that script.
 
 ---
 
