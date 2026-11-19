@@ -49,9 +49,11 @@ simple commands joined by ``;``, newline, ``&&``, ``||`` or ``|``; every
 command word, including inside ``$(...)``, is a bare unquoted name from
 ``_DATA_PROGRAMS``; there is no assignment, no output redirection except to
 ``/dev/null`` or an fd; and ``printf`` / ``rg`` / ``git`` / ``gh`` use only
-allowlisted subcommands and exact options. Otherwise nothing is cleared, so
-a mixed string such as ``dotnet build && git commit -m "... ppds ..."`` is
-handled as before. Matching is best-effort: scripts, aliases, a variable
+allowlisted subcommands and exact options, checked on the value bash
+delivers (only literal text and plain quotes; a ``"$(...)"`` only as the
+whole value of ``-m`` / ``--message`` / ``--title`` / ``--body``).
+Otherwise nothing is cleared, so a mixed string such as ``dotnet build &&
+git commit ...`` or ``git commit ... && git push`` is handled as before. Matching is best-effort: scripts, aliases, a variable
 or glob as the program, interpreters (``python -c``) and a working
 directory set outside the string are not seen. The C# ``IShakedownGuard``
 blocks writes during a shakedown however the CLI was started.
@@ -588,42 +590,7 @@ _COMMAND_POSITION_KEYWORDS = {"!", "{", "}", "if", "then", "else", "elif", "fi",
                               "do", "done", "while", "until", "esac"}
 # Reserved words that start a construct whose following words are not commands.
 _NON_COMMAND_KEYWORDS = {"for", "select", "case", "function", "[[", "]]"}
-# Constructs the parse does not model: their presence prevents exoneration.
-_UNMODELLED_KEYWORDS = {"case", "esac"}
 
-# Commands that run their argument as a program:
-# wrapper -> (options that take a separate value, leading positionals to skip).
-_WRAPPERS = {
-    "env": ({"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}, 0),
-    "command": (set(), 0),
-    "builtin": (set(), 0),
-    "exec": ({"-a"}, 0),
-    "time": ({"-f", "--format", "-o", "--output"}, 0),
-    "nohup": (set(), 0),
-    "sudo": ({"-u", "--user", "-g", "--group", "-C", "--close-from", "-D",
-              "--chdir", "-h", "--host", "-p", "--prompt", "-r", "--role",
-              "-t", "--type", "-U", "--other-user", "-T", "--command-timeout"}, 0),
-    "doas": ({"-u", "-C"}, 0),
-    "nice": ({"-n", "--adjustment"}, 0),
-    "ionice": ({"-c", "--class", "-n", "--classdata", "-p", "-t"}, 0),
-    "timeout": ({"-s", "--signal", "-k", "--kill-after"}, 1),
-    "flock": ({"-w", "--timeout", "-E", "--conflict-exit-code"}, 1),
-    "xargs": ({"-I", "-n", "--max-args", "-P", "--max-procs", "-L",
-               "--max-lines", "-s", "--max-chars", "-d", "--delimiter", "-E",
-               "-a", "--arg-file"}, 0),
-    "stdbuf": ({"-i", "-o", "-e", "--input", "--output", "--error"}, 0),
-    "winpty": (set(), 0),
-    "watch": ({"-n", "--interval"}, 0),
-    "setsid": (set(), 0),
-    "strace": ({"-o", "-e", "-p", "-s", "-u", "-E", "-I", "-a", "-O", "-S"}, 0),
-    "npx": ({"-p", "--package", "-c", "--call"}, 0),
-    "chronic": (set(), 0),
-    "caffeinate": ({"-t", "-w"}, 0),
-    "wsl": ({"-d", "--distribution", "-u", "--user", "--cd"}, 0),
-    "coproc": (set(), 0),
-    "start": (set(), 0),
-}
-_WRAPPER_POSITIONAL_RE = re.compile(r"^(?:\d+(?:\.\d+)?[smhd]?|\{\})$")
 _SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish"}
 _SHELL_VALUE_OPTIONS = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
 
@@ -670,73 +637,41 @@ def _program_name(word: str) -> str:
 def _command_start(words: list) -> int:
     """Index of the word in command position, or ``len(words)`` if none.
 
-    Skips leading ``NAME=value`` assignments, reserved words such as ``if`` /
-    ``then`` / ``do`` / ``!``, and wrapper commands that run their argument
-    (``env``, ``sudo``, ``time``, ``xargs`` ...) with their options.
+    Skips leading ``NAME=value`` assignments and reserved words such as
+    ``if`` / ``then`` / ``do`` / ``!``. A wrapper (``sudo``, ``env``,
+    ``xargs`` ...) is the program; ``_new_invocations`` looks past it.
     """
-    i = 0
-    n = len(words)
-    while i < n:
-        word = words[i]
-        if _ASSIGNMENT_RE.match(word) or word in _COMMAND_POSITION_KEYWORDS:
-            i += 1
-            continue
+    for i, word in enumerate(words):
         if word in _NON_COMMAND_KEYWORDS:
-            return n
-        wrapper = _program_name(word)
-        if wrapper not in _WRAPPERS:
-            return i
-        value_opts, positionals = _WRAPPERS[wrapper]
-        i += 1
-        while i < n:
-            arg = words[i]
-            if arg == "--":
-                i += 1
-                break
-            if arg.startswith("-") and len(arg) > 1:
-                i += 2 if arg in value_opts else 1
-                continue
-            if wrapper == "env" and _ASSIGNMENT_RE.match(arg):
-                i += 1
-                continue
-            if positionals:
-                positionals -= 1
-                i += 1
-                continue
-            if wrapper in ("nice", "xargs", "watch") and _WRAPPER_POSITIONAL_RE.match(arg):
-                i += 1
-                continue
             break
-    return n
+        if not (_ASSIGNMENT_RE.match(word) or word in _COMMAND_POSITION_KEYWORDS):
+            return i
+    return len(words)
 
 
 class _Cmd:
     """One simple command found by ``_ShellParse``."""
 
-    __slots__ = ("words", "spans", "pipe_to", "herestrings", "heredoc_bodies",
-                 "heredocs", "redirs", "_start")
+    __slots__ = ("words", "spans", "pipe_to", "herestrings", "heredocs", "redirs", "_start")
 
     def __init__(self):
         self.words = []
         self.spans = []
         self.pipe_to = None
         self.herestrings = []
-        self.heredoc_bodies = []
         self.heredocs = []  # (raw delimiter, quoted, body)
         self.redirs = []    # (operator, raw target)
         self._start = None
+
+    @property
+    def heredoc_bodies(self) -> list:
+        return [body for _, _, body in self.heredocs]
 
     @property
     def start(self) -> int:
         if self._start is None:
             self._start = _command_start(self.words)
         return self._start
-
-    @property
-    def program(self) -> Optional[str]:
-        if self.start >= len(self.words):
-            return None
-        return _program_name(self.words[self.start])
 
 
 class _SeqState:
@@ -824,9 +759,6 @@ class _ShellParse:
             self._seq(0, False, 0, len(s))
         except RecursionError:
             self.unclean = True
-        for cmd in self.commands:
-            if any(w in _UNMODELLED_KEYWORDS for w in cmd.words[: cmd.start + 1]):
-                self.unclean = True
 
     def _seq(self, i, in_paren, depth, limit):
         """Parse a command list from ``i``; return the index after it.
@@ -1032,9 +964,7 @@ class _ShellParse:
         return i
 
     def _body(self, cmd, start, end, quoted, raw, depth):
-        body = self.s[start:end]
-        cmd.heredoc_bodies.append(body)
-        cmd.heredocs.append((raw, quoted, body))
+        cmd.heredocs.append((raw, quoted, self.s[start:end]))
         if not quoted:
             self._expand(start, end, None, depth, [])
 
@@ -1045,9 +975,11 @@ class _ShellParse:
 # found nothing and the whole string is "all data" (``_all_data``).
 
 
-def _opts(flags: str, values: str = "") -> dict:
-    """Option allowlist: option -> whether it takes a separate value."""
-    return {**dict.fromkeys(flags.split(), False), **dict.fromkeys(values.split(), True)}
+def _opts(flags: str, values: str = "", eq_only: str = "") -> dict:
+    """Option allowlist: option -> True (takes the next word or ``=value``),
+    "=" (value only as ``--name=value``), or False (takes no value)."""
+    return {**dict.fromkeys(flags.split(), False), **dict.fromkeys(values.split(), True),
+            **dict.fromkeys(eq_only.split(), "=")}
 
 
 _BARE_NAME_RE = re.compile(r"^[a-z]+$")
@@ -1055,8 +987,10 @@ _HEREDOC_DELIMITER_RE = re.compile(r"""^(?:\w+|'\w+'|"\w+")$""", re.ASCII)
 _DATA_JOINING_OPS = {";", "&&", "||", "|"}
 _OUTPUT_REDIRECTIONS = {">", ">>", ">|", "&>", "&>>", ">&"}
 _INPUT_REDIRECTIONS = {"<", "<&", "<<", "<<-"}
-# Exact options only; `--name=value` is accepted for a long option that
-# takes a value. Not rg -z (runs decompressors), --pre, --pre-glob.
+# Exact options only, checked on the value the shell delivers. Separate
+# values only where the program parses them (rg/clap, git parse-options and
+# revision options, gh/pflag). Not rg -z (runs decompressors), --pre,
+# --pre-glob, --hostname-bin.
 _RG_OPTIONS = _opts("-n --line-number -i --ignore-case -S --smart-case -l "
                     "--files-with-matches -w --word-regexp -F --fixed-strings "
                     "-c --count --files --hidden",
@@ -1064,8 +998,9 @@ _RG_OPTIONS = _opts("-n --line-number -i --ignore-case -S --smart-case -l "
 # git subcommands that run nothing they are given, no option before them.
 # Not fetch / pull / clone / push (remote URLs, --upload-pack, --exec),
 # config, rebase, bisect, grep (-O runs a pager), or anything else.
+# --pretty / --format take their value only after `=`.
 _GIT_LOG_OPTIONS = _opts("--oneline --stat --name-only --name-status",
-                         "-n --grep --format --pretty --since --until --author")
+                         "-n --grep --since --until --author", "--format --pretty")
 _GIT_SUBCOMMAND_OPTIONS = {
     "commit": _opts("-a --all --amend --no-edit -s --signoff -q --quiet",
                     "-m --message -am -F"),
@@ -1088,6 +1023,41 @@ _GH_SUBCOMMAND_OPTIONS = {
                      ("repo", "view"), ("label", "list"), ("search", "prs"),
                      ("search", "issues")], _GH_READ),
 }
+_CHECKED_PROGRAMS = {"printf", "rg", "git", "gh"}
+# The only options whose value may be a `"$(...)"` (the commit-message idiom).
+_MESSAGE_OPTIONS = {"-m", "--message", "--title", "--body"}
+
+
+def _shell_value(raw: str) -> Optional[str]:
+    """The value bash delivers for a word, or None when it involves any
+    expansion this function does not compute exactly."""
+    if raw.startswith("~"):
+        return None
+    out = []
+    i = 0
+    while i < len(raw):
+        c = raw[i]
+        if c in "'\"":
+            j = raw.find(c, i + 1)
+            if j < 0 or (c == '"' and any(ch in raw[i + 1:j] for ch in "$`\\")):
+                return None
+            out.append(raw[i + 1:j])
+            i = j + 1
+        elif c in "\\{}$`*?[":
+            return None
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def _whole_substitution(raw: str) -> bool:
+    """True when ``raw`` is exactly ``"$(...)"`` with a cleanly parsed inside."""
+    if not (raw.startswith('"$(') and raw.endswith(')"')) or raw.startswith('"$(('):
+        return False
+    probe = _ShellParse("")
+    probe.s = raw
+    return probe._seq(3, True, 1, len(raw) - 1) == len(raw) - 1 and not probe.unclean
 
 
 def _options_allowed(args: list, allowed: dict) -> bool:
@@ -1097,7 +1067,7 @@ def _options_allowed(args: list, allowed: dict) -> bool:
         arg = args[i]
         name = arg.split("=", 1)[0]
         if arg in allowed:
-            i += 2 if allowed[arg] else 1
+            i += 2 if allowed[arg] is True else 1
         elif arg.startswith("-") and not ("=" in arg and name.startswith("--") and allowed.get(name)):
             return False
         else:
@@ -1110,7 +1080,7 @@ def _data_command(cmd, s: str) -> bool:
     if not cmd.words or cmd.herestrings:
         return False
     a, b = cmd.spans[0]
-    prog, args = cmd.words[0], cmd.words[1:]
+    prog = cmd.words[0]
     if s[a:b] != prog or not _BARE_NAME_RE.match(prog) or prog not in _DATA_PROGRAMS:
         return False
     for op, target in cmd.redirs:
@@ -1122,6 +1092,16 @@ def _data_command(cmd, s: str) -> bool:
     for raw, quoted, body in cmd.heredocs:
         if not _HEREDOC_DELIMITER_RE.match(raw) or (not quoted and ("$(" in body or "`" in body)):
             return False
+    if prog not in _CHECKED_PROGRAMS:
+        return True
+    args = []
+    for a, b in cmd.spans[1:]:
+        value = _shell_value(s[a:b])
+        if value is None:
+            if not (args and args[-1] in _MESSAGE_OPTIONS and _whole_substitution(s[a:b])):
+                return False
+            value = "$(...)"
+        args.append(value)
     if prog == "printf":
         return not any(arg.startswith("-v") for arg in args)
     if prog == "rg":
@@ -1134,11 +1114,9 @@ def _data_command(cmd, s: str) -> bool:
         if any(w == "-F" and rest[j + 1:j + 2] != ["-"] for j, w in enumerate(rest)):
             return False
         return _options_allowed(rest, _GIT_SUBCOMMAND_OPTIONS[args[0]])
-    if prog == "gh":
-        if len(args) < 2 or (args[0], args[1]) not in _GH_SUBCOMMAND_OPTIONS:
-            return False
-        return _options_allowed(args[2:], _GH_SUBCOMMAND_OPTIONS[(args[0], args[1])])
-    return True
+    if len(args) < 2 or (args[0], args[1]) not in _GH_SUBCOMMAND_OPTIONS:
+        return False
+    return _options_allowed(args[2:], _GH_SUBCOMMAND_OPTIONS[(args[0], args[1])])
 
 
 def _all_data(parse) -> bool:
@@ -1148,12 +1126,11 @@ def _all_data(parse) -> bool:
     return all(_data_command(cmd, parse.s) for cmd in parse.commands)
 
 
-def _data_argument(cmd, idx) -> bool:
-    """True when word ``idx`` of a data program is not an argument it runs."""
-    words = cmd.words
-    prog = cmd.program
+def _data_argument(words: list, start: int, idx: int) -> bool:
+    """True when word ``idx`` of git / gh / rg is not an argument it runs."""
+    prog = _program_name(words[start])
     if prog == "git":
-        j = cmd.start + 1
+        j = start + 1
         while j < len(words) and words[j].startswith("-"):
             w = words[j]
             if w.startswith(_GIT_GLOBAL_EXEC_OPTIONS):
@@ -1162,7 +1139,7 @@ def _data_argument(cmd, idx) -> bool:
         if j >= len(words) or words[j] not in _GIT_DATA_SUBCOMMANDS or idx <= j:
             return False
     elif prog == "gh":
-        j = cmd.start + 1
+        j = start + 1
         if j >= len(words) or words[j] not in _GH_DATA_SUBCOMMANDS or idx <= j:
             return False
     exec_opts = _DATA_EXEC_OPTIONS.get(prog, ())
@@ -1444,6 +1421,29 @@ def _cmd_command(args: list) -> Optional[str]:
     return None
 
 
+# Programs ``_new_invocations`` handles itself; anything else that is not a
+# data program is treated as a possible launcher and searched for one.
+_TERMINAL_PROGRAMS = _PPDS_PROGRAMS | _SHELLS | {
+    "dotnet", "dnx", "cd", "pushd", "popd", "su", "script", "pwsh", "powershell", "cmd", "eval"}
+_LAUNCHED_PROGRAMS = (_TERMINAL_PROGRAMS - {"cd", "pushd", "popd"}) | {"env", "git", "gh", "rg"}
+
+
+def _launched_index(words: list, start: int) -> Optional[int]:
+    """Where a launcher (``sudo``, ``xargs``, ``find -exec`` ...) starts the
+    program it runs: the first later word naming a program handled here."""
+    if _program_name(words[start]) in _DATA_PROGRAMS | _TERMINAL_PROGRAMS:
+        return None
+    return next((j for j in range(start + 1, len(words))
+                 if _program_name(words[j]) in _LAUNCHED_PROGRAMS), None)
+
+
+def _effective_program(cmd) -> Optional[str]:
+    if cmd.start >= len(cmd.words):
+        return None
+    j = _launched_index(cmd.words, cmd.start)
+    return _program_name(cmd.words[cmd.start if j is None else j])
+
+
 def _new_invocations(parse, cwd: Optional[str], depth: int, out: list) -> None:
     """Append the invocations the precise parse recognises (part (b))."""
 
@@ -1455,24 +1455,13 @@ def _new_invocations(parse, cwd: Optional[str], depth: int, out: list) -> None:
                 return
             _new_invocations(inner, cwd_box[0], depth + 1, out)
 
-    cwd_box = [cwd]
-    for cmd in parse.commands:
-        words = cmd.words
-        start = cmd.start
-        # env -S / --split-string runs its value as a command line.
-        for j, w in enumerate(words[:start]):
-            if w in ("-S", "--split-string") and j + 1 < len(words):
-                scan(words[j + 1])
-            elif w.startswith("--split-string="):
-                scan(w.split("=", 1)[1])
-        if start >= len(words):
-            continue
+    def handle(cmd, words, start):
         prog_word = words[start]
         args = words[start + 1:]
         prog = _program_name(prog_word)
 
         if prog in _PPDS_PROGRAMS:
-            out.append([re.split(r"[\\/]", prog_word)[-1]] + args)
+            out.append([re.split(r"[\/]", prog_word)[-1]] + args)
         elif prog == "dotnet":
             out.extend(_dotnet_argvs(args, cwd_box[0]))
         elif prog == "dnx":
@@ -1495,6 +1484,13 @@ def _new_invocations(parse, cwd: Optional[str], depth: int, out: list) -> None:
             scan(_cmd_command(args))
         elif prog == "eval":
             scan(" ".join(args))
+        elif prog == "env":
+            # env -S / --split-string runs its value as a command line.
+            for j, w in enumerate(args):
+                if w in ("-S", "--split-string") and j + 1 < len(args):
+                    scan(args[j + 1])
+                elif w.startswith("--split-string="):
+                    scan(w.split("=", 1)[1])
 
         if prog in _SHELLS or prog in ("pwsh", "powershell", "cmd"):
             for text in cmd.herestrings + cmd.heredoc_bodies:
@@ -1504,29 +1500,26 @@ def _new_invocations(parse, cwd: Optional[str], depth: int, out: list) -> None:
         # programs may run are scanned as command strings.
         if prog in _DATA_EXEC_OPTIONS:
             for j in range(start + 1, len(words)):
-                if not _data_argument(cmd, j):
+                if not _data_argument(words, start, j):
                     text = words[j]
                     if "=" in text and (text.startswith("--") or not text.startswith("-")):
                         text = text.split("=", 1)[1]
                     scan(text.lstrip("!"))
         # `echo '...' | bash`, `cat <<EOF | sh`: text piped into a shell.
-        if cmd.pipe_to is not None and cmd.pipe_to.program in _SHELLS:
+        if cmd.pipe_to is not None and _effective_program(cmd.pipe_to) in _SHELLS:
             if prog in ("echo", "printf"):
                 scan(" ".join(args))
             for text in cmd.herestrings + cmd.heredoc_bodies:
                 scan(text)
 
-        if prog not in _DATA_PROGRAMS and prog not in ("dotnet", "dnx"):
-            # A launcher this parse does not model may run `dotnet ...` or a
-            # PPDS program from its arguments (find -exec, parallel, ssh ...).
-            for j in range(start + 1, len(words)):
-                name = _program_name(words[j])
-                if name == "dotnet":
-                    out.extend(_dotnet_argvs(words[j + 1:], cwd_box[0]))
-                    break
-                if name in _PPDS_PROGRAMS:
-                    out.append([re.split(r"[\\/]", words[j])[-1]] + words[j + 1:])
-                    break
+        launched = _launched_index(words, start)
+        if launched is not None:
+            handle(cmd, words, launched)
+
+    cwd_box = [cwd]
+    for cmd in parse.commands:
+        if cmd.start < len(cmd.words):
+            handle(cmd, cmd.words, cmd.start)
     for text in parse.nested_strings:
         scan(text)
 

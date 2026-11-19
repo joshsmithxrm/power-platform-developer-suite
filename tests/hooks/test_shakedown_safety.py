@@ -1014,6 +1014,73 @@ class TestWholeStringBypasses:
         assert not hook._all_data(hook._ShellParse(cmd))
 
 
+E_PPDS = "env ppds data delete --entity account"
+
+# Options hidden from the lexer's text but delivered by bash after expansion.
+EXPANDED_OPTION_ATTACKS = [
+    ("rg-backslash-pre", r"rg \--pre ppds-mcp-server x"),
+    ("rg-brace-pre", "rg {--pre,} ppds-mcp-server x"),
+    ("git-backslash-output", rf"git log \--output=s.sh --format='{E_PPDS}' -1"),
+    ("git-brace-output", f"git log {{--output=s.sh,}} --format='{E_PPDS}' -1"),
+    ("git-pretty-swallows-next", f"git log --pretty --output=s.sh --format='{E_PPDS}' -1"),
+    ("rg-double-quoted-pre", 'rg "--pre" ppds-mcp-server x'),
+    ("rg-single-quoted-pre", "rg '--pre' ppds-mcp-server x"),
+    ("rg-partly-quoted-pre", 'rg --p"r"e ppds-mcp-server x'),
+    ("rg-empty-quotes-pre", 'rg -""-pre ppds-mcp-server x'),
+    ("rg-ansi-c-pre", "rg $'--pre' ppds-mcp-server x"),
+    ("printf-brace-v", f"printf {{-v,c}} '%s ' ppds data delete --entity account"),
+]
+
+EXPANDED_OPTION_ALLOWED = [
+    ("rg-files", "rg --files x # ppds data delete"),
+    ("git-pretty-equals", "git log --pretty=oneline -1 # ppds data delete"),
+    ("commit-message-substitution",
+     "git commit -m \"$(cat <<'EOF'\nfix: ppds data delete --entity account\nEOF\n)\""),
+    ("gh-body-substitution",
+     "gh pr create --title t --body \"$(cat <<'EOF'\nppds data delete --entity account\nEOF\n)\""),
+]
+
+
+class TestExpandedOptions:
+    """Allowlisted options are checked on the value bash delivers."""
+
+    @pytest.mark.parametrize("cmd", [c for _, c in EXPANDED_OPTION_ATTACKS],
+                             ids=[i for i, _ in EXPANDED_OPTION_ATTACKS])
+    def test_blocked(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        r = _run_hook(cmd, env_extra=_gate_env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert ENV_BLOCK in r.stderr
+
+    @pytest.mark.parametrize("cmd", [c for _, c in EXPANDED_OPTION_ALLOWED],
+                             ids=[i for i, _ in EXPANDED_OPTION_ALLOWED])
+    def test_counterpart_allowed(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        r = _run_hook(cmd, env_extra=_gate_env(config_dir, project_dir, PPDS_SHAKEDOWN="1"))
+        assert r.returncode == 0, r.stderr
+        assert r.stderr == ""
+
+    @pytest.mark.parametrize("cmd", [c for _, c in EXPANDED_OPTION_ATTACKS],
+                             ids=[i for i, _ in EXPANDED_OPTION_ATTACKS])
+    def test_not_all_data(self, cmd):
+        assert not hook._all_data(hook._ShellParse(cmd))
+
+    @pytest.mark.parametrize("raw,value", [
+        ("--pre", "--pre"), ('"--pre"', "--pre"), ("'--pre'", "--pre"),
+        ('--p"r"e', "--pre"), ('-""-pre', "--pre"), ("'a b'", "a b"),
+        (r"\--pre", None), ("{--pre,}", None), ("$X", None), ('"$X"', None),
+        ("`x`", None), ("*.md", None), ("~/x", None), ('"a\\"b"', None),
+    ])
+    def test_shell_value(self, raw, value):
+        assert hook._shell_value(raw) == value
+
+    def test_substitution_only_as_message_value(self):
+        assert hook._all_data(hook._ShellParse('git commit -m "$(cat x)"'))
+        assert not hook._all_data(hook._ShellParse('git commit "$(cat x)" -m y'))
+        assert not hook._all_data(hook._ShellParse('git log --grep "$(cat x)"'))
+        assert not hook._all_data(hook._ShellParse('git commit -m "a $(cat x)"'))
+
+
 class TestHeredocs:
     @pytest.mark.parametrize("cmd,blocked", [(c, b) for _, c, b in HEREDOC_CASES],
                              ids=[i for i, _, _ in HEREDOC_CASES])

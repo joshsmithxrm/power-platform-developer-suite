@@ -94,11 +94,20 @@ command string that is data as a whole. When in doubt it blocks.
      starts with `commit`, `log`, `show`, `diff`, `status` or `add` (no
      option before it) and `gh` with an allowlisted pair such as
      `pr create` / `pr view` / `issue comment`, each with only allowlisted
-     exact options (no abbreviation, attached value or bare `--`).
+     exact options (no abbreviation, attached value or bare `--`). For these
+     four programs every argument is checked as the value bash delivers, so
+     it may contain only literal text and plain quotes (`"--pre"` counts as
+     `--pre`); a backslash, brace, glob, `~` or `$` makes the string not data,
+     except a `"$(...)"` that is the whole value of `-m`, `--message`,
+     `--title` or `--body`.
 
    Otherwise nothing is cleared and the result is exactly steps 1 + 2. The
-   accepted trade: a mixed string such as
-   `dotnet build && git commit -m "... ppds ..."` is gated as before.
+   accepted trade: a string that mixes in any other command is gated as on
+   origin/main. That includes `dotnet build && git commit -m "... ppds ..."`
+   and, most often, `git add -A && git commit -m "$(cat <<'EOF' ... EOF)" &&
+   git push`: `push` is not an allowed subcommand, so a commit message that
+   mentions `ppds` is gated when it is followed by a push (without the
+   trailing push it is cleared).
 
 So `grep -rn ppds docs/`, `git commit -m "fix: ppds query crash"`,
 `gh pr create --title "..." --body "..."` and a commit message passed as
