@@ -172,8 +172,8 @@ public class PpdsNotFoundException : PpdsException
     /// <summary>
     /// Creates a new not found exception.
     /// </summary>
-    public PpdsNotFoundException(string resourceType, string resourceId)
-        : base(ErrorCodes.Operation.NotFound, $"{resourceType} '{resourceId}' not found.")
+    public PpdsNotFoundException(string resourceType, string resourceId, Exception? inner = null)
+        : base(ErrorCodes.Operation.NotFound, $"{resourceType} '{resourceId}' not found.", inner)
     {
         ResourceType = resourceType;
         ResourceId = resourceId;

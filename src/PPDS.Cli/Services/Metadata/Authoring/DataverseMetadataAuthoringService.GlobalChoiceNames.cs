@@ -39,8 +39,9 @@ public partial class DataverseMetadataAuthoringService
     /// with a "not found" fault (see <see cref="IsOptionSetNotFoundFault"/>), the catalog is listed. If exactly one stored name differs from
     /// the request only by case, the operation is retried once under that stored name. If several do, the
     /// existing ambiguity error is raised (with the original fault as its inner exception). In every other
-    /// case (no case variant, the requested spelling is itself stored, or the lookup fails) the original
-    /// exception is rethrown unchanged.
+    /// case (the requested spelling is itself stored, or the lookup fails) the original exception is rethrown
+    /// unchanged. If the listed catalog holds no choice by that name in any spelling, a <see cref="PpdsNotFoundException"/>
+    /// naming the choice is thrown instead (#1759), which the CLI reports with the not-found exit code.
     /// </summary>
     /// <remarks>
     /// Recognition is by fault code, so any ObjectDoesNotExist fault qualifies, including one about another object
@@ -95,7 +96,9 @@ public partial class DataverseMetadataAuthoringService
 
     /// <summary>
     /// Returns the stored spelling when exactly one stored name differs from <paramref name="name"/> only by
-    /// case and none matches it exactly; otherwise null, meaning the original failure stands. Throws the
+    /// case and none matches it exactly; null when the requested spelling is itself stored or the catalog could not
+    /// be listed, meaning the original failure stands. Throws <see cref="PpdsNotFoundException"/> when the listed
+    /// catalog holds no choice by that name in any spelling (#1759). Throws the
     /// existing ambiguity error (carrying <paramref name="original"/>) when several case variants exist.
     /// </summary>
     private async Task<string?> TryResolveCaseVariantAsync(string name, string field, Exception original, CancellationToken ct)
@@ -118,7 +121,11 @@ public partial class DataverseMetadataAuthoringService
         }
 
         var matches = definitions.Where(d => string.Equals(d?.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
-        if (matches.Length == 0 || matches.Any(d => string.Equals(d.Name, name, StringComparison.Ordinal)))
+        // #1759: the catalog was listed and holds no choice by this name in any spelling, so the not-found fault
+        // was about the choice itself. Report it as not found (exit 6) rather than the raw fault.
+        if (matches.Length == 0)
+            throw new PpdsNotFoundException("Global choice", name, original);
+        if (matches.Any(d => string.Equals(d.Name, name, StringComparison.Ordinal)))
             return null;
         if (matches.Length > 1)
             throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,

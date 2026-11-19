@@ -48,13 +48,17 @@ public sealed class DataverseMetadataQueryServiceOptionSetNameTests
 
     [Theory]
     [InlineData("mayo_missing")]   // nothing matches
-    [InlineData("statuscode")]     // entity-scoped name: existing not-found hint path must still see the server fault
+    [InlineData("statuscode")]     // entity-scoped name: absent from the global catalog too
     [Trait("AC", "AC-134")]
-    public async Task Unresolvable_KeepsOriginalServerFault(string name)
+    public async Task Unresolvable_IsReportedAsOptionSetNotFound(string name)
     {
+        // #1759: the fault says not found and the listed catalog holds no such choice in any spelling.
         var f = new Fixture();
-        var ex = await Assert.ThrowsAsync<FaultException<OrganizationServiceFault>>(() => f.Service.GetOptionSetAsync(name));
-        Assert.Contains("Could not find an optionset with name", ex.Message);
+        var ex = await Assert.ThrowsAsync<OptionSetNotFoundException>(() => f.Service.GetOptionSetAsync(name));
+        Assert.Equal(name, ex.OptionSetName);
+        Assert.Contains(name, ex.Message);
+        var fault = Assert.IsType<FaultException<OrganizationServiceFault>>(ex.InnerException);
+        Assert.Contains("Could not find an optionset with name", fault.Message);
         Assert.Single(f.Requests.OfType<RetrieveOptionSetRequest>());
         f.AssertLeases();
     }

@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `OptionSetNotFoundException` (`PPDS.Dataverse.Metadata`): the exception `IMetadataQueryService.GetOptionSetAsync` throws for a global choice that exists in no spelling (#1759).
 - `DeleteGlobalChoiceRequest.ExpectedMetadataId` (default null), a request field for the CLI/MCP metadata authoring service. When it is set, that service refuses the delete unless its pre-delete check finds exactly that object under the requested name. This library does not act on it itself, and existing callers are unaffected (#1535).
 - A `MetadataValidationException(string errorCode, string message, string? field, Exception? innerException)` constructor that keeps the inner exception (#1535).
 - `MetadataErrorCodes.WriteNotConfirmed` (`WRITE_NOT_CONFIRMED`): a write request returned success but a follow-up confirmation, such as the stored option colour, failed or disagreed (#1604).
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Behaviour change:** `IMetadataQueryService.GetOptionSetAsync` throws `OptionSetNotFoundException` (inner exception: the original `FaultException<OrganizationServiceFault>`) when Dataverse reports the name not found and the published catalog holds it in no spelling. Before, it rethrew the `FaultException`. Code that caught `FaultException<OrganizationServiceFault>` to detect an unknown name must also catch `OptionSetNotFoundException`, or read `InnerException`. The `FaultException` is still thrown when the catalog lookup fails or several case variants exist (#1759).
 - Refreshed MSAL and its cache extensions from 4.90.1 to 4.92.0 (#1513).
 
 ### Fixed

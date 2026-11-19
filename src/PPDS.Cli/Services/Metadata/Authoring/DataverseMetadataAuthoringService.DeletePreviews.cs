@@ -79,7 +79,9 @@ public partial class DataverseMetadataAuthoringService
             _ => throw new ArgumentOutOfRangeException(nameof(target))
         };
         var (request, key, type) = requestInfo;
-        var response = targetRead ?? await ExecuteDeleteReadAsync(request, ct).ConfigureAwait(false);
+        var response = targetRead ?? (target.Kind == MetadataDeleteKind.GlobalChoice
+            ? await ReadGlobalChoiceDeleteTargetAsync(target.Name!, request, ct).ConfigureAwait(false)
+            : await ExecuteDeleteReadAsync(request, ct).ConfigureAwait(false));
         var expectedResponse = target.Kind switch
         {
             MetadataDeleteKind.Table => response is RetrieveEntityResponse,
@@ -147,6 +149,24 @@ public partial class DataverseMetadataAuthoringService
         result.Warnings = warnings.ToArray();
         result.NameResolutionIssues = nameIssues.ToArray();
         return result;
+    }
+
+    /// <summary>
+    /// Reads the global choice a delete is pinned to, by its exact name (#1759). Dataverse looks names up
+    /// case-sensitively, so a "not found" fault on this single read means no choice has exactly this name, and it
+    /// is reported as <see cref="PpdsNotFoundException"/> (exit 6) like every other path that targets a global choice.
+    /// No catalog is listed: delete never resolves case variants (#1535); the CLI resolves one first through the preview.
+    /// </summary>
+    private async Task<OrganizationResponse> ReadGlobalChoiceDeleteTargetAsync(string name, OrganizationRequest request, CancellationToken ct)
+    {
+        try
+        {
+            return await ExecuteDeleteReadAsync(request, ct).ConfigureAwait(false);
+        }
+        catch (PpdsException ex) when (ex is not PpdsNotFoundException && ex.InnerException is { } fault && IsOptionSetNotFoundFault(fault, name))
+        {
+            throw new PpdsNotFoundException("Global choice", name, ex);
+        }
     }
 
     private async Task<OrganizationResponse> ExecuteDeleteReadAsync(OrganizationRequest request, CancellationToken ct)

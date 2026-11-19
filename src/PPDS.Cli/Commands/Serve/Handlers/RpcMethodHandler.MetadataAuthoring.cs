@@ -652,6 +652,11 @@ public partial class RpcMethodHandler
 
                 return new MetadataDeleteResponse { Success = true };
             }
+            catch (PpdsNotFoundException ex)
+            {
+                // #1759: an unknown choice is Operation.NotFound, like the CLI, not a generic internal error.
+                throw MapPpdsToRpcException(ex);
+            }
             catch (Authoring.MetadataValidationException ex)
             {
                 return new MetadataDeleteResponse

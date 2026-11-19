@@ -60,7 +60,7 @@ public static class OptionSetCommand
                 return ExitCodes.Success;
             }
 
-            return await ExecuteReadAsync(name!, profile, environment, globalOptions, cancellationToken);
+            return await ExecuteReadAsync(name!, profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -71,19 +71,22 @@ public static class OptionSetCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
-                profile,
-                environment,
-                globalOptions.Verbose,
-                globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken: cancellationToken);
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfileAsync(
+                    profile,
+                    environment,
+                    globalOptions.Verbose,
+                    globalOptions.Debug,
+                    ProfileServiceFactory.DefaultDeviceCodeCallback,
+                    cancellationToken: cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var metadataService = serviceProvider.GetRequiredService<IMetadataQueryService>();
 
@@ -143,7 +146,7 @@ public static class OptionSetCommand
             var msg = ex.Message;
             var isNotFound = msg.Contains("Could not find", StringComparison.OrdinalIgnoreCase)
                           || msg.Contains("optionset", StringComparison.OrdinalIgnoreCase)
-                          || ex is PpdsNotFoundException;
+                          || ex is PpdsNotFoundException or OptionSetNotFoundException;
 
             if (isNotFound && !globalOptions.IsJsonMode)
             {
