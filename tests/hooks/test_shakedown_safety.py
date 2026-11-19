@@ -632,6 +632,7 @@ FALSE_POSITIVES = [
     'echo "a && ppds data delete --entity x"',
     "ls src/ppds",
     "cat notes.txt # ppds data delete",
+    "git commit -m \"$(cat <<'EOF'\nfix: don't crash\n\nppds data delete --entity account now asks first.\nEOF\n)\"",
 ]
 
 
@@ -707,7 +708,8 @@ class TestDotnetHostInvocations:
 
 
 class TestCommandPositionOnly:
-    """``ppds`` as an argument, in a quoted string or a path is not an invocation.
+    """A ``ppds`` the parse proves is data (an argument of a data-only program,
+    a comment, a heredoc body such a program reads) is not an invocation.
 
     Run with an allowlist and an unsafe active env (and a shakedown armed),
     the situation where these used to block.
@@ -749,7 +751,7 @@ class TestFindInvocationsParsing:
         ids=[i for i, *_ in DOTNET_HOST_SHAPES],
     )
     def test_dotnet_host_shapes_normalised(self, cmd, shown):
-        assert hook.find_ppds_invocations(cmd) == [shown.split(" ")]
+        assert shown.split(" ") in hook.find_ppds_invocations(cmd)
 
     def test_bare_run_of_cli_project(self):
         assert hook.find_ppds_invocations("dotnet run --project src/PPDS.Cli") == [["ppds"]]
@@ -788,7 +790,218 @@ class TestFindInvocationsParsing:
         ("ppds query \"SELECT FROM t WHERE n=';'\"", [["ppds", "query", "SELECT FROM t WHERE n=';'"]]),
     ])
     def test_command_position_forms(self, cmd, expected):
-        assert hook.find_ppds_invocations(cmd) == expected
+        found = hook.find_ppds_invocations(cmd)
+        for argv in expected:
+            assert argv in found, found
+
+
+D = "data delete --entity account"
+
+# The numbered regressions an independent review found in the first
+# version of the command-position parser (old matcher blocked, it allowed).
+LEGACY_REGRESSIONS = [
+    ("1-heredoc-odd-apostrophe",
+     "cat > accounts.csv <<'EOF'\nname\nO'Brien Ltd\nEOF\nppds data import --file accounts.csv --entity account"),
+    ("1-commit-heredoc-then-ppds",
+     f"git commit -m \"$(cat <<'EOF'\nfix: don't crash\nEOF\n)\" && ppds {D}"),
+    ("2-ansi-c-quote", f"echo $'it\\'s' ; ppds {D}"),
+    ("3-pwsh-noprofile", f"pwsh -NoProfile -Command ppds {D}"),
+    ("3-pwsh-call-operator", f'pwsh -Command "& ppds {D}"'),
+    ("3-cmd-c", f"cmd /c ppds {D}"),
+    ("3-cmd-c-compound", f'cmd /c "cd x && ppds {D}"'),
+    ("4-bash-euo-pipefail", f'bash -euo pipefail -c "cd x && ppds {D}"'),
+    ("4-bash-rcfile", f'bash --rcfile x -c "cd y && ppds {D}"'),
+    ("4-su-c", f'su -c "cd x && ppds {D}"'),
+    ("4-bash-here-string", f"bash <<< 'cd x && ppds {D}'"),
+    ("5-sudo-long-user", f"sudo --user me ppds {D}"),
+    ("5-timeout-quoted-duration", f'timeout "$T" ppds {D}'),
+    ("5-xargs-i", f"echo a | xargs -i ppds {D} --id {{}}"),
+    ("5-xargs-delimiter", f"echo a | xargs --delimiter '\\n' ppds {D}"),
+    ("5-usr-bin-time-f", f"/usr/bin/time -f %e ppds {D}"),
+    ("5-watch-d", f"watch -d ppds {D}"),
+    ("6-find-exec", f"find . -name '*.json' -exec ppds {D} {{}} \\;"),
+    ("6-npx", f"npx ppds {D}"),
+    ("6-setsid", f"setsid ppds {D}"),
+    ("6-strace", f"strace -f ppds {D}"),
+    ("6-parallel", f"parallel ppds {D} ::: a b"),
+    ("6-flock", f"flock /tmp/l ppds {D}"),
+    ("6-start", f"start ppds {D}"),
+    ("6-wsl", f"wsl ppds {D}"),
+    ("6-coproc", f"coproc ppds {D}"),
+    ("7-tool-run-options", f"dotnet tool run --allow-roll-forward ppds {D}"),
+    ("8-function", f"function f {{ ppds {D}; }}; f"),
+    ("8-case-in-substitution", f"echo $(case $y in a) ppds {D};; esac)"),
+    ("8-escaped-nested-backticks", f"echo `echo \\`ppds {D}\\``"),
+    ("8-deep-nesting", "echo " + "$(echo " * 9 + f"$(ppds {D})" + ")" * 9),
+    ("8-command-v-substitution", f'"$(command -v ppds)" {D}'),
+]
+
+# (exonerated: allowed, nearest case that must still block)
+EXONERATION_PAIRS = [
+    ("echo-arg", f'echo "a && ppds {D}"', f'echo "a && ppds {D}" | bash'),
+    ("echo-to-file", f'echo "a && ppds {D}"', f'echo "a && ppds {D}" > x.sh && bash x.sh'),
+    ("echo-under-wrapper", f"echo 'a && ppds {D}'", f"sudo echo 'a && ppds {D}'"),
+    ("git-message", f'git commit -m "fix: ppds {D}"', f'git -c core.sshCommand="ppds {D}" fetch'),
+    ("git-rebase-exec", f'git commit -m "fix: ppds {D}"', f'git rebase --exec "ppds {D}" main'),
+    ("git-alias", f'git log --grep "ppds {D}"', f"git config alias.x '!ppds {D}'"),
+    ("gh-alias", f'gh pr create --title "ppds {D}" --body x', f"gh alias set x 'ppds {D}'"),
+    ("rg-pre", f"rg 'a && ppds {D}' docs", f"rg --pre 'ppds {D}' docs"),
+    ("quoted-heredoc", f"cat <<'EOF'\nppds {D}\nEOF", f"cat <<EOF | bash\nppds {D}\nEOF"),
+    ("heredoc-substitution", f"cat <<'EOF'\n$(ppds {D})\nEOF", f"cat <<EOF\n$(ppds {D})\nEOF"),
+    ("comment", f"echo hi # ppds {D}", f"echo hi #x\nppds {D}"),
+    ("unmodelled-construct", f'echo "a && ppds {D}"', f'echo "a && ppds {D}" ${{X}}'),
+    ("unterminated-quote", f'echo "a && ppds {D}"', f"echo \"a && ppds {D}\" 'oops"),
+    ("commit-F-stdin", f"git commit -F - <<'EOF'\nfix: x\nppds {D}\nEOF",
+     f"git commit -F - <<'EOF'\nfix: x\nEOF\nppds {D}"),
+]
+
+HEREDOC_CASES = [
+    # (id, command, blocked)
+    ("commit-message-form", f"git commit -m \"$(cat <<'EOF'\nfix: ppds {D}\nEOF\n)\"", False),
+    ("commit-message-form-then-ppds", f"git commit -m \"$(cat <<'EOF'\nfix: ppds {D}\nEOF\n)\" && ppds {D}", True),
+    ("dash-strips-tabs", f"cat <<-EOF\n\tppds {D}\n\tEOF\nppds {D}", True),
+    ("dash-strips-tabs-body-only", f"cat <<-EOF\n\tppds {D}\n\tEOF", False),
+    ("two-heredocs-one-line", f"cat <<A <<B\nppds {D}\nA\nppds {D}\nB\nppds {D}", True),
+    ("two-heredocs-bodies-only", f"cat <<A <<B\nppds {D}\nA\nppds {D}\nB", False),
+    ("unclosed-heredoc", f"cat <<EOF\nnever closed\nppds {D}", True),
+    ("double-quoted-delimiter", f'cat <<"EOF"\nppds {D}\nEOF', False),
+    ("heredoc-to-shell", f"bash <<'EOF'\nppds {D}\nEOF", True),
+]
+
+# dotnet run with an option this table does not know before `--`.
+DUAL_READING = [
+    f"dotnet run --project src/PPDS.Cli --tl off -- {D}",
+    f"dotnet run --project src/PPDS.Cli --self-contained false -- {D}",
+    f"dotnet run --project src/PPDS.Cli --ucr -- {D}",
+    f"dotnet run --project src/PPDS.Cli -bl -- {D}",
+    f"dotnet run --project src/PPDS.Cli --no-launch-profile-arguments -- {D}",
+    f"dotnet watch run --project src/PPDS.Cli -- {D}",
+    f"dotnet watch --project src/PPDS.Cli run -- {D}",
+]
+
+
+class TestLegacyRegressions:
+    """Every form the legacy matcher blocked still blocks (both gates)."""
+
+    @pytest.mark.parametrize("cmd", [c for _, c in LEGACY_REGRESSIONS],
+                             ids=[i for i, _ in LEGACY_REGRESSIONS])
+    def test_env_gate_blocks(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        r = _run_hook(cmd, env_extra=_gate_env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert ENV_BLOCK in r.stderr
+
+    @pytest.mark.parametrize("cmd", [c for i, c in LEGACY_REGRESSIONS if i.startswith(("1-", "2-", "3-", "4-"))],
+                             ids=[i for i, _ in LEGACY_REGRESSIONS if i.startswith(("1-", "2-", "3-", "4-"))])
+    def test_write_block_blocks(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(cmd, env_extra=_gate_env(config_dir, project_dir, PPDS_SHAKEDOWN="1"))
+        assert r.returncode == 2, r.stderr
+        assert READONLY_BLOCK in r.stderr
+        assert "Pattern: data " in r.stderr
+
+    @pytest.mark.parametrize("cmd", [c for _, c in LEGACY_REGRESSIONS],
+                             ids=[i for i, _ in LEGACY_REGRESSIONS])
+    def test_parse_finds_the_invocation(self, cmd):
+        found = hook.find_ppds_invocations(cmd)
+        assert any("delete" in argv or "import" in argv for argv in found), found
+
+
+class TestExoneration:
+    """A legacy hit is cleared only when the parse proves it is data."""
+
+    @pytest.mark.parametrize("cmd", [a for _, a, _ in EXONERATION_PAIRS],
+                             ids=[i for i, _, _ in EXONERATION_PAIRS])
+    def test_exonerated_allowed(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        r = _run_hook(cmd, env_extra=_gate_env(config_dir, project_dir, PPDS_SHAKEDOWN="1"))
+        assert r.returncode == 0, r.stderr
+        assert r.stdout == ""
+        assert r.stderr == ""
+
+    @pytest.mark.parametrize("cmd", [b for _, _, b in EXONERATION_PAIRS],
+                             ids=[i for i, _, _ in EXONERATION_PAIRS])
+    def test_nearest_case_still_blocked(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        r = _run_hook(cmd, env_extra=_gate_env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert ENV_BLOCK in r.stderr
+        assert "data delete" in r.stderr
+
+    @pytest.mark.parametrize("pair", EXONERATION_PAIRS, ids=[i for i, _, _ in EXONERATION_PAIRS])
+    def test_parse_view(self, pair):
+        _, allowed, blocked = pair
+        assert hook.find_ppds_invocations(allowed) == []
+        assert any(argv[1:3] == ["data", "delete"] for argv in hook.find_ppds_invocations(blocked))
+
+    def test_legacy_hits_are_unchanged(self):
+        """The legacy matcher itself is the pre-2026-11-19 one."""
+        assert hook._legacy_invocations('git commit -m "fix: ppds query crash"') == [
+            (20, ["ppds", "query", 'crash"'])
+        ]
+
+    @pytest.mark.parametrize("cmd", [
+        f'echo "a && ppds {D}" ${{X}}',
+        f"echo $(( 1 + 2 )) 'a && ppds {D}'",
+        f"echo <(true) 'a && ppds {D}'",
+        f"echo 'a && ppds {D}' <<< x",
+        f"case $x in a) echo 'a && ppds {D}';; esac",
+        f"echo \"a && ppds {D}",
+    ])
+    def test_unmodelled_input_exonerates_nothing(self, cmd):
+        assert hook._ShellParse(cmd).unclean
+        assert hook.find_ppds_invocations(cmd)
+
+
+class TestHeredocs:
+    @pytest.mark.parametrize("cmd,blocked", [(c, b) for _, c, b in HEREDOC_CASES],
+                             ids=[i for i, _, _ in HEREDOC_CASES])
+    def test_decision(self, fake_profile_dir, project_dir, cmd, blocked):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(cmd, env_extra=_gate_env(config_dir, project_dir, PPDS_SHAKEDOWN="1"))
+        if blocked:
+            assert r.returncode == 2, r.stderr
+            assert READONLY_BLOCK in r.stderr
+            assert "Pattern: data delete" in r.stderr
+        else:
+            assert r.returncode == 0, r.stderr
+            assert r.stderr == ""
+
+    def test_body_ends_at_delimiter_line(self):
+        parse = hook._ShellParse("cat <<'EOF'\nit's\nEOF\necho done")
+        assert not parse.unclean
+        assert [c.words for c in parse.commands] == [["cat"], ["echo", "done"]]
+        assert parse.commands[0].heredoc_bodies == ["it's\n"]
+
+    def test_two_heredocs_in_order(self):
+        parse = hook._ShellParse("cat <<A <<'B'\none\nA\ntwo\nB\n")
+        assert not parse.unclean
+        assert parse.commands[0].heredoc_bodies == ["one\n", "two\n"]
+
+    def test_unclosed_heredoc_is_unclean(self):
+        assert hook._ShellParse("cat <<EOF\nno end").unclean
+
+
+class TestDotnetRunDualReading:
+    """Unknown ``dotnet run`` options: block if either reading blocks."""
+
+    @pytest.mark.parametrize("cmd", DUAL_READING)
+    def test_write_block(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(cmd, env_extra=_gate_env(config_dir, project_dir, PPDS_SHAKEDOWN="1"))
+        assert r.returncode == 2, r.stderr
+        assert READONLY_BLOCK in r.stderr
+        assert "Pattern: data delete" in r.stderr
+
+    def test_both_readings_returned(self):
+        found = hook.find_ppds_invocations(f"dotnet run --project src/PPDS.Cli --tl off -- {D}")
+        assert ["ppds", "data", "delete", "--entity", "account"] in found
+        assert ["ppds", "off", "data", "delete", "--entity", "account"] in found
+
+    def test_single_reading_when_they_agree(self):
+        assert hook.find_ppds_invocations(f"dotnet run --project src/PPDS.Cli -c Release -- {D}") == [
+            ["ppds", "data", "delete", "--entity", "account"]
+        ]
 
 
 # ===========================================================================

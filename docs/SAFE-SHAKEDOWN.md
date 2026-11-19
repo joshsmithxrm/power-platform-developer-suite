@@ -55,46 +55,96 @@ one of the forms below.
 
 ### What the hook recognises
 
-The hook splits the command string the way a POSIX shell does (quotes,
-escapes, `&&` / `||` / `;` / `|` / newlines, redirections) and looks only at
-the word in **command position** of each simple command: the first word,
-after any leading `NAME=value` assignments, reserved words (`if`, `then`,
-`do`, `!`, ...) and wrappers (`env`, `sudo`, `time`, `nohup`, `xargs`, ...).
-It also looks inside `$(...)` and backticks, and inside the string passed to
-`bash -c` / `sh -c` / `eval`. A `ppds` that is an argument, part of a quoted
-string, a path component of an argument or a comment is not an invocation,
-so `grep -rn ppds docs/` and `git commit -m "fix: ppds query crash"` are not
-gated.
+The design keeps the broad matching the hook has always had, uses a
+precise parse to add forms it missed, and uses the same parse to clear a
+match only when it can prove the match is data. When in doubt it blocks.
 
-Recognised forms, each treated exactly like the direct program:
+1. **Broad match (unchanged).** Any `ppds` / `ppds-mcp-server` word, with
+   an optional path and `.exe`, at the start of the command or after
+   whitespace, `|`, `;`, `&`, `(` or a backtick. This catches launchers the
+   hook knows nothing about (`find -exec ppds ...`, `parallel`, `ssh`,
+   `npx`, ...).
+2. **Precise parse (adds forms).** The hook also parses the command like a
+   shell (quotes including `$'...'`, escapes, `&&` / `||` / `;` / `|` /
+   newlines, redirections, heredocs, `$(...)` and backticks) and adds:
+   a quoted program word (`"C:\Program Files\PPDS\ppds.exe" ...`); the
+   program after assignments, reserved words and wrappers (`env`, `sudo`,
+   `time`, `timeout`, `xargs`, ...); command strings given to `bash -c` /
+   `sh -c` (with other options before `-c`), `su -c`, `script -c`, `eval`,
+   `pwsh` / `powershell -Command` and `cmd /c`; here-strings and heredocs
+   fed to a shell; `echo` / `printf` output piped into a shell; arguments
+   that `git` / `gh` / `rg` would run (`git -c core.sshCommand=...`,
+   `git rebase --exec`, `git config alias.x '!...'`, `gh alias set`,
+   `rg --pre`); and PPDS run through the .NET host (table below).
+3. **Exoneration (clears matches).** A broad match is dropped only when the
+   parse consumed the whole command with nothing it does not model, and
+   the match is in a comment, in a heredoc body read by a data-only
+   program, or in an argument of a data-only program: `git`, `gh`, `grep`,
+   `rg`, `echo`, `printf`, `cat`, `ls`, `cd`, `head`, `tail`, `wc`,
+   `mkdir`. That program must be the one actually run (no wrapper such as
+   `sudo` or `xargs` before it), must not write its output to a file or
+   pipe it to another kind of program, and must not sit inside a
+   substitution used as a command. For `git`, only arguments after a
+   subcommand that never runs an argument (`commit`, `log`, `grep`, `add`,
+   `push`, ...; not `config`, `rebase`, `bisect`, `submodule`), with no
+   `-c` before it and not the value of an option that runs a command
+   (`--exec`, `--upload-pack`, `--receive-pack`, `-O`, ...). For `gh`,
+   only arguments after `pr`, `issue`, `release`, `repo`, `search` and
+   similar (not `alias` or `extension`). Anything the parse does not model
+   (an unterminated quote, substitution or heredoc, a here-string, process
+   substitution, `${...}`, `$((...))`, `case`, an escaped backtick inside
+   backticks, deep nesting) clears nothing in that command.
+
+So `grep -rn ppds docs/`, `git commit -m "fix: ppds query crash"` and a
+commit message passed as `git commit -m "$(cat <<'EOF' ... EOF)"` are not
+gated, while the same commit command followed by `&& ppds data delete ...`
+is.
+
+.NET host forms, each treated exactly like the direct program:
 
 | Form | Treated as |
 |------|------------|
 | `ppds ...` / `ppds-mcp-server ...`, with an optional path and `.exe` | itself |
 | `dotnet run --project <PPDS.Cli dir or .csproj> [run options] [--] <args>` | `ppds <args>` |
 | `dotnet run --project <PPDS.Mcp dir or .csproj> [run options] [--] <args>` | `ppds-mcp-server <args>` |
+| `dotnet watch [--project <dir>] run [--project <dir>] [--] <args>` | as `dotnet run` |
 | `cd <PPDS.Cli or PPDS.Mcp dir> && dotnet run [--] <args>` (same command string) | `ppds <args>` / `ppds-mcp-server <args>` |
 | `dotnet [exec] <path>/ppds.dll <args>` / `.../ppds-mcp-server.dll <args>` | `ppds <args>` / `ppds-mcp-server <args>` |
-| `dotnet ppds <args>` / `dotnet tool run ppds <args>` (local tool) | `ppds <args>` |
+| `dotnet ppds <args>` / `dotnet tool run [options] ppds <args>` (local tool) | `ppds <args>` |
+| `dotnet tool exec PPDS.Cli <args>` / `dnx PPDS.Cli <args>` | `ppds <args>` |
 
 For `dotnet run`, the project path may use either slash style and be
 absolute or relative; `--project=<path>` and the legacy `-p <path>` (a `-p`
 value without `=` is a project, with `=` an MSBuild property) are accepted.
-The `dotnet run` options (`-c Release`, `--no-build`, `-f net10.0`, ...) are
-dropped, and the CLI arguments are every token `dotnet run` does not
-recognise plus everything after `--`, which is what `dotnet run` itself
-passes to the app. `dotnet run --project src/PPDS.Cli` with no arguments is
-a bare `ppds`, which both gates allow. Any other `dotnet` command
-(`dotnet build`, `dotnet test`, `dotnet run` for another project) is not a
-PPDS invocation.
+The known `dotnet run` options (`-c Release`, `--no-build`, `-f net10.0`,
+...) are dropped. The hook then checks two readings and blocks if either
+blocks: the CLI arguments are only what follows `--`; and they are every
+token `dotnet run` does not recognise plus what follows `--`, which is what
+`dotnet run` itself passes to the app. An option the hook does not know
+(`--tl off`, `--ucr`, `-bl`, ...) therefore cannot hide a write. The cost
+is the occasional extra block, for example
+`dotnet run --project src/PPDS.Mcp --read-only` without `--` during a
+shakedown. `dotnet run --project src/PPDS.Cli` with no arguments is a bare
+`ppds`, which both gates allow. Any other `dotnet` command (`dotnet build`,
+`dotnet test`, `dotnet run` for another project) is not a PPDS invocation.
 
-**Matching is best-effort.** The hook cannot see through arbitrary
-indirection: a shell script, an alias or shell function, `pwsh -c` /
-`cmd /c`, `scripts/ppds-dev.ps1`, or a working directory set anywhere other
-than an earlier `cd` in the same command string. It is a fast early reject,
-not the boundary: the C# guard (`IShakedownGuard`, see
-`specs/shakedown-guard.md`) blocks writes during a shakedown regardless of
-how the CLI was started.
+**Limits.** Matching is best-effort. The hook does not see:
+
+- a PPDS command inside a script file, an alias or a shell function
+  defined in an earlier command, or `scripts/ppds-dev.ps1`;
+- a program word built from a variable, glob or brace expansion
+  (`$P data delete`, `pp{d,}s`, `src/PPDS.C*`);
+- commands run by an interpreter (`python -c`, `node -e`);
+- a working directory set anywhere other than an earlier `cd` / `pushd` in
+  the same command string (the Bash tool's own working directory is not
+  used), so `dotnet run -- ...` run from inside `src/PPDS.Cli` is not
+  recognised;
+- `cd` inside a subshell is not scoped, so `(cd src/PPDS.Cli); dotnet run`
+  is treated as if the `cd` still applied (an extra block, never a miss).
+
+It is a fast early reject, not the boundary: the C# guard
+(`IShakedownGuard`, see `specs/shakedown-guard.md`) blocks writes during a
+shakedown regardless of how the CLI was started.
 
 ### Concern 1: env allowlist gating (opt-in)
 
