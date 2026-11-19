@@ -281,9 +281,10 @@ The architecture rules are in [AGENTS.md](AGENTS.md) and, in full, in
 The analyzers in `src/PPDS.Analyzers` run on PPDS.Cli and PPDS.Mcp. PPDS001 to
 PPDS013 are at suggestion severity, so they show in the IDE but do not fail the
 build. PPDS015 (CLI command descriptions) and PPDS016 (MCP tool metadata) are
-warnings, and both projects treat warnings as errors, so those do fail it. PPDS014
-(XML docs) reports only in PPDS.Dataverse, PPDS.Migration, PPDS.Auth and
-PPDS.Plugins, none of which loads the analyzers, so it does not fire in any build.
+warnings, and both projects treat warnings as errors, so those do fail it. In
+PPDS.Dataverse, PPDS.Migration, PPDS.Auth and PPDS.Plugins, a public type or
+member without XML documentation fails the build through the compiler's CS1591,
+which `.editorconfig` makes an error there (code under `Generated/` is exempt).
 
 | Pattern | Where to look |
 |---------|---------------|
