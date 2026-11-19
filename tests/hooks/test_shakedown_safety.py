@@ -563,6 +563,235 @@ class TestCommandParsing:
 
 
 # ===========================================================================
+# Command matching: .NET host forms and command-position false positives
+# ===========================================================================
+
+
+ENV_BLOCK = "BLOCKED [shakedown-safety/env]: active env is not in the safe-env allowlist."
+READONLY_BLOCK = "BLOCKED [shakedown-safety/readonly]: write/mutation command refused."
+
+# (id, command, normalised command shown in the block, write-block pattern)
+DOTNET_HOST_SHAPES = [
+    ("run-project-dir",
+     "dotnet run --project src/PPDS.Cli -- data truncate --entity account",
+     "ppds data truncate --entity account", "data truncate"),
+    ("run-project-csproj",
+     "dotnet run --project src/PPDS.Cli/PPDS.Cli.csproj -- data delete --entity account",
+     "ppds data delete --entity account", "data delete"),
+    ("run-project-backslash-absolute",
+     r"dotnet run --project 'C:\repo\src\PPDS.Cli\PPDS.Cli.csproj' -- data delete --entity a",
+     "ppds data delete --entity a", "data delete"),
+    ("run-project-posix-absolute-with-options",
+     "dotnet run --project /c/repo/src/PPDS.Cli/ -c Release --no-build -f net10.0 -- data delete --entity a",
+     "ppds data delete --entity a", "data delete"),
+    ("run-project-equals",
+     "dotnet run --project=src/PPDS.Cli -- data delete --entity a",
+     "ppds data delete --entity a", "data delete"),
+    ("run-p-alias",
+     "dotnet run -p src/PPDS.Cli -- data delete --entity a",
+     "ppds data delete --entity a", "data delete"),
+    ("run-p-property-then-project",
+     "dotnet run -p:Configuration=Release --project src/PPDS.Cli -- data delete --entity a",
+     "ppds data delete --entity a", "data delete"),
+    ("run-project-no-separator",
+     "dotnet run --project src/PPDS.Cli data delete --entity a",
+     "ppds data delete --entity a", "data delete"),
+    ("run-mcp-project",
+     "dotnet run --project src/PPDS.Mcp/PPDS.Mcp.csproj -- --profile x",
+     "ppds-mcp-server --profile x", "missing --read-only flag"),
+    ("dll",
+     "dotnet src/PPDS.Cli/bin/Debug/net10.0/ppds.dll data delete --entity a",
+     "ppds data delete --entity a", "data delete"),
+    ("exec-dll",
+     "dotnet exec src/PPDS.Cli/bin/Debug/net10.0/ppds.dll data delete --entity a",
+     "ppds data delete --entity a", "data delete"),
+    ("mcp-dll",
+     "dotnet src/PPDS.Mcp/bin/Debug/net10.0/ppds-mcp-server.dll",
+     "ppds-mcp-server", "missing --read-only flag"),
+    ("cd-then-run",
+     "cd src/PPDS.Cli && dotnet run -- data delete --entity a",
+     "ppds data delete --entity a", "data delete"),
+    ("cd-then-run-mcp",
+     "cd src/PPDS.Mcp && dotnet run",
+     "ppds-mcp-server", "missing --read-only flag"),
+]
+
+NOT_PPDS_DOTNET = [
+    "dotnet build PPDS.sln",
+    "dotnet test PPDS.sln --filter Category!=Integration",
+    "dotnet run --project src/PPDS.DocsGen -- data delete --entity a",
+    "dotnet run --project tests/PPDS.Cli.Tests -- data delete --entity a",
+    "dotnet run -- data delete --entity a",
+    "cd src/PPDS.Cli && cd .. && dotnet run -- data delete --entity a",
+]
+
+FALSE_POSITIVES = [
+    "grep -rn ppds docs/",
+    'git commit -m "fix: ppds query crash"',
+    'git commit -m "chore: ppds data delete cleanup"',
+    'echo "a && ppds data delete --entity x"',
+    "ls src/ppds",
+    "cat notes.txt # ppds data delete",
+]
+
+
+def _gate_env(config_dir: str, project: dict, **extra) -> dict:
+    env = {
+        "PPDS_SAFE_ENVS": "ppds-dev",
+        "PPDS_CONFIG_DIR": config_dir,
+        "CLAUDE_PROJECT_DIR": project["path"],
+    }
+    env.update(extra)
+    return env
+
+
+class TestDotnetHostInvocations:
+    """PPDS run through the .NET host gets both gates, like a direct ``ppds``."""
+
+    @pytest.mark.parametrize(
+        "cmd,shown", [(c, s) for _, c, s, _ in DOTNET_HOST_SHAPES],
+        ids=[i for i, *_ in DOTNET_HOST_SHAPES],
+    )
+    def test_env_gate_blocks_unsafe_active_env(self, fake_profile_dir, project_dir, cmd, shown):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        r = _run_hook(cmd, env_extra=_gate_env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert ENV_BLOCK in r.stderr
+        assert f"Command:    {shown}\n" in r.stderr
+
+    @pytest.mark.parametrize(
+        "cmd,pattern", [(c, p) for _, c, _, p in DOTNET_HOST_SHAPES],
+        ids=[i for i, *_ in DOTNET_HOST_SHAPES],
+    )
+    def test_write_block_during_shakedown(self, fake_profile_dir, project_dir, cmd, pattern):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(cmd, env_extra=_gate_env(config_dir, project_dir, PPDS_SHAKEDOWN="1"))
+        assert r.returncode == 2, r.stderr
+        assert READONLY_BLOCK in r.stderr
+        assert pattern in r.stderr
+
+    @pytest.mark.parametrize(
+        "cmd", [c for _, c, _, _ in DOTNET_HOST_SHAPES],
+        ids=[i for i, *_ in DOTNET_HOST_SHAPES],
+    )
+    def test_safe_env_allowed(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(cmd, env_extra=_gate_env(config_dir, project_dir))
+        assert r.returncode == 0, r.stderr
+        assert r.stderr == ""
+
+    def test_mcp_run_with_read_only_allowed_during_shakedown(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(
+            "dotnet run --project src/PPDS.Mcp -- --read-only",
+            env_extra=_gate_env(config_dir, project_dir, PPDS_SHAKEDOWN="1"),
+        )
+        assert r.returncode == 0, r.stderr
+
+    def test_bare_run_of_cli_project_treated_like_bare_ppds(self, fake_profile_dir, project_dir):
+        """``dotnet run --project src/PPDS.Cli`` alone is ``ppds`` with no args: allowed."""
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        r = _run_hook(
+            "dotnet run --project src/PPDS.Cli",
+            env_extra=_gate_env(config_dir, project_dir, PPDS_SHAKEDOWN="1"),
+        )
+        assert r.returncode == 0, r.stderr
+        assert r.stderr == ""
+
+    @pytest.mark.parametrize("cmd", NOT_PPDS_DOTNET)
+    def test_other_dotnet_commands_not_gated(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        r = _run_hook(cmd, env_extra=_gate_env(config_dir, project_dir, PPDS_SHAKEDOWN="1"))
+        assert r.returncode == 0, f"cmd={cmd}: stderr={r.stderr!r}"
+        assert r.stderr == ""
+
+
+class TestCommandPositionOnly:
+    """``ppds`` as an argument, in a quoted string or a path is not an invocation.
+
+    Run with an allowlist and an unsafe active env (and a shakedown armed),
+    the situation where these used to block.
+    """
+
+    @pytest.mark.parametrize("cmd", FALSE_POSITIVES)
+    def test_ppds_outside_command_position_allowed(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        r = _run_hook(cmd, env_extra=_gate_env(config_dir, project_dir, PPDS_SHAKEDOWN="1"))
+        assert r.returncode == 0, f"cmd={cmd}: stderr={r.stderr!r}"
+        assert r.stdout == ""
+        assert r.stderr == ""
+
+    @pytest.mark.parametrize("cmd", [
+        "echo $(ppds data delete --entity a)",
+        "echo `ppds data delete --entity a`",
+        'echo "$(ppds data delete --entity a)"',
+        "(cd x; ppds data delete --entity a)",
+        'bash -c "ppds data delete --entity a"',
+        "FOO=1 ppds data delete --entity a",
+        "sudo -u me ppds data delete --entity a",
+        "ppds env who 2>&1 | ppds data delete --entity a",
+        r"C:\tools\ppds.exe data delete --entity a",
+        '"ppds" data delete --entity a',
+    ])
+    def test_command_position_forms_still_blocked(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        r = _run_hook(cmd, env_extra=_gate_env(config_dir, project_dir))
+        assert r.returncode == 2, f"cmd={cmd}: stderr={r.stderr!r}"
+        assert ENV_BLOCK in r.stderr
+        assert "data delete --entity a" in r.stderr
+
+
+class TestFindInvocationsParsing:
+    """Unit view of ``find_ppds_invocations`` for the same inputs."""
+
+    @pytest.mark.parametrize(
+        "cmd,shown", [(c, s) for _, c, s, _ in DOTNET_HOST_SHAPES],
+        ids=[i for i, *_ in DOTNET_HOST_SHAPES],
+    )
+    def test_dotnet_host_shapes_normalised(self, cmd, shown):
+        assert hook.find_ppds_invocations(cmd) == [shown.split(" ")]
+
+    def test_bare_run_of_cli_project(self):
+        assert hook.find_ppds_invocations("dotnet run --project src/PPDS.Cli") == [["ppds"]]
+
+    def test_run_mcp_read_only(self):
+        assert hook.find_ppds_invocations("dotnet run --project src/PPDS.Mcp -- --read-only") == [
+            ["ppds-mcp-server", "--read-only"]
+        ]
+
+    def test_dotnet_local_tool(self):
+        assert hook.find_ppds_invocations("dotnet ppds env who") == [["ppds", "env", "who"]]
+        assert hook.find_ppds_invocations("dotnet tool run ppds env who") == [["ppds", "env", "who"]]
+
+    @pytest.mark.parametrize("cmd", NOT_PPDS_DOTNET)
+    def test_other_dotnet_commands(self, cmd):
+        assert hook.find_ppds_invocations(cmd) == []
+
+    @pytest.mark.parametrize("cmd", FALSE_POSITIVES)
+    def test_false_positives(self, cmd):
+        assert hook.find_ppds_invocations(cmd) == []
+
+    @pytest.mark.parametrize("cmd,expected", [
+        ("echo $(ppds env who)", [["ppds", "env", "who"]]),
+        ("echo `ppds env who`", [["ppds", "env", "who"]]),
+        ('echo "$(ppds env who)"', [["ppds", "env", "who"]]),
+        ("(cd x; ppds env who)", [["ppds", "env", "who"]]),
+        ("bash -c 'ppds env who'", [["ppds", "env", "who"]]),
+        ("FOO=1 BAR=2 ppds env who", [["ppds", "env", "who"]]),
+        ("sudo -u me env X=1 ppds env who", [["ppds", "env", "who"]]),
+        ("ppds env who 2>&1 | jq .", [["ppds", "env", "who"]]),
+        ("ppds env who > out.json", [["ppds", "env", "who"]]),
+        ("ppds env who; ppds env list", [["ppds", "env", "who"], ["ppds", "env", "list"]]),
+        ("if ppds env who; then echo ok; fi", [["ppds", "env", "who"]]),
+        (r"C:\tools\ppds.exe env who", [["ppds.exe", "env", "who"]]),
+        ('"ppds" env who', [["ppds", "env", "who"]]),
+        ("ppds query \"SELECT FROM t WHERE n=';'\"", [["ppds", "query", "SELECT FROM t WHERE n=';'"]]),
+    ])
+    def test_command_position_forms(self, cmd, expected):
+        assert hook.find_ppds_invocations(cmd) == expected
+
+
+# ===========================================================================
 # Concern 2: write-block during shakedown
 # ===========================================================================
 

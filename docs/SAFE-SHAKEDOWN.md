@@ -50,11 +50,55 @@ policy; fewer ways to drift.
 
 ## Hook behavior
 
-**Trigger:** every Bash invocation that mentions `ppds` or `ppds-mcp-server`.
+**Trigger:** every Bash command that runs `ppds` or `ppds-mcp-server`, in
+one of the forms below.
+
+### What the hook recognises
+
+The hook splits the command string the way a POSIX shell does (quotes,
+escapes, `&&` / `||` / `;` / `|` / newlines, redirections) and looks only at
+the word in **command position** of each simple command: the first word,
+after any leading `NAME=value` assignments, reserved words (`if`, `then`,
+`do`, `!`, ...) and wrappers (`env`, `sudo`, `time`, `nohup`, `xargs`, ...).
+It also looks inside `$(...)` and backticks, and inside the string passed to
+`bash -c` / `sh -c` / `eval`. A `ppds` that is an argument, part of a quoted
+string, a path component of an argument or a comment is not an invocation,
+so `grep -rn ppds docs/` and `git commit -m "fix: ppds query crash"` are not
+gated.
+
+Recognised forms, each treated exactly like the direct program:
+
+| Form | Treated as |
+|------|------------|
+| `ppds ...` / `ppds-mcp-server ...`, with an optional path and `.exe` | itself |
+| `dotnet run --project <PPDS.Cli dir or .csproj> [run options] [--] <args>` | `ppds <args>` |
+| `dotnet run --project <PPDS.Mcp dir or .csproj> [run options] [--] <args>` | `ppds-mcp-server <args>` |
+| `cd <PPDS.Cli or PPDS.Mcp dir> && dotnet run [--] <args>` (same command string) | `ppds <args>` / `ppds-mcp-server <args>` |
+| `dotnet [exec] <path>/ppds.dll <args>` / `.../ppds-mcp-server.dll <args>` | `ppds <args>` / `ppds-mcp-server <args>` |
+| `dotnet ppds <args>` / `dotnet tool run ppds <args>` (local tool) | `ppds <args>` |
+
+For `dotnet run`, the project path may use either slash style and be
+absolute or relative; `--project=<path>` and the legacy `-p <path>` (a `-p`
+value without `=` is a project, with `=` an MSBuild property) are accepted.
+The `dotnet run` options (`-c Release`, `--no-build`, `-f net10.0`, ...) are
+dropped, and the CLI arguments are every token `dotnet run` does not
+recognise plus everything after `--`, which is what `dotnet run` itself
+passes to the app. `dotnet run --project src/PPDS.Cli` with no arguments is
+a bare `ppds`, which both gates allow. Any other `dotnet` command
+(`dotnet build`, `dotnet test`, `dotnet run` for another project) is not a
+PPDS invocation.
+
+**Matching is best-effort.** The hook cannot see through arbitrary
+indirection: a shell script, an alias or shell function, `pwsh -c` /
+`cmd /c`, `scripts/ppds-dev.ps1`, or a working directory set anywhere other
+than an earlier `cd` in the same command string. It is a fast early reject,
+not the boundary: the C# guard (`IShakedownGuard`, see
+`specs/shakedown-guard.md`) blocks writes during a shakedown regardless of
+how the CLI was started.
 
 ### Concern 1: env allowlist gating (opt-in)
 
-1. If the command does not mention `ppds`, the hook is a no-op (exit 0).
+1. If the command does not run `ppds` (as above), the hook is a no-op (exit 0).
 2. Resolve the allowlist. The first source that names an environment wins:
    - `$PPDS_SAFE_ENVS` (comma-separated), when set and non-empty.
    - Else `safety.shakedown_safe_envs` in `.claude/settings.json`, when it
@@ -207,4 +251,5 @@ Either:
 - `docs/MERGE-POLICY.md` — how PRs land on `main`.
 - `.claude/skills/shakedown/SKILL.md` — Phase 0 references this doc.
 - `tests/hooks/test_shakedown_safety.py` — behavioral tests covering
-  allowlist sources, switch gating, dry-run carve-out, fail-safe paths.
+  allowlist sources, switch gating, dry-run carve-out, fail-safe paths,
+  and the recognised command forms.

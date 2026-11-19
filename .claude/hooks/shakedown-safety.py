@@ -9,8 +9,9 @@ safety surface harder to review and invited drift.
 Two concerns, one hook:
 
 1. **Env allowlist gating (opt-in).** Once an allowlist names at least one
-   env, every Bash invocation that mentions ``ppds`` / ``ppds-mcp-server``
-   is gated against that allowlist of dev/test env names. With no allowlist
+   env, every Bash command that runs ``ppds`` / ``ppds-mcp-server`` (see
+   "Recognised invocations" below) is gated against that allowlist of
+   dev/test env names. With no allowlist
    configured the gate is off; a misconfigured allowlist blocks (see
    below). The active env is read directly from the PPDS profile
    store (``profiles.json``). Read-only subcommands (``env list``,
@@ -22,6 +23,36 @@ Two concerns, one hook:
    verbs (``create``, ``update``, ``delete``, ``plugins deploy`` without
    ``--dry-run``, ``solutions import``, etc.) are refused outright. This
    provides a mechanical boundary that the shakedown / verify skills rely on.
+
+**Recognised invocations.** The command string is split like a POSIX shell
+splits it, and a program counts only in command position: the first word
+of a simple command (after ``&&``, ``||``, ``;``, ``|``, ``&``, a newline
+or ``(``), after leading ``NAME=value`` assignments, reserved words
+(``if``, ``then``, ``do``, ``!`` ...) and wrappers (``env``, ``sudo``,
+``time``, ``nohup``, ``xargs`` ...), inside ``$(...)`` or backticks, and
+inside the string of ``bash -c`` / ``sh -c`` / ``eval``. A ``ppds`` that is
+an argument, inside a quoted string or a path component of an argument
+(``grep ppds docs/``, ``git commit -m "fix ppds"``) is not an invocation.
+Each recognised form is normalised to ``[program, *cli_args]``:
+
+- ``ppds`` / ``ppds-mcp-server``, with an optional path and ``.exe``.
+- ``dotnet run`` whose ``--project`` / ``-p`` (``-p`` without ``=``) names
+  the ``PPDS.Cli`` or ``PPDS.Mcp`` project directory or ``.csproj``
+  (either slash style, absolute or relative), or that follows ``cd`` /
+  ``pushd`` into that directory earlier in the same command string. The
+  ``dotnet run`` options are dropped; the CLI args are every token
+  ``dotnet run`` does not recognise plus everything after ``--``, as
+  ``dotnet run`` itself forwards them.
+- ``dotnet [exec] <path>/ppds.dll`` and ``.../ppds-mcp-server.dll`` (the
+  AssemblyName of each project), ``dotnet ppds`` and ``dotnet tool run
+  ppds`` (local tool).
+
+Any other ``dotnet`` command (``dotnet build``, ``dotnet test``,
+``dotnet run`` for another project) is not an invocation. Matching is
+best-effort: it cannot see through a shell script, an alias or function,
+``pwsh -c`` / ``cmd /c``, or a working directory set outside the command
+string. The C# ``IShakedownGuard`` blocks writes during a shakedown however
+the CLI was started.
 
 **Allowlist sources (checked in order; the first that names an env wins):**
 
@@ -80,7 +111,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shlex
 import sys
 import time
 from datetime import datetime, timezone
@@ -457,43 +487,503 @@ def env_matches_allowlist(candidates: Iterable, allowlist: Iterable) -> bool:
 # ---------------------------------------------------------------------------
 
 
-_PPDS_PROGRAM_RE = re.compile(
-    r"""
-    (?:^|[\s|;&(`])
-    (?:[^\s|;&()`]*[\\/])?
-    (ppds(?:\.exe)?|ppds-mcp-server(?:\.exe)?)
-    (?=$|[\s|;&)`])
-    """,
-    re.IGNORECASE | re.VERBOSE,
-)
+# The command string is split the way a POSIX shell would split it (quotes,
+# escapes, operators, redirections, ``$(...)`` / backtick substitution), and
+# only the word in *command position* of each simple command is compared
+# against the PPDS program names. A ``ppds`` that is an argument, part of a
+# quoted string or a path component of an argument is not an invocation.
+#
+# Best-effort by design: this is a pre-filter in front of the C#
+# ``IShakedownGuard``, not a shell. It does not follow shell scripts,
+# aliases, functions, ``pwsh -c`` / ``cmd /c``, or a working directory set
+# anywhere other than an earlier ``cd`` / ``pushd`` in the same string.
 
-_SHELL_OPERATORS = {"|", ";", "&", "&&", "||", ">", "<", ">>", "<<", chr(96), "(", ")"}
+_PPDS_PROGRAMS = {"ppds", "ppds-mcp-server"}
+
+# Project directory / file stem -> the program it builds (AssemblyName in
+# src/PPDS.Cli/PPDS.Cli.csproj and src/PPDS.Mcp/PPDS.Mcp.csproj).
+_PPDS_PROJECTS = {"ppds.cli": "ppds", "ppds.mcp": "ppds-mcp-server"}
+_PPDS_ASSEMBLIES = {"ppds.dll": "ppds", "ppds-mcp-server.dll": "ppds-mcp-server"}
+
+_LEX_OPERATORS = (
+    "&>>", "<<<", "<<-",
+    "&&", "||", ";;", "|&", ">>", "<<", "&>", ">&", "<&", ">|", "<>",
+    "|", "&", ";", "(", ")", "<", ">",
+)
+_REDIRECTIONS = {"&>>", "<<<", "<<-", ">>", "<<", "&>", ">&", "<&", ">|", "<>", "<", ">"}
+_WORD_BREAK = set(" \t\n|&;()<>")
+# Characters a backslash escapes outside quotes. Any other backslash is kept
+# literally, so an unquoted Windows path (C:\x\ppds.exe) keeps its separators.
+_BACKSLASH_ESCAPES = set(" \t\"'\\$`|&;()<>#*?[]{}~!")
+
+_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=")
+# Reserved words after which the next word is still in command position.
+_COMMAND_POSITION_KEYWORDS = {"!", "{", "}", "if", "then", "else", "elif", "fi",
+                              "do", "done", "while", "until", "esac"}
+# Reserved words that start a construct whose following words are not commands.
+_NON_COMMAND_KEYWORDS = {"for", "select", "case", "function", "[[", "]]"}
+# Commands that run their argument as a program: wrapper -> its options that
+# take a separate value.
+_WRAPPERS = {
+    "env": {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"},
+    "command": set(),
+    "builtin": set(),
+    "exec": {"-a"},
+    "time": set(),
+    "nohup": set(),
+    "sudo": {"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U"},
+    "doas": {"-u", "-C"},
+    "nice": {"-n", "--adjustment"},
+    "timeout": {"-s", "--signal", "-k", "--kill-after"},
+    "xargs": {"-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a", "-i", "-l", "-e"},
+    "stdbuf": {"-i", "-o", "-e"},
+    "winpty": set(),
+    "watch": {"-n", "--interval", "-d"},
+}
+_WRAPPER_POSITIONAL_RE = re.compile(r"^(?:\d+(?:\.\d+)?[smhd]?|\{\})$")
+_SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
+
+# `dotnet run` options (learn.microsoft.com/dotnet/core/tools/dotnet-run).
+# Every token `dotnet run` does not recognise is forwarded to the app, as is
+# everything after `--`.
+_DOTNET_RUN_VALUE_OPTIONS = {
+    "-a", "--arch", "--artifacts-path", "-c", "--configuration",
+    "-e", "--environment", "--file", "-f", "--framework",
+    "-lp", "--launch-profile", "--os", "--project", "-r", "--runtime",
+    "-v", "--verbosity", "--property",
+}
+_DOTNET_RUN_FLAGS = {
+    "--disable-build-servers", "--force", "--interactive", "--no-build",
+    "--no-cache", "--no-dependencies", "--no-launch-profile", "--no-restore",
+    "--no-self-contained", "--sc", "--self-contained", "-?", "-h", "--help",
+}
+# `dotnet [host-options] <app.dll>` and `dotnet exec [options] <app.dll>`.
+_DOTNET_HOST_VALUE_OPTIONS = {
+    "--additionalprobingpath", "--additional-deps", "--depsfile",
+    "--fx-version", "--roll-forward", "--runtimeconfig",
+}
+_DOTNET_HOST_FLAGS = {"-d", "--diagnostics"}
+_LONG_OPTION_VALUE_RE = re.compile(r"^(--?[A-Za-z?][\w-]*)[=:](.*)$", re.DOTALL)
+
+
+def _program_name(word: str) -> str:
+    """Basename of a program word, lowercased, without a ``.exe`` suffix."""
+    base = re.split(r"[\\/]", word)[-1].lower()
+    if base.endswith(".exe"):
+        base = base[:-4]
+    return base
+
+
+def _scan_substitution(s: str, i: int, close: str) -> int:
+    """Return the index of the ``close`` char ending a substitution at ``i``.
+
+    ``i`` is the first character inside the substitution. For ``)`` nesting
+    and quoting are honoured; returns ``len(s)`` when unterminated.
+    """
+    depth = 0
+    n = len(s)
+    while i < n:
+        c = s[i]
+        if c == "\\":
+            i += 2
+            continue
+        if close == "`":
+            if c == "`":
+                return i
+            i += 1
+            continue
+        if c == "'":
+            end = s.find("'", i + 1)
+            i = n if end < 0 else end + 1
+            continue
+        if c == '"':
+            i += 1
+            while i < n and s[i] != '"':
+                i += 2 if s[i] == "\\" else 1
+            i += 1
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            if depth == 0:
+                return i
+            depth -= 1
+        i += 1
+    return n
+
+
+def _lex(s: str):
+    """Split ``s`` into shell tokens.
+
+    Returns ``(tokens, substitutions)``. ``tokens`` is a list of
+    ``(kind, text)`` with kind ``word``, ``op`` or ``redir``; quotes are
+    removed from words. ``substitutions`` holds the source text of every
+    ``$(...)`` / backtick substitution, which the caller parses separately.
+    Never raises: an unterminated quote runs to the end of the string.
+    """
+    tokens = []
+    subs = []
+    word = []
+    in_word = False
+    n = len(s)
+    i = 0
+
+    def end_word():
+        nonlocal word, in_word
+        if in_word:
+            tokens.append(("word", "".join(word)))
+        word = []
+        in_word = False
+
+    def take_substitution(start):
+        """Handle ``$(`` or a backtick at ``start``; return the next index."""
+        if s[start] == "`":
+            end = _scan_substitution(s, start + 1, "`")
+            subs.append(s[start + 1:end])
+        else:
+            end = _scan_substitution(s, start + 2, ")")
+            subs.append(s[start + 2:end])
+        word.append(s[start:end + 1])
+        return end + 1
+
+    while i < n:
+        c = s[i]
+        if c in " \t":
+            end_word()
+            i += 1
+        elif c == "\n":
+            end_word()
+            tokens.append(("op", ";"))
+            i += 1
+        elif c == "#" and not in_word:
+            end = s.find("\n", i)
+            i = n if end < 0 else end
+        elif c == "\\":
+            nxt = s[i + 1] if i + 1 < n else ""
+            if nxt == "\n":
+                i += 2
+                continue
+            in_word = True
+            if nxt and nxt in _BACKSLASH_ESCAPES:
+                word.append(nxt)
+                i += 2
+            else:
+                word.append("\\")
+                i += 1
+        elif c == "'":
+            in_word = True
+            end = s.find("'", i + 1)
+            end = n if end < 0 else end
+            word.append(s[i + 1:end])
+            i = end + 1
+        elif c == '"':
+            in_word = True
+            i += 1
+            while i < n and s[i] != '"':
+                ch = s[i]
+                if ch == "\\" and i + 1 < n and s[i + 1] in '$`"\\\n':
+                    if s[i + 1] != "\n":
+                        word.append(s[i + 1])
+                    i += 2
+                elif ch == "`" or (ch == "$" and s.startswith("$(", i)):
+                    i = take_substitution(i)
+                else:
+                    word.append(ch)
+                    i += 1
+            i += 1
+        elif c == "`" or (c == "$" and s.startswith("$(", i)):
+            in_word = True
+            i = take_substitution(i)
+        elif c in _WORD_BREAK:
+            # `2>file`, `2>&1`: an all-digit word before < or > is an fd.
+            if c in "<>" and in_word and "".join(word).isdigit():
+                word = []
+                in_word = False
+            end_word()
+            op = next(o for o in _LEX_OPERATORS if s.startswith(o, i))
+            tokens.append(("redir" if op in _REDIRECTIONS else "op", op))
+            i += len(op)
+        else:
+            in_word = True
+            word.append(c)
+            i += 1
+    end_word()
+    return tokens, subs
+
+
+def _simple_commands(tokens) -> list:
+    """Group lexer tokens into simple commands (lists of words).
+
+    Operators end a simple command; a redirection and its target word are
+    dropped, so ``ppds env who 2>&1 | jq`` yields ``[ppds, env, who]`` and
+    ``[jq]``.
+    """
+    commands = []
+    current = []
+    skip_target = False
+    for kind, text in tokens:
+        if kind == "word":
+            if skip_target:
+                skip_target = False
+            else:
+                current.append(text)
+        elif kind == "redir":
+            skip_target = True
+        else:
+            skip_target = False
+            if current:
+                commands.append(current)
+            current = []
+    if current:
+        commands.append(current)
+    return commands
+
+
+def _command_start(words: list) -> int:
+    """Index of the word in command position, or ``len(words)`` if none.
+
+    Skips leading ``NAME=value`` assignments, reserved words such as ``if`` /
+    ``then`` / ``do`` / ``!``, and wrapper commands that run their argument
+    (``env``, ``sudo``, ``time``, ``xargs`` ...) with their options.
+    """
+    i = 0
+    n = len(words)
+    while i < n:
+        word = words[i]
+        if _ASSIGNMENT_RE.match(word) or word in _COMMAND_POSITION_KEYWORDS:
+            i += 1
+            continue
+        if word in _NON_COMMAND_KEYWORDS:
+            return n
+        wrapper = _program_name(word)
+        if wrapper not in _WRAPPERS:
+            return i
+        value_opts = _WRAPPERS[wrapper]
+        i += 1
+        while i < n:
+            arg = words[i]
+            if arg == "--":
+                i += 1
+                break
+            if arg.startswith("-") and len(arg) > 1:
+                i += 2 if arg in value_opts else 1
+                continue
+            if wrapper == "env" and _ASSIGNMENT_RE.match(arg):
+                i += 1
+                continue
+            if wrapper in ("timeout", "nice", "xargs", "watch") and _WRAPPER_POSITIONAL_RE.match(arg):
+                i += 1
+                continue
+            break
+    return n
+
+
+def _shell_c_argument(args: list) -> Optional[str]:
+    """The command string of ``bash -c '<cmd>'``-style args, else None."""
+    has_c = False
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in ("-o", "+o", "-O", "+O"):
+            i += 2
+            continue
+        if arg.startswith(("-", "+")) and len(arg) > 1:
+            if not arg.startswith("--") and "c" in arg[1:]:
+                has_c = True
+            i += 1
+            continue
+        return arg if has_c else None
+    return None
+
+
+def _norm_path(path: str) -> str:
+    return path.replace("\\", "/")
+
+
+def _is_absolute(path: str) -> bool:
+    return path.startswith("/") or bool(re.match(r"^[A-Za-z]:", path))
+
+
+def _join_cwd(cwd: Optional[str], path: str) -> str:
+    path = _norm_path(path)
+    if cwd and not _is_absolute(path):
+        path = cwd.rstrip("/") + "/" + path
+    return path
+
+
+def _project_program(path: str) -> Optional[str]:
+    """``ppds`` / ``ppds-mcp-server`` when ``path`` names that project."""
+    parts = [p for p in _norm_path(path).split("/") if p not in ("", ".")]
+    resolved = []
+    for part in parts:
+        if part == ".." and resolved and resolved[-1] != "..":
+            resolved.pop()
+        else:
+            resolved.append(part)
+    if not resolved:
+        return None
+    last = resolved[-1].lower()
+    if last.endswith(".csproj"):
+        last = last[: -len(".csproj")]
+    return _PPDS_PROJECTS.get(last)
+
+
+def _split_option(arg: str):
+    """``--opt=value`` / ``--opt:value`` -> (``--opt``, value); else (arg, None)."""
+    m = _LONG_OPTION_VALUE_RE.match(arg)
+    if m:
+        return m.group(1), m.group(2)
+    return arg, None
+
+
+def _dotnet_run_argv(args: list, cwd: Optional[str]) -> Optional[list]:
+    """Normalise ``dotnet run <args>`` to a PPDS argv, or None."""
+    project = None
+    app_args = []
+    i = 0
+    n = len(args)
+    while i < n:
+        arg = args[i]
+        if arg == "--":
+            app_args.extend(args[i + 1:])
+            break
+        name, inline = _split_option(arg)
+        if name == "-p":
+            # -p is --property when its value contains '=', else --project.
+            value = inline if inline is not None else (args[i + 1] if i + 1 < n else "")
+            if "=" not in value:
+                project = value
+            i += 1 if inline is not None else 2
+            continue
+        if name in _DOTNET_RUN_VALUE_OPTIONS:
+            value = inline if inline is not None else (args[i + 1] if i + 1 < n else "")
+            if name == "--project":
+                project = value
+            elif name == "--file":
+                return None  # a file-based app, not a project
+            i += 1 if inline is not None else 2
+            continue
+        if name in _DOTNET_RUN_FLAGS or name.startswith("--tl"):
+            i += 1
+            continue
+        app_args.append(arg)
+        i += 1
+
+    target = _join_cwd(cwd, project) if project is not None else cwd
+    if not target:
+        return None
+    program = _project_program(target)
+    if program is None:
+        return None
+    return [program] + app_args
+
+
+def _dotnet_argv(args: list, cwd: Optional[str]) -> Optional[list]:
+    """Normalise a ``dotnet ...`` command line to a PPDS argv, or None.
+
+    Recognised: ``dotnet run`` targeting the PPDS.Cli / PPDS.Mcp project
+    (by ``--project`` / ``-p`` or an earlier ``cd``); ``dotnet [exec]
+    <path>/ppds.dll`` and ``ppds-mcp-server.dll``; ``dotnet ppds`` and
+    ``dotnet tool run ppds`` (local tool). Anything else is not PPDS.
+    """
+    i = 0
+    n = len(args)
+    while i < n:
+        name, inline = _split_option(args[i])
+        if name in _DOTNET_HOST_VALUE_OPTIONS:
+            i += 1 if inline is not None else 2
+        elif name in _DOTNET_HOST_FLAGS:
+            i += 1
+        else:
+            break
+    if i >= n:
+        return None
+    verb = args[i]
+    rest = args[i + 1:]
+    lowered = verb.lower()
+
+    if lowered == "run":
+        return _dotnet_run_argv(rest, cwd)
+    if lowered == "exec":
+        j = 0
+        while j < len(rest):
+            name, inline = _split_option(rest[j])
+            if name in _DOTNET_HOST_VALUE_OPTIONS:
+                j += 1 if inline is not None else 2
+            elif name.startswith("-"):
+                j += 1
+            else:
+                break
+        if j >= len(rest):
+            return None
+        verb, rest, lowered = rest[j], rest[j + 1:], rest[j].lower()
+    if lowered == "tool" and rest and rest[0].lower() == "run" and len(rest) > 1:
+        verb, rest, lowered = rest[1], rest[2:], rest[1].lower()
+        if lowered in _PPDS_PROGRAMS:
+            return [lowered] + rest
+        return None
+
+    assembly = _PPDS_ASSEMBLIES.get(re.split(r"[\\/]", lowered)[-1])
+    if assembly is not None:
+        return [assembly] + rest
+    if lowered in _PPDS_PROGRAMS:
+        return [lowered] + rest
+    return None
+
+
+def _collect_invocations(command: str, out: list, depth: int) -> None:
+    if depth > 8:
+        return
+    tokens, subs = _lex(command)
+    cwd = None
+    for words in _simple_commands(tokens):
+        start = _command_start(words)
+        if start >= len(words):
+            continue
+        prog_word = words[start]
+        args = words[start + 1:]
+        prog = _program_name(prog_word)
+
+        if prog in _PPDS_PROGRAMS:
+            out.append([re.split(r"[\\/]", prog_word)[-1]] + args)
+        elif prog == "dotnet":
+            argv = _dotnet_argv(args, cwd)
+            if argv is not None:
+                out.append(argv)
+        elif prog in ("cd", "pushd"):
+            target = next((a for a in args if not a.startswith("-") or a == "-"), None)
+            if target is None or target in ("-", "~") or target.startswith("~/"):
+                cwd = None
+            else:
+                cwd = _join_cwd(cwd, target)
+        elif prog in _SHELLS:
+            inner = _shell_c_argument(args)
+            if inner:
+                _collect_invocations(inner, out, depth + 1)
+        elif prog == "eval" and args:
+            _collect_invocations(" ".join(args), out, depth + 1)
+    for sub in subs:
+        _collect_invocations(sub, out, depth + 1)
 
 
 def find_ppds_invocations(command: str) -> list:
-    """Return a list of argv-style token lists for each ppds invocation.
+    """Return a list of argv-style token lists for each PPDS invocation.
 
-    Handles compound bash (``cd foo && ppds env list``) and pipes. The CLI
-    argv tokens stop at the first shell operator after the program name.
+    Each entry starts with the program (``ppds`` / ``ppds-mcp-server``,
+    possibly with ``.exe``) followed by the CLI arguments. A program counts
+    only in command position: at the start of a simple command, after
+    ``&&`` / ``||`` / ``;`` / ``|`` / ``&`` / a newline / ``(``, after
+    leading ``NAME=value`` assignments, reserved words and wrappers such as
+    ``env`` / ``sudo`` / ``time``, inside ``$(...)`` or backticks, or as the
+    command string of ``bash -c`` / ``sh -c`` / ``eval``. A path prefix and
+    a ``.exe`` suffix are allowed. Runs through the .NET host are normalised
+    to the same shape (see ``_dotnet_argv``). Quoted operators are not
+    command boundaries, and redirections are dropped from the argv.
     """
     if not command:
         return []
-
     out = []
-    for match in _PPDS_PROGRAM_RE.finditer(command):
-        prog = match.group(1)
-        tail = command[match.end():]
-        try:
-            tokens = shlex.split(tail, posix=True)
-        except ValueError:
-            tokens = tail.split()
-
-        args = []
-        for tok in tokens:
-            if tok in _SHELL_OPERATORS:
-                break
-            args.append(tok)
-        out.append([prog] + args)
+    _collect_invocations(command, out, 0)
     return out
 
 

@@ -37,8 +37,8 @@ Before running anything below:
 2. When invoked from `/shakedown`, confirm `.claude/state/shakedown-active.json`
    exists so writes fail closed.
 3. Invoke the CLI as `ppds` or `src/PPDS.Cli/bin/Debug/net10.0/ppds`, not
-   through `dotnet run --project src/PPDS.Cli/...` or `scripts/ppds-dev.ps1`:
-   the hook matches the program name and does not see those forms.
+   through `scripts/ppds-dev.ps1`: the hook also recognises
+   `dotnet run --project src/PPDS.Cli -- ...` but does not see that script.
 
 ---
 
