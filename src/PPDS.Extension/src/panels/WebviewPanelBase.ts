@@ -64,6 +64,16 @@ export abstract class WebviewPanelBase<
             && this._requestGenerations.get(scope) === generation;
     }
 
+    /**
+     * Capture the current environment and return a check that is false once it has changed
+     * (or the panel is disposed). Use it before a write to tell afterwards whether the
+     * follow-up refresh still belongs to this panel's environment; never to gate the write's outcome.
+     */
+    protected captureEnvironment(): () => boolean {
+        const epoch = this._environmentEpoch;
+        return () => !this._disposed && epoch === this._environmentEpoch;
+    }
+
     /** Invalidate every in-flight request. Called whenever the panel's environment changes. */
     private invalidateRequests(): void {
         this._environmentEpoch++;

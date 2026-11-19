@@ -385,7 +385,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
     }
 
     private async handleToggle(id: string, enabled: boolean): Promise<void> {
-        const isCurrent = this.beginRequest('refresh');
+        const sameEnvironment = this.captureEnvironment();
         try {
             await vscode.window.withProgress(
                 { location: vscode.ProgressLocation.Notification, title: `${enabled ? 'Enabling' : 'Disabling'} step...` },
@@ -393,10 +393,18 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                     await this.daemon.pluginsToggleStep(id, enabled, this.environmentUrl, this.profileName);
                 }
             );
+        } catch (error) {
+            // The outcome of a write is always reported, even after an environment switch.
+            const msg = error instanceof Error ? error.message : String(error);
+            this.postMessage({ command: 'error', message: `Failed to toggle step: ${msg}` });
+            return;
+        }
 
-            // Reload detail for the updated node to get fresh state
+        // Only the refreshed view of the node is guarded: reload it for the updated state.
+        const isCurrent = this.beginRequest(`refresh:${id}`);
+        try {
             const result = await this.daemon.pluginsGet('step', id, this.environmentUrl, this.profileName);
-            if (!isCurrent()) return;
+            if (!sameEnvironment() || !isCurrent()) return;
             const entity = result.step;
             this.postMessage({
                 command: 'nodeUpdated',
@@ -408,7 +416,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                 },
             });
         } catch (error) {
-            if (!isCurrent()) return;
+            if (!sameEnvironment() || !isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to toggle step: ${msg}` });
         }
@@ -514,7 +522,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
 
     private async handleUpdate(message: Extract<PluginsPanelWebviewToHost, { command: 'updateEntity' }>): Promise<void> {
         const { entityType, id, fields } = message;
-        const isCurrent = this.beginRequest('refresh');
+        const sameEnvironment = this.captureEnvironment();
 
         try {
             await vscode.window.withProgress(
@@ -546,7 +554,16 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                     }
                 }
             );
+        } catch (error) {
+            // The outcome of a write is always reported, even after an environment switch.
+            const msg = error instanceof Error ? error.message : String(error);
+            this.postMessage({ command: 'error', message: `Failed to update ${entityType}: ${msg}` });
+            return;
+        }
 
+        // Only the refreshed view of the node is guarded.
+        const isCurrent = this.beginRequest(`refresh:${id}`);
+        try {
             // Reload detail for the updated node, routing through the correct endpoint
             let updatedEntity: Record<string, unknown> | null;
             if (entityType === 'customApi') {
@@ -559,7 +576,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                 const result = await this.daemon.pluginsGet(entityType, id, this.environmentUrl, this.profileName);
                 updatedEntity = result.assembly ?? result.package ?? result.pluginType ?? result.step ?? result.image ?? null;
             }
-            if (!isCurrent()) return;
+            if (!sameEnvironment() || !isCurrent()) return;
             this.postMessage({
                 command: 'nodeUpdated',
                 node: {
@@ -569,7 +586,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                 },
             });
         } catch (error) {
-            if (!isCurrent()) return;
+            if (!sameEnvironment() || !isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to update ${entityType}: ${msg}` });
         }
