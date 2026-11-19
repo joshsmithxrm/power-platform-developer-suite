@@ -15,7 +15,7 @@ coverage:
       default:
         target: 80%
         threshold: 5%
-        informational: false  # ENFORCED — blocks PRs with <80% new-code coverage
+        informational: false  # Posted as a pass/fail status, but not a required check (branch protection requires only build-status and test-status), so it does not block merging
         after_n_builds: 1
 
   # Per-package thresholds using component system

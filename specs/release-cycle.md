@@ -113,7 +113,7 @@ Releases are **event-driven with a cadence floor**:
 
 - `1.0.0` → bug fix → `1.0.1` (patch, per-package)
 - `1.0.x` → feature batch → `1.1.0` (minor, all packages)
-- The Plugins package follows its own lineage (currently `3.0.0`) but its minor/patch increments follow the same policy.
+- The Plugins package follows its own lineage (see the newest `Plugins-v*` tag for the current version) but its minor/patch increments follow the same policy.
 - Extension follows odd/even minor convention (odd = pre-release channel, even = stable).
 
 ### Branching and Merge Policy
@@ -664,6 +664,7 @@ claim. This change does not certify every installed component against all adviso
 
 | Date | Change |
 |------|--------|
+| 2026-11-19 | Version progression no longer states the Plugins package version; it points at the newest `Plugins-v*` tag. No release policy change |
 | 2026-11-19 | Move the release procedure from the `/release` skill into `docs/runbooks/release.md`; the skill now only directs an agent to the runbook. AC-06, AC-07, AC-13 and AC-16 are verified against the runbook by `tests/test_release_runbook_content.py`. No release policy change |
 | 2026-11-10 | Add source-bound closeout ledger, explicit required/optional gates, scoped evidence reuse and review contracts; preserve active pre-merge evaluation on ready-for-review events (AC-49 through AC-53) |
 | 2026-09-12 | Repair cadence UTC/strict-tag handling and make CLI/Extension alerts commit-co-location based, CLI-keyed, serialized, and self-reconciling for either tag order (AC-31 and AC-32) |

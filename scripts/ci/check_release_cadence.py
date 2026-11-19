@@ -45,7 +45,7 @@ from release_model import ReleaseGraph, SemVer
 
 PUBLIC_RELEASE_RUNBOOK = (
     "https://github.com/joshsmithxrm/power-platform-developer-suite/"
-    "blob/main/docs/RELEASE.md"
+    "blob/main/docs/runbooks/release.md"
 )
 
 
