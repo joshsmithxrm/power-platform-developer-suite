@@ -8,7 +8,7 @@ This document explains how code scanning tools are configured for the PPDS repos
 |------|---------------|---------|
 | **CodeQL** | `.github/codeql/codeql-config.yml` | Security analysis (style rules disabled) |
 | **Copilot** | `.github/copilot-instructions.md` | PR review guidance |
-| **Gemini** | `.gemini/config.yaml`, `.gemini/styleguide.md` | PR review with architecture focus |
+| **CodeRabbit** | `.coderabbit.yaml` | PR review |
 | **Roslyn Analyzers** | `src/PPDS.Analyzers/` | Compile-time enforcement |
 
 ## CodeQL Configuration
@@ -39,7 +39,6 @@ Based on PR feedback analysis:
 
 | Bot | Value | Notes |
 |-----|-------|-------|
-| **Gemini** | HIGH | Catches real bugs: concurrency, performance, logic errors |
 | **Copilot** | MIXED | Good for duplication, resource leaks; noisy for style |
 | **CodeQL** | LOW | Mostly style noise for this codebase |
 
@@ -47,7 +46,7 @@ Based on PR feedback analysis:
 
 Compile-time enforcement of architectural patterns. Analyzers run during build and show as warnings in IDE.
 
-### Implemented Rules (All 13)
+### Implemented Rules (All 16)
 
 | ID | Name | Description | Severity |
 |----|------|-------------|----------|
@@ -64,6 +63,9 @@ Compile-time enforcement of architectural patterns. Analyzers run during build a
 | PPDS011 | PropagateCancellation | Flags async methods that drop CancellationToken | Warning |
 | PPDS012 | NoSyncOverAsync | Flags `.GetAwaiter().GetResult()`, `.Result`, `.Wait()` | Warning |
 | PPDS013 | NoFireAndForgetInCtor | Flags async calls in constructors without await | Warning |
+| PPDS014 | XmlDocOnPublicApi | Flags public API in library projects without XML documentation | Warning |
+| PPDS015 | CliCommandNeedsDescription | Flags System.CommandLine commands, options and arguments without a Description | Warning |
+| PPDS016 | McpToolNeedsMetadata | Flags `[McpServerTool]` methods missing Name or Description | Warning |
 
 ### Suppressing Analyzer Warnings
 

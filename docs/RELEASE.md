@@ -265,6 +265,13 @@ The repository's optional `.claude/skills/release/SKILL.md` documents the same
 ceremony for supported agents; this public document remains the authoritative,
 tool-neutral entry point for generated GitHub issues.
 
+### Tags, not release branches, record what shipped
+
+When working out what shipped as version X, trust the release tag, not a
+`release/X` branch. The branch tip may sit on a separate lineage from the tagged
+commit. Check with `git merge-base --is-ancestor <release-tag> <branch>` before
+assuming a branch contains a release.
+
 ## CLI/Extension Co-release Reconciliation
 
 The VS Code Extension bundles the CLI selected from an exact `Cli-v*` tag on

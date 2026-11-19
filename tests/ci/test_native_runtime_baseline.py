@@ -13,8 +13,6 @@ PATHS = [".github/workflows/release-cli.yml", ".github/workflows/test.yml",
 
 
 PUBLISHER_CHANGE_PATHS = (
-    '.claude/skills/implement/SKILL.md',
-    '.claude/skills/pr/SKILL.md',
     '.claude/skills/release/SKILL.md',
     '.github/pull_request_template.md',
     '.github/workflows/publish-nuget.yml',

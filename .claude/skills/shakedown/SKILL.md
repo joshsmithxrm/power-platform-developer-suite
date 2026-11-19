@@ -1,39 +1,30 @@
 ---
 name: shakedown
-description: Structured multi-surface product validation — systematically test Extension, TUI, MCP, and CLI with parity comparison and architecture audit. Use before releases, after large features, or to kick the tires.
+description: Multi-surface product validation against live Dataverse - exercise the Extension, TUI, MCP server and CLI, compare behaviour across surfaces, audit the architecture, and write a findings report. Use before a release, after a large cross-surface feature or refactor, or when asked to kick the tires. Refuses to start without a configured safe-environment allowlist.
 ---
 
 # Shakedown
 
-A structured, multi-interface product validation session. Unlike `/qa`
-(automated, single surface) or `/verify` (self-check), shakedown is
-collaborative, comprehensive, and produces a documented findings report.
+A shakedown asks "does the product work" by using it on every surface, not by reading code. A passing test suite is not a shakedown. It differs from `/verify`, which checks one change on one surface.
 
-Product-level shakedown of Extension / TUI / MCP / CLI against live
-Dataverse, with parity comparison and an architecture audit. Use this
-when the question is "does the product work".
-
-## When to Use
-
-- Pre-release milestone
-- After a large feature lands across multiple surfaces
-- After a refactor that touched multiple surfaces
-- "I want to kick the tires on this thing"
-- "Test everything"
+Use it before releases, after large multi-surface features or refactors, or when asked to "test everything".
 
 ## Phase 0: Safety Pre-checks
 
 Before any other work, validate the safety guardrails are configured and
-active.
+active. The `shakedown-safety` hook (`.claude/hooks/shakedown-safety.py`) and
+the C# `IShakedownGuard` consume what this phase sets up; see
+`docs/SAFE-SHAKEDOWN.md` for the full model.
 
 1. **Verify env allowlist is configured** — read
    `.claude/settings.json` → `safety.shakedown_safe_envs`, or
    `$PPDS_SAFE_ENVS`. If neither lists at least one safe env, STOP and ask
-   the user to configure (`docs/SAFE-SHAKEDOWN.md` for details).
-2. **Verify active env is in the allowlist** — run `ppds env who` (or
-   `ppds env current`) and confirm the displayed env matches an allowlist
-   entry. The `shakedown-safety` hook will block downstream `ppds *`
-   calls otherwise.
+   the user to configure (`docs/SAFE-SHAKEDOWN.md` for details). Do not
+   continue without one: the hook's environment gating is opt-in, so with no
+   allowlist nothing stops `ppds` commands from reaching an unsafe environment.
+2. **Verify active env is in the allowlist** — run `ppds env who` and confirm
+   the displayed env matches an allowlist entry. The `shakedown-safety` hook
+   will block downstream `ppds *` calls otherwise.
 3. **Arm the shakedown write-block (sentinel file).** Before any
    mutating Bash work (steps 1-2 are read-only checks and run first
    by design), write `.claude/state/shakedown-active.json` containing at
@@ -49,149 +40,54 @@ active.
                open('.claude/state/shakedown-active.json', 'w'))"
    ```
 
-   The `shakedown-safety` hook reads this sentinel on every Bash call
-   and refuses mutation verbs (`plugins deploy` without `--dry-run`,
-   `<surface> create/update/delete`, `solutions import`, etc.) for the
-   duration of the shakedown. The sentinel auto-expires after 24h so a
-   crashed session cannot wedge the write-block for future sessions.
+   The hook reads this sentinel on every Bash call and refuses mutation
+   verbs (`plugins deploy` without `--dry-run`, `<surface> create/update/delete`,
+   `solutions import`, etc.) for the duration of the shakedown. The sentinel
+   auto-expires after 24h so a crashed session cannot wedge the write-block
+   for future sessions.
 
    **Why the sentinel and not just `export PPDS_SHAKEDOWN=1`?** Claude
-   Code's Bash tool spawns a fresh shell per invocation — both inline
-   `PPDS_SHAKEDOWN=1 ppds ...` prefixes and `export` from a prior call
-   fail to propagate to this hook subprocess. The sentinel file is the
-   reliable activation source from inside a Claude Code session. The
-   env var is still honored as a secondary source for shell scripts and
-   CI where sentinel-file management is awkward. (The env-var name is
-   configurable via `safety.readonly_env_var` in settings.json; default
-   is `PPDS_SHAKEDOWN`.)
-4. **Acknowledge the model:** plugin deploys MUST be invoked with <!-- enforcement: T3 -->
+   Code's Bash tool spawns a fresh shell per invocation, so neither an inline
+   `PPDS_SHAKEDOWN=1 ppds ...` prefix nor an `export` from a prior call
+   reaches the hook subprocess. The sentinel file is the reliable activation
+   source inside a Claude Code session. The env var is still honored for
+   shell scripts and CI (its name is configurable via
+   `safety.readonly_env_var` in settings.json; default `PPDS_SHAKEDOWN`).
+4. **Acknowledge the model:** plugin deploys MUST be invoked with
    `--dry-run` during shakedown. To run a real deploy, delete the
    sentinel file (`rm .claude/state/shakedown-active.json`) and unset
    `PPDS_SHAKEDOWN` if it's also in the environment — deliberate action,
    there is no softer bypass.
 
-See `docs/SAFE-SHAKEDOWN.md` for the full safety model and how to add envs
-to the allowlist.
+## What to exercise
 
-## Default Mode
+Ask which surfaces are in scope, then use each one interactively through the `/verify` skill (its sections cover launching and driving the TUI, the extension, the MCP server and the CLI). Reading code does not count as verifying an interactive feature; mark it "not tested" instead.
 
-### Phase 1: Scope Declaration
+- **Extension:** open each panel, run a query, sort and filter results, switch profile and environment, check the error states.
+- **TUI:** launch, switch profile and environment, open every screen from the menus, send keystrokes, read the rendered text.
+- **MCP:** invoke each tool against the safe environment (server launched with `--read-only`) and check the responses.
+- **CLI:** run the command groups with `--output-format json` and without; check data on stdout, status on stderr, and exit codes.
 
-Ask the user which surfaces to test:
-- [ ] Extension (VS Code webview panels)
-- [ ] TUI (Terminal.Gui interactive)
-- [ ] MCP (tool invocations)
-- [ ] CLI (command execution)
+Build a feature-by-surface matrix from `specs/` and `src/` first, confirm it with the user, and record pass or fail with evidence (screenshots, output) for each cell.
 
-All declared surfaces MUST get interactive verification — not just code audit. <!-- enforcement: T3 -->
+Then:
 
-### Phase 2: Test Matrix
+- **Parity:** for features on more than one surface, note differences and say which is a bug and which is acceptable.
+- **Architecture audit:** direct `ServiceClient` use outside the pool, empty or non-logging catch blocks, commands or handlers that are not wired up, TUI screens unreachable from menus, business logic outside Application Services (see `specs/CONSTITUTION.md`).
 
-Before testing begins, create an explicit test matrix:
+## Findings
 
-1. Enumerate features per surface from specs and code:
-   - Read `specs/` for feature specs
-   - Read `src/` for implemented features
-   - List each feature and which surfaces implement it
+Write `docs/qa/{date}-{scope}.md`: surfaces tested, bugs found and fixed, bugs found and not fixed (with severity), the matrix, the parity table, audit findings, and untested areas with reasons. Present findings and let the user decide what to defer; do not recommend deferral. Investigate failed background tasks rather than dismissing them.
 
-2. Create a checklist table:
+## Finish
 
-| Feature | Extension | TUI | MCP | CLI | Notes |
-|---------|-----------|-----|-----|-----|-------|
-| Query execution | ☐ | ☐ | ☐ | ☐ | |
-| Profile management | ☐ | ☐ | — | ☐ | |
-| ... | | | | | |
+Before declaring complete, list the untested features and get the user's explicit sign-off on skipping them. Then **disarm the shakedown write-block** — delete the sentinel file as
+the very last act:
 
-3. Get user confirmation on the matrix before proceeding.
-
-### Phase 3: Interactive Verification
-
-Test each surface using the appropriate verification tool:
-
-- **Extension:** Use `/verify extension` — open panels, click buttons, type queries, take screenshots (see `REFERENCE.md §ext`)
-- **TUI:** Use `/verify tui` — launch, navigate, read text, send keystrokes (see `REFERENCE.md §tui`)
-- **MCP:** Use `/verify mcp` — invoke tools, validate responses (see `REFERENCE.md §mcp`)
-- **CLI:** Use `/verify cli` — run commands, check stdout/stderr (see `REFERENCE.md §cli`)
-
-For each feature in the matrix:
-1. Exercise it in each applicable surface
-2. Mark pass/fail in the matrix
-3. Note any bugs or unexpected behavior
-4. Take evidence (screenshots, output) for failures
-
-### Phase 4: Parity Comparison
-
-For features that exist in multiple surfaces:
-
-1. Compare behavior side-by-side
-2. Note differences (acceptable vs. bugs)
-3. Assess "who does it better" for each feature
-4. Document in a parity table:
-
-| Feature | Extension | TUI | Better? | Notes |
-|---------|-----------|-----|---------|-------|
-| Query results | Sortable table | Fixed table | Ext | TUI needs column sorting |
-| Profile selector | Dropdown | Dialog | TUI | TUI shows more detail |
-
-### Phase 5: Architecture Audit
-
-Automated + manual checks:
-
-1. **Service bypass check:** Grep for direct `ServiceClient` usage outside pool
-2. **Silent error check:** Grep for empty catch blocks or catches without logging
-3. **Dead code check:** Look for commands/handlers that aren't wired up
-4. **Handler wiring:** Verify all TUI dialogs are reachable from menus
-5. **Constitution compliance:** Spot-check A1 (logic in services), A2 (single code path)
-
-### Phase 6: Findings Document
-
-Write findings to `docs/qa/{date}-{scope}.md`:
-
-```markdown
-# {Scope} QA Shakedown — {date}
-
-## Surfaces Tested
-{list}
-
-## Bugs Found and Fixed
-{numbered list with commit references}
-
-## Bugs Found — Not Fixed
-{numbered list with severity and recommended action}
-
-## Test Matrix Results
-{the completed matrix from Phase 2}
-
-## Parity Comparison
-{the parity table from Phase 4}
-
-## Architecture Audit
-{findings from Phase 5}
-
-## Untested Areas
-{features/surfaces explicitly not covered, with reason}
+```bash
+rm .claude/state/shakedown-active.json
 ```
 
-### Phase 7: Gap Check
-
-Before declaring complete:
-1. Enumerate features NOT tested (from the matrix)
-2. Present to user for explicit sign-off on skipping
-3. Do NOT declare the shakedown complete without this sign-off
-4. **Disarm the shakedown write-block** — delete the sentinel file as
-   the very last act, after sign-off on (1)–(3):
-
-   ```bash
-   rm .claude/state/shakedown-active.json
-   ```
-
-   A leftover sentinel keeps the write-block armed for any subsequent
-   session in this worktree until it expires 24h later. Delete the
-   sentinel explicitly - do not rely on the staleness expiry.
-
-### Default-mode Rules
-
-- No declaring "VERIFIED (code)" for interactive features — either test it interactively or mark as "NOT TESTED"
-- Do not recommend deferring issues — present findings, let user decide disposition
-- Background tasks that fail must be retried or investigated, not dismissed
-- AI MUST actually use the product. A passing test suite is not a shakedown. <!-- enforcement: T3 -->
+A leftover sentinel keeps the write-block armed for any subsequent
+session in this worktree until it expires 24h later. Delete the
+sentinel explicitly; do not rely on the staleness expiry.

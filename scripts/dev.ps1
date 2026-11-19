@@ -650,7 +650,7 @@ function Show-WorktreeStatus {
         $missing = Get-MissingSteps -Workflow $workflow
         if ($missing.Count -gt 0 -and -not ($workflow.pr -and $workflow.pr.url)) {
             $steps = ($missing | ForEach-Object { "/$_" }) -join ' → '
-            Write-Host "    Next: $steps → /pr" -ForegroundColor DarkYellow
+            Write-Host "    Next: $steps → open PR" -ForegroundColor DarkYellow
         }
     } else {
         Write-Host ""

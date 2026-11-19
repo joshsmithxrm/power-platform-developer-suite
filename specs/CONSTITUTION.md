@@ -1,14 +1,13 @@
 # PPDS Constitution
 
-Non-negotiable principles. Every spec, plan, implementation, and review MUST comply. Violations are defects — not style issues, not suggestions, not "nice to haves."
-
-## How to Use This Document
-
-- **Skills:** Read this before any implementation, review, or spec work
-- **Subagents:** This is injected into your prompt — comply fully
-- **Reviews:** Check every item — violation = finding
+The rules PPDS is held to, for every contributor and every reviewer, human or AI.
+Part 1 applies to all code. Part 2 applies only when a spec in `specs/` is being written or changed.
 
 ---
+
+# Part 1 — Architecture Principles
+
+These apply to all code and all contributors. Every implementation and review must comply. Violations are defects — not style issues, not suggestions, not "nice to haves."
 
 ## Architecture Laws
 
@@ -30,17 +29,15 @@ Non-negotiable principles. Every spec, plan, implementation, and review MUST com
 
 ## Interface Laws
 
+I3 and I6 are about spec documents, so they sit in Part 2 under Spec Process. Their IDs are unchanged.
+
 **I1.** CLI stdout is for data only — status messages, progress, and diagnostics go to `Console.Error.WriteLine` (stderr). Stdout must be pipeable.
 
 **I2.** Generated entities in `src/PPDS.Dataverse/Generated/` are never hand-edited. They are regenerated from metadata.
 
-**I3.** Every spec must have numbered acceptance criteria (AC-01, AC-02, ...) before implementation begins. No ACs = no implementation.
-
 **I4.** Never silently hide, truncate, or filter data. Every reduction in displayed records must be (a) visible — show "X of Y" with the reason, and (b) reversible — provide a toggle, filter, or option to show the full dataset. Service methods that apply filters or limits must return total counts alongside results so every consumer (CLI, TUI, Extension, MCP) can communicate what was filtered. Security-correct exclusions (e.g., secrets) still require visibility ("N secrets excluded") but need not be reversible.
 
 **I5.** Extension panel names use the plural noun for collection views (Solutions, Plugin Traces) and a descriptive tool name for interactive tools (Data Explorer, Plugin Registration, Metadata Browser). Test: if "list of {name}" makes sense, it's a collection — use the noun. If the panel has its own interaction model beyond listing, use a descriptive name.
-
-**I6.** Every spec AC must have a corresponding passing test before implementation is complete. The spec AC table `Test` column must reference the test method; the `Status` column must show ✅. Untested ACs are incomplete implementations — not tech debt, not follow-up items.
 
 ## Session Laws
 
@@ -63,6 +60,20 @@ Non-negotiable principles. Every spec, plan, implementation, and review MUST com
 **R2.** `CancellationToken` must be threaded through the entire async call chain — never accepted as a parameter and then ignored. If a method accepts a token, it must pass it to every async call it makes.
 
 **R3.** Event handlers and subscriptions must be cleaned up in `Dispose`. Every `+=` needs a corresponding `-=`. Every `.subscribe()` needs an `.unsubscribe()` or disposal mechanism.
+
+---
+
+# Part 2 — Spec Process
+
+These apply when a spec in `specs/` is being written or changed, which is usually maintainer-led feature work.
+
+A bug fix or small change from an outside contributor does not require writing or updating a spec. If your change affects behaviour that a spec describes, say so in the PR and a maintainer will update the spec.
+
+## Acceptance Criteria
+
+**I3.** Every spec must have numbered acceptance criteria (AC-01, AC-02, ...) before implementation begins. No ACs = no implementation.
+
+**I6.** Every spec AC must have a corresponding passing test before implementation is complete. The spec AC table `Test` column must reference the test method; the `Status` column must show ✅. Untested ACs are incomplete implementations — not tech debt, not follow-up items.
 
 ## Spec Laws
 

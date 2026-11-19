@@ -53,13 +53,12 @@ Verify exit 0, format correct, edge cases (empty/invalid/no-auth).
 
 See `REFERENCE.md` "TUI Mode - worked example" for the Phase A/B/C
 commands. Phase B is mandatory when changed files touch
-`src/PPDS.Cli/Tui/`. <!-- enforcement: T3 -->
+`src/PPDS.Cli/Tui/`.
 
 ### 5. Extension mode
 
 See `REFERENCE.md` "Extension Mode - worked example" for Phase A/B/C
 commands. Phase B is mandatory when query/data/panel files change.
-<!-- enforcement: T3 -->
 
 ### 6. MCP mode
 
@@ -85,21 +84,16 @@ python -m pytest tests/ scripts/ --import-mode=importlib -q
 **Check 4 - Skill frontmatter:** every `.claude/skills/*/SKILL.md` parses;
 `name` and `description` non-empty.
 
-**Check 5 - Agent frontmatter:** every `.claude/agents/*.md` parses;
-`tools` present; names in known set (`Read`, `Edit`, `Write`, `Glob`,
-`Grep`, `Bash`, `Agent`, `WebSearch`, `WebFetch`, `NotebookEdit`, and
-`Bash(pattern:*)`).
-
-**Check 6 - Skill file refs:** every referenced path exists.
+**Check 5 - Skill file refs:** every referenced path exists.
 
 ### 8. Report
 
 See `REFERENCE.md` "Report template". Include actual values.
 
-Verify is one step in the usual shipping sequence (`/gates` -> `/verify`
--> `/pr`), not the last one. On PASS, proceed to `/pr`. On FAIL, run
-`/debug` to root-cause it (Rule 5: verify reports, it does not fix);
-after the fix lands, re-run `/verify` before continuing.
+Verify is one step in the usual shipping sequence (build and test per
+AGENTS.md, `/verify`, open a PR), not the last one. On PASS, open the PR.
+On FAIL, root-cause it (Rule 5: verify reports, it does not fix); after the
+fix lands, re-run `/verify` before continuing.
 
 ## Rules
 
@@ -107,4 +101,4 @@ after the fix lands, re-run `/verify` before continuing.
 2. Screenshots for visual changes - look at them, don't just take them.
 3. Report actual values, not just pass/fail.
 4. Prerequisites are hard gates.
-5. Don't fix during verify - report problems for `/debug`.
+5. Don't fix during verify - report problems and root-cause them separately.

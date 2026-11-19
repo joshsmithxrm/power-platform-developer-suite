@@ -16,7 +16,7 @@ End-to-end release ceremony for PPDS. Produces CHANGELOGs, version bumps, tags, 
 - Scheduled release cadence
 
 Do NOT use this skill for:
-- Implement a hot-fix — use `/pr`; after merge, use the Patch Release Procedure
+- Implement a hot-fix — open a PR; after merge, use the Patch Release Procedure
   and its explained scope advisory before choosing tags
 - Documentation-only updates — those don't need a release
 - Pre-public-release key rotation — that's a separate operation

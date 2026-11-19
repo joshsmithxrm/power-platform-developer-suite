@@ -1,57 +1,25 @@
-# Copilot Code Review Instructions
+# Copilot instructions
 
-This file guides GitHub Copilot's code review behavior for the PPDS repository.
+The project rules, build commands and test commands for every coding agent are in
+[AGENTS.md](../AGENTS.md). Apply them when writing or reviewing code; the full
+architecture principles are in [specs/CONSTITUTION.md](../specs/CONSTITUTION.md).
 
-## Architecture (ADRs 0015, 0024, 0025, 0026)
+## Code review
 
-### Layer Rules
+Flag:
 
-- CLI/TUI are THIN presentation adapters - no business logic
-- Application Services own all business logic
-- Services are UI-agnostic - no `Console.WriteLine`, no Spectre/Terminal.Gui references
+- Business logic, file I/O or Dataverse SDK calls in CLI commands, TUI screens, MCP tools or extension panels instead of an Application Service.
+- `Console.WriteLine`, Spectre.Console or Terminal.Gui references inside Application Services; services report through `IProgressReporter` and return data.
+- Raw exceptions thrown from Application Services, and `PpdsException.UserMessage` text that exposes GUIDs, stack traces or other technical detail.
+- A pooled Dataverse client obtained outside a parallel loop and shared by its iterations.
+- Single-record Dataverse calls inside loops where `CreateMultiple` or `UpdateMultiple` applies, and record counts done by retrieving records instead of a FetchXML aggregate.
+- Missing `CancellationToken` propagation and sync-over-async (`.Result`, `.GetAwaiter().GetResult()`).
+- Resource leaks (missing `using` or disposal), thread-safety problems in async code, and logic duplicated across files.
 
-### File I/O
+Do not suggest:
 
-- UIs never read/write files directly
-- All file access through Application Services
-- WRONG: `File.ReadAllText` in command handler
-- CORRECT: `await _profileService.GetProfilesAsync()`
+- Converting `foreach` loops with `if` conditions into LINQ `.Where()` chains.
+- Replacing `if`/`else` with ternary operators.
+- "Simplifying" explicit control flow.
 
-### Progress Reporting
-
-- Services accept `IProgressReporter`, not write to console
-- UIs implement adapters for their display medium
-- Services return data, presentation layers format it
-
-### Error Handling
-
-- Services throw `PpdsException` with `ErrorCode` and `UserMessage`
-- Never expose technical details (GUIDs, stack traces) in `UserMessage`
-- UIs format errors for their medium
-
-### Dataverse Patterns
-
-- Use bulk APIs (`CreateMultiple`, `UpdateMultiple`) not loops with single operations
-- Use FetchXML aggregate for counting, not retrieve-and-count
-- Propagate `CancellationToken` through all async methods
-- Get pool client INSIDE parallel loops, not outside
-
-## Style Preferences
-
-Do NOT suggest:
-
-- Converting `foreach` loops with `if` conditions to LINQ `.Where()` chains
-- Replacing `if/else` with ternary operators
-- "Simplifying" explicit control flow
-
-These are intentional style choices per project conventions.
-
-## Valuable Findings
-
-DO flag:
-
-- Code duplication across files
-- Resource leaks (missing disposal, using statements)
-- Missing `CancellationToken` propagation
-- Sync-over-async patterns (`.GetAwaiter().GetResult()`)
-- Thread safety issues in async code
+These are deliberate style choices in this codebase.

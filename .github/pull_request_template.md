@@ -1,39 +1,17 @@
 ## Summary
 
-<!-- Brief description of the changes -->
-
-## Type of Change
-
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Breaking change
-- [ ] Documentation update
-
-## Checklist
-
-- [ ] Code compiles without errors (`dotnet build`)
-- [ ] All tests pass (`dotnet test`)
-- [ ] CHANGELOG.md updated (if applicable)
-- [ ] XML documentation added for public APIs
-- [ ] Version bumped in .csproj (if releasing)
-
-## Contributor provenance
-
-<!-- Maintainer checklist; choose one route. See docs/CONTRIBUTOR-LIFECYCLE.md.
-No-contribution work needs no invented source/identity or extra approval.
-The offline validator checks supplied records, not semantic overlap or live state. -->
-
-- [ ] No external contribution incorporated; reason recorded.
-- [ ] Original contributor PR lands directly; exact source/head and credit recorded.
-- [ ] Work incorporated elsewhere; reason, source PR/head, verified identity and landing PR recorded.
-- [ ] If applicable: proposed squash author/message checked; communication and disposition owners named; exact reply/decision prepared when permission is needed.
-
-Provenance record/evidence (if applicable):
+<!-- What does this change and why? Put "Closes #N" on its own line for each issue it resolves. -->
 
 ## Testing
 
-<!-- How was this tested? -->
+<!-- What did you run, and what did you check by hand? For example: dotnet test PPDS.sln --filter "Category!=Integration" -->
 
-## Breaking Changes
+## Checklist
 
-<!-- List any breaking changes and migration steps -->
+- [ ] Tests added or updated
+- [ ] The affected package's CHANGELOG.md updated, if the change is user-visible
+- [ ] Docs updated, if behaviour changed
+
+## Breaking changes
+
+<!-- List any breaking changes and migration steps, or write "None". -->
