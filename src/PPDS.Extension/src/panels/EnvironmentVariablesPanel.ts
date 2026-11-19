@@ -157,6 +157,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
     }
 
     private async loadEnvironmentVariables(isRetry = false): Promise<void> {
+        const isCurrent = this.beginRequest('list');
         try {
             this.postMessage({ command: 'loading' });
             const result = await this.daemon.environmentVariablesList(
@@ -165,6 +166,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
                 this.includeInactive,
                 this.profileName,
             );
+            if (!isCurrent()) return;
 
             this.postMessage({
                 command: 'environmentVariablesLoaded',
@@ -184,6 +186,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
                 filtersApplied: result.filtersApplied ?? [],
             });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
 
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadEnvironmentVariables(true))) {
@@ -195,8 +198,10 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
     }
 
     private async loadEnvironmentVariableDetail(schemaName: string): Promise<void> {
+        const isCurrent = this.beginRequest('detail');
         try {
             const result = await this.daemon.environmentVariablesGet(schemaName, this.environmentUrl, this.profileName);
+            if (!isCurrent()) return;
             const v = result.variable;
             this.postMessage({
                 command: 'environmentVariableDetailLoaded',
@@ -216,6 +221,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
                 },
             });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to load detail: ${msg}` });
         }
@@ -344,8 +350,10 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
     }
 
     private async loadSolutionList(): Promise<void> {
+        const isCurrent = this.beginRequest('solutionList');
         try {
             const result = await this.daemon.solutionsList(undefined, false, this.environmentUrl, undefined, this.profileName);
+            if (!isCurrent()) return;
             this.postMessage({
                 command: 'solutionListLoaded',
                 solutions: result.solutions.map(s => ({
@@ -355,6 +363,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
                 })),
             });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to load solutions: ${msg}` });
         }

@@ -212,8 +212,10 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
     }
 
     private async loadSolutionList(): Promise<void> {
+        const isCurrent = this.beginRequest('solutionList');
         try {
             const result = await this.daemon.solutionsList(undefined, true, this.environmentUrl, undefined, this.profileName);
+            if (!isCurrent()) return;
             const solutions = result.solutions.map(s => ({
                 id: s.id,
                 uniqueName: s.uniqueName,

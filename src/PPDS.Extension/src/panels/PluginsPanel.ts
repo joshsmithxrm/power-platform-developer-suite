@@ -150,6 +150,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
     }
 
     private async loadTree(isRetry = false): Promise<void> {
+        const isCurrent = this.beginRequest('tree');
         try {
             this.postMessage({ command: 'loading' });
 
@@ -158,6 +159,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                 this.daemon.pluginsList(this.environmentUrl, this.profileName),
                 this.daemon.dataProvidersList(undefined, this.environmentUrl, this.profileName),
             ]);
+            if (!isCurrent()) return;
 
             // Collect assembly names that already appear under a package to avoid duplication
             const packagedAssemblyNames = new Set<string>(
@@ -289,6 +291,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
 
             this.postMessage({ command: 'treeLoaded', data });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
 
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadTree(true))) {

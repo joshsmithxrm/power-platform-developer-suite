@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - When the maximum number of Data Explorer panels is open and the oldest one, which a notebook query would reuse, is bound to a different environment or profile, opening the query now shows a warning and leaves that panel unchanged instead of loading the query into it.
 - Attributed outputs, errors, record links, exports and query history to the executed environment; preserved valid legacy notebooks with missing or partial environment metadata.
 - Data Explorer: failed DML rows show a banner with counts and, when the daemon reports one, the reason (#1607).
+- Panels now discard a slow list or detail response that arrives after the environment was switched or a newer request started, so the previous environment's items no longer repopulate the list and later actions cannot send an old-environment id to the new one (#1731).
 
 ### Security
 

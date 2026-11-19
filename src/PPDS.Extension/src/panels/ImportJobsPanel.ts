@@ -122,9 +122,11 @@ export class ImportJobsPanel extends WebviewPanelBase<ImportJobsPanelWebviewToHo
     }
 
     private async loadImportJobs(isRetry = false): Promise<void> {
+        const isCurrent = this.beginRequest('list');
         try {
             this.postMessage({ command: 'loading' });
             const result = await this.daemon.importJobsList(undefined, this.environmentUrl, this.profileName);
+            if (!isCurrent()) return;
 
             this.postMessage({
                 command: 'importJobsLoaded',
@@ -144,6 +146,7 @@ export class ImportJobsPanel extends WebviewPanelBase<ImportJobsPanelWebviewToHo
                 })),
             });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
 
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadImportJobs(true))) {

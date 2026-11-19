@@ -177,9 +177,11 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
     }
 
     private async loadTraces(isRetry = false): Promise<void> {
+        const isCurrent = this.beginRequest('list');
         try {
             this.postMessage({ command: 'loading' });
             const result = await this.daemon.pluginTracesList(this.currentFilter, undefined, this.environmentUrl, this.profileName);
+            if (!isCurrent()) return;
 
             const traces: PluginTraceViewDto[] = result.traces.map(t => ({
                 id: t.id,
@@ -201,6 +203,7 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
             // Also check trace level to inform the user if tracing is Off
             void this.loadTraceLevel();
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
 
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadTraces(true))) {

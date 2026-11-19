@@ -141,9 +141,11 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
     }
 
     private async loadSolutions(isRetry = false): Promise<void> {
+        const isCurrent = this.beginRequest('list');
         try {
             this.postMessage({ command: 'loading' });
             const allResult = await this.daemon.solutionsList(undefined, true, this.environmentUrl, this.includeInternal, this.profileName);
+            if (!isCurrent()) return;
 
             this.postMessage({
                 command: 'solutionsLoaded',
@@ -165,6 +167,7 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
                 filtersApplied: allResult.filtersApplied ?? [],
             });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
 
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadSolutions(true))) {
@@ -176,9 +179,11 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
     }
 
     private async loadComponents(uniqueName: string): Promise<void> {
+        const isCurrent = this.beginRequest('components');
         try {
             this.postMessage({ command: 'componentsLoading', uniqueName });
             const result = await this.daemon.solutionsComponents(uniqueName, undefined, this.environmentUrl, this.profileName);
+            if (!isCurrent()) return;
 
             // Group components by type name using the shared utility
             // (mirrors `PPDS.Cli.Services.SolutionComponentGrouper`).
