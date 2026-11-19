@@ -146,8 +146,10 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
     }
 
     private async loadEntities(isRetry = false): Promise<void> {
+        const isCurrent = this.beginRequest('entities');
         try {
             const result = await this.daemon.metadataEntities(this.environmentUrl, this.includeIntersect, this.profileName);
+            if (!isCurrent()) return;
 
             this.postMessage({
                 command: 'entitiesLoaded',
@@ -163,27 +165,33 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
                 intersectHiddenCount: result.intersectHiddenCount ?? 0,
             });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
 
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadEntities(true))) {
                 return;
             }
+            if (!isCurrent()) return;
 
             this.postMessage({ command: 'error', message: msg });
         }
     }
 
     private async loadGlobalChoices(isRetry = false): Promise<void> {
+        const isCurrent = this.beginRequest('globalChoices');
         try {
             const result = await this.daemon.metadataGlobalOptionSets(this.environmentUrl, this.profileName);
+            if (!isCurrent()) return;
             this.postMessage({
                 command: 'globalChoicesLoaded',
                 choices: result.optionSets,
             });
         } catch (error) {
+            if (!isCurrent()) return;
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadGlobalChoices(true))) {
                 return;
             }
+            if (!isCurrent()) return;
 
             // Non-fatal — choices section just stays empty
             this.postMessage({ command: 'globalChoicesLoaded', choices: [] });
@@ -191,38 +199,46 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
     }
 
     private async loadGlobalChoiceDetail(name: string, isRetry = false): Promise<void> {
+        const isCurrent = this.beginRequest('globalChoiceDetail');
         try {
             this.postMessage({ command: 'globalChoiceDetailLoading', name });
             const result = await this.daemon.metadataGlobalOptionSet(name, this.environmentUrl, this.profileName);
+            if (!isCurrent()) return;
             this.postMessage({
                 command: 'globalChoiceDetailLoaded',
                 choice: result.optionSet,
             });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
 
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadGlobalChoiceDetail(name, true))) {
                 return;
             }
+            if (!isCurrent()) return;
 
             this.postMessage({ command: 'error', message: `Failed to load choice detail: ${msg}` });
         }
     }
 
     private async loadEntityDetail(logicalName: string, isRetry = false): Promise<void> {
+        const isCurrent = this.beginRequest('entityDetail');
         try {
             this.postMessage({ command: 'entityDetailLoading', logicalName });
             const result = await this.daemon.metadataEntity(logicalName, true, this.environmentUrl, this.profileName);
+            if (!isCurrent()) return;
             this.postMessage({
                 command: 'entityDetailLoaded',
                 entity: result.entity,
             });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
 
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadEntityDetail(logicalName, true))) {
                 return;
             }
+            if (!isCurrent()) return;
 
             this.postMessage({ command: 'error', message: `Failed to load entity detail: ${msg}` });
         }

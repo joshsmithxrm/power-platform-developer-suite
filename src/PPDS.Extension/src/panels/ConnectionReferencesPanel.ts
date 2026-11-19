@@ -179,6 +179,7 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
         this.abortPendingLoad();
         this._loadAbortController = new AbortController();
         const signal = this._loadAbortController.signal;
+        const isCurrent = this.beginRequest('list');
 
         try {
             this.postMessage({ command: 'loading' });
@@ -189,8 +190,8 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                 this.profileName,
             );
 
-            // Check if request was aborted before we got the result
-            if (signal.aborted) return;
+            // Drop the result if the request was aborted or the environment changed meanwhile
+            if (signal.aborted || !isCurrent()) return;
 
             this.postMessage({
                 command: 'connectionReferencesLoaded',
@@ -210,20 +211,23 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                 filtersApplied: result.filtersApplied ?? [],
             });
         } catch (error) {
-            if (signal.aborted) return;
+            if (signal.aborted || !isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
 
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadConnectionReferences(true))) {
                 return;
             }
+            if (!isCurrent()) return;
 
             this.postMessage({ command: 'error', message: msg });
         }
     }
 
     private async loadConnectionReferenceDetail(logicalName: string): Promise<void> {
+        const isCurrent = this.beginRequest('detail');
         try {
             const result = await this.daemon.connectionReferencesGet(logicalName, this.environmentUrl, this.profileName);
+            if (!isCurrent()) return;
             const ref = result.reference;
             this.postMessage({
                 command: 'connectionReferenceDetailLoaded',
@@ -254,15 +258,18 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                 },
             });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to load detail: ${msg}` });
         }
     }
 
     private async runAnalysis(): Promise<void> {
+        const isCurrent = this.beginRequest('analysis');
         try {
             this.postMessage({ command: 'loading' });
             const result = await this.daemon.connectionReferencesAnalyze(this.environmentUrl, this.profileName);
+            if (!isCurrent()) return;
             this.postMessage({
                 command: 'analyzeResult',
                 result: {
@@ -281,14 +288,17 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                 },
             });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Analysis failed: ${msg}` });
         }
     }
 
     private async loadSolutionList(): Promise<void> {
+        const isCurrent = this.beginRequest('solutionList');
         try {
             const result = await this.daemon.solutionsList(undefined, false, this.environmentUrl, undefined, this.profileName);
+            if (!isCurrent()) return;
             this.postMessage({
                 command: 'solutionListLoaded',
                 solutions: result.solutions.map(s => ({
@@ -298,6 +308,7 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                 })),
             });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to load solutions: ${msg}` });
         }
@@ -364,12 +375,14 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
     }
 
     private async loadConnectionsForPicker(logicalName: string, connectorId: string | null): Promise<void> {
+        const isCurrent = this.beginRequest('connections');
         try {
             const result = await this.daemon.connectionsList(
                 connectorId ?? undefined,
                 this.environmentUrl,
                 this.profileName,
             );
+            if (!isCurrent()) return;
             this.postMessage({
                 command: 'connectionsLoaded',
                 logicalName,
@@ -384,6 +397,7 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                 })),
             });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to load connections: ${msg}` });
         }
