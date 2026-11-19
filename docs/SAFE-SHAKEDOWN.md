@@ -7,8 +7,8 @@ the skill-level rules.
 
 ## Why this exists
 
-The shakedown skills (`/shakedown`, `/ext-verify`, `/tui-verify`,
-`/cli-verify`, `/mcp-verify`) drive live Dataverse environments. Without
+The shakedown skills (`/shakedown`, `/verify`) drive live Dataverse
+environments. Without
 explicit guardrails, an autonomous agent can:
 
 1. Connect to the wrong environment (e.g. production instead of dev).
@@ -16,18 +16,25 @@ explicit guardrails, an autonomous agent can:
 3. Hit org-level resources accidentally.
 
 The skills themselves contain rules ("do not run write commands during
-shakedown"), but rules are advisory. The hook below is **mechanical** and
-fails closed: if the configuration is missing or the active env can't be
-identified, the hook blocks rather than allows.
+shakedown"), but rules are advisory. The hook below is **mechanical**.
+
+Environment gating is **opt-in**: it turns on once you configure an
+allowlist of safe environments, and from then on it fails closed (if the
+active env can't be identified, the hook blocks rather than allows). With
+no allowlist configured the hook does not gate `ppds` commands, so a fresh
+clone works without setup. Anyone who runs an agent against live Dataverse
+should configure the allowlist first; `/shakedown` Phase 0 refuses to start
+without one.
 
 ## Architecture
 
 ```
 Bash tool invocation -> PreToolUse hooks
                         |
-                        +-- shakedown-safety.py        (always on)
-                            1. Env allowlist gate (ALL ppds *)
-                            2. Write-block (only when PPDS_SHAKEDOWN=1)
+                        +-- shakedown-safety.py
+                            1. Env allowlist gate (ALL ppds *, once an
+                               allowlist is configured)
+                            2. Write-block (only during a shakedown)
 ```
 
 The hook uses the JSON envelope contract from PR #816 (read
@@ -44,7 +51,7 @@ policy; fewer ways to drift.
 
 **Trigger:** every Bash invocation that mentions `ppds` or `ppds-mcp-server`.
 
-### Concern 1: env allowlist gating (always on)
+### Concern 1: env allowlist gating (opt-in)
 
 1. If the command does not mention `ppds`, the hook is a no-op (exit 0).
 2. Resolve the allowlist:
@@ -52,7 +59,8 @@ policy; fewer ways to drift.
    - Else `safety.shakedown_safe_envs` in `.claude/settings.json`.
    - Else legacy `.claude/state/safe-envs.json` (transitional fallback —
      will be removed once mid-migration trees have re-landed).
-   - Else **block** with a configuration-help message.
+   - If none of these names an environment (unset, or an empty list as
+     checked in), the gate is **off** and the steps below do not run.
 3. Resolve the active env: read `profiles.json` directly from
    `$PPDS_CONFIG_DIR` (or `%LOCALAPPDATA%\PPDS` / `~/.ppds`). The hook does
    NOT shell out to `ppds env who` — that would be circular for a
@@ -72,14 +80,18 @@ policy; fewer ways to drift.
 `Environment.UniqueName`, the host of `Environment.Url`, and the leftmost
 host label are all compared case-insensitively against the allowlist.
 
-**Fail-safe:** if the profile store is missing, malformed, or has no
-active profile, the hook **blocks** (the spec is "in doubt, block").
+**Fail-safe:** with an allowlist configured, if the profile store is
+missing, malformed, or has no active profile, the hook **blocks** (the spec
+is "in doubt, block").
 
 ### Concern 2: write-block during shakedown
 
-Active only when the configured read-only env var is set to `1`. Default
-name is `PPDS_SHAKEDOWN`; override via `safety.readonly_env_var` in
-`.claude/settings.json`.
+Active when the configured read-only env var is set to `1`, or when the
+sentinel file `.claude/state/shakedown-active.json` is present and less
+than 24 hours old (the form a Claude Code session uses, because the Bash
+tool starts a fresh shell per call). Default env var name is
+`PPDS_SHAKEDOWN`; override via `safety.readonly_env_var` in
+`.claude/settings.json`. The write-block does not depend on the allowlist.
 
 **Blocked verbs (any surface):** `create`, `update`, `delete`, `remove`,
 `import`, `apply`, `register`, `unregister`, `publish`, `truncate`, `drop`,
@@ -133,9 +145,9 @@ runs where you want the allowlist scoped to a single shell.
 export PPDS_SHAKEDOWN=1
 ```
 
-Set automatically by Phase 0 of the `/shakedown` skill. The verify skills
-(`/ext-verify`, `/tui-verify`, `/cli-verify`, `/mcp-verify`) inherit this
-when they are invoked from a shakedown context.
+Inside a Claude Code session, Phase 0 of the `/shakedown` skill arms the
+same write-block by writing the sentinel file, and `/verify` inherits it
+when invoked from a shakedown context.
 
 ## Common operator scenarios
 
@@ -148,7 +160,8 @@ when they are invoked from a shakedown context.
 
 ### "The hook blocked a legitimate write outside shakedown"
 
-The env-allowlist concern is **always on**. If you need to write to a
+Once an allowlist is configured, the env-allowlist concern applies to every
+`ppds` command, in and out of shakedown. If you need to write to a
 non-allowlisted env, add that env to the allowlist (per-session env var is
 recommended for one-off writes, settings.json for permanent additions).
 

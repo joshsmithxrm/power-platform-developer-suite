@@ -553,7 +553,7 @@ gh workflow run extension-publish.yml --ref Extension-v<version> -f dry_run=fals
 
 **Symptom:** `dotnet build` fails with `NU1507: There are 2 package sources defined...`
 
-**Cause:** Local machine has both `nuget.org` and an internal feed (`hitachi-github`) configured without source mapping. MSBuild treats this as error.
+**Cause:** Local machine has both `nuget.org` and a second, private feed configured without source mapping. MSBuild treats this as error.
 
 **Fix:** Pass `--source https://api.nuget.org/v3/index.json` to isolate to public NuGet. Alternative permanent fix: commit a `NuGet.config` in the repo root that pins sources, but only if you need local builds to work without `--source`.
 
@@ -572,7 +572,7 @@ Run `git log --oneline --grep='MinVerTagPrefix'` to see any recent changes.
 
 Previous releases have needed inline fixes:
 - `fix(build): set NuGetAuditMode=direct to unblock CI` — CI audit mode broke the build
-- `.claude/hooks/protect-main-branch.py` reading `file_path` at top level instead of under `tool_input`
+- a Claude Code hook reading `file_path` at top level instead of under `tool_input`
 
 **Prevention:** Run full CI on the release branch BEFORE opening the release PR. Catch these on the release branch, not in the merge.
 

@@ -8,9 +8,10 @@ safety surface harder to review and invited drift.
 
 Two concerns, one hook:
 
-1. **Env allowlist gating (always on).** Every Bash invocation that mentions
-   ``ppds`` / ``ppds-mcp-server`` is gated against a configured allowlist of
-   dev/test env names. The active env is read directly from the PPDS profile
+1. **Env allowlist gating (opt-in).** Once an allowlist names at least one
+   env, every Bash invocation that mentions ``ppds`` / ``ppds-mcp-server``
+   is gated against that allowlist of dev/test env names. With no allowlist
+   configured the gate is off. The active env is read directly from the PPDS profile
    store (``profiles.json``). Read-only subcommands (``env list``,
    ``env who``, ...) are always allowed; switching INTO a safe env is
    allowed even when currently on an unsafe one.
@@ -28,16 +29,17 @@ Two concerns, one hook:
 3. ``.claude/state/safe-envs.json`` -- legacy fallback, kept for a single
    release so in-flight branches don't break during migration. Will be
    removed once all trees have re-landed the settings.json form.
-4. Neither set -- BLOCK with an instructive message.
+4. None set, or the list is empty -- env gating is off (the write-block
+   below still applies during a shakedown).
 
 **Envelope contract:** Claude Code wraps tool input as
 ``{"tool_name": "...", "tool_input": {"command": "..."}}``. Always read the
 command from the nested ``tool_input`` dict -- reading at the top level was
 the v1-prelaunch hook bug fixed by PR #816.
 
-**Fail-safe:** when the active env cannot be determined the hook BLOCKS
-rather than allows -- an unknown env is more dangerous than a false
-positive.
+**Fail-safe:** with an allowlist configured, when the active env cannot be
+determined the hook BLOCKS rather than allows -- an unknown env is more
+dangerous than a false positive.
 
 **Activation sources for the write-block (either is sufficient):**
 
@@ -145,7 +147,8 @@ def load_allowlist(config: Optional[dict] = None) -> Optional[list]:
     1. ``$PPDS_SAFE_ENVS`` env var (comma-separated).
     2. ``safety.shakedown_safe_envs`` in ``.claude/settings.json``.
     3. ``.claude/state/safe-envs.json`` (legacy fallback -- migration aid).
-    4. None -> caller treats as a hard block with a config-help message.
+    4. None -> no allowlist; the caller leaves env gating off. An empty
+       list is treated the same way.
     """
     env_var = os.environ.get("PPDS_SAFE_ENVS", "").strip()
     if env_var:
@@ -545,18 +548,6 @@ def _config_help_lines():
     ]
 
 
-def _block_msg_no_allowlist(argv):
-    lines = [
-        "BLOCKED [shakedown-safety/env]: no safe-env allowlist configured.",
-        f"  Command: {' '.join(argv)}",
-        "  ppds CLI commands are gated against an allowlist of dev/test envs",
-        "  to prevent accidental writes against production environments.",
-        "",
-    ]
-    lines.extend(_config_help_lines())
-    return "\n".join(lines)
-
-
 def _block_msg_active_not_allowed(active, allowlist, argv):
     lines = [
         "BLOCKED [shakedown-safety/env]: active env is not in the safe-env allowlist.",
@@ -669,11 +660,13 @@ def main() -> None:
                 )
                 sys.exit(2)
 
-    # Concern 1: env allowlist gating -- always on.
+    # Concern 1: env allowlist gating -- opt-in. It is active once an
+    # allowlist names at least one env; with none configured (missing or
+    # empty) the hook does not gate ppds commands, so a fresh clone works
+    # without setup.
     allowlist = load_allowlist(config)
-    if allowlist is None:
-        print(_block_msg_no_allowlist(invocations[0]), file=sys.stderr)
-        sys.exit(2)
+    if not allowlist:
+        sys.exit(0)
 
     active = get_active_env_names()
 

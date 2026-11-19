@@ -8,18 +8,17 @@ Treat this as the canonical surface: if a skill reads an env var, or a hook shor
 
 | Env Var | Set By | Consumed By (hooks) | Consumed By (skills) | Effect |
 |---------|--------|---------------------|----------------------|--------|
-| `PPDS_SHAKEDOWN` | `/shakedown` skill when validating surfaces against disposable state | `shakedown-safety.py`, `shakedown-readonly-guard.py`, `protect-main-branch.py` | `shakedown` | Marks the session as a shakedown run. Env allowlist + write-blocks apply; downstream steps must not file real issues, open real PRs, or otherwise touch durable systems. |
-| `CLAUDE_PROJECT_DIR` | Claude Code harness at session start | `_pathfix.py` (re-exported as `get_project_dir()`), `protect-main-branch.py`, all hooks that shell out to git | (indirectly all skills via hook path resolution) | Absolute path to the project root. Hooks normalize it for Git Bash / MSYS and fall back to `os.getcwd()` when unset. In worktrees it resolves to the worktree root, not the main repo. |
+| `PPDS_SHAKEDOWN` | The operator's shell or CI. A Claude Code session arms the same write-block with the sentinel file `.claude/state/shakedown-active.json` instead (see `/shakedown` Phase 0) | `shakedown-safety.py` | `shakedown` | Marks the session as a shakedown run. Write-blocks apply; downstream steps must not file real issues, open real PRs, or otherwise touch durable systems. |
+| `PPDS_SAFE_ENVS` | The operator (optional) | `shakedown-safety.py` | `shakedown` | Comma-separated safe environment names. Setting it (or `safety.shakedown_safe_envs` in `.claude/settings.json`) turns on environment gating for `ppds` commands. Unset, the gate is off. |
+| `CLAUDE_PROJECT_DIR` | Claude Code harness at session start | `_pathfix.py`, `shakedown-safety.py`, `snk-protect.py` | (indirectly all skills via hook path resolution) | Absolute path to the project root. Hooks normalize it for Git Bash / MSYS and fall back to `os.getcwd()` when unset. In worktrees it resolves to the worktree root, not the main repo. |
 
 ## PPDS_SHAKEDOWN
 
 ### Set by
-- `.claude/skills/shakedown/SKILL.md` — exports `PPDS_SHAKEDOWN=1` when exercising product surfaces against throwaway state.
+- The operator's shell or CI. Inside a Claude Code session the Bash tool starts a fresh shell per call, so `/shakedown` writes the sentinel file `.claude/state/shakedown-active.json` instead; either one activates the write-block.
 
 ### Consumed by (hooks)
-- `.claude/hooks/shakedown-safety.py` — enforces the safe-environment allowlist (`safety.shakedown_safe_envs` in `.claude/settings.json`) and blocks writes during shakedown.
-- `.claude/hooks/shakedown-readonly-guard.py` — enforces the read-only claim of the shakedown phase.
-- `.claude/hooks/protect-main-branch.py` — when set, exits 0 (shakedown runs in disposable worktrees; main-branch protection is moot).
+- `.claude/hooks/shakedown-safety.py` — blocks `ppds` write verbs during a shakedown. Separately, once a safe-environment allowlist is configured (`PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs` in `.claude/settings.json`), it gates every `ppds` command to those environments.
 
 ### Consumed by (skills)
 - `.claude/skills/shakedown/SKILL.md` — sets the variable and asserts in downstream tooling that issue-creation, PR-creation, and any other durable side effects are suppressed.
@@ -34,8 +33,7 @@ Shakedown mode guarantees no real artifacts leak from exercise runs. Violations 
 - Claude Code harness — exported into every hook and skill subprocess automatically.
 
 ### Consumed by (hooks)
-- `.claude/hooks/_pathfix.py` — `get_project_dir()` normalizes the value for Git Bash / MSYS and falls back to `os.getcwd()` when unset. Every other hook imports this helper rather than reading the env var directly.
-- `.claude/hooks/protect-main-branch.py` — also logs the raw value for debugging.
+- `.claude/hooks/_pathfix.py` — normalizes the value for Git Bash / MSYS (`normalize_msys_path`, `get_project_dir()`), falling back to `os.getcwd()` when unset. The other hooks import this helper rather than handling path forms themselves.
 
 ### Consumed by (skills)
 - Indirectly — skills inherit the **raw** environment value; normalization happens inside hooks, via `_pathfix.get_project_dir()`, at the moment a hook reads it. Skills authoring new hook commands should reference `$CLAUDE_PROJECT_DIR` via forward slashes on Windows.

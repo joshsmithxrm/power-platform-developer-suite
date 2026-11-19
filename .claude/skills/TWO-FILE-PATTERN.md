@@ -4,9 +4,8 @@
 procedure it needs to run. Rationale, taxonomies, and worked examples
 live in a sibling `REFERENCE.md` and are loaded on demand.
 
-The `skill-line-cap.py` hook (PreToolUse Edit/Write) blocks any edit
-that pushes a `SKILL.md` past 150 lines. The cap is mechanical; this
-file is the procedure for getting under it.
+The 150-line figure is a guideline, not a gate: nothing blocks an edit
+that goes past it. This file is the procedure for getting under it.
 
 ---
 

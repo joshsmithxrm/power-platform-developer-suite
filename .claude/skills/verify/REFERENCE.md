@@ -86,9 +86,10 @@ These verification flows talk to live Dataverse. The `shakedown-safety`
 PreToolUse hook gates `ppds *` invocations to keep an agent from writing
 to a non-dev env, with two concerns in one gate:
 
-- **Env allowlist (always on).** Blocks `ppds *` unless the active env
-  is in the allowlist (`$PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs`
-  in `.claude/settings.json`).
+- **Env allowlist (opt-in).** Once an allowlist is configured
+  (`$PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs` in
+  `.claude/settings.json`), blocks `ppds *` unless the active env is in
+  it. With none configured this gate is off.
 - **Write-block during shakedown (active when `PPDS_SHAKEDOWN=1`).**
   Blocks write verbs (`create`, `update`, `delete`, `plugins deploy`
   without `--dry-run`, `solutions import`, etc.). The shakedown skill
@@ -325,9 +326,10 @@ These verification flows talk to live Dataverse. The `shakedown-safety`
 PreToolUse hook gates `ppds *` invocations to keep an agent from writing
 to a non-dev env, with two concerns in one gate:
 
-- **Env allowlist (always on).** Blocks `ppds *` unless the active env
-  is in the allowlist (`$PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs`
-  in `.claude/settings.json`).
+- **Env allowlist (opt-in).** Once an allowlist is configured
+  (`$PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs` in
+  `.claude/settings.json`), blocks `ppds *` unless the active env is in
+  it. With none configured this gate is off.
 - **Write-block during shakedown (active when `PPDS_SHAKEDOWN=1`).**
   Blocks write verbs (`create`, `update`, `delete`, `plugins deploy`
   without `--dry-run`, `solutions import`, etc.). The shakedown skill
@@ -554,9 +556,10 @@ These verification flows talk to live Dataverse. The `shakedown-safety`
 PreToolUse hook gates `ppds *` invocations to keep an agent from writing
 to a non-dev env, with two concerns in one gate:
 
-- **Env allowlist (always on).** Blocks `ppds *` unless the active env
-  is in the allowlist (`$PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs`
-  in `.claude/settings.json`).
+- **Env allowlist (opt-in).** Once an allowlist is configured
+  (`$PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs` in
+  `.claude/settings.json`), blocks `ppds *` unless the active env is in
+  it. With none configured this gate is off.
 - **Write-block during shakedown (active when `PPDS_SHAKEDOWN=1`).**
   Blocks write verbs (`create`, `update`, `delete`, `plugins deploy`
   without `--dry-run`, `solutions import`, etc.). The shakedown skill
@@ -636,9 +639,10 @@ These verification flows talk to live Dataverse. The `shakedown-safety`
 PreToolUse hook gates `ppds *` invocations to keep an agent from writing
 to a non-dev env, with two concerns in one gate:
 
-- **Env allowlist (always on).** Blocks `ppds *` unless the active env
-  is in the allowlist (`$PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs`
-  in `.claude/settings.json`).
+- **Env allowlist (opt-in).** Once an allowlist is configured
+  (`$PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs` in
+  `.claude/settings.json`), blocks `ppds *` unless the active env is in
+  it. With none configured this gate is off.
 - **Write-block during shakedown (active when `PPDS_SHAKEDOWN=1`).**
   Blocks write verbs (`create`, `update`, `delete`, `plugins deploy`
   without `--dry-run`, `solutions import`, etc.). The shakedown skill
@@ -724,12 +728,12 @@ How to test changes to `.claude/` infrastructure: hooks, skills, agents, setting
 Pipe JSON matching the hook's input schema to the hook script. Check exit code (0=allow, 2=block) and stderr (feedback message).
 
 ```bash
-# Test a PreToolUse hook (e.g., protect-main-branch)
+# Test a PreToolUse hook (e.g., snk-protect; expect exit=2)
 python -c "
 import subprocess, json
-input_data = json.dumps({'file_path': 'src/PPDS.Cli/Program.cs'})
+input_data = json.dumps({'tool_name': 'Write', 'tool_input': {'file_path': 'src/PPDS.Plugins/PPDS.Plugins.snk'}})
 result = subprocess.run(
-    ['python', '.claude/hooks/protect-main-branch.py'],
+    ['python', '.claude/hooks/snk-protect.py'],
     input=input_data, capture_output=True, text=True
 )
 print(f'exit={result.returncode} stderr={result.stderr[:100]}')

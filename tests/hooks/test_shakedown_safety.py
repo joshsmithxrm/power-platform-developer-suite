@@ -192,8 +192,9 @@ class TestAllowlistFromSettings:
         assert r.returncode == 2
         assert "BLOCKED [shakedown-safety/env]" in r.stderr
 
-    def test_settings_allowlist_empty_list_blocked(self, fake_profile_dir, project_dir):
-        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+    def test_settings_allowlist_empty_list_leaves_gating_off(self, fake_profile_dir, project_dir):
+        """An empty list is the checked-in default: env gating is opt-in."""
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
         project_dir["write_settings"]({"shakedown_safe_envs": []})
         r = _run_hook(
             "ppds query sql 'SELECT 1'",
@@ -202,8 +203,7 @@ class TestAllowlistFromSettings:
                 "CLAUDE_PROJECT_DIR": project_dir["path"],
             },
         )
-        # Allowlist resolved to empty -- nothing matches -> block.
-        assert r.returncode == 2
+        assert r.returncode == 0, r.stderr
 
     def test_env_var_takes_precedence_over_settings(self, fake_profile_dir, project_dir):
         config_dir = fake_profile_dir(active_env_name="ppds-prod")
@@ -219,10 +219,9 @@ class TestAllowlistFromSettings:
         assert r.returncode == 0
 
     def test_block_message_references_settings_json(self, fake_profile_dir, project_dir):
-        """Help text in no-allowlist path must mention settings.json, not the old safe-envs.json."""
-        config_dir = fake_profile_dir(active_env_name="ppds-dev")
-        # No safety block at all.
-        project_dir["write_settings"](None)
+        """Help text on an env block must mention settings.json, not the old safe-envs.json."""
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        project_dir["write_settings"]({"shakedown_safe_envs": ["ppds-dev"]})
         r = _run_hook(
             "ppds query sql 'SELECT 1'",
             env_extra={
@@ -272,8 +271,10 @@ class TestSettingsMigrationFallback:
 
 
 class TestNoAllowlistConfigured:
-    def test_no_allowlist_blocks_with_config_help(self, fake_profile_dir, tmp_path):
-        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+    """Env gating is opt-in: with no allowlist a fresh clone is not gated."""
+
+    def test_no_allowlist_leaves_env_gating_off(self, fake_profile_dir, tmp_path):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
         # CLAUDE_PROJECT_DIR at an empty dir -> no settings.json, no legacy file.
         empty_project = tmp_path / "empty-project"
         empty_project.mkdir()
@@ -281,9 +282,36 @@ class TestNoAllowlistConfigured:
             "ppds query sql 'SELECT 1'",
             env_extra={"PPDS_CONFIG_DIR": config_dir, "CLAUDE_PROJECT_DIR": str(empty_project)},
         )
+        assert r.returncode == 0, r.stderr
+        assert r.stderr == ""
+
+    def test_no_allowlist_does_not_need_a_profile_store(self, tmp_path):
+        """The fail-safe on an unreadable profile store only applies once gating is on."""
+        empty_project = tmp_path / "empty-project"
+        empty_project.mkdir()
+        r = _run_hook(
+            "ppds --help",
+            env_extra={
+                "PPDS_CONFIG_DIR": str(tmp_path / "no-such-config"),
+                "CLAUDE_PROJECT_DIR": str(empty_project),
+            },
+        )
+        assert r.returncode == 0, r.stderr
+
+    def test_write_block_still_applies_without_an_allowlist(self, fake_profile_dir, tmp_path):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        empty_project = tmp_path / "empty-project"
+        empty_project.mkdir()
+        r = _run_hook(
+            "ppds solutions import --file s.zip",
+            env_extra={
+                "PPDS_SHAKEDOWN": "1",
+                "PPDS_CONFIG_DIR": config_dir,
+                "CLAUDE_PROJECT_DIR": str(empty_project),
+            },
+        )
         assert r.returncode == 2
-        assert "no safe-env allowlist configured" in r.stderr
-        assert "PPDS_SAFE_ENVS" in r.stderr
+        assert "BLOCKED [shakedown-safety/readonly]" in r.stderr
 
 
 class TestEnvSwitchTarget:
@@ -341,18 +369,6 @@ class TestReadOnlyAlwaysAllowed:
             env_extra={"PPDS_SAFE_ENVS": "ppds-dev", "PPDS_CONFIG_DIR": config_dir},
         )
         assert r.returncode == 0, f"cmd={cmd}: stderr={r.stderr!r}"
-
-    def test_no_allowlist_still_blocks_readonly_cmds(self, fake_profile_dir, tmp_path):
-        """Intentional: no-allowlist surfaces the config message on ANY ppds call."""
-        config_dir = fake_profile_dir(active_env_name="ppds-prod")
-        empty = tmp_path / "empty"
-        empty.mkdir()
-        r = _run_hook(
-            "ppds env list",
-            env_extra={"PPDS_CONFIG_DIR": config_dir, "CLAUDE_PROJECT_DIR": str(empty)},
-        )
-        assert r.returncode == 2
-        assert "no safe-env allowlist configured" in r.stderr
 
 
 class TestFailSafe:
