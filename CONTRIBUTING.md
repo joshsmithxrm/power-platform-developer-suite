@@ -83,7 +83,8 @@ npm run ext:test
 npm run ext:compile
 ```
 
-`npm run ext:compile` runs esbuild, which does not type-check. Run
+The `npm install` also turns on the [pre-commit hook](#the-optional-pre-commit-hook)
+for your clone. `npm run ext:compile` runs esbuild, which does not type-check. Run
 `typecheck:all` too, or type errors reach CI (and users) unnoticed. CI also runs
 the end-to-end suite (`npm run ext:test:e2e`, which downloads VS Code) and an
 advisory dead-code check (`npm run dead-code --prefix src/PPDS.Extension`).
@@ -168,9 +169,13 @@ it on (the extension's `prepare` script sets `core.hooksPath`), or enable it you
 git config core.hooksPath scripts/hooks
 ```
 
-When C# files are staged it runs a full `dotnet build PPDS.sln` and the whole .NET
-unit suite, which takes minutes, not seconds. When extension TypeScript is staged
-it runs `typecheck:all`, ESLint and Vitest. Skip it for one commit with
+When any `.cs` or `.csproj` file is staged it runs `dotnet build PPDS.sln` and then
+the whole .NET unit suite, so such a commit takes a couple of minutes. When
+`.ts`, `.tsx` or `.js` files under `src/PPDS.Extension/` are staged it runs
+`typecheck:all`, ESLint and Vitest (skipped with a warning if the extension's
+`node_modules` is missing), and a staged `src/PPDS.Extension/package.json` has its
+contributions linted. A commit of other files, such as documentation, runs none of
+these. Skip it for one commit with
 `git commit --no-verify`, or turn it off with `git config --unset core.hooksPath`.
 CI runs the same checks either way.
 
@@ -194,6 +199,20 @@ types in `src/PPDS.Extension/src/types.ts`, or an MCP tool and a CLI command), c
 - Nullability agrees between the C# DTOs and the TypeScript types.
 - Error codes defined in one layer are the ones the other layer handles.
 - Default values are the same on every surface.
+
+### Errors and exit codes
+
+Services throw `PpdsException`, or a subclass such as `PpdsNotFoundException` or
+`PpdsValidationException`, with a code from `ErrorCodes`. A CLI command catches the
+exception and calls `ExceptionMapper`: `Map` builds the structured error it writes
+and `ToExitCode` picks the `ExitCodes` value from the exception type or error code
+(`Program.cs` does the same for anything a command does not catch). Some commands
+catch a specific type first and choose the exit code themselves; the metadata
+commands, for example, return `ExitCodes.ValidationError` (8) for
+`MetadataValidationException`, which is not a `PpdsException`. So when you change
+an error, check both the mapper and the `catch` blocks of the commands that raise
+it. Start with `ErrorCodes.cs`, `ExitCodes.cs`, `ExceptionMapper.cs` and
+`PpdsException.cs` in `src/PPDS.Cli/Infrastructure/Errors/`.
 
 ### Rebasing and `PublicAPI.Unshipped.txt`
 
@@ -223,6 +242,11 @@ if your change affects one, say so in the PR and a maintainer will update the sp
 If you are proposing a substantial new feature, the issue is the place to discuss
 whether it needs one.
 
+If your bug fix changes behaviour that an existing test or a spec's acceptance
+criterion asserts, even one described as deliberate, change the test in the same
+PR. Update the acceptance criterion's text too, or point it out in the PR
+description so a maintainer can, and say in the PR what changed and why.
+
 ### Checks
 
 Branch protection requires two checks: `build-status` (the .NET build and the
@@ -242,8 +266,12 @@ but a maintainer reviews every outside contribution before merging.
    title and for your commit subjects: PRs are squash-merged, and the squash commit
    on `main` takes its subject from the PR title, or from the commit subject when
    the PR has a single commit.
-2. Update the affected package's `src/<package>/CHANGELOG.md` for user-visible changes.
-   Do not change version numbers; versions come from git tags (MinVer).
+2. For user-visible changes, add an entry to the affected package's
+   `src/<package>/CHANGELOG.md` under the right heading (Added, Changed, Fixed and
+   so on) of the `## [X.Y.Z] - Unreleased` section near the top, citing the PR or
+   issue as `(#NNN)`. Leave the empty `## [Unreleased]` heading above it as it is;
+   the release process keeps it empty. Do not change version numbers; versions
+   come from git tags (MinVer).
 3. Wait for CI, then respond to review comments.
 4. A maintainer squash-merges the PR. Merge mechanics are in
    [docs/MERGE-POLICY.md](docs/MERGE-POLICY.md).

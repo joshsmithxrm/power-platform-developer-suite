@@ -100,6 +100,17 @@ Steps:
 6. **Command.** Add the command to `contributes.commands` in `package.json` (category `PPDS`, title `Open {Name}`), and a `...ForEnv` variant in the `ppds.profiles` environment context menu if the panel can target an environment. Register both in `src/extension.ts`, and add the panel's `instanceCount` to the `registerDebugCommands` call so **PPDS Debug: Panel State** reports it.
 7. **Check it.** Run the build and lint scripts above, then open the panel and check it in both light and dark themes. A passing type-check does not show that a panel renders correctly.
 
+### Testing a panel
+
+Panel tests are Vitest files in `src/__tests__/panels/`. Most of them test message types or pure helpers; to test a host class's behaviour, copy `queryPanelDmlSafety.test.ts` (or the smaller `notebookQueryTransfer.test.ts`), which create a real `QueryPanel` and drive it with `handleMessage(...)`.
+
+- **`vscode`.** There is no `vscode` module outside VS Code and `vitest.config.ts` does not alias one, so each test supplies it with `vi.mock('vscode', () => ({ ... }))`, giving only what the panel touches: `window.createWebviewPanel` returning a fake panel whose `webview.postMessage` is a `vi.fn()`, the `window.show*Message` functions, `Uri` and `workspace.getConfiguration`. Create shared values the factory needs with `vi.hoisted`.
+- **Other imports.** The same file mocks `panels/environmentPicker.js`, `utils/errorNotify.js` and `commands/queryHistoryCommand.js` with `vi.mock`.
+- **Daemon client.** There is no shared mock: pass a plain object with a `vi.fn()` for each `DaemonClient` method the panel calls (`onDidReconnect`, `authWho`, `querySql` and so on), cast `as unknown as DaemonClient`.
+- **Assertions.** Read what the host sent from `webview.postMessage.mock.calls`, and what it asked the daemon from the daemon object's mock calls. Dispose the panels and reset the mocks in `afterEach`.
+
+Run one file from `src/PPDS.Extension` with `npx vitest run src/__tests__/panels/queryPanelDmlSafety.test.ts`.
+
 ## Daemon lifecycle, cancellation and environment scoping
 
 **Reconnect.** Every `DaemonClient` method calls `ensureConnected()`, which starts the daemon if it is not running. A heartbeat (`auth/list` every 30 seconds) kills the daemon after three consecutive failures; the next call restarts it and fires `onDidReconnect`. `subscribeToDaemonReconnect` turns that into a `daemonReconnected` message to the webview, where most panels show a "Connection restored. Data may be stale." banner, and calls `onDaemonReconnected()` so the panel can refresh. Data the panel loaded before the restart may be out of date, which is why both happen.
