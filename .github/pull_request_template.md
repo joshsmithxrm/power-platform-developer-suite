@@ -9,7 +9,7 @@
 ## Checklist
 
 - [ ] Tests added or updated
-- [ ] The affected package's CHANGELOG.md updated, if the change is user-visible
+- [ ] The affected package's CHANGELOG.md updated under `## [X.Y.Z] - Unreleased`, if the change is user-visible
 - [ ] Docs updated, if behaviour changed
 
 ## Breaking changes

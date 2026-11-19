@@ -10,7 +10,7 @@ Business logic lives in Application Services (`src/PPDS.Cli/Services/` and the l
 - Get a pooled Dataverse client inside each parallel branch and dispose it there; one client held across parallel or repeated awaited calls serialises the work and defeats the pool.
 - Never construct `ServiceClient` directly; use `IDataverseConnectionPool`. Each new client re-authenticates.
 - CLI status and progress text goes to stderr (`Console.Error.WriteLine`); stdout carries only data, so piped output stays parseable.
-- Application Services throw `PpdsException` with a code from `ErrorCodes`, not raw exceptions, so every surface can handle errors by code. Keep GUIDs and stack traces out of `UserMessage`.
+- Application Services throw `PpdsException` with a code from `ErrorCodes`, not raw exceptions, so every surface can handle errors by code. Keep GUIDs and stack traces out of `UserMessage`. How codes become CLI exit codes is in CONTRIBUTING.md, "Errors and exit codes".
 - Accept `IProgressReporter` for any operation likely to take more than a second; services never write to the console themselves, each surface renders progress its own way.
 - Pass the `CancellationToken` through every async call, and do not block on async code (`.Result`, `.GetAwaiter().GetResult()`).
 - In loops, use the bulk APIs (`CreateMultiple`, `UpdateMultiple`) rather than one request per record, and count with a FetchXML aggregate rather than retrieving records.
@@ -35,7 +35,7 @@ Unit tests need no Dataverse environment or credentials. `Category=Integration` 
 
 ## Before you open a PR
 
-CI is the gate: the required checks are `build-status` and `test-status`. A spec is not required for a bug fix or small change. Add or update tests, update the affected package's `src/<package>/CHANGELOG.md` for user-visible changes, and say in the PR what you ran. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full process.
+CI is the gate: the required checks are `build-status` and `test-status`. A spec is not required for a bug fix or small change. Add or update tests, add user-visible changes to the `## [X.Y.Z] - Unreleased` section of the affected package's `src/<package>/CHANGELOG.md` (not the empty `## [Unreleased]`), and say in the PR what you ran. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full process.
 
 ## Further reading
 
