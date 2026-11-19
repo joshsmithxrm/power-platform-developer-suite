@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `OptionSetNotFoundException` (`PPDS.Dataverse.Metadata`): `IMetadataQueryService.GetOptionSetAsync` throws it, with the Dataverse fault as its inner exception, when the name exists in no spelling in the published catalog. Before, the original `FaultException<OrganizationServiceFault>` was rethrown; it is still rethrown when the catalog lookup fails or several case variants exist (#1759).
 - `DeleteGlobalChoiceRequest.ExpectedMetadataId` (default null), a request field for the CLI/MCP metadata authoring service. When it is set, that service refuses the delete unless its pre-delete check finds exactly that object under the requested name. This library does not act on it itself, and existing callers are unaffected (#1535).
 - A `MetadataValidationException(string errorCode, string message, string? field, Exception? innerException)` constructor that keeps the inner exception (#1535).
 - `MetadataErrorCodes.WriteNotConfirmed` (`WRITE_NOT_CONFIRMED`): a write request returned success but a follow-up confirmation, such as the stored option colour, failed or disagreed (#1604).

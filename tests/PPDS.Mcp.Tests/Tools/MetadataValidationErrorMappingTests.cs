@@ -126,6 +126,46 @@ public sealed class MetadataValidationErrorMappingTests
     }
 
     [Theory]
+    [InlineData("update-choice")]
+    [InlineData("add-option-value")]
+    [Trait("AC", "AC-134")]
+    public async Task ActualService_UnknownChoiceName_IsOperationNotFoundAtMcpBoundary(string tool)
+    {
+        // #1759: a name that exists in no spelling is Operation.NotFound, naming the choice, never an internal error;
+        // the server's fault text (here carrying a synthetic secret) stays withheld.
+        var notFound = new FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040217), Message = "Could not find an optionset with name Mayo_X. " + Secret },
+            "Could not find an optionset with name Mayo_X. " + Secret);
+        var pool = new Mock<IDataverseConnectionPool>(MockBehavior.Strict);
+        pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>())).ReturnsAsync(() =>
+        {
+            var client = new Mock<IPooledClient>(MockBehavior.Loose);
+            client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+                .Returns<OrganizationRequest, CancellationToken>((request, _) => request switch
+                {
+                    RetrieveOptionSetRequest or InsertOptionValueRequest => Task.FromException<OrganizationResponse>(notFound),
+                    RetrieveAllOptionSetsRequest => Task.FromResult<OrganizationResponse>(new RetrieveAllOptionSetsResponse
+                    {
+                        Results = new ParameterCollection { ["OptionSetMetadata"] = new OptionSetMetadataBase[] { new OptionSetMetadata { Name = "mayo_other", IsGlobal = true } } }
+                    }),
+                    _ => throw new InvalidOperationException("Unexpected SDK request: " + request.RequestName)
+                });
+            return client.Object;
+        });
+        var service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(),
+            new Mock<PPDS.Cli.Infrastructure.Safety.IShakedownGuard>().Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
+        using var fixture = await ToolFixture.CreateAsync(service);
+
+        var ex = await Assert.ThrowsAsync<McpException>(() => fixture.InvokeAsync(tool, choiceName: "Mayo_X"));
+
+        using var payload = JsonDocument.Parse(ex.Message);
+        Assert.Equal(ErrorCodes.Operation.NotFound, payload.RootElement.GetProperty("errorCode").GetString());
+        Assert.Equal("Global choice 'Mayo_X' not found.", payload.RootElement.GetProperty("userMessage").GetString());
+        Assert.DoesNotContain("synthetic-secret", ex.Message);
+        Assert.DoesNotContain("Could not find", ex.Message);
+    }
+
+    [Theory]
     [InlineData(true)]
     [InlineData(false)]
     [Trait("AC", "AC-143")]

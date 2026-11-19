@@ -129,6 +129,9 @@ public partial class DataverseMetadataAuthoringService
     {
         TaskCanceledException => "the read timed out or was cancelled",
         OperationCanceledException => "the read was cancelled",
+        // #1759: a PpdsNotFoundException here (the choice vanished between the write and the read-back) is quoted as
+        // "Global choice 'x' not found". That is accurate, and the prefix already says the write was sent but not
+        // confirmed (WRITE_NOT_CONFIRMED, exit 2), which is the right classification for a committed write.
         PpdsException or MetadataValidationException => ex.Message.TrimEnd('.'),
         _ => "the read failed"
     };

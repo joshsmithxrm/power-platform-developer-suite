@@ -144,14 +144,43 @@ public sealed class GlobalChoiceNameResolutionTests
 
     [Fact]
     [Trait("AC", "AC-134")]
-    public async Task ChoiceDelete_MissingName_KeepsThePreviousFailure()
+    public async Task ChoiceDelete_MissingName_IsReportedAsNotFound_WithoutListingOrDeleting()
     {
-        // Delete is exact-name only and does not list the catalog (#1535); its outcome is unchanged by #1759.
+        // #1759: the service delete (RPC metadata/deleteGlobalChoice) takes an exact name and never resolves case variants
+        // (#1535), so "absent" means this exact name is absent. It reports not-found like the CLI, which previews first,
+        // and still lists no catalog and sends no delete.
         using var f = new GlobalChoiceServerFake();
         var ex = await Record.ExceptionAsync(() => f.Run("choice-delete", "mayo_Missing"));
-        var ppds = Assert.IsType<PpdsException>(ex);
-        Assert.Equal(MetadataErrorCodes.SdkOperationFailed, ppds.ErrorCode);
+        var notFound = Assert.IsType<PpdsNotFoundException>(ex);
+        Assert.Equal(ErrorCodes.Operation.NotFound, notFound.ErrorCode);
+        Assert.Equal(ExitCodes.NotFoundError, ExceptionMapper.ToExitCode(notFound));
+        Assert.Contains("mayo_Missing", notFound.UserMessage);
+        var wrapped = Assert.IsType<PpdsException>(notFound.InnerException);
+        Assert.Equal(MetadataErrorCodes.SdkOperationFailed, wrapped.ErrorCode);
+        Assert.IsType<FaultException<OrganizationServiceFault>>(wrapped.InnerException);
+        Assert.Equal("mayo_Missing", Assert.Single(f.Faults));
         Assert.Equal(0, f.Requests.Count(r => r is RetrieveAllOptionSetsRequest));
+        Assert.DoesNotContain(f.Requests, r => r is DeleteOptionSetRequest);
+        f.AssertLeases();
+    }
+
+    [Fact]
+    [Trait("AC", "AC-134")]
+    public async Task MissingChoice_AndMissingSolution_ReportsTheChoiceNotFound_WithTheOriginalFaultInside()
+    {
+        // Dataverse reports a missing solution with the same ObjectDoesNotExist code. When the choice is absent too,
+        // the choice is what is reported (the catalog proves it); the server's fault stays reachable as the inner exception.
+        using var f = new GlobalChoiceServerFake
+        {
+            FailFirstNamedRequestWith = () => GlobalChoiceServerFake.Fault("The given solution unique name (Sol) is not valid")
+        };
+        var ex = await Record.ExceptionAsync(() => f.Run("option-add", "mayo_Missing"));
+        var notFound = Assert.IsType<PpdsNotFoundException>(ex);
+        Assert.Contains("mayo_Missing", notFound.UserMessage);
+        Assert.Same(f.InjectedFault, notFound.InnerException);
+        Assert.Single(f.Requests, r => r is RetrieveAllOptionSetsRequest);
+        Assert.Single(f.Requests, GlobalChoiceServerFake.IsWrite);
+        f.AssertLeases();
     }
 
     [Theory]
@@ -400,7 +429,8 @@ public sealed class GlobalChoiceNameResolutionTests
         }
         else
         {
-            Assert.Equal(MetadataErrorCodes.SdkOperationFailed, Assert.IsType<PpdsException>(ex).ErrorCode);
+            // #1759: the exact name is absent (the server looks names up case-sensitively): not found, not SDK_OPERATION_FAILED.
+            Assert.Equal(ErrorCodes.Operation.NotFound, Assert.IsType<PpdsNotFoundException>(ex).ErrorCode);
             Assert.DoesNotContain(f.Requests, r => r is DeleteOptionSetRequest);
         }
     }
