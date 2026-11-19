@@ -347,7 +347,7 @@ Captured by `page.on('console')` and `page.on('pageerror')`. Written to `.webvie
 node src/PPDS.Extension/tools/webview-cdp.mjs launch
 
 # Open a Data Explorer panel via command palette
-node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
+node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Open Data Explorer"
 
 # Wait for the webview to appear
 node src/PPDS.Extension/tools/webview-cdp.mjs wait

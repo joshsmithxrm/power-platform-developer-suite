@@ -14,10 +14,11 @@ The `.claude/hooks/shakedown-safety.py` PreToolUse hook inspects each Bash
 command that invokes `ppds` or `ppds-mcp-server` by program name (a path
 ending in `ppds` counts). Full model: `docs/SAFE-SHAKEDOWN.md`.
 
-- **Env allowlist (opt-in).** Off until a list names an env:
-  `$PPDS_SAFE_ENVS` (comma-separated, read from the environment Claude Code
-  was started in), else `safety.shakedown_safe_envs` in the tracked
-  `.claude/settings.json` (checked in as `[]`). Once on, `ppds *` is allowed
+- **Env allowlist (opt-in).** Off until a list names an env. The hook reads,
+  first match wins: `$PPDS_SAFE_ENVS` (comma-separated, read from the
+  environment Claude Code was started in), then `safety.shakedown_safe_envs`
+  in the tracked `.claude/settings.json` (checked in as `[]`), then the
+  legacy `.claude/state/safe-envs.json` (`safe_envs`). Once on, `ppds *` is allowed
   only when the active env is in the list, and an unidentifiable active env
   blocks. A misconfigured source (unparseable settings, wrong type, a value
   naming no env) blocks every `ppds` command until it is fixed or removed.

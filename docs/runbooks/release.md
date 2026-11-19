@@ -193,9 +193,9 @@ strong-name key change forces a major. Both rules are in the
 
 ### 6. Pre-Merge Verification
 
-Push the release branch and let full CI run on it before opening the release PR
-(see [Build or configuration fixes needed mid-release](#build-or-configuration-fixes-needed-mid-release)).
-Run the gates locally as well:
+Run the gates locally. Full CI runs on the release PR in Step 7: `build.yml` and
+`test.yml` start only on pull requests to `main` and pushes to `main`, so pushing
+the release branch by itself starts no CI.
 
 ```bash
 # Restore and build (the repository NuGet.config pins nuget.org)
@@ -243,8 +243,12 @@ Spot-check:
 
 ### 7. Open the Release PR
 
+Open it as a **draft**, wait for its CI to finish, and mark it ready only when
+every check is green. This is where build or configuration problems surface
+(see [Build or configuration fixes needed mid-release](#build-or-configuration-fixes-needed-mid-release)).
+
 ```bash
-gh pr create \
+gh pr create --draft \
   --base main \
   --head <release branch from Step 1> \
   --title "chore(release): <prerelease|stable> bump for all packages — <version/date>" \
@@ -260,6 +264,8 @@ The PR body contains:
 - **Test plan**: what to verify before and after merge
 
 PR #785 is a worked reference (`gh pr view 785 --json body`).
+
+When CI on the draft is green, mark it ready with `gh pr ready <pr-number>`.
 
 ### 8. Post-Merge: Push Tags
 
@@ -323,6 +329,22 @@ activated; check
 [Isolated Plugins signing preparation](../RELEASE.md#isolated-plugins-signing-preparation)
 before planning a `Plugins-v*` tag.
 
+**First NuGet publish through trusted publishing.** `publish-nuget.yml` has used
+NuGet trusted publishing (OIDC login, no stored key) since #1564 (2026-11-09), and
+no package tag has been published through it yet; the newest package tags
+(2026-11-02) predate it. On the first wave of the next release, push a single
+tag and watch its `publish` job before pushing any other:
+
+- `Validate trusted publishing identity` and `NuGet login` must succeed. A
+  failure there means the token exchange or the nuget.org policy is wrong; no
+  package has been uploaded, and there is no stored-key fallback.
+- `Push packages to NuGet` and `Push symbols to NuGet` must succeed, and the
+  `verify-public-artifact` job must find the version on nuget.org.
+
+If login or upload fails, stop and see
+[NuGet trusted publishing](../RELEASE.md#nuget-trusted-publishing) for what is
+unverified about the policy before changing anything or rerunning.
+
 **Worked example** from PR #785 (2026-04-17 prerelease):
 
 ```bash
@@ -375,8 +397,7 @@ gh workflow run docs-release.yml --ref <reviewed-product-release-tag> -f dry_run
 
 Review the generated artifacts, then separately authorize the `dry_run=false`
 dispatch that opens the paired docs and API-rollover PRs. Check the existing
-rollover-PR gate and review both outputs, including an expected no-op rollover
-when there are no unshipped API entries. Recapture companion skills against the
+rollover-PR gate and review both outputs as in Step 9 item 4. Recapture companion skills against the
 same final CLI/MCP versions. A successful product publish does not by itself mean
 the docs or skills were refreshed.
 
@@ -398,7 +419,12 @@ Expected sequence (timings are estimates; advance only after verification):
    must finish and verify before the next wave.
 3. `extension-publish.yml` runs on the `Extension-v*` tag push, about 10-15
    minutes, with the channel inferred from the minor version.
-4. `docs-release.yml` runs on the unified `v*` tag if you pushed one.
+4. `docs-release.yml` runs on the unified `v*` tag if you pushed one. It opens
+   the generated-reference PR in ppds-docs, and opens the core API-baseline
+   rollover PR only if baseline files change (`scripts/docs-gen/open-rollover-pr.sh`
+   skips the PR when there are no Unshipped entries to roll); otherwise record
+   the verified no-op. Review any rollover before merging the public docs
+   landing, in the order given in [docs-release.md](docs-release.md).
 
 Let `release-cli.yml` own the CLI GitHub release: do not pre-create a draft and
 do not use auto-generated notes. Its draft, resume and asset rules are in
@@ -412,6 +438,10 @@ while another fails, and an unverified tag leaves the channels inconsistent.
 Every publish workflow already ends with an automated check through the public
 channel ([Automated Public Artifact Verification](../RELEASE.md#automated-public-artifact-verification)).
 Confirm the results yourself as well.
+
+Stable releases require full verification of every check below before the
+release is called done. Prereleases tolerate a gotcha being caught after
+publication; stable releases should not.
 
 #### NuGet.org
 
@@ -635,8 +665,8 @@ source, workflow ownership, notes or assets cannot be verified. A failed read is
 not proof that no release exists.
 
 **Recovery:** preserve the existing tags, assets and failed run. Resume a known
-owned draft only when the guard verifies it; otherwise make a deliberate recovery
-decision. Do not delete a draft, move or re-push a tag, or replace assets as a
+owned draft only when the guard verifies it; otherwise stop and obtain a deliberate
+recovery decision from the maintainer. Do not delete a draft, move or re-push a tag, or replace assets as a
 routine fix. Let the workflow own the release lifecycle.
 
 ### Extension publish: manual dispatch needs `--ref`
@@ -663,7 +693,7 @@ MinVer falls back to older tags.
 
 **Fix:** tag with exactly the prefixes in the
 [Release model](../RELEASE.md#release-model-tags-channels-and-lineage); they are
-case-sensitive. Do not invent a new prefix without changing the matching csproj. To see recent prefix
+case-sensitive on Linux runners. Do not invent a new prefix without changing the matching csproj. To see recent prefix
 changes: `git log --oneline --grep='MinVerTagPrefix'`.
 
 ### Build or configuration fixes needed mid-release
@@ -671,8 +701,9 @@ changes: `git log --oneline --grep='MinVerTagPrefix'`.
 Releases have needed inline build fixes; the 2026-04-17 prerelease (#785) had to
 set `NuGetAuditMode=direct` in `Directory.Build.props` to unblock CI.
 
-**Prevention:** run full CI on the release branch before opening the release PR,
-so these surface on the branch rather than in the merge.
+**Prevention:** open the release PR as a draft and let its full CI finish before
+marking it ready (Step 7), so these surface on the release PR rather than after
+the merge.
 
 ### Large tag batches suppress GitHub Actions events
 
@@ -708,8 +739,21 @@ recovery needs a separate, explicit decision; it is never a routine release step
 
 ### A publish or signing job failed
 
-Do not retag. Investigate the failure (for a credential, fix the secret in the
-repository settings), then rerun the workflow on the existing tag:
+Do not retag. Investigate the failure and fix the credential where it lives:
+
+- **NuGet, tag on a commit that includes #1564:** there is no NuGet secret. A
+  login or upload failure points at the trusted-publishing policy on nuget.org or
+  the workflow's identity
+  ([NuGet trusted publishing](../RELEASE.md#nuget-trusted-publishing)).
+- **NuGet, tag on an older commit:** a rerun executes that tag's historical
+  publisher, which reads the `NUGET_API_KEY` repository secret.
+- **Extension:** the `ADO_MARKETPLACE_PAT` repository secret.
+- **Plugins signing:** the `PLUGINS_SNK_BASE64` repository secret, once the
+  signing policy is active.
+
+Each credential is listed in
+[Signing and credentials](../RELEASE.md#signing-and-credentials). Then rerun the
+workflow on the existing tag:
 
 ```bash
 gh run rerun <run-id>

@@ -18,18 +18,26 @@ specific to an agent doing the work; it does not restate the procedure.
 
 Not for implementing a hot-fix (open a PR first) or documentation-only changes.
 
+Arguments: `/release` (prerelease, the default), `/release prerelease`, or
+`/release stable v1.0.0` (stable, version given).
+
 ## Confirm With the User Before Running
 
 Ask in chat and wait for an explicit yes, separately for each action. Approval
 of one tag or wave does not cover the next.
 
-- Every `git push` of a tag, one tag at a time, and the unified `v*` tag
-- `gh release create`, `gh release edit` or any other GitHub release change
-- `gh workflow run` for `extension-publish.yml` or `docs-release.yml`
-  (including `dry_run=false`), and `gh run rerun` of a publish workflow
-- Opening, merging or pushing to the release PR, and pushing to `main` or a
-  `release/X.Y` branch
-- Sending a contributor reply or closing a contributor's original PR
+- **Publishing:** every tag push (`git push origin "refs/tags/..."`, one at a
+  time), including the unified `v*` tag; `gh release create`/`edit`;
+  `gh workflow run` of `extension-publish.yml` or `docs-release.yml`;
+  `gh run rerun` of a publish or docs workflow
+- **Branches and PRs:** pushing a `release/prerelease-*`, `release/vX.Y.Z` or
+  `release/X.Y` branch or `main`; deleting a remote branch
+  (`git push origin :release/X.Y`); `gh pr create`, `gh pr ready`, merging
+- **Issues and contributors:** commenting on or closing any issue (the
+  co-release issue is the durable opt-out record), filing follow-up issues,
+  sending a contributor reply, closing a contributor's original PR
+- **The maintainer's machine:** `dotnet tool install -g`/`uninstall -g PPDS.Cli`
+  (replaces their installed CLI) and `code --install-extension`
 - Anything that deletes, unlists, moves or replaces a published tag or artifact
 
 Reading state is fine without asking: `release_plan.py`, `gh run list`,

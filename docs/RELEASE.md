@@ -81,8 +81,11 @@ prove that a compromised producer built trustworthy source.
 
 ## NuGet trusted publishing
 
-The proposed publisher uses pinned official NuGet/login and a temporary key for
-both package and symbol uploads. The login user is **JoshSmithMSFT**, confirmed
+Since #1564 (merged 2026-11-09) `publish-nuget.yml` on `main` uses pinned
+official NuGet/login and a temporary key for both package and symbol uploads.
+It has not yet been exercised by a real publish: the newest package tags
+(2026-11-02) predate it, so the next NuGet release is its first live token
+exchange and upload. The login user is **JoshSmithMSFT**, confirmed
 by Josh as the **individual policy creator** profile. The step-local nonsecret
 `NUGET_PUBLISH_USER` guard uses that same identity; no repository variable is needed.
 NuGet's token service searches policies by their creator; a package owner may
@@ -112,10 +115,10 @@ The reviewed tag, workflow, verifier, runner and build inputs remain trusted.
 
 Keep source/dependency/signing/vacancy/public-artifact gates and sequential
 publication verification. New source must contain this workflow; retrying an old
-immutable tag still executes its historical secret-based publisher. Actual
-token exchange and package/symbol uploads are untested by offline checks and
-require separate authorization. Trust/identity settings and final publication
-approval remain separate from preparing this change. Do not remove old secrets,
+immutable tag still executes its historical secret-based publisher. The offline
+checks do not exercise the token exchange or package/symbol uploads; the first
+real publish needs the maintainer's final publication approval like any other.
+Changes to trust/identity settings are reviewed separately. Do not remove old secrets,
 create trust settings or invoke login as part of local validation.
 
 Primary references: [NuGet trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing),
@@ -333,8 +336,8 @@ assuming a branch contains a release.
 bundled-CLI refresh on the same commit.** The Extension bundles the CLI at publish
 time (`extension-publish.yml` runs `npm run bundle:cli`), so Marketplace users get
 new CLI behavior only when a new `Extension-v*` tag is cut. Cut the refresh even
-when the Extension's own source is unchanged, bumping the Extension version to
-produce a fresh VSIX.
+when the Extension's own source is unchanged: bump the Extension patch version
+to force a fresh VSIX (a minor bump would change the odd/even channel).
 
 This is the default that `Cli-v1.3.0` and `Mcp-v1.1.0` missed on 2026-07-14: no
 Extension release rode along, so Marketplace users kept running older bundled CLI

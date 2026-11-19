@@ -93,11 +93,15 @@ into `ppds-mcp-server`; it needs the `initialize` handshake first.
 
 ### 8. Workflow mode
 
-**Check 1 - Python tests** (hook behaviour, skill content, bash
-portability; what CI's `workflow-tests.yml` runs):
+**Check 1 - Python tests:** run only the files that cover what you
+changed, and leave the full `tests/` suite to CI (`workflow-tests.yml`),
+because it starts hundreds of child processes (git, PowerShell) and flashes
+console windows on Windows:
 ```bash
-python -m pytest tests/ -q
+python -m pytest tests/test_hook_paths.py tests/test_snk_protect.py tests/hooks/test_shakedown_safety.py tests/test_skill_bash_portability.py -q -p no:cacheprovider
 ```
+Hooks: `test_hook_paths.py`, `test_snk_protect.py`,
+`hooks/test_shakedown_safety.py`. Skill files: `test_skill_bash_portability.py`.
 
 **Check 2 - Hook scripts:** for `snk-protect.py` and `shakedown-safety.py`
 in `.claude/hooks/` (`_pathfix.py` is a helper):
