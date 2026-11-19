@@ -1,7 +1,7 @@
 # Docs Generation
 
 **Status:** Draft
-**Last Updated:** 2026-11-12
+**Last Updated:** 2026-11-19
 **Code:** [scripts/docs-gen/](../scripts/docs-gen/), [src/PPDS.Analyzers/Rules/](../src/PPDS.Analyzers/Rules/), [.github/workflows/docs-smoke.yml](../.github/workflows/docs-smoke.yml), [.github/workflows/docs-release.yml](../.github/workflows/docs-release.yml)
 **Surfaces:** CLI | Libraries | MCP | Extension
 
@@ -9,7 +9,7 @@
 
 ## Overview
 
-Generates reference documentation for CLI command groups, five PPDS libraries (Auth, Dataverse, Migration, Plugins and Query), MCP tools, and VS Code extension commands from product metadata. Library reflection has an opt-in manifest route covering all thirteen package/framework pairs, with explicit missing-summary notes and retained framework variants. Build-time analyzers enforce annotation policy separately; release automation prepares companion documentation for review.
+Generates reference documentation for CLI command groups, five PPDS libraries (Auth, Dataverse, Migration, Plugins and Query), MCP tools, and VS Code extension commands from product metadata. Library reflection has an opt-in manifest route covering all thirteen package/framework pairs, with explicit missing-summary notes and retained framework variants. Build-time checks (the compiler's CS1591 and the PPDS analyzers) enforce annotation policy separately; release automation prepares companion documentation for review.
 
 ### Goals
 
@@ -40,9 +40,9 @@ ppds monorepo                                                      ppds-docs rep
 │   PPDS.Mcp/Tools/**                        ([McpServerTool])│    │    libraries/{pkg}/*.md│
 │   PPDS.Extension/package.json              (contributes)    │    │    mcp/{tool}/*.md     │
 │   PPDS.Analyzers/Rules/                                     │    │    extension/          │
-│     XmlDocOnPublicApiAnalyzer              (PPDS014)        │    │      commands.md       │
-│     CliCommandNeedsDescriptionAnalyzer     (PPDS015)        │    │                        │
-│     McpToolNeedsMetadataAnalyzer           (PPDS016)        │    │  docs/guides/*.md      │
+│     CliCommandNeedsDescriptionAnalyzer     (PPDS015)        │    │      commands.md       │
+│     McpToolNeedsMetadataAnalyzer           (PPDS016)        │    │                        │
+│                                                             │    │  docs/guides/*.md      │
 │                                                             │    │   (fenced C# blocks)   │
 │  scripts/docs-gen/                                          │    │                        │
 │    cli-reflect/    (C# tool → markdown)                     │──▶ │                        │
@@ -64,7 +64,7 @@ ppds monorepo                                                      ppds-docs rep
 
 | Component | Responsibility |
 |-----------|----------------|
-| `PPDS014 XmlDocOnPublicApi` | Analyzer: fails build if a public type/member in the four libraries lacks `/// <summary>` and is not marked `[EditorBrowsable(Never)]` |
+| Compiler CS1591 | Fails the build if a public type/member in the four libraries lacks XML documentation: `.editorconfig` sets CS1591 to `error` for `src/{PPDS.Dataverse,PPDS.Migration,PPDS.Auth,PPDS.Plugins}/**.cs` and back to `none` for `**/Generated/**.cs` |
 | `PPDS015 CliCommandNeedsDescription` | Analyzer: fails build if a `System.CommandLine.Command`, `Option<T>`, or `Argument<T>` creation expression lacks a non-empty Description (via 2-arg `Command` ctor or object initializer) |
 | `PPDS016 McpToolNeedsMetadata` | Analyzer: fails build if a method with `[McpServerTool]` lacks `Name` or `Description` |
 | `Microsoft.CodeAnalysis.PublicApiAnalyzers` | Vendored: enforces `PublicAPI.Shipped.txt` / `PublicAPI.Unshipped.txt` baseline convention (RS0016, RS0017) |
@@ -79,7 +79,7 @@ ppds monorepo                                                      ppds-docs rep
 
 ### Dependencies
 
-- Depends on: [analyzers.md](./analyzers.md) — extends PPDS.Analyzers with three new rules (PPDS014-PPDS016)
+- Depends on: [analyzers.md](./analyzers.md) — extends PPDS.Analyzers with two new rules (PPDS015-PPDS016)
 - Depends on: [cli.md](./cli.md) — the command tree cli-reflect walks
 - Depends on: [mcp.md](./mcp.md) — the tool registry mcp-reflect enumerates
 - Uses: [Microsoft.CodeAnalysis.PublicApiAnalyzers](https://www.nuget.org/packages/Microsoft.CodeAnalysis.PublicApiAnalyzers/) — vendored public-surface detection
@@ -97,7 +97,7 @@ The five-library reference input contract includes Query. The historical
 four-library annotation/baseline rollout below is a separate authoring policy;
 this coverage change does not expand or claim completion of that rollout.
 
-1. **Curated public-API annotation.** Every public type and member in PPDS.Dataverse, PPDS.Migration, PPDS.Auth, and PPDS.Plugins must have either `/// <summary>` documentation or be marked `[EditorBrowsable(Never)]`. The rule applies to everything in the baseline (Phase 0) and to every future addition (drift check).
+1. **Curated public-API annotation.** Every public type and member in PPDS.Dataverse, PPDS.Migration, PPDS.Auth, and PPDS.Plugins must have an XML documentation comment; by convention that is a `/// <summary>`, which the reference generators use as the description. `[EditorBrowsable(Never)]` hides a type or member from IntelliSense and from customer pages but does not replace the comment. Generated code under `Generated/` is exempt. Enforced at build time by the compiler's CS1591, which `.editorconfig` makes an error in these four libraries; CS1591 checks only that a doc comment exists (`<remarks>` or `<inheritdoc/>` alone satisfies it), so the `<summary>` convention is a review concern. The rule applies to everything in the baseline (Phase 0) and to every future addition (drift check).
 2. **Public-surface baseline.** Each of the four libraries has committed `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt` files. Any change to the public surface requires a corresponding baseline update or the build fails.
 3. **CLI command annotation.** Every `System.CommandLine.Command`, `Option<T>`, and `Argument<T>` creation site in the CLI factory code must supply a non-empty Description — for `Command`, via the 2-arg constructor `Command(name, description)` or via an object initializer `Description = "..."`; for `Option<T>` / `Argument<T>`, only via object initializer since their constructors take only name/aliases. Enforced at build time by PPDS015.
 4. **MCP tool annotation.** Every method annotated `[McpServerTool]` must supply `Name` and `Description`. Enforced at build time.
@@ -117,10 +117,10 @@ this coverage change does not expand or claim completion of that rollout.
 
 1. Developer writes `public class NewThing { public void Do() {} }` with no XML docs
 2. Developer runs `dotnet build`
-3. PPDS014 fires: `error PPDS014: Public type 'NewThing' needs '/// <summary>' or [EditorBrowsable(Never)]`
+3. CS1591 fires: `error CS1591: Missing XML comment for publicly visible type or member 'NewThing'`
 4. RS0016 fires (PublicApiAnalyzers): `error RS0016: NewThing not declared in PublicAPI.Unshipped.txt`
 5. Developer adds `/// <summary>` comment explaining purpose and adds line to `PublicAPI.Unshipped.txt`
-6. Build passes; `Do()` member without summary still fails PPDS014 — developer adds summary
+6. Build passes; `Do()` member without summary still fails CS1591 — developer adds summary
 7. PR diff shows the Unshipped.txt addition — reviewer sees exactly what public surface is growing
 
 **Release tag ships docs:**
@@ -174,7 +174,7 @@ Dry-run does not require the GitHub App token (no cross-repo writes). Used for C
 - Reflection: `System.Reflection.MetadataLoadContext` reads assembly metadata without executing product constructors or service code. XML documentation is parsed separately; this is not a Roslyn source walker.
 - Ordinary output: `docs/reference/libraries/{package}/{namespace}/{type}.md` and a per-package `_index.md`.
 - Coverage: every exported type is inventoried in manifest mode, including hidden types. Customer pages omit `[EditorBrowsable(Never)]` types and members, accessor methods, and compiler-generated/record-synthesized members. This is not a claim of complete CLR signature compatibility.
-- Missing summaries: retain customer-facing types and members with an explicit unavailable-summary note and a diagnostic. Do not invent documentation or silently drop a public type because annotation is missing. This fallback does not relax PPDS014 authoring policy.
+- Missing summaries: retain customer-facing types and members with an explicit unavailable-summary note and a diagnostic. Do not invent documentation or silently drop a public type because annotation is missing. This fallback does not relax the CS1591 authoring policy.
 - Per-type fields: summary or fallback, namespace, assembly, kind, base type, implemented interfaces, and included public members with summaries or fallback notes and signatures.
 - Cross-references: package indexes link type pages; external type references render as inline code. MDX escaping follows Core Requirement 9.
 - XML docs: support summary, parameter and return text plus supported inline XML elements. Resolved `inheritdoc` uses the available inheritance documentation; an unresolved target remains an explicit inherited-from pointer and diagnostic. Cross-type hyperlinks and a complete C# source-signature reconstruction are not promised.
@@ -262,12 +262,12 @@ Test projects follow the convention `tests/PPDS.DocsGen.{Surface}.Tests/` for ge
 
 | ID | Criterion | Test | Status |
 |----|-----------|------|--------|
-| AC-01 | PPDS014 fails build for a public type in a library project with no `/// <summary>` and no `[EditorBrowsable(Never)]` | `PPDS.Analyzers.Tests/XmlDocOnPublicApiAnalyzerTests.FlagsUndocumentedPublicType` | 🔲 |
-| AC-02 | PPDS014 fails build for a public member inside an included type when the member has no `/// <summary>` | `PPDS.Analyzers.Tests/XmlDocOnPublicApiAnalyzerTests.FlagsUndocumentedPublicMember` | 🔲 |
-| AC-03 | PPDS014 allows a public type marked `[EditorBrowsable(Never)]` without a summary | `PPDS.Analyzers.Tests/XmlDocOnPublicApiAnalyzerTests.AllowsEditorBrowsableNever` | 🔲 |
-| AC-04 | PPDS014 allows a public type with `/// <summary>` covering every public member | `PPDS.Analyzers.Tests/XmlDocOnPublicApiAnalyzerTests.AllowsFullyDocumentedType` | 🔲 |
-| AC-05 | PPDS014 skips types marked `[GeneratedCode]` | `PPDS.Analyzers.Tests/XmlDocOnPublicApiAnalyzerTests.SkipsGeneratedCodeAttribute` | 🔲 |
-| AC-06 | PPDS014 skips files whose path contains `/Generated/` or `\Generated\` | `PPDS.Analyzers.Tests/XmlDocOnPublicApiAnalyzerTests.SkipsGeneratedDirectory` | 🔲 |
+| AC-01 | The four library projects are configured so that a public type or member without an XML doc comment fails the build: CS1591 is `error` for their sources and no project file suppresses or overrides it. The tests check the configuration files only; the proof that the build fails is a library build with a summary removed (done for all four on 2026-11-19 when the mechanism was introduced) | `tests/ci/test_xml_doc_enforcement.py::test_cs1591_is_an_error_in_each_library`, `test_no_later_section_lowers_cs1591_for_library_sources`, `test_library_projects_generate_docs_without_overriding_the_severity` | ✅ |
+| AC-02 | Retired 2026-11-19: merged into AC-01, since CS1591 reports undocumented members and types alike | — | — |
+| AC-03 | Retired 2026-11-19: CS1591 has no `[EditorBrowsable(Never)]` exemption, so hidden public API also needs a summary (Core Requirement 1) | — | — |
+| AC-04 | A fully documented library builds without CS1591 errors | No dedicated test; the CI .NET build (`build.yml`, `dotnet build` of the solution) builds the four libraries with CS1591 as an error on every PR that touches C#, project files or `.editorconfig` | ❌ |
+| AC-05 | Retired 2026-11-19: CS1591 has no `[GeneratedCode]` exemption; generated code is exempted by path instead (AC-06) | — | — |
+| AC-06 | Files under a `Generated/` folder are exempt: `.editorconfig` sets CS1591 to `none` for `**/Generated/**.cs` in a section after the library section | `tests/ci/test_xml_doc_enforcement.py::test_generated_code_stays_exempt_after_the_library_section` | ✅ |
 | AC-07 | PublicApiAnalyzers (RS0016) fails build when a new public type is not listed in `PublicAPI.Unshipped.txt` in each of the four library projects (Dataverse, Migration, Auth, Plugins) | `PPDS.DocsGen.Workflow.Tests/PublicApiBaselineTests.FailsOnUnbaselinedAddition` (parametrized over all four libs) | 🔲 |
 | AC-08 | PPDS015 fails build for a `new System.CommandLine.Command(name)` creation expression (single-arg ctor, no description) with no object-initializer `Description = "..."` assignment | `PPDS.Analyzers.Tests/CliCommandNeedsDescriptionAnalyzerTests.PPDS015_FlagsCommandWithoutDescription` | 🔲 |
 | AC-09 | PPDS015 allows a `Command` constructed with its 2-arg `Command(name, description)` ctor where the description is a non-empty string; also allows any Command-family ctor (e.g. `RootCommand(description)`) that passes a non-empty string to a parameter named `description` | `PPDS.Analyzers.Tests/CliCommandNeedsDescriptionAnalyzerTests.PPDS015_AllowsCommandWithCtorDescription` + `.PPDS015_AllowsRootCommandWithSingleDescriptionArgument` | 🔲 |
@@ -289,8 +289,8 @@ Test projects follow the convention `tests/PPDS.DocsGen.{Surface}.Tests/` for ge
 | AC-25 | `docs-release.yml` in dry-run mode (workflow_dispatch with `dry_run=true`) produces the expected file tree, a PR body summary, and a baseline rollover diff — all visible as workflow artifacts, without opening any PR | `PPDS.DocsGen.Workflow.Tests/DocsReleaseWorkflowTests.DryRunProducesExpectedArtifacts` | 🔲 |
 | AC-26 | `docs-release.yml` rollover logic moves all entries from each library's `PublicAPI.Unshipped.txt` into `PublicAPI.Shipped.txt` (sorted, deduplicated) and clears Unshipped to empty | `PPDS.DocsGen.Workflow.Tests/DocsReleaseWorkflowTests.RolloverMovesUnshippedEntries` | 🔲 |
 | AC-27 | `docs-release.yml` checks every page of open PRs and aborts when a prior baseline rollover PR exists, listing the matching PRs. GitHub/API failures or malformed responses also abort; only a successful complete query without matching PRs permits continuation. | `PPDS.DocsGen.Workflow.Tests/DocsReleaseWorkflowTests.AbortsOnOpenPriorRolloverPr`; `tests/ci/test_rollover_guard.py::test_blocks_rollover_beyond_first_hundred`, `test_allows_only_after_all_pages_are_checked`, `test_empty_success_is_clean`, `test_api_failures_fail_closed`, `test_late_page_failure_fails_closed`, `test_invalid_api_responses_fail_closed`, `test_malformed_later_page_fails_closed`, `test_non_200_success_status_fails_closed` | ✅ |
-| AC-28 | After Phase 0 completes, running `dotnet build` on each of the four library projects with `WarningsAsErrors` for PPDS014-016/RS0016-0017 produces zero errors | `PPDS.DocsGen.Workflow.Tests/PhaseZeroCompletionTests.AllFourLibrariesBuildClean` | 🔲 |
-| AC-29 | `Microsoft.CodeAnalysis.PublicApiAnalyzers` returns zero RS0016/RS0017 diagnostics against the committed source of each of the four library projects — gated by Phase 0 completion across all four libs (Phase 0 is currently pilot-only: PPDS.Auth has baselines; PPDS.Dataverse / PPDS.Migration / PPDS.Plugins baselines are pending). AC tracked at 🔲 until all four libs reach zero-diagnostic state. | `PPDS.DocsGen.Workflow.Tests/PhaseZeroCompletionTests.RS0016ReturnsZeroDiagnostics` | 🔲 |
+| AC-28 | After Phase 0 completes, `dotnet build` of each of the four library projects produces zero errors with CS1591 as an error (all four, via `.editorconfig`) and RS0016/RS0017 as errors (via `WarningsAsErrors` in each library that references PublicApiAnalyzers; today only PPDS.Auth) | No automated test yet; checked by building each library (the CS1591 part was clean for all four on 2026-11-19, see Phase 0 Rollout Status) | 🔲 |
+| AC-29 | `Microsoft.CodeAnalysis.PublicApiAnalyzers` returns zero RS0016/RS0017 diagnostics against the committed source of each of the four library projects — gated by Phase 0 completion across all four libs (Phase 0 is currently pilot-only: PPDS.Auth has baselines; PPDS.Dataverse / PPDS.Migration / PPDS.Plugins baselines are pending). AC tracked at 🔲 until all four libs reach zero-diagnostic state. | No automated test yet | 🔲 |
 | AC-30 | `docs-smoke.yml` runs as `workflow_call` from a caller repository, accepts the caller's docs path as input, and fails the check with stdout pointing at the offending block when compilation fails | `PPDS.DocsGen.Workflow.Tests/DocsSmokeWorkflowTests.FailsOnBadBlockViaWorkflowCall` | 🔲 |
 | AC-31 | The CLI reflector exits nonzero without writing output when the input cannot load, a command factory fails, or no command pages are generated; valid inputs still emit reference pages successfully. | `PPDS.DocsGen.Cli.Tests/CliReflectProcessTests` | ✅ |
 | AC-32 | Release reference generation selects a runtime compatible with the workflow's net10.0 input assemblies, even when .NET 8 is also installed. | `tests/ci/test_docs_release_workflow.py::test_reflectors_use_runtime_compatible_with_net10_input` | ✅ |
@@ -318,13 +318,14 @@ The full-checkout generator run on 2026-11-12 passed all 19 tests, including the
 
 | Scenario | Input | Expected Output |
 |----------|-------|-----------------|
-| Public type inherits from a documented base | `class B : A { }` with no summary on B | PPDS014 fires — inheritance doesn't cascade summaries |
+| Public type inherits from a documented base | `class B : A { }` with no summary on B | CS1591 fires — inheritance doesn't cascade summaries |
 | Generic type parameter | `Task<T>` referenced in prose | MDX parses without error; HTML-entity escaping in prose, inline-code in fenced blocks |
 | `[EditorBrowsable(Never)]` on a member | Member hidden, type documented | Type appears in reference; hidden member absent |
 | Fenced block using internal-only API | Guide references `internal class Helper` | Smoke test compile fails with CS0122 (inaccessible) — legitimate failure |
 | Fenced block with `// ignore-smoke` comment on opening fence | ` ```csharp // ignore-smoke ` as opening fence | Smoke test skips this block; generator emits metadata noting skipped count (AC-22) |
 | Library with no documented public types | Public types lack summaries | Emit customer-facing pages with explicit unavailable-summary notes. Hidden types stay out of pages. Ordinary reflection may produce an empty index if no visible types exist; complete manifest mode still requires a nonempty exported-type inventory. |
 | Command Description assigned on a separate statement after `new Command(name)` | `var c = new Command("foo"); c.Description = "...";` | PPDS015 inspects the creation expression only; separate-statement assignment is not tracked. The PPDS CLI convention is to pass Description in the 2-arg ctor or object initializer, and no current factory uses the separate-statement pattern. |
+| Positional record parameter without a `<param>` tag | `public sealed record R(string Name);` with only a `<summary>` | Not mechanically checked: CS1591 does not report positional record parameters. Document each with a `<param>` tag on the record; reviewers enforce it |
 | PR moves Unshipped entries to Shipped without tagging | Developer manually edits Shipped in a non-release PR | Not mechanically prevented — treated as a code-review concern. The release workflow is the conventional mover; manual moves are discouraged but legal. |
 
 ---
@@ -377,7 +378,7 @@ foreach (var file in result.Files) File.WriteAllText(Path.Combine(input.OutputRo
 
 | Diagnostic | Condition | Recovery |
 |------------|-----------|----------|
-| PPDS014 | Public type/member missing summary | Add `/// <summary>` or mark `[EditorBrowsable(Never)]` |
+| CS1591 | Public type/member missing XML documentation | Add `/// <summary>`, or make the type or member `internal` |
 | RS0016 | New public API not in Unshipped.txt | Add entry to `PublicAPI.Unshipped.txt` |
 | RS0017 | Public API signature changed without baseline update | Update Shipped/Unshipped accordingly |
 | PPDS015 | CLI command missing Description | Set `Description` via attribute, initializer, or ctor |
@@ -586,13 +587,15 @@ public class TuiReferenceGenerator : IReferenceGenerator
 | `PPDS_DOCS_APP_PRIVATE_KEY` | secret | Yes (release workflow only) | — | PEM-encoded private key for the App |
 | `PPDS_DOCS_OUTPUT_ROOT` | path | No | `docs/reference/` | Override generator output root (for local dev) |
 | `PPDS_DOCS_SMOKE_PPDS_SHA` | string | No | `main` | Git ref of ppds that `smoke` checks out and builds against. Set by `ppds-docs`'s caller workflow via `workflow_call` inputs: PR-triggered smokes pass `main` (latest product surface); release-triggered smokes pass the release tag SHA. |
-| `dotnet_diagnostic.PPDS014.severity` | string | No | `warning` repo-wide (analyzer default per analyzers.md convention), escalated to `error` via `<WarningsAsErrors>` in each of the four library `.csproj` files | Can be escalated or disabled per-file via `.editorconfig`; spec expects the four libs to keep it as error |
+| `dotnet_diagnostic.CS1591.severity` | string | No | `error` for `src/{PPDS.Dataverse,PPDS.Migration,PPDS.Auth,PPDS.Plugins}/**.cs` and `none` for `**/Generated/**.cs`, both in the root `.editorconfig` | Set in `.editorconfig`, not via `<WarningsAsErrors>CS1591`, because a command-line `/warnaserror:CS1591` overrides the Generated section's `none`; the spec expects the four libs to keep it as error |
 
-Library `.csproj` files add:
+PPDS.Auth, the only library that references `Microsoft.CodeAnalysis.PublicApiAnalyzers` today, adds:
 
 ```xml
-<WarningsAsErrors>PPDS014;PPDS015;PPDS016;RS0016;RS0017</WarningsAsErrors>
+<WarningsAsErrors>$(WarningsAsErrors);RS0016;RS0017</WarningsAsErrors>
 ```
+
+PPDS.Migration also sets `TreatWarningsAsErrors`. The libraries do not load PPDS.Analyzers, so PPDS015/PPDS016 do not run in them; those rules apply to PPDS.Cli and PPDS.Mcp, which reference the analyzer project and set `TreatWarningsAsErrors`.
 
 The .NET SDK version is pinned in `global.json` at the repository root with `rollForward: latestPatch`. Golden-fixture ACs (AC-15–AC-19) depend on this pin for reproducibility; feature-level SDK bumps (e.g. 10.0.x → 10.1.x) can change reflection member ordering and source-generator output, which would flake the goldens. Update the pin deliberately when intentionally moving to a new feature band.
 
@@ -614,14 +617,14 @@ The .NET SDK version is pinned in `global.json` at the repository root with `rol
 | Revocation playbook | GitHub App settings page → Generate new private key → update `PPDS_DOCS_APP_PRIVATE_KEY` in Actions secrets → previous key invalidated immediately by GitHub (no workflow downtime because the new key starts being used on the next run) |
 | Audit trail | GitHub App installation's audit log + per-PR commit attribution (`ppds-docs-bot[bot]` author) |
 
-### Phase 0 Rollout Status (as of initial spec authoring)
+### Phase 0 Rollout Status (as of 2026-11-19)
 
-| Library | `PublicAPI.Shipped.txt` committed | PPDS014-clean |
+| Library | `PublicAPI.Shipped.txt` committed | CS1591-clean |
 |---------|-----------------------------------|---------------|
 | PPDS.Auth | ✅ (pilot) | ✅ |
-| PPDS.Dataverse | ❌ | ❌ |
-| PPDS.Migration | ❌ | ❌ |
-| PPDS.Plugins | ❌ | ❌ |
+| PPDS.Dataverse | ❌ | ✅ |
+| PPDS.Migration | ❌ | ✅ |
+| PPDS.Plugins | ❌ | ✅ |
 
 AC-28 and AC-29 stay ungated until all four libraries reach pass state. The phased rollout is tracked outside this spec; completion flips both ACs to ✅ simultaneously.
 
@@ -629,7 +632,7 @@ AC-28 and AC-29 stay ungated until all four libraries reach pass state. The phas
 
 ## Related Specs
 
-- [analyzers.md](./analyzers.md) — extended with PPDS014-PPDS016
+- [analyzers.md](./analyzers.md) — extended with PPDS015-PPDS016
 - [architecture.md](./architecture.md) — generators respect the service-pattern constraint (no business logic in scripts)
 - [cli.md](./cli.md) — surface that `cli-reflect` documents
 - [mcp.md](./mcp.md) — surface that `mcp-reflect` documents
@@ -640,6 +643,7 @@ AC-28 and AC-29 stay ungated until all four libraries reach pass state. The phas
 
 | Date | Change |
 |------|--------|
+| 2026-11-19 | Retire the dormant PPDS014 analyzer (it reported only in the four libraries, which never loaded the analyzers); enforce XML documentation with the compiler's CS1591 as an error in the four libraries via `.editorconfig`, keeping `Generated/` exempt. Rewrite AC-01 and AC-06 against `tests/ci/test_xml_doc_enforcement.py` (configuration checks); reopen AC-04 against the CI build; retire AC-02, AC-03 and AC-05; correct AC-28, AC-29 and the Configuration block to what the project files contain and drop references to a workflow test class that was never written. `[EditorBrowsable(Never)]` no longer substitutes for a summary, and positional record parameters are no longer machine-checked. |
 | 2026-11-12 | Align library reflection with MetadataLoadContext and explicit missing-summary fallback; add five-library/thirteen-framework opt-in manifest, inventory and variant contract; update AC-16 to its passing renamed test and add fixture-backed AC-34 through AC-39 and the banner regression contract AC-40. Preserve separate product-capture/publication evidence and historical analyzer rollout scope. |
 | 2026-04-18 | Initial spec |
 | 2026-04-18 | Retarget PPDS015 + `cli-reflect` from Spectre to System.CommandLine; add Operations section (GitHub App runbook, Phase 0 status table); pin .NET SDK via `global.json` for reproducible goldens; strengthen AC-15–19 (alphabetical member ordering + SDK pin), AC-23 (nested generics + `<see cref>` in prose), AC-29 (RS0016 zero-diagnostic gate); add inheritdoc resolution to `libs-reflect` (in-scope) with explicit non-goals for cross-type hyperlinks, overload disambiguation, and generic-arity round-trip |
@@ -652,4 +656,4 @@ AC-28 and AC-29 stay ungated until all four libraries reach pass state. The phas
 - Auto-generated example code per tool/command (requires `[Example]` attribute pattern — future)
 - Versioned docs snapshots (Docusaurus `docs-version`) when a v2 release ships
 - TUI screen-by-screen reference generator (deferred until demand emerges)
-- Code-fix providers for PPDS014-PPDS016 (auto-insert `/// <summary>` templates) — home at `src/PPDS.Analyzers.CodeFixes/`
+- Code-fix providers for PPDS015-PPDS016 and CS1591 (auto-insert `/// <summary>` templates) — home at `src/PPDS.Analyzers.CodeFixes/`

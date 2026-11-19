@@ -12,10 +12,10 @@
          (struct pointers in delegate signatures). Unsafe is confined to Internal/CredentialStore/**. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
-    <!-- Phase 0 docs-generation pilot: PPDS014 and PublicApiAnalyzers are errors
-         in this project. Other PPDS libraries (Dataverse, Migration, Plugins)
-         still default these to warnings until they are onboarded. -->
-    <WarningsAsErrors>$(WarningsAsErrors);PPDS014;RS0016;RS0017</WarningsAsErrors>
+    <!-- PublicApiAnalyzers RS0016/RS0017 (public API added or removed without
+         updating PublicAPI.*.txt) are errors in this project. Missing XML docs
+         (CS1591) are an error in all four libraries via .editorconfig. -->
+    <WarningsAsErrors>$(WarningsAsErrors);RS0016;RS0017</WarningsAsErrors>
 
     <!-- RS0026/RS0027: "multiple overloads with optional parameters" backcompat
          advice. Pre-existing design in ProfileStore and PowerPlatformTokenProvider.

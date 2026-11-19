@@ -22,9 +22,11 @@ REFUSAL_SCRIPT = (
 # servicing and automatic full-.NET routing for SDK/config/props/targets/workflow
 # inputs; the separate Integration Tests workflow remains a tokenless refusal.
 # No Git calls or mutable refs are used by these tests.
+# 2026-11-19: '.editorconfig' added to the build.yml code filter and the
+# test.yml code and python filters (it sets CS1591 to error in the libraries).
 REVIEWED_WORKFLOW_HASHES = {
-    "build.yml": "776c71af79b10ddb3e2415d8a23405bd7e8c7d4c774bb6ddf0fbde0699f52b6a",
-    "test.yml": "b8d90fedf6dfdb3f76e04abccee95bd2321c72c558b247881dfd53343d1d6027",
+    "build.yml": "5b58e3dce7cb80ca1f4f828761a77f68fb17b6a03f7ab77f33863de80de6b0d5",
+    "test.yml": "0146164e1fcd9d9f719b0a18ebe26d31b580c9b217867cd9ab80174eb8df65d0",
 }
 
 

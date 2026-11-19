@@ -85,6 +85,14 @@ dotnet_diagnostic.PPDS011.severity = suggestion
 dotnet_diagnostic.PPDS012.severity = suggestion
 dotnet_diagnostic.PPDS013.severity = suggestion
 
+# Published libraries: public API without XML documentation fails the build.
+# Must stay above the Generated section, which turns CS1591 off again for
+# generated code (the later matching section wins). Set here rather than via
+# <WarningsAsErrors> in the .csproj files, because a command-line
+# /warnaserror:CS1591 overrides the Generated section's "none".
+[src/{PPDS.Dataverse,PPDS.Migration,PPDS.Auth,PPDS.Plugins}/**.cs]
+dotnet_diagnostic.CS1591.severity = error
+
 # Generated code - relax rules that are noisy for auto-generated files
 [**/Generated/**.cs]
 # Disable naming warnings (generated code may not follow conventions)

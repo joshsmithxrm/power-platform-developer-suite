@@ -604,4 +604,7 @@ public sealed class WindowDefinition
 /// A compiled ORDER BY item used by window functions. Contains the column name for
 /// value lookup, a compiled expression for evaluation, and the sort direction.
 /// </summary>
+/// <param name="ColumnName">Name of the row column that holds the sort value (for a column reference, that column's name). Sort nodes compare rows by this column's value.</param>
+/// <param name="Value">The ORDER BY expression compiled to a delegate that computes the sort value from a row.</param>
+/// <param name="Descending"><see langword="true"/> to reverse the comparison for this item (ORDER BY ... DESC); <see langword="false"/> for ascending.</param>
 public sealed record CompiledOrderByItem(string ColumnName, CompiledScalarExpression Value, bool Descending);

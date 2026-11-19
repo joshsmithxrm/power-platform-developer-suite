@@ -46,9 +46,9 @@ Based on PR feedback analysis:
 
 Compile-time enforcement of architectural patterns. Analyzers run during the PPDS.Cli and PPDS.Mcp builds; PPDS001-PPDS013 show as suggestions in the IDE and PPDS015-PPDS016 as warnings, which those projects treat as errors.
 
-### Implemented Rules (All 16)
+### Implemented Rules (All 15)
 
-Severity is the effective level: each analyzer defaults to Warning, and `.editorconfig` lowers PPDS001-PPDS013 to suggestion.
+Severity is the effective level: each analyzer defaults to Warning, and `.editorconfig` lowers PPDS001-PPDS013 to suggestion. The gap in numbering is a retired rule whose ID is not reused (see `DiagnosticIds.cs`). XML documentation on public API in PPDS.Dataverse, PPDS.Migration, PPDS.Auth and PPDS.Plugins is enforced by the compiler's CS1591, which `.editorconfig` makes an error in those four libraries.
 
 | ID | Name | Description | Severity |
 |----|------|-------------|----------|
@@ -65,7 +65,6 @@ Severity is the effective level: each analyzer defaults to Warning, and `.editor
 | PPDS011 | PropagateCancellation | Flags async methods that drop CancellationToken | Suggestion |
 | PPDS012 | NoSyncOverAsync | Flags `.GetAwaiter().GetResult()`, `.Result`, `.Wait()` | Suggestion |
 | PPDS013 | NoFireAndForgetInCtor | Flags async calls in constructors without await | Suggestion |
-| PPDS014 | XmlDocOnPublicApi | Flags public API in library projects without XML documentation | Warning; reports only in PPDS.Dataverse, PPDS.Migration, PPDS.Auth and PPDS.Plugins, which do not load the analyzers, so it does not fire today |
 | PPDS015 | CliCommandNeedsDescription | Flags System.CommandLine commands, options and arguments without a Description | Warning |
 | PPDS016 | McpToolNeedsMetadata | Flags `[McpServerTool]` methods missing Name or Description | Warning |
 
