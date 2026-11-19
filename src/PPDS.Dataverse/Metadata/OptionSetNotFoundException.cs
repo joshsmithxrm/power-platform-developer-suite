@@ -10,7 +10,7 @@ namespace PPDS.Dataverse.Metadata;
 /// A read that fails any other way, or whose catalog lookup fails, still surfaces the original fault.
 /// The CLI maps this exception to its not-found error code and exit code.
 /// </remarks>
-public sealed class OptionSetNotFoundException : Exception
+public class OptionSetNotFoundException : Exception
 {
     /// <summary>Gets the global choice name that was requested.</summary>
     public string OptionSetName { get; }

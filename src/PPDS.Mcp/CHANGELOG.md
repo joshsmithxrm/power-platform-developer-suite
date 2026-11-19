@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `ppds_metadata_update_choice` and `ppds_metadata_add_option_value` report a global choice name that exists in no spelling with `errorCode` `Operation.NotFound` and the message `Global choice '<name>' not found.`; before they returned `Operation.Internal` or `ENTITY_NOT_FOUND`. Other failures keep their codes (#1759).
+- `ppds_metadata_update_choice` and `ppds_metadata_add_option_value` report a global choice name that exists in no spelling with `errorCode` `Operation.NotFound` and the message `Global choice '<name>' not found.`; before they returned `Operation.Internal`. Other failures keep their codes (#1759).
 - Captured startup authentication/target defaults. Allowed switches affect future calls in that session without changing global defaults; creating or replacing startup authentication requires a server restart.
 - Form writes require `confirmEnvironment` when effective protection requires acknowledgement. `--allowed-env` permits switching but does not authorize writes; `--read-only` rejects covered form mutations. Publication separately requires `confirmPublishEntity`, publishes all pending customizations for that table and verifies only the selected form (#1015, partial).
 - Updated to consume CLI 1.5.0 and the coordinated library/runtime dependency refresh, including Microsoft.Extensions.Hosting 10.0.14 (#1501), MSAL 4.92.0 (#1513) and System.Text.Json 10.0.14 (#1565).
