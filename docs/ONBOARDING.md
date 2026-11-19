@@ -85,7 +85,7 @@ A 14-stop path from the simplest library to the full request flow. Each stop nam
 
 **13. MCP Tool Handlers in Practice — `PPDS.Mcp/Tools/`.** 40+ `McpToolBase` subclasses, one capability each. `QuerySqlTool` → ADO.NET provider (stop 10); `MetadataCreateTableTool` → metadata authoring (stop 7); `PluginsListTool` → generated entities (stop 7). **Trace one tool end-to-end** — e.g. `QuerySqlTool → PpdsDbCommand → PlanExecutor → QueryExecutor → FetchXML → Dataverse` — and you've connected every layer in this tour.
 
-**14. Roslyn Analyzers — `PPDS.Analyzers/Rules/`.** 16 compile-time rules. `DiagnosticIds.cs` is the rule registry; `NoConsoleInServicesAnalyzer` (PPDS002), `PoolClientInParallelAnalyzer` (PPDS007), and `UseStructuredExceptionsAnalyzer` (PPDS004) encode the conventions from §3. PPDS001–PPDS013 are at suggestion severity in `.editorconfig`, so they appear in the IDE but do not fail the build; PPDS014–PPDS016 are warnings, which PPDS.Cli and PPDS.Mcp treat as errors. Their tests are in `tests/PPDS.Analyzers.Tests`.
+**14. Roslyn Analyzers — `PPDS.Analyzers/Rules/`.** 16 compile-time rules. `DiagnosticIds.cs` is the rule registry; `NoConsoleInServicesAnalyzer` (PPDS002), `PoolClientInParallelAnalyzer` (PPDS007), and `UseStructuredExceptionsAnalyzer` (PPDS004) encode the conventions from §3. PPDS001–PPDS013 are at suggestion severity in `.editorconfig`, so they appear in the IDE but do not fail the build; PPDS015 and PPDS016 are warnings, which PPDS.Cli and PPDS.Mcp treat as errors; PPDS014 reports only in the four library assemblies, which do not load the analyzers, so it does not fire today. Their tests are in `tests/PPDS.Analyzers.Tests`.
 
 ---
 

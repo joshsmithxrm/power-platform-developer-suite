@@ -153,8 +153,8 @@ tests/PPDS.Cli.Tests/Services/ConnectionServiceTests.cs
 When a test covers an acceptance criterion from a spec in `specs/`, tag it with
 `[Trait("AC", "AC-12")]` and reference the test from the spec's AC table.
 
-`codecov.yml` sets an 80% patch-coverage target for new code, and Codecov posts a
-failing status on a PR whose patch coverage is below it. Branch protection requires
+`codecov.yml` configures a non-informational patch-coverage status for new code
+with an 80% target and a 5% threshold, so Codecov reports it as pass or fail. Branch protection requires
 only `build-status` and `test-status`, so the Codecov status does not block merging.
 `scripts/Test-NewCodeCoverage.ps1` gives a similar local view.
 
@@ -237,9 +237,11 @@ but a maintainer reviews every outside contribution before merging.
 
 1. Open the PR against `main` and fill in the template: a summary, what you ran
    to test it, and any breaking changes. Put `Closes #N` on its own line for
-   each issue it resolves. Give the PR a conventional-commit title,
-   `type(scope): summary` (for example `fix(cli): ...` or `docs: ...`): PRs are
-   squash-merged and the title becomes the commit subject on `main`.
+   each issue it resolves. Use conventional-commit form,
+   `type(scope): summary` (for example `fix(cli): ...` or `docs: ...`), for the PR
+   title and for your commit subjects: PRs are squash-merged, and the squash commit
+   on `main` takes its subject from the PR title, or from the commit subject when
+   the PR has a single commit.
 2. Update the affected package's `src/<package>/CHANGELOG.md` for user-visible changes.
    Do not change version numbers; versions come from git tags (MinVer).
 3. Wait for CI, then respond to review comments.
@@ -275,8 +277,10 @@ The architecture rules are in [AGENTS.md](AGENTS.md) and, in full, in
 
 The analyzers in `src/PPDS.Analyzers` run on PPDS.Cli and PPDS.Mcp. PPDS001 to
 PPDS013 are at suggestion severity, so they show in the IDE but do not fail the
-build. PPDS014 to PPDS016 (XML docs, CLI command descriptions, MCP tool metadata)
-are warnings, and both projects treat warnings as errors, so those do fail it.
+build. PPDS015 (CLI command descriptions) and PPDS016 (MCP tool metadata) are
+warnings, and both projects treat warnings as errors, so those do fail it. PPDS014
+(XML docs) reports only in PPDS.Dataverse, PPDS.Migration, PPDS.Auth and
+PPDS.Plugins, none of which loads the analyzers, so it does not fire in any build.
 
 | Pattern | Where to look |
 |---------|---------------|
