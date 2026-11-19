@@ -1,7 +1,7 @@
 # Shakedown Guard
 
 **Status:** Implemented
-**Last Updated:** 2026-04-20
+**Last Updated:** 2026-11-18
 **Code:** [src/PPDS.Cli/Infrastructure/Safety/](../src/PPDS.Cli/Infrastructure/Safety/) | [src/PPDS.Cli/Services/](../src/PPDS.Cli/Services/) | [src/PPDS.Cli/Infrastructure/Errors/](../src/PPDS.Cli/Infrastructure/Errors/)
 **Surfaces:** CLI | TUI | Extension | MCP
 
@@ -649,7 +649,7 @@ public sealed class PluginTraceService : IPluginTraceService
 
 **Context:** The guard catches every mutation at the service layer. Arguably the hook is now redundant.
 
-**Decision:** Keep the Bash hook unchanged.
+**Decision:** Keep the Bash hook, with its write-block (mutation-verb list and block logic) unchanged. Its env allowlist gating is opt-in: off when no allowlist is configured, on once one names an env, and a misconfigured allowlist blocks (see core requirement 12 and the 2026-11-18 changelog row).
 
 **Rationale:**
 - The hook catches misuse BEFORE the C# process starts. Faster feedback, lower resource cost. A user pasting a destructive command gets an instant reject, not a reject after authentication + pool warmup.
@@ -680,7 +680,7 @@ public sealed class PluginTraceService : IPluginTraceService
 | 2026-04-20 | Revised per plan-phase review: expanded relocation scope from 6 services to the full 12 in `PPDS.Dataverse.Services` (added `UserService`, `RoleService`, `FlowService`, `ConnectionReferenceService`, `DeploymentSettingsService`, `ComponentNameResolver`) to resolve the transitive-dependency hazard (`DeploymentSettingsService` → `IEnvironmentVariableService`) and to fully pay down the A1 debt in one pass. Added `RoleService.AssignRoleAsync`/`RemoveRoleAsync` to the Mutation Method Inventory (the only new mutation methods in the 6 added services — the other 5 are pure reads/transforms). Tightened AC-26's assembly-purity test predicate to enumerate the 12 forbidden type names concretely (rather than forbid whole namespaces, which would have caught `SchemaValidator` and DTOs that legitimately remain). Total: 17 services, 70 mutation methods, 1 DML branch. |
 | 2026-04-20 | Implementation landed across commits `1729bd3f7` (Phase A foundation), `fc167e6fa` (Phase B+C — 12 services relocated, guard wired into 11 mutation-owning services), `9f03f99e3` (Phase D — preservation tests + CHANGELOG). During implementation, `TimelineHierarchyBuilder` was correctly identified by the B-1 agent as a domain-logic helper that had to follow `PluginTraceService` into `PPDS.Cli.Services.PluginTraces` — the B-DI coordinator handled the relocation. Status flipped to `Implemented`; all 40 ACs flipped to ✅ after full test suite ran green (3246 tests, 0 failures across net8.0/net9.0/net10.0). Added a `CurrentDirectoryMutatingCollection` xUnit collection to serialize process-CWD mutation between `ShakedownGuardTests.ProjectRoot_ResolvesInExpectedOrder` and the pre-existing `CleanCommandTests` — same kind of parallel-test CWD race that issue #668's retro addressed. |
 | 2026-07-13 | Post-#1315 sync: the session-start hook that owned the stale-sentinel sweep was extracted with the personal automation harness, so no proactive sentinel sweep remains — lazy cleanup stays with the `shakedown-safety.py` gate (stale/malformed deletion) and the guard's >24h absent-treatment; sweep ownership tracked in #1337. Guard behavior is unchanged. Removed dangling `retro-filing.md` reference. |
-| 2026-11-18 | Bash hook env allowlist gating became opt-in: with no allowlist configured (`PPDS_SAFE_ENVS` unset and `safety.shakedown_safe_envs` empty) the hook no longer blocks `ppds` commands, so a fresh clone needs no setup. The hook's mutation-verb list and write-block logic, and the guard, are unchanged (AC-39 still holds). |
+| 2026-11-18 | Bash hook env allowlist gating became opt-in: with no allowlist configured (`PPDS_SAFE_ENVS` unset, `safety.shakedown_safe_envs` absent or empty, and no legacy list) the hook no longer blocks `ppds` commands, so a fresh clone needs no setup. An allowlist that is present but unusable (for example `PPDS_SAFE_ENVS=","`, a non-list `shakedown_safe_envs`, or an unparseable settings or legacy file) still blocks with a message naming the problem; an empty settings list falls through to the legacy `.claude/state/safe-envs.json`. The hook's mutation-verb list and write-block logic, and the guard, are unchanged (AC-39 still holds). |
 
 ---
 

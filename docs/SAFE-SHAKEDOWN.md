@@ -22,7 +22,8 @@ Environment gating is **opt-in**: it turns on once you configure an
 allowlist of safe environments, and from then on it fails closed (if the
 active env can't be identified, the hook blocks rather than allows). With
 no allowlist configured the hook does not gate `ppds` commands, so a fresh
-clone works without setup. Anyone who runs an agent against live Dataverse
+clone works without setup; an allowlist that is present but unusable blocks
+them (see Concern 1). Anyone who runs an agent against live Dataverse
 should configure the allowlist first; `/shakedown` Phase 0 refuses to start
 without one.
 
@@ -54,13 +55,25 @@ policy; fewer ways to drift.
 ### Concern 1: env allowlist gating (opt-in)
 
 1. If the command does not mention `ppds`, the hook is a no-op (exit 0).
-2. Resolve the allowlist:
-   - `$PPDS_SAFE_ENVS` (comma-separated) wins if present.
-   - Else `safety.shakedown_safe_envs` in `.claude/settings.json`.
-   - Else legacy `.claude/state/safe-envs.json` (transitional fallback —
-     will be removed once mid-migration trees have re-landed).
-   - If none of these names an environment (unset, or an empty list as
-     checked in), the gate is **off** and the steps below do not run.
+2. Resolve the allowlist. The first source that names an environment wins:
+   - `$PPDS_SAFE_ENVS` (comma-separated), when set and non-empty.
+   - Else `safety.shakedown_safe_envs` in `.claude/settings.json`, when it
+     is a non-empty list.
+   - Else `safe_envs` in legacy `.claude/state/safe-envs.json`
+     (transitional fallback — will be removed once mid-migration trees
+     have re-landed), when it is a non-empty list. An empty settings list
+     (`[]`, as checked in) falls through to this file.
+   - The gate is **off**, and the steps below do not run, only when nothing
+     is configured: `$PPDS_SAFE_ENVS` unset or empty,
+     `safety.shakedown_safe_envs` absent or `[]`, and the legacy file absent
+     or with `safe_envs` absent or `[]`.
+   - A **misconfigured** allowlist blocks every `ppds` command (exit 2) with
+     a message naming the problem: `$PPDS_SAFE_ENVS` set but naming no
+     environment (e.g. `,`), `.claude/settings.json` that cannot be parsed
+     as JSON, a `safety` or `shakedown_safe_envs` value of the wrong type
+     (e.g. a string instead of a list), a legacy file that cannot be parsed
+     or has a non-list `safe_envs`, or a non-empty list with no environment
+     names in it. Fix the entry, or remove it to leave the gate off.
 3. Resolve the active env: read `profiles.json` directly from
    `$PPDS_CONFIG_DIR` (or `%LOCALAPPDATA%\PPDS` / `~/.ppds`). The hook does
    NOT shell out to `ppds env who` — that would be circular for a
@@ -107,9 +120,12 @@ tool starts a fresh shell per call). Default env var name is
 - `ppds env switch/select` is read-only here because the env-allowlist
   concern above already validates the target.
 
-**Bypass:** `unset PPDS_SHAKEDOWN` (or whatever name is configured). There
-is intentionally no softer bypass marker — if you need to write during
-shakedown, that is a deliberate action.
+**Bypass:** remove whichever source armed the block — `unset PPDS_SHAKEDOWN`
+(or whatever name is configured) when the env var armed it, or delete
+`.claude/state/shakedown-active.json` when the sentinel file armed it (the
+form a `/shakedown` session in Claude Code uses). The block message names
+the active source. There is intentionally no softer bypass marker — if you
+need to write during shakedown, that is a deliberate action.
 
 ## Configuration
 
@@ -169,9 +185,12 @@ recommended for one-off writes, settings.json for permanent additions).
 
 Either:
 
-- `unset PPDS_SHAKEDOWN` (preferred — explicit), or
+- Remove the source that armed the write-block (preferred — explicit):
+  `unset PPDS_SHAKEDOWN` if the env var armed it, or delete
+  `.claude/state/shakedown-active.json` if the sentinel file did (a
+  `/shakedown` session in Claude Code), or
 - Run `ppds plugins deploy --dry-run` to validate without writing, then
-  unset and re-run for the real deploy.
+  remove that source and re-run for the real deploy.
 
 ## Related
 

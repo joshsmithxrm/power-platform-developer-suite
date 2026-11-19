@@ -111,5 +111,5 @@ Default to single-file. Split only when one of the following is true:
 - The skill has a "playbook" of long examples (3+) that would dwarf
   the procedural steps.
 
-If you are under 150 lines, do not pre-emptively split. The hook
-catches the real cases.
+If you are under 150 lines, do not pre-emptively split. Split when a
+skill actually grows past the guideline.

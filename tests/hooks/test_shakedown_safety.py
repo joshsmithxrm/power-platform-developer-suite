@@ -314,6 +314,115 @@ class TestNoAllowlistConfigured:
         assert "BLOCKED [shakedown-safety/readonly]" in r.stderr
 
 
+class TestMisconfiguredAllowlistBlocks:
+    """An allowlist that is present but unusable must block, not turn the gate off.
+
+    The active env is the safe one in every case, so a block can only come
+    from the misconfiguration check, not from the env match.
+    """
+
+    MISCONFIGURED = "BLOCKED [shakedown-safety/env]: the safe-env allowlist is misconfigured."
+
+    @staticmethod
+    def _env(config_dir: str, project: dict, **extra) -> dict:
+        env = {"PPDS_CONFIG_DIR": config_dir, "CLAUDE_PROJECT_DIR": project["path"]}
+        env.update(extra)
+        return env
+
+    @staticmethod
+    def _write_raw(project: dict, rel: str, text: str) -> None:
+        (Path(project["path"]) / rel).write_text(text, encoding="utf-8")
+
+    def test_settings_list_not_a_list_blocks(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        project_dir["write_settings"]({"shakedown_safe_envs": "ppds-dev"})
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert self.MISCONFIGURED in r.stderr
+        assert "`safety.shakedown_safe_envs` in .claude/settings.json is a string" in r.stderr
+
+    def test_unparseable_settings_json_blocks(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        self._write_raw(project_dir, ".claude/settings.json", "{ not valid json")
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert self.MISCONFIGURED in r.stderr
+        assert ".claude/settings.json could not be parsed as JSON" in r.stderr
+
+    def test_empty_settings_list_falls_through_to_legacy_file(
+        self, fake_profile_dir, project_dir
+    ):
+        """Checked-in [] must not hide a legacy list: the legacy list gates."""
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        project_dir["write_settings"]({"shakedown_safe_envs": []})
+        project_dir["write_legacy"](["ppds-dev"])
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert "active env is not in the safe-env allowlist" in r.stderr
+        assert "Allowlist:  ppds-dev" in r.stderr
+
+    def test_empty_settings_list_legacy_file_allows_safe_env(
+        self, fake_profile_dir, project_dir
+    ):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        project_dir["write_settings"]({"shakedown_safe_envs": []})
+        project_dir["write_legacy"](["ppds-dev"])
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 0, r.stderr
+
+    def test_env_var_naming_no_env_blocks(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(
+            "ppds query sql 'SELECT 1'",
+            env_extra=self._env(config_dir, project_dir, PPDS_SAFE_ENVS=","),
+        )
+        assert r.returncode == 2, r.stderr
+        assert self.MISCONFIGURED in r.stderr
+        assert "PPDS_SAFE_ENVS is set to ','" in r.stderr
+
+    def test_unparseable_legacy_file_blocks(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        self._write_raw(project_dir, ".claude/state/safe-envs.json", "{ not valid json")
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert self.MISCONFIGURED in r.stderr
+        assert ".claude/state/safe-envs.json could not be parsed as JSON" in r.stderr
+
+    def test_legacy_safe_envs_not_a_list_blocks(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        self._write_raw(
+            project_dir, ".claude/state/safe-envs.json", json.dumps({"safe_envs": "ppds-dev"})
+        )
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert self.MISCONFIGURED in r.stderr
+        assert "`safe_envs` in .claude/state/safe-envs.json is a string" in r.stderr
+
+    def test_settings_list_naming_no_env_blocks(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        project_dir["write_settings"]({"shakedown_safe_envs": ["", "  "]})
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert self.MISCONFIGURED in r.stderr
+        assert "has entries but names no env" in r.stderr
+
+    def test_misconfigured_message_includes_config_help(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        project_dir["write_settings"]({"shakedown_safe_envs": "ppds-dev"})
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 2
+        assert "Configure the allowlist via either:" in r.stderr
+
+    def test_empty_everywhere_stays_off(self, fake_profile_dir, project_dir):
+        """[] in settings plus a legacy file with [] is still 'not configured'."""
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        project_dir["write_settings"]({"shakedown_safe_envs": []})
+        project_dir["write_legacy"]([])
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 0, r.stderr
+        assert r.stderr == ""
+
+
 class TestEnvSwitchTarget:
     def test_switch_to_safe_target_allowed(self, fake_profile_dir):
         config_dir = fake_profile_dir(active_env_name="ppds-prod")

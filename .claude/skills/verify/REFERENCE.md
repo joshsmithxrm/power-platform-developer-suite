@@ -90,15 +90,18 @@ to a non-dev env, with two concerns in one gate:
   (`$PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs` in
   `.claude/settings.json`), blocks `ppds *` unless the active env is in
   it. With none configured this gate is off.
-- **Write-block during shakedown (active when `PPDS_SHAKEDOWN=1`).**
+- **Write-block during shakedown (active when the sentinel file
+  `.claude/state/shakedown-active.json` is fresh, or `PPDS_SHAKEDOWN=1`).**
   Blocks write verbs (`create`, `update`, `delete`, `plugins deploy`
-  without `--dry-run`, `solutions import`, etc.). The shakedown skill
-  exports `PPDS_SHAKEDOWN=1` in its Phase 0.
+  without `--dry-run`, `solutions import`, etc.). In a Claude Code
+  session the shakedown skill arms it in Phase 0 by writing the sentinel
+  file; `PPDS_SHAKEDOWN=1` is the shell / CI form.
 
 Before running any of the patterns below:
 
 1. Confirm `ppds env who` shows a safe env (in the allowlist).
-2. If invoked from `/shakedown`, verify `PPDS_SHAKEDOWN=1` is set so write
+2. If invoked from `/shakedown`, verify `.claude/state/shakedown-active.json`
+   exists (or, outside Claude Code, that `PPDS_SHAKEDOWN=1` is set) so write
    commands fail closed.
 3. Read `docs/SAFE-SHAKEDOWN.md` for the full model and bypass procedure.
 
@@ -330,15 +333,18 @@ to a non-dev env, with two concerns in one gate:
   (`$PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs` in
   `.claude/settings.json`), blocks `ppds *` unless the active env is in
   it. With none configured this gate is off.
-- **Write-block during shakedown (active when `PPDS_SHAKEDOWN=1`).**
+- **Write-block during shakedown (active when the sentinel file
+  `.claude/state/shakedown-active.json` is fresh, or `PPDS_SHAKEDOWN=1`).**
   Blocks write verbs (`create`, `update`, `delete`, `plugins deploy`
-  without `--dry-run`, `solutions import`, etc.). The shakedown skill
-  exports `PPDS_SHAKEDOWN=1` in its Phase 0.
+  without `--dry-run`, `solutions import`, etc.). In a Claude Code
+  session the shakedown skill arms it in Phase 0 by writing the sentinel
+  file; `PPDS_SHAKEDOWN=1` is the shell / CI form.
 
 Before running any of the patterns below:
 
 1. Confirm `ppds env who` shows a safe env (in the allowlist).
-2. If invoked from `/shakedown`, verify `PPDS_SHAKEDOWN=1` is set so write
+2. If invoked from `/shakedown`, verify `.claude/state/shakedown-active.json`
+   exists (or, outside Claude Code, that `PPDS_SHAKEDOWN=1` is set) so write
    commands fail closed.
 3. Read `docs/SAFE-SHAKEDOWN.md` for the full model and bypass procedure.
 
@@ -560,15 +566,18 @@ to a non-dev env, with two concerns in one gate:
   (`$PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs` in
   `.claude/settings.json`), blocks `ppds *` unless the active env is in
   it. With none configured this gate is off.
-- **Write-block during shakedown (active when `PPDS_SHAKEDOWN=1`).**
+- **Write-block during shakedown (active when the sentinel file
+  `.claude/state/shakedown-active.json` is fresh, or `PPDS_SHAKEDOWN=1`).**
   Blocks write verbs (`create`, `update`, `delete`, `plugins deploy`
-  without `--dry-run`, `solutions import`, etc.). The shakedown skill
-  exports `PPDS_SHAKEDOWN=1` in its Phase 0.
+  without `--dry-run`, `solutions import`, etc.). In a Claude Code
+  session the shakedown skill arms it in Phase 0 by writing the sentinel
+  file; `PPDS_SHAKEDOWN=1` is the shell / CI form.
 
 Before running any of the patterns below:
 
 1. Confirm `ppds env who` shows a safe env (in the allowlist).
-2. If invoked from `/shakedown`, verify `PPDS_SHAKEDOWN=1` is set so write
+2. If invoked from `/shakedown`, verify `.claude/state/shakedown-active.json`
+   exists (or, outside Claude Code, that `PPDS_SHAKEDOWN=1` is set) so write
    commands fail closed.
 3. Read `docs/SAFE-SHAKEDOWN.md` for the full model and bypass procedure.
 
@@ -643,15 +652,18 @@ to a non-dev env, with two concerns in one gate:
   (`$PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs` in
   `.claude/settings.json`), blocks `ppds *` unless the active env is in
   it. With none configured this gate is off.
-- **Write-block during shakedown (active when `PPDS_SHAKEDOWN=1`).**
+- **Write-block during shakedown (active when the sentinel file
+  `.claude/state/shakedown-active.json` is fresh, or `PPDS_SHAKEDOWN=1`).**
   Blocks write verbs (`create`, `update`, `delete`, `plugins deploy`
-  without `--dry-run`, `solutions import`, etc.). The shakedown skill
-  exports `PPDS_SHAKEDOWN=1` in its Phase 0.
+  without `--dry-run`, `solutions import`, etc.). In a Claude Code
+  session the shakedown skill arms it in Phase 0 by writing the sentinel
+  file; `PPDS_SHAKEDOWN=1` is the shell / CI form.
 
 Before running any of the patterns below:
 
 1. Confirm `ppds env who` shows a safe env (in the allowlist).
-2. If invoked from `/shakedown`, verify `PPDS_SHAKEDOWN=1` is set so write
+2. If invoked from `/shakedown`, verify `.claude/state/shakedown-active.json`
+   exists (or, outside Claude Code, that `PPDS_SHAKEDOWN=1` is set) so write
    commands fail closed.
 3. Read `docs/SAFE-SHAKEDOWN.md` for the full model and bypass procedure.
 

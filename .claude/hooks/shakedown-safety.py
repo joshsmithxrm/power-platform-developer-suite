@@ -11,7 +11,8 @@ Two concerns, one hook:
 1. **Env allowlist gating (opt-in).** Once an allowlist names at least one
    env, every Bash invocation that mentions ``ppds`` / ``ppds-mcp-server``
    is gated against that allowlist of dev/test env names. With no allowlist
-   configured the gate is off. The active env is read directly from the PPDS profile
+   configured the gate is off; a misconfigured allowlist blocks (see
+   below). The active env is read directly from the PPDS profile
    store (``profiles.json``). Read-only subcommands (``env list``,
    ``env who``, ...) are always allowed; switching INTO a safe env is
    allowed even when currently on an unsafe one.
@@ -22,15 +23,27 @@ Two concerns, one hook:
    ``--dry-run``, ``solutions import``, etc.) are refused outright. This
    provides a mechanical boundary that the shakedown / verify skills rely on.
 
-**Allowlist sources (checked in order):**
+**Allowlist sources (checked in order; the first that names an env wins):**
 
 1. Env var ``$PPDS_SAFE_ENVS`` -- comma-separated list of env names.
 2. ``.claude/settings.json`` top-level ``safety.shakedown_safe_envs`` array.
-3. ``.claude/state/safe-envs.json`` -- legacy fallback, kept for a single
-   release so in-flight branches don't break during migration. Will be
-   removed once all trees have re-landed the settings.json form.
-4. None set, or the list is empty -- env gating is off (the write-block
-   below still applies during a shakedown).
+3. ``.claude/state/safe-envs.json`` ``safe_envs`` array -- legacy fallback,
+   kept for a single release so in-flight branches don't break during
+   migration. Will be removed once all trees have re-landed the
+   settings.json form.
+
+**Gate off** only when no source is configured at all: ``$PPDS_SAFE_ENVS``
+unset or empty, ``safety.shakedown_safe_envs`` absent or ``[]``, and the
+legacy file absent or with ``safe_envs`` absent or ``[]``. An empty
+settings list falls through to the legacy file. The write-block below
+still applies during a shakedown either way.
+
+**Misconfigured -> BLOCK** every ``ppds`` command (exit 2, message naming
+the problem): ``$PPDS_SAFE_ENVS`` non-empty but naming no env (e.g.
+``","``); ``.claude/settings.json`` present but not parseable JSON, or a
+``safety`` / ``shakedown_safe_envs`` value of the wrong type; the legacy
+file present but unparseable or with a non-list ``safe_envs``; or any
+non-empty list whose entries are not env-name strings.
 
 **Envelope contract:** Claude Code wraps tool input as
 ``{"tool_name": "...", "tool_input": {"command": "..."}}``. Always read the
@@ -115,19 +128,86 @@ def _read_json(path: str) -> Optional[dict]:
         return None
 
 
+class AllowlistConfigError(Exception):
+    """An allowlist source is present but unusable (the hook blocks)."""
+
+
+_MISSING = object()
+
+_SETTINGS_REL = ".claude/settings.json"
+_LEGACY_REL = ".claude/state/safe-envs.json"
+
+
+def _json_type(value) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return type(value).__name__
+
+
+def _read_json_checked(path: str):
+    """Return ``(data, error)``. ``data`` is ``_MISSING`` when no file exists.
+
+    ``error`` is a short description when the file exists but cannot be read
+    or parsed as JSON; ``data`` is then None.
+    """
+    if not os.path.isfile(path):
+        return _MISSING, None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh), None
+    except (OSError, ValueError) as exc:
+        return None, str(exc)
+
+
 def load_safety_config() -> dict:
-    """Return a dict with ``shakedown_safe_envs`` and ``readonly_env_var``.
+    """Return a dict with ``shakedown_safe_envs``, ``readonly_env_var`` and
+    ``allowlist_error``.
 
     Reads from ``.claude/settings.json`` under the ``safety`` top-level key.
-    Falls back to sensible defaults when missing. Never raises.
+    ``shakedown_safe_envs`` is the list as written, or None when the key is
+    absent or unusable. ``allowlist_error`` describes why the settings file
+    cannot supply an allowlist (unparseable file, or a ``safety`` /
+    ``shakedown_safe_envs`` value of the wrong type), else None.
+    ``readonly_env_var`` falls back to the default. Never raises.
     """
-    settings = _read_json(_settings_path()) or {}
-    safety = settings.get("safety") if isinstance(settings, dict) else None
-    if not isinstance(safety, dict):
-        safety = {}
+    settings, read_error = _read_json_checked(_settings_path())
+    allowlist_error = None
+    safety = {}
+    if read_error is not None:
+        allowlist_error = f"{_SETTINGS_REL} could not be parsed as JSON ({read_error})."
+    elif settings is not _MISSING:
+        if not isinstance(settings, dict):
+            allowlist_error = (
+                f"{_SETTINGS_REL} is a JSON {_json_type(settings)}, not an object."
+            )
+        else:
+            raw_safety = settings.get("safety", _MISSING)
+            if isinstance(raw_safety, dict):
+                safety = raw_safety
+            elif raw_safety is not _MISSING:
+                allowlist_error = (
+                    f"`safety` in {_SETTINGS_REL} is a {_json_type(raw_safety)}, "
+                    "not an object."
+                )
 
-    safe_envs = safety.get("shakedown_safe_envs")
-    if not isinstance(safe_envs, list):
+    safe_envs = safety.get("shakedown_safe_envs", _MISSING)
+    if safe_envs is _MISSING:
+        safe_envs = None
+    elif not isinstance(safe_envs, list):
+        allowlist_error = (
+            f"`safety.shakedown_safe_envs` in {_SETTINGS_REL} is a "
+            f"{_json_type(safe_envs)} ({safe_envs!r}), not a list."
+        )
         safe_envs = None
 
     env_var = safety.get("readonly_env_var")
@@ -137,37 +217,91 @@ def load_safety_config() -> dict:
     return {
         "shakedown_safe_envs": safe_envs,
         "readonly_env_var": env_var.strip(),
+        "allowlist_error": allowlist_error,
     }
 
 
-def load_allowlist(config: Optional[dict] = None) -> Optional[list]:
-    """Return the list of safe env names, or None when no allowlist configured.
+def _names_from_list(values: list, source: str) -> list:
+    """Return the env names in a non-empty JSON list, or raise if it has none."""
+    names = []
+    for value in values:
+        if not isinstance(value, str):
+            raise AllowlistConfigError(
+                f"{source} contains a {_json_type(value)} entry ({value!r}); "
+                "every entry must be an env name string."
+            )
+        if value.strip():
+            names.append(value.strip())
+    if not names:
+        raise AllowlistConfigError(f"{source} has entries but names no env.")
+    return names
 
-    Resolution order:
-    1. ``$PPDS_SAFE_ENVS`` env var (comma-separated).
-    2. ``safety.shakedown_safe_envs`` in ``.claude/settings.json``.
-    3. ``.claude/state/safe-envs.json`` (legacy fallback -- migration aid).
-    4. None -> no allowlist; the caller leaves env gating off. An empty
-       list is treated the same way.
+
+def load_allowlist(config: Optional[dict] = None) -> list:
+    """Return the safe env names. An empty list means env gating is off.
+
+    Resolution order -- the first source that names an env wins:
+    1. ``$PPDS_SAFE_ENVS`` env var (comma-separated), when non-empty.
+    2. ``safety.shakedown_safe_envs`` in ``.claude/settings.json``, when a
+       non-empty list.
+    3. ``safe_envs`` in ``.claude/state/safe-envs.json`` (legacy fallback --
+       migration aid), when a non-empty list.
+
+    Returns ``[]`` (gate off) only when nothing is configured: the env var is
+    unset or empty, the settings key is absent or ``[]`` (``[]`` falls
+    through to the legacy file), and the legacy file is absent or its
+    ``safe_envs`` is absent or ``[]``.
+
+    Raises ``AllowlistConfigError`` (the caller blocks) when a source is
+    present but unusable: the env var is non-empty but names no env; the
+    settings file is unparseable or has a wrong-typed ``safety`` /
+    ``shakedown_safe_envs``; the legacy file is unparseable, not an object,
+    or has a non-list ``safe_envs``; or a non-empty list names no env or has
+    a non-string entry. A source consulted after one that already named envs
+    is not read.
     """
-    env_var = os.environ.get("PPDS_SAFE_ENVS", "").strip()
-    if env_var:
-        return [name.strip() for name in env_var.split(",") if name.strip()]
+    raw = os.environ.get("PPDS_SAFE_ENVS", "")
+    if raw.strip():
+        names = [name.strip() for name in raw.split(",") if name.strip()]
+        if not names:
+            raise AllowlistConfigError(
+                f"PPDS_SAFE_ENVS is set to {raw!r}, which names no env."
+            )
+        return names
 
     if config is None:
         config = load_safety_config()
+    if config.get("allowlist_error"):
+        raise AllowlistConfigError(config["allowlist_error"])
     safe = config.get("shakedown_safe_envs")
-    if isinstance(safe, list):
-        return [str(name).strip() for name in safe if str(name).strip()]
+    if safe:
+        return _names_from_list(
+            safe, f"`safety.shakedown_safe_envs` in {_SETTINGS_REL}"
+        )
 
     # Legacy fallback -- keep for one release so mid-migration trees still work.
-    legacy = _read_json(_legacy_safe_envs_path())
-    if isinstance(legacy, dict):
-        legacy_safe = legacy.get("safe_envs")
-        if isinstance(legacy_safe, list):
-            return [str(name).strip() for name in legacy_safe if str(name).strip()]
-
-    return None
+    legacy, read_error = _read_json_checked(_legacy_safe_envs_path())
+    if legacy is _MISSING:
+        return []
+    if read_error is not None:
+        raise AllowlistConfigError(
+            f"{_LEGACY_REL} could not be parsed as JSON ({read_error})."
+        )
+    if not isinstance(legacy, dict):
+        raise AllowlistConfigError(
+            f"{_LEGACY_REL} is a JSON {_json_type(legacy)}, not an object."
+        )
+    legacy_safe = legacy.get("safe_envs", _MISSING)
+    if legacy_safe is _MISSING:
+        return []
+    if not isinstance(legacy_safe, list):
+        raise AllowlistConfigError(
+            f"`safe_envs` in {_LEGACY_REL} is a {_json_type(legacy_safe)} "
+            f"({legacy_safe!r}), not a list."
+        )
+    if not legacy_safe:
+        return []
+    return _names_from_list(legacy_safe, f"`safe_envs` in {_LEGACY_REL}")
 
 
 # ---------------------------------------------------------------------------
@@ -533,12 +667,6 @@ def _format_active(active):
     return active[0]
 
 
-def _format_allowlist(allowlist):
-    if not allowlist:
-        return "(empty)"
-    return ", ".join(allowlist)
-
-
 def _config_help_lines():
     return [
         "  Configure the allowlist via either:",
@@ -553,7 +681,7 @@ def _block_msg_active_not_allowed(active, allowlist, argv):
         "BLOCKED [shakedown-safety/env]: active env is not in the safe-env allowlist.",
         f"  Command:    {' '.join(argv)}",
         f"  Active env: {_format_active(active)}",
-        f"  Allowlist:  {_format_allowlist(allowlist)}",
+        f"  Allowlist:  {', '.join(allowlist)}",
         "",
         "  To proceed, switch to a safe env:",
         "    ppds env select <name>           # canonical CLI",
@@ -569,7 +697,21 @@ def _block_msg_target_not_allowed(target, allowlist, argv):
         "BLOCKED [shakedown-safety/env]: switch target is not in the safe-env allowlist.",
         f"  Command:   {' '.join(argv)}",
         f"  Target:    {target}",
-        f"  Allowlist: {_format_allowlist(allowlist)}",
+        f"  Allowlist: {', '.join(allowlist)}",
+        "",
+    ]
+    lines.extend(_config_help_lines())
+    return "\n".join(lines)
+
+
+def _block_msg_misconfigured(problem, argv):
+    lines = [
+        "BLOCKED [shakedown-safety/env]: the safe-env allowlist is misconfigured.",
+        f"  Command: {' '.join(argv)}",
+        f"  Problem: {problem}",
+        "",
+        "  Fix it so it names at least one env, or remove it (unset the env",
+        "  var, or set the list to []) to leave env gating off.",
         "",
     ]
     lines.extend(_config_help_lines())
@@ -663,8 +805,12 @@ def main() -> None:
     # Concern 1: env allowlist gating -- opt-in. It is active once an
     # allowlist names at least one env; with none configured (missing or
     # empty) the hook does not gate ppds commands, so a fresh clone works
-    # without setup.
-    allowlist = load_allowlist(config)
+    # without setup. A source that is present but unusable blocks.
+    try:
+        allowlist = load_allowlist(config)
+    except AllowlistConfigError as exc:
+        print(_block_msg_misconfigured(str(exc), invocations[0]), file=sys.stderr)
+        sys.exit(2)
     if not allowlist:
         sys.exit(0)
 
