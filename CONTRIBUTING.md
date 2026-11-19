@@ -167,14 +167,18 @@ in the `test-conventions` skill: `.claude/skills/test-conventions/SKILL.md`.
 
 This repo ships Claude Code tooling in `.claude/` — skills that document
 project procedures (release, testing conventions, multi-surface
-verification) and a small set of safety hooks (branch/key protection,
-delete guards). All of it is optional:
+verification) and two safety hooks: one refuses edits to strong-name
+`.snk` key files, and one guards `ppds` commands against live
+environments (off until you configure an allowlist; see
+`docs/SAFE-SHAKEDOWN.md`). All of it is optional:
 
 - **CI is the contract for code quality.** The build, test, and lint gates
   the tooling runs locally are the same plain `dotnet`/`npm` commands CI runs
   on your PR — you can contribute without ever running an AI tool. (The
-  safety hooks — branch/key protection, delete guards — are local Claude
-  Code guards, not CI checks.)
+  safety hooks are local Claude Code guards, not CI checks.)
+- The checked-in `.claude/settings.json` pre-approves only read-only and
+  build/test commands. Put your own permission preferences in
+  `.claude/settings.local.json`, which is gitignored.
 - The skills are plain markdown (`.claude/skills/*/SKILL.md`) — useful as
   documentation even if you never execute them.
 - **Token-cost note:** some skills (`/verify`, `/qa`, `/review`) spawn

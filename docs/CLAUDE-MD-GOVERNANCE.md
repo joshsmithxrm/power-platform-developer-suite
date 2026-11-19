@@ -83,12 +83,13 @@ fails if violated. Listing it in CLAUDE.md is dead code.
 
 ## Enforcement Chain
 
-Three layers protect CLAUDE.md from drift:
+Two git hooks protect CLAUDE.md from drift, and one Claude Code hook guards
+the strong-name key:
 
 | Layer | When | What |
 |-------|------|------|
-| `claudemd-line-cap.py` | PreToolUse on Edit/Write | Blocks an edit that would push the file past 100 lines. Fast feedback at edit time. |
-| `claudemd-gate.sh` | pre-commit | Blocks commit if CLAUDE.md is in the staged diff and either (a) post-edit line count > 100 or (b) commit message lacks the `[claude-md-reviewed: YYYY-MM-DD]` marker. Catches anything that bypassed the PreToolUse layer (manual editors, other agents). |
+| `claudemd-gate.sh` | pre-commit | Blocks commit if CLAUDE.md is in the staged diff and the post-edit line count is over 100. |
+| `claudemd-marker.sh` | commit-msg | Blocks commit if CLAUDE.md is in the staged diff and the commit message lacks the `[claude-md-reviewed: YYYY-MM-DD]` marker. |
 | `snk-protect.py` | PreToolUse on Edit/Write | Adjacent enforcement — replaces the previous CLAUDE.md `.snk` NEVER rule with a deterministic block. |
 
 If a hook misfires, run with `git commit --no-verify` only after fixing the

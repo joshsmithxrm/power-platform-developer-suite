@@ -136,15 +136,15 @@ Skip on Linux — not meaningful in dev containers.
 
 ### Step 8: AI Tooling Check (wizard only)
 
-Verify the hook layer runs — valid envelope, always-permitted path (`.claude/worktrees/` is allowlisted even on `main`), expect exit 0:
+Verify the hook layer runs — a `.snk` path is always refused, so expect exit 2 and a `BLOCKED` message:
 
 ```bash
-printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$PWD/.claude/worktrees/probe/x.md" | python .claude/hooks/protect-main-branch.py
+printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$PWD/probe.snk" | python .claude/hooks/snk-protect.py
 ```
 
-If Python is not available, warn that the `.claude/` hooks require Python 3 (a non-zero exit above means the hook layer itself is broken).
+If Python is not available, warn that the `.claude/` hooks require Python 3 (any exit other than 2 above means the hook layer itself is broken).
 
-Check that `.claude/settings.json` contains the hook configuration (PreToolUse, PostToolUse, and any other configured hook events).
+Check that `.claude/settings.json` contains the hook configuration (PreToolUse).
 
 ### Step 9: Developer Experience Options (wizard only)
 

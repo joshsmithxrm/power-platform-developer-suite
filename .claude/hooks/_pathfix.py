@@ -3,7 +3,6 @@
 Defense-in-depth for Git Bash (MSYS) environments where CLAUDE_PROJECT_DIR
 may contain /c/VS/... style paths that Python interprets as C:\\c\\VS\\...
 """
-import os
 import re
 import sys
 
@@ -17,8 +16,3 @@ def normalize_msys_path(path):
         if m:
             return f"{m.group(1).upper()}:/{m.group(2)}"
     return path
-
-
-def get_project_dir():
-    """Get CLAUDE_PROJECT_DIR as a platform-native path."""
-    return normalize_msys_path(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))

@@ -57,7 +57,7 @@ description: One sentence describing when to use this skill. Write for AI discov
 
 ## Two-File Pattern
 
-SKILL.md is capped at 150 lines and is the entry point loaded on demand. Move rationale, worked examples, and long tables into a sibling `REFERENCE.md` that SKILL.md references. See `.claude/skills/TWO-FILE-PATTERN.md`.
+SKILL.md should stay at or under 150 lines (a guideline; nothing blocks a longer file) and is the entry point loaded on demand. Move rationale, worked examples, and long tables into a sibling `REFERENCE.md` that SKILL.md references. See `.claude/skills/TWO-FILE-PATTERN.md`.
 
 ## Authoring an Agent
 

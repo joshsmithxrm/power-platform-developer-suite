@@ -13,7 +13,7 @@ permissions:
 #     `.claude/settings.json` uses `$CLAUDE_PROJECT_DIR/`. It was correct and
 #     would have caught PR #973 silently regressing all 39 entries back to
 #     bare-relative paths — but nothing in CI invoked it. This workflow was
-#     created to run that file (plus `tests/test_hooks.py`).
+#     created to run that file.
 #   * `tests/scripts/dependabot/test_classify.py` guards `classify.py` — the
 #     module deciding which dependabot PRs auto-merge — yet no `pull_request`
 #     workflow ran it, so a regression could merge with green CI (found while
