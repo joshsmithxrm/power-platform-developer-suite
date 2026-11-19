@@ -37,6 +37,7 @@ jobs:
               - 'Directory.Build.props'
               - 'Directory.Packages.props'
               - 'nuget.config'
+              - '.editorconfig'
               - 'src/PPDS.Extension/**'
             extension:
               - 'src/PPDS.Extension/**'

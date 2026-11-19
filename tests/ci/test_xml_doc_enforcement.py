@@ -51,6 +51,29 @@ def test_generated_code_stays_exempt_after_the_library_section():
     assert library_sections and max(library_sections) < generated
 
 
+def test_no_later_section_lowers_cs1591_for_library_sources():
+    sections = _editorconfig_sections()
+    first_error = min(i for i, (glob, settings) in enumerate(sections)
+                      if settings.get(CS1591) == "error" and _section_libraries(glob))
+    for glob, settings in sections[first_error + 1:]:
+        if glob == "**/Generated/**.cs" or settings.get(CS1591, "error") == "error":
+            continue
+        # Only the Generated section may lower CS1591 after the library section.
+        assert not any(library in glob for library in LIBRARIES), glob
+        assert not glob.startswith(("*", "src/*", "src/{", "**")), glob
+
+
+def _mentions_cs1591(text):
+    return re.search(r"\b(CS)?1591\b", text) is not None
+
+
+def test_cs1591_matcher_catches_both_spellings():
+    assert _mentions_cs1591("$(NoWarn);CS1591")
+    assert _mentions_cs1591("$(NoWarn);1591")
+    assert _mentions_cs1591("1591;CS8618")
+    assert not _mentions_cs1591("$(NoWarn);RS0026;CS15910")
+
+
 def test_library_projects_generate_docs_without_overriding_the_severity():
     for library in LIBRARIES:
         project = ET.parse(ROOT / "src" / library / f"{library}.csproj").getroot()
@@ -62,4 +85,4 @@ def test_library_projects_generate_docs_without_overriding_the_severity():
         # NoWarn would silence CS1591; WarningsAsErrors would override the
         # Generated/ exemption in .editorconfig (command-line options win).
         for tag in ("NoWarn", "WarningsAsErrors"):
-            assert not any("CS1591" in text for text in values.get(tag, [])), (library, tag)
+            assert not any(_mentions_cs1591(text) for text in values.get(tag, [])), (library, tag)

@@ -46,6 +46,7 @@ jobs:
               - '**.targets'
               - 'global.json'
               - 'NuGet.config'
+              - '.editorconfig'
               - '.github/workflows/test.yml'
             extraction:
               - '.nvmrc'
@@ -82,6 +83,7 @@ jobs:
               - 'global.json'
               - 'NuGet.config'
               - 'nuget.config'
+              - '.editorconfig'
               - '.github/**'
               - 'pyproject.toml'
               - 'pytest.ini'
