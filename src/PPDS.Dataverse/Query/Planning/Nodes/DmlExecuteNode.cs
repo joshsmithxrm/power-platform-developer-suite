@@ -10,6 +10,8 @@ using PPDS.Dataverse.Query.Execution;
 namespace PPDS.Dataverse.Query.Planning.Nodes;
 
 /// <summary>A compiled SET clause for UPDATE statements.</summary>
+/// <param name="ColumnName">Logical name of the target column that receives the value.</param>
+/// <param name="Value">Compiled expression evaluated against each source row to produce the new column value.</param>
 public sealed record CompiledSetClause(string ColumnName, CompiledScalarExpression Value);
 
 /// <summary>

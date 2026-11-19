@@ -61,4 +61,11 @@
     <PackageReference Include="System.Security.Cryptography.Xml" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- PPDS architectural enforcement analyzers -->
+    <ProjectReference Include="..\PPDS.Analyzers\PPDS.Analyzers.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
 </Project>

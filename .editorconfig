@@ -84,6 +84,8 @@ dotnet_diagnostic.PPDS010.severity = suggestion
 dotnet_diagnostic.PPDS011.severity = suggestion
 dotnet_diagnostic.PPDS012.severity = suggestion
 dotnet_diagnostic.PPDS013.severity = suggestion
+# PPDS014 (XmlDocOnPublicApi) is clean in the library assemblies, so it runs as a warning.
+dotnet_diagnostic.PPDS014.severity = warning
 
 # Generated code - relax rules that are noisy for auto-generated files
 [**/Generated/**.cs]

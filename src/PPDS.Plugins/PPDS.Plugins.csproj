@@ -51,4 +51,11 @@
     <PackageReference Include="MinVer" PrivateAssets="all" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- PPDS architectural enforcement analyzers -->
+    <ProjectReference Include="..\PPDS.Analyzers\PPDS.Analyzers.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
 </Project>

@@ -12,9 +12,9 @@
          (struct pointers in delegate signatures). Unsafe is confined to Internal/CredentialStore/**. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
-    <!-- Phase 0 docs-generation pilot: PPDS014 and PublicApiAnalyzers are errors
-         in this project. Other PPDS libraries (Dataverse, Migration, Plugins)
-         still default these to warnings until they are onboarded. -->
+    <!-- PPDS014 and PublicApiAnalyzers are errors in this project. In Migration,
+         TreatWarningsAsErrors makes PPDS014 an error too; Dataverse and Plugins
+         leave it as a warning. -->
     <WarningsAsErrors>$(WarningsAsErrors);PPDS014;RS0016;RS0017</WarningsAsErrors>
 
     <!-- RS0026/RS0027: "multiple overloads with optional parameters" backcompat
@@ -97,6 +97,13 @@
     <!-- Source Link -->
     <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
     <PackageReference Include="MinVer" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- PPDS architectural enforcement analyzers -->
+    <ProjectReference Include="..\PPDS.Analyzers\PPDS.Analyzers.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>
