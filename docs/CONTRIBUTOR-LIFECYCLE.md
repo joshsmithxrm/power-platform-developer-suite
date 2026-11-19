@@ -76,7 +76,8 @@ communication/disposition remains visible until completed or explicitly decided.
 
 ## Lightweight checklist and local validation
 
-The PR template prompts for the applicable mode and provenance record. Maintainers
+The [maintainer merge checklist](MERGE-POLICY.md#maintainer-merge-checklist) lists
+the applicable modes and what each provenance record needs. Maintainers
 can record evidence in the PR body, an attached review artifact or a local JSON
 file; there is no requirement to commit personal information or a ledger for every
 PR. No-contribution work uses this minimal record:

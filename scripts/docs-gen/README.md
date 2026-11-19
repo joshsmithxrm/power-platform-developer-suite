@@ -202,5 +202,5 @@ A `[McpServerTool]` method is missing metadata. Set `Name` via the attribute's n
 ## Design references
 
 - [`specs/docs-generation.md`](../../specs/docs-generation.md) — the full spec with 30 ACs
-- [`specs/CONSTITUTION.md`](../../specs/CONSTITUTION.md) — non-negotiable principles
+- [`specs/CONSTITUTION.md`](../../specs/CONSTITUTION.md) — architecture principles and spec process
 - [`specs/analyzers.md`](../../specs/analyzers.md) — PPDS.Analyzers project conventions (extended by PPDS014/015/016)

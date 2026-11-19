@@ -482,7 +482,7 @@ node src/PPDS.Extension/tools/webview-cdp.mjs notebook run-all
 
 ### Screenshots (Extension)
 
-**Always save screenshots to a temp directory. NEVER save to the repo working tree.** <!-- enforcement: T2 hook:screenshot-temp-dir -->
+**Always save screenshots to a temp directory. NEVER save to the repo working tree.**
 
 ```bash
 # Good — uses temp directory (use $TEMP on Windows, $TMPDIR on macOS/Linux)
@@ -554,7 +554,7 @@ If you encounter a webview interaction that this tool cannot handle:
 
 ## §cli — CLI Verify Reference
 
-Supporting knowledge for `/verify cli` and `/qa cli`. Documents how to build, run, and verify CLI commands.
+Supporting knowledge for `/verify cli`. Documents how to build, run, and verify CLI commands.
 
 ### Safety pre-check
 
@@ -640,7 +640,7 @@ Test error paths:
 
 ## §mcp — MCP Verify Reference
 
-Supporting knowledge for `/verify mcp` and `/qa mcp`. Documents how to interact with and verify MCP server tools.
+Supporting knowledge for `/verify mcp`. Documents how to interact with and verify MCP server tools.
 
 ### Safety pre-check
 
@@ -731,7 +731,7 @@ For each tool invocation, verify:
 
 ## §workflow — Workflow Infrastructure Verify Reference
 
-How to test changes to `.claude/` infrastructure: hooks, skills, agents, settings.
+How to test changes to `.claude/` infrastructure: hooks, skills, settings.
 
 ### Hook Testing
 

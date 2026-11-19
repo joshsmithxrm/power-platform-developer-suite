@@ -124,7 +124,7 @@ const innerFrame = await innerIframe.contentFrame();
 | Frame resolver | `contentFrame()` chain to reach webview inner frames |
 | Command palette helper | Open palette, type command, select result — adapted from archived `CommandPaletteHelper.ts` pattern |
 | Console capture | `page.on('console')` + `page.on('pageerror')` running in daemon, writing JSONL to `.webview-cdp-console.log` |
-| Skill file | `.agents/skills/webview-cdp/SKILL.md` — teaches AI agents when/how to use the tool. **Must be fully rewritten for v2** — the v1 skill file actively contradicts v2 capabilities (claims keyboard shortcuts don't work, documents removed `attach` command, missing `command`/`wait`/`logs`). Must also include guidance to save screenshots to temp directories. |
+| Skill file | `.claude/skills/verify/SKILL.md` and `.claude/skills/verify/REFERENCE.md` ("Extension Mode") — teach AI agents when/how to use the tool. They document the v2 commands, including `command`, `wait`, `logs` and `key`, and save screenshots under `$TEMP`. |
 
 ### Dependencies
 

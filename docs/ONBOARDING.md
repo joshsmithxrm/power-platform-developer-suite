@@ -2,9 +2,9 @@
 
 A new-contributor walkthrough of the **core libraries** of the Power Platform Developer Suite: the shared Application Services and the MCP server that sit beneath every PPDS surface.
 
-> **Scope.** This guide covers the libraries under `src/` — **PPDS.Dataverse, PPDS.Auth, PPDS.Query, PPDS.Migration, PPDS.Mcp, PPDS.Plugins, PPDS.Analyzers**. The UI surfaces **PPDS.Cli** and **PPDS.Extension** are intentionally out of scope: they are thin shells that map user actions onto the services described here. Once you understand these libraries, the surfaces are easy.
+> **Scope.** This guide covers the libraries under `src/` — **PPDS.Dataverse, PPDS.Auth, PPDS.Query, PPDS.Migration, PPDS.Mcp, PPDS.Plugins, PPDS.Analyzers**. The UI surfaces of **PPDS.Cli** and **PPDS.Extension** are out of scope: they are thin shells that map user actions onto services. (PPDS.Cli also hosts the Application Services themselves, in `src/PPDS.Cli/Services/`.) For setup, build and test commands, see [CONTRIBUTING.md](../CONTRIBUTING.md); for the extension, see [src/PPDS.Extension/DEVELOPMENT.md](../src/PPDS.Extension/DEVELOPMENT.md).
 >
-> **How this was generated & how to refresh it.** The first draft was produced from an [understand-anything](https://github.com/) knowledge graph (`/understand src`) at commit `e67fd952`, then curated by hand. It is **prose documentation, not a generated artifact checked into the repo** — keep it accurate the same way you keep any doc accurate: edit it when the architecture changes. To regenerate a fresh structural pass for reference, run `/understand src` and explore with `/understand-dashboard src` locally (the raw graph is gitignored).
+> **Keeping it current.** The first draft was produced from a generated knowledge graph of `src/` at commit `e67fd952`, then curated by hand. It is ordinary prose documentation: edit it when the architecture changes.
 
 ---
 
@@ -12,7 +12,7 @@ A new-contributor walkthrough of the **core libraries** of the Power Platform De
 
 **PPDS (Power Platform Developer Suite)** is a multi-surface .NET platform for Microsoft Power Platform and Dataverse. It ships a CLI, a TUI, a VS Code extension, an MCP server, and NuGet libraries — each surface independently consumable.
 
-The governing rule of the whole codebase (see `specs/CONSTITUTION.md` and `CLAUDE.md`):
+The governing rule of the whole codebase (see `specs/CONSTITUTION.md` and `AGENTS.md`):
 
 > **All business logic lives in Application Services — never in UI code.**
 
@@ -20,7 +20,7 @@ Every surface is a thin adapter over the same services. That is why this guide i
 
 - **Language:** C# (.NET 8/9/10; `PPDS.Plugins` targets `net462` for the Dataverse plugin sandbox)
 - **Key dependencies:** Microsoft.PowerPlatform.Dataverse.Client, Microsoft.SqlServer.TransactSql.ScriptDom (T‑SQL parsing), ModelContextProtocol, MSAL / Azure.Identity, Microsoft.Extensions.DependencyInjection / Hosting, MinVer
-- **Architecture enforcement:** a dedicated Roslyn analyzer package (`PPDS.Analyzers`) turns the platform's own conventions into build errors
+- **Architecture checks:** a dedicated Roslyn analyzer package (`PPDS.Analyzers`) flags violations of the platform's own conventions in PPDS.Cli and PPDS.Mcp
 
 ---
 
@@ -36,8 +36,8 @@ The core libraries decompose into eight cohesive layers. Dependencies generally 
 | **Generated Dataverse Entities** | `PPDS.Dataverse/Generated` | Auto-generated early-bound entity and option-set classes from the Dataverse schema, giving compile-time column type safety. **Do not hand-edit** — regenerated via `pac modelbuilder`. |
 | **SQL Query Engine** | `PPDS.Query` + `PPDS.Dataverse/Query` | The crown jewel: T‑SQL → Dataverse translation. ScriptDom parsing, a Volcano-model physical plan, FetchXML transpilation, TDS execution, a full ADO.NET provider, and SQL IntelliSense. Split across two projects by dependency direction (library API vs. Dataverse-coupled execution). |
 | **Data Migration Engine** | `PPDS.Migration` | Parallel export and tiered import for moving data between environments: CMT-format adapters, dependency-ordered import, schema generation, user mapping, and progress reporting. |
-| **MCP Server** | `PPDS.Mcp` | A .NET global tool exposing 20+ Dataverse capabilities as Model Context Protocol tools for AI assistants. The most self-contained **runnable** surface in scope — and a textbook example of the surface→service pattern. |
-| **Roslyn Analyzers** | `PPDS.Analyzers` | 16 compile-time rules enforcing the platform's architecture (Application-Service boundaries, async hygiene, Dataverse performance patterns, structured exceptions, public-API docs). The codebase's "immune system." |
+| **MCP Server** | `PPDS.Mcp` | A .NET global tool exposing 40+ Dataverse capabilities as Model Context Protocol tools for AI assistants. The most self-contained **runnable** surface in scope — and a textbook example of the surface→service pattern. |
+| **Roslyn Analyzers** | `PPDS.Analyzers` | 16 compile-time rules covering the platform's architecture (Application-Service boundaries, async hygiene, Dataverse performance patterns, structured exceptions, public-API docs). Applied to PPDS.Cli and PPDS.Mcp. |
 
 ---
 
@@ -46,12 +46,12 @@ The core libraries decompose into eight cohesive layers. Dependencies generally 
 These patterns recur everywhere. Learn them once, recognize them everywhere.
 
 - **Application Services hold all logic.** A surface handler (CLI command, MCP tool, extension panel) only maps parameters and translates errors; it resolves an `I…Service` from DI and delegates. If you find business logic in a handler, that's a bug.
-- **Connection pooling is the performance primitive.** `IDataverseConnectionPool` hands out pooled `ServiceClient`s for parallel workloads. **The critical rule:** never reuse a single checked-out client across multiple concurrent awaited calls — each parallel branch checks out its own. This is subtle enough that analyzer **PPDS0007** (`PoolClientInParallelAnalyzer`) enforces it at compile time.
-- **Errors are wrapped, never raw.** Application Services wrap exceptions in `PpdsException` with an `ErrorCode` (enforced by analyzer **PPDS0004**, `UseStructuredExceptionsAnalyzer`).
-- **`stdout` is reserved for data.** Services never write status to `stdout`; use `Console.Error` / an injected writer (enforced by **PPDS0002**, `NoConsoleInServicesAnalyzer`). Note the auth library's injectable `Action<string>` writer pattern instead of direct console access.
+- **Connection pooling is the performance primitive.** `IDataverseConnectionPool` hands out pooled `ServiceClient`s for parallel workloads. **The critical rule:** never reuse a single checked-out client across multiple concurrent awaited calls — each parallel branch checks out its own. Analyzer **PPDS007** (`PoolClientInParallelAnalyzer`) flags it, at suggestion severity, so the build will not stop you.
+- **Errors are wrapped, never raw.** Application Services wrap exceptions in `PpdsException` with an `ErrorCode` (flagged by analyzer **PPDS004**, `UseStructuredExceptionsAnalyzer`).
+- **`stdout` is reserved for data.** Services never write status to `stdout`; use `Console.Error` / an injected writer (flagged by **PPDS002**, `NoConsoleInServicesAnalyzer`). Note the auth library's injectable `Action<string>` writer pattern instead of direct console access.
 - **Strongly-typed everywhere.** Metadata comes back as DTOs (`EntityMetadataDto`, `AttributeMetadataDto`, …), not raw SDK objects; columns are accessed through generated early-bound entities, not string keys.
 - **`IProgressReporter` for anything slow.** Long-running operations thread progress events through so CLI/TUI/MCP all get live feedback.
-- **Public API is locked.** `PublicAPI.Shipped.txt` / `PublicAPI.Unshipped.txt` track the exported surface; RS0016/RS0017 are build errors. Don't hand-edit these during a rebase (see `CLAUDE.md`).
+- **PPDS.Auth's public API is tracked.** `src/PPDS.Auth/PublicAPI.Shipped.txt` / `PublicAPI.Unshipped.txt` record its exported surface; RS0016/RS0017 are build errors there. Don't hand-merge them during a rebase (see CONTRIBUTING.md).
 
 ---
 
@@ -83,9 +83,9 @@ A 14-stop path from the simplest library to the full request flow. Each stop nam
 
 **12. MCP Server — Entry Point & Composition Root — `PPDS.Mcp/Program.cs` + `Infrastructure/`.** `Program.cs` is the only runnable entry point in scope: it configures the DI host, registers the Auth/Dataverse/Query/Migration services, and wires `McpConnectionPoolManager` for per-session pool lifecycle. `McpToolBase.CreateScopeAsync` creates a per-request DI scope and resolves the target service — the surface→service pattern in action.
 
-**13. MCP Tool Handlers in Practice — `PPDS.Mcp/Tools/`.** 50+ `McpToolBase` subclasses, one capability each. `QuerySqlTool` → ADO.NET provider (stop 10); `MetadataCreateTableTool` → metadata authoring (stop 7); `PluginsListTool` → generated entities (stop 7). **Trace one tool end-to-end** — e.g. `QuerySqlTool → PpdsDbCommand → PlanExecutor → QueryExecutor → FetchXML → Dataverse` — and you've connected every layer in this tour.
+**13. MCP Tool Handlers in Practice — `PPDS.Mcp/Tools/`.** 40+ `McpToolBase` subclasses, one capability each. `QuerySqlTool` → ADO.NET provider (stop 10); `MetadataCreateTableTool` → metadata authoring (stop 7); `PluginsListTool` → generated entities (stop 7). **Trace one tool end-to-end** — e.g. `QuerySqlTool → PpdsDbCommand → PlanExecutor → QueryExecutor → FetchXML → Dataverse` — and you've connected every layer in this tour.
 
-**14. Roslyn Analyzers — `PPDS.Analyzers/Rules/`.** 16 rules enforcing architecture at compile time. `DiagnosticIds.cs` is the rule registry; `NoConsoleInServicesAnalyzer` (PPDS0002), `PoolClientInParallelAnalyzer` (PPDS0007), and `UseStructuredExceptionsAnalyzer` (PPDS0004) encode the conventions from §3. Violations are build errors, not PR comments.
+**14. Roslyn Analyzers — `PPDS.Analyzers/Rules/`.** 16 compile-time rules. `DiagnosticIds.cs` is the rule registry; `NoConsoleInServicesAnalyzer` (PPDS002), `PoolClientInParallelAnalyzer` (PPDS007), and `UseStructuredExceptionsAnalyzer` (PPDS004) encode the conventions from §3. PPDS001–PPDS013 are at suggestion severity in `.editorconfig`, so they appear in the IDE but do not fail the build; PPDS015 and PPDS016 are warnings, which PPDS.Cli and PPDS.Mcp treat as errors; PPDS014 reports only in the four library assemblies, which do not load the analyzers, so it does not fire today. Their tests are in `tests/PPDS.Analyzers.Tests`.
 
 ---
 
@@ -110,12 +110,7 @@ Beyond these, the **`PPDS.Dataverse/Query/Planning/Nodes/`** and **`PPDS.Query/P
 
 ## 6. First-Day Checklist
 
-1. Read `CLAUDE.md` and `specs/CONSTITUTION.md` (Spec Laws SL1–SL5, the NEVER/ALWAYS lists).
+1. Read `AGENTS.md` and Part 1 of `specs/CONSTITUTION.md` (the architecture principles).
 2. Read `PPDS.Mcp/README.md` and `PPDS.Dataverse/README.md`.
 3. Walk tour stops 1–7 in code; skim 8–14.
-4. Internalize the pool-parallelism rule and the `PpdsException` convention — the analyzers will hold you to them.
-5. Build and run the analyzer suite to see the rules fire: `dotnet test PPDS.sln --filter "Category!=Integration" -v q`.
-
----
-
-*Maintainers: keep this guide current by editing it directly. For a fresh structural reference, run `/understand src` and `/understand-dashboard src` locally — the raw knowledge graph under `src/.understand-anything/` is gitignored.*
+4. Internalize the pool-parallelism rule and the `PpdsException` convention — reviewers will hold you to them, and the analyzers only suggest.

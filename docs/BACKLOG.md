@@ -28,6 +28,7 @@ them here — past audits found drift between this doc and the live state.
 | Any milestone | (none needed) | Committed to that release |
 | None | `status:backlog` | Triaged, deliberately parked |
 | None | `status:needs-evaluation` | Blocked on investigation |
+| None | `status:blocked-upstream` | Waiting on an external dependency |
 | None | (no status label) | **Untriaged inbox** — needs a decision |
 
 ## Rules
@@ -37,7 +38,7 @@ them here — past audits found drift between this doc and the live state.
 3. **Monthly review:** Check inbox is empty. Review `status:backlog` + `priority:high` for promotion to a milestone.
 4. **Epics vs milestones:** Epics track initiatives across areas. Milestones track releases. An issue can have both.
 5. **Validity over staleness:** There is no time-based staleness rule. Issues are valid or invalid based on whether their premise still matches the codebase, not their age. Validate during triage.
-6. **Pipeline-created issues** land in the inbox unlabeled. The pipeline retro stage files issues for findings but cannot reliably assign `type:` or `area:`. These issues are triaged during the next `/backlog triage` pass.
+6. **Automation-created issues** (for example findings filed from a shakedown or a retro) may land in the inbox without `type:` or `area:` labels. Triage them in the next inbox pass.
 
 ## Useful Queries
 

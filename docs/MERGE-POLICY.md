@@ -2,11 +2,8 @@
 
 How PRs get merged into `main`. Operational reference for maintainers.
 
-For contributor work, apply the shared [contributor lifecycle](CONTRIBUTOR-LIFECYCLE.md)
-before choosing the landing PR. Prefer the original PR when practical; verify the
-actual proposed squash author/message and resulting credit, and name the owners
-of contributor communication and source-PR disposition. Auto-merge eligibility
-does not waive these applicable checks or grant communication permission.
+For contributor work, complete the [maintainer merge checklist](#maintainer-merge-checklist)
+before merging. Auto-merge eligibility does not waive it or grant communication permission.
 
 ## Auto-Merge
 
@@ -80,12 +77,24 @@ To add or remove a package: edit the list above (between the `BEGIN`/`END` marke
 `main` is protected. PRs must:
 
 - Be up to date with `main` before merging (auto-merge handles this via dependabot rebases or `gh pr update-branch`)
-- Pass all required status checks
-- Have any required reviews approved
+- Pass the two required status checks, `build-status` and `test-status`
+
+No approving review is required by branch protection. Every other check (Codecov, CodeQL, the Pre-Merge Gate, the TUI end-to-end workflow, automated review comments) is advisory: read it before merging, but GitHub does not block on it.
+
+## Maintainer merge checklist
+
+Before merging a PR that may incorporate outside work, apply the shared [contributor lifecycle](CONTRIBUTOR-LIFECYCLE.md): prefer the original PR when practical, verify the actual proposed squash author and message and the resulting credit, and name the owners of contributor communication and source-PR disposition. Record one route:
+
+- [ ] No external contribution incorporated; reason recorded.
+- [ ] Original contributor PR lands directly; exact source/head and credit recorded.
+- [ ] Work incorporated elsewhere; reason, source PR/head, verified identity and landing PR recorded.
+- [ ] If applicable: proposed squash author/message checked; communication and disposition owners named; exact reply/decision prepared when permission is needed.
+
+No-contribution work needs no invented source or identity and no extra approval. The offline validator (`scripts/ci/check_contributor_provenance.py`) checks supplied records, not semantic overlap or live state.
 
 ## Pre-Merge Gate Rules
 
-The [`pre-merge-gate.yml`](../.github/workflows/pre-merge-gate.yml) workflow enforces one rule (Rule 3, below) on every PR before merge, with no soft-warn period (per the v1-launch retro), and reports PR size for information. Each check is its own job in the PR Checks tab; the aggregate `Pre-Merge Gate` check succeeds iff the enforcing rule passes.
+The [`pre-merge-gate.yml`](../.github/workflows/pre-merge-gate.yml) workflow runs on every PR. It evaluates one rule (Rule 3, below) and reports PR size for information. Each check is its own job in the PR Checks tab; the aggregate `Pre-Merge Gate` check succeeds iff Rule 3 passes. The aggregate is not a required status check, so GitHub does not block a merge on it: a maintainer must not merge, or enable auto-merge on, a PR whose `Pre-Merge Gate` has failed.
 
 Rule logic lives in `scripts/ci/`.
 

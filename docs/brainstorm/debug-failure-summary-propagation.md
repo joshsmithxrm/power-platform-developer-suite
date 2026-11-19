@@ -85,4 +85,4 @@ if not decision.get("failure_summary"):
 
 **Trivial fix** — single file, two lines, no behavior change for any existing caller.
 
-Hand off to `/implement` with `mode: tdd`. The reproducing test (`test_ci_failure_routes_to_fix[0]`) must fail against the unpatched code and pass after applying the fix. A second parametrize case covering agent-supplied non-empty `failure_summary` is recommended to close the untested case (c) gap noted by the challenger.
+Implement it test-first. The reproducing test (`test_ci_failure_routes_to_fix[0]`) must fail against the unpatched code and pass after applying the fix. A second parametrize case covering agent-supplied non-empty `failure_summary` is recommended to close the untested case (c) gap noted by the challenger.
