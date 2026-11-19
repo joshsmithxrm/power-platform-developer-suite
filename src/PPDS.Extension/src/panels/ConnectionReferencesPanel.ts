@@ -217,6 +217,7 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadConnectionReferences(true))) {
                 return;
             }
+            if (!isCurrent()) return;
 
             this.postMessage({ command: 'error', message: msg });
         }
@@ -264,9 +265,11 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
     }
 
     private async runAnalysis(): Promise<void> {
+        const isCurrent = this.beginRequest('analysis');
         try {
             this.postMessage({ command: 'loading' });
             const result = await this.daemon.connectionReferencesAnalyze(this.environmentUrl, this.profileName);
+            if (!isCurrent()) return;
             this.postMessage({
                 command: 'analyzeResult',
                 result: {
@@ -285,6 +288,7 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                 },
             });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Analysis failed: ${msg}` });
         }
@@ -371,12 +375,14 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
     }
 
     private async loadConnectionsForPicker(logicalName: string, connectorId: string | null): Promise<void> {
+        const isCurrent = this.beginRequest('connections');
         try {
             const result = await this.daemon.connectionsList(
                 connectorId ?? undefined,
                 this.environmentUrl,
                 this.profileName,
             );
+            if (!isCurrent()) return;
             this.postMessage({
                 command: 'connectionsLoaded',
                 logicalName,
@@ -391,6 +397,7 @@ export class ConnectionReferencesPanel extends WebviewPanelBase<ConnectionRefere
                 })),
             });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to load connections: ${msg}` });
         }

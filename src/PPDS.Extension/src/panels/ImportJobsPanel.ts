@@ -152,6 +152,7 @@ export class ImportJobsPanel extends WebviewPanelBase<ImportJobsPanelWebviewToHo
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadImportJobs(true))) {
                 return;
             }
+            if (!isCurrent()) return;
 
             this.postMessage({ command: 'error', message: msg });
         }
@@ -162,8 +163,10 @@ export class ImportJobsPanel extends WebviewPanelBase<ImportJobsPanelWebviewToHo
      * editor tab with XML language mode. The XML is prettified before display.
      */
     private async openImportLog(id: string): Promise<void> {
+        const isCurrent = this.beginRequest('importLog');
         try {
             const result = await this.daemon.importJobsGet(id, this.environmentUrl, this.profileName);
+            if (!isCurrent()) return;
             const raw = result.job.data;
             if (!raw) {
                 void vscode.window.showInformationMessage('No import log data available for this job.');
@@ -174,6 +177,7 @@ export class ImportJobsPanel extends WebviewPanelBase<ImportJobsPanelWebviewToHo
             const doc = await vscode.workspace.openTextDocument({ content: pretty, language: 'xml' });
             await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             void showErrorWithReport(`Failed to open import log: ${msg}`);
         }

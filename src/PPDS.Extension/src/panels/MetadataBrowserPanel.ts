@@ -171,6 +171,7 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadEntities(true))) {
                 return;
             }
+            if (!isCurrent()) return;
 
             this.postMessage({ command: 'error', message: msg });
         }
@@ -190,6 +191,7 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadGlobalChoices(true))) {
                 return;
             }
+            if (!isCurrent()) return;
 
             // Non-fatal — choices section just stays empty
             this.postMessage({ command: 'globalChoicesLoaded', choices: [] });
@@ -213,6 +215,7 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadGlobalChoiceDetail(name, true))) {
                 return;
             }
+            if (!isCurrent()) return;
 
             this.postMessage({ command: 'error', message: `Failed to load choice detail: ${msg}` });
         }
@@ -235,6 +238,7 @@ export class MetadataBrowserPanel extends WebviewPanelBase<MetadataBrowserPanelW
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadEntityDetail(logicalName, true))) {
                 return;
             }
+            if (!isCurrent()) return;
 
             this.postMessage({ command: 'error', message: `Failed to load entity detail: ${msg}` });
         }

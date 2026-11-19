@@ -192,6 +192,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadEnvironmentVariables(true))) {
                 return;
             }
+            if (!isCurrent()) return;
 
             this.postMessage({ command: 'error', message: msg });
         }
@@ -228,8 +229,10 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
     }
 
     private async startEditVariable(schemaName: string): Promise<void> {
+        const isCurrent = this.beginRequest('edit');
         try {
             const result = await this.daemon.environmentVariablesGet(schemaName, this.environmentUrl, this.profileName);
+            if (!isCurrent()) return;
             const v = result.variable;
             this.postMessage({
                 command: 'editVariableDialog',
@@ -239,6 +242,7 @@ export class EnvironmentVariablesPanel extends WebviewPanelBase<EnvironmentVaria
                 currentValue: v.currentValue,
             });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to load variable for editing: ${msg}` });
         }

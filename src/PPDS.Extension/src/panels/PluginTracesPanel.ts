@@ -209,14 +209,17 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadTraces(true))) {
                 return;
             }
+            if (!isCurrent()) return;
 
             this.postMessage({ command: 'error', message: msg });
         }
     }
 
     private async loadTraceDetail(id: string): Promise<void> {
+        const isCurrent = this.beginRequest('detail');
         try {
             const result = await this.daemon.pluginTracesGet(id, this.environmentUrl, this.profileName);
+            if (!isCurrent()) return;
             const t = result.trace;
             const trace: PluginTraceDetailViewDto = {
                 id: t.id,
@@ -250,14 +253,17 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
             };
             this.postMessage({ command: 'traceDetailLoaded', trace });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to load trace detail: ${msg}` });
         }
     }
 
     private async loadTimeline(correlationId: string): Promise<void> {
+        const isCurrent = this.beginRequest('timeline');
         try {
             const result = await this.daemon.pluginTracesTimeline(correlationId, this.environmentUrl, this.profileName);
+            if (!isCurrent()) return;
             const mapNodes = (nodes: typeof result.nodes): TimelineNodeViewDto[] =>
                 nodes.map(n => ({
                     traceId: n.traceId,
@@ -273,6 +279,7 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
                 }));
             this.postMessage({ command: 'timelineLoaded', nodes: mapNodes(result.nodes) });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to load timeline: ${msg}` });
         }
@@ -315,10 +322,13 @@ export class PluginTracesPanel extends WebviewPanelBase<PluginTracesPanelWebview
     }
 
     private async loadTraceLevel(): Promise<void> {
+        const isCurrent = this.beginRequest('traceLevel');
         try {
             const result = await this.daemon.pluginTracesTraceLevel(this.environmentUrl, this.profileName);
+            if (!isCurrent()) return;
             this.postMessage({ command: 'traceLevelLoaded', level: result.level, levelValue: result.levelValue });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to load trace level: ${msg}` });
         }

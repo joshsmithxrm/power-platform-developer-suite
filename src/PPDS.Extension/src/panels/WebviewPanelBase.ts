@@ -187,7 +187,6 @@ export abstract class WebviewPanelBase<
             this.profileName = active?.name ?? (active ? `Profile ${active.index}` : list.activeProfile ?? undefined);
             const env = active?.environment ?? null;
             if (!this.environmentUrl && env?.url) {
-                this.invalidateRequests();
                 this.environmentUrl = env.url;
                 this.environmentDisplayName = env.displayName || env.url;
             }

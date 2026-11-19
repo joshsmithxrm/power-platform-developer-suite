@@ -237,13 +237,16 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
     }
 
     private async loadWebResources(isRetry = false): Promise<void> {
+        // The base guard covers what `requestId` cannot: `requestId` only moves when the next
+        // load starts, so a response for the previous environment could land before that.
+        const isCurrent = this.beginRequest('list');
         const key = this.cacheKey();
 
         // WR-23: Serve from cache when available (skips the RPC call entirely).
         const cached = this.resourceCache.get(key);
         if (cached) {
             const currentRequestId = ++this.requestId;
-            await this.sendProgressivePages(cached.resources, currentRequestId, cached.totalCount);
+            await this.sendProgressivePages(cached.resources, currentRequestId, cached.totalCount, isCurrent);
             return;
         }
 
@@ -257,20 +260,23 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
                 this.environmentUrl,
                 this.profileName,
             );
+            if (!isCurrent()) return;
 
             // WR-23: Store in cache before streaming to webview.
             this.resourceCache.set(key, { resources: result.resources, totalCount: result.totalCount });
 
             // WR-04: Send first page immediately so the UI renders fast,
             // then stream remaining pages in the background.
-            await this.sendProgressivePages(result.resources, currentRequestId, result.totalCount);
+            await this.sendProgressivePages(result.resources, currentRequestId, result.totalCount, isCurrent);
 
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
 
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadWebResources(true))) {
                 return;
             }
+            if (!isCurrent()) return;
 
             this.postMessage({ command: 'error', message: msg });
         }
@@ -290,6 +296,7 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
         resources: WebResourceInfoDto[],
         requestId: number,
         totalCount: number,
+        isCurrent: () => boolean = () => true,
     ): Promise<void> {
         const pageSize = WebResourcesPanel.PAGE_SIZE;
         const firstPage = resources.slice(0, pageSize);
@@ -306,7 +313,7 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
         // responsive. Use setImmediate-equivalent via Promise microtask.
         for (let offset = pageSize; offset < resources.length; offset += pageSize) {
             // Guard: discard if a newer request has started
-            if (requestId !== this.requestId) return;
+            if (requestId !== this.requestId || !isCurrent()) return;
 
             const batch = resources.slice(offset, offset + pageSize);
             this.postMessage({
@@ -321,7 +328,7 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
             await new Promise<void>(resolve => setImmediate(resolve));
         }
 
-        if (requestId === this.requestId) {
+        if (requestId === this.requestId && isCurrent()) {
             this.postMessage({ command: 'webResourcesLoadComplete', requestId, totalCount });
         }
     }
@@ -340,8 +347,9 @@ export class WebResourcesPanel extends WebviewPanelBase<WebResourcesPanelWebview
         const cached = this.resourceCache.get(key);
         if (cached) {
             // Cache hit: re-send full dataset so the webview can filter locally.
+            const isCurrent = this.beginRequest('list');
             const currentRequestId = ++this.requestId;
-            await this.sendProgressivePages(cached.resources, currentRequestId, cached.totalCount);
+            await this.sendProgressivePages(cached.resources, currentRequestId, cached.totalCount, isCurrent);
         } else {
             // Cache miss: trigger a full load (which will cache and stream the result).
             await this.loadWebResources();

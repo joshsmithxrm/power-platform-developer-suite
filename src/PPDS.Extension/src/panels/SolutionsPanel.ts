@@ -173,13 +173,14 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
             if (await handleAuthError(this.daemon, error, isRetry, () => this.loadSolutions(true))) {
                 return;
             }
+            if (!isCurrent()) return;
 
             this.postMessage({ command: 'error', message: msg });
         }
     }
 
     private async loadComponents(uniqueName: string): Promise<void> {
-        const isCurrent = this.beginRequest('components');
+        const isCurrent = this.beginRequest(`components:${uniqueName}`);
         try {
             this.postMessage({ command: 'componentsLoading', uniqueName });
             const result = await this.daemon.solutionsComponents(uniqueName, undefined, this.environmentUrl, this.profileName);
@@ -202,6 +203,7 @@ export class SolutionsPanel extends WebviewPanelBase<SolutionsPanelWebviewToHost
 
             this.postMessage({ command: 'componentsLoaded', uniqueName, groups });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to load components for ${uniqueName}: ${msg}` });
         }
