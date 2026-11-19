@@ -56,8 +56,8 @@ one of the forms below.
 ### What the hook recognises
 
 The design keeps the broad matching the hook has always had, uses a
-precise parse to add forms it missed, and uses the same parse to clear a
-match only when it can prove the match is data. When in doubt it blocks.
+precise parse to add forms it missed, and clears matches only for a
+command string that is data as a whole. When in doubt it blocks.
 
 1. **Broad match (unchanged).** Any `ppds` / `ppds-mcp-server` word, with
    an optional path and `.exe`, at the start of the command or after
@@ -76,29 +76,34 @@ match only when it can prove the match is data. When in doubt it blocks.
    that `git` / `gh` / `rg` would run (`git -c core.sshCommand=...`,
    `git rebase --exec`, `git config alias.x '!...'`, `gh alias set`,
    `rg --pre`); and PPDS run through the .NET host (table below).
-3. **Exoneration (clears matches).** A broad match is dropped only when the
-   parse consumed the whole command with nothing it does not model, and
-   the match is in a comment, in a heredoc body read by a data-only
-   program, or in an argument of a data-only program: `git`, `gh`, `grep`,
-   `rg`, `echo`, `printf`, `cat`, `ls`, `cd`, `head`, `tail`, `wc`,
-   `mkdir`. That program must be the one actually run (no wrapper such as
-   `sudo` or `xargs` before it), must not write its output to a file or
-   pipe it to another kind of program, and must not sit inside a
-   substitution used as a command. For `git`, only arguments after a
-   subcommand that never runs an argument (`commit`, `log`, `grep`, `add`,
-   `push`, ...; not `config`, `rebase`, `bisect`, `submodule`), with no
-   `-c` before it and not the value of an option that runs a command
-   (`--exec`, `--upload-pack`, `--receive-pack`, `-O`, ...). For `gh`,
-   only arguments after `pr`, `issue`, `release`, `repo`, `search` and
-   similar (not `alias` or `extension`). Anything the parse does not model
-   (an unterminated quote, substitution or heredoc, a here-string, process
-   substitution, `${...}`, `$((...))`, `case`, an escaped backtick inside
-   backticks, deep nesting) clears nothing in that command.
+3. **Clearing (whole string only).** Every broad match in a command string
+   is cleared when, and only when, step 2 found nothing and the whole
+   string is data:
+   - it parsed cleanly: no `for` / `while` / `if` / `case` or other
+     keyword, no `{ }` group, `( )` subshell or function, no here-string,
+     process substitution, arithmetic or `${...}`, no heredoc delimiter
+     other than `WORD`, `'WORD'` or `"WORD"`, nothing unterminated;
+   - it is simple commands joined only by `;`, newline, `&&`, `||`, `|`;
+   - every command word, including inside `$(...)` and backticks, is a bare
+     unquoted name from `git`, `gh`, `grep`, `rg`, `echo`, `printf`, `cat`,
+     `ls`, `cd`, `head`, `tail`, `wc`, `mkdir` (no path, variable or
+     assignment prefix);
+   - no output redirection except to `/dev/null` or a file descriptor;
+   - an unquoted heredoc body contains no `$(` or backtick;
+   - `printf` has no `-v`; `rg` uses only allowlisted exact options; `git`
+     starts with `commit`, `log`, `show`, `diff`, `status` or `add` (no
+     option before it) and `gh` with an allowlisted pair such as
+     `pr create` / `pr view` / `issue comment`, each with only allowlisted
+     exact options (no abbreviation, attached value or bare `--`).
 
-So `grep -rn ppds docs/`, `git commit -m "fix: ppds query crash"` and a
-commit message passed as `git commit -m "$(cat <<'EOF' ... EOF)"` are not
-gated, while the same commit command followed by `&& ppds data delete ...`
-is.
+   Otherwise nothing is cleared and the result is exactly steps 1 + 2. The
+   accepted trade: a mixed string such as
+   `dotnet build && git commit -m "... ppds ..."` is gated as before.
+
+So `grep -rn ppds docs/`, `git commit -m "fix: ppds query crash"`,
+`gh pr create --title "..." --body "..."` and a commit message passed as
+`git commit -m "$(cat <<'EOF' ... EOF)"` are not gated, while the same
+commit command followed by `&& ppds data delete ...` is.
 
 .NET host forms, each treated exactly like the direct program:
 

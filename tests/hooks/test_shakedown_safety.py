@@ -952,6 +952,67 @@ class TestExoneration:
         assert hook._ShellParse(cmd).unclean
         assert hook.find_ppds_invocations(cmd)
 
+    def test_mixed_string_is_not_cleared(self):
+        """Accepted trade: one non-data command keeps every legacy hit."""
+        cmd = 'dotnet build && git commit -m "fix: ppds query crash"'
+        assert hook.find_ppds_invocations(cmd) == [["ppds", "query", 'crash"']]
+
+
+# Strings that really run `ppds`, were blocked on origin/main, and that
+# per-hit exoneration let through (independent review, by class).
+WHOLE_STRING_BYPASSES = [
+    ("1-loop-output", "for i in 1; do echo ppds data delete --entity account; done | sh"),
+    ("1-subshell-output", "( echo ppds data delete --entity account ) | sh"),
+    ("1-group-to-file", "{ echo ppds data delete --entity account; } > s.sh; sh s.sh"),
+    ("1-if-output", "if true; then echo ppds data delete --entity account; fi | sh"),
+    ("2-dup-to-file", "echo ppds data delete --entity account >& s.sh; sh s.sh"),
+    ("2-pipe-cat-to-file", "echo ppds data delete --entity account | cat > s.sh; sh s.sh"),
+    ("2-git-output", "git log -1 --format='env ppds data delete --entity account' --output=s.sh; sh s.sh"),
+    ("2-stderr-to-file", "echo ppds data delete --entity account 2> s.sh; sh s.sh"),
+    ("3-last-argument", "echo 'env ppds data delete --entity account'; $_"),
+    ("3-printf-v", "printf -v c '%s ' ppds data delete --entity account; $c"),
+    ("3-assignment", "c=$(echo ppds data delete --entity account); $c"),
+    ("4-function", 'echo() { "$@"; }; echo ppds data delete --entity account'),
+    ("4-hash-p", "hash -p /bin/sh cat; cat <<'EOF'\nppds data delete --entity account\nEOF"),
+    ("4-path-qualified", "./echo ppds data delete --entity account"),
+    ("5-backslash-delimiter", "cat <<E\\OF\nx\nEOF\nppds data delete --entity account\nE\\OF"),
+    ("5-partly-quoted-delimiter", "cat <<'E'OF\nx\nEOF\nppds data delete --entity account\nEOF"),
+    ("6-git-abbreviated-option", "git fetch --upload-pa 'env ppds data delete --entity account' ."),
+    ("6-git-attached-value", "git grep -O'env ppds data delete --entity account' foo"),
+    ("6-gh-passthrough", "gh repo clone o/r -- -c core.fsmonitor='env ppds data delete --entity account'"),
+    ("6-git-push-receive-pack", "git push --receive-pack='env ppds data delete --entity account' origin"),
+]
+
+
+class TestWholeStringBypasses:
+    @pytest.mark.parametrize("cmd", [c for _, c in WHOLE_STRING_BYPASSES],
+                             ids=[i for i, _ in WHOLE_STRING_BYPASSES])
+    def test_env_gate_blocks(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        r = _run_hook(cmd, env_extra=_gate_env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert ENV_BLOCK in r.stderr
+        assert "data delete" in r.stderr
+
+    @pytest.mark.parametrize("cmd", [c for _, c in WHOLE_STRING_BYPASSES],
+                             ids=[i for i, _ in WHOLE_STRING_BYPASSES])
+    def test_not_all_data(self, cmd):
+        assert not hook._all_data(hook._ShellParse(cmd))
+        assert any("delete" in argv for argv in hook.find_ppds_invocations(cmd))
+
+    @pytest.mark.parametrize("cmd", [
+        "git commit -m 'x' -F notes.txt",
+        "git commit --mess 'ppds data delete'",
+        "rg -g'*.md' ppds",
+        "rg --pre-glob '*' ppds",
+        "gh api repos/o/r --input ppds",
+        "git log --output=x ppds",
+        "git -C . log ppds",
+        "git log -- ppds",
+    ])
+    def test_option_rules_are_exact(self, cmd):
+        assert not hook._all_data(hook._ShellParse(cmd))
+
 
 class TestHeredocs:
     @pytest.mark.parametrize("cmd,blocked", [(c, b) for _, c, b in HEREDOC_CASES],

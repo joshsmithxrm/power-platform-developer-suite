@@ -24,64 +24,37 @@ Two concerns, one hook:
    ``--dry-run``, ``solutions import``, etc.) are refused outright. This
    provides a mechanical boundary that the shakedown / verify skills rely on.
 
-**Recognised invocations.** Detection is the union of two matchers, minus
-matches that are provably data:
+**Recognised invocations.** Detection is the union of two matchers:
 
-- The broad legacy matcher, unchanged from earlier releases: any ``ppds`` /
-  ``ppds-mcp-server`` word (optional path, optional ``.exe``) at the start
-  of the string or after whitespace, ``|``, ``;``, ``&``, ``(`` or a backtick.
-  It catches launchers this hook knows nothing about (``find -exec``,
-  ``parallel``, ``ssh``, ...).
-- A shell-like parse (quotes, ``$'...'``, escapes, operators,
-  redirections, heredocs, ``$(...)`` and backticks) that adds the forms
-  the legacy matcher misses: a quoted program word, the program after
-  assignments, reserved words and wrappers (``env``, ``sudo``, ``time``,
-  ``timeout``, ``xargs`` ...), command strings given to ``bash -c`` /
-  ``sh -c`` (with any options) / ``su -c`` / ``script -c`` / ``eval`` /
-  ``pwsh`` or ``powershell -Command`` / ``cmd /c``, here-strings and
-  heredocs fed to a shell, text piped from ``echo`` / ``printf`` into a
-  shell, and PPDS run through the .NET host, normalised to
-  ``[program, *cli_args]``:
+- The broad legacy matcher, unchanged: any ``ppds`` / ``ppds-mcp-server``
+  word (optional path and ``.exe``) at the start of the string or after
+  whitespace, ``|``, ``;``, ``&``, ``(`` or a backtick.
+- A shell-like parse that adds what that misses: a quoted program word,
+  the program after assignments and wrappers (``env``, ``sudo``,
+  ``timeout`` ...), command strings given to ``bash -c`` (any options),
+  ``su -c``, ``script -c``, ``eval``, ``pwsh -Command``, ``cmd /c``,
+  here-strings and heredocs fed to a shell, ``echo`` piped into a shell,
+  values ``git`` / ``gh`` / ``rg`` would run, and PPDS through the .NET host
+  (``dotnet run`` / ``dotnet watch`` for ``PPDS.Cli`` / ``PPDS.Mcp`` by
+  ``--project`` or an earlier ``cd``, ``dotnet [exec] .../ppds.dll``,
+  ``dotnet tool run|exec``, ``dnx``), normalised to ``[program, *args]``.
+  An unknown ``dotnet run`` option before ``--`` yields two readings (args
+  after ``--`` only; every unrecognised token plus those) and either blocks.
 
-  - ``dotnet run`` / ``dotnet watch [run]`` whose ``--project`` / ``-p``
-    (``-p`` without ``=``) names the ``PPDS.Cli`` or ``PPDS.Mcp`` project
-    directory or ``.csproj`` (either slash style, absolute or relative),
-    or that follows ``cd`` / ``pushd`` into that directory earlier in the
-    same command string. Two readings are checked and the hook blocks if
-    either blocks: the CLI args are only what follows ``--``; and they
-    are every token ``dotnet run`` does not recognise plus what follows
-    ``--`` (what ``dotnet run`` itself forwards).
-  - ``dotnet [exec] <path>/ppds.dll`` and ``.../ppds-mcp-server.dll`` (the
-    AssemblyName of each project), ``dotnet ppds``, ``dotnet tool run
-    [options] ppds``, ``dotnet tool exec PPDS.Cli`` and ``dnx PPDS.Cli``.
-  - ``dotnet ...`` anywhere in the arguments of a program that is not a
-    data-only program (``strace -f dotnet run ...``).
-
-A legacy match is dropped only when the parse consumed the whole string
-with nothing it does not model (any unterminated quote, substitution or
-heredoc, here-string, process substitution, ``${...}``, ``$((...))``,
-``case``, escaped backtick inside backticks, or nesting beyond its cap
-clears nothing) and the match is in a comment, in an argument of a program
-on ``_DATA_PROGRAMS`` (``git``, ``gh``, ``grep``, ``rg``, ``echo``,
-``printf``, ``cat``, ``ls``, ``cd``, ``head``, ``tail``, ``wc``,
-``mkdir``) that it does not run, or in a heredoc body such a program
-reads. That program must be the one actually run (no wrapper before it),
-must not write its output to a file or pipe it to another kind of
-program, and must not sit inside a substitution used as a command. For
-``git`` only the arguments after a subcommand on
-``_GIT_DATA_SUBCOMMANDS`` count, with no ``-c`` / ``--config-env`` /
-``--exec-path`` before it and not the value of an option that runs a
-command (``--exec``, ``--upload-pack``, ...); for ``gh`` only arguments
-after a subcommand on ``_GH_DATA_SUBCOMMANDS``. When in doubt the hook
-blocks.
-
-Any other ``dotnet`` command (``dotnet build``, ``dotnet test``,
-``dotnet run`` for another project) is not an invocation. Matching is
-best-effort: it cannot see through a shell script, an alias or function
-defined earlier, a variable or glob in the program word, ``python -c`` /
-``node -e``, or a working directory set outside the command string. The
-C# ``IShakedownGuard`` blocks writes during a shakedown however the CLI
-was started.
+**Clearing.** All legacy matches in a command string are cleared only when
+the parse found nothing and the whole string is data: it parsed cleanly
+(no compound command, group, function, keyword, unmodelled quoting or
+heredoc delimiter, here-string, process substitution or arithmetic); it is
+simple commands joined by ``;``, newline, ``&&``, ``||`` or ``|``; every
+command word, including inside ``$(...)``, is a bare unquoted name from
+``_DATA_PROGRAMS``; there is no assignment, no output redirection except to
+``/dev/null`` or an fd; and ``printf`` / ``rg`` / ``git`` / ``gh`` use only
+allowlisted subcommands and exact options. Otherwise nothing is cleared, so
+a mixed string such as ``dotnet build && git commit -m "... ppds ..."`` is
+handled as before. Matching is best-effort: scripts, aliases, a variable
+or glob as the program, interpreters (``python -c``) and a working
+directory set outside the string are not seen. The C# ``IShakedownGuard``
+blocks writes during a shakedown however the CLI was started.
 
 **Allowlist sources (checked in order; the first that names an env wins):**
 
@@ -517,29 +490,11 @@ def env_matches_allowlist(candidates: Iterable, allowlist: Iterable) -> bool:
 # ---------------------------------------------------------------------------
 
 
-# Design: detection is the UNION of
-#
-#   (a) the legacy matcher (``_legacy_invocations``), unchanged from the
-#       releases before 2026-11-19: any ``ppds`` / ``ppds-mcp-server`` word
-#       at the start of the string or after whitespace or one of | ; & ( `,
-#       with an optional path prefix and ``.exe`` suffix; and
-#   (b) precise recognition from a shell-like parse (``_ShellParse`` and
-#       ``_new_invocations``): the program in command position (including
-#       quoted program words), the .NET host forms, and command strings
-#       handed to bash -c / sh -c / su -c / script -c / eval /
-#       pwsh -Command / powershell -Command / cmd /c, here-strings and
-#       heredocs fed to a shell, and ``dotnet ...`` appearing anywhere in the
-#       arguments of a program that is not a known data-only program,
-#
-# minus only legacy hits that the parse can prove are data
-# (``_ShellParse.is_data``): the parse consumed the whole string with
-# nothing it does not model, and the hit lies in a comment, in an argument
-# of a program on ``_DATA_PROGRAMS`` (that does not execute that argument,
-# whose output is not piped to another kind of program or redirected to a
-# file, and that is not itself inside a substitution used as a command), or
-# in a heredoc body read by such a program. Anything else stays a hit: when
-# in doubt the hook blocks. This is a best-effort pre-filter in front of the
-# C# ``IShakedownGuard``, not a shell.
+# Design (see the module docstring): detection is the legacy matcher
+# (``_legacy_invocations``) plus precise recognition (``_ShellParse`` and
+# ``_new_invocations``); the only exoneration is whole-string
+# (``_all_data``). A best-effort pre-filter in front of the C#
+# ``IShakedownGuard``, not a shell.
 
 _LEGACY_PROGRAM_RE = re.compile(
     r"""
@@ -552,9 +507,6 @@ _LEGACY_PROGRAM_RE = re.compile(
 )
 
 _LEGACY_SHELL_OPERATORS = {"|", ";", "&", "&&", "||", ">", "<", ">>", "<<", chr(96), "(", ")"}
-
-# Above this many legacy hits in one command, nothing is exonerated.
-_MAX_EXONERATION_HITS = 200
 
 
 def _legacy_invocations(command: str) -> list:
@@ -625,7 +577,6 @@ _LEX_OPERATORS = (
     "|", "&", ";", "(", ")", "<", ">",
 )
 _REDIRECTIONS = {"&>>", "<<<", "<<-", ">>", "<<", "&>", ">&", "<&", ">|", "<>", "<", ">"}
-_FILE_OUTPUT_REDIRECTIONS = {"&>>", ">>", "&>", ">|", "<>", ">"}
 _WORD_BREAK = set(" \t\n|&;()<>")
 # Characters a backslash escapes outside quotes. Any other backslash is kept
 # literally, so an unquoted Windows path (C:\x\ppds.exe) keeps its separators.
@@ -762,20 +713,17 @@ def _command_start(words: list) -> int:
 class _Cmd:
     """One simple command found by ``_ShellParse``."""
 
-    __slots__ = ("words", "spans", "parent", "pipe_to", "herestrings",
-                 "heredoc_bodies", "writes_file", "_start")
+    __slots__ = ("words", "spans", "pipe_to", "herestrings", "heredoc_bodies",
+                 "heredocs", "redirs", "_start")
 
-    def __init__(self, parent):
+    def __init__(self):
         self.words = []
         self.spans = []
-        # None at top level; ("word", cmd, index) for a substitution inside
-        # that word; ("body", cmd, None) inside a heredoc body read by cmd;
-        # ("target", cmd, None) inside a redirection target.
-        self.parent = parent
         self.pipe_to = None
         self.herestrings = []
         self.heredoc_bodies = []
-        self.writes_file = False
+        self.heredocs = []  # (raw delimiter, quoted, body)
+        self.redirs = []    # (operator, raw target)
         self._start = None
 
     @property
@@ -794,14 +742,12 @@ class _Cmd:
 class _SeqState:
     """Mutable state of one ``_ShellParse._seq`` call (a command list)."""
 
-    def __init__(self, parse, parent):
+    def __init__(self, parse):
         self.p = parse
-        self.parent = parent
-        self.cur = _Cmd(parent)
+        self.cur = _Cmd()
         self.word = None
         self.wstart = 0
         self.target = None
-        self.target_fd = ""
         self.heredocs = []
         self.prev_pipe = None
 
@@ -809,11 +755,6 @@ class _SeqState:
         if self.word is None:
             self.word = []
             self.wstart = i
-
-    def sub_parent(self):
-        if self.target is not None:
-            return ("target", self.cur, None)
-        return ("word", self.cur, len(self.cur.words))
 
     def fd_prefix(self, i) -> str:
         """The word so far when it is an unquoted fd number (``2`` in ``2>``)."""
@@ -825,49 +766,50 @@ class _SeqState:
         if self.word is None:
             return
         value = "".join(self.word)
-        span = (self.wstart, i)
+        raw = self.p.s[self.wstart:i]
         self.word = None
         if self.target is not None:
-            op, fd = self.target, self.target_fd
+            op = self.target
             self.target = None
             if op in ("<<", "<<-"):
-                raw = self.p.s[span[0]:span[1]]
                 quoted = any(ch in raw for ch in "'\"\\")
-                self.heredocs.append((self.cur, value, op == "<<-", quoted))
+                delim = value.replace("\\", "") if "\\" in raw else value
+                self.heredocs.append((self.cur, delim, op == "<<-", quoted, raw))
             elif op == "<<<":
                 self.p.unclean = True
                 self.cur.herestrings.append(value)
-            elif op in _FILE_OUTPUT_REDIRECTIONS and fd in ("", "1") and value != "/dev/null":
-                self.cur.writes_file = True
+            else:
+                self.cur.redirs.append((op, raw))
             return
         self.cur.words.append(value)
-        self.cur.spans.append(span)
-        self.p.regions.append((span[0], span[1], "word", self.cur, len(self.cur.words) - 1))
+        self.cur.spans.append((self.wstart, i))
 
     def end_cmd(self, op):
         if self.target is not None:
             self.p.unclean = True  # redirection without a target
             self.target = None
         cmd = self.cur
-        if not cmd.words and not cmd.herestrings and not any(h[0] is cmd for h in self.heredocs):
+        if not cmd.words and not cmd.herestrings and not cmd.redirs and not any(
+            h[0] is cmd for h in self.heredocs
+        ):
             return
         self.p.commands.append(cmd)
         if self.prev_pipe is not None:
             self.prev_pipe.pipe_to = cmd
         self.prev_pipe = cmd if op in ("|", "|&") else None
-        self.cur = _Cmd(self.parent)
+        self.cur = _Cmd()
 
 
 class _ShellParse:
     """Shell-like parse of a Bash command string.
 
-    Records every simple command (``commands``), the source span and role of
-    every word, comment and heredoc body (``regions``), and sets ``unclean``
-    whenever it meets anything it does not model (an unterminated quote,
-    substitution or heredoc, a here-string, process substitution, ``${...}``
-    / ``$((...))`` / ``$[...]``, ``case``, a stray ``)``, an escaped
-    backtick inside backticks, nesting beyond ``MAX_DEPTH``). When
-    ``unclean`` is set nothing in the string is exonerated.
+    Records every simple command (``commands``, including those inside
+    ``$(...)``, backticks and unquoted heredoc bodies) and the operators
+    that join them (``ops``). Sets ``unclean`` for anything it does not
+    model: an unterminated quote, substitution or heredoc, a here-string,
+    process substitution, ``${...}`` / ``$((...))`` / ``$[...]``, ``case``,
+    a ``( )`` group or ``f()``, a stray ``)``, an escaped backtick inside
+    backticks, or nesting beyond ``MAX_DEPTH``.
     """
 
     MAX_DEPTH = 40
@@ -876,20 +818,17 @@ class _ShellParse:
         self.s = s
         self.unclean = False
         self.commands = []
-        self.regions = []
+        self.ops = set()
         self.nested_strings = []
-        self._eligible_cache = {}
         try:
-            self._seq(0, False, 0, None, len(s))
+            self._seq(0, False, 0, len(s))
         except RecursionError:
             self.unclean = True
         for cmd in self.commands:
             if any(w in _UNMODELLED_KEYWORDS for w in cmd.words[: cmd.start + 1]):
                 self.unclean = True
 
-    # -- lexing / parsing ---------------------------------------------------
-
-    def _seq(self, i, in_paren, depth, parent, limit):
+    def _seq(self, i, in_paren, depth, limit):
         """Parse a command list from ``i``; return the index after it.
 
         With ``in_paren`` the list is the body of ``$(`` / ``<(`` and ends at
@@ -899,7 +838,7 @@ class _ShellParse:
         if depth > self.MAX_DEPTH:
             self.unclean = True
             return limit
-        st = _SeqState(self, parent)
+        st = _SeqState(self)
         group = 0
         while i < limit:
             c = s[i]
@@ -915,9 +854,7 @@ class _ShellParse:
                     st.heredocs = []
             elif c == "#" and st.word is None:
                 end = s.find("\n", i, limit)
-                end = limit if end < 0 else end
-                self.regions.append((i, end, "comment", None, None))
-                i = end
+                i = limit if end < 0 else end
             elif c == "\\":
                 nxt = s[i + 1] if i + 1 < limit else ""
                 if nxt == "\n":
@@ -956,19 +893,17 @@ class _ShellParse:
                 i = j + 1
             elif c == '"' or (c == "$" and s.startswith('$"', i)):
                 st.start_word(i)
-                i = self._expand(i + (2 if c == "$" else 1), limit, '"', depth,
-                                 st.sub_parent(), st.word)
+                i = self._expand(i + (2 if c == "$" else 1), limit, '"', depth, st.word)
             elif c == "`":
                 st.start_word(i)
-                i = self._backtick(i, limit, depth, st.sub_parent(), st.word)
+                i = self._backtick(i, limit, depth, st.word)
             elif c == "$" and s.startswith("$(", i):
                 st.start_word(i)
-                i = self._dollar_paren(i, limit, depth, st.sub_parent(), st.word)
+                i = self._dollar_paren(i, limit, depth, st.word)
             elif c in "<>" and s.startswith("(", i + 1):
-                # Process substitution: parsed for detection, never exonerated.
-                self.unclean = True
+                self.unclean = True  # process substitution
                 st.start_word(i)
-                end = self._seq(i + 2, True, depth + 1, st.sub_parent(), limit)
+                end = self._seq(i + 2, True, depth + 1, limit)
                 st.word.append(s[i:end])
                 i = end
             elif c in _WORD_BREAK:
@@ -978,29 +913,25 @@ class _ShellParse:
                     if st.heredocs:
                         self.unclean = True
                     return i + 1
-                fd = ""
-                if c in "<>":
-                    fd = st.fd_prefix(i)
-                    if fd:
-                        st.word = None
+                if c in "<>" and st.fd_prefix(i):
+                    st.word = None
                 st.end_word(i)
                 op = next(o for o in _LEX_OPERATORS if s.startswith(o, i))
                 if op in _REDIRECTIONS:
                     if st.target is not None:
                         self.unclean = True
                     st.target = op
-                    st.target_fd = fd
-                elif op == "(":
-                    group += 1
-                    st.end_cmd(op)
-                elif op == ")":
-                    if group:
-                        group -= 1
-                    else:
-                        self.unclean = True
-                    st.end_cmd(op)
                 else:
-                    if op == ";;":
+                    self.ops.add(op)
+                    if op == "(":
+                        group += 1
+                        self.unclean = True  # ( ) group, subshell, f(), array
+                    elif op == ")":
+                        if group:
+                            group -= 1
+                        else:
+                            self.unclean = True
+                    elif op == ";;":
                         self.unclean = True
                     st.end_cmd(op)
                 i += len(op)
@@ -1016,7 +947,7 @@ class _ShellParse:
             self.unclean = True
         return limit
 
-    def _expand(self, i, limit, quote, depth, parent, out):
+    def _expand(self, i, limit, quote, depth, out):
         """Scan double-quoted text (``quote='"'``) or an unquoted heredoc body
         (``quote=None``) from ``i``, parsing ``$(...)`` and backticks.
         Returns the index after the closing quote, or ``limit``.
@@ -1032,9 +963,9 @@ class _ShellParse:
                     out.append(s[i + 1])
                 i += 2
             elif ch == "`":
-                i = self._backtick(i, limit, depth, parent, out)
+                i = self._backtick(i, limit, depth, out)
             elif ch == "$" and s.startswith("$(", i):
-                i = self._dollar_paren(i, limit, depth, parent, out)
+                i = self._dollar_paren(i, limit, depth, out)
             else:
                 if ch == "$" and i + 1 < limit and s[i + 1] in "{[":
                     self.unclean = True
@@ -1044,14 +975,14 @@ class _ShellParse:
             self.unclean = True
         return limit
 
-    def _dollar_paren(self, i, limit, depth, parent, out):
+    def _dollar_paren(self, i, limit, depth, out):
         if self.s.startswith("$((", i):
             self.unclean = True  # arithmetic expansion
-        end = self._seq(i + 2, True, depth + 1, parent, limit)
+        end = self._seq(i + 2, True, depth + 1, limit)
         out.append(self.s[i:end])
         return end
 
-    def _backtick(self, i, limit, depth, parent, out):
+    def _backtick(self, i, limit, depth, out):
         s = self.s
         j = i + 1
         while j < limit and s[j] != "`":
@@ -1062,25 +993,25 @@ class _ShellParse:
         content = s[i + 1:j]
         if "\\" in content:
             # Backslashes inside backticks are unescaped before the shell
-            # parses the content, so source offsets no longer line up.
+            # parses the content, so it is re-parsed as a separate string.
             self.unclean = True
             self.nested_strings.append(
                 content.replace("\\\\", "\0").replace("\\`", "`").replace("\\$", "$").replace("\0", "\\")
             )
         else:
-            self._seq(i + 1, False, depth + 1, parent, j)
+            self._seq(i + 1, False, depth + 1, j)
         out.append(s[i:j + 1])
         return j + 1
 
     def _heredoc_bodies(self, i, limit, pending, depth):
         """Read the bodies of the heredocs started on the line just ended."""
         s = self.s
-        for cmd, delim, strip_tabs, quoted in pending:
+        for cmd, delim, strip_tabs, quoted, raw in pending:
             body_start = i
             while True:
                 if i >= limit:
                     self.unclean = True
-                    self._body(cmd, body_start, limit, quoted, depth)
+                    self._body(cmd, body_start, limit, quoted, raw, depth)
                     return limit
                 j = s.find("\n", i, limit)
                 line_end = limit if j < 0 else j
@@ -1090,74 +1021,131 @@ class _ShellParse:
                 if strip_tabs:
                     line = line.lstrip("\t")
                 if line == delim:
-                    self._body(cmd, body_start, i, quoted, depth)
+                    self._body(cmd, body_start, i, quoted, raw, depth)
                     i = limit if j < 0 else j + 1
                     break
                 if j < 0:
                     self.unclean = True
-                    self._body(cmd, body_start, limit, quoted, depth)
+                    self._body(cmd, body_start, limit, quoted, raw, depth)
                     return limit
                 i = j + 1
         return i
 
-    def _body(self, cmd, start, end, quoted, depth):
-        self.regions.append((start, end, "body", cmd, None))
-        cmd.heredoc_bodies.append(self.s[start:end])
+    def _body(self, cmd, start, end, quoted, raw, depth):
+        body = self.s[start:end]
+        cmd.heredoc_bodies.append(body)
+        cmd.heredocs.append((raw, quoted, body))
         if not quoted:
-            self._expand(start, end, None, depth, ("body", cmd, None), [])
+            self._expand(start, end, None, depth, [])
 
-    # -- exoneration ----------------------------------------------------------
 
-    def _eligible(self, cmd) -> bool:
-        """True when ``cmd`` is a data program whose arguments are data."""
-        key = id(cmd)
-        if key in self._eligible_cache:
-            return self._eligible_cache[key]
-        self._eligible_cache[key] = False  # guards against cycles
-        result = self._eligible_uncached(cmd)
-        self._eligible_cache[key] = result
-        return result
+# -- whole-string exoneration -------------------------------------------------
+#
+# Every legacy hit is cleared when, and only when, the precise recognisers
+# found nothing and the whole string is "all data" (``_all_data``).
 
-    def _eligible_uncached(self, cmd) -> bool:
-        if cmd.program not in _DATA_PROGRAMS or cmd.writes_file:
+
+def _opts(flags: str, values: str = "") -> dict:
+    """Option allowlist: option -> whether it takes a separate value."""
+    return {**dict.fromkeys(flags.split(), False), **dict.fromkeys(values.split(), True)}
+
+
+_BARE_NAME_RE = re.compile(r"^[a-z]+$")
+_HEREDOC_DELIMITER_RE = re.compile(r"""^(?:\w+|'\w+'|"\w+")$""", re.ASCII)
+_DATA_JOINING_OPS = {";", "&&", "||", "|"}
+_OUTPUT_REDIRECTIONS = {">", ">>", ">|", "&>", "&>>", ">&"}
+_INPUT_REDIRECTIONS = {"<", "<&", "<<", "<<-"}
+# Exact options only; `--name=value` is accepted for a long option that
+# takes a value. Not rg -z (runs decompressors), --pre, --pre-glob.
+_RG_OPTIONS = _opts("-n --line-number -i --ignore-case -S --smart-case -l "
+                    "--files-with-matches -w --word-regexp -F --fixed-strings "
+                    "-c --count --files --hidden",
+                    "-g --glob -t --type -e --regexp -A -B -C")
+# git subcommands that run nothing they are given, no option before them.
+# Not fetch / pull / clone / push (remote URLs, --upload-pack, --exec),
+# config, rebase, bisect, grep (-O runs a pager), or anything else.
+_GIT_LOG_OPTIONS = _opts("--oneline --stat --name-only --name-status",
+                         "-n --grep --format --pretty --since --until --author")
+_GIT_SUBCOMMAND_OPTIONS = {
+    "commit": _opts("-a --all --amend --no-edit -s --signoff -q --quiet",
+                    "-m --message -am -F"),
+    "log": _GIT_LOG_OPTIONS,
+    "show": _GIT_LOG_OPTIONS,
+    "diff": _opts("--stat --name-only --name-status --cached --staged"),
+    "status": _opts("-s --short -b --branch --porcelain"),
+    "add": _opts("-A --all -u --update"),
+}
+# gh (command, subcommand) pairs. Not api, alias, extension, repo clone, ...
+_GH_WRITE = _opts("--draft -d", "--title -t --body -b --body-file -F --base -B "
+                  "--head -H --label -l --repo -R")
+_GH_READ = _opts("--comments", "--json --jq -q --limit -L --state -s --repo -R")
+_GH_SUBCOMMAND_OPTIONS = {
+    **dict.fromkeys([("pr", "create"), ("pr", "edit"), ("pr", "comment"),
+                     ("issue", "create"), ("issue", "comment")], _GH_WRITE),
+    **dict.fromkeys([("pr", "view"), ("pr", "list"), ("pr", "checks"),
+                     ("issue", "view"), ("issue", "list"), ("release", "view"),
+                     ("release", "list"), ("run", "view"), ("run", "list"),
+                     ("repo", "view"), ("label", "list"), ("search", "prs"),
+                     ("search", "issues")], _GH_READ),
+}
+
+
+def _options_allowed(args: list, allowed: dict) -> bool:
+    """True when every ``-`` token in ``args`` is an exact allowed option."""
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        name = arg.split("=", 1)[0]
+        if arg in allowed:
+            i += 2 if allowed[arg] else 1
+        elif arg.startswith("-") and not ("=" in arg and name.startswith("--") and allowed.get(name)):
             return False
-        # The data program must be the program actually run: only
-        # assignments and reserved words may precede it, never a wrapper.
-        for word in cmd.words[: cmd.start]:
-            if not (_ASSIGNMENT_RE.match(word) or word in _COMMAND_POSITION_KEYWORDS):
+        else:
+            i += 1
+    return True
+
+
+def _data_command(cmd, s: str) -> bool:
+    """True when ``cmd`` is a bare data program with only allowed arguments."""
+    if not cmd.words or cmd.herestrings:
+        return False
+    a, b = cmd.spans[0]
+    prog, args = cmd.words[0], cmd.words[1:]
+    if s[a:b] != prog or not _BARE_NAME_RE.match(prog) or prog not in _DATA_PROGRAMS:
+        return False
+    for op, target in cmd.redirs:
+        if op in _OUTPUT_REDIRECTIONS:
+            if target != "/dev/null" and not (op == ">&" and target.isdigit()):
                 return False
-        nxt = cmd.pipe_to
-        while nxt is not None:
-            if nxt.program not in _DATA_PROGRAMS:
-                return False
-            nxt = nxt.pipe_to
-        if cmd.parent is None:
-            return True
-        kind, pcmd, pidx = cmd.parent
-        if kind == "body":
-            return self._eligible(pcmd)
-        if kind != "word":
+        elif op not in _INPUT_REDIRECTIONS:
             return False
-        return pidx > pcmd.start and self._eligible(pcmd) and _data_argument(pcmd, pidx)
+    for raw, quoted, body in cmd.heredocs:
+        if not _HEREDOC_DELIMITER_RE.match(raw) or (not quoted and ("$(" in body or "`" in body)):
+            return False
+    if prog == "printf":
+        return not any(arg.startswith("-v") for arg in args)
+    if prog == "rg":
+        return _options_allowed(args, _RG_OPTIONS)
+    if prog == "git":
+        if not args or args[0] not in _GIT_SUBCOMMAND_OPTIONS:
+            return False
+        rest = [w for w in args[1:] if not re.match(r"^-\d+$", w) or args[0] not in ("log", "show")]
+        # -F only as `-F -` (the message from stdin).
+        if any(w == "-F" and rest[j + 1:j + 2] != ["-"] for j, w in enumerate(rest)):
+            return False
+        return _options_allowed(rest, _GIT_SUBCOMMAND_OPTIONS[args[0]])
+    if prog == "gh":
+        if len(args) < 2 or (args[0], args[1]) not in _GH_SUBCOMMAND_OPTIONS:
+            return False
+        return _options_allowed(args[2:], _GH_SUBCOMMAND_OPTIONS[(args[0], args[1])])
+    return True
 
-    def is_data(self, pos: int) -> bool:
-        """True when the legacy hit at ``pos`` is provably data."""
-        if self.unclean:
-            return False
-        best = None
-        for region in self.regions:
-            if region[0] <= pos < region[1] and (
-                best is None or region[1] - region[0] < best[1] - best[0]
-            ):
-                best = region
-        if best is None:
-            return False
-        _, _, kind, cmd, idx = best
-        if kind == "comment":
-            return True
-        if kind == "body":
-            return self._eligible(cmd)
-        return idx > cmd.start and self._eligible(cmd) and _data_argument(cmd, idx)
+
+def _all_data(parse) -> bool:
+    """The whole-string exoneration rule (see the design note above)."""
+    if parse.unclean or not parse.ops <= _DATA_JOINING_OPS:
+        return False
+    return all(_data_command(cmd, parse.s) for cmd in parse.commands)
 
 
 def _data_argument(cmd, idx) -> bool:
@@ -1548,34 +1536,33 @@ def find_ppds_invocations(command: str, cwd: Optional[str] = None) -> list:
 
     Each entry starts with the program (``ppds`` / ``ppds-mcp-server``,
     possibly with a ``.exe`` suffix) followed by the CLI arguments. The
-    result is the union of the legacy matcher's hits (minus hits the parse
-    proves are data) and the forms the parse recognises precisely, including
-    the .NET host forms normalised to the same shape; see the design note
-    above. ``cwd``, when given, is the directory the command starts in.
+    result is the legacy matcher's hits plus the forms the parse recognises
+    precisely (the .NET host forms normalised to the same shape), or ``[]``
+    when the recognisers found nothing and the whole string is all data;
+    see the design note above. ``cwd``, when given, is the directory the
+    command starts in.
     """
     if not command:
         return []
-    legacy = _legacy_invocations(command)
     try:
         parse = _ShellParse(command)
     except RecursionError:
         parse = None
-    exonerate = parse is not None and not parse.unclean and len(legacy) <= _MAX_EXONERATION_HITS
+    found = []
+    if parse is not None:
+        _new_invocations(parse, cwd, 0, found)
+        if not found and _all_data(parse):
+            return []
     out = []
     seen = set()
-    for pos, argv in legacy:
-        if exonerate and parse.is_data(pos):
-            continue
+    for _, argv in _legacy_invocations(command):
         out.append(argv)
         seen.add(tuple(argv))
-    if parse is not None:
-        found = []
-        _new_invocations(parse, cwd, 0, found)
-        for argv in found:
-            key = tuple(argv)
-            if key not in seen:
-                seen.add(key)
-                out.append(argv)
+    for argv in found:
+        key = tuple(argv)
+        if key not in seen:
+            seen.add(key)
+            out.append(argv)
     return out
 
 
