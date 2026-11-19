@@ -51,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Metadata commands that take a global choice name (`optionset update`, `add-option`, `update-option`, `remove-option`, `reorder-options`, and the schema-delete preview of a choice) now report a name that exists in no spelling as `Operation.NotFound` naming the choice, with exit code 6. Previously `optionset update` reported `Operation.Internal` and the option commands `ENTITY_NOT_FOUND` or the raw fault, all with exit 2. `column create`/`attribute create` with an unknown choice still report `OPTION_NOT_FOUND` with exit 8 (#1759).
 - Direct plugin image updates preserve omitted registration values and use Dataverse row-version checks. Concurrent edits or unavailable capabilities fail without automatic mutation retries; acknowledged updates remain distinguished from connection-cleanup failures. RPC callers receive the service's structured codes and safe outcome warnings without private diagnostics.
 
 - Version 2 image-only cleanup also refuses present-null step/image protection metadata during planning and fresh pre-dispatch checks. Public DTO bool values/signatures remain; the checks do not make deletion atomic.

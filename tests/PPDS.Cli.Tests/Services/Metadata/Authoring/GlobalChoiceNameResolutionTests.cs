@@ -116,37 +116,42 @@ public sealed class GlobalChoiceNameResolutionTests
         f.AssertLeases();
     }
 
-    public static TheoryData<string, Type, string?> MissingOutcomes => new()
+    public static TheoryData<string> MissingOperations => new()
     {
-        // Pre-existing outcome for a name that does not exist, preserved exactly (type and code).
-        { "choice-update", typeof(FaultException<OrganizationServiceFault>), null },
-        { "choice-delete", typeof(PpdsException), MetadataErrorCodes.SdkOperationFailed },
-        { "choice-delete-preview", typeof(PpdsException), MetadataErrorCodes.SdkOperationFailed },
-        { "option-add", typeof(FaultException<OrganizationServiceFault>), null },
-        { "option-add-color", typeof(FaultException<OrganizationServiceFault>), null },
-        { "option-update", typeof(PpdsException), MetadataErrorCodes.EntityNotFound },
-        { "option-update-color", typeof(PpdsException), MetadataErrorCodes.EntityNotFound },
-        { "option-delete", typeof(PpdsException), MetadataErrorCodes.EntityNotFound },
-        { "option-reorder", typeof(FaultException<OrganizationServiceFault>), null }
+        "choice-update", "choice-delete-preview", "option-add", "option-add-color",
+        "option-update", "option-update-color", "option-delete", "option-reorder"
     };
 
     [Theory]
-    [MemberData(nameof(MissingOutcomes))]
+    [MemberData(nameof(MissingOperations))]
     [Trait("AC", "AC-134")]
-    public async Task MissingName_KeepsThePreviousFailure_AndDoesNotRetry(string operation, Type expectedType, string? expectedCode)
+    public async Task MissingName_IsReportedAsNotFound_AndDoesNotRetry(string operation)
     {
+        // #1759: a name that exists in no spelling is one not-found error (Operation.NotFound, exit 6) on every path,
+        // naming the choice, keeping the original failure as the inner exception.
         using var f = new GlobalChoiceServerFake();
         var ex = await Record.ExceptionAsync(() => f.Run(operation, "mayo_Missing"));
-        Assert.IsType(expectedType, ex);
-        if (expectedCode != null)
-        {
-            Assert.Equal(expectedCode, Assert.IsAssignableFrom<PpdsException>(ex).ErrorCode);
-            Assert.IsType<FaultException<OrganizationServiceFault>>(ex!.InnerException);
-        }
+        var notFound = Assert.IsType<PpdsNotFoundException>(ex);
+        Assert.Equal(ErrorCodes.Operation.NotFound, notFound.ErrorCode);
+        Assert.Equal(ExitCodes.NotFoundError, ExceptionMapper.ToExitCode(notFound));
+        Assert.Contains("mayo_Missing", notFound.UserMessage);
+        Assert.NotNull(notFound.InnerException); // the server fault (wrapped by the delete read on the preview path)
         Assert.Equal("mayo_Missing", Assert.Single(f.Faults));
-        Assert.Equal(operation == "choice-delete" ? 0 : 1, f.Requests.Count(r => r is RetrieveAllOptionSetsRequest));
+        Assert.Equal(1, f.Requests.Count(r => r is RetrieveAllOptionSetsRequest));
         Assert.DoesNotContain(f.Requests, r => r is DeleteOptionSetRequest);
         f.AssertLeases();
+    }
+
+    [Fact]
+    [Trait("AC", "AC-134")]
+    public async Task ChoiceDelete_MissingName_KeepsThePreviousFailure()
+    {
+        // Delete is exact-name only and does not list the catalog (#1535); its outcome is unchanged by #1759.
+        using var f = new GlobalChoiceServerFake();
+        var ex = await Record.ExceptionAsync(() => f.Run("choice-delete", "mayo_Missing"));
+        var ppds = Assert.IsType<PpdsException>(ex);
+        Assert.Equal(MetadataErrorCodes.SdkOperationFailed, ppds.ErrorCode);
+        Assert.Equal(0, f.Requests.Count(r => r is RetrieveAllOptionSetsRequest));
     }
 
     [Theory]
