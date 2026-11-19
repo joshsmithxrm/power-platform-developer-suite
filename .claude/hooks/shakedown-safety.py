@@ -23,6 +23,14 @@ Two concerns, one hook:
    ``--dry-run``, ``solutions import``, etc.) are refused outright. This
    provides a mechanical boundary that the shakedown / verify skills rely on.
 
+**.NET host forms.** Besides ``ppds`` / ``ppds-mcp-server`` themselves, the
+hook recognises the CLI and MCP server started through ``dotnet``:
+``dotnet run`` / ``dotnet watch run`` with ``--project`` (or ``-p``) naming
+``PPDS.Cli`` / ``PPDS.Mcp`` or after ``cd`` into that directory in the same
+command, ``dotnet [exec] <path>/ppds.dll`` / ``ppds-mcp-server.dll``,
+``dotnet ppds`` and ``dotnet tool run ppds``. These are normalised to the
+same argv and only ever add hits. Matching is broad and best-effort.
+
 **Allowlist sources (checked in order; the first that names an env wins):**
 
 1. Env var ``$PPDS_SAFE_ENVS`` -- comma-separated list of env names.
@@ -494,7 +502,139 @@ def find_ppds_invocations(command: str) -> list:
                 break
             args.append(tok)
         out.append([prog] + args)
+    out.extend(_dotnet_invocations(command))
     return out
+
+
+# PPDS run through the .NET host. Additive: these hits are appended to the
+# matcher above and nothing is ever cleared. Broad like that matcher: any
+# `dotnet` word after the start, whitespace, an operator, a quote or a
+# parenthesis. Caps keep the work linear: at most 50 `dotnet` occurrences
+# per command, and 400 tokens / 4096 characters after each, are examined.
+_DOTNET_MAX_OCCURRENCES = 50
+_DOTNET_MAX_TOKENS = 400
+_DOTNET_MAX_CHARS = 4096
+_DOTNET_RE = re.compile(
+    r"""(?:^|[\s|;&()`'"])(?:[^\s|;&()`'"]*[\\/])?dotnet(?:\.exe)?(?=$|[\s|;&)`'"])""",
+    re.IGNORECASE,
+)
+_CD_RE = re.compile(r"""(?:^|[\s|;&(])(?:cd|pushd)\s+(?:-\S*\s+)*("[^"]*"|'[^']*'|[^\s|;&()]+)""")
+# Project (folder or .csproj stem) -> program; AssemblyName in the csproj.
+_PPDS_PROJECTS = {"ppds.cli": "ppds", "ppds.mcp": "ppds-mcp-server"}
+_PPDS_ASSEMBLIES = {"ppds.dll": "ppds", "ppds-mcp-server.dll": "ppds-mcp-server"}
+# `dotnet run` options that take a value / take none (learn.microsoft.com
+# dotnet-run); every other token before `--` is forwarded to the app.
+_RUN_VALUE_OPTS = set("-a --arch --artifacts-path -c --configuration -e --environment --file "
+                      "-f --framework -lp --launch-profile --os --project -r --runtime -v "
+                      "--verbosity --property".split())
+_RUN_FLAGS = set("--disable-build-servers --force --interactive --no-build --no-cache "
+                 "--no-dependencies --no-launch-profile --no-restore --no-self-contained "
+                 "--sc --self-contained -? -h --help".split())
+# `dotnet [exec]` host options that take a value.
+_HOST_VALUE_OPTS = set("--additionalprobingpath --additional-deps --depsfile --fx-version "
+                       "--roll-forward --runtimeconfig --roll-forward-on-no-candidate-fx".split())
+_OPTION_VALUE_RE = re.compile(r"^(--?[A-Za-z?][\w-]*)[=:](.*)$", re.DOTALL)
+
+
+def _dotnet_project(path):
+    """``ppds`` / ``ppds-mcp-server`` when ``path``'s last component names that project."""
+    parts = []
+    for part in (path or "").replace("\\", "/").split("/"):
+        if part == "..":
+            parts = parts[:-1]
+        elif part not in ("", "."):
+            parts.append(part)
+    last = parts[-1].lower() if parts else ""
+    return _PPDS_PROJECTS.get(last[:-7] if last.endswith(".csproj") else last)
+
+
+def _dotnet_run(tokens: list, project) -> list:
+    """argv readings for ``dotnet run <tokens>``: args after ``--`` only, and
+    unrecognised tokens plus those (a hit for each, so either can block)."""
+    unknown, after, i = [], [], 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "--":
+            after = tokens[i + 1:]
+            break
+        m = _OPTION_VALUE_RE.match(tok)
+        name, inline = (m.group(1), m.group(2)) if m else (tok, None)
+        value = inline if inline is not None else (tokens[i + 1] if i + 1 < len(tokens) else "")
+        if name in _RUN_VALUE_OPTS or (name == "-p" and "=" not in value):
+            if name == "--file":
+                return []
+            if name in ("--project", "-p"):  # -p:x=y and -p x=y are properties
+                project = value
+            i += 1 if inline is not None else 2
+        else:
+            if name != "-p" and name not in _RUN_FLAGS and not name.startswith("--tl"):
+                unknown.append(tok)
+            i += 1 if name != "-p" or inline is not None else 2
+    program = _dotnet_project(project)
+    if program is None:
+        return []
+    readings = [[program] + after, [program] + unknown + after]
+    return readings[:1] if readings[0] == readings[1] else readings
+
+
+def _dotnet_argvs(tokens: list, cwd) -> list:
+    """Normalise the tokens after a ``dotnet`` word to PPDS argvs (or [])."""
+    i = 0
+    while i < len(tokens) and (tokens[i].startswith("-") or tokens[i].lower() == "exec"):
+        i += 2 if tokens[i] in _HOST_VALUE_OPTS else 1
+    verb, rest = (tokens[i].lower(), tokens[i + 1:]) if i < len(tokens) else ("", [])
+    if verb == "watch" and "run" in rest[: rest.index("--") if "--" in rest else len(rest)]:
+        rest.remove("run")
+        verb = "run"
+    if verb == "run":
+        return _dotnet_run(rest, cwd)
+    if verb == "tool" and rest[:1] == ["run"]:
+        j = 1
+        while j < len(rest) and rest[j].startswith("-"):
+            j += 1
+        verb, rest = (rest[j].lower(), rest[j + 1:]) if j < len(rest) else ("", [])
+        rest = rest[1:] if rest[:1] == ["--"] else rest
+    verb = _PPDS_ASSEMBLIES.get(re.split(r"[\\/]", verb)[-1], verb)
+    return [[verb] + rest] if verb in ("ppds", "ppds-mcp-server") else []
+
+
+def _dotnet_invocations(command: str) -> list:
+    """Hits for PPDS started through ``dotnet``; [] on any error."""
+    try:
+        cds, parts = [], []  # (position, directory after each cd / pushd)
+        for m in _CD_RE.finditer(command):
+            target = m.group(1).strip("'\"").replace("\\", "/")
+            if target.startswith("/") or target[1:2] == ":":
+                parts = []
+            parts = (parts + target.split("/"))[-32:]
+            cds.append((m.start(), "/".join(parts)))
+        out, cwd, k = [], None, 0
+        for count, match in enumerate(_DOTNET_RE.finditer(command)):
+            if count >= _DOTNET_MAX_OCCURRENCES:
+                break
+            while k < len(cds) and cds[k][0] < match.start():
+                cwd, k = cds[k][1], k + 1
+            tail = command[match.end():match.end() + _DOTNET_MAX_CHARS]
+            tail = tail[1:] if tail[:1] in ("'", '"') else tail
+            lexer = shlex.shlex(tail, posix=True)
+            # As shlex.split, but a backslash stays literal (Windows paths).
+            lexer.whitespace_split, lexer.commenters, lexer.escape = True, "", ""
+            args = []
+            try:
+                tok = lexer.get_token()
+                while tok is not None and tok not in _SHELL_OPERATORS and len(args) < _DOTNET_MAX_TOKENS:
+                    args.append(tok.rstrip(";"))
+                    tok = None if tok.endswith(";") else lexer.get_token()
+            except ValueError:
+                args = []
+                for tok in tail.split(None, _DOTNET_MAX_TOKENS)[:_DOTNET_MAX_TOKENS]:
+                    if tok in _SHELL_OPERATORS:
+                        break
+                    args.append(tok)
+            out.extend(_dotnet_argvs(args, cwd))
+        return out
+    except Exception:  # noqa: BLE001 -- new detection must never remove existing hits
+        return []
 
 
 # ---------------------------------------------------------------------------

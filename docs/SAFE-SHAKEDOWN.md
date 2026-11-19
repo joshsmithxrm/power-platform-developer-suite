@@ -50,7 +50,34 @@ policy; fewer ways to drift.
 
 ## Hook behavior
 
-**Trigger:** every Bash invocation that mentions `ppds` or `ppds-mcp-server`.
+**Trigger:** every Bash invocation that mentions `ppds` or `ppds-mcp-server`,
+or runs either through `dotnet` (below).
+
+### What the hook recognises
+
+- The programs `ppds` and `ppds-mcp-server`, with an optional path and
+  `.exe`, anywhere they appear as a word in the command.
+- The same programs started through the .NET host, treated exactly like the
+  direct program:
+  - `dotnet run` (or `dotnet watch run`) whose `--project`, `--project=` or
+    `-p` names the `PPDS.Cli` / `PPDS.Mcp` project folder or `.csproj`, or
+    after a `cd` / `pushd` into that folder earlier in the same command.
+    Arguments are what follows `--` plus anything `dotnet run` does not
+    recognise; when an unknown option makes that ambiguous, both readings
+    are checked and either can block.
+  - `dotnet [exec] <path>/ppds.dll` and `<path>/ppds-mcp-server.dll`.
+  - `dotnet ppds ...` and `dotnet tool run ppds ...`.
+
+  Other `dotnet` commands (`build`, `test`, `pack`, `run` for any other
+  project) are not gated.
+
+Matching is deliberately broad and best-effort. It cannot see through a
+script, an alias, another shell (`pwsh -c`, `cmd /c`) or a working
+directory set in an earlier Bash call. A command that merely mentions
+`ppds` (or one of these `dotnet` forms), for example in a commit message or
+a `grep` pattern, can be blocked when a gate applies; that is existing
+behaviour. The C# guard (`IShakedownGuard`, `specs/shakedown-guard.md`)
+blocks writes during a shakedown however the CLI was started.
 
 ### Concern 1: env allowlist gating (opt-in)
 

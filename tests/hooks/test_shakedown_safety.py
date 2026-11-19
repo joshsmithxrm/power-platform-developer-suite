@@ -941,6 +941,120 @@ class TestCustomReadonlyEnvVar:
         assert r.returncode == 2
 
 
+# (id, command, argv the hook must find)
+_DEL = "data delete --entity account"
+DOTNET_HOST_FORMS = [
+    ("run-project-dir", f"dotnet run --project src/PPDS.Cli -- {_DEL}", f"ppds {_DEL}"),
+    ("run-csproj-windows-path", rf'dotnet run --project "C:\repo\src\PPDS.Cli\PPDS.Cli.csproj" -- {_DEL}', f"ppds {_DEL}"),
+    ("run-project-equals-options", f"dotnet run -c Release --no-build --project=src/PPDS.Cli/ -f net10.0 -- {_DEL}", f"ppds {_DEL}"),
+    ("run-p-path", f"dotnet run -p:Configuration=Release -p src/ppds.cli -- {_DEL}", f"ppds {_DEL}"),
+    ("run-no-separator", f"dotnet run --project src/PPDS.Cli {_DEL}", f"ppds {_DEL}"),
+    ("run-mcp", "dotnet run --project src/PPDS.Mcp/PPDS.Mcp.csproj -- --profile x", "ppds-mcp-server --profile x"),
+    ("dll", f"dotnet src/PPDS.Cli/bin/Debug/net10.0/ppds.dll {_DEL}", f"ppds {_DEL}"),
+    ("exec-dll", f"dotnet exec --depsfile d.json bin/ppds.dll {_DEL}", f"ppds {_DEL}"),
+    ("cd-then-run", f"cd src/PPDS.Cli && dotnet run -- {_DEL}", f"ppds {_DEL}"),
+    ("watch-run", f"dotnet watch run --project src/PPDS.Cli -- {_DEL}", f"ppds {_DEL}"),
+    ("tool-run", f"dotnet tool run --allow-roll-forward ppds {_DEL}", f"ppds {_DEL}"),
+    ("quoted-dotnet-exe", rf'"C:\Program Files\dotnet\dotnet.exe" run --project src/PPDS.Cli -- {_DEL}', f"ppds {_DEL}"),
+]
+DOTNET_NOT_PPDS = [
+    "dotnet build src/PPDS.Cli/PPDS.Cli.csproj",
+    "dotnet test tests/PPDS.Cli.Tests",
+    "dotnet pack src/PPDS.Cli -c Release",
+    "dotnet format PPDS.sln && dotnet restore src/PPDS.Mcp",
+    f"dotnet run --project src/PPDS.DocsGen -- {_DEL}",
+    f"dotnet run --project scripts/docs-gen/cli-reflect -- {_DEL}",
+    f"dotnet run --project tests/PPDS.Cli.Tests -- {_DEL}",
+    f"dotnet run --project tests/PPDS.Cli.DaemonTests/PPDS.Cli.DaemonTests.csproj -- {_DEL}",
+    f"cd src/PPDS.Cli && cd .. && dotnet run -- {_DEL}",
+]
+
+
+class TestDotnetHostForms:
+    """PPDS started through ``dotnet`` is gated like the direct program."""
+
+    ENV_BLOCK = "BLOCKED [shakedown-safety/env]: active env is not in the safe-env allowlist."
+
+    @staticmethod
+    def _env(config_dir, project, **extra):
+        env = {"PPDS_SAFE_ENVS": "ppds-dev", "PPDS_CONFIG_DIR": config_dir,
+               "CLAUDE_PROJECT_DIR": project["path"]}
+        env.update(extra)
+        return env
+
+    @pytest.mark.parametrize("cmd,argv", [(c, a) for _, c, a in DOTNET_HOST_FORMS],
+                             ids=[i for i, _, _ in DOTNET_HOST_FORMS])
+    def test_env_gate_blocks(self, fake_profile_dir, project_dir, cmd, argv):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        r = _run_hook(cmd, env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert self.ENV_BLOCK in r.stderr
+        assert f"Command:    {argv}\n" in r.stderr
+
+    @pytest.mark.parametrize("cmd", [c for i, c, _ in DOTNET_HOST_FORMS if i in (
+        "run-project-dir", "run-no-separator", "run-mcp", "exec-dll", "cd-then-run", "tool-run")])
+    def test_write_block_during_shakedown(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(cmd, env_extra=self._env(config_dir, project_dir, PPDS_SHAKEDOWN="1"))
+        assert r.returncode == 2, r.stderr
+        assert "BLOCKED [shakedown-safety/readonly]" in r.stderr
+        assert "Pattern: data delete" in r.stderr or "missing --read-only" in r.stderr
+
+    @pytest.mark.parametrize("cmd", [c for i, c, _ in DOTNET_HOST_FORMS if i in (
+        "run-project-dir", "dll", "cd-then-run", "watch-run")])
+    def test_safe_env_allowed(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(cmd, env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 0, r.stderr
+        assert r.stderr == ""
+
+    @pytest.mark.parametrize("cmd", [
+        "dotnet run --project src/PPDS.Cli -- plugins deploy --dry-run",
+        "dotnet run --project src/PPDS.Mcp -- --read-only",
+    ])
+    def test_exemptions_as_for_the_direct_program(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(cmd, env_extra=self._env(config_dir, project_dir, PPDS_SHAKEDOWN="1"))
+        assert r.returncode == 0, r.stderr
+
+    def test_dual_reading_blocks(self, fake_profile_dir, project_dir):
+        """An option the hook does not know before `--` cannot hide the verb."""
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(f"dotnet run --project src/PPDS.Cli --tl off -- {_DEL}",
+                      env_extra=self._env(config_dir, project_dir, PPDS_SHAKEDOWN="1"))
+        assert r.returncode == 2, r.stderr
+        assert "Pattern: data delete" in r.stderr
+
+    def test_other_dotnet_commands_allowed(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        for cmd in DOTNET_NOT_PPDS[:4] + DOTNET_NOT_PPDS[4:6]:
+            r = _run_hook(cmd, env_extra=self._env(config_dir, project_dir, PPDS_SHAKEDOWN="1"))
+            assert r.returncode == 0, f"cmd={cmd}: stderr={r.stderr!r}"
+            assert r.stderr == ""
+
+    @pytest.mark.parametrize("cmd,argv", [(c, a) for _, c, a in DOTNET_HOST_FORMS],
+                             ids=[i for i, _, _ in DOTNET_HOST_FORMS])
+    def test_parse(self, cmd, argv):
+        assert argv.split(" ") in hook.find_ppds_invocations(cmd)
+
+    @pytest.mark.parametrize("cmd", DOTNET_NOT_PPDS)
+    def test_parse_not_ppds(self, cmd):
+        assert hook.find_ppds_invocations(cmd) == []
+
+    def test_parse_dual_reading(self):
+        found = hook.find_ppds_invocations(f"dotnet run --project src/PPDS.Cli --tl off -- {_DEL}")
+        assert found == [["ppds"] + _DEL.split(), ["ppds", "off"] + _DEL.split()]
+
+    def test_existing_hits_survive_a_failure(self, monkeypatch):
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("bug")
+
+        monkeypatch.setattr(hook, "_dotnet_argvs", boom)
+        assert hook.find_ppds_invocations(f"ppds {_DEL} && dotnet run --project src/PPDS.Cli -- x") == [
+            ["ppds"] + _DEL.split()
+        ]
+
+
 # ===========================================================================
 # Module-level unit tests (no subprocess)
 # ===========================================================================

@@ -56,8 +56,8 @@ Don't spend interactive cycles on code that fails its tests.
 ### 3. Safety pre-check
 
 Any mode that reaches live Dataverse: run `REFERENCE.md` "Safety pre-check"
-first. In particular, call the CLI as `ppds` or by its built path, never
-through `dotnet run`, so the shakedown safety hook can see it.
+first. In particular, call the CLI as `ppds`, by its built path, or via
+`dotnet run --project src/PPDS.Cli`, so the shakedown safety hook can see it.
 
 ### 4. CLI mode
 
