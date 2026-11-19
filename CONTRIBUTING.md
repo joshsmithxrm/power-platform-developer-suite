@@ -263,6 +263,9 @@ key files; one guards `ppds` commands against live environments and is off until
 you configure an allowlist, see `docs/SAFE-SHAKEDOWN.md`). All of it is optional,
 and nothing in it is needed to get a PR merged. Put your own Claude Code
 permission preferences in `.claude/settings.local.json`, which is gitignored.
+The `ppds` guard does not read that file: set your own safe environments in the
+`PPDS_SAFE_ENVS` environment variable, and keep the tracked `.claude/settings.json`
+list for environments the whole team shares.
 
 ## Code standards
 

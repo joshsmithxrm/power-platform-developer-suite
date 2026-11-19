@@ -475,7 +475,7 @@ node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs close
 
 ### TUI reference in the verify skill
 
-The TUI command reference lives in `.claude/skills/verify/REFERENCE.md` ("TUI Mode"), not in a separate skill. It covers:
+The TUI command reference lives in `.claude/skills/verify/REFERENCE.md` ("§tui — TUI Mode"), not in a separate skill. It covers:
 - When to use (after any TUI change that affects rendering or interaction)
 - Command reference table (all 8 commands with examples)
 - Common patterns (navigate screens, verify status bar, check menu items)

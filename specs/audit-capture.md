@@ -168,7 +168,7 @@ Supported step types (extension):
 
 | Step | Shape | Maps to webview-cdp command |
 |------|-------|------------------------------|
-| command | `{ command: "PPDS: Data Explorer" }` | `command "PPDS: Data Explorer"` |
+| command | `{ command: "PPDS: Open Data Explorer" }` | `command "PPDS: Open Data Explorer"` |
 | wait | `{ wait: { ext: "power-platform-developer-suite", timeout: 30000 } }` | `wait --ext ... --timeout ...` |
 | click | `{ click: "#execute-btn", ext: "power-platform-developer-suite" }` | `click "#execute-btn" --ext ...` |
 | eval | `{ eval: "monaco.editor.getEditors()[0].setValue('...')" }` | `eval "..."` |

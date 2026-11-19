@@ -1,59 +1,44 @@
 # Verify - REFERENCE
 
-Rationale and worked examples for `.claude/skills/verify/SKILL.md`. The
-procedure stays in SKILL.md; everything that doesn't change between
-sessions lives here.
+Mechanics for `.claude/skills/verify/SKILL.md`: the safety pre-check, the
+report template, and one section per surface. Every command below runs from
+the repo root in the Bash tool (Git Bash on Windows), so paths use forward
+slashes.
 
 ---
 
-## TUI Mode - worked example
+## Safety pre-check
 
-The TUI verifier wraps `@microsoft/tui-test` + `node-pty`. Full command
-reference: §tui below.
+Applies to every flow that reaches live Dataverse (CLI, TUI, extension, MCP).
+The `.claude/hooks/shakedown-safety.py` PreToolUse hook inspects each Bash
+command that invokes `ppds` or `ppds-mcp-server` by program name (a path
+ending in `ppds` counts). Full model: `docs/SAFE-SHAKEDOWN.md`.
 
-```bash
-# Phase A: Build and launch
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs launch --build
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs wait "PPDS" 15000
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 0
+- **Env allowlist (opt-in).** Off until a list names an env. The hook reads,
+  first match wins: `$PPDS_SAFE_ENVS` (comma-separated, read from the
+  environment Claude Code was started in), then `safety.shakedown_safe_envs`
+  in the tracked `.claude/settings.json` (checked in as `[]`), then the
+  legacy `.claude/state/safe-envs.json` (`safe_envs`). Once on, `ppds *` is allowed
+  only when the active env is in the list, and an unidentifiable active env
+  blocks. A misconfigured source (unparseable settings, wrong type, a value
+  naming no env) blocks every `ppds` command until it is fixed or removed.
+- **Write-block.** Armed by the sentinel `.claude/state/shakedown-active.json`
+  (what `/shakedown` Phase 0 writes; under 24h old) or by `PPDS_SHAKEDOWN=1`
+  in the environment Claude Code was started in. An inline
+  `PPDS_SHAKEDOWN=1 ppds ...` in the Bash tool does not reach the hook.
+  Blocks write verbs (`create`, `update`, `delete`, `import`, `publish`,
+  `set`, ...), `plugins deploy` without `--dry-run`, and `ppds-mcp-server`
+  without `--read-only`.
 
-# Phase B (MANDATORY when src/PPDS.Cli/Tui/ changes): interactive nav
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "tab"
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 2
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 28
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs wait "SQL Query" 5000
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs screenshot $TEMP/tui-verify.json
+Before running anything below:
 
-# Phase C: Cleanup
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs close
-```
-
----
-
-## Extension Mode - worked example
-
-Wraps `@playwright/test` + `@vscode/test-electron`. Full reference:
-§ext below.
-
-```bash
-# Phase A: Launch and screenshot
-node src/PPDS.Extension/tools/webview-cdp.mjs launch --build
-node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
-node src/PPDS.Extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
-node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/data-explorer.png
-node src/PPDS.Extension/tools/webview-cdp.mjs logs --channel "PPDS"
-
-# Phase B (MANDATORY when query/data/panel code changes): exercise a query
-node src/PPDS.Extension/tools/webview-cdp.mjs eval 'monaco.editor.getEditors()[0].setValue("SELECT TOP 5 name FROM account")'
-node src/PPDS.Extension/tools/webview-cdp.mjs click "#execute-btn" --ext "power-platform-developer-suite"
-node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/after-query.png
-
-# Phase C: Cleanup
-node src/PPDS.Extension/tools/webview-cdp.mjs close
-```
-
-Phase B trigger files: `SqlQueryService`, `RpcMethodHandler`, `QueryPanel`,
-`query-panel.ts`, anything under data rendering or panel interactions.
+1. `ppds env who` (always allowed) and confirm the env is a dev/test env you
+   mean to touch, and in the allowlist if one is configured.
+2. When invoked from `/shakedown`, confirm `.claude/state/shakedown-active.json`
+   exists so writes fail closed.
+3. Invoke the CLI as `ppds` or `src/PPDS.Cli/bin/Debug/net10.0/ppds`, not
+   through `dotnet run --project src/PPDS.Cli/...` or `scripts/ppds-dev.ps1`:
+   the hook matches the program name and does not see those forms.
 
 ---
 
@@ -65,682 +50,450 @@ Phase B trigger files: `SqlQueryService`, `RpcMethodHandler`, `QueryPanel`,
 | Check | Status | Details |
 |-------|--------|---------|
 | Unit tests | PASS | 12/12 passing |
-| Daemon connection | PASS | PID 12345, uptime 30s |
-| Tree view state | PASS | 2 profiles, 3 environments |
-| Data Explorer open | PASS | Panel created |
-| SQL query execution | PASS | 5 rows returned |
-| Webview rendering | PASS | Query panel layout correct |
+| Data Explorer open | PASS | Panel created, env "Dev" shown |
+| SQL query execution | PASS | 5 rows returned in 298ms |
+| Webview rendering | PASS | Screenshot reviewed: toolbar, grid, status bar |
 
 ### Verdict: PASS -- all checks green
 ```
 
 ---
 
-## §tui — TUI Verify Reference
+## §cli — CLI Mode
 
-Interact with the PPDS TUI (`ppds interactive`) running in a PTY. Read terminal text to verify what's rendered, send keystrokes to navigate, wait for specific content to appear. Text-based verification — the AI reads terminal rows directly instead of interpreting screenshots.
-
-### Safety pre-check
-
-These verification flows talk to live Dataverse. The `shakedown-safety`
-PreToolUse hook gates `ppds *` invocations to keep an agent from writing
-to a non-dev env, with two concerns in one gate:
-
-- **Env allowlist (opt-in).** Once an allowlist is configured
-  (`$PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs` in
-  `.claude/settings.json`), blocks `ppds *` unless the active env is in
-  it. With none configured this gate is off.
-- **Write-block during shakedown (active when the sentinel file
-  `.claude/state/shakedown-active.json` is fresh, or `PPDS_SHAKEDOWN=1`).**
-  Blocks write verbs (`create`, `update`, `delete`, `plugins deploy`
-  without `--dry-run`, `solutions import`, etc.). In a Claude Code
-  session the shakedown skill arms it in Phase 0 by writing the sentinel
-  file; `PPDS_SHAKEDOWN=1` is the shell / CI form.
-
-Before running any of the patterns below:
-
-1. Confirm `ppds env who` shows a safe env (in the allowlist).
-2. If invoked from `/shakedown`, verify `.claude/state/shakedown-active.json`
-   exists (or, outside Claude Code, that `PPDS_SHAKEDOWN=1` is set) so write
-   commands fail closed.
-3. Read `docs/SAFE-SHAKEDOWN.md` for the full model and bypass procedure.
-
-### When to Use
-
-- After implementing or modifying any TUI screen, widget, or keyboard handler
-- When debugging TUI rendering — read specific rows to see what's there
-- When testing keyboard navigation — send keystrokes and verify focus moved
-- When verifying status bar content after an operation
-
-### Setup
-
-The tool is at `tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs`. Uses `@microsoft/tui-test` (already a dev dependency). Requires the TUI to be built first. The TUI subcommand is `ppds interactive` (the tool handles this internally).
-
-### First Steps After Launch
-
-The TUI starts with no profile connected. You must select a profile and environment before most features work.
+### Build and run
 
 ```bash
-# 1. Build and launch TUI in PTY (120x30 terminal)
+dotnet build src/PPDS.Cli/PPDS.Cli.csproj -f net10.0 -v q
+src/PPDS.Cli/bin/Debug/net10.0/ppds <command> <args>
+```
+
+The apphost is `ppds.exe` on Windows; Git Bash resolves it from the path
+above without the extension, and the same path works on macOS/Linux. To test
+the packaged global tool instead, run `pwsh scripts/Install-LocalCli.ps1`
+(packs and reinstalls `PPDS.Cli`), then call `ppds`.
+
+### What to check
+
+- **Exit code** 0 on success. Non-zero codes are defined in
+  `src/PPDS.Cli/Infrastructure/Errors/ExitCodes.cs`: 1 partial success,
+  2 failure, 3 invalid arguments, 4 connection, 5 auth, 6 not found,
+  7 mapping required, 8 validation, 9 forbidden, 10 precondition failed,
+  11 confirmation required (stdin redirected; `--force` bypasses),
+  12 incomplete.
+- **stdout is data only, stderr is status** (Constitution I1). Pipe stdout
+  to `jq` or `grep` to prove it is clean; `--output-format json` where the
+  command offers it.
+- **Errors** go to stderr with a non-zero exit: an unknown command
+  (`ppds nonexistent`), missing arguments (`ppds query sql`), and no active
+  profile.
+- **Help** `ppds <command> --help` shows the new options.
+
+Commonly used: `ppds auth list`, `ppds auth create`, `ppds auth who`,
+`ppds env list`, `ppds env who`, `ppds env select <name>`,
+`ppds query sql "<sql>"`, `ppds data export`, `ppds serve` (daemon, long
+running), `ppds interactive` (TUI).
+
+---
+
+## §tui — TUI Mode
+
+Tool: `tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs` (`@microsoft/tui-test` +
+`node-pty`). It runs `ppds interactive` in a 120x30 PTY behind a background
+daemon; you read rows as text instead of interpreting screenshots.
+
+- It launches `src/PPDS.Cli/bin/Debug/net10.0/ppds.exe`, so it currently
+  works only on Windows. `launch --build` runs
+  `dotnet build src/PPDS.Cli/PPDS.Cli.csproj -f net10.0` first.
+- `launch` with a live session prints "TUI is already running" and does
+  nothing, so after a rebuild `close` first or you test the old binary.
+- The daemon exits after 30 minutes without a request.
+- Session and log files live next to the tool
+  (`.tui-verify-session.json`, `.tui-verify-daemon.log`); `close` deletes
+  the log, so read it before closing.
+
+### Worked example
+
+The TUI starts with no profile connected; pick a profile and environment
+before most screens work.
+
+```bash
+# Phase A: build, launch, confirm it rendered
 node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs launch --build
-
-# 2. Wait for splash screen to render
 node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs wait "PPDS" 15000
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 0
 
-# 3. Select profile (Alt+P opens profile picker)
+# Connect: Alt+P profile picker, arrow to the profile, Enter
 node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "alt+p"
-# Arrow to the desired profile, then Enter to select
 node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "enter"
-
-# 4. Select environment (Alt+E opens environment picker)
-#    If environment auto-populated from profile, skip this step.
-#    Check row 28 to see current state:
+# Row 28 shows "Environment: None" if no env came from the profile; then Alt+E
 node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 28
-#    If it shows "Environment: None", open the picker:
 node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "alt+e"
 node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "enter"
 
-# 5. Navigate to SQL Query screen
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "alt+t"   # Tools menu
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "enter"   # SQL Query (first item)
+# Phase B (mandatory when src/PPDS.Cli/Tui/ changes): drive the screen
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "alt+t"    # Tools menu
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "enter"    # SQL Query (first item)
 node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs wait "SQL Query" 5000
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 2         # [ 1: SQL Query - <env name> ] [+]
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "ctrl+a"   # select the pre-filled query
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs type "SELECT TOP 10 name FROM account"
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "F5"
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs wait "rows" 30000
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 24        # "Returned 10 rows in 298ms via Dataverse"
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs render "$TEMP/tui-sql.png"
 
-# 6. Verify connection — check the tab title includes environment name
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 2
-# Expected: │[ 1: SQL Query - <env name> ] [+]
+# Phase C: cleanup
+node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs close
 ```
+
+The SQL editor opens pre-filled with
+`SELECT TOP 100 accountid, name, createdon FROM account`, and `type` inserts
+at the cursor; read rows 4-9 to confirm the editor holds what you expect
+before pressing F5.
 
 ### Commands
 
-| Command | Example | Purpose |
-|---------|---------|---------|
-| `launch [--build]` | `launch --build` | Start TUI in PTY. `--build` compiles first |
-| `close` | `close` | Kill PTY, clean up (idempotent) |
-| `text <row>` | `text 0` | Read terminal row content (0-based, 0-29) |
-| `key "<combo>"` | `key "alt+t"` | Send keystroke |
-| `type "<text>"` | `type "SELECT"` | Type text character by character |
-| `wait "<text>" [ms]` | `wait "PPDS" 5000` | Poll until text appears (default 10s) |
-| `screenshot <file>` | `screenshot $TEMP/debug.json` | Dump serialize() as JSON (text + colors) |
-| `rows` | `rows` | Show terminal dimensions (120x30) |
+| Command | Purpose |
+|---------|---------|
+| `launch [--build]` | Start the TUI in a PTY; `--build` compiles first |
+| `close` | Kill the PTY and daemon (safe when nothing is running) |
+| `text <row>` | Print one row, 0-29 |
+| `key "<combo>"` | Send a keystroke (100ms settle) |
+| `type "<text>"` | Type text, 30ms per character |
+| `wait "<text>" [ms]` | Poll all rows until the text appears (default 10000) |
+| `screenshot <file.json>` | Write `serialize()` output (text + colour shifts) as JSON |
+| `render <file.png>` | Render the current screen to a PNG (headless Chromium + xterm.js) and print JSON with the path and the serialize payload |
+| `rows` | Print the dimensions (`120x30`) |
 
-### Key Combos
+Write `screenshot` / `render` output under `$TEMP` (set in Git Bash on
+Windows; use `${TMPDIR:-/tmp}` on macOS/Linux), never into the repo.
 
-| Combo | What it does in PPDS TUI |
-|-------|--------------------------|
-| `tab` | Cycle focus to next widget |
-| `shift+tab` | Cycle focus to previous widget |
-| `enter` | Activate focused button/menu item |
-| `escape` | Close dialog/cancel operation |
-| `alt+f` | Open File menu |
-| `alt+q` | Open Query menu (on SQL Query screen) |
-| `alt+t` | Open Tools menu |
-| `alt+h` | Open Help menu |
-| `alt+p` | Open profile selector dialog |
-| `alt+e` | Open environment selector dialog |
-| `ctrl+q` | Quit TUI (exits immediately, no confirmation) |
-| `up`/`down` | Navigate lists, menus, tree views |
-| `F5` | Execute query (on SQL Query screen) |
-| `F1`-`F12` | Function key shortcuts |
+### Keys
 
-**Known issue:** `ctrl+shift+t` is bound to both "new query tab" and "TDS Read Replica toggle" — the new-tab binding wins. Use the Query menu instead: `alt+q` → navigate to "TDS Read Replica" → `enter`. See [#580](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/580).
+The tool accepts modifiers `ctrl`, `alt`, `shift` and the named keys
+`enter`, `tab`, `escape`, `up`, `down`, `left`, `right`, `backspace`,
+`delete`, `space`, `F1`-`F12`, or a single character.
 
-### Screen Layout (120x30 terminal)
+- Modifiers are dropped on named keys, so `shift+tab` sends a plain Tab.
+- `ctrl+<letter>` sends the control character; `shift` is ignored with it,
+  so Ctrl+Shift shortcuts cannot be sent. Use the menu or the F-key
+  alternative.
+
+| Combo | PPDS TUI action |
+|-------|-----------------|
+| `tab` | Next widget |
+| `enter` / `escape` | Activate / close dialog or cancel a running query |
+| `alt+f`, `alt+t`, `alt+h` | File, Tools, Help menus |
+| `alt+q` | Query menu (SQL Query screen) |
+| `alt+p` / `alt+e` | Profile / environment selector |
+| `up` / `down` | Lists, menus, tree views |
+| `ctrl+t` / `ctrl+w` | New SQL Query tab / close tab |
+| `ctrl+q` | Quit immediately, no confirmation |
+| `F1` / `F12` | Keyboard shortcuts / error log |
+| `F5` | Execute query |
+| `F6` | Toggle focus between editor and results |
+| `F7` / `F8` / `F9` | Execution plan / history / FetchXML |
+| `F10` / `F11` | Toggle TDS Read Replica / FetchXML input |
+
+Query menu, top to bottom: Execute, Show FetchXML, Show Execution Plan,
+History, (separator), Filter Results, (separator), FetchXML Input,
+TDS Read Replica.
+
+### Screen layout (120x30, SQL Query screen)
 
 | Rows | Content |
 |------|---------|
 | 0 | Title bar: "PPDS - Power Platform Developer Suite" |
-| 1 | Menu bar: File, Query/Tools, Help |
-| 2 | Tab bar (on SQL Query screen) |
-| 3 | Screen title (e.g., "SQL Query - Env Name") |
-| 4-9 | Query editor area |
+| 1 | Menu bar: File, Query (SQL Query screen only), Tools, Help |
+| 2 | Tab bar |
+| 3 | Screen title (e.g. "SQL Query - Env Name") |
+| 4-9 | Query editor |
 | 10 | Splitter |
 | 11-23 | Results table |
-| 24 | Inner status label (e.g., "Ready", "Mode: TDS Read Replica...") |
+| 24 | Query status label ("Ready", "Mode: TDS Read Replica...", errors) |
 | 25 | Inner frame border |
 | 26 | (empty) |
 | 27 | Error/notification bar |
-| 28 | Profile/Environment status: "Profile: ... Environment: ..." |
+| 28 | "Profile: ... Environment: ..." |
 | 29 | Bottom border |
 
-**Row 24** is the query status label. **Row 28** is the profile/environment bar. **Row 29** is just the border.
-
-### Common Patterns
-
-#### Open SQL Query screen
-```bash
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "alt+t"   # Tools menu
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "enter"   # SQL Query (first item)
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs wait "SQL Query" 5000
-```
-
-#### Check query status label
-```bash
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 24  # inner status (Ready, Mode, error, etc.)
-```
-
-#### Check profile and environment
-```bash
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 28  # Profile: ... Environment: ...
-```
-
-#### Navigate Query menu items
-```bash
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "alt+q"   # open Query menu
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "down"    # navigate items
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "enter"   # select
-```
-
-Query menu items (top to bottom): Execute, Show FetchXML, Show Execution Plan, History, (separator), Filter Results, (separator), TDS Read Replica.
-
-#### Type and execute a query
-```bash
-# Focus is usually on the query editor after opening SQL Query
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs type "SELECT TOP 10 name FROM account"
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs key "F5"     # execute
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs wait "rows" 30000  # wait for results
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text 24      # check status (e.g., "Returned 10 rows in 298ms via Dataverse")
-```
-
-#### Debug rendering issues
-```bash
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs screenshot $TEMP/tui-state.json
-# Read the file to see full terminal state with colors
-```
-
-#### Read multiple rows to understand layout
-```bash
-for i in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29; do
-  echo "Row $i: $(node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text $i)"
-done
-```
-
-### Screenshots
-
-The `screenshot` command dumps the terminal's `serialize()` output as JSON — text with color metadata. Not a PNG image. Use `$TEMP` for the output path:
+To dump every row:
 
 ```bash
-# Good
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs screenshot $TEMP/debug.json
-
-# BAD — creates file in repo
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs screenshot debug.json
+for i in $(seq 0 29); do echo "Row $i: $(node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs text $i)"; done
 ```
 
-### Verification Before Completion (TUI)
+### When interactive verification is required
 
-**Interactive verification required** — any change affecting TUI rendering:
-- Screen layout, widget placement, borders
-- Keyboard handlers, focus order
-- Status bar content, menu items
-- Dialog boxes, error messages
+Required for anything that changes what is rendered or how keys behave:
+layout, widgets, borders, keyboard handlers, focus order, status bar, menu
+items, dialogs, error messages. Compile and unit tests suffice for
+Application Service logic, Dataverse queries and data transformation.
 
-**Compile + test sufficient** — no visual impact:
-- Application Service logic (business rules)
-- Dataverse queries, data transformation
-- CLI command behavior (not TUI)
+### Error recovery (TUI)
 
-### Error Recovery (TUI)
-
-#### `launch` fails or times out
-```bash
-# Check the daemon log for diagnostics — this is the most important step
-cat tests/PPDS.Tui.E2eTests/tools/.tui-verify-daemon.log
-
-# Common causes:
-# - "Binary not found" → run with --build
-# - "PTY exited: code=1" → wrong subcommand or missing dependency
-# - No log file at all → node-pty compilation issue
-
-# Clean up and retry
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs close
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs launch --build
-```
-
-#### `wait` times out
-1. Check if TUI is alive: `text 0` — if error, TUI crashed. `close` then `launch --build`
-2. Check if you're on the right screen: read several rows with `text`
-3. Check the daemon log: `cat tests/PPDS.Tui.E2eTests/tools/.tui-verify-daemon.log`
-4. Increase timeout: `wait "text" 30000`
-
-#### TUI crashes mid-session
-```bash
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs close   # clean up
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs launch --build
-```
-
-### Gap Protocol (TUI)
-
-If you encounter a TUI interaction that this tool cannot handle:
-
-1. **STOP** — do not work around it silently
-2. **Describe the gap** — what interaction you need
-3. **Propose an enhancement** — a new command or flag
-4. **Ask the user** — implement now or defer
+- **`launch` fails or times out:** read
+  `tests/PPDS.Tui.E2eTests/tools/.tui-verify-daemon.log` first.
+  "Binary not found" means build (`--build`); "PTY exited: code=1" means a
+  wrong subcommand or missing dependency; no log file at all points at a
+  `node-pty` install problem. Then `close` and `launch --build`.
+- **`wait` times out:** `text 0` (an error means the TUI died: `close`, then
+  `launch --build`); read several rows to see which screen you are on; read
+  the daemon log; retry with a longer timeout (`wait "text" 30000`).
+- **TUI crashed mid-session:** `close`, then `launch --build`.
 
 ---
 
-## §ext — Extension Webview Verify Reference
+## §ext — Extension Mode
 
-Interact with extension webview panels running inside VS Code. Take screenshots to see what you've built, click buttons, type text, test keyboard shortcuts, execute VS Code commands, right-click context menus, read console logs, and inspect DOM state.
+Tool: `src/PPDS.Extension/tools/webview-cdp.mjs` (`@playwright/test` +
+`@vscode/test-electron`). It drives a VS Code window through a background
+daemon.
 
-### Safety pre-check
+- The first run downloads VS Code (30-60s, cached). The extension loads
+  from source (`--extensionDevelopmentPath`).
+- `launch --build` runs `npm run compile` in `src/PPDS.Extension`, then
+  `dotnet build src/PPDS.Cli/PPDS.Cli.csproj -c Debug` for the daemon.
+  CSS changes need `--build` too: esbuild bundles the CSS, and webviews do
+  not hot-reload it.
+- `launch` with a live session prints "already running" and does not
+  relaunch, so `close` before a rebuild.
+- `launch --vsix <file>` installs a packaged VSIX into a clean extensions
+  directory instead (no build).
+- `--session <name>` on any command runs separate, concurrent instances;
+  `close --all` closes every session.
 
-These verification flows talk to live Dataverse. The `shakedown-safety`
-PreToolUse hook gates `ppds *` invocations to keep an agent from writing
-to a non-dev env, with two concerns in one gate:
+**Always pass `--ext "power-platform-developer-suite"`** to `eval`, `click`,
+`type`, `select`, `text` and `wait`. VS Code may have other webviews open
+(walkthrough, settings); without `--ext` you can act on the wrong one.
 
-- **Env allowlist (opt-in).** Once an allowlist is configured
-  (`$PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs` in
-  `.claude/settings.json`), blocks `ppds *` unless the active env is in
-  it. With none configured this gate is off.
-- **Write-block during shakedown (active when the sentinel file
-  `.claude/state/shakedown-active.json` is fresh, or `PPDS_SHAKEDOWN=1`).**
-  Blocks write verbs (`create`, `update`, `delete`, `plugins deploy`
-  without `--dry-run`, `solutions import`, etc.). In a Claude Code
-  session the shakedown skill arms it in Phase 0 by writing the sentinel
-  file; `PPDS_SHAKEDOWN=1` is the shell / CI form.
-
-Before running any of the patterns below:
-
-1. Confirm `ppds env who` shows a safe env (in the allowlist).
-2. If invoked from `/shakedown`, verify `.claude/state/shakedown-active.json`
-   exists (or, outside Claude Code, that `PPDS_SHAKEDOWN=1` is set) so write
-   commands fail closed.
-3. Read `docs/SAFE-SHAKEDOWN.md` for the full model and bypass procedure.
-
-### When to Use (Extension)
-
-- After implementing or modifying any webview panel UI
-- When debugging visual issues — screenshot to see the current state
-- When testing interactions — clicks, keyboard shortcuts, context menus, dropdowns
-- When checking for errors — read console logs and output channel content
-
-### Setup (Extension)
-
-The tool is at `src/PPDS.Extension/tools/webview-cdp.mjs`. Uses `@playwright/test` and `@vscode/test-electron` (both already dev dependencies). First run downloads VS Code (~30-60 seconds, cached afterward).
-
-### Core Workflow
+### Worked example
 
 ```bash
-# 1. Launch VS Code with the extension (--build compiles extension + daemon)
+# Phase A: launch, open a panel, look at it
 node src/PPDS.Extension/tools/webview-cdp.mjs launch --build
-
-# 2. Open a panel via command palette
-node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
+node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Open Data Explorer"
 node src/PPDS.Extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot "$TEMP/data-explorer.png"
+node src/PPDS.Extension/tools/webview-cdp.mjs logs --channel "PPDS"
 
-# 3. Take a screenshot to see what you built
-node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/current-state.png
-# IMPORTANT: Actually look at the screenshot to verify the UI
-
-# 4. Interact with webview content (use --ext to target the PPDS webview)
+# Phase B (mandatory when query/data/panel code changes): run a query
+node src/PPDS.Extension/tools/webview-cdp.mjs eval 'monaco.editor.getEditors()[0].setValue("SELECT TOP 5 name FROM account")' --ext "power-platform-developer-suite"
 node src/PPDS.Extension/tools/webview-cdp.mjs click "#execute-btn" --ext "power-platform-developer-suite"
-node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/after-click.png
-
-# 5. Check for errors
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot "$TEMP/after-query.png"
 node src/PPDS.Extension/tools/webview-cdp.mjs logs
 
-# 6. When done
+# Phase C: cleanup
 node src/PPDS.Extension/tools/webview-cdp.mjs close
 ```
 
-**Always use `--ext "power-platform-developer-suite"`** on `eval`, `click`, `type`, `select`, and `wait` commands. VS Code may have other webviews open (walkthrough, settings, etc.) — without `--ext`, you might interact with the wrong panel.
+Look at every screenshot (Read the PNG); taking it is not verifying it.
 
-### Commands (Extension)
+Phase B trigger files: `SqlQueryService`, `RpcMethodHandler`, `QueryPanel`,
+`query-panel.ts`, and anything under data rendering or panel interactions.
 
-| Command | Example | Purpose |
-|---------|---------|---------|
-| `launch [workspace] [--build]` | `launch` or `launch --build` | Start VS Code with extension (--build compiles extension + daemon first) |
-| `close` | `close` | Shut down VS Code and daemon |
-| `connect` | `connect` | List available webview frames |
-| `command "<cmd>"` | `command "PPDS: Data Explorer"` | Execute VS Code command via command palette |
-| `wait [timeout] [--ext id]` | `wait 10000` | Wait until webview appears |
-| `screenshot <file>` | `screenshot $TEMP/shot.png` | Capture full VS Code window (always full window; `--page` accepted but ignored) |
-| `eval "<js>" [--page]` | `eval "document.title"` | Run JS in webview or page context |
-| `click "<selector>" [--right] [--page]` | `click "#btn"` | Click element |
-| `type "<selector>" "<text>" [--page]` | `type "#input" "hello"` | Type text into element |
-| `select "<selector>" "<value>" [--page]` | `select "#dropdown" "opt1"` | Select dropdown option |
-| `key "<combo>" [--page]` | `key "ctrl+enter"` | Send keyboard shortcut (works everywhere!) |
-| `mouse <event> <x> <y> [--page]` | `mouse mousedown 150 200` | Raw mouse event at coordinates |
-| `logs [--channel name]` | `logs --channel "PPDS"` | Read console logs or output channel |
-| `text "<selector>" [--page]` | `text "#status"` | Read textContent of element |
-| `notebook run` | `notebook run` | Execute focused cell (clicks run button) |
-| `notebook run-all` | `notebook run-all` | Execute all cells |
+### Commands
 
-**Flags:**
-- `--page` — target VS Code's native UI instead of webview content
-- `--target N` — select specific webview by index
-- `--ext "<id>"` — select webview by extension ID (more stable than index)
+| Command | Purpose |
+|---------|---------|
+| `launch [workspace] [--build] [--vsix file]` | Start VS Code with the extension (90s timeout) |
+| `close [--all]` | Shut down VS Code and the daemon |
+| `connect` | List webview frames: index, extension id, title, `*` if visible |
+| `command "<title>"` | Open the command palette, type the title, press Enter on the first match |
+| `wait [ms] [--ext id]` | Wait for a webview to appear (default 30000) |
+| `screenshot <file.png>` | Capture the whole VS Code window (`--page`/`--ext`/`--target` are ignored) |
+| `eval "<js>"` | Evaluate JS in the webview (or the workbench with `--page`); prints the JSON result |
+| `text "<selector>"` | Print an element's `textContent` |
+| `click "<selector>" [--right]` | Click (right-click with `--right`) |
+| `type "<selector>" "<text>"` | Fill an input; falls back to click + Ctrl+A + typing |
+| `select "<selector>" "<value>"` | Choose a `<select>` option |
+| `key "<combo>"` | Press keys on whatever has focus in the window (`--page`/`--ext` do not apply) |
+| `mouse <mousedown\|mousemove\|mouseup> <x> <y>` | Raw mouse event at window coordinates |
+| `logs [--channel name]` | Console log of the window, or an output channel's log file |
+| `notebook run` / `notebook run-all` | Run the focused cell / all cells |
+| `download <publisher.name> <version>` | Fetch a Marketplace VSIX into the current directory, for `launch --vsix` |
 
-### Two Targets: `--page` vs default
+Targeting flags for `eval`, `text`, `click`, `type`, `select`:
+`--ext <id>` (by extension id; prefer this), `--target <N|active>` (by index
+from `connect`, or the single visible webview), `--page` (VS Code's own UI:
+sidebar, tabs, menus, palette, instead of webview content).
 
-| Flag | Target | Use for |
-|------|--------|---------|
-| *(none)* | Webview iframe content | Buttons, inputs, tables inside your extension's panels |
-| `--page` | VS Code's main UI | Sidebar, tabs, menus, command palette, native UI elements |
+Key names: `Enter`, `Escape`, `Tab`, `Backspace`, `Delete`, `ArrowUp`,
+`ArrowDown`, `ArrowLeft`, `ArrowRight`, `space` (case-insensitive) or any
+Playwright key name; modifiers `ctrl`, `shift`, `alt`, `meta`. `up`/`down`
+are not mapped; use `arrowup`/`arrowdown`.
 
-### Common Patterns (Extension)
+### Command titles
 
-#### Open a panel and verify it loaded
+The palette shows each command as `PPDS: <title>` (category `PPDS` in
+`src/PPDS.Extension/package.json`). Panels: `PPDS: Open Data Explorer`,
+`PPDS: Open Notebooks`, `PPDS: New Notebook`, `PPDS: Open Solutions`,
+`PPDS: Open Import Jobs`, `PPDS: Open Plugin Traces`,
+`PPDS: Open Plugin Registration`, `PPDS: Open Metadata Browser`,
+`PPDS: Open Connection References`, `PPDS: Open Environment Variables`,
+`PPDS: Open Web Resources`. Other useful ones: `PPDS: Show Logs`,
+`PPDS: Restart Daemon`, `PPDS: Select Profile`, and the
+`PPDS Debug: Daemon Status` / `Extension State` / `Tree View State` /
+`Panel State` diagnostics. Check package.json for anything else; a wrong
+title fails with "Command not found" only if nothing matches, otherwise the
+first fuzzy match runs. Each panel title is shared with a tree-context
+`...ForEnv` command, and the palette shows both, so confirm from the
+screenshot which one opened.
+
+### Patterns
+
 ```bash
-node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
-node src/PPDS.Extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
-node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/panel.png
-```
+# Monaco: `type` does NOT work on the Monaco editor. Use eval.
+node src/PPDS.Extension/tools/webview-cdp.mjs eval 'monaco.editor.getEditors()[0].setValue("SELECT TOP 10 * FROM account")' --ext "power-platform-developer-suite"
+node src/PPDS.Extension/tools/webview-cdp.mjs eval 'monaco.editor.getEditors()[0].getValue()' --ext "power-platform-developer-suite"
 
-#### Test a keyboard shortcut
-```bash
+# Context menu on a result cell, then pick Copy
+node src/PPDS.Extension/tools/webview-cdp.mjs click "td[data-row='1']" --right --ext "power-platform-developer-suite"
+node src/PPDS.Extension/tools/webview-cdp.mjs screenshot "$TEMP/context-menu.png"
+node src/PPDS.Extension/tools/webview-cdp.mjs click ".context-menu [data-action='copy']" --ext "power-platform-developer-suite"
+
+# Keyboard shortcut / command palette
 node src/PPDS.Extension/tools/webview-cdp.mjs key "ctrl+enter"
-node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/after-shortcut.png
-```
-
-#### Open the command palette
-```bash
 node src/PPDS.Extension/tools/webview-cdp.mjs key "ctrl+shift+p"
-node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/palette.png
 node src/PPDS.Extension/tools/webview-cdp.mjs key "Escape"
-```
 
-#### Test a context menu
-```bash
-node src/PPDS.Extension/tools/webview-cdp.mjs click "td[data-row='1']" --right
-node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/context-menu.png
-node src/PPDS.Extension/tools/webview-cdp.mjs click ".context-menu [data-action='copy']"
-```
-
-#### Monaco Editor
-**`type` does NOT work with Monaco Editor.** Use `eval` instead:
-
-```bash
-# Set Monaco editor content
-node src/PPDS.Extension/tools/webview-cdp.mjs eval 'monaco.editor.getEditors()[0].setValue("SELECT TOP 10 * FROM account")'
-
-# Read Monaco editor content
-node src/PPDS.Extension/tools/webview-cdp.mjs eval 'monaco.editor.getEditors()[0].getValue()'
-```
-
-#### Check for errors
-```bash
-# Console output (captured continuously by daemon)
-node src/PPDS.Extension/tools/webview-cdp.mjs logs
-
-# Extension output channel logs
-node src/PPDS.Extension/tools/webview-cdp.mjs logs --channel "PPDS"
-```
-
-#### Execute notebook cells
-```bash
-# Run the focused cell — clicks the run button (reliable, focus-independent)
+# Notebook cells
 node src/PPDS.Extension/tools/webview-cdp.mjs notebook run
-node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/after-run.png
-
-# Run all cells
 node src/PPDS.Extension/tools/webview-cdp.mjs notebook run-all
 ```
 
-**Avoid** using `command "Notebook: Execute Cell"` — opening the command palette steals focus from the cell. Similarly, `key "ctrl+enter"` may trigger `executeAndInsertBelow` depending on VS Code's keybinding context.
+**Notebooks:** use `notebook run`, which clicks the cell's run button.
+Running a cell through `command "Notebook: ..."` opens the palette and
+takes focus from the cell, and `key "ctrl+enter"` may trigger
+`executeAndInsertBelow` depending on keybinding context. (`notebook run`
+falls back to the palette only when it cannot find the button.)
 
-### Screenshots (Extension)
+### Logs
 
-**Always save screenshots to a temp directory. NEVER save to the repo working tree.**
+- `logs` prints the window's console messages captured since launch
+  (`.webview-cdp-console-<session>.log` next to the tool; deleted on
+  `close`, so read it first).
+- `logs --channel "PPDS"` prints every `PPDS.log` under the session profile
+  (`src/PPDS.Extension/tools/.webview-cdp-profile-<session>/logs/`). The
+  profile persists across launches, so output can include earlier runs.
+- The `PPDS` LogOutputChannel writes to
+  `<user-data-dir>/logs/<window>/exthost/JoshSmithXRM.power-platform-developer-suite/PPDS.log`.
+  Numbered files such as `1-CodeLens.log` belong to core VS Code services.
 
-```bash
-# Good — uses temp directory (use $TEMP on Windows, $TMPDIR on macOS/Linux)
-node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/my-screenshot.png
+### When a screenshot is required
 
-# BAD — creates untracked files in the repo
-node src/PPDS.Extension/tools/webview-cdp.mjs screenshot screenshot.png
-```
+Required for changes to rendered UI: CSS, layout, theme variables, message
+wiring (postMessage/onMessage), HTML templates, DOM structure. Compile and
+unit tests suffice for string constants, config flags, package.json
+metadata, command registration, URL handlers, enablement conditions, and
+refactors that do not change output.
 
-**Windows note:** `$TMPDIR` does NOT work on Windows. Use `$TEMP` instead.
+### Error recovery (Extension)
 
-### Verification Before Completion (Extension)
-
-**Screenshot required** — any change affecting rendered UI:
-- CSS, layout, styling, theme variables
-- Message protocol wiring (postMessage/onMessage handlers)
-- HTML templates, component rendering, DOM structure
-
-```bash
-# After implementation + tests pass, verify visually
-node src/PPDS.Extension/tools/webview-cdp.mjs launch --build
-node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
-node src/PPDS.Extension/tools/webview-cdp.mjs wait --ext "power-platform-developer-suite"
-node src/PPDS.Extension/tools/webview-cdp.mjs screenshot $TEMP/verification.png
-# LOOK at the screenshot — don't just take it
-```
-
-**Compile + test sufficient** — structural changes with no visual impact:
-- String constants, config flags, package.json metadata
-- Command registration, URL handlers, enablement conditions
-- Internal refactors that don't change rendered output
-
-### Error Recovery (Extension)
-
-#### `launch` fails or hangs
-```bash
-node src/PPDS.Extension/tools/webview-cdp.mjs close   # try graceful shutdown first
-node src/PPDS.Extension/tools/webview-cdp.mjs logs
-```
-
-Common causes:
-- **Stale process from prior session** — always `close` before `launch`
-- **Build failure** with `--build` — run `npm run compile --prefix src/PPDS.Extension` separately
-- **Daemon won't start** — check `logs --channel "PPDS"` for startup errors
-
-#### CSS-only changes
-CSS changes require `--build` because esbuild bundles CSS files. You cannot hot-reload CSS in VS Code webviews.
-
-### Log File Locations
-
-VS Code `LogOutputChannel` writes to `exthost/<extId>/Name.log`:
-
-```
-<vscode-user>/logs/<window>/exthost/JoshSmithXRM.power-platform-developer-suite/PPDS.log
-```
-
-The numeric prefix on adjacent files (`1-CodeLens.log`, etc.) refers to core VS Code services, not extension-defined channels.
-
-### Gap Protocol (Extension)
-
-If you encounter a webview interaction that this tool cannot handle:
-
-1. **STOP** — do not work around it silently
-2. **Describe the gap** — what interaction you need and why the current commands don't cover it
-3. **Propose an enhancement** — a new command, flag, or behavior that would close the gap
-4. **Ask the user** — whether to implement the enhancement now or defer it
+- **`launch` fails or hangs:** run `logs` (while the session still exists),
+  then `close` and relaunch. Common causes: a session from an earlier run is
+  still alive (`close`, or `close --all`); a build failure under `--build`
+  (run `npm run ext:compile` on its own to see it); the daemon did not start
+  (check `logs --channel "PPDS"`).
 
 ---
 
-## §cli — CLI Verify Reference
+## Gap protocol (TUI and extension harnesses)
 
-Supporting knowledge for `/verify cli`. Documents how to build, run, and verify CLI commands.
+If an interaction cannot be done with `tui-verify` or `webview-cdp`: stop
+rather than work around it silently, describe the interaction you need and
+why the commands do not cover it, propose a new command or flag, and ask the
+user whether to implement it now or defer it.
 
-### Safety pre-check
+---
 
-These verification flows talk to live Dataverse. The `shakedown-safety`
-PreToolUse hook gates `ppds *` invocations to keep an agent from writing
-to a non-dev env, with two concerns in one gate:
-
-- **Env allowlist (opt-in).** Once an allowlist is configured
-  (`$PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs` in
-  `.claude/settings.json`), blocks `ppds *` unless the active env is in
-  it. With none configured this gate is off.
-- **Write-block during shakedown (active when the sentinel file
-  `.claude/state/shakedown-active.json` is fresh, or `PPDS_SHAKEDOWN=1`).**
-  Blocks write verbs (`create`, `update`, `delete`, `plugins deploy`
-  without `--dry-run`, `solutions import`, etc.). In a Claude Code
-  session the shakedown skill arms it in Phase 0 by writing the sentinel
-  file; `PPDS_SHAKEDOWN=1` is the shell / CI form.
-
-Before running any of the patterns below:
-
-1. Confirm `ppds env who` shows a safe env (in the allowlist).
-2. If invoked from `/shakedown`, verify `.claude/state/shakedown-active.json`
-   exists (or, outside Claude Code, that `PPDS_SHAKEDOWN=1` is set) so write
-   commands fail closed.
-3. Read `docs/SAFE-SHAKEDOWN.md` for the full model and bypass procedure.
+## §mcp — MCP Mode
 
 ### Build
 
 ```bash
-dotnet build src/PPDS.Cli/PPDS.Cli.csproj -f net10.0
+dotnet build src/PPDS.Mcp/PPDS.Mcp.csproj -f net10.0 -v q
+src/PPDS.Mcp/bin/Debug/net10.0/ppds-mcp-server --version --read-only
 ```
 
-### Run Commands
+`--version` prints the package version and exits before hosting
+(`src/PPDS.Mcp/Program.cs`). `--read-only` is there because the safety hook
+blocks any `ppds-mcp-server` command without it during a shakedown.
 
-```bash
-.\src\PPDS.Cli\bin\Debug\net10.0\ppds.exe <command> <args>
-```
+### How the server talks
 
-### Output Conventions (Constitution I1)
+Stdio JSON-RPC: stdout carries only protocol messages and all logging goes
+to stderr (`--log-level <Trace|Debug|Information|Warning|Error>` or
+`PPDS_MCP_LOG_LEVEL`; default Warning). An MCP client must complete the
+`initialize` handshake before `tools/list` or `tools/call`, so piping a
+single JSON-RPC line into the server is not a working test. The repo has no
+scripted command-line client, and MCP Inspector is not used anywhere in it.
 
-- **stdout** is for data only — pipeable, machine-readable
-- **stderr** is for status messages, progress, diagnostics
-- When verifying: check stdout for correct data format, stderr for appropriate status messages
+### How to exercise tools
 
-### Verification Checklist
+1. **Protocol level, no Dataverse:** `tests/PPDS.Mcp.Tests`.
+   `tests/PPDS.Mcp.Tests/Tools/FormsProtocolTests.cs` is the pattern: an
+   in-process server and an `McpClientFactory` client over
+   `StreamClientTransport`, then `ListToolsAsync` / `CallToolAsync` and
+   assertions on `IsError` and the serialized content. Add a test in that
+   shape for a new or changed tool and run
+   `dotnet test tests/PPDS.Mcp.Tests/PPDS.Mcp.Tests.csproj -v q`.
+2. **Live:** register the built binary as an MCP server in an MCP client
+   (the `mcpServers` shape in `src/PPDS.Mcp/README.md`, "Quick Start -
+   Claude Code"), with `"args": ["--read-only", ...]` unless you are
+   deliberately testing writes, start a new client session, and call the
+   tools. This needs the user to add the server and restart the client;
+   ask rather than editing their MCP configuration yourself.
 
-For each command:
+### Session options
 
-1. **Executes without error** — exit code is 0
-2. **Output format is correct** — JSON, table, or expected text
-3. **Pipe-friendly** — stdout can be piped to `jq`, `grep`, etc.
-4. **Error handling** — bad input produces clear error message on stderr, non-zero exit code
-5. **Help text** — `ppds <command> --help` shows usage
-
-### Common Commands
-
-| Command | Purpose | Expected Output |
-|---------|---------|----------------|
-| `ppds auth list` | List profiles | JSON array of profiles |
-| `ppds auth login` | Interactive login | Status on stderr, profile on stdout |
-| `ppds query sql "<sql>"` | Execute SQL | Results on stdout |
-| `ppds data export` | Export data | File path on stdout |
-| `ppds env list` | List environments | JSON array |
-| `ppds serve` | Start daemon | Status on stderr (long-running) |
-| `ppds interactive` | Launch TUI | Terminal UI (interactive) |
-
-### Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | General error |
-| 2 | Invalid arguments |
-
-### Error Verification
-
-Test error paths:
-- Invalid command: `ppds nonexistent` → non-zero exit, error message
-- Bad arguments: `ppds query sql` (no query) → non-zero exit, usage hint
-- No profile: `ppds query sql "SELECT 1"` (without auth) → clear error about missing profile
-
----
-
-## §mcp — MCP Verify Reference
-
-Supporting knowledge for `/verify mcp`. Documents how to interact with and verify MCP server tools.
-
-### Safety pre-check
-
-These verification flows talk to live Dataverse. The `shakedown-safety`
-PreToolUse hook gates `ppds *` invocations to keep an agent from writing
-to a non-dev env, with two concerns in one gate:
-
-- **Env allowlist (opt-in).** Once an allowlist is configured
-  (`$PPDS_SAFE_ENVS` or `safety.shakedown_safe_envs` in
-  `.claude/settings.json`), blocks `ppds *` unless the active env is in
-  it. With none configured this gate is off.
-- **Write-block during shakedown (active when the sentinel file
-  `.claude/state/shakedown-active.json` is fresh, or `PPDS_SHAKEDOWN=1`).**
-  Blocks write verbs (`create`, `update`, `delete`, `plugins deploy`
-  without `--dry-run`, `solutions import`, etc.). In a Claude Code
-  session the shakedown skill arms it in Phase 0 by writing the sentinel
-  file; `PPDS_SHAKEDOWN=1` is the shell / CI form.
-
-Before running any of the patterns below:
-
-1. Confirm `ppds env who` shows a safe env (in the allowlist).
-2. If invoked from `/shakedown`, verify `.claude/state/shakedown-active.json`
-   exists (or, outside Claude Code, that `PPDS_SHAKEDOWN=1` is set) so write
-   commands fail closed.
-3. Read `docs/SAFE-SHAKEDOWN.md` for the full model and bypass procedure.
-
-### Build
-
-```bash
-dotnet build src/PPDS.Mcp/PPDS.Mcp.csproj -f net10.0
-```
-
-### MCP Inspector
-
-The MCP Inspector provides a web UI for testing tools interactively:
-
-```bash
-npx @modelcontextprotocol/inspector --cli --server "ppds-mcp-server"
-```
-
-This opens a web UI where you can:
-- List available tools
-- Invoke tools with parameters
-- See JSON responses
-- Test session options
-
-### Direct Tool Invocation
-
-For programmatic testing, invoke tools via the MCP protocol:
-
-```bash
-# List tools
-echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | ppds-mcp-server
-
-# Call a tool
-echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"ppds_query_sql","arguments":{"sql":"SELECT TOP 1 name FROM account"}},"id":2}' | ppds-mcp-server
-```
-
-### Session Options
-
-Test session configuration flags:
+Parsed by `src/PPDS.Mcp/Infrastructure/McpSessionOptions.cs`:
 
 | Flag | Purpose | Test |
 |------|---------|------|
-| `--profile <name>` | Lock to specific profile | Invoke with wrong profile, verify rejection |
-| `--environment <url>` | Lock to specific environment | Verify tools use the locked environment |
-| `--read-only` | Prevent DML operations | Run INSERT/UPDATE/DELETE, verify rejection |
-| `--allowed-env <urls>` | Restrict environment switching | Try switching to disallowed env, verify rejection |
+| `--profile <name>` | Lock to a profile (default: the active profile at startup) | Tools report that profile |
+| `--environment <url>` | Lock to an environment (default: the profile's) | Tools use the locked environment |
+| `--read-only` | Reject DML and guarded mutations | INSERT/UPDATE/DELETE via `ppds_query_sql` is rejected |
+| `--allowed-env <url>` | Allow `ppds_env_select` to switch to this URL; repeat the flag per URL | Switching to an unlisted URL is rejected; with no flag, switching is disabled |
 
-### Response Validation
+The profile and environment are captured at startup; a later
+`ppds auth select` or `ppds env select` does not redirect a running server.
+Restart it.
 
-For each tool invocation, verify:
-1. Response is valid JSON
-2. `content` array contains expected text/data
-3. `isError` is false for success cases, true for error cases
-4. Error messages are descriptive (not raw exceptions)
+### Response validation
 
-### Common Failure Modes
+For each call: the response is valid JSON; the `content` array holds the
+expected data; `isError` is false on success and true on error; error text
+is descriptive, not a raw exception.
 
-| Symptom | Likely Cause |
-|---------|-------------|
-| "No active profile" | Session not initialized, or profile flag wrong |
-| Timeout | Dataverse connection issue, check environment URL |
-| Empty results | Query is valid but no matching data |
-| "Operation not permitted" | `--read-only` flag blocking DML |
+### Common failure messages
+
+| Message | Cause |
+|---------|-------|
+| "No active profile configured at session startup. Run 'ppds auth create', then restart this MCP server." | No profile when the server started |
+| "DML operations (INSERT, UPDATE, DELETE) are disabled. This MCP session was started with --read-only." | `--read-only` blocking DML in `ppds_query_sql` |
+| "Cannot modify metadata: this MCP session is read-only." | `--read-only` blocking a metadata tool |
+| Timeout | Dataverse connection; check the environment URL |
+| Empty results | Valid query, no matching data |
 
 ---
 
-## §workflow — Workflow Infrastructure Verify Reference
+## §workflow — Workflow Infrastructure
 
 How to test changes to `.claude/` infrastructure: hooks, skills, settings.
+The hooks are `.claude/hooks/snk-protect.py` (Edit|Write) and
+`.claude/hooks/shakedown-safety.py` (Bash); `_pathfix.py` is a shared
+helper, not a hook.
 
-### Hook Testing
+### Hook testing
 
-#### PreToolUse / PostToolUse hooks
-
-Pipe JSON matching the hook's input schema to the hook script. Check exit code (0=allow, 2=block) and stderr (feedback message).
+Pipe the tool envelope (`{"tool_name": ..., "tool_input": {...}}`) to the
+script and check the exit code (0 allow, 2 block; 1 means the hook crashed)
+and stderr (the message shown to the agent).
 
 ```bash
-# Test a PreToolUse hook (e.g., snk-protect; expect exit=2)
+# snk-protect should block (exit=2)
 python -c "
 import subprocess, json
 input_data = json.dumps({'tool_name': 'Write', 'tool_input': {'file_path': 'src/PPDS.Plugins/PPDS.Plugins.snk'}})
@@ -752,21 +505,24 @@ print(f'exit={result.returncode} stderr={result.stderr[:100]}')
 "
 ```
 
-**Exit codes:** 0 = allow, 2 = block (with stderr message shown to AI)
+Behavioural tests: `tests/test_snk_protect.py`,
+`tests/hooks/test_shakedown_safety.py`.
 
-### Settings Validation
-
-After editing `.claude/settings.json`:
+### Settings validation
 
 ```bash
 python -c "import json; json.load(open('.claude/settings.json')); print('valid JSON')"
 ```
 
-Check matcher format — matchers are regex patterns tested against tool names or notification types.
+Matchers are regexes tested against tool names (`Edit|Write`, `Bash`).
 
-### Common Pitfalls
+### Pitfalls
 
-- **Windows path escaping in JSON:** Use forward slashes or double-backslash. `$CLAUDE_PROJECT_DIR` uses forward slashes.
-- **`$CLAUDE_PROJECT_DIR` in worktrees:** Resolves to the worktree root, not the main repo. Hooks using this var work correctly in both locations.
-- **Exit code handling in bash pipes:** `echo ... | python script.py` — the exit code is from `python`, not `echo`. Use `$?` or `subprocess.run` for reliable capture.
-- **Hook timeouts:** Default 600s (10 min). Set shorter for fast hooks (5s for path checks, 10s for notifications, 120s for build+test).
+- **Paths in JSON:** use forward slashes or doubled backslashes; hook
+  commands use `$CLAUDE_PROJECT_DIR`.
+- **Worktrees:** `$CLAUDE_PROJECT_DIR` is the worktree root, so hooks read
+  that worktree's `.claude/settings.json` and `.claude/state/`.
+- **Exit codes in pipes:** in `echo ... | python script.py` the status is
+  Python's; use `$?` right after, or `subprocess.run` as above.
+- **Timeouts:** set per hook in `.claude/settings.json` (currently 5s for
+  `snk-protect`, 10s for `shakedown-safety`); keep new hooks as short.

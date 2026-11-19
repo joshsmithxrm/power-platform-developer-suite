@@ -131,7 +131,19 @@ need to write during shakedown, that is a deliberate action.
 
 ### Add an env to the allowlist
 
-Edit `.claude/settings.json`:
+**Your own envs: use the `PPDS_SAFE_ENVS` environment variable.**
+
+```bash
+export PPDS_SAFE_ENVS=ppds-dev,ppds-test
+```
+
+The variable takes precedence over `settings.json`. The hook reads it from
+its own process environment, which it inherits from Claude Code, so set it
+in the shell or profile you start Claude Code from (or in CI). An `export`
+run inside the Claude Code Bash tool does not reach the hook, because that
+tool starts a fresh shell for each command.
+
+**A list the whole team shares: the tracked `.claude/settings.json`.**
 
 ```json
 {
@@ -142,18 +154,14 @@ Edit `.claude/settings.json`:
 }
 ```
 
+The file is checked in with `shakedown_safe_envs: []`, so a name added here
+applies to everyone who pulls it; do not commit personal env names.
 `readonly_env_var` is optional (default `PPDS_SHAKEDOWN`); include it only
-when you need a project-specific override. `shakedown_safe_envs` is the
-authoritative list — operators add their own dev/test envs locally.
+when you need a project-specific override.
 
-### Override via env var (per-session)
-
-```bash
-export PPDS_SAFE_ENVS=ppds-dev,ppds-test
-```
-
-The env var takes precedence over `settings.json`. Useful for CI / sandbox
-runs where you want the allowlist scoped to a single shell.
+**`.claude/settings.local.json` is not read by the hook.** A `safety` block
+there has no effect, even though that file is where personal Claude Code
+permissions go.
 
 ### Activate read-only mode
 
@@ -169,8 +177,10 @@ when invoked from a shakedown context.
 
 ### "I added a new dev env and want to use it for shakedown"
 
-1. Add the env's friendly name to `safety.shakedown_safe_envs` in
-   `.claude/settings.json`.
+1. Add the env's friendly name to `PPDS_SAFE_ENVS` in the environment you
+   start Claude Code from, then restart Claude Code. (Edit
+   `safety.shakedown_safe_envs` in `.claude/settings.json` instead only if
+   the whole team should share that env.)
 2. `ppds env select <new-env>` — the hook now allows it.
 3. Re-run `/shakedown`.
 
@@ -178,8 +188,8 @@ when invoked from a shakedown context.
 
 Once an allowlist is configured, the env-allowlist concern applies to every
 `ppds` command, in and out of shakedown. If you need to write to a
-non-allowlisted env, add that env to the allowlist (per-session env var is
-recommended for one-off writes, settings.json for permanent additions).
+non-allowlisted env, add that env to `PPDS_SAFE_ENVS`; change the tracked
+`.claude/settings.json` only for an env the whole team should share.
 
 ### "I need to run a real plugin deploy during a shakedown session"
 

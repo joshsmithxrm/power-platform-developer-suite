@@ -15,7 +15,7 @@ POLICY = ROOT / "docs/CONTRIBUTOR-LIFECYCLE.md"
 
 @pytest.mark.parametrize("relative", [
     "CONTRIBUTING.md", "docs/MERGE-POLICY.md",
-    ".claude/skills/release/SKILL.md",
+    "docs/runbooks/release.md",
 ])
 def test_entry_points_resolve_to_the_single_shared_policy(relative):
     source = ROOT / relative

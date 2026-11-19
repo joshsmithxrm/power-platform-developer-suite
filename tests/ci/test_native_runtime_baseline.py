@@ -13,7 +13,6 @@ PATHS = [".github/workflows/release-cli.yml", ".github/workflows/test.yml",
 
 
 PUBLISHER_CHANGE_PATHS = (
-    '.claude/skills/release/SKILL.md',
     '.github/pull_request_template.md',
     '.github/workflows/publish-nuget.yml',
     'CONTRIBUTING.md',
@@ -21,6 +20,7 @@ PUBLISHER_CHANGE_PATHS = (
     'docs/CONTRIBUTOR-LIFECYCLE.md',
     'docs/MERGE-POLICY.md',
     'docs/RELEASE.md',
+    'docs/runbooks/release.md',
     'scripts/ci/check_contributor_provenance.py',
     'specs/README.md',
     'specs/contributor-lifecycle.md',

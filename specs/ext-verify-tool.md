@@ -124,7 +124,7 @@ const innerFrame = await innerIframe.contentFrame();
 | Frame resolver | `contentFrame()` chain to reach webview inner frames |
 | Command palette helper | Open palette, type command, select result — adapted from archived `CommandPaletteHelper.ts` pattern |
 | Console capture | `page.on('console')` + `page.on('pageerror')` running in daemon, writing JSONL to `.webview-cdp-console.log` |
-| Skill file | `.claude/skills/verify/SKILL.md` and `.claude/skills/verify/REFERENCE.md` ("Extension Mode") — teach AI agents when/how to use the tool. They document the v2 commands, including `command`, `wait`, `logs` and `key`, and save screenshots under `$TEMP`. |
+| Skill file | `.claude/skills/verify/SKILL.md` and `.claude/skills/verify/REFERENCE.md` ("§ext — Extension Mode") — teach AI agents when/how to use the tool. They document the v2 commands, including `command`, `wait`, `logs` and `key`, and save screenshots under `$TEMP`. |
 
 ### Dependencies
 
@@ -347,7 +347,7 @@ Captured by `page.on('console')` and `page.on('pageerror')`. Written to `.webvie
 node src/PPDS.Extension/tools/webview-cdp.mjs launch
 
 # Open a Data Explorer panel via command palette
-node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Data Explorer"
+node src/PPDS.Extension/tools/webview-cdp.mjs command "PPDS: Open Data Explorer"
 
 # Wait for the webview to appear
 node src/PPDS.Extension/tools/webview-cdp.mjs wait
