@@ -83,9 +83,8 @@ prove that a compromised producer built trustworthy source.
 
 Since #1564 (merged 2026-11-09) `publish-nuget.yml` on `main` uses pinned
 official NuGet/login and a temporary key for both package and symbol uploads.
-It has not yet been exercised by a real publish: the newest package tags
-(2026-11-02) predate it, so the next NuGet release is its first live token
-exchange and upload. The login user is **JoshSmithMSFT**, confirmed
+It has not yet run in a real publish; see the runbook's
+[first-publish note](runbooks/release.md#first-nuget-publish-through-trusted-publishing). The login user is **JoshSmithMSFT**, confirmed
 by Josh as the **individual policy creator** profile. The step-local nonsecret
 `NUGET_PUBLISH_USER` guard uses that same identity; no repository variable is needed.
 NuGet's token service searches policies by their creator; a package owner may

@@ -193,9 +193,22 @@ strong-name key change forces a major. Both rules are in the
 
 ### 6. Pre-Merge Verification
 
-Run the gates locally. Full CI runs on the release PR in Step 7: `build.yml` and
-`test.yml` start only on pull requests to `main` and pushes to `main`, so pushing
-the release branch by itself starts no CI.
+Run every gate below locally; do not skip any. `build.yml` and `test.yml` start
+only on pull requests to `main` and pushes to `main`, so pushing the release
+branch by itself starts no CI. On the release PR (Step 7), CI selects jobs by
+changed paths, and a typical release PR (CHANGELOGs plus the Extension
+`package.json`/`package-lock.json`) gets only part of it:
+
+- **Runs:** `build.yml` `build` (.NET restore, vulnerable-package check, Release
+  build) and `extension` (typecheck, lint, audit, compile, tests), both because
+  `src/PPDS.Extension/**` changed; `test.yml` Python tests and the native/VSIX
+  artifact jobs, because `src/**` changed.
+- **Does not run:** the `test.yml` .NET `test` job, which needs a `.cs`,
+  `.csproj`, `.sln`, props/targets, `global.json`, `NuGet.config` or `test.yml`
+  change; and `tui-e2e.yml`, which needs a `src/PPDS.Cli/Tui/**` change.
+
+The local `dotnet test` and `npm run tui:test` below are then the only runs of
+the .NET unit tests and TUI snapshots for the release commit.
 
 ```bash
 # Restore and build (the repository NuGet.config pins nuget.org)
@@ -246,6 +259,8 @@ Spot-check:
 Open it as a **draft**, wait for its CI to finish, and mark it ready only when
 every check is green. This is where build or configuration problems surface
 (see [Build or configuration fixes needed mid-release](#build-or-configuration-fixes-needed-mid-release)).
+The PR's CI is path-selected and usually skips the .NET unit tests (Step 6), so
+green checks here do not replace the local Step 6 gates.
 
 ```bash
 gh pr create --draft \
@@ -329,7 +344,10 @@ activated; check
 [Isolated Plugins signing preparation](../RELEASE.md#isolated-plugins-signing-preparation)
 before planning a `Plugins-v*` tag.
 
-**First NuGet publish through trusted publishing.** `publish-nuget.yml` has used
+#### First NuGet publish through trusted publishing
+
+Temporary note: remove this subsection after the first successful
+trusted-publishing release. `publish-nuget.yml` has used
 NuGet trusted publishing (OIDC login, no stored key) since #1564 (2026-11-09), and
 no package tag has been published through it yet; the newest package tags
 (2026-11-02) predate it. On the first wave of the next release, push a single
@@ -613,6 +631,12 @@ git cherry-pick -x <commit-sha-from-main>
 git push origin release/X.Y
 ```
 
+Pushing to `release/X.Y` starts no CI: `build.yml` and `test.yml` run only for
+pushes to `main` and pull requests whose base is `main`. Run the Step 6 gates
+locally on the branch before tagging. To get CI as well, open a draft PR from
+`release/X.Y` to `main` and do not merge it until the merge-back below; its
+checks are path-selected as described in Step 6.
+
 **Tag from it**, not from `main`. The publish workflows run from the tag
 regardless of branch:
 
@@ -701,9 +725,9 @@ changes: `git log --oneline --grep='MinVerTagPrefix'`.
 Releases have needed inline build fixes; the 2026-04-17 prerelease (#785) had to
 set `NuGetAuditMode=direct` in `Directory.Build.props` to unblock CI.
 
-**Prevention:** open the release PR as a draft and let its full CI finish before
-marking it ready (Step 7), so these surface on the release PR rather than after
-the merge.
+**Prevention:** run all the Step 6 gates locally, then open the release PR as a
+draft and let its CI finish before marking it ready (Step 7), so these surface
+before the merge. That CI is path-selected and is not a full run (Step 6).
 
 ### Large tag batches suppress GitHub Actions events
 

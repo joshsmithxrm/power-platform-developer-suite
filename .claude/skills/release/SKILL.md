@@ -27,7 +27,8 @@ Ask in chat and wait for an explicit yes, separately for each action. Approval
 of one tag or wave does not cover the next.
 
 - **Publishing:** every tag push (`git push origin "refs/tags/..."`, one at a
-  time), including the unified `v*` tag; `gh release create`/`edit`;
+  time), including the unified `v*` tag; every `gh release` write (`create`,
+  `edit`, `upload`, `delete`, including of a draft);
   `gh workflow run` of `extension-publish.yml` or `docs-release.yml`;
   `gh run rerun` of a publish or docs workflow
 - **Branches and PRs:** pushing a `release/prerelease-*`, `release/vX.Y.Z` or
