@@ -129,7 +129,7 @@ class TestBuildIssueBodyChecklist:
             "",
             [{"number": 1, "title": "some PR"}],
         )
-        assert "docs/RELEASE.md" in body
+        assert "docs/runbooks/release.md" in body
         assert ".claude/skills" not in body
 
 
@@ -156,7 +156,7 @@ class TestMainWritesToStdout:
         assert "v2.0.0" in captured.out
         assert "#10" in captured.out
         assert "Add feature X" in captured.out
-        assert "docs/RELEASE.md" in captured.out
+        assert "docs/runbooks/release.md" in captured.out
 
 
 class TestWorkflowFailureHandling:
