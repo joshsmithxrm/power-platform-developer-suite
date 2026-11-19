@@ -130,7 +130,7 @@ The marketplace listing is the public-facing narrative for PPDS on the VS Code M
 **Release-time listing update:**
 
 1. **Feature PR lands on `main`:** implementer updates `src/PPDS.Extension/README.md` and `CHANGELOG.md` as part of the PR if the change alters user-visible capabilities. Reviewer verifies ACs affected by the change are still green.
-2. **Release PR opens:** release skill runs the listing-verification test (see Acceptance Criteria), fixing any AC drift before merge.
+2. **Release PR opens:** release runbook (`docs/runbooks/release.md`) runs the listing-verification test (see Acceptance Criteria), fixing any AC drift before merge.
 3. **Tag + publish:** the release ceremony creates the `Extension-v<X.Y.Z>` tag on the release commit. CI resolves the tag SHA, packages with `--baseImagesUrl .../<sha>/...`, validates the VSIX and uploads it via `--packagePath`. Publish fails if the SHA does not match the tag commit. `workflow_dispatch` invocations MUST be blocked when `github.ref` is not a tag — SHA resolution MUST error rather than pinning to a branch HEAD.
 4. **Post-publish verification:** a smoke step opens the live Marketplace listing, confirms all images load and the rendered content matches the committed README (modulo Markdown rendering differences).
 
@@ -142,7 +142,7 @@ The marketplace listing is the public-facing narrative for PPDS on the VS Code M
 
 **Listing-drift detection:**
 
-Each release, the release skill grep-checks the extension README against the spec's negative-constraint list (e.g., forbidden phrases from AC-23) and the structural ACs (e.g., nine-panel grid). Drift surfaces as gate findings, not silent drift.
+Each release, the release runbook (`docs/runbooks/release.md`) grep-checks the extension README against the spec's negative-constraint list (e.g., forbidden phrases from AC-23) and the structural ACs (e.g., nine-panel grid). Drift surfaces as gate findings, not silent drift.
 
 ### Surface-Specific Behavior
 

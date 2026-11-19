@@ -1,26 +1,26 @@
 # Release Cycle
 
 **Status:** Draft
-**Last Updated:** 2026-11-11
-**Code:** [.claude/skills/release/](../.claude/skills/release/), [.github/workflows/](../.github/workflows/), [scripts/ci/](../scripts/ci/), [tests/ci/](../tests/ci/), [tests/compatibility/](../tests/compatibility/), [tests/test_release_skill_content.py](../tests/test_release_skill_content.py), [tests/ci/test_extension_publish_workflow.py](../tests/ci/test_extension_publish_workflow.py)
+**Last Updated:** 2026-11-19
+**Code:** [docs/runbooks/release.md](../docs/runbooks/release.md), [.claude/skills/release/](../.claude/skills/release/), [.github/workflows/](../.github/workflows/), [scripts/ci/](../scripts/ci/), [tests/ci/](../tests/ci/), [tests/compatibility/](../tests/compatibility/), [tests/test_release_runbook_content.py](../tests/test_release_runbook_content.py), [tests/ci/test_extension_publish_workflow.py](../tests/ci/test_extension_publish_workflow.py)
 **Surfaces:** All
 
 ---
 
 ## Overview
 
-Policy layer governing *when* PPDS releases happen, *how* work is grouped into milestones, and *what* automation surfaces release readiness. The existing `/release` skill owns the ceremony (CHANGELOGs, version bumps, tag pushes, CI monitoring); this spec owns the decisions above it — triggering, targeting, branching, and enforcement.
+Policy layer governing *when* PPDS releases happen, *how* work is grouped into milestones, and *what* automation surfaces release readiness. The [release runbook](../docs/runbooks/release.md) owns the ceremony (CHANGELOGs, version bumps, tag pushes, CI monitoring), and the optional `/release` skill directs an agent to follow it; this spec owns the decisions above it — triggering, targeting, branching, and enforcement.
 
 ### Goals
 
 - **Predictable release cadence**: patches ship fast, minors ship when ready, nothing drifts silently
 - **Automated detection**: the system tells the maintainer when a release is warranted — not the other way around
-- **Manual ceremony**: irreversible actions (tag push, NuGet/Marketplace publish) remain human-initiated via `/release`
+- **Manual ceremony**: irreversible actions (tag push, NuGet/Marketplace publish) remain human-initiated by the maintainer following the release runbook
 - **Explained scope**: direct changes, downstream deliverables, and MinVer tag prerequisites are reported separately
 
 ### Non-Goals
 
-- Replacing the `/release` skill ceremony — this spec extends it, not replaces it
+- Replacing the release runbook ceremony — this spec extends it, not replaces it
 - Auto-publishing to NuGet or Marketplace on merge — too risky for a multi-surface product
 - Release trains or calendar-driven minor releases — wrong for a solo maintainer
 - Cross-repo docs generation automation — covered by `specs/docs-generation.md`
@@ -53,7 +53,7 @@ PR merges to main
 All three paths lead to:
        │
        ▼
-  Maintainer runs /release (manual)
+  Maintainer follows the release runbook (manual)
        │
        ▼
   Tag push → CI publish workflows
@@ -66,14 +66,16 @@ All three paths lead to:
 | `post-merge-release-check.yml` | Detects `release:patch` label on merged PRs, opens patch release issue |
 | `milestone-release-check.yml` | Detects milestone completion, opens minor release readiness issue |
 | `release-cadence-check.yml` | Weekly cron, checks days since last release tag, opens check-in issue |
-| `/release` skill (existing) | Release ceremony — CHANGELOGs, version bumps, tag push, CI monitoring |
+| [docs/runbooks/release.md](../docs/runbooks/release.md) | Release ceremony — CHANGELOGs, version bumps, tag push, CI monitoring |
+| `/release` skill (optional) | Directs an AI agent to follow the runbook and lists the actions it must confirm with the maintainer |
 | `verify_public_release.py` | Read-only post-publish verification through nuget.org, GitHub Releases, and the VS Code Marketplace |
 | `verify_release_inputs.py`, `inspect_release_assemblies.ps1` | Read-only pre-upload identity, dependency, signing, channel, vacancy and workflow-owned draft checks |
 | GitHub Milestones | Group PRs into minor release targets (v1.1.0, v1.2.0, ...) |
 
 ### Dependencies
 
-- Extends: [/release skill](../.claude/skills/release/SKILL.md) (ceremony)
+- Extends: [release runbook](../docs/runbooks/release.md) (ceremony)
+- Reference: [docs/RELEASE.md](../docs/RELEASE.md) (release model and policy)
 - Complements: [MERGE-POLICY.md](../docs/MERGE-POLICY.md) (how PRs merge)
 
 ---
@@ -85,8 +87,8 @@ All three paths lead to:
 | Type | Version | Trigger | Scope | Example |
 |------|---------|---------|-------|---------|
 | Patch | `X.Y.Z` (Z > 0) | Bug fix or security fix merged with `release:patch` label | Direct product changes, downstream deliverables, and required same-commit MinVer dependency tags | `Dataverse-v1.0.1`, `Query-v1.0.1` |
-| Minor | `X.Y.0` (Y > 0) | GitHub Milestone reaches 100% closed | All packages — coordinated release via `/release` | `Auth-v1.1.0`, `Cli-v1.1.0`, ... |
-| Major | `X.0.0` (X > 1) | Breaking change (API, strong-name rotation, etc.) | All packages — coordinated release via `/release` | Future |
+| Minor | `X.Y.0` (Y > 0) | GitHub Milestone reaches 100% closed | All packages — coordinated release via the release runbook | `Auth-v1.1.0`, `Cli-v1.1.0`, ... |
+| Major | `X.0.0` (X > 1) | Breaking change (API, strong-name rotation, etc.) | All packages — coordinated release via the release runbook | Future |
 
 ### Release Triggering Model
 
@@ -94,7 +96,7 @@ Releases are **event-driven with a cadence floor**:
 
 1. **Patch releases** ship when ready. Any merged PR labeled `release:patch` triggers automated detection. The maintainer decides whether to release immediately or batch with other pending fixes.
 
-2. **Minor releases** ship when complete. GitHub Milestones define scope. When all issues/PRs in a milestone are closed, automated detection surfaces readiness. The maintainer runs `/release`.
+2. **Minor releases** ship when complete. GitHub Milestones define scope. When all issues/PRs in a milestone are closed, automated detection surfaces readiness. The maintainer follows the release runbook.
 
 3. **Cadence floor**: if no release (patch or minor) has shipped in 8 weeks and main has unreleased commits, a scheduled workflow opens a check-in issue. This prevents drift where accumulated changes never ship because nothing feels "ready enough."
 
@@ -122,7 +124,7 @@ Releases are **event-driven with a cadence floor**:
    - Feature/fix branches → squash-merge to main → tag from main → CI publishes
    - No release branch needed. This is the current model and it works.
 
-2. **Stabilization branch** (rare, manual procedure — documented in `/release` skill per AC-07):
+2. **Stabilization branch** (rare, manual procedure — documented in the release runbook per AC-07):
    - Create `release/X.Y` from main at the point where the milestone is feature-complete
    - Only cherry-pick bug fixes onto the stabilization branch
    - Tag from the stabilization branch, not main
@@ -133,7 +135,7 @@ Releases are **event-driven with a cadence floor**:
    - Bug fix merges to main as a normal PR
    - Tag reviewed release targets and MinVer prerequisites from the merge commit on main
    - No branch or full release PR is needed for a focused patch
-   - Multi-package patches (rare) follow the standard `/release` ceremony
+   - Multi-package patches (rare) follow the standard release runbook ceremony
 
 ### Patch Release Procedure
 
@@ -144,7 +146,7 @@ For focused patches (the common case):
    - Direct product changes
    - Downstream deliverables that consume those changes
    - Same-commit stable MinVer tag prerequisites
-3. Maintainer runs abbreviated `/release` for the reviewed scope:
+3. Maintainer follows the runbook's abbreviated patch procedure for the reviewed scope:
    - Update each release target's CHANGELOG
    - Push each reviewed target/prerequisite tag individually
    - Monitor every triggered publish workflow
@@ -153,7 +155,7 @@ For focused patches (the common case):
 
 For multi-package patches or patches that touch the Extension:
 
-1. Follow the full `/release` ceremony (release PR, all CHANGELOGs, coordinated tags)
+1. Follow the full release runbook ceremony (release PR, all CHANGELOGs, coordinated tags)
 
 ### Severity-Based Patch Trigger
 
@@ -180,7 +182,7 @@ A merged PR does NOT warrant `release:patch`:
 1. **PR merges to main** with `release:patch`, or the label is added to the merged PR later
 2. **`post-merge-release-check.yml` fires**: uses the release model to analyze the exact merge diff and opens an advisory issue only when product impact exists
 3. **Issue body includes**: a stable per-PR marker, explained direct changes, internal build changes, downstream deliverables, delivery/MinVer tag prerequisites, strict-SemVer latest tags, ignored non-product changes, diagnostics, and a link to the public release procedure
-4. **Maintainer reviews issue**, runs `/release` for the affected package(s)
+4. **Maintainer reviews issue**, follows the release runbook for the affected package(s)
 5. **Maintainer closes issue** after publish verification
 
 Patch records are permanent audit records. Reruns and label toggles search both
@@ -195,7 +197,7 @@ or reopened; a different merged PR receives a different marker and record.
 2. **Last issue/PR in milestone closes** → milestone reaches 100%
 3. **`milestone-release-check.yml` fires**: opens a GitHub issue titled "Milestone vX.Y.0 complete — ready for release"
 4. **Issue body includes**: milestone summary, PR list, any deferred items
-5. **Maintainer reviews**, runs full `/release` ceremony
+5. **Maintainer reviews**, follows the full release runbook ceremony
 6. **Maintainer closes milestone and issue** after publish verification
 
 **Flow 3 — Cadence floor (scheduled):**
@@ -271,7 +273,7 @@ Auth-v1.1.0-beta.3  Cli-v1.1.0-beta.3  ...  (optionally: v1.1.0-beta.3)
 - Latest tag selection must use strict SemVer 2.0 precedence with ASCII digits only, never git refname sorting
 - Extension publish auto-dispatches on `Extension-v*` tag push (channel inferred from odd/even minor convention); manual dispatch remains available for override
 - All release types must produce CHANGELOG entries before tagging
-- Stable releases (`vX.Y.0`) require a completed `/security-review` artifact before tagging — enforced in the `/release` skill's pre-merge verification step
+- Stable releases (`vX.Y.0`) require a completed `/security-review` artifact before tagging — enforced in the release runbook's pre-merge verification step
 - Publish workflows poll public availability every two minutes, with a bounded 30-attempt limit, then validate installability, versions, target coverage, and checksums as applicable
 - A public verification failure stops and escalates; automation never unpublishes, deletes, deprecates, replaces, or rolls back published artifacts
 - Downloaded public executables run only in fresh follow-on jobs with read-only repository permissions, non-persisted checkout credentials, and no publishing secrets
@@ -312,17 +314,17 @@ lookup failures stop for review; there is no automated rollback or repair.
 | AC-03 | `milestone-release-check.yml` opens a GitHub issue when a milestone reaches 100% closed with merged PRs | `tests/ci/test_milestone_release_check.py::test_opens_issue_on_milestone_complete` | ✅ |
 | AC-04 | `release-cadence-check.yml` opens a check-in issue if >8 weeks since last release tag and >0 unreleased commits on main | `tests/ci/test_release_cadence_check.py::test_opens_issue_when_overdue` | ✅ |
 | AC-05 | `release-cadence-check.yml` does NOT open an issue if a release was cut within the last 8 weeks | `tests/ci/test_release_cadence_check.py::test_no_issue_when_recent_release` | ✅ |
-| AC-06 | `/release` skill contains a "Patch Release Procedure" section documenting the single-package abbreviated flow | `tests/test_release_skill_content.py::test_patch_procedure_documented` | ✅ |
-| AC-07 | `/release` skill contains a "Stabilization Branch" section documenting when to create one and how to merge back | `tests/test_release_skill_content.py::test_stabilization_branch_documented` | ✅ |
+| AC-06 | The release runbook (`docs/runbooks/release.md`) contains a "Patch Release Procedure" section documenting the single-package abbreviated flow | `tests/test_release_runbook_content.py::test_patch_procedure_documented` | ✅ |
+| AC-07 | The release runbook contains a "Stabilization Branch" section documenting when to create one and how to merge back | `tests/test_release_runbook_content.py::test_stabilization_branch_documented` | ✅ |
 | AC-08 | `release-cadence-check.yml` does NOT open a duplicate issue if one is already open | `tests/ci/test_release_cadence_check.py::test_no_duplicate_issue` | ✅ |
 | AC-09 | `milestone-release-check.yml` does NOT open a release issue when a milestone is closed with 0 merged PRs | `tests/ci/test_milestone_release_check.py::test_no_issue_on_empty_milestone` | ✅ |
 | AC-10 | `post-merge-release-check.yml` does not open a release issue when the explained advisory finds only deterministic non-product changes | `tests/ci/test_post_merge_release_check.py::TestUnknownPackageWarning::test_workflow_skips_issue_when_model_finds_no_product_impact` | ✅ |
 | AC-11 | `release-cadence-check.yml` does NOT open an issue if >8 weeks since last release but 0 unreleased commits on main | `tests/ci/test_release_cadence_check.py::test_no_issue_when_no_unreleased_commits` | ✅ |
 | AC-12 | The release model identifies and explains multiple direct/downstream surfaces when a patch spans the product graph | `tests/ci/test_release_model.py::TestImpactAnalysis::test_pr_1402_fixture_yields_seven_surfaces_excluding_plugins` | ✅ |
-| AC-13 | `/release` skill enforces security review gate for stable releases — `docs/qa/security-review-*.md` must exist before tagging `vX.Y.0`; patches and prereleases are exempt | `tests/test_release_skill_content.py::test_security_review_gate_documented` | ✅ |
+| AC-13 | The release runbook enforces security review gate for stable releases — `docs/qa/security-review-*.md` must exist before tagging `vX.Y.0`; patches and prereleases are exempt | `tests/test_release_runbook_content.py::test_security_review_gate_documented` | ✅ |
 | AC-14 | `extension-publish.yml` auto-dispatches on `Extension-v*` tag push with channel inferred from odd/even minor convention | `tests/ci/test_extension_publish_workflow.py::test_tag_push_trigger` | ✅ |
 | AC-15 | `docs-release.yml` uses `actions/create-github-app-token@v2` with documented manual setup steps for GitHub App provisioning | Manual verification — secrets require repo admin | ✅ |
-| AC-16 | Unified `v*` tag convention documented alongside per-package tags in `/release` skill and `specs/release-cycle.md` | `tests/test_release_skill_content.py::test_unified_tag_convention_documented` | ✅ |
+| AC-16 | Unified `v*` tag convention documented alongside per-package tags in the release runbook and `specs/release-cycle.md` | `tests/test_release_runbook_content.py::test_unified_tag_convention_documented` | ✅ |
 | AC-17 | NuGet publication is polled at a bounded two-minute cadence, restored/installed from a clean nuget.org-only configuration, and public CLI/MCP tool releases execute with the exact tagged version | `test_polling_retries_at_two_minute_intervals_then_succeeds`, `test_nuget_library_restore_uses_only_clean_public_feed`, `test_public_cli_is_installed_to_temp_and_version_checked`, `test_public_mcp_launcher_exits_zero_and_reports_exact_version` | ✅ |
 | AC-18 | Public CLI GitHub Releases contain all five binaries and a complete checksum manifest; downloaded checksums and CLI version must match | `test_checksum_parser_requires_exact_binary_coverage`, `test_github_release_checksum_mismatch_fails_before_execution` | ✅ |
 | AC-19 | After the Marketplace publish matrix completes, all four public target VSIXs match the Extension version, target RID, and bundled CLI release | `test_marketplace_downloads_and_validates_every_target`, `test_marketplace_version_and_target_mismatches_fail`, `test_marketplace_verification_waits_for_full_publish_matrix` | ✅ |
@@ -500,7 +502,7 @@ AC-64 remains pending until the separately authorized real experiment passes.
 
 **Context:** Want to reduce cognitive load ("do I need to release?") without losing control over irreversible actions.
 
-**Decision:** Three detection workflows (patch label, milestone completion, cadence floor) that open issues. The `/release` skill ceremony remains human-initiated.
+**Decision:** Three detection workflows (patch label, milestone completion, cadence floor) that open issues. The release runbook ceremony remains human-initiated.
 
 **Alternatives considered:**
 - **Full auto-release**: Tag push on merge. Too risky — NuGet publishes are permanent (unlisting is possible but the version is consumed).
@@ -662,6 +664,7 @@ claim. This change does not certify every installed component against all adviso
 
 | Date | Change |
 |------|--------|
+| 2026-11-19 | Move the release procedure from the `/release` skill into `docs/runbooks/release.md`; the skill now only directs an agent to the runbook. AC-06, AC-07, AC-13 and AC-16 are verified against the runbook by `tests/test_release_runbook_content.py`. No release policy change |
 | 2026-11-10 | Add source-bound closeout ledger, explicit required/optional gates, scoped evidence reuse and review contracts; preserve active pre-merge evaluation on ready-for-review events (AC-49 through AC-53) |
 | 2026-09-12 | Repair cadence UTC/strict-tag handling and make CLI/Extension alerts commit-co-location based, CLI-keyed, serialized, and self-reconciling for either tag order (AC-31 and AC-32) |
 | 2026-09-12 | Make patch release records late-label and fork aware, label-authenticated and permanently idempotent per PR, safe for untrusted event text, and backed by one reconciled release-label manifest; keep historical merge content data-only and stop swallowing milestone helper failures (AC-25 through AC-30) |
