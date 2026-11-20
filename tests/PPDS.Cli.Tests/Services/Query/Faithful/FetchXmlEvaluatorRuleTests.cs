@@ -290,10 +290,12 @@ public class FetchXmlEvaluatorRuleTests
         => Assert.Empty(Fetch("", " top=\"0\"").Entities);
 
     [Fact(Skip = "Waiting for a live observation (LiveObservationsOwed.md): rows that tie on every ORDER BY key but return different values")]
-    public void R10_TopAndCountLimitTheRows()
-    {
-        Assert.Equal("k8,k10,k2", Keys(Fetch("<order attribute=\"numberofemployees\" descending=\"true\" />", " top=\"3\""), ordered: true));
+    public void R10_TopLimitsTheRows()
+        => Assert.Equal("k8,k10,k2", Keys(Fetch("<order attribute=\"numberofemployees\" descending=\"true\" />", " top=\"3\""), ordered: true));
 
+    [Fact]
+    public void R10_CountAndPageLimitTheRows()
+    {
         var page2 = Fetch("<order attribute=\"accountnumber\" />", " count=\"4\" page=\"2\"");
         Assert.Equal("k4,k5,k6,k7", Keys(page2, ordered: true)); // string order: k1, k10, k2, ...
         Assert.True(page2.MoreRecords);
