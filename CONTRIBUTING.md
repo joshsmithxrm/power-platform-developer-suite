@@ -271,7 +271,8 @@ but a maintainer reviews every outside contribution before merging.
    so on) of the `## [X.Y.Z] - Unreleased` section near the top, citing the PR or
    issue as `(#NNN)`. Leave the empty `## [Unreleased]` heading above it as it is;
    the release process keeps it empty. Do not change version numbers; versions
-   come from git tags (MinVer).
+   come from git tags (MinVer). What counts as a breaking change, and which
+   release may contain one, is in [docs/VERSIONING.md](docs/VERSIONING.md).
 3. Wait for CI, then respond to review comments.
 4. A maintainer squash-merges the PR. Merge mechanics are in
    [docs/MERGE-POLICY.md](docs/MERGE-POLICY.md).
