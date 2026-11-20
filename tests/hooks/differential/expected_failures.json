@@ -1,9 +1,20 @@
 {
  "_comment": [
-  "Failure labels (findings.py) the requirement-severity tests are known to fail with at commit 3164e825.",
+  "Failure labels (findings.py) the requirement-severity tests are known to fail with at the head they were last run against.",
   "Used only with PPDS_DIFF_XFAIL=1: a test whose failures all carry these labels is reported as xfail.",
   "A failure with any other label, or 'unlabelled', still fails. Remove a label when its fix lands."
  ],
  "labels": {
+  "new-xargs-options": "round 4: xargs / parallel with their own options in front of the program, the words of a switch, target or write on stdin (e.g. echo select --environment <unlisted> | xargs -n 9 ppds env passes even with an unlisted active environment)",
+  "new-hidden-words": "round 4: switch or target words in the text but not as whole words (printf escapes feeding xargs, an exported assignment used in bash -c)",
+  "new-unknown-wrapper": "round 4: a wrapper the reader does not know in front of a shell given code (setsid, busybox sh, ...), program from a substitution",
+  "new-home-override": "round 4: HOME changed in front of the CLI, so it reads another profile store (~/.ppds)",
+  "new-sql-exponent-glue": "round 4: a SQL write word glued to a numeric literal with an exponent marker (SELECT 1.5eDELETE ...)",
+  "cost-rule-false-block": "round 4: an ordinary command that only mentions a program next to option-looking words is refused with a listed environment (grep ppds -rE docs, Get-Process ppds -ErrorAction SilentlyContinue)",
+  "r2-target-override": "reappears only together with a round-4 label (an override reached through xargs or hidden words)",
+  "r2-profile-override": "reappears only together with a round-4 label",
+  "r2-version-update": "reappears only together with a round-4 label (echo --update | xargs -n 1 ppds version)",
+  "new-shell-feed": "reappears only together with a round-4 label (wrapper or HOME in front of a shell given code)",
+  "new-switch-behind-runtime-program": "reappears only together with a round-4 label (unknown wrapper)"
  }
 }

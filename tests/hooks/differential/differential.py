@@ -16,6 +16,7 @@ import argparse
 import collections
 import hashlib
 import json
+import random
 import sys
 import time
 from pathlib import Path
@@ -191,7 +192,7 @@ CI_FEED_LIMIT = 500
 
 
 def run_statement_oracle(size: int = CI_SIZE_SHELL, seed: int = 1780, cases_dir=None, strict: bool = False,
-                         feed_limit=CI_FEED_LIMIT) -> dict:
+                         feed_limit=CI_FEED_LIMIT, only_round4: bool = False) -> dict:
     import gen_shell
     from _shells import ShellLab, map_start
     t0 = time.monotonic()
@@ -205,7 +206,10 @@ def run_statement_oracle(size: int = CI_SIZE_SHELL, seed: int = 1780, cases_dir=
     else:
         oracle_note = ""
     try:
-        texts = gen_shell.generate(size, seed, str(lab.bin), feed_limit)
+        if only_round4:
+            texts = gen_shell.round4_texts(random.Random(seed + 2), None)
+        else:
+            texts = gen_shell.generate(size, seed, str(lab.bin), feed_limit)
         bash, pwsh = lab.run_all([t.text for t in texts])
         t_shell = time.monotonic() - t0
         verdicts = []
@@ -467,6 +471,7 @@ def main(argv=None) -> int:
     ap.add_argument("--cases", help="folder to write failing cases into (payload + case file)")
     ap.add_argument("--json", help="write the full report as JSON")
     ap.add_argument("--strict", action="store_true", help="policy-severity failures also fail the run")
+    ap.add_argument("--round4", action="store_true", help="shell: only the round-4 blocks, all of them")
     a = ap.parse_args(argv)
     if a.oracle == "args":
         size = a.size or (LONG_SIZE_ARGS if a.long else CI_SIZE_ARGS)
@@ -482,7 +487,7 @@ def main(argv=None) -> int:
     else:
         size = a.size or (LONG_SIZE_SHELL if a.long else CI_SIZE_SHELL)
         rep = run_statement_oracle(size, a.seed if a.seed is not None else 1780, a.cases, a.strict,
-                                   None if a.long else CI_FEED_LIMIT)
+                                   None if a.long else CI_FEED_LIMIT, a.round4)
     if a.json:
         Path(a.json).write_text(json.dumps(rep, indent=1, ensure_ascii=False), encoding="utf-8")
     shown = {k: v for k, v in rep.items() if k not in ("failures", "rows")}

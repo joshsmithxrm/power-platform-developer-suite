@@ -266,7 +266,7 @@ def generate(size: int, seed: int, bindir: str, feed_limit=None) -> list:
     rng = random.Random(seed)
     wrappers = _wrappers(bindir)
     out = feed_texts(random.Random(seed + 1), feed_limit)
-    out += round4_texts(random.Random(seed + 2), None if feed_limit is None else feed_limit * 2)
+    out += round4_texts(random.Random(seed + 2), None if feed_limit is None else ROUND4_CI_LIMIT)
     size += len(out)
     # Every core in its plain form first, in both quoting styles.
     for label, program, argv in CORES:
@@ -419,6 +419,9 @@ def home_texts() -> list:
                            (f"USERPROFILE=other ppds {args}", "userprofile"), (f"XDG_CONFIG_HOME=other ppds {args}", "xdg")):
             out.append(Text(text, "home-" + label, "ppds", argv, f"home:{kind}"))
     return out
+
+
+ROUND4_CI_LIMIT = 400
 
 
 def round4_texts(rng: random.Random, limit=None) -> list:
