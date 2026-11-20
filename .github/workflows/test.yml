@@ -58,6 +58,7 @@ jobs:
               - 'tests/fixtures/ReferenceCacheProbe/**'
               - 'scripts/ci/smoke_single_file_extraction.py'
               - 'scripts/ci/verify_native_distribution.py'
+              - 'scripts/ci/ci_images.py'
               - 'scripts/ci/check_native_glibc.sh'
               - '.github/workflows/extension-publish.yml'
               - 'Directory.*.props'

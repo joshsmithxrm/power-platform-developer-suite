@@ -17,12 +17,13 @@ import uuid
 import xml.etree.ElementTree as ET
 import zipfile
 
+import ci_images
 import verify_public_release as public
 
 ROOT = Path(__file__).resolve().parents[2]
 TARGETS = {"win32-x64": "win-x64", "linux-x64": "linux-x64", "darwin-x64": "osx-x64", "darwin-arm64": "osx-arm64"}
 RIDS = set(TARGETS.values()) | {"win-arm64"}
-IMAGE = "registry.access.redhat.com/ubi8/dotnet-80-runtime:latest"
+IMAGE = ci_images.UBI8_DOTNET8_RUNTIME
 OS_KEYS = {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "SYSTEMDRIVE", "PROGRAMFILES",
            "PROGRAMFILES(X86)", "PROGRAMDATA", "DOTNET_ROOT", "DOTNET_ROOT_X64", "DOTNET_ROOT_ARM64"}
 
@@ -30,6 +31,10 @@ OS_KEYS = {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "SYSTEMDRIVE", 
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+class InfrastructureFailure(Exception):
+    """CI infrastructure, not the product, failed; the product was not tested."""
 
 
 def plain(path):
@@ -550,6 +555,15 @@ def run(command, env, evidence, label, timeout=120, cwd=None):
     return result.stdout.decode("utf-8")
 
 
+def pull_image(image, env, evidence):
+    try:
+        run(["docker", "pull", image], env, evidence, "image-pull", 180)
+    except (ValueError, subprocess.TimeoutExpired, OSError) as error:
+        raise InfrastructureFailure(
+            f"Infrastructure failure: could not pull {image} from {ci_images.registry(image)} ({error}). "
+            "The product was not tested; this is not a product failure.") from error
+
+
 def read_frame(stream):
     header = bytearray()
     while not header.endswith(b"\r\n\r\n"):
@@ -705,7 +719,7 @@ def main():
             save(binary.parent / "ppds.version.json", bundle_manifest(value))
         elif args.mode == "glibc":
             require(sys.platform == "linux" and args.rid == "linux-x64" and os.getenv("GITHUB_ACTIONS") == "true", "Public image pull is CI-only")
-            run(["docker", "pull", IMAGE], env, evidence, "image-pull", 180)
+            pull_image(IMAGE, env, evidence)
             value["containerImage"] = run(["docker", "image", "inspect", "--format", "{{json .RepoDigests}}", IMAGE], env, evidence, "image-digest", 15).strip()
             output = run(docker_command(binary, ROOT / "tests/fixtures/SingleFilePlugin/bin/Release/net462",
                                         ROOT / "scripts/ci/check_native_glibc.sh"), env, evidence, "glibc", 120)
@@ -748,6 +762,8 @@ def main():
         return 0
     except Exception as error:
         save(evidence / "failure.json", {"passed": False, "type": type(error).__name__, "message": str(error)})
+        if isinstance(error, InfrastructureFailure):
+            print(f"::error title=Infrastructure failure::{error}", flush=True)
         raise
 
 
