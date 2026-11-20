@@ -12,6 +12,8 @@ namespace PPDS.Cli.Tests.TestHelpers;
 /// but on a loaded CI runner (every test assembly for three frameworks running at once, with coverage)
 /// a short fixed deadline fired with the behaviour still correct (#1684, #1795). Two minutes still
 /// ends a genuinely wedged test long before the job's own timeout, and the failure names what was awaited.
+/// The wait is raced against the bound, so a hang that ignores the cancellation token, or blocks the
+/// thread it runs on, fails at the bound as well.
 /// </remarks>
 internal static class HangBackstop
 {
@@ -19,29 +21,47 @@ internal static class HangBackstop
     public static readonly TimeSpan Bound = TimeSpan.FromMinutes(2);
 
     /// <summary>
-    /// Runs <paramref name="operation"/>, which must observe the token it is given. If the bound elapses
-    /// first, the test fails with a message naming <paramref name="awaiting"/> instead of surfacing a bare
-    /// <see cref="OperationCanceledException"/>.
+    /// Runs <paramref name="operation"/> and waits for it under <see cref="Bound"/>. The token it is given
+    /// is cancelled when the bound elapses. Whether or not the operation observes that token, the test
+    /// fails at the bound with a message naming <paramref name="awaiting"/>, never with a bare
+    /// <see cref="OperationCanceledException"/>. An exception the operation throws before then surfaces unchanged.
     /// </summary>
-    public static async Task<T> WaitAsync<T>(Func<CancellationToken, Task<T>> operation, string awaiting)
-    {
-        using var backstop = new CancellationTokenSource(Bound);
-        try
-        {
-            return await operation(backstop.Token);
-        }
-        catch (OperationCanceledException) when (backstop.IsCancellationRequested)
-        {
-            Assert.Fail($"No completion after {Bound.TotalSeconds:0}s waiting for {awaiting}. " +
-                "This bound only catches a hang; treat the failure as one, not as slowness.");
-            throw; // Unreachable: Assert.Fail throws.
-        }
-    }
+    public static Task<T> WaitAsync<T>(Func<CancellationToken, Task<T>> operation, string awaiting)
+        => WaitAsync(operation, awaiting, Bound);
 
     /// <summary>
-    /// Waits for <paramref name="signal"/> to complete, failing the test as described in
+    /// Waits for <paramref name="signal"/> to complete under <see cref="Bound"/>, failing the test as described in
     /// <see cref="WaitAsync{T}(Func{CancellationToken, Task{T}}, string)"/> if the bound elapses first.
     /// </summary>
     public static Task<T> WaitAsync<T>(Task<T> signal, string awaiting)
-        => WaitAsync(token => signal.WaitAsync(token), awaiting);
+        => WaitAsync(_ => signal, awaiting, Bound);
+
+    /// <summary>
+    /// As <see cref="WaitAsync{T}(Func{CancellationToken, Task{T}}, string)"/> with an explicit bound.
+    /// Only the tests of this helper pass one, to exercise the firing path quickly.
+    /// </summary>
+    internal static async Task<T> WaitAsync<T>(Func<CancellationToken, Task<T>> operation, string awaiting, TimeSpan bound)
+    {
+        using var backstop = new CancellationTokenSource();
+        using var timer = new CancellationTokenSource();
+        // Task.Run: an operation that blocks before its first await must not block the race itself.
+        var work = Task.Run(() => operation(backstop.Token));
+        var deadline = Task.Delay(bound, timer.Token);
+
+        if (await Task.WhenAny(work, deadline) != work)
+        {
+            backstop.Cancel();
+            // The operation may still fault later; observe it so it does not surface as an unobserved exception.
+            _ = work.ContinueWith(static t => _ = t.Exception, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            Assert.Fail($"No completion after {Describe(bound)} waiting for {awaiting}. " +
+                "This bound only catches a hang; treat the failure as one, not as slowness.");
+        }
+
+        timer.Cancel();
+        return await work;
+    }
+
+    private static string Describe(TimeSpan bound)
+        => bound >= TimeSpan.FromSeconds(1) ? $"{bound.TotalSeconds:0}s" : $"{bound.TotalMilliseconds:0}ms";
 }
