@@ -603,6 +603,7 @@ public void Transpile_SelectWithJoin_GeneratesLinkEntity()
 - [architecture.md](./architecture.md) - `ISqlQueryService` follows Application Services pattern
 - [mcp.md](./mcp.md) - MCP tools expose query capabilities to AI assistants
 - [cli.md](./cli.md) - CLI commands for `ppds query sql|fetch|history`
+- [sql-values.md](./sql-values.md) - SQL type model for every value computed from SQL text: type rules, evaluation, and the check before a write
 - [CONSTITUTION.md](./CONSTITUTION.md) - A2 (Application Services single code path) motivates shared `SqlQueryService`
 
 ---
