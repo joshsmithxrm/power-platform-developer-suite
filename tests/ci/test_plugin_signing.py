@@ -19,7 +19,7 @@ import yaml
 
 from scripts.ci import verify_nuget_handoff as h
 from scripts.ci import verify_plugin_signing as p
-from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/ is on sys.path via tests/conftest.py
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/conftest.py puts tests/ on sys.path
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = "b" * 40

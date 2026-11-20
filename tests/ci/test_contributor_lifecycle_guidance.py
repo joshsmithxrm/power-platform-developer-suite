@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 import pytest
-from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/ is on sys.path via tests/conftest.py
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/conftest.py puts tests/ on sys.path
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY = ROOT / "docs/CONTRIBUTOR-LIFECYCLE.md"

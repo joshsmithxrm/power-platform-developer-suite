@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 import yaml
-from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/ is on sys.path via tests/conftest.py
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/conftest.py puts tests/ on sys.path
 
 ROOT = Path(__file__).resolve().parents[2]
 PATH = ROOT / '.github/workflows/publish-nuget.yml'

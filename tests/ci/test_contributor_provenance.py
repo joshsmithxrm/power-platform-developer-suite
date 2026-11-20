@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 from scripts.ci import check_contributor_provenance as guard
-from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/ is on sys.path via tests/conftest.py
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/conftest.py puts tests/ on sys.path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/ci/check_contributor_provenance.py"

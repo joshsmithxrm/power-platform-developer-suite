@@ -9,7 +9,7 @@ inside the job timeout. When it fires, ``subprocess.TimeoutExpired`` names the c
 bound, so the failure says what was awaited.
 
 The .NET tests follow the same rule with ``tests/Shared/HangBackstop.cs``. Import this by bare
-name: ``tests/`` is on ``sys.path`` because ``tests/conftest.py`` lives there.
+name: ``tests/conftest.py`` inserts ``tests/`` into ``sys.path`` in every pytest import mode.
 """
 
 CHILD_PROCESS_HANG_BOUND_SECONDS = 300

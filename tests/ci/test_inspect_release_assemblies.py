@@ -15,6 +15,7 @@ import sys
 import time
 
 import pytest
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/conftest.py puts tests/ on sys.path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / 'scripts/ci/inspect_release_assemblies.ps1'
@@ -116,7 +117,7 @@ def environment(*, pathext):
 
 def run_pwsh(pwsh, arguments, *, env, cwd):
     return subprocess.run([pwsh, '-NoProfile', *arguments], cwd=cwd, env=env,
-                          stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120)
+                          stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=CHILD_PROCESS_HANG_BOUND_SECONDS)
 
 
 def run_script(pwsh, tmp_path, directory, *extra, env=None):

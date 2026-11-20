@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
-from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/ is on sys.path via tests/conftest.py
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/conftest.py puts tests/ on sys.path
 
 
 HOOK_PATH = (
