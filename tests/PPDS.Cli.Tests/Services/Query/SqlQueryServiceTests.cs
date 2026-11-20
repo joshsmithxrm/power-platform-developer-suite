@@ -3,6 +3,7 @@ using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services;
 using PPDS.Cli.Services.Query;
+using PPDS.Cli.Tests.Services.Query.Faithful;
 using PPDS.Cli.Tests.Services.Shared;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Query;
@@ -1057,41 +1058,23 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteAsync_MaxRowsHint_LimitsReturnedRows()
     {
-        // Arrange: executor returns 200 records; hint should cap at 100
-        var mockExecutor = new Mock<IQueryExecutor>();
-        var records = Enumerable.Range(0, 200)
-            .Select(i => (IReadOnlyDictionary<string, QueryValue>)new Dictionary<string, QueryValue>
-            { ["name"] = QueryValue.Simple($"Record {i}") })
-            .ToList();
-
-        mockExecutor
-            .Setup(x => x.ExecuteFetchXmlAsync(
-                It.IsAny<string>(),
-                It.IsAny<int?>(),
-                It.IsAny<string?>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new QueryResult
-            {
-                EntityLogicalName = "account",
-                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
-                Records = records,
-                Count = records.Count
-            });
-
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard());
+        // Arrange: a table of 200 rows behind a fake that honours FetchXML like Dataverse; the hint caps at 100
+        var table = new FakeTable("account").Column("name", FakeColumnType.String);
+        for (var i = 0; i < 200; i++)
+            table.Row(("name", $"Record {i:D3}"));
+        var service = new FakeDataverse().Add(table).CreateSqlQueryService();
         var request = new SqlQueryRequest
         {
-            Sql = "-- ppds:MAX_ROWS 100\nSELECT name FROM account"
+            Sql = "-- ppds:MAX_ROWS 100\nSELECT name FROM account ORDER BY name"
         };
 
         // Act
         var result = await service.ExecuteAsync(request);
 
-        // Assert: the plan node's MaxRows cap was applied — at most 100 rows returned
-        Assert.NotNull(result);
-        Assert.True(result.Result.Count <= 100,
-            $"Expected at most 100 rows, got {result.Result.Count}");
+        // Assert: exactly the first 100 rows
+        Assert.Equal(
+            Enumerable.Range(0, 100).Select(i => $"Record {i:D3}"),
+            result.Result.Records.Select(r => (string?)r["name"].Value));
     }
 
     // ── AC-09: MAXDOP 2 caps parallelism ─────────────────────────────────
