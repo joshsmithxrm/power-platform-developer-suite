@@ -1050,9 +1050,19 @@ class TestDotnetHostForms:
             raise RuntimeError("bug")
 
         monkeypatch.setattr(hook, "_dotnet_argvs", boom)
-        assert hook.find_ppds_invocations(f"ppds {_DEL} && dotnet run --project src/PPDS.Cli -- x") == [
-            ["ppds"] + _DEL.split()
-        ]
+        found = hook.find_ppds_invocations(f"ppds {_DEL} && dotnet run --project src/PPDS.Cli -- x")
+        # The original matcher's hit survives; the shell reader adds its own.
+        assert ["ppds"] + _DEL.split() in found
+        assert ["ppds", "x"] in found
+
+    def test_a_reader_failure_is_an_invocation(self, monkeypatch):
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("bug")
+
+        monkeypatch.setattr(hook.sp, "read", boom)
+        found = hook.find_ppds_invocations("p`pds data delete", "PowerShell")
+        assert ["ppds", hook.UNREADABLE] in found
+        assert hook.is_mutation(["ppds", hook.UNREADABLE])[0]
 
 
 # ===========================================================================

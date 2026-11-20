@@ -31,6 +31,27 @@ command, ``dotnet [exec] <path>/ppds.dll`` / ``ppds-mcp-server.dll``,
 ``dotnet ppds`` and ``dotnet tool run ppds``. These are normalised to the
 same argv and only ever add hits. Matching is broad and best-effort.
 
+**Both shell tools.** The hook is registered for the Bash tool and the
+PowerShell tool. The payload's ``tool_name`` picks the dialect: PowerShell
+text is read with PowerShell's rules (``_shellparse.py``: backtick escapes
+and continuations, ``''`` and ``""`` inside quotes, the call operator, script
+blocks, sub-expressions, backslash paths); Bash text with POSIX rules, in
+addition to the original matcher. Any word naming ``ppds`` /
+``ppds-mcp-server`` (with a path and ``.exe``) or ``dotnet`` / ``dnx`` is an
+invocation, at any nesting depth: inside substitutions, script blocks and
+every quoted string, so ``bash -c``, ``pwsh -Command`` and ``cmd /c`` are
+seen. A command that only mentions ``ppds`` (a commit message, a search) is
+also treated as an invocation; that is the maintainer's decision on #1780.
+
+**Cannot tell -> invocation.** When the hook cannot tell what a command
+runs, it treats it as an invocation of both programs: a program only known
+at run time (``$x data delete``, ``& $exe ...``, ``Invoke-Expression $c``),
+a ``dotnet run`` project or working directory only known at run time, an
+alias that names ``ppds``, more than ``_DOTNET_MAX_OCCURRENCES`` ``dotnet``
+words, or text the reader could not finish (an unterminated quote, a cap).
+Such an invocation is gated, and during a shakedown it is refused when its
+subcommand or verb is not known.
+
 **Allowlist sources (checked in order; the first that names an env wins):**
 
 1. Env var ``$PPDS_SAFE_ENVS`` -- comma-separated list of env names.
@@ -96,6 +117,7 @@ from typing import Iterable, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _pathfix import normalize_msys_path  # noqa: E402
+import _shellparse as sp  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -478,15 +500,174 @@ _PPDS_PROGRAM_RE = re.compile(
 _SHELL_OPERATORS = {"|", ";", "&", "&&", "||", ">", "<", ">>", "<<", chr(96), "(", ")"}
 
 
-def find_ppds_invocations(command: str) -> list:
+_PPDS_PROGRAMS = ("ppds", "ppds-mcp-server")
+# Argument standing for text the hook could not read; `is_mutation` treats
+# an argv that contains it as a write.
+UNREADABLE = "<unreadable>"
+# A working directory only known at run time.
+_UNKNOWN_CWD = sp.DYN
+_MENTION_RE = re.compile(r"ppds|dotnet|dnx", re.IGNORECASE)
+_CD_WORDS = {"cd", "pushd", "chdir", "set-location", "sl", "push-location"}
+_CD_POP_WORDS = {"popd", "pop-location"}
+_ALIAS_DEFINERS = {"alias", "set-alias", "new-alias", "sal", "nal", "doskey"}
+
+
+def _unknown(args) -> list:
+    """Readings for a program the hook cannot identify: both PPDS programs."""
+    return [[program] + list(args) for program in _PPDS_PROGRAMS]
+
+
+def _dedupe(argvs: list) -> list:
+    seen, out = set(), []
+    for argv in argvs:
+        program = argv[0].lower()
+        program = program[:-4] if program.endswith(".exe") else program
+        key = (program,) + tuple(argv[1:])  # `ppds.exe env list` == `ppds env list`
+        if key not in seen:
+            seen.add(key)
+            out.append(argv)
+    return out
+
+
+def find_ppds_invocations(command: str, tool_name: str = "Bash", cwd=None) -> list:
     """Return a list of argv-style token lists for each ppds invocation.
 
-    Handles compound bash (``cd foo && ppds env list``) and pipes. The CLI
-    argv tokens stop at the first shell operator after the program name.
+    ``tool_name`` picks the dialect: ``PowerShell`` text is read with
+    PowerShell's rules only; ``Bash`` text with the original matcher plus
+    POSIX rules; any other value with all of them. ``cwd`` is the shell's
+    working directory from the hook payload; None means a directory that is
+    not a PPDS project (the original behaviour), ``_UNKNOWN_CWD`` that it is
+    not known. Readings only ever add hits; the list is de-duplicated.
     """
     if not command:
         return []
+    tool = (tool_name or "").lower()
+    out = []
+    if tool != "powershell":
+        out.extend(_original_invocations(command))
+    dialects = {"powershell": ["ps"], "bash": ["posix"]}.get(tool, ["posix", "ps"])
+    for dialect in dialects:
+        out.extend(_read_invocations(command, dialect, cwd))
+    if not out and tool == "powershell" and _PPDS_PROGRAM_RE.search(command):
+        out.extend(_unknown([UNREADABLE]))
+    return _dedupe(out)
 
+
+def _strip_quoting(text: str) -> str:
+    return re.sub(r"[`^\\'\"‘’‚‛“”„]", "", text)
+
+
+def _read_invocations(command: str, dialect: str, cwd) -> list:
+    """Hits from reading ``command`` with ``_shellparse`` in ``dialect``.
+
+    Every word naming a PPDS program, ``dotnet`` or ``dnx`` counts, in every
+    statement the reader finds. A failure here is an invocation (when the
+    text mentions PPDS or the .NET host), never a pass.
+    """
+    try:
+        result = sp.read(command, dialect)
+        out = []
+        if not result.complete and (
+            _MENTION_RE.search(_strip_quoting(command))
+            or any("encoded" in problem for problem in result.problems)  # hides any mention
+        ):
+            out.extend(_unknown([UNREADABLE]))
+        stack = [cwd]  # working directory per subshell level
+        dotnet_words = 0
+        for stmt in result.statements:
+            level = stmt.level
+            del stack[level + 1:]
+            while len(stack) < level + 1:
+                stack.append(stack[-1])
+            words, texts = stmt.words, stmt.texts
+            for i, word in enumerate(words):
+                prog = sp.program_name(word)
+                if prog in _PPDS_PROGRAMS:
+                    out.append([prog] + texts[i + 1:])
+                elif prog in ("dotnet", "dnx"):
+                    dotnet_words += 1
+                    if dotnet_words > _DOTNET_MAX_OCCURRENCES:
+                        out.extend(_unknown([UNREADABLE]))
+                    elif prog == "dnx":
+                        out.extend(_package_exec(texts[i + 1:]))
+                    else:
+                        out.extend(_dotnet_hits(texts[i + 1:], {stack[level], cwd}))
+            if stmt.code:
+                for i in sp.command_positions(stmt):
+                    if words[i].dynamic and sp.program_name(words[i]) is None:
+                        out.extend(_unknown(texts[i + 1:]))
+                first = words[0].text.lower()
+                if first in _CD_WORDS:
+                    stack[level] = _cd(stack[level], words[1:])
+                elif first in _CD_POP_WORDS:
+                    stack[level] = _UNKNOWN_CWD
+            if words[0].text.lower() in _ALIAS_DEFINERS and _MENTION_RE.search(" ".join(texts[1:])):
+                out.extend(_unknown([UNREADABLE]))
+        return out
+    except Exception:  # noqa: BLE001 -- a reading failure must not become a pass
+        return _unknown([UNREADABLE]) if _MENTION_RE.search(_strip_quoting(command)) else []
+
+
+def _is_absolute(path: str) -> bool:
+    return path.startswith(("/", "~")) or bool(re.match(r"^[A-Za-z]:", path))
+
+
+def _cd(base, args):
+    """The working directory after ``cd`` / ``Set-Location`` with ``args``."""
+    for word in args:
+        if word.dynamic:
+            return _UNKNOWN_CWD
+        text = word.text
+        if text == "-":
+            return _UNKNOWN_CWD
+        if text.startswith("-"):
+            continue  # -P, -L, -Path, -LiteralPath
+        path = text.replace("\\", "/")
+        if _is_absolute(path) or base is None:
+            return path
+        return base.replace("\\", "/") + "/" + path
+    return "~"
+
+
+def _path_program(path):
+    """``ppds`` / ``ppds-mcp-server`` when ``path``'s last component names that
+    project, ``"?"`` when that component is only known at run time."""
+    if path is None:
+        return None
+    parts = []
+    for part in path.replace("\\", "/").split("/"):
+        if part == "..":
+            if parts and sp.DYN in parts[-1]:
+                return "?"
+            parts = parts[:-1]
+        elif part not in ("", "."):
+            parts.append(part)
+    if not parts:
+        return None
+    last = parts[-1].lower()
+    if sp.DYN in last:
+        return "?"
+    return _PPDS_PROJECTS.get(last[:-7] if last.endswith(".csproj") else last)
+
+
+def _project_programs(project, cwds) -> set:
+    """Programs a ``dotnet run`` with ``project`` (None: no ``--project``)
+    starts, over the candidate working directories."""
+    out = set()
+    for base in cwds:
+        if project is None:
+            path = base
+        else:
+            path = project.replace("\\", "/")
+            if not (_is_absolute(path) or base is None):
+                path = base.replace("\\", "/") + "/" + path
+        out.add(_path_program(path))
+    return out
+
+
+def _original_invocations(command: str) -> list:
+    """The original matcher: a ``ppds`` word after whitespace or an operator,
+    its tail split with POSIX rules, plus the ``dotnet`` forms."""
     out = []
     for match in _PPDS_PROGRAM_RE.finditer(command):
         prog = match.group(1)
@@ -509,9 +690,11 @@ def find_ppds_invocations(command: str) -> list:
 # PPDS run through the .NET host. Additive: these hits are appended to the
 # matcher above and nothing is ever cleared. Broad like that matcher: any
 # `dotnet` word after the start, whitespace, an operator, a quote or a
-# parenthesis. Caps keep the work linear: at most 50 `dotnet` occurrences
-# per command, and 400 tokens / 4096 characters after each, are examined.
-_DOTNET_MAX_OCCURRENCES = 50
+# parenthesis. Caps keep the work linear: at most 500 `dotnet` occurrences
+# per command, and 400 tokens / 4096 characters after each, are examined by
+# this matcher; past 500 the `_shellparse` reading reports an unreadable
+# invocation.
+_DOTNET_MAX_OCCURRENCES = 500
 _DOTNET_MAX_TOKENS = 400
 _DOTNET_MAX_CHARS = 4096
 _DOTNET_RE = re.compile(
@@ -548,10 +731,12 @@ def _dotnet_project(path):
     return _PPDS_PROJECTS.get(last[:-7] if last.endswith(".csproj") else last)
 
 
-def _dotnet_run(tokens: list, project) -> list:
-    """argv readings for ``dotnet run <tokens>``: args after ``--`` only, and
-    unrecognised tokens plus those (a hit for each, so either can block)."""
-    unknown, after, i = [], [], 0
+def _parse_run(tokens: list):
+    """Split ``dotnet run <tokens>`` into ``(project, unknown, after)``:
+    the ``--project`` value (None when absent), the tokens ``dotnet run``
+    does not recognise (forwarded to the application) and the tokens after
+    ``--``. None for ``--file`` (a file-based app, not a PPDS project)."""
+    project, unknown, after, i = None, [], [], 0
     while i < len(tokens):
         tok = tokens[i]
         if tok == "--":
@@ -562,7 +747,7 @@ def _dotnet_run(tokens: list, project) -> list:
         value = inline if inline is not None else (tokens[i + 1] if i + 1 < len(tokens) else "")
         if name in _RUN_VALUE_OPTS or (name == "-p" and "=" not in value):
             if name == "--file":
-                return []
+                return None
             if name in ("--project", "-p"):  # -p:x=y and -p x=y are properties
                 project = value
             i += 1 if inline is not None else 2
@@ -570,11 +755,129 @@ def _dotnet_run(tokens: list, project) -> list:
             if name != "-p" and name not in _RUN_FLAGS and not name.startswith("--tl"):
                 unknown.append(tok)
             i += 1 if name != "-p" or inline is not None else 2
-    program = _dotnet_project(project)
+    return project, unknown, after
+
+
+def _read_only_forwarded(unknown: list) -> bool:
+    """True when ``--read-only`` certainly reaches the MCP server: it is among
+    the forwarded tokens and no option ``dotnet run`` does not recognise
+    comes before it (such an option might take it as its value)."""
+    for tok in unknown:
+        if tok == "--read-only" or tok.startswith("--read-only="):
+            return True
+        if tok.startswith("-"):
+            return False
+    return False
+
+
+def _run_readings(program: str, unknown: list, after: list) -> list:
+    """argv readings for an application started with forwarded ``unknown``
+    tokens and ``after`` (the tokens after ``--``): ``after`` alone, and each
+    suffix of ``unknown`` followed by ``after``, so an option value the hook
+    does not know (``--tl off``) cannot hide the verb. A reading for each;
+    any one can block."""
+    if program == "ppds-mcp-server" and _read_only_forwarded(unknown):
+        return [[program] + unknown + after]
+    readings = [[program] + after]
+    for k in range(min(len(unknown), _DOTNET_MAX_TOKENS)):
+        readings.append([program] + unknown[k:] + after)
+    return _dedupe(readings)
+
+
+def _dotnet_run(tokens: list, project) -> list:
+    """argv readings for ``dotnet run <tokens>`` in the original matcher."""
+    parsed = _parse_run(tokens)
+    if parsed is None:
+        return []
+    value, unknown, after = parsed
+    program = _dotnet_project(value if value is not None else project)
     if program is None:
         return []
-    readings = [[program] + after, [program] + unknown + after]
-    return readings[:1] if readings[0] == readings[1] else readings
+    return _run_readings(program, unknown, after)
+
+
+def _run_hits(tokens: list, cwds) -> list:
+    """argv readings for ``dotnet run <tokens>`` over candidate working
+    directories; a project only known at run time reads as both programs."""
+    parsed = _parse_run(tokens)
+    if parsed is None:
+        return []
+    project, unknown, after = parsed
+    out = []
+    for program in _project_programs(project, cwds):
+        for prog in (_PPDS_PROGRAMS if program == "?" else (program,) if program else ()):
+            out.extend(_run_readings(prog, unknown, after))
+    return out
+
+
+_PACKAGE_PROGRAMS = {"ppds.cli": "ppds", "ppds.mcp": "ppds-mcp-server"}
+# `dotnet` verbs that build or test rather than run the project.
+_DOTNET_NOT_RUN = {"build", "test", "msbuild", "publish", "pack", "format", "restore", "clean", "vstest"}
+
+
+def _package_exec(tokens: list) -> list:
+    """``dotnet tool exec <package> ...`` / ``dnx <package> ...``: the PPDS
+    tool packages (``PPDS.Cli``, ``PPDS.Mcp``, optionally ``@version``)."""
+    dd = tokens.index("--") if "--" in tokens else len(tokens)
+    before, after = tokens[:dd], tokens[dd + 1:]
+    for k, tok in enumerate(before):
+        if tok.startswith("-"):
+            continue
+        name = tok.split("@", 1)[0].lower()
+        if sp.DYN in name:
+            programs = _PPDS_PROGRAMS
+        elif name in _PACKAGE_PROGRAMS:
+            programs = (_PACKAGE_PROGRAMS[name],)
+        else:
+            continue  # an option value, or another package
+        out = []
+        for program in programs:
+            out.extend(_run_readings(program, before[k + 1:], after))
+        return out
+    return []
+
+
+def _dotnet_hits(tokens: list, cwds) -> list:
+    """Normalise the words after a ``dotnet`` word to PPDS argvs (or [])."""
+    i = 0
+    while i < len(tokens) and (tokens[i].startswith("-") or tokens[i].lower() == "exec"):
+        i += 2 if tokens[i] in _HOST_VALUE_OPTS else 1
+    if i >= len(tokens):
+        return []
+    verb, rest = tokens[i].lower(), list(tokens[i + 1:])
+    if sp.DYN in verb:
+        return _unknown(rest)
+    if verb == "watch":
+        # `dotnet watch [run]` runs the project; `dotnet watch test` does not.
+        k = 0
+        while k < len(rest) and rest[k] != "--" and rest[k].startswith("-"):
+            k += 2 if rest[k] in _RUN_VALUE_OPTS or rest[k] == "-p" else 1
+        if k < len(rest) and rest[k] != "--":
+            sub = rest[k].lower()
+            if sp.DYN in sub:
+                return _unknown(rest)
+            if sub == "run":
+                del rest[k]
+            elif sub in _DOTNET_NOT_RUN:
+                return []
+        verb = "run"
+    if verb == "run":
+        return _run_hits(rest, cwds)
+    if verb == "dnx" or (verb == "tool" and rest[:1] and rest[0].lower() == "exec"):
+        return _package_exec(rest if verb == "dnx" else rest[1:])
+    return _dotnet_other(verb, rest)
+
+
+def _dotnet_other(verb: str, rest: list) -> list:
+    """``dotnet tool run ppds``, ``dotnet [exec] <path>/ppds.dll``, ``dotnet ppds``."""
+    if verb == "tool" and rest[:1] == ["run"]:
+        j = 1
+        while j < len(rest) and rest[j].startswith("-"):
+            j += 1
+        verb, rest = (rest[j].lower(), rest[j + 1:]) if j < len(rest) else ("", [])
+        rest = rest[1:] if rest[:1] == ["--"] else rest
+    verb = _PPDS_ASSEMBLIES.get(re.split(r"[\\/]", verb)[-1], verb)
+    return [[verb] + rest] if verb in _PPDS_PROGRAMS else []
 
 
 def _dotnet_argvs(tokens: list, cwd) -> list:
@@ -760,6 +1063,9 @@ def is_mutation(argv: list) -> tuple:
     if prog not in ("ppds", "ppds-mcp-server"):
         return False, ""
 
+    if UNREADABLE in argv:
+        return True, "a command the hook could not read in full (treated as a write)"
+
     if prog == "ppds-mcp-server":
         if any(
             arg == "--read-only" or arg.startswith("--read-only=")
@@ -769,6 +1075,8 @@ def is_mutation(argv: list) -> tuple:
         return True, "ppds-mcp-server (missing --read-only flag during shakedown)"
 
     if len(argv) < 3:
+        if len(argv) == 2 and sp.DYN in argv[1]:
+            return True, "a subcommand only known when the command runs (treated as a write)"
         return False, ""
 
     sub = argv[1].lower()
@@ -779,6 +1087,9 @@ def is_mutation(argv: list) -> tuple:
     if sub == "metadata" and verb not in _MUTATION_VERBS and len(argv) >= 4:
         verb = argv[3].lower()
         rest = argv[4:]
+
+    if sp.DYN in sub or sp.DYN in verb:
+        return True, "a subcommand or verb only known when the command runs (treated as a write)"
 
     allowed = _READONLY_SUBCOMMANDS.get(sub)
     if allowed and ("*" in allowed or verb in allowed):
@@ -801,6 +1112,11 @@ def is_mutation(argv: list) -> tuple:
 # ---------------------------------------------------------------------------
 
 
+def _shown(argv) -> str:
+    """argv as text for a message; run-time-only text shows as ``$...``."""
+    return " ".join(argv).replace(sp.DYN, "$...")
+
+
 def _format_active(active):
     if not active:
         return "(unknown -- no active profile / store missing)"
@@ -819,7 +1135,7 @@ def _config_help_lines():
 def _block_msg_active_not_allowed(active, allowlist, argv):
     lines = [
         "BLOCKED [shakedown-safety/env]: active env is not in the safe-env allowlist.",
-        f"  Command:    {' '.join(argv)}",
+        f"  Command:    {_shown(argv)}",
         f"  Active env: {_format_active(active)}",
         f"  Allowlist:  {', '.join(allowlist)}",
         "",
@@ -835,7 +1151,7 @@ def _block_msg_active_not_allowed(active, allowlist, argv):
 def _block_msg_target_not_allowed(target, allowlist, argv):
     lines = [
         "BLOCKED [shakedown-safety/env]: switch target is not in the safe-env allowlist.",
-        f"  Command:   {' '.join(argv)}",
+        f"  Command:   {_shown(argv)}",
         f"  Target:    {target}",
         f"  Allowlist: {', '.join(allowlist)}",
         "",
@@ -847,7 +1163,7 @@ def _block_msg_target_not_allowed(target, allowlist, argv):
 def _block_msg_misconfigured(problem, argv):
     lines = [
         "BLOCKED [shakedown-safety/env]: the safe-env allowlist is misconfigured.",
-        f"  Command: {' '.join(argv)}",
+        f"  Command: {_shown(argv)}",
         f"  Problem: {problem}",
         "",
         "  Fix it so it names at least one env, or remove it (unset the env",
@@ -881,7 +1197,7 @@ def _block_msg_mutation(
     return "\n".join(
         [
             "BLOCKED [shakedown-safety/readonly]: write/mutation command refused.",
-            f"  Command: {' '.join(argv)}",
+            f"  Command: {_shown(argv)}",
             f"  Pattern: {reason}",
             "",
             f"  Active: {activation} -- this session is in read-only mode for",
@@ -910,12 +1226,20 @@ def main() -> None:
     except (json.JSONDecodeError, ValueError):
         sys.exit(0)
 
+    if not isinstance(payload, dict):
+        sys.exit(0)
     tool_input = payload.get("tool_input") or {}
-    command = tool_input.get("command", "")
+    command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
     if not isinstance(command, str) or not command.strip():
         sys.exit(0)
+    tool_name = payload.get("tool_name")
+    tool_name = tool_name if isinstance(tool_name, str) else ""
+    # The shell's working directory; when the payload has none, `dotnet run`
+    # without a project path cannot be told apart from PPDS, so it counts.
+    cwd = payload.get("cwd")
+    cwd = cwd if isinstance(cwd, str) and cwd.strip() else _UNKNOWN_CWD
 
-    invocations = find_ppds_invocations(command)
+    invocations = find_ppds_invocations(command, tool_name, cwd)
     if not invocations:
         sys.exit(0)
 

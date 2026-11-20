@@ -1,0 +1,27 @@
+{
+  "_note": "PreToolUse hook input observed from Claude Code 2.1.326 on 2026-11-20, one payload per shell tool, with identifiers and paths replaced. Keys, nesting and value types are as observed; tool_input.description is optional (absent on some calls of both tools). Tests fill in tool_input.command and cwd.",
+  "Bash": {
+    "session_id": "00000000-0000-0000-0000-000000000000",
+    "transcript_path": "<transcript>.jsonl",
+    "cwd": "<cwd>",
+    "prompt_id": "00000000-0000-0000-0000-000000000000",
+    "permission_mode": "default",
+    "effort": {"level": "medium"},
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Bash",
+    "tool_input": {"command": "", "description": ""},
+    "tool_use_id": "toolu_00000000000000000000000"
+  },
+  "PowerShell": {
+    "session_id": "00000000-0000-0000-0000-000000000000",
+    "transcript_path": "<transcript>.jsonl",
+    "cwd": "<cwd>",
+    "prompt_id": "00000000-0000-0000-0000-000000000000",
+    "permission_mode": "default",
+    "effort": {"level": "medium"},
+    "hook_event_name": "PreToolUse",
+    "tool_name": "PowerShell",
+    "tool_input": {"command": "", "description": ""},
+    "tool_use_id": "toolu_00000000000000000000000"
+  }
+}
