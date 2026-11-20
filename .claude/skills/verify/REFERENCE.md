@@ -20,8 +20,15 @@ by program name (a path ending in `ppds` counts) or through `dotnet`
 - **`--` before application arguments.** Write
   `dotnet run --project src/PPDS.Cli -- data list`. Without `--` the hook
   checks several readings of the arguments and may block a read.
-- **Caps.** Commands longer than 200,000 characters or with more than 500
-  `dotnet` words are treated as unreadable invocations.
+- **Both readings, every mention.** Each command is read with PowerShell
+  rules and with POSIX rules whatever the tool, and every mention of
+  `ppds`, `dotnet` or `dnx` the readings cannot place in a word counts as
+  an invocation with an unknown verb.
+- **Caps.** Past any cap a command is treated as an unreadable invocation,
+  mention or not: 200,000 characters, nesting 8 levels deep, 4,000,000
+  characters of reading work, 3.5 seconds, 500 `dotnet` words, and in the
+  original matcher 500 `ppds` or `dotnet` words with 400 tokens / 4,096
+  characters after each. The full list is in `docs/SAFE-SHAKEDOWN.md`.
 - **Mentions count.** A commit message, pull request body or search pattern
   that mentions `ppds` is treated as an invocation when a gate applies; pass
   long text through a file (`git commit -F`, `gh pr create --body-file`).
@@ -495,8 +502,8 @@ is descriptive, not a raw exception.
 
 How to test changes to `.claude/` infrastructure: hooks, skills, settings.
 The hooks are `.claude/hooks/snk-protect.py` (Edit|Write) and
-`.claude/hooks/shakedown-safety.py` (Bash); `_pathfix.py` is a shared
-helper, not a hook.
+`.claude/hooks/shakedown-safety.py` (Bash and PowerShell); `_pathfix.py`
+and `_shellparse.py` are shared helpers, not hooks.
 
 ### Hook testing
 

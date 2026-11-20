@@ -51,11 +51,24 @@ policy; fewer ways to drift.
 ## Hook behavior
 
 **Trigger:** every Bash tool or PowerShell tool invocation that mentions
-`ppds` or `ppds-mcp-server`, or runs either through `dotnet` (below). The
-hook is registered for both shell tools and reads each command with that
-shell's rules: PowerShell text with PowerShell's (backtick escapes and line
-continuations, `''` and `""` inside quotes, the call operator `&`, script
-blocks, sub-expressions, backslash paths), Bash text with POSIX rules.
+`ppds`, `ppds-mcp-server`, `dotnet` or `dnx`, or runs a program the hook
+cannot identify (below). The hook is registered for both shell tools and
+reads every command twice, whatever the tool: with PowerShell's rules
+(backtick escapes and line continuations, `''` and `""` inside quotes, the
+call operator `&`, script blocks, also glued to the word before them,
+sub-expressions, `$r=<command>` assignments, `--%`, every Unicode space as
+a separator, backslash paths) and with POSIX rules. A hit from either
+reading counts.
+
+**Every mention is accounted for.** Each mention of `ppds`, `dotnet` or
+`dnx` in the raw command text (any case, also with quoting, escape, brace
+or glob characters between the letters) must be placed by each reading in
+a word of a statement it read to the end: a word that names the program
+(which the hook then checks), or a word naming something else that only
+contains it (`src/PPDS.Cli`, `PPDS_CONFIG_DIR=x`,
+`--environment=ppds-dev`). A mention that is not placed (for example
+`@{a=ppds ...}`, `cmd /c p^pds ...`, `['ppds','data','delete']`) is an
+invocation of both programs whose verb is unknown.
 
 ### What the hook recognises
 
@@ -63,8 +76,12 @@ blocks, sub-expressions, backslash paths), Bash text with POSIX rules.
   `.exe`, anywhere they appear as a word in the command: in each statement
   (`;`, `&&`, `||`, `|`, a new line), inside substitutions (`$(...)`,
   backticks), PowerShell script blocks and sub-expressions, and inside
-  every quoted string, so `bash -c '...'`, `pwsh -Command "..."`,
-  `cmd /c "..."` and `pwsh -EncodedCommand` are seen.
+  every quoted string. The code handed to `bash -c`, `pwsh -Command` (all
+  the words after it), `cmd /c`, `eval`, `Invoke-Expression` and
+  `pwsh -EncodedCommand` (every spelling, `/enc` included) is also read as
+  one joined text in that shell's rules. A program started by
+  `Start-Process`, `xargs`, `find -exec` and the like gets its arguments
+  from elsewhere, so its verb is unknown.
 - The same programs started through the .NET host, treated exactly like the
   direct program:
   - `dotnet run`, `dotnet watch run` or `dotnet watch` whose `--project`,
@@ -73,14 +90,20 @@ blocks, sub-expressions, backslash paths), Bash text with POSIX rules.
     `Set-Location` earlier in the same command (`--project .`) or contains
     a substitution (`$(git rev-parse --show-toplevel)/src/PPDS.Cli`).
     Without `--project`, the shell's working directory from the hook input
-    decides.
+    decides, after a plain `cd` / `Set-Location <path>` earlier in the
+    command; any other way of changing directory (`cd /d`, `-Path:`,
+    `env -C`, `Start-Process -WorkingDirectory`, `popd`) makes the working
+    directory unknown, and the run counts as both programs.
     Arguments are what follows `--` plus anything `dotnet run` does not
     recognise; when an unknown option makes that ambiguous, each reading is
     checked and any can block.
   - `dotnet [exec] <path>/ppds.dll` and `<path>/ppds-mcp-server.dll`.
   - `dotnet ppds ...`, `dotnet tool run ppds ...`, and the tool packages
     run without installing them: `dotnet tool exec PPDS.Cli ...`,
-    `dnx PPDS.Cli ...` (and `PPDS.Mcp`, with or without `@version`).
+    `dotnet tool execute PPDS.Cli ...`, `dnx PPDS.Cli ...` (and
+    `PPDS.Mcp`, with or without `@version`).
+  - An option before the `dotnet` verb other than the host's own
+    (`--info`, `-d`, `--roll-forward ...`) makes the command unknown.
 
   Other `dotnet` commands (`build`, `test`, `pack`, `watch test`, `run` for
   any other project) are not gated.
@@ -94,14 +117,41 @@ may block a command that is in fact read-only.
 **When the hook cannot tell, it counts as an invocation** of both programs,
 gated by the allowlist and, during a shakedown, refused unless its verb is
 known to be read-only: a program only known when the command runs
-(`$x data list`, `& $exe ...`, `Invoke-Expression $c`), a `dotnet run`
-project or working directory only known when it runs, an alias that names
-`ppds`, text the hook could not read to the end (an unterminated quote, an
-encoded command that does not decode), or a command past the caps below.
+(`$x data list`, `& $exe ...`, `timeout 5 $x ...`, a brace or glob in the
+program name, `[scriptblock]::Create(...)`), code for a wrapper that is not
+in the text (`pwsh -Command $c`, `$c | iex`, `echo $c | sh`,
+`sh <<< "$c"`, a script file such as `bash x.sh` or `pwsh -File x.ps1`), a
+`dotnet run` project or working directory only known when it runs, an
+alias that names `ppds` or a run-time value, a mention the readings do not
+place (above), text the hook could not read to the end (an unterminated
+quote, an encoded command that does not decode), or a command past a cap
+below. During a shakedown a command is also refused when anything before
+its verb is an option (`ppds --verbose data delete`) or several words in
+one argument.
 
-**Caps.** The hook reads a command of up to 200,000 characters and up to 500
-`dotnet` words; past either cap the command counts as an invocation that
-could not be read. Real commands are far below both.
+**Caps.** Past any of these the command counts as an invocation of both
+programs with an unknown verb, whether or not it mentions `ppds`:
+
+| Cap | Value |
+|-----|-------|
+| Command length | 200,000 characters |
+| Nesting (substitutions, blocks, quoted strings read again) | 8 levels |
+| Reading work | 4,000,000 characters read, counting every nested reading |
+| Time | 3.5 seconds per command (the hook is registered with 10) |
+| `dotnet` words read | 500 |
+| Original matcher | 500 `ppds` words and 500 `dotnet` words, and 400 tokens or 4,096 characters after each |
+
+Real commands are far below all of them. Claude Code runs a command whose
+hook exceeds its registered timeout or exits 1, in both shell tools, so the
+hook answers within its time cap and, on any internal error, refuses a
+command that mentions `ppds`, `dotnet` or `dnx` whenever an allowlist or a
+shakedown is in effect. With neither, the hook exits 0 for every command
+before reading it.
+
+**Statements led by a variable.** The POSIX reading of a PowerShell
+statement such as `$x = 1` or `$env:FOO = 'bar'` is a program only known at
+run time. It therefore blocks during a shakedown and when the active env is
+not on the allowlist, in both shell tools.
 
 **Mentions are blocked too.** A command that merely mentions `ppds` (or one
 of these `dotnet` forms), for example in a commit message, a pull request
@@ -186,6 +236,9 @@ tool starts a fresh shell per call). Default env var name is
   `--read-only` before `--` counts only when no option `dotnet run` does
   not recognise comes before it (such an option could take it as its
   value); `dotnet run --project src/PPDS.Mcp -- --read-only` always counts.
+  Only the bare flag counts: `--read-only=<value>` (`=true`, `=false`, `=`)
+  is refused with a message that the server only accepts the bare flag,
+  because the server ignores the valued form and starts writable (#1718).
 - `ppds env switch/select` is read-only here because the env-allowlist
   concern above already validates the target.
 
@@ -279,6 +332,10 @@ Either:
   allowlist sources, switch gating, dry-run carve-out, fail-safe paths.
 - `tests/hooks/test_shakedown_safety_shells.py` — each recognised form in
   Bash and PowerShell syntax, sent in the hook input shape each tool uses.
-- `.claude/hooks/_shellparse.py` — the command reader shared with the
-  command-text guard (`.claude/hooks/command-text-guard.py`, which the
-  checked-in settings do not register).
+- `tests/hooks/test_shakedown_safety_forms.py` — forms that must count as
+  an invocation, each in the syntax of its shell, and what each reading and
+  the mention accounting contribute.
+- `tests/hooks/test_shakedown_safety_process.py` — the hook as a process:
+  input shapes, caps, the time budget against the registered timeout, and
+  internal errors.
+- `.claude/hooks/_shellparse.py` — the command reader the hook uses.
