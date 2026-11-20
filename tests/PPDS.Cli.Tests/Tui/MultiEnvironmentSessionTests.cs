@@ -4,6 +4,7 @@ using PPDS.Cli.Services.Settings;
 using PPDS.Cli.Tests.Mocks;
 using PPDS.Cli.Tui;
 using Xunit;
+using PPDS.Tests.Shared;
 
 namespace PPDS.Cli.Tests.Tui;
 
@@ -99,16 +100,16 @@ public sealed class MultiEnvironmentSessionTests : IDisposable
 
         await session.GetServiceProviderAsync("https://dev.crm.dynamics.com");
         await session.GetServiceProviderAsync("https://prod.crm.dynamics.com");
+        Assert.Equal(2, _mockFactory.CreationLog.Count);
+        _mockFactory.Reset();
 
         await session.SetActiveProfileAsync("profile2", "https://dev.crm.dynamics.com");
 
-        // Give time for fire-and-forget re-warm
-        await Task.Delay(200);
-
         // Both should have been invalidated since credentials changed.
-        // SetActiveProfile invalidates all, then re-warms the target environment.
-        // So we should see: 2 original + at least 1 re-warm = 3+
-        Assert.True(_mockFactory.CreationLog.Count >= 3);
+        // SetActiveProfile invalidates all, then re-warms the target environment:
+        // 2 original creations (asserted above) + at least 1 re-warm.
+        await HangBackstop.WaitAsync(_mockFactory.FirstCreationSinceReset, "the fire-and-forget re-warm to create a provider");
+        Assert.True(_mockFactory.CreationLog.Count >= 1);
     }
 
     [Fact]

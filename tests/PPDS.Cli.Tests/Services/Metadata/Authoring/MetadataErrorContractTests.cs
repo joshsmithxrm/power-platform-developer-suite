@@ -6,6 +6,7 @@ using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Resilience;
 using PPDS.Dataverse.Security;
 using Xunit;
+using PPDS.Tests.Shared;
 
 namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 
@@ -32,7 +33,7 @@ public sealed partial class MetadataLeaseLifetimeTests
         {
             if (delayed)
             {
-                await h.FaultReached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                await HangBackstop.WaitAsync(h.FaultReached.Task, "the operation to reach the delayed fault");
                 Assert.False(operation.IsCompleted);
                 h.ReleaseFault();
             }

@@ -4,6 +4,7 @@ using PPDS.Cli.Services.Settings;
 using PPDS.Cli.Tests.Mocks;
 using PPDS.Cli.Tui;
 using Xunit;
+using PPDS.Tests.Shared;
 
 namespace PPDS.Cli.Tests.Tui;
 
@@ -236,8 +237,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
             "TestProfile",
             "https://test.crm.dynamics.com");
 
-        // Give time for fire-and-forget re-warm
-        await Task.Delay(100);
+        await HangBackstop.WaitAsync(_mockFactory.FirstCreationSinceReset, "the fire-and-forget re-warm to create a provider");
 
         // Assert - Provider should have been recreated
         Assert.True(_mockFactory.CreationLog.Count >= 1);
@@ -253,13 +253,8 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
         await _tempStore.SeedProfilesAsync("TestProfile", profile);
 
         var session = new InteractiveSession(null, _tempStore.Store, _envConfigStore, new TuiStateStore(Path.GetTempFileName()), _mockFactory);
-        string? receivedUrl = null;
-        string? receivedName = null;
-        session.EnvironmentChanged += (url, name) =>
-        {
-            receivedUrl = url;
-            receivedName = name;
-        };
+        var changed = new TaskCompletionSource<(string? Url, string? Name)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        session.EnvironmentChanged += (url, name) => changed.TrySetResult((url, name));
 
         // Act
         await session.SetActiveProfileAsync(
@@ -267,8 +262,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
             "https://test.crm.dynamics.com",
             "Test Environment");
 
-        // Give time for fire-and-forget to complete
-        await Task.Delay(200);
+        var (receivedUrl, receivedName) = await HangBackstop.WaitAsync(changed.Task, "the EnvironmentChanged event");
 
         // Assert
         Assert.Equal("https://test.crm.dynamics.com", receivedUrl);
@@ -389,8 +383,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
             "https://new.crm.dynamics.com",
             "New Environment");
 
-        // Wait for pre-warm
-        await Task.Delay(100);
+        await HangBackstop.WaitAsync(_mockFactory.FirstCreationSinceReset, "the pre-warm to create a provider");
 
         // Assert - Should have created new provider (pre-warm)
         Assert.True(_mockFactory.CreationLog.Count >= 1);
@@ -412,10 +405,10 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
         var session = new InteractiveSession(null, _tempStore.Store, _envConfigStore, new TuiStateStore(Path.GetTempFileName()), _mockFactory);
         await session.GetServiceProviderAsync("https://test.crm.dynamics.com");
 
-        // Act & Assert - Should complete within 3 seconds
-        var disposeTask = session.DisposeAsync().AsTask();
-        var completed = await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromSeconds(3))) == disposeTask;
-        Assert.True(completed, "DisposeAsync should complete within timeout");
+        // Act & Assert - DisposeAsync completes. The product bounds a slow provider's disposal with its own
+        // DisposeTimeout; this test's providers dispose at once, so a fixed wall-clock budget here would only
+        // measure runner load. The hang guard catches a disposal that never completes.
+        await HangBackstop.WaitAsync(session.DisposeAsync().AsTask(), "DisposeAsync to complete");
     }
 
     [Fact]

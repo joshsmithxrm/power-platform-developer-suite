@@ -17,11 +17,25 @@ public sealed class MockServiceProviderFactory : IServiceProviderFactory
 {
     private readonly List<ProviderCreationRecord> _creationLog = new();
     private readonly Func<ServiceCollection, ServiceCollection>? _configureServices;
+    private readonly object _lock = new();
+    private TaskCompletionSource<ProviderCreationRecord> _firstCreation = NewCreationSignal();
 
     /// <summary>
     /// Gets the log of all provider creation calls.
     /// </summary>
-    public IReadOnlyList<ProviderCreationRecord> CreationLog => _creationLog;
+    public IReadOnlyList<ProviderCreationRecord> CreationLog
+    {
+        get { lock (_lock) return _creationLog.ToList(); }
+    }
+
+    /// <summary>
+    /// Completes with the first creation recorded since construction or the last <see cref="Reset"/>,
+    /// so a test can wait for a fire-and-forget creation instead of sleeping.
+    /// </summary>
+    public Task<ProviderCreationRecord> FirstCreationSinceReset
+    {
+        get { lock (_lock) return _firstCreation.Task; }
+    }
 
     /// <summary>
     /// Gets or sets whether CreateAsync should throw an exception.
@@ -57,10 +71,14 @@ public sealed class MockServiceProviderFactory : IServiceProviderFactory
         Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? beforeInteractiveAuth = null,
         CancellationToken cancellationToken = default)
     {
-        _creationLog.Add(new ProviderCreationRecord(
-            profileName,
-            environmentUrl,
-            DateTime.UtcNow));
+        var record = new ProviderCreationRecord(profileName, environmentUrl, DateTime.UtcNow);
+        TaskCompletionSource<ProviderCreationRecord> signal;
+        lock (_lock)
+        {
+            _creationLog.Add(record);
+            signal = _firstCreation;
+        }
+        signal.TrySetResult(record);
 
         if (CreateDelay > TimeSpan.Zero)
         {
@@ -93,10 +111,17 @@ public sealed class MockServiceProviderFactory : IServiceProviderFactory
     /// </summary>
     public void Reset()
     {
-        _creationLog.Clear();
+        lock (_lock)
+        {
+            _creationLog.Clear();
+            _firstCreation = NewCreationSignal();
+        }
         ExceptionToThrow = null;
         CreateDelay = TimeSpan.Zero;
     }
+
+    private static TaskCompletionSource<ProviderCreationRecord> NewCreationSignal()
+        => new(TaskCreationOptions.RunContinuationsAsynchronously);
 }
 
 /// <summary>
