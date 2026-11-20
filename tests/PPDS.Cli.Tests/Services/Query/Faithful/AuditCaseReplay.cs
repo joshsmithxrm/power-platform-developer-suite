@@ -1,0 +1,296 @@
+using System.Globalization;
+using System.Reflection;
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
+using PPDS.Cli.Services.Query;
+using PPDS.Cli.Tests.Services.Shared;
+using PPDS.Dataverse.Query;
+
+namespace PPDS.Cli.Tests.Services.Query.Faithful;
+
+/// <summary>One row of the audit's per-case table, as recorded (see AuditRecords/select-fidelity-audit-2026-11.txt).</summary>
+internal sealed record AuditCase(string Id, string Area, string Sql, string SqlSuffix, string Expected, string Actual, string Verdict, string Detail)
+{
+    public override string ToString() => Id;
+}
+
+internal enum ReplayClass
+{
+    /// <summary>Offline equals what the audit recorded live.</summary>
+    Matches,
+    /// <summary>Offline differs from what the audit recorded live.</summary>
+    Differs,
+    /// <summary>The case cannot be replayed; <see cref="ReplayResult.Reason"/> says why.</summary>
+    CannotReplay
+}
+
+internal sealed record ReplayResult(ReplayClass Class, string Reason, string Offline);
+
+/// <summary>
+/// Replays the audit's recorded cases: SQL → the real <see cref="SqlQueryService"/> → <see cref="FakeDataverse"/> holding
+/// <see cref="AuditDataset"/>, rendered exactly as the audit rendered the engine's result (<c>RunCaseAsync</c>,
+/// <c>ResultComparer.Describe</c>/<c>Canon</c> in the live suite), and compared with the recorded outcome.
+/// <para>
+/// What the record allows to be compared, and nothing looser:
+/// <list type="bullet">
+/// <item>An error: the exception type, and the message up to the first point the report cut or redacted
+/// (<c>…</c>, <c>[REDACTED]</c>, <c>&lt;...&gt;</c>) or where live-organisation detail begins (<c>orgIndex</c>, the metadata
+/// cache's version).</item>
+/// <item>Rows: the column names exactly, the row count exactly, and every row the report shows. With a top-level ORDER BY
+/// the shown rows are the first rows in order; without one Dataverse's order is its own (it follows the live run's random
+/// record ids), so each shown row must occur in the offline result, and when the report shows all rows the two must be the
+/// same multiset. A row the report cut short is not compared. Record ids differ from the live run and are masked.</item>
+/// </list>
+/// </para>
+/// </summary>
+internal static class AuditCaseReplay
+{
+    private static readonly Lazy<(IReadOnlyList<AuditCase> Cases, IReadOnlyDictionary<string, string> FetchXml)> Records = new(Load);
+
+    public static IReadOnlyList<AuditCase> Cases => Records.Value.Cases;
+
+    /// <summary>The FetchXML the audit recorded for each non-correct case (appendix).</summary>
+    public static IReadOnlyDictionary<string, string> RecordedFetchXml => Records.Value.FetchXml;
+
+    private static (IReadOnlyList<AuditCase>, IReadOnlyDictionary<string, string>) Load()
+    {
+        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("AuditRecords.select-fidelity-audit-2026-11.txt")
+            ?? throw new InvalidOperationException("audit records resource missing");
+        using var reader = new StreamReader(stream);
+        var cases = new List<AuditCase>();
+        var fetch = new Dictionary<string, string>(StringComparer.Ordinal);
+        while (reader.ReadLine() is { } line)
+        {
+            if (line.StartsWith("| ", StringComparison.Ordinal))
+            {
+                var cells = line[2..^2].Split(" | ");
+                if (cells.Length != 7)
+                    throw new InvalidDataException($"audit row with {cells.Length} cells: {line[..40]}");
+                var m = Regex.Match(cells[2], @"^`(?<sql>.*)`(?<suffix>.*)$", RegexOptions.Singleline);
+                cases.Add(new AuditCase(cells[0], cells[1], m.Groups["sql"].Value, m.Groups["suffix"].Value.Trim(), cells[3], cells[4], cells[5].Trim('*'), cells[6]));
+            }
+            else if (Regex.Match(line, @"^- (?<id>[A-Z]+\d+): `(?<fx>.*)`$") is { Success: true } f)
+            {
+                fetch[f.Groups["id"].Value] = f.Groups["fx"].Value;
+            }
+        }
+        return (cases, fetch);
+    }
+
+    // ───────────── names ─────────────
+
+    private static readonly (string Report, string Offline)[] Names =
+    [
+        ("Pid", AuditDataset.P + "id"), ("Cid", AuditDataset.C + "id"), ("Bid", AuditDataset.B + "id"),
+        ("P", AuditDataset.P), ("C", AuditDataset.C), ("B", AuditDataset.B)
+    ];
+
+    /// <summary>The report's P, C, B, Pid, Cid, Bid as table and column names, outside string literals.</summary>
+    public static string ToOffline(string sql)
+    {
+        // The report prints a leading hint and its statement on one line; the statement followed a line break.
+        sql = Regex.Replace(sql, @"^(-- ppds:\w+(?: \S+)?) (?=SELECT|WITH|DECLARE)", "$1\n");
+        var parts = Regex.Split(sql, "('(?:[^']|'')*')");
+        for (var i = 0; i < parts.Length; i += 2)
+        {
+            foreach (var (report, offline) in Names)
+                parts[i] = Regex.Replace(parts[i], $@"(?<![\w@#]){report}(?!\w)", offline);
+        }
+        return string.Concat(parts);
+    }
+
+    /// <summary>Offline names back to the report's P, C, B, Pid, Cid, Bid.</summary>
+    public static string ToReport(string text)
+    {
+        foreach (var (report, offline) in Names)
+            text = text.Replace(offline, report, StringComparison.Ordinal);
+        return text;
+    }
+
+    // ───────────── run and render as the audit did ─────────────
+
+    public sealed record Run(string Text, string? FetchXml, Exception? Error, IReadOnlyList<string> Columns, IReadOnlyList<string> Rows);
+
+    public static async Task<Run> ExecuteAsync(AuditCase c)
+    {
+        int? top = Regex.Match(c.SqlSuffix, @"^\(top (\d+)\)$") is { Success: true } t ? int.Parse(t.Groups[1].Value, CultureInfo.InvariantCulture) : null;
+        var service = new SqlQueryService(AuditDataset.Dataverse.CreateQueryExecutor(), new InactiveFakeShakedownGuard(), poolCapacity: 4);
+        try
+        {
+            var result = await service.ExecuteAsync(new SqlQueryRequest { Sql = ToOffline(c.Sql), TopOverride = top, DmlSafety = new DmlSafetyOptions() });
+            var columns = result.Result.Columns.Select(col => ToReport(col.Alias ?? col.LogicalName)).ToList();
+            var keys = result.Result.Columns.Select(col => col.Alias ?? col.LogicalName).ToList();
+            var rows = result.Result.Records
+                .Select(r => "(" + string.Join(",", keys.Select(k => Canon(r.TryGetValue(k, out var qv) ? qv?.Value : null))) + ")")
+                .ToList();
+            var text = $"[{string.Join(", ", columns)}] {rows.Count} row{(rows.Count == 1 ? "" : "s")}" + (rows.Count == 0 ? "" : ": " + Preview(rows));
+            return new Run(text, result.TranspiledFetchXml, null, columns, rows);
+        }
+        catch (Exception ex)
+        {
+            return new Run(ToReport($"{ex.GetType().Name}: {FirstLine(Innermost(ex))}"), null, ex, [], []);
+        }
+    }
+
+    private static string Preview(IReadOnlyList<string> rows, int max = 6)
+        => string.Join(" ", rows.Take(max)) + (rows.Count > max ? $" …(+{rows.Count - max})" : "");
+
+    private static string FirstLine(string s) => s.Split('\n')[0].Trim();
+
+    private static string Innermost(Exception ex)
+    {
+        var inner = ex;
+        while (inner.InnerException is not null) inner = inner.InnerException;
+        return ReferenceEquals(inner, ex) || inner.Message == ex.Message ? ex.Message : $"{ex.Message} <- {inner.GetType().Name}: {inner.Message}";
+    }
+
+    /// <summary>The live suite's <c>ResultComparer.Canon</c> (non-collation form).</summary>
+    public static string Canon(object? v)
+    {
+        switch (v)
+        {
+            case null: return "NULL";
+            case string s: return "'" + s + "'";
+            case bool b: return b ? "1" : "0";
+            case DateTime dt: return (dt.Kind == DateTimeKind.Local ? dt.ToUniversalTime() : dt).ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
+            case Guid g: return "{" + g.ToString("D") + "}";
+            case int[] arr: return "[" + string.Join("|", arr.OrderBy(x => x)) + "]";
+            case DateTimeOffset dto: return dto.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
+            case byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal:
+                decimal d;
+                try { d = Convert.ToDecimal(v, CultureInfo.InvariantCulture); }
+                catch (OverflowException) { return Convert.ToString(v, CultureInfo.InvariantCulture)!; }
+                return Math.Round(d, 4, MidpointRounding.AwayFromZero).ToString("0.####", CultureInfo.InvariantCulture);
+        }
+        return "<" + v.GetType().Name + ":" + Convert.ToString(v, CultureInfo.InvariantCulture) + ">";
+    }
+
+    // ───────────── classify ─────────────
+
+    private static readonly Regex GuidText = new(@"\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}");
+
+    private static string Mask(string s) => GuidText.Replace(s, "{id}");
+
+    public static async Task<ReplayResult> ReplayAsync(AuditCase c)
+    {
+        if (c.Actual.StartsWith("not run in-process", StringComparison.Ordinal))
+            return new(ReplayClass.CannotReplay, "crash: the audit did not run it in-process (stack overflow ends the process)", "");
+        if (c.Sql.Contains("(--page", StringComparison.Ordinal))
+            return new(ReplayClass.CannotReplay, "paging runner: the audit paged it with --page and a cookie outside SQL text (PageAllAsync), not ported", "");
+        if (Regex.IsMatch(c.Sql, "<[a-z][^>]*>"))
+            return new(ReplayClass.CannotReplay, "redacted: the report replaced a value in the SQL", "");
+        if (Regex.IsMatch(c.Actual, "<[a-z][^>]*>") && c.Actual.StartsWith('['))
+            return new(ReplayClass.CannotReplay, "redacted: the report replaced values in the recorded rows", "");
+        if (c.SqlSuffix.Length > 0 && !Regex.IsMatch(c.SqlSuffix, @"^\(top \d+\)$"))
+            return new(ReplayClass.CannotReplay, $"runner option '{c.SqlSuffix}' not ported", "");
+
+        var run = await ExecuteAsync(c);
+        if (FakeRefusal(run.Error) is { } refusal)
+            return new(ReplayClass.CannotReplay, "fake refuses: " + refusal, run.Text);
+
+        var recorded = c.Actual;
+        if (!recorded.StartsWith('['))
+        {
+            // An error. Compare the type and the message up to where the report cut or redacted it.
+            var colon = recorded.IndexOf(": ", StringComparison.Ordinal);
+            var type = colon < 0 ? recorded : recorded[..colon];
+            var message = colon < 0 ? "" : recorded[(colon + 2)..];
+            // Cut at the report's ellipsis and redactions, and at details specific to the live organisation (orgIndex,
+            // the metadata cache's version).
+            var cut = new[] { message.IndexOf('…'), message.IndexOf("[REDACTED]", StringComparison.Ordinal), message.IndexOf('<'), message.IndexOf("orgIndex", StringComparison.Ordinal), message.IndexOf("LazyDynamicMetadataCache", StringComparison.Ordinal) }
+                .Where(i => i >= 0).DefaultIfEmpty(message.Length).Min();
+            var prefix = message[..cut];
+            if (run.Error is null)
+                return new(ReplayClass.Differs, $"live raised {type}; offline returned rows", run.Text);
+            var offlineType = run.Text[..run.Text.IndexOf(": ", StringComparison.Ordinal)];
+            var offlineMessage = run.Text[(offlineType.Length + 2)..];
+            if (offlineType != type)
+                return new(ReplayClass.Differs, $"live raised {type}; offline raised {offlineType}", run.Text);
+            if (!offlineMessage.StartsWith(prefix, StringComparison.Ordinal))
+                return new(ReplayClass.Differs, "same exception type, different message", run.Text);
+            return new(ReplayClass.Matches, "", run.Text);
+        }
+
+        if (run.Error is not null)
+            return new(ReplayClass.Differs, "live returned rows; offline raised an error", run.Text);
+
+        var m = Regex.Match(recorded, @"^\[(?<cols>[^\]]*)\] (?<n>\d+) rows?(: (?<rows>.*))?$", RegexOptions.Singleline);
+        if (!m.Success)
+            return new(ReplayClass.CannotReplay, "the recorded outcome cannot be parsed", run.Text);
+        var columns = m.Groups["cols"].Value.Length == 0 ? [] : m.Groups["cols"].Value.Split(", ");
+        if (!columns.SequenceEqual(run.Columns))
+            return new(ReplayClass.Differs, $"columns: live [{string.Join(", ", columns)}], offline [{string.Join(", ", run.Columns)}]", run.Text);
+        var count = int.Parse(m.Groups["n"].Value, CultureInfo.InvariantCulture);
+        if (count != run.Rows.Count)
+            return new(ReplayClass.Differs, $"rows: live {count}, offline {run.Rows.Count}", run.Text);
+
+        var shownText = m.Groups["rows"].Value;
+        var complete = !shownText.EndsWith('…') && !shownText.Contains("…(+", StringComparison.Ordinal);
+        shownText = Regex.Replace(shownText, @" …\(\+\d+\)$", "");
+        var shown = shownText.Length == 0 ? new List<string>() : Regex.Split(shownText, @"(?<=\)) (?=\()").ToList();
+        if (shown.Count > 0 && (!shown[^1].EndsWith(')') || shownText.EndsWith('…')))
+            shown.RemoveAt(shown.Count - 1); // cut short by the report
+        shown = shown.Select(Mask).ToList();
+        var offline = run.Rows.Select(Mask).ToList();
+
+        if (HasTopLevelOrderBy(c.Sql))
+        {
+            if (!shown.SequenceEqual(offline.Take(shown.Count)))
+                return new(ReplayClass.Differs, "ordered rows differ from the first rows shown", run.Text);
+        }
+        else
+        {
+            var pool = offline.GroupBy(r => r).ToDictionary(g => g.Key, g => g.Count());
+            foreach (var row in shown)
+            {
+                if (!pool.TryGetValue(row, out var left) || left == 0)
+                    return new(ReplayClass.Differs, $"live row {row} not in the offline result", run.Text);
+                pool[row] = left - 1;
+            }
+            if (complete && pool.Values.Any(v => v > 0))
+                return new(ReplayClass.Differs, "offline has rows live did not return", run.Text);
+        }
+        return new(ReplayClass.Matches, "", run.Text);
+    }
+
+    private static string? FakeRefusal(Exception? error)
+    {
+        for (var e = error; e is not null; e = e.InnerException)
+        {
+            if (e is NotSupportedException && (e.Message.StartsWith("Fake Dataverse", StringComparison.Ordinal) || e.Message.StartsWith("Fake table", StringComparison.Ordinal)))
+                return ToReport(e.Message);
+        }
+        return null;
+    }
+
+    /// <summary>An ORDER BY at parenthesis depth 0 (not inside OVER (...) or a subquery).</summary>
+    public static bool HasTopLevelOrderBy(string sql)
+    {
+        var depth = 0;
+        var stripped = Regex.Replace(sql, "'(?:[^']|'')*'", "''");
+        for (var i = 0; i < stripped.Length; i++)
+        {
+            var ch = stripped[i];
+            if (ch == '(') depth++;
+            else if (ch == ')') depth--;
+            else if (depth == 0 && string.Compare(stripped, i, "ORDER BY", 0, 8, StringComparison.OrdinalIgnoreCase) == 0)
+                return true;
+        }
+        return false;
+    }
+
+    // ───────────── recorded FetchXML ─────────────
+
+    /// <summary>FetchXML with names in report form, attributes sorted, whitespace dropped; null when it is not FetchXML.</summary>
+    public static string? CanonicalFetchXml(string? fetchXml)
+    {
+        if (fetchXml is null || !fetchXml.TrimStart().StartsWith("<fetch", StringComparison.Ordinal))
+            return null;
+        XElement root;
+        try { root = XElement.Parse(ToReport(fetchXml)); }
+        catch (System.Xml.XmlException) { return null; }
+        static XElement Sort(XElement e) => new(e.Name, e.Attributes().OrderBy(a => a.Name.ToString(), StringComparer.Ordinal), e.Elements().Select(Sort),
+            e.HasElements ? null : (string.IsNullOrWhiteSpace(e.Value) ? null : e.Value));
+        return Sort(root).ToString(SaveOptions.DisableFormatting);
+    }
+}

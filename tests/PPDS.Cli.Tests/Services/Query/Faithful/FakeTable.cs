@@ -18,7 +18,11 @@ internal enum FakeColumnType
     DateOnly,
     Uniqueidentifier,
     Choice,
-    Lookup
+    Lookup,
+    /// <summary>A multi-select choice; only <c>null</c> and <c>not-null</c> conditions are observed (audit W39).</summary>
+    MultiChoice,
+    /// <summary>The virtual <c>&lt;column&gt;name</c> of a choice or two-option column (audit V04, V08, V09, J19).</summary>
+    VirtualName
 }
 
 /// <summary>

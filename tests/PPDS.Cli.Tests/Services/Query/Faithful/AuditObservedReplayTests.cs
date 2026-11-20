@@ -21,64 +21,10 @@ namespace PPDS.Cli.Tests.Services.Query.Faithful;
 public class AuditObservedReplayTests
 {
 
-    // ───────────── The audit's parent table (SelectFidelityLiveTests.ParentSeeds, unchanged) ─────────────
-
-    private sealed record PSeed(int Key, string? Name, string? Memo, int? Num, int? Num2, decimal? Dec, decimal? Money, double? Flt,
-        bool? Flag, DateTime? Dt, DateTime? DOnly, int? Color, int[]? Multi, string? ItemType, string? ItemTypeName);
-
-    private static DateTime U(int y, int mo, int d, int h = 0, int mi = 0) => new(y, mo, d, h, mi, 0, DateTimeKind.Utc);
-    private static DateTime D(int y, int mo, int d) => new(y, mo, d, 0, 0, 0, DateTimeKind.Unspecified);
-
-    private static List<PSeed> ParentSeeds()
-    {
-        var list = new List<PSeed>
-        {
-            new(1, "Alpha", "first memo", 10, 10, 1.25m, 100m, 3.25, true, U(2024, 1, 15, 0, 30), D(2024, 1, 15), 0, [0], "A", "ItemA"),
-            new(2, "alpha", null, 5, 7, 1.25m, 0m, 0, false, U(2024, 1, 15, 23, 30), D(2024, 1, 16), 1, [0, 1], "B", "ItemB"),
-            new(3, "ALPHA", "Mixed CASE memo", -1, null, -2.5m, -10m, -0.5, true, U(2024, 6, 30, 12), D(2024, 6, 30), 2, null, null, "ItemC"),
-            new(4, "Beta", "", 0, 0, 0m, null, null, false, null, null, null, null, "A", null),
-            new(5, "Café", "café memo", 5, 5, 99.99m, 1234.56m, 1000000, true, U(2000, 1, 1), D(2000, 1, 1), 0, [2], "C", "ItemC"),
-            new(6, "cafe", null, null, 3, null, 50m, 2.5, false, U(2099, 12, 31, 12), D(2099, 12, 31), 1, null, "B", "ItemB"),
-            new(7, "  lead", "line1\nline2", 100, null, 10.5m, null, -3.25, null, U(1900, 1, 1, 12), D(1900, 1, 1), null, null, null, null),
-            new(8, "trail  ", null, -100, -100, -0.01m, -0.01m, 0.01, true, U(2024, 1, 14, 23, 59), D(2024, 1, 14), 2, [0, 1, 2], "A", "ItemA"),
-            new(9, "50% off", "percent", 50, 49, 50m, 50m, 50, false, U(2024, 2, 29, 8), D(2024, 2, 29), 0, null, "A", null),
-            new(10, "under_score", null, 7, 8, null, 7m, 7, true, U(2024, 3, 10, 9, 30), D(2024, 3, 10), 1, [1], "B", "ItemB"),
-            new(11, "underXscore", null, 8, 7, 8m, 8m, 8, false, U(2024, 3, 10, 10, 30), D(2024, 3, 10), 2, null, "C", "ItemC"),
-        };
-        string?[] names =
-        [
-            "[bracket]", "a[b]c", "abc", "abd", "ab", "b", null, null, "O'Brien", "Zeta", "Ångström", "naïve", "c%d", "e_f",
-            "100", "20", "x", "X", "Alpha ", "dup", "dup", "zz", "Ab", "a_c", "a%c"
-        ];
-        string?[] itemTypes = ["A", "B", "C", "a"];
-        for (var k = 12; k <= 36; k++)
-        {
-            var name = names[k - 12];
-            int? num = k % 5 == 0 ? null : (k * 7 % 23) - 8;
-            if (name == "dup") num = 5;
-            list.Add(new PSeed(
-                k, name,
-                k % 4 == 0 ? null : (k % 7 == 0 ? $"MEMO {k}" : $"memo {k}"),
-                num,
-                k % 6 == 0 ? null : (k * 5 % 19) - 6,
-                k % 7 == 0 ? null : Math.Round(((k * 13 % 41) - 20) / 4m, 2),
-                k % 8 == 0 ? null : (k * 17 % 50) - 25 + 0.5m,
-                k % 9 == 0 ? null : ((k * 11 % 30) - 15) / 4.0,
-                k % 3 == 0 ? null : k % 2 == 0,
-                k % 10 == 0 ? null : U(2023, 1 + k % 12, 1 + k % 27, k % 24, k * 7 % 60),
-                k % 11 == 0 ? null : D(2022, 1 + k % 12, 1 + k % 28),
-                k % 4 == 1 ? null : k % 3,
-                k % 5 == 2 ? null : k % 3 == 0 ? [0] : k % 3 == 1 ? [1, 2] : [0, 2],
-                k % 6 == 5 ? null : itemTypes[k % 4],
-                k % 7 == 3 ? null : $"Item{k % 3}"));
-        }
-        return list;
-    }
-
     /// <summary>
-    /// The parent table as the audit read it back. Its choice labels are the ones the OBSERVED order line shows
-    /// (Red=374110000, Blue=374110001, Green=374110002); an unset two-option reads back as 0 (false), as observed.
-    /// Columns no replayed line uses (num2, decimal, money, float, multi-select, item types) are left out.
+    /// The parent table as the audit read it back (<see cref="AuditDataset.ParentSeeds"/>). Its choice labels are the ones
+    /// the OBSERVED order line shows; an unset two-option reads back as 0 (false), as observed. Columns no replayed line uses
+    /// are left out.
     /// </summary>
     private static FakeDataverse AuditDataverse()
     {
@@ -87,7 +33,7 @@ public class AuditObservedReplayTests
             .Column("ppds_num", FakeColumnType.Integer).Column("ppds_flag", FakeColumnType.Boolean)
             .Column("ppds_dt", FakeColumnType.DateTime).Column("ppds_donly", FakeColumnType.DateOnly)
             .Choice("ppds_colorcode", (374110000, "Red"), (374110001, "Blue"), (374110002, "Green"));
-        foreach (var s in ParentSeeds())
+        foreach (var s in AuditDataset.ParentSeeds())
         {
             table.Row(("ppds_key", s.Key), ("ppds_name", s.Name), ("ppds_memo", s.Memo), ("ppds_num", s.Num), ("ppds_flag", s.Flag ?? false),
                 ("ppds_dt", s.Dt), ("ppds_donly", s.DOnly),

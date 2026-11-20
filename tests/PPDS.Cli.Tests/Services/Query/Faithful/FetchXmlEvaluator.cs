@@ -108,7 +108,7 @@ internal sealed class FetchXmlEvaluator
 
     private sealed record Filter(bool Or, List<object> Children);
 
-    private sealed record Condition(string Alias, string Attribute, FakeColumnType Type, string Operator, object[] Values);
+    private sealed record Condition(string Alias, string Attribute, FakeColumnType Type, string Operator, object[] Values, FakeTable? Table = null);
 
     private sealed record Order(string Alias, string Attribute, FakeColumnType Type, bool Descending);
 
@@ -136,11 +136,30 @@ internal sealed class FetchXmlEvaluator
         foreach (var filter in spec.Root.Filters)
             rows = rows.Where(r => Matches(filter, r)).ToList();
 
-        rows = Sort(rows, AllOrders(spec.Root).ToList(), spec.Sources);
-        var entities = rows.Select(r => Project(r, spec)).ToList();
-        if (spec.Distinct)
-            entities = entities.DistinctBy(Signature).ToList();
-        return Page(spec, entities);
+        var orders = AllOrders(spec.Root).ToList();
+        if (!spec.Distinct)
+            return Page(spec, Sort(rows, orders, spec.Sources).Select(r => Project(r, spec)).ToList());
+
+        // R14 distinct (audit D05, D06, PG08): of rows that are the same, the first created is kept (D06 returns 'A', not
+        // 'a'); with no ORDER BY the result is sorted by the returned columns in order, NULL first (D05, D06).
+        var created = spec.Root.Table.Rows.Select((r, i) => (r, i)).ToDictionary(x => x.r, x => x.i, ReferenceEqualityComparer.Instance);
+        var firstCreated = rows.OrderBy(r => created[r.Rows[BaseAlias]!]).ToList();
+        var kept = Sort(firstCreated, orders, spec.Sources, tieBreakById: false)
+            .Select(r => Project(r, spec)).DistinctBy(Signature).ToList();
+        if (orders.Count == 0)
+        {
+            var columns = spec.Root.AllAttributes ? spec.Root.Table.Columns.Keys.ToList() : spec.Root.Attributes.Select(a => a.Alias ?? a.Name).ToList();
+            IOrderedEnumerable<Entity>? sorted = null;
+            foreach (var column in columns)
+            {
+                object? Key(Entity e) => e.Attributes.TryGetValue(column, out var v) && Normalize(v) is { } n ? n is string str ? StringKey(str, ordered: true) : n : null;
+                var comparer = Comparer<object?>.Create((a, b) => CompareForOrder(a, b, FakeColumnType.Decimal));
+                sorted = sorted is null ? kept.OrderBy(Key, comparer) : sorted.ThenBy(Key, comparer);
+            }
+            if (sorted != null)
+                kept = Unwrap(() => sorted.ToList());
+        }
+        return Page(spec, kept);
     }
 
     // ───────────────────────────── validation (before any row) ─────────────────────────────
@@ -171,8 +190,9 @@ internal sealed class FetchXmlEvaluator
         ValidateContent(root, sources);
         CheckResultKeys(sources);
 
-        var top = PositiveInt(fetch, "top");
-        var count = PositiveInt(fetch, "count");
+        // TOP 0 returns no row (audit T04).
+        var top = PositiveInt(fetch, "top", min: 0);
+        var count = PositiveInt(fetch, "count", min: 0);
         var page = PositiveInt(fetch, "page", max: int.MaxValue);
         if (top != null && (count != null || page != null))
             throw Unsupported("top together with page or count");
@@ -200,9 +220,21 @@ internal sealed class FetchXmlEvaluator
                 throw Unsupported("an inner link-entity nested under an outer one (not observed)");
             if (alias.Length == 0 || sources.ContainsKey(alias))
                 throw Unsupported($"a duplicate or empty link-entity alias '{alias}'");
-            if (RequireColumn(table, from) is not (FakeColumnType.Uniqueidentifier or FakeColumnType.Lookup)
-                || RequireColumn(parent.Table, to) is not (FakeColumnType.Uniqueidentifier or FakeColumnType.Lookup))
-                throw Unsupported($"a link-entity joined on a column that is not a unique identifier or lookup ({from}, {to})");
+            if (from.Length == 0 && to.Length == 0)
+            {
+                // Audit J08: an outer link with empty from and to returns every parent row with the link columns NULL.
+                if (type != "outer")
+                    throw Unsupported("an inner link-entity with empty from and to");
+            }
+            else
+            {
+                var fromType = RequireColumn(table, from);
+                var toType = RequireColumn(parent.Table, to);
+                var guids = fromType is FakeColumnType.Uniqueidentifier or FakeColumnType.Lookup && toType is FakeColumnType.Uniqueidentifier or FakeColumnType.Lookup;
+                var wholes = fromType == FakeColumnType.Integer && toType == FakeColumnType.Integer; // audit J12
+                if (!guids && !wholes)
+                    throw Unsupported($"a link-entity joined on {fromType} and {toType} columns ({from}, {to})");
+            }
 
             var source = new Source { Alias = alias, Table = table, Element = link, LinkType = type, From = from, To = to, Parent = parent };
             sources[alias] = source;
@@ -229,13 +261,17 @@ internal sealed class FetchXmlEvaluator
             switch (child.Name.LocalName)
             {
                 case "attribute":
-                    AllowAttributes(child, "name", "alias");
+                    AllowAttributes(child, "name", "alias", "groupby");
                     NoChildren(child);
+                    if (child.Attribute("groupby") is not null)
+                        throw Fault($"groupby cannot be specified if aggreate is not true. NodeXml: {child.ToString(SaveOptions.DisableFormatting)}"); // audit E14, A27
                     var name = (string?)child.Attribute("name") ?? throw Unsupported("an <attribute> without a name");
-                    RequireColumn(source.Table, name);
+                    ColumnOrVirtual(source.Table, name);
                     var alias = (string?)child.Attribute("alias");
                     if (alias is { Length: 0 })
                         throw Unsupported("an empty attribute alias");
+                    if (alias is not null && !Regex.IsMatch(alias, "^[A-Za-z_][A-Za-z0-9_]*$"))
+                        throw Fault($"Invalid character specified for alias: {alias}. Only characters within the ranges [A-Z], [a-z] or [0-9] or _ are allowed.  The first character may only be in the ranges [A-Z], [a-z] or _."); // audit PRJ18 (observed up to "[A-Z], [")
                     source.Attributes.Add((name, alias));
                     break;
                 case "all-attributes":
@@ -329,8 +365,16 @@ internal sealed class FetchXmlEvaluator
         var source = ResolveSource((string?)c.Attribute("entityname") ?? defaultAlias, sources);
         var attribute = (string?)c.Attribute("attribute") ?? throw Unsupported("a <condition> without an attribute");
         var op = (string?)c.Attribute("operator") ?? throw Unsupported("a <condition> without an operator");
-        var type = RequireColumn(source.Table, attribute);
+        var type = ColumnOrVirtual(source.Table, attribute);
         var raw = c.Attribute("value") is { } v ? new[] { v.Value } : c.Elements("value").Select(x => x.Value).ToArray();
+        if (type == FakeColumnType.VirtualName)
+        {
+            if (op != "eq" || raw.Length != 1 || source.Table.TypeOf(attribute[..^4]) != FakeColumnType.Choice)
+                throw Unsupported($"operator {op} on the virtual column {attribute} (only eq on a choice name is observed, V08)");
+            return new Condition(source.Alias, attribute[..^4], type, op, [StringKey(raw[0])], source.Table);
+        }
+        if (type == FakeColumnType.MultiChoice && op is not ("null" or "not-null"))
+            throw Unsupported($"operator {op} on a multi-select column");
 
         (int Min, int Max) expected = op switch
         {
@@ -344,8 +388,6 @@ internal sealed class FetchXmlEvaluator
         if (raw.Length < expected.Min || raw.Length > expected.Max)
             throw Unsupported($"operator {op} with {raw.Length} values");
 
-        if (op == "ends-with")
-            throw Unsupported("operator ends-with (only not-end-with is observed)");
         if (LikeOperators.Contains(op))
         {
             if (type != FakeColumnType.String)
@@ -372,9 +414,17 @@ internal sealed class FetchXmlEvaluator
             throw Unsupported("entityname on an order inside a link-entity, or an empty entityname");
         var source = ResolveSource((string?)order.Attribute("entityname") ?? alias, sources);
         var attribute = (string?)order.Attribute("attribute") ?? throw Unsupported("an <order> without an attribute");
-        var type = RequireColumn(source.Table, attribute);
-        if (type is FakeColumnType.Lookup or FakeColumnType.Uniqueidentifier)
-            throw Unsupported($"ORDER BY a {type} column (not observed)");
+        var type = ColumnOrVirtual(source.Table, attribute);
+        if (type == FakeColumnType.VirtualName)
+        {
+            // Audit V09: ORDER BY a choice's name orders by its label, NULL first, like ORDER BY the choice (OBSERVED).
+            if (source.Table.TypeOf(attribute[..^4]) != FakeColumnType.Choice)
+                throw Unsupported($"ORDER BY the virtual column {attribute}");
+            attribute = attribute[..^4];
+            type = FakeColumnType.Choice;
+        }
+        if (type is FakeColumnType.Lookup or FakeColumnType.Uniqueidentifier or FakeColumnType.MultiChoice)
+            throw Unsupported($"ORDER BY a {type} column");
         return new Order(source.Alias, attribute, type, order.Attribute("descending") is { } d && Bool(d));
     }
 
@@ -419,11 +469,11 @@ internal sealed class FetchXmlEvaluator
         _ => throw Unsupported($"{attribute.Name}=\"{attribute.Value}\" (only true and false are modelled)")
     };
 
-    private static int? PositiveInt(XElement element, string name, int max = MaxPageSize)
+    private static int? PositiveInt(XElement element, string name, int max = MaxPageSize, int min = 1)
     {
         if (element.Attribute(name) is not { } a)
             return null;
-        if (!int.TryParse(a.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var n) || n < 1
+        if (!int.TryParse(a.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var n) || n < min
             || a.Value != n.ToString(CultureInfo.InvariantCulture))
             throw Unsupported($"{name}=\"{a.Value}\"");
         if (n > max)
@@ -434,15 +484,26 @@ internal sealed class FetchXmlEvaluator
     private FakeTable Table(string? name)
     {
         if (name is null || !_tables.TryGetValue(name, out var table))
-            throw Unsupported($"the table '{name}', which this fake does not hold");
+            throw Fault($"The entity with a name = '{name}' with namemapping = 'Logical' was not found in the MetadataCache."); // audit C01, E07
         return table;
     }
+
+    /// <summary>
+    /// A column, or the virtual <c>&lt;column&gt;name</c> of a choice or two-option column: Dataverse accepts it in an
+    /// attribute and returns nothing for it (audit V04, V09, J19), and matches its label in an <c>eq</c> (V08).
+    /// </summary>
+    private static FakeColumnType ColumnOrVirtual(FakeTable table, string attribute)
+        => !table.HasColumn(attribute) && attribute.EndsWith("name", StringComparison.Ordinal)
+           && table.HasColumn(attribute[..^4]) && table.TypeOf(attribute[..^4]) is FakeColumnType.Choice or FakeColumnType.Boolean
+            ? FakeColumnType.VirtualName
+            : RequireColumn(table, attribute);
 
     /// <summary>R12.</summary>
     private static FakeColumnType RequireColumn(FakeTable table, string attribute)
         => table.HasColumn(attribute)
             ? table.TypeOf(attribute)
-            : throw Fault($"'{table.LogicalName}' entity doesn't contain attribute with Name = '{attribute}'.");
+            // The live text (audit E01, O03): "'P' entity doesn't contain attribute with Name = 'x' and NameMapping = 'Logical' (...)".
+            : throw Fault($"'{table.LogicalName}' entity doesn't contain attribute with Name = '{attribute}' and NameMapping = 'Logical' (look up attribute by name is case-sensitive).");
 
     // ───────────────────────────── values (R4, R7, R13) ─────────────────────────────
 
@@ -479,7 +540,7 @@ internal sealed class FetchXmlEvaluator
     {
         var ordered = RangeOperators.Contains(op);
         FaultException<OrganizationServiceFault> FormatFault() => Fault(
-            $"An exception System.FormatException was thrown while trying to convert input value '{value}' to attribute '{attribute}'. Expected type of attribute value: {type}.");
+            $"An exception System.FormatException was thrown while trying to convert input value '{value}' to attribute '{attribute}'. Expected type of attribute value: System.Int32.");
 
         switch (type)
         {
@@ -490,9 +551,9 @@ internal sealed class FetchXmlEvaluator
 
             case FakeColumnType.Integer or FakeColumnType.BigInt or FakeColumnType.Choice:
                 if (value.Length == 0)
-                    return op is "in" or "not-in" or "between" ? EmptyValue.Instance : throw Unsupported($"an empty value with operator {op} on a whole-number column");
-                if (DecimalForm.IsMatch(value) && value.Contains('.'))
-                    throw FormatFault(); // audit W15
+                    return op is "in" or "not-in" or "between" or "eq" ? EmptyValue.Instance : throw Unsupported($"an empty value with operator {op} on a whole-number column"); // W26 eq
+                if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _) && !Regex.IsMatch(value.Trim(), @"^[+-]?\d+$"))
+                    throw FormatFault(); // audit W15 '5.0', E06 'abc', X02/X03/X12 '@i'
                 if (!WholeForm.IsMatch(value))
                     throw Unsupported($"the whole-number value '{value}'");
                 var parsed = decimal.Parse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture);
@@ -510,7 +571,7 @@ internal sealed class FetchXmlEvaluator
                     : throw Unsupported($"the float value '{value}'");
 
             case FakeColumnType.Boolean:
-                return value switch { "1" => true, "0" => false, _ => throw Unsupported($"the two-option value '{value}'") };
+                return value switch { "1" or "true" => true, "0" => false, _ => throw Unsupported($"the two-option value '{value}'") }; // "true": W118
 
             case FakeColumnType.DateTime:
                 return ParseDateTime(value);
@@ -522,7 +583,8 @@ internal sealed class FetchXmlEvaluator
                 throw Unsupported($"the date-only value '{value}'");
 
             case FakeColumnType.Uniqueidentifier or FakeColumnType.Lookup:
-                return Guid.TryParseExact(value, "D", out var g) ? g : throw Unsupported($"the unique-identifier value '{value}'");
+                return Guid.TryParseExact(value, "D", out var g) || Guid.TryParseExact(value, "B", out g) // "B": W114
+                    ? g : throw Unsupported($"the unique-identifier value '{value}'");
 
             default:
                 throw Unsupported($"a condition on a {type} column");
@@ -586,6 +648,7 @@ internal sealed class FetchXmlEvaluator
         >= 'a' and <= 'z' => (char)(ch - 'a' + 'A'),
         '\'' when ordered => '\u0006',
         > ' ' and <= '~' when !ordered => ch,
+        '\n' when !ordered => ch, // a memo line break (audit W125, W126)
         _ => throw Unsupported($"{(ordered ? "ordering by" : "comparing")} the character '{ch}' (U+{(int)ch:X4}); its collation is not observed")
     };
 
@@ -675,8 +738,8 @@ internal sealed class FetchXmlEvaluator
             var joined = new List<JoinedRow>();
             foreach (var row in rows)
             {
-                var key = Normalize(row.Rows[parent.Alias]?.GetValueOrDefault(link.To!));
-                var matches = key is null ? [] : candidates.Where(c => Equals(Normalize(c.GetValueOrDefault(link.From!)), key)).ToList();
+                var key = link.To!.Length == 0 ? null : Normalize(row.Rows[parent.Alias]?.GetValueOrDefault(link.To!));
+                var matches = key is null || link.From!.Length == 0 ? [] : candidates.Where(c => Equals(Normalize(c.GetValueOrDefault(link.From!)), key)).ToList();
                 if (matches.Count == 0)
                 {
                     if (link.LinkType == "outer")
@@ -700,6 +763,11 @@ internal sealed class FetchXmlEvaluator
 
     private static bool Holds(Condition c, JoinedRow row)
     {
+        if (c.Type == FakeColumnType.VirtualName)
+        {
+            var option = row.Rows.GetValueOrDefault(c.Alias)?.GetValueOrDefault(c.Attribute) as OptionSetValue;
+            return option is not null && c.Table!.Label(c.Attribute, option.Value) is { } label && StringKey(label) == (string)c.Values[0];
+        }
         var actual = Normalize(row.Rows.GetValueOrDefault(c.Alias)?.GetValueOrDefault(c.Attribute));
         switch (c.Operator)
         {
@@ -721,7 +789,7 @@ internal sealed class FetchXmlEvaluator
         int Cmp(object value) => Compare(actual, value, c.Type, ordered);
         return c.Operator switch
         {
-            "eq" => Cmp(c.Values[0]) == 0,
+            "eq" => c.Values[0] is not EmptyValue && Cmp(c.Values[0]) == 0, // an empty value matches nothing (W26)
             "ne" => Cmp(c.Values[0]) != 0,
             "lt" => Cmp(c.Values[0]) < 0,
             "gt" => Cmp(c.Values[0]) > 0,
@@ -742,10 +810,27 @@ internal sealed class FetchXmlEvaluator
     private static IEnumerable<Order> AllOrders(Source source)
         => source.Orders.Concat(source.Links.SelectMany(AllOrders));
 
-    private static List<JoinedRow> Sort(List<JoinedRow> rows, List<Order> orders, IReadOnlyDictionary<string, Source> sources)
+    private static List<T> Unwrap<T>(Func<List<T>> sort)
     {
+        try
+        {
+            return sort();
+        }
+        catch (InvalidOperationException ex) when (ex.InnerException is NotSupportedException refused)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(refused).Throw();
+            throw;
+        }
+    }
+
+    private static List<JoinedRow> Sort(List<JoinedRow> rows, List<Order> orders, IReadOnlyDictionary<string, Source> sources, bool tieBreakById = true)
+    {
+        // Rows come back in SQL Server uniqueidentifier order of the primary key when nothing else decides (the audit's
+        // unordered outputs, for example W54, D01 and PRJ01, follow it); that order also breaks ties.
+        var primary = sources[BaseAlias].Table.PrimaryIdAttribute;
+        System.Data.SqlTypes.SqlGuid Id(JoinedRow r) => new((Guid)r.Rows[BaseAlias]![primary]!);
         if (orders.Count == 0)
-            return rows;
+            return tieBreakById ? rows.OrderBy(Id).ToList() : rows;
         IOrderedEnumerable<JoinedRow>? sorted = null;
         foreach (var order in orders)
         {
@@ -766,7 +851,7 @@ internal sealed class FetchXmlEvaluator
         }
         try
         {
-            return sorted!.ToList();
+            return tieBreakById ? sorted!.ThenBy(Id).ToList() : sorted!.ToList();
         }
         catch (InvalidOperationException ex) when (ex.InnerException is NotSupportedException refused)
         {
@@ -811,6 +896,8 @@ internal sealed class FetchXmlEvaluator
                 if (entity.Attributes.ContainsKey(key))
                     continue; // a repeated unaliased attribute (audit PRJ12); other duplicates are refused before any row
 
+                if (!source.Table.HasColumn(name))
+                    continue; // a virtual <column>name comes back empty (V04, V09)
                 var value = data?.GetValueOrDefault(name);
                 if (Normalize(value) is null)
                     continue; // R8, R3
@@ -829,8 +916,9 @@ internal sealed class FetchXmlEvaluator
         FakeColumnType.Choice => table.Label(name, ((OptionSetValue)value).Value),
         FakeColumnType.Lookup => ((EntityReference)value).Name,
         FakeColumnType.Boolean => (bool)value ? "Yes" : "No",
-        FakeColumnType.Integer or FakeColumnType.BigInt when Math.Abs(Convert.ToDecimal(value, CultureInfo.InvariantCulture)) < 1000
-            => Convert.ToDecimal(value, CultureInfo.InvariantCulture).ToString("0", CultureInfo.InvariantCulture),
+        // Audit PRJ01 '11', D01 '-100', PG01/PG03 '4,640'.
+        FakeColumnType.Integer or FakeColumnType.BigInt
+            => Convert.ToDecimal(value, CultureInfo.InvariantCulture).ToString("#,##0", CultureInfo.InvariantCulture),
         FakeColumnType.DateTime => (DateTime.SpecifyKind((DateTime)value, DateTimeKind.Utc) + _callerUtcOffset)
             .ToString("M/d/yyyy h:mm tt", CultureInfo.InvariantCulture),
         _ => NotModelledFormattedValue
@@ -842,6 +930,7 @@ internal sealed class FetchXmlEvaluator
             {
                 string s => StringKey(s),
                 decimal d => (d / 1.0000000000000000000000000000m).ToString(CultureInfo.InvariantCulture),
+                OptionSetValueCollection m => string.Join("|", m.Select(o => o.Value).Order()),
                 double f => f.ToString("R", CultureInfo.InvariantCulture),
                 var v => Convert.ToString(v, CultureInfo.InvariantCulture)
             }}"));
@@ -863,7 +952,7 @@ internal sealed class FetchXmlEvaluator
             var size = spec.Count ?? MaxPageSize;
             var number = spec.Page ?? 1;
             slice = entities.Skip((number - 1) * size).Take(size).ToList();
-            more = total > number * size;
+            more = size > 0 && total > number * size;
         }
 
         var collection = new EntityCollection(slice)
