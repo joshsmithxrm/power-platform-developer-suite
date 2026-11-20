@@ -92,9 +92,14 @@ class Sandbox:
             (self.work / name).write_text("", encoding="utf-8")
         (self.work / "d").mkdir(exist_ok=True)
         self.stores = {}
+        # The hook finds each mode's store the way the product does on Linux when PPDS_CONFIG_DIR is
+        # not set: under $HOME/.ppds. (PPDS_CONFIG_DIR is left unset so that a HOME change in a text
+        # is a real change of store; see ProfilePaths.cs.)
+        self.mode_homes = {}
         for mode, env_name in ACTIVE.items():
-            cfg = self.root / f"cfg-{mode}"
-            cfg.mkdir(exist_ok=True)
+            self.mode_homes[mode] = self.root / f"home-{mode}"
+            cfg = self.mode_homes[mode] / ".ppds"
+            cfg.mkdir(parents=True, exist_ok=True)
             (cfg / "profiles.json").write_text(json.dumps({
                 "version": 2, "activeProfileIndex": 1,
                 "profiles": [{"index": i, "name": name, "environment": {
@@ -111,9 +116,8 @@ class Sandbox:
     def hook_env(self, mode: str) -> dict:
         env = _scrubbed_env()
         env.update({
-            "PPDS_CONFIG_DIR": str(self.stores[mode]),
             "CLAUDE_PROJECT_DIR": str(self.project),
-            "HOME": str(self.home),
+            "HOME": str(self.mode_homes[mode]),
             "PPDS_SAFE_ENVS": ALLOWLIST,
         })
         if mode == "shakedown":

@@ -13,7 +13,10 @@ These tests check the hook against those real things, on generated inputs, inste
 | Hook run | Each vector rendered as text for each tool name (`Bash`, `PowerShell`) | The same text for both tool names |
 
 A third, smaller check, the **timing oracle** (`gen_timing.py`), feeds long texts (50,000 to 200,000 characters, valid in both shells by `bash -n` and the PowerShell parser) in several shapes: a write followed by many words naming the programs and many short words, quoted names, mixed program names, many statements, `dotnet run` words.
-Its property: the hook refuses each text inside its documented budget (`_BUDGET_SECONDS`, read from the hook, plus 0.5 s for interpreter start-up) and never after the timeout registered for it in `.claude/settings.json` (read from the file).
+A fourth, the **raw timing check**, feeds raw text far above the hook's caps (one repeated character or short unit, 200,000 characters at CI size and up to 30 million with `--long`, with and without a mention in front); its property is an answer inside the registered timeout.
+A fifth, the **ordinary-mention check** (`gen_ordinary.py`), is the other direction: searches and process queries that only mention a program name next to option-looking words (`grep ppds -rE docs`, `Select-String -Pattern 'ppds' -Path ...`, `Get-Process ppds -ErrorAction SilentlyContinue`, `Stop-Process -Name ppds -Force -WhatIf`). With a listed environment and no shakedown, a text under which no stand-in starts in either shell and that names no switch or target must pass; a refusal is a requirement failure of the cost rule (cause `cost-rule`).
+
+The timing oracle's property: the hook refuses each text inside its documented budget (`_BUDGET_SECONDS`, read from the hook, plus 0.5 s for interpreter start-up) and never after the timeout registered for it in `.claude/settings.json` (read from the file).
 
 Every hook run is a subprocess with the payload on stdin, in three modes, each with a made-up allowlist (`zz-safe-a`, `zz-safe-b`) and a throwaway profile store:
 
@@ -41,7 +44,7 @@ False blocks are counted and reported, never failed on: the maintainer accepted 
 - `requirement`: the hook must refuse it (R4, and the maintainer's decisions in the third review round). A pass fails the test.
 - `policy`: counted and reported; a pass fails only with `PPDS_DIFF_STRICT=1`. Two kinds:
   - the pure read diagnostics on an unlisted active environment: `env list`, `who`, `current`, `show`, and `env config` / `env type` in their `--list` / `--show` forms (their writing forms are `requirement`);
-  - an environment-gate harm (a switch or a target override) in a text that shows no switch words (`env`, `org` or `auth` with `select`, `switch` or `use`) and no target option (`--environment`, `-env`, `-e`, `--profile`, `-p`, `--allowed-env`, `PPDS_CONFIG_DIR`, `PPDS_PROFILE`), after quoting characters are removed and `-EncodedCommand` payloads are decoded. Example: `ppds @cmd.rsp`, where the switch is inside the response file. For such texts a pass is acceptable in the listed-environment gate; the cause is suffixed `-not-in-text`.
+  - an environment-gate harm (a switch or a target override) in a text that shows no switch words (after joining line continuations, turning `\n`, `\t` and `\xNN` escapes into the characters they stand for, removing quoting characters, expanding braces and decoding `-EncodedCommand`) (`env`, `org` or `auth` with `select`, `switch` or `use`) and no target option (`--environment`, `-env`, `-e`, `--profile`, `-p`, `--allowed-env`, `PPDS_CONFIG_DIR`, `PPDS_PROFILE`), after quoting characters are removed and `-EncodedCommand` payloads are decoded. Example: `ppds @cmd.rsp`, where the switch is inside the response file. For such texts a pass is acceptable in the listed-environment gate; the cause is suffixed `-not-in-text`.
 - `-approx`: a .NET host form (`dotnet run`, `dnx`, `dotnet tool exec`) whose mapping from the `dotnet` stand-in's arguments to the CLI's arguments in `_shells.map_start` is an approximation of the .NET SDK's own forwarding. These are reported in their own group.
 
 ## How to run
@@ -77,7 +80,7 @@ python tests/hooks/differential/repro.py out/args/<name>.case.json
 |---|---|
 | `--size N`, `--seed S` | Corpus size and seed. Generation is deterministic for a seed and size. Defaults: oracle 1 seed 1814 and 4,500 vectors; oracle 2 seed 1780, 700 random texts plus a seeded sample of 500 of the 1,840 shell-feed texts; timing 50,000 and 110,000 characters in the shakedown mode. `--long` uses 40,000 vectors, 8,000 random texts plus every shell-feed text, and 20,000 to 200,000 characters in two modes. |
 | `--cases DIR` | Writes each failing case as `<name>.payload.json` (the hook's stdin) and `<name>.case.json` (tool, mode, command, ground truth). At most a few per group. |
-| `PPDS_DIFF_SIZE_ARGS`, `PPDS_DIFF_SIZE_SHELL`, `PPDS_DIFF_TIMING_LENGTHS` | Corpus sizes under pytest (defaults 1,500 vectors, 700 texts, and `50000`; lengths are comma-separated). |
+| `PPDS_DIFF_SIZE_ARGS`, `PPDS_DIFF_SIZE_SHELL`, `PPDS_DIFF_TIMING_LENGTHS`, `PPDS_DIFF_SIZE_ORDINARY`, `PPDS_DIFF_RAW_LENGTHS` | Corpus sizes under pytest (defaults 1,500 vectors, 700 texts, `50000`, 120 ordinary texts, `200000`; lengths are comma-separated). |
 | `PPDS_DIFF_STRICT=1` | Policy-severity passes also fail. |
 | `PPDS_DIFF_REQUIRE=1` | A missing tool fails the test instead of skipping it. |
 | `PPDS_DIFF_XFAIL=1` | A test whose failures all carry a label in `expected_failures.json` is reported as xfail. |
@@ -95,9 +98,13 @@ A failure labelled `unlabelled` is a finding nobody has named yet.
 - The helper in `ParseOracle/` only calls `Parse`. No command action is invoked, so it cannot sign in or reach an environment. It runs with `HOME` and `PPDS_CONFIG_DIR` pointing at empty temporary folders.
 - Shell runs use stand-ins named `ppds`, `ppds-mcp-server`, `dotnet` and `dnx` (and `.exe` and upper-case spellings) that only record their arguments to a file and exit.
 - Each shell run has a temporary working directory, `HOME` and `PPDS_CONFIG_DIR` inside it, `PATH` set to the stand-in folder plus `/usr/bin:/bin`, and a timeout. Before the first run the lab asserts that every guarded name resolves to its stand-in and that no real `ppds` or `ppds-mcp-server` exists on the system folders.
+- `Stop-Process` in the ordinary-mention texts always carries `-WhatIf`.
 - The text vocabulary has no deletion, no network access and no redirection outside the temporary folder.
 - Oracle 2's generator has a systematic block for the class "code handed to a shell": every wrapper and assignment prefix (`env`, `env FOO=1`, `FOO=1`, `timeout 5`, `nohup`, `command`, `exec`, a changed `PPDS_CONFIG_DIR`) in front of every way of feeding code to `bash`, `sh` and `pwsh` (here-string, quoted and unquoted here-document, `-c` / `-Command`, stdin pipe), with the program name literal, quoted, escaped, from a variable and from a substitution.
-- Stand-ins also record `PPDS_CONFIG_DIR` and `PPDS_PROFILE` as they saw them, so environment-variable overrides in the text are judged.
+- Stand-ins also record `PPDS_CONFIG_DIR`, `PPDS_PROFILE` and `HOME` as they saw them, so environment-variable overrides in the text are judged. Neither the hook nor the shells get `PPDS_CONFIG_DIR`: the hook finds each mode's store under `$HOME/.ppds`, as the product does on Linux (`ProfilePaths.cs`), so a `HOME=<dir>` in front of the CLI is a change of store (cause `home-override`).
+- Round-4 blocks of oracle 2 (recipes `xargs:`, `hidden:`, `wrapper:`, `home:`): `xargs` with its own options (`-n`, `-L`, `-P`, `-I{}`, `-r`, `-t`, `-s`, `-x`) and GNU `parallel` (`-j`, `-n`, `:::`) with the words of a switch, a target or a write arriving on stdin; switch, target and write words that are in the text but not as whole words (inside `printf` / `echo -e` escapes, in an assignment, split by a line continuation, in brace expansion, splatted); wrappers in front of a shell given code (`setsid`, `flock <file>`, `chroot /`, `busybox sh`, `xvfb-run -a`, `winpty`, `stdbuf`, `nice`, `ionice`, `script -c`, `ssh host`); `HOME`, `USERPROFILE` and `XDG_CONFIG_HOME` changes.
+- `ssh`, `parallel`, `busybox`, `winpty` and `xvfb-run` are approximated by stand-ins (`_shells.APPROX_WRAPPERS`) that apply the wrapper's own option rules and run the rest locally: `ssh` must not reach a network and `xvfb-run` would start an X server; the others are not installed here. Their texts are reported with `-approx` severity. `chroot /` needs root here, so nothing starts under it.
+- Each shell run has its own process group; a run past its timeout is killed with its children. Texts that take a file lock (`flock`) run one at a time.
 - The hook runs with a made-up allowlist and profile store and a scrubbed environment (no `PPDS_*`, `CLAUDE_*` or credential variables).
 
 ## Where it runs in CI

@@ -122,3 +122,31 @@ def test_timing_long_inputs_are_refused_inside_the_budget(timing_report):
 def test_timing_texts_are_valid_in_both_shells(timing_report):
     bad = [r for r in timing_report["rows"] if r["valid_bash"] is False or r["valid_pwsh"] is False]
     assert not bad, bad[:3]
+
+
+ORDINARY_LIMIT = int(os.environ.get("PPDS_DIFF_SIZE_ORDINARY", "120"))
+RAW_LENGTHS = tuple(int(x) for x in os.environ.get("PPDS_DIFF_RAW_LENGTHS", "200000").split(","))
+
+
+@pytest.fixture(scope="module")
+def ordinary_report():
+    if not shutil.which("bash") or not shutil.which("pwsh"):
+        _missing("the ordinary-mention check needs real bash and pwsh")
+    return differential.run_ordinary_oracle(ORDINARY_LIMIT, 7, CASES)
+
+
+@pytest.fixture(scope="module")
+def raw_report():
+    return differential.run_raw_timing_oracle(RAW_LENGTHS, 0, CASES)
+
+
+def test_ordinary_mentions_pass_with_a_listed_environment(ordinary_report):
+    """The cost rule: with a listed environment and no shakedown, a command that starts no program
+    under either shell and names no switch or target (a search, a process query) is not refused."""
+    _check(ordinary_report, "gate-listed")
+
+
+def test_raw_text_far_above_the_caps_is_answered_in_time(raw_report):
+    """Raw text of one repeated character (or short unit), with and without a mention: an answer
+    inside the timeout registered in .claude/settings.json."""
+    _check(raw_report, "shakedown")

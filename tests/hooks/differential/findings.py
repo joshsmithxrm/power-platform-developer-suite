@@ -12,6 +12,7 @@ import re
 
 # Code handed to a shell: a here-string or here-document to bash/sh/pwsh, `-c` / `-Command`, or a pipe into one.
 _FEED = re.compile(r"(?:(?i:-(?:e|ec|encodedcommand)\s+[A-Za-z0-9+/=]{8,}))|(?:\beval\b)|(?:\b(?:bash|sh|pwsh)\b[^\n|;&]*(?:<<|\s-c\b|\s-Command\b))|(?:\|\s*(?:[^|;&\n]*\s)?(?:bash|sh|pwsh)\b)")
+_EXP = re.compile(r"(?:\d|\.)e(?:[+-]?\d*)?(?:delete|insert|update|merge|truncate|with|exec|select)", re.I)
 _GLUED = re.compile(r"(?:\d|0x[0-9a-f]+|'|\]|\.)(?:delete|insert|update|merge|truncate)", re.I)
 
 
@@ -69,13 +70,24 @@ def _labels(f: dict) -> list:
         out.append("r2-target-override")
     if cause in ("profile-override", "mcp-profile-override", "profile-switch"):
         out.append("r2-profile-override")
+    recipe = f.get("recipe", "")
+    if recipe.startswith("xargs:"):
+        out.append("new-xargs-options")
+    if recipe.startswith("hidden:"):
+        out.append("new-hidden-words")
+    if recipe.startswith("wrapper:"):
+        out.append("new-unknown-wrapper")
+    if cause == "home-override":
+        out.append("new-home-override")
+    if cause == "write-in-shakedown" and _EXP.search(_sql_text(f) or ""):
+        out.append("new-sql-exponent-glue")
     if f.get("severity", "").startswith("policy"):
         out.append("policy-" + cause)
     return out
 
 
 def classify(f: dict) -> str:
-    if f.get("label") and f.get("cause") in ("over-timeout", "over-budget", "not-refused"):
+    if f.get("label") and f.get("cause") in ("over-timeout", "over-budget", "not-refused", "cost-rule"):
         return f["label"]
     labels = _labels(f)
     return "+".join(labels) if labels else "unlabelled"

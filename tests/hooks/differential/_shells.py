@@ -17,12 +17,16 @@ import concurrent.futures as cf
 import json
 import os
 import shutil
+import signal
 import stat
+import threading
+import time
 import subprocess
 import uuid
 from pathlib import Path
 
-SYSTEM_PATH = "/usr/bin:/bin"
+_FLOCK = threading.Lock()
+SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin"
 # Names that get a stand-in. The upper-case and .exe spellings stand for Windows, where lookup is
 # case-insensitive and the extension may be written.
 GUARDED_NAMES = ("ppds", "ppds-mcp-server", "dotnet", "dnx")
@@ -33,8 +37,63 @@ _STANDIN = """#!{python} -I
 import json, os, sys
 with open(os.environ.get("STANDIN_LOG", os.devnull), "a", encoding="utf-8", errors="surrogateescape") as fh:
     fh.write(json.dumps({{"prog": os.path.basename(sys.argv[0]), "argv": sys.argv[1:], "cwd": os.getcwd(),
-                         "config_dir": os.environ.get("PPDS_CONFIG_DIR"), "profile": os.environ.get("PPDS_PROFILE")}},
+                         "config_dir": os.environ.get("PPDS_CONFIG_DIR"), "profile": os.environ.get("PPDS_PROFILE"),
+                         "home": os.environ.get("HOME")}},
                         ensure_ascii=False) + "\\n")
+"""
+
+
+# Approximating stand-ins for wrappers that are missing here or must not run for real (ssh: network;
+# xvfb-run: starts an X server). Each applies the wrapper's own option rules and then runs the rest
+# locally, so the guarded stand-ins see what the real wrapper would start. Texts that use one of them
+# are reported with an ``-approx`` severity.
+APPROX_WRAPPERS = ("ssh", "parallel", "busybox", "winpty", "xvfb-run")
+_WRAPPER = """#!{python} -I
+import os, sys
+name = os.path.basename(sys.argv[0])
+a = sys.argv[1:]
+def run(argv):
+    if argv:
+        os.execvp(argv[0], argv)
+    sys.exit(0)
+if name == "ssh":
+    # ssh [options] host [command...]: the remote shell runs the words joined by spaces.
+    with_value = set("-b -c -D -E -e -F -I -i -J -L -l -m -O -o -p -Q -R -S -W -w".split())
+    i = 0
+    while i < len(a) and a[i].startswith("-"):
+        i += 2 if a[i] in with_value else 1
+    rest = a[i + 1:]
+    run(["sh", "-c", " ".join(rest)] if rest else [])
+elif name == "busybox":
+    run(a if not a or a[0] not in ("sh", "ash") else ["sh"] + a[1:])
+elif name == "winpty":
+    while a and a[0].startswith("-"):
+        a = a[1:]
+    run(a)
+elif name == "xvfb-run":
+    with_value = set("-e --error-file -f --auth-file -n --server-num -p --xauth-protocol -s --server-args -w --wait".split())
+    i = 0
+    while i < len(a) and a[i].startswith("-"):
+        i += 2 if a[i] in with_value else 1
+    run(a[i:])
+elif name == "parallel":
+    # GNU parallel: [options] command [::: args]; without ::: each input line is one argument,
+    # -n N puts N of them on one command line. Runs the command lines one after another.
+    with_value = set("-j --jobs -n --max-args -N -L --max-lines -d --delimiter -S --sshlogin --joblog".split())
+    i, n = 0, 1
+    while i < len(a) and a[i].startswith("-"):
+        if a[i] in ("-n", "--max-args", "-N"):
+            n = int(a[i + 1])
+        i += 2 if a[i] in with_value else 1
+    cmd = a[i:]
+    if ":::" in cmd:
+        k = cmd.index(":::")
+        cmd, items = cmd[:k], cmd[k + 1:]
+    else:
+        items = [l.rstrip("\\n") for l in sys.stdin if l.strip()]
+    import subprocess
+    for j in range(0, len(items), max(n, 1)):
+        subprocess.run(cmd + items[j:j + max(n, 1)])
 """
 
 
@@ -48,6 +107,13 @@ class ShellLab:
             p = self.bin / name
             p.write_text(_STANDIN.format(python=python), encoding="utf-8")
             p.chmod(p.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        for name in APPROX_WRAPPERS:
+            p = self.bin / name
+            p.write_text(_WRAPPER.format(python=python), encoding="utf-8")
+            p.chmod(p.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        (sandbox.work / "docs").mkdir(exist_ok=True)
+        (sandbox.work / "docs" / "notes.md").write_text("ppds env list\ndotnet run --project x\n", encoding="utf-8")
+        (sandbox.work / "lock.txt").write_text("", encoding="utf-8")
         # Folders a ``cd`` in a text may name (so `cd src/PPDS.Cli && dotnet run` is meaningful).
         for sub in ("src/PPDS.Cli", "src/PPDS.Mcp"):
             (sandbox.work / sub).mkdir(parents=True, exist_ok=True)
@@ -56,13 +122,16 @@ class ShellLab:
         self.path = f"{self.bin}:{SYSTEM_PATH}"
         # The configuration folder every shell run starts with. A stand-in that sees another one was
         # started with a configuration-folder override.
-        self.config_dir = str(sandbox.home / "cfg")
+        # The lab sets no PPDS_CONFIG_DIR, so the store a program reaches is $HOME/.ppds unless the
+        # text changes PPDS_CONFIG_DIR or HOME (ProfilePaths.cs, Linux). This is the default store.
+        self.config_dir = None
+        self.default_store = os.path.normpath(str(sandbox.home / ".ppds"))
         self.bash = shutil.which("bash", path=SYSTEM_PATH)
         self.pwsh = shutil.which("pwsh", path=SYSTEM_PATH) or shutil.which("pwsh")
         self.assert_real_cli_unreachable()
 
     def assert_real_cli_unreachable(self) -> None:
-        for name in GUARDED_NAMES:
+        for name in GUARDED_NAMES + APPROX_WRAPPERS:
             got = shutil.which(name, path=self.path)
             if got != str(self.bin / name):
                 raise RuntimeError(f"refusing to run shells: {name!r} resolves to {got!r}, not the stand-in")
@@ -75,7 +144,7 @@ class ShellLab:
                 raise RuntimeError(f"refusing to run shells: a real {name!r} is on the system folders: {got!r}")
 
     def env(self, log: Path) -> dict:
-        return {"PATH": self.path, "HOME": str(self.sandbox.home), "PPDS_CONFIG_DIR": self.config_dir,
+        return {"PATH": self.path, "HOME": str(self.sandbox.home),
                 "STANDIN_LOG": str(log), "LANG": "C.UTF-8", "TERM": "dumb", "SB": str(self.sandbox.work),
                 "DOTNET_CLI_TELEMETRY_OPTOUT": "1", "POWERSHELL_TELEMETRY_OPTOUT": "1",
                 "POWERSHELL_UPDATECHECK": "Off", "NO_COLOR": "1"}
@@ -93,25 +162,51 @@ class ShellLab:
         return out
 
     def overrides(self, record: dict) -> dict:
-        return {"config_dir_changed": record.get("config_dir") != self.config_dir,
+        return {"config_dir_changed": self.reached_store(record) != self.default_store,
+                "home_changed": not record.get("config_dir") and self.reached_store(record) != self.default_store,
                 "profile": record.get("profile")}
 
-    def run_bash(self, text: str, timeout: float = 10.0) -> list:
-        log = self.logs / f"b-{uuid.uuid4().hex}.log"
+    def reached_store(self, record: dict) -> str:
+        """The profile-store folder the program would read (ProfilePaths: PPDS_CONFIG_DIR, else ~/.ppds)."""
+        cwd = record.get("cwd") or str(self.sandbox.work)
+        cfg = (record.get("config_dir") or "").strip()
+        if cfg:
+            return os.path.normpath(os.path.join(cwd, cfg))
+        home = record.get("home") or ""
+        return os.path.normpath(os.path.join(cwd, home, ".ppds"))
+
+    def _run(self, argv: list, text: str, log: Path, timeout: float) -> None:
+        """Run one shell in its own process group; on timeout, kill the whole group, so that no child
+        of a hanging text is left behind. Texts that take a file lock run one at a time."""
+        lock = _FLOCK if "flock" in text else None
+        if lock:
+            lock.acquire()
         try:
-            subprocess.run([self.bash, "--norc", "--noprofile", "-c", text], env=self.env(log), cwd=str(self.sandbox.work),
-                           stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            pass
+            proc = subprocess.Popen(argv, env=self.env(log), cwd=str(self.sandbox.work), stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            try:
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                pass
+            if "setsid" in text or "&" in text:
+                time.sleep(0.5)  # a detached child may still be starting
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            proc.wait()
+        finally:
+            if lock:
+                lock.release()
+
+    def run_bash(self, text: str, timeout: float = 40.0) -> list:
+        log = self.logs / f"b-{uuid.uuid4().hex}.log"
+        self._run([self.bash, "--norc", "--noprofile", "-c", text], text, log, timeout)
         return self._read(log)
 
-    def run_pwsh(self, text: str, timeout: float = 20.0) -> list:
+    def run_pwsh(self, text: str, timeout: float = 40.0) -> list:
         log = self.logs / f"p-{uuid.uuid4().hex}.log"
-        try:
-            subprocess.run([self.pwsh, "-NoProfile", "-NonInteractive", "-Command", text], env=self.env(log),
-                           cwd=str(self.sandbox.work), stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            pass
+        self._run([self.pwsh, "-NoProfile", "-NonInteractive", "-Command", text], text, log, timeout)
         return self._read(log)
 
     def run_pwsh_batch(self, texts: list, timeout: float = 600.0) -> list:
@@ -129,7 +224,8 @@ class ShellLab:
             b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
             lines.append(
                 "try { Set-Location -LiteralPath $__sb; "
-                f"$env:PPDS_CONFIG_DIR = '{self.config_dir}'; $env:PPDS_PROFILE = $null; $env:FOO = $null; "
+                f"$env:PPDS_CONFIG_DIR = $null; $env:HOME = '{self.sandbox.home}'; $env:PPDS_PROFILE = $null; "
+                "$env:FOO = $null; $env:E = $null; "
                 f"$env:STANDIN_LOG = '{log}'; "
                 f"$__t = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{b64}')); "
                 "$null = & ([scriptblock]::Create($__t)) 2>&1 } catch { }")
@@ -143,14 +239,15 @@ class ShellLab:
             pass
         return [self._read(log) for log in logs]
 
-    def run_all(self, texts: list, workers: int = 8, chunk: int = 60) -> tuple:
+    def run_all(self, texts: list, workers: int = 16, chunk: int = 20) -> tuple:
         """(bash_records, pwsh_records) for every text, in order."""
-        with cf.ThreadPoolExecutor(max_workers=max(4, (os.cpu_count() or 4))) as pool:
+        # One fresh process per text and shell, each with its own timeout (a batch would let one
+        # hanging text stall all the others).
+        n = max(4, (os.cpu_count() or 4))
+        with cf.ThreadPoolExecutor(max_workers=n) as pool:
             bash = list(pool.map(self.run_bash, texts))
-        chunks = [texts[i:i + chunk] for i in range(0, len(texts), chunk)]
-        with cf.ThreadPoolExecutor(max_workers=workers) as pool:
-            parts = list(pool.map(self.run_pwsh_batch, chunks))
-        pwsh = [r for part in parts for r in part]
+        with cf.ThreadPoolExecutor(max_workers=n) as pool:
+            pwsh = list(pool.map(self.run_pwsh, texts))
         return bash, pwsh
 
 

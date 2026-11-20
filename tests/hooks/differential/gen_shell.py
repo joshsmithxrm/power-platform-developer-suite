@@ -266,6 +266,7 @@ def generate(size: int, seed: int, bindir: str, feed_limit=None) -> list:
     rng = random.Random(seed)
     wrappers = _wrappers(bindir)
     out = feed_texts(random.Random(seed + 1), feed_limit)
+    out += round4_texts(random.Random(seed + 2), None if feed_limit is None else feed_limit * 2)
     size += len(out)
     # Every core in its plain form first, in both quoting styles.
     for label, program, argv in CORES:
@@ -285,4 +286,146 @@ def generate(size: int, seed: int, bindir: str, feed_limit=None) -> list:
             text = _continuation(text, rng)
             steps.append("continuation")
         out.append(Text(text, label, program, argv, "+".join(steps)))
+    return out
+
+
+# --------------------------------------------------------------------------------------------
+# Round 4: classes a review by hand found (each text's recipe starts with its class name)
+# --------------------------------------------------------------------------------------------
+
+R4_CORES = (
+    ("write", ["data", "truncate", "--entity", "account", "--force"]),
+    ("write", ["data", "delete", "--entity", "account", "--filter", "name eq 'x'"]),
+    ("switch", ["env", "select", "--environment", "zz-prod-x"]),
+    ("target", ["solutions", "list", "--environment", "zz-prod-x"]),
+    ("version", ["version", "--update"]),
+    ("profile", ["solutions", "list", "--profile", "p-zz-prod-x"]),
+)
+XARGS_OPTS = ("", "-n 4", "-n 9", "-n 1", "-L 1", "-P 2 -n 4", "-r", "-t", "--max-args=9", "-n9", "-L1 -P 2",
+              "-s 4096", "-x -n 9")
+APPROX_WRAPPER_WORDS = ("ssh", "parallel", "busybox", "winpty", "xvfb-run")
+
+
+def _stdin_feeds(words: list) -> list:
+    joined = " ".join(words)
+    nl = "\\n".join(words)
+    return [f"echo {joined}", f"printf '%s\\n' {joined}", f"printf '{nl}\\n'", f"echo -e '{nl}'"]
+
+
+def xargs_texts() -> list:
+    out = []
+    for label, argv in R4_CORES:
+        for k in range(1, len(argv) + 1):
+            head, tail = argv[:k - 1], argv[k - 1:]
+            if any(" " in w for w in tail):
+                tail = [bq(w) if " " in w else w for w in tail]
+            prog = " ".join(["ppds"] + head)
+            for opts in XARGS_OPTS:
+                x = f"xargs {opts} ".replace("  ", " ")
+                for i, feed in enumerate(_stdin_feeds(tail)):
+                    out.append(Text(f"{feed} | {x}{prog}", "xargs-" + label, "ppds", argv,
+                                    f"xargs:{opts or '-'}:k{k}:feed{i}"))
+                out.append(Text(f"{x}{prog} <<< {bq(' '.join(tail))}", "xargs-" + label, "ppds", argv,
+                                f"xargs:{opts or '-'}:k{k}:here-string"))
+            # -I: the last word arrives on stdin and replaces {}
+            out.append(Text(f"echo {argv[-1]} | xargs -I{{}} {' '.join(['ppds'] + [bq(w) if ' ' in w else w for w in argv[:-1]])} {{}}",
+                            "xargs-" + label, "ppds", argv, f"xargs:-I:last"))
+            # GNU parallel (approximated stand-in): input lines as arguments, -n groups them
+            n = len(tail)
+            out.append(Text(f"printf '%s\\n' {' '.join(tail)} | parallel -j 4 -n {n} {prog}", "xargs-" + label,
+                            "ppds", argv, f"xargs:parallel-n:k{k}:approx"))
+            out.append(Text(f"parallel -j 4 {prog} {' '.join(tail[:-1])} ::: {tail[-1]}", "xargs-" + label,
+                            "ppds", argv, f"xargs:parallel-:::k{k}:approx"))
+    return out
+
+
+def hidden_texts() -> list:
+    """Switch, target or write words that are in the text but not as whole words."""
+    t = []
+    for label, argv in R4_CORES:
+        nl = "\\n".join(argv)
+        tab = "\\t".join(argv)
+        hx = "\\x0a".join(argv)
+        t += [(f"printf '{nl}\\n' | xargs ppds", "printf-nl"), (f"printf '{tab}' | xargs ppds", "printf-tab"),
+              (f"printf '{hx}' | xargs ppds", "printf-hex"), (f"echo -e '{nl}' | xargs ppds", "echo-e"),
+              (f"printf '{nl}' | xargs -n {len(argv)} ppds", "printf-nl-n")]
+        words = [bq(w) if " " in w else w for w in argv]
+        for i, w in enumerate(argv):
+            if w.startswith("-") or w in ("select", "truncate", "delete", "version", "env"):
+                rest = words[:i] + ["$E"] + words[i + 1:]
+                t.append((f"E={w}; ppds {' '.join(rest)}", "assign"))
+                t.append((f"E={w} && ppds {' '.join(rest)}", "assign-and"))
+                t.append((f"export E={w}; bash -c {bq('ppds ' + ' '.join(rest))}", "assign-export"))
+                prest = [pq(x) if " " in x else x for x in argv[:i]] + ["$E"] + [pq(x) if " " in x else x for x in argv[i + 1:]]
+                t.append((f"$E = '{w}'; ppds {' '.join(prest)}", "assign-pwsh"))
+                if len(w) > 3:
+                    j = len(w) // 2
+                    t.append((f"ppds {' '.join(words[:i] + [w[:j] + chr(92) + chr(10) + w[j:]] + words[i + 1:])}", "continuation"))
+                    t.append((f"ppds {' '.join(words[:i] + ['{' + w + ',}'] + words[i + 1:])}", "brace"))
+                    t.append((f"ppds {' '.join(words[:i] + [w[:j] + '{' + w[j:] + ',}'] + words[i + 1:])}", "brace-inner"))
+        t.append((f"W={bq(' '.join(words))}; ppds $W", "split-variable"))
+        t.append((f"$w = {', '.join(pq(x) for x in argv)}; ppds @w", "splat"))
+        t.append((f"{{ppds,}} {' '.join(words)}", "brace-program"))
+    return [Text(text, "hidden-" + core, "ppds", [], f"hidden:{kind}") for (text, kind), core in
+            zip(t, [c for c in _cycle_labels(t)])]
+
+
+def _cycle_labels(t):
+    # labels are informational; keep them aligned with the core that produced each text
+    out, per = [], []
+    for label, argv in R4_CORES:
+        per.append(label)
+    n = len(t) // len(R4_CORES) or 1
+    for i in range(len(t)):
+        out.append(per[min(i // n, len(per) - 1)])
+    return out
+
+
+WRAPPERS = ("setsid", "setsid -f", "flock lock.txt", "chroot /", "busybox", "xvfb-run -a", "winpty", "stdbuf -o0",
+            "stdbuf -oL -eL", "nice", "nice -n 5", "ionice -c 3", "ssh host", "ssh -o BatchMode=yes host")
+
+
+def wrapper_texts() -> list:
+    out = []
+    for label, argv in R4_CORES[:3] + R4_CORES[4:5]:
+        args = " ".join(bq(w) if " " in w else w for w in argv)
+        for form in ("ppds", "$(echo ppds)", "P=ppds; $P"):
+            code = f"{form} {args}"
+            for w in WRAPPERS:
+                approx = w.split()[0] in APPROX_WRAPPER_WORDS
+                sh = "sh" if w == "busybox" else "bash"
+                cases = [(f"{w} {sh} -c {bq(code)}", "dash-c"), (f"{w} {sh} <<< {bq(code)}", "here-string"),
+                         (f"echo {bq(code)} | {w} {sh}", "stdin"), (f"{w} pwsh -NoProfile -c {bq(code)}", "pwsh-c")]
+                if form == "ppds":
+                    cases.append((f"{w} {code}", "direct"))
+                if w.startswith("ssh"):
+                    cases.append((f"{w} {bq(code)}", "ssh-remote"))
+                for text, kind in cases:
+                    out.append(Text(text, "wrapper-" + label, "ppds", argv,
+                                    f"wrapper:{w}:{kind}:{form}" + (":approx" if approx else "")))
+            out.append(Text(f"script -qc {bq(code)} /dev/null", "wrapper-" + label, "ppds", argv, f"wrapper:script:dash-c:{form}"))
+    return out
+
+
+def home_texts() -> list:
+    out = []
+    for label, argv in (("read", ["solutions", "list"]), ("write", ["data", "delete", "--entity", "account"]),
+                        ("switch", ["env", "select", "--environment", "zz-safe-b"])):
+        args = " ".join(argv)
+        for text, kind in ((f"HOME=other ppds {args}", "prefix"), (f"env HOME=other ppds {args}", "env"),
+                           (f"export HOME=other; ppds {args}", "export"), (f"$env:HOME = 'other'; ppds {args}", "pwsh"),
+                           (f"HOME=other bash -c {bq('ppds ' + args)}", "shell"), (f"cd d && HOME=. ppds {args}", "relative"),
+                           (f'HOME="$HOME" ppds {args}', "same-home"), (f"HOME=$PWD ppds {args}", "pwd"),
+                           (f"USERPROFILE=other ppds {args}", "userprofile"), (f"XDG_CONFIG_HOME=other ppds {args}", "xdg")):
+            out.append(Text(text, "home-" + label, "ppds", argv, f"home:{kind}"))
+    return out
+
+
+def round4_texts(rng: random.Random, limit=None) -> list:
+    out = xargs_texts() + hidden_texts() + wrapper_texts() + home_texts()
+    if limit is not None and limit < len(out):
+        # keep every hidden and home text (small), sample the large xargs and wrapper blocks
+        small = [t for t in out if t.recipe.startswith(("hidden:", "home:"))]
+        big = [t for t in out if not t.recipe.startswith(("hidden:", "home:"))]
+        out = small + rng.sample(big, max(0, limit - len(small)))
     return out

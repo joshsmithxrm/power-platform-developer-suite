@@ -182,7 +182,10 @@ def judge(oracle, program: str, argv: list, mode: str, overrides: dict | None = 
 
 
 def _process_overrides(overrides: dict, mode: str, harms: list) -> None:
-    if overrides.get("config_dir_changed"):
+    if overrides.get("home_changed"):
+        harms.append(Harm("home-override", "requirement",
+                          "HOME differs, so the program reads another profile store (~/.ppds)"))
+    elif overrides.get("config_dir_changed"):
         harms.append(Harm("config-folder-override", "requirement",
                           "PPDS_CONFIG_DIR differs from the profile store the hook read"))
     if overrides.get("profile") is not None:
@@ -197,11 +200,11 @@ def _process_overrides(overrides: dict, mode: str, harms: list) -> None:
 # policy severity.
 ENV_GATE_CAUSES = {"switch-to-unlisted", "environment-override", "profile-override", "profile-switch",
                    "mcp-environment-override", "mcp-profile-override", "mcp-allowed-env-unlisted",
-                   "config-folder-override"}
+                   "config-folder-override", "home-override"}
 _SWITCH_GROUP = re.compile(r"(?i)(?<![\w-])(env|org|auth)(?![\w-])")
 _SWITCH_VERB = re.compile(r"(?i)(?<![\w-])(select|switch|use)(?![\w-])")
 _TARGET_OPT = re.compile(r"(?i)(--environment|(?<![\w-])-env|(?<![\w-])-e(?![\w-])|--profile|(?<![\w-])-p(?![\w-])|--allowed-env|"
-                         r"PPDS_CONFIG_DIR|PPDS_PROFILE)")
+                         r"PPDS_CONFIG_DIR|PPDS_PROFILE|(?<![\w-])HOME=|\$env:HOME|USERPROFILE|LOCALAPPDATA)")
 
 
 _ENCODED = re.compile(r"(?i)-(?:e|ec|encodedcommand)\s+([A-Za-z0-9+/=]{8,})")
@@ -216,7 +219,24 @@ def _readable(text: str) -> str:
             extra.append(base64.b64decode(m.group(1) + "==").decode("utf-16-le", "replace"))
         except ValueError:
             pass
-    return re.sub(r"[\'\"`\\]", "", "\n".join([text] + extra))
+    t = "\n".join([text] + extra)
+    t = re.sub(r"(?:\\|`)\r?\n", "", t)                       # line continuations join the word
+    t = re.sub(r"\\x([0-9A-Fa-f]{2})", lambda m: chr(int(m.group(1), 16)), t)
+    t = re.sub(r"\\[ntrvf]|`[ntrvf]", " ", t)                  # printf / echo -e / PowerShell escapes
+    t = re.sub(r"[\'\"`\\]", "", t)
+    return " ".join(_expand_braces(w) for w in t.split())
+
+
+_BRACE = re.compile(r"\{([^{}]*,[^{}]*)\}")
+
+
+def _expand_braces(word: str, depth: int = 0) -> str:
+    """Single-level brace expansion, as bash does it: a{b,c}d -> abd acd."""
+    m = _BRACE.search(word)
+    if not m or depth > 4:
+        return word
+    pre, post = word[:m.start()], word[m.end():]
+    return " ".join(_expand_braces(pre + alt + post, depth + 1) for alt in m.group(1).split(","))
 
 
 def text_shows_target(text: str) -> bool:

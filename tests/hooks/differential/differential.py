@@ -264,7 +264,7 @@ def run_statement_oracle(size: int = CI_SIZE_SHELL, seed: int = 1780, cases_dir=
                 continue
             req = [h for h in harms if h[0].severity == "requirement"]
             h, shell, program, argv, exact = (req or harms)[0]
-            sev = h.severity if exact else h.severity + "-approx"
+            sev = h.severity if exact and ":approx" not in t.recipe else h.severity + "-approx"
             for tool in passed:
                 failures.append({"tool": tool, "mode": mode, "command": t.text, "recipe": t.recipe, "core": t.core,
                                  "cause": h.cause, "severity": sev, "detail": h.detail, "started_under": shell,
@@ -296,7 +296,8 @@ def run_statement_oracle(size: int = CI_SIZE_SHELL, seed: int = 1780, cases_dir=
 
 
 def _confirm_shell(lab, failures: list) -> list:
-    """A failure seen only under the batched pwsh run is re-run in a fresh ``pwsh -Command``."""
+    """A failure seen only under pwsh is re-run once more in a fresh ``pwsh -Command`` (a check that the
+    start is reproducible, not a timing accident)."""
     out = []
     cache = {}
     for f in failures:
@@ -372,9 +373,94 @@ def run_timing_oracle(lengths=CI_TIMING_LENGTHS, modes=("shakedown",), seed: int
         sandbox.cleanup()
 
 
+CI_RAW_LENGTHS = (200_000,)
+LONG_RAW_LENGTHS = (1_000_000, 10_000_000, 30_000_000)
+
+
+def run_raw_timing_oracle(lengths=CI_RAW_LENGTHS, seed: int = 0, cases_dir=None, workers: int = 2) -> dict:
+    """Raw text far above the caps: the hook must answer inside its registered timeout."""
+    import gen_timing
+    from _harness import run_hook
+    import concurrent.futures as cf
+    t0 = time.monotonic()
+    timeout = gen_timing.registered_timeout()
+    sandbox = Sandbox()
+    try:
+        texts = gen_timing.raw_generate(lengths)
+        jobs = [(tool, t["text"], "shakedown") for t in texts for tool in TOOLS]
+        meta = [t for t in texts for _ in TOOLS]
+        with cf.ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(lambda j: run_hook(sandbox, *j, timeout=timeout + 5), jobs))
+        rows, failures = [], []
+        for (tool, text, mode), t, res in zip(jobs, meta, results):
+            rows.append({"shape": t["shape"], "length": len(text), "tool": tool, "mode": mode, "exit": res.code,
+                         "seconds": round(res.seconds, 2)})
+            if res.code == "TIMEOUT" or res.seconds > timeout:
+                f = {"tool": tool, "mode": mode, "shape": t["shape"], "length": len(text), "seconds": round(res.seconds, 2),
+                     "hook_exit": res.code, "severity": "requirement", "cause": "over-timeout",
+                     "label": "timing-raw-over-timeout", "program": "ppds", "argv": [],
+                     "detail": f"{res.seconds:.1f} s > registered timeout {timeout} s",
+                     "recipe": f"gen_timing.raw_generate([{t['length']}]) shape {t['shape']}"}
+                # Very large texts are not written out; the recipe regenerates them.
+                f["command"] = text if len(text) <= 2_000_000 else f"<{len(text)} characters: see recipe>"
+                failures.append(f)
+        saved = _save_cases([f for f in failures if not f["command"].startswith("<")], cases_dir, "raw", sandbox, 2)
+        return {"oracle": "raw-timing", "lengths": list(lengths), "texts": len(texts), "hook_runs": len(jobs),
+                "registered_timeout": timeout, "seconds": {"total": round(time.monotonic() - t0, 1)},
+                "max_seconds": max((r["seconds"] for r in rows), default=0), "rows": rows,
+                "requirement_failures": len(failures), "groups": _summarise(failures, False),
+                "saved_cases": saved, "failures": failures}
+    finally:
+        sandbox.cleanup()
+
+
+def run_ordinary_oracle(limit=None, seed: int = 7, cases_dir=None) -> dict:
+    """The cost rule: with a listed environment and no shakedown, an ordinary command that starts no
+    stand-in and names no switch or target must pass."""
+    import gen_ordinary
+    from _shells import ShellLab, map_start
+    t0 = time.monotonic()
+    sandbox = Sandbox()
+    lab = ShellLab(sandbox)
+    try:
+        texts = gen_ordinary.generate(seed, limit)
+        bash, pwsh = lab.run_all([t for t, _ in texts])
+        jobs = [(tool, t, "gate-listed") for t, _ in texts for tool in TOOLS]
+        results = run_hooks(sandbox, jobs)
+        failures, stats = [], collections.Counter()
+        for i, (text, recipe) in enumerate(texts):
+            started = [s for r in bash[i] + pwsh[i] for s in map_start(r)]
+            named = _truth.text_shows_target(text)
+            for j, tool in enumerate(TOOLS):
+                res = results[2 * i + j]
+                stats["runs"] += 1
+                if started:
+                    stats["standin_started"] += 1
+                    continue
+                if _blocked(res):
+                    if named:
+                        stats["refused_names_target"] += 1
+                        continue
+                    stats["refused"] += 1
+                    failures.append({"tool": tool, "mode": "gate-listed", "command": text, "recipe": recipe,
+                                     "cause": "cost-rule", "severity": "requirement", "label": "cost-rule-false-block",
+                                     "detail": (res.stderr.strip().splitlines() or [""])[0][:160],
+                                     "hook_exit": res.code, "program": "", "argv": []})
+                else:
+                    stats["passed"] += 1
+        saved = _save_cases(failures, cases_dir, "ordinary", sandbox, per_group=200)
+        by_template = collections.Counter(f["recipe"].split(":", 2)[2] for f in failures)
+        return {"oracle": "ordinary", "texts": len(texts), "hook_runs": len(jobs),
+                "seconds": {"total": round(time.monotonic() - t0, 1)}, "stats": dict(stats),
+                "requirement_failures": len(failures), "by_template": dict(by_template.most_common()),
+                "groups": _summarise(failures, False), "saved_cases": saved, "failures": failures}
+    finally:
+        sandbox.cleanup()
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("oracle", choices=("args", "shell", "timing"))
+    ap.add_argument("oracle", choices=("args", "shell", "timing", "raw", "ordinary"))
     ap.add_argument("--size", type=int)
     ap.add_argument("--long", action="store_true", help="the larger corpus for a long run")
     ap.add_argument("--seed", type=int)
@@ -385,6 +471,10 @@ def main(argv=None) -> int:
     if a.oracle == "args":
         size = a.size or (LONG_SIZE_ARGS if a.long else CI_SIZE_ARGS)
         rep = run_argument_oracle(size, a.seed if a.seed is not None else 1814, a.cases, a.strict)
+    elif a.oracle == "raw":
+        rep = run_raw_timing_oracle(LONG_RAW_LENGTHS if a.long else CI_RAW_LENGTHS, 0, a.cases)
+    elif a.oracle == "ordinary":
+        rep = run_ordinary_oracle(None, a.seed if a.seed is not None else 7, a.cases)
     elif a.oracle == "timing":
         rep = run_timing_oracle(LONG_TIMING_LENGTHS if a.long else CI_TIMING_LENGTHS,
                                 ("shakedown", "gate-unlisted") if a.long else ("shakedown",),

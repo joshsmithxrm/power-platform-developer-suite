@@ -109,3 +109,19 @@ def valid_in_both_shells(text: str) -> tuple:
             p = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-File", str(ps1), str(f)],
                                capture_output=True, timeout=120).returncode == 0
         return b, p
+
+
+# Raw text far above the hook's caps: tens of millions of one character (or a short unit), with and
+# without a mention in front. Property: an answer inside the registered timeout.
+RAW_UNITS = ("'", '"', "(", "{", "a", "\\", "$", "`", ";", " ", "a ", "ppds ", "\"a\" ", "$(")
+
+
+def raw_generate(lengths) -> list:
+    out = []
+    for unit in RAW_UNITS:
+        for length in lengths:
+            body = unit * max(1, length // len(unit))
+            out.append({"shape": f"raw{unit!r}", "length": length, "text": body})
+            out.append({"shape": f"raw{unit!r}+mention", "length": length,
+                        "text": "ppds data delete --entity account ; " + body})
+    return out

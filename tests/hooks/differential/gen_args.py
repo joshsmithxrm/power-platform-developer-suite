@@ -80,6 +80,13 @@ SQL_WRAPS = [
     lambda s: "SELECT 1" + s,          # glued to a digit
     lambda s: "SELECT 1." + s,         # glued to a float
     lambda s: "SELECT 0x1" + s,        # glued to a binary literal
+    lambda s: "SELECT 1e" + s,         # glued to a numeric literal with an exponent marker
+    lambda s: "SELECT 1E" + s,
+    lambda s: "SELECT 1.e" + s,
+    lambda s: "SELECT 1.5e" + s,
+    lambda s: "SELECT .5e" + s,
+    lambda s: "SELECT 1e5" + s,
+    lambda s: "SELECT 1.5E+" + s,
     lambda s: "SELECT 'a'" + s,        # glued to a string
     lambda s: "SELECT [a]" + s,        # glued to a bracketed name
     lambda s: "SELECT 1 AS a " + s,  # no-break space
