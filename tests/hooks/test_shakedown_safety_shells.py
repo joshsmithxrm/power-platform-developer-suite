@@ -322,6 +322,11 @@ def test_an_internal_error_blocks_a_ppds_command(monkeypatch, tmp_path):
         raise RuntimeError("bug")
 
     monkeypatch.setattr(mod, "find_ppds_invocations", boom)
+    for name in ("PPDS_SHAKEDOWN", "PPDS_HOOK_BUDGET_SECONDS"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("PPDS_SAFE_ENVS", "some-other-env")
+    monkeypatch.setenv("PPDS_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     data = json.dumps(_payload("PowerShell", "ppds data delete", str(tmp_path))).encode()
     monkeypatch.setattr(mod.sys, "stdin", type("S", (), {"buffer": type("B", (), {"read": lambda self: data})()})())
     with pytest.raises(SystemExit) as exc:
