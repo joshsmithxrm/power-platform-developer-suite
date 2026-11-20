@@ -92,7 +92,7 @@ Before merging a PR that may incorporate outside work, apply the shared [contrib
 
 No-contribution work needs no invented source or identity and no extra approval. The offline validator (`scripts/ci/check_contributor_provenance.py`) checks supplied records, not semantic overlap or live state.
 
-The rules below apply to every merge, alongside the routes above. They are numbered so the pull request template and other documents can cite them. The rules for proof before merge are in [specs/test-gates.md](../specs/test-gates.md); the rules for decisions, triage and sessions are in [MAINTAINER-SESSION-RULES.md](MAINTAINER-SESSION-RULES.md).
+The rules below bind agent sessions that work for the maintainer (the coordinating session and its worker sessions). The merge routes above and the contributor process in [CONTRIBUTING.md](../CONTRIBUTING.md) are unchanged for everyone else. The rules are numbered so the pull request template and other documents can cite them. The rules for proof before merge are in [specs/test-gates.md](../specs/test-gates.md); the rules for decisions, triage and sessions are in [MAINTAINER-SESSION-RULES.md](MAINTAINER-SESSION-RULES.md).
 
 ### Review
 

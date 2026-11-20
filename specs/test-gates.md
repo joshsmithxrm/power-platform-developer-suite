@@ -39,7 +39,10 @@ the new hold does not revoke or cancel them.
 
 ## Proof before merge
 
-These rules say what must be observed before a pull request merges. They are
+These rules bind agent sessions that work for the maintainer (the coordinating
+session and its worker sessions); the contributor process in
+[CONTRIBUTING.md](../CONTRIBUTING.md) is unchanged for everyone else. They say
+what must be observed before such a session's pull request merges. They are
 separate from the suites above, which gate CI.
 
 | # | Rule |
