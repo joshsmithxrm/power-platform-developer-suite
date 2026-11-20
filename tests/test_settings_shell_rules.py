@@ -9,7 +9,8 @@ ask rule exists for both tools with the same command, each tool's rules use
 one suffix form, the environment hook is registered for both tool names as
 a `command` hook, and nothing turns the hooks off (`disableAllHooks`). The
 hook process itself handles both tool names; that is tested in
-tests/hooks/ (every case runs with `tool_name` Bash and PowerShell).
+tests/hooks/ (the decision tests run each case with `tool_name` Bash and
+PowerShell; some process-level cases, such as payload shapes, use one).
 
 What they do not prove: that Claude Code enforces a rule or runs the hook
 for the PowerShell tool. No automated test here can observe the app's
@@ -58,7 +59,7 @@ def unmirrored(rules: list) -> list:
 
 
 def _forms(rules: list) -> dict:
-    """Rule suffix form per tool: {"Bash": {":*"}, "PowerShell": {" *"}}."""
+    """Rule suffix forms per tool, e.g. {"Bash": {":*"}, "PowerShell": {":*"}}."""
     out = {}
     for rule in rules:
         m = _RULE_RE.match(rule)
@@ -78,8 +79,9 @@ def test_every_rule_exists_for_both_shell_tools(section):
 
 @pytest.mark.parametrize("section", ["deny", "ask"])
 def test_one_suffix_form_per_tool(section):
-    """Every rule for a tool uses one suffix form (`:*` for Bash, ` *` for
-    PowerShell). Whether Claude Code enforces that form is not tested here."""
+    """Every rule for a tool uses one suffix form (`:*` or ` *`; the checked-in
+    rules use `:*` for both tools). Whether Claude Code enforces that form is
+    not tested here."""
     forms = _forms(_settings()["permissions"][section])
     for tool in SHELL_TOOLS:
         assert len(forms.get(tool, set())) == 1, f"{section}: mixed rule forms for {tool}: {forms}"

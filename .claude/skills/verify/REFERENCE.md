@@ -24,22 +24,37 @@ by program name (a path ending in `ppds` counts) or through `dotnet`
   rules and with POSIX rules whatever the tool, and every mention of
   `ppds`, `dotnet` or `dnx` the readings cannot place in a word counts as
   an invocation with an unknown verb.
-- **Caps.** Past any cap a command is treated as an unreadable invocation,
-  mention or not, and both gates refuse it: 200,000 characters, nesting 8
-  levels deep, 4,000,000 characters of reading work, 3.5 seconds (a
-  watchdog refuses at 4.5), 500 words naming a guarded program per reading,
-  400 arguments per invocation, and in the original matcher 500 `ppds` or
-  `dotnet` words with 400 tokens / 4,096 characters after each. The full
-  list is in `docs/SAFE-SHAKEDOWN.md`.
-- **Only recognised shapes pass.** What the hook cannot place is refused:
-  a response file, an argument only known at run time, an option bundle
-  that may hold `-e` / `-p`, a target it cannot resolve. With an allowlist,
-  every `--environment` / `--profile` value (any delimiter) and every
-  `PPDS_` variable that can move the target is checked, not only the
-  active env.
+- **Caps.** A command longer than 200,000 characters is not read: it is
+  refused when it names a guarded program, a shell or a code word, or holds
+  an escape that can spell one (and, during a shakedown or with an unlisted
+  active env, run-time text such as `$X`); otherwise it passes. Past any
+  other cap (nesting 8 levels deep, 4,000,000 characters of reading work,
+  3.5 seconds with a watchdog at 4.5, 500 words naming a guarded program
+  per reading, 400 arguments per invocation, and in the original matcher
+  500 `ppds` or `dotnet` words with 400 tokens / 4,096 characters after
+  each) a command is an unreadable invocation, mention or not: refused
+  during a shakedown and with an unlisted active env; with a listed active
+  env only when the text names a switch or a target. The full list is in
+  `docs/SAFE-SHAKEDOWN.md`.
+- **What the hook cannot place.** A response file, an argument only known
+  at run time, an option bundle that may hold `-e` / `-p`, a mention it
+  cannot place: refused during a shakedown and with an unlisted active env.
+  With a listed active env and no shakedown, refused only when the text
+  names a switch (`env` / `org` / `auth` with `select` / `switch` / `use`)
+  or a target option (`--environment`, `--profile` and kin) anywhere;
+  `ppds @file` is refused in every mode. Every `--environment` /
+  `--profile` value the hook places (any delimiter), every `PPDS_` variable
+  that can move the target and a home-folder override (`HOME=`) are
+  checked, not only the active env.
+- **A guard against mistakes, not containment.** The hook reads text. With
+  a listed active env it does not see a target in a script file, in a
+  response file given to a program it could not identify, or in words
+  built at run time.
 - **Mentions count.** A commit message, pull request body or search pattern
-  that mentions `ppds` is treated as an invocation when a gate applies; pass
-  long text through a file (`git commit -F`, `gh pr create --body-file`).
+  that mentions `ppds` is a guessed invocation: refused during a shakedown
+  and with an unlisted active env, and with a listed one when the text also
+  names a switch or a target; pass long text through a file
+  (`git commit -F`, `gh pr create --body-file`).
 
 - **Env allowlist (opt-in).** Off until a list names an env. The hook reads,
   first match wins: `$PPDS_SAFE_ENVS` (comma-separated, read from the

@@ -148,15 +148,50 @@ def test_no_allowlist_and_no_shakedown_passes_everything(env_for, command):
 
 @pytest.mark.parametrize("tool", ["Bash", "PowerShell"])
 @pytest.mark.parametrize("command", [
-    "Write-Output " + "a" * 200_050 + "; git status",
-    "echo " + "a" * 200_050,
     "echo " + "$(" * 10 + "git status" + ")" * 10,
-], ids=["length-ps", "length-posix", "depth"])
+], ids=["depth"])
 def test_past_a_cap_is_an_invocation_without_a_mention(env_for, tool, command):
     r = _run(_payload(tool, command), env_for("shakedown"))
     assert r.returncode == 2, r.stderr
     r = _run(_payload(tool, command), env_for("gate"))
     assert r.returncode == 2, r.stderr
+
+
+# Above the length cap the hook does not read the text; constant-cost checks
+# decide: a program name or a letter escape refuses in every gated mode,
+# run-time text refuses during a shakedown and with an unlisted active env.
+_LONG = "a" * 200_050
+
+
+@pytest.mark.parametrize("tool", ["Bash", "PowerShell"])
+@pytest.mark.parametrize("command,shakedown,gate,listed", [
+    ("Write-Output " + _LONG + "; git status", 0, 0, 0),
+    ("echo " + _LONG, 0, 0, 0),
+    ("echo " + _LONG + "; ppds data delete --entity account", 2, 2, 2),
+    ("echo " + _LONG + "; p'p'd's env list", 2, 2, 2),
+    ("echo " + _LONG + "; bash -c x", 2, 2, 2),
+    ("echo " + _LONG + "; Invoke-Expression $c", 2, 2, 2),
+    ("echo " + _LONG + "; $'\\x70pds' env list", 2, 2, 2),
+    ("echo " + _LONG + "; $X data delete", 2, 2, 0),
+    ("echo " + _LONG + "; `$x` data delete", 2, 2, 0),
+], ids=["ps-plain", "posix-plain", "names-ppds", "quoted-name", "shell", "code-word", "escape",
+        "run-time", "backtick"])
+def test_past_the_length_cap(env_for, tool, command, shakedown, gate, listed):
+    for mode, expected in (("shakedown", shakedown), ("gate", gate), ("safe", listed)):
+        r = _run(_payload(tool, command), env_for(mode))
+        assert r.returncode == expected, (mode, r.stderr)
+        if expected:
+            assert b"longer than the hook reads" in r.stderr
+
+
+@pytest.mark.parametrize("tool", ["Bash", "PowerShell"])
+def test_far_past_the_length_cap_answers_in_time(env_for, tool):
+    command = "git status " + "'" * 20_000_000
+    t = time.monotonic()
+    r = _run(_payload(tool, command), env_for("safe"))
+    assert r.returncode == 0, r.stderr
+    # well inside the registered 10 s (about 1 s on an idle Linux machine)
+    assert time.monotonic() - t < 8
 
 
 @pytest.mark.parametrize("tool", ["Bash", "PowerShell"])
@@ -299,3 +334,16 @@ def test_a_failing_stdin_read_refuses(env_for, mode):
 def test_an_internal_error_with_the_gate_off_passes(env_for):
     r = _with_failing_reader(_payload("Bash", f"ppds {DEL}"), env_for("off"))
     assert r.returncode == 0, r.stderr
+
+
+@pytest.mark.parametrize("missing", ["_shellparse.py", "_pathfix.py"])
+def test_a_hook_copy_without_its_helpers_refuses(env_for, tmp_path, missing):
+    # the helper imports sit inside the guard: a missing helper is exit 2, not 1
+    copy = tmp_path / "hooks"
+    copy.mkdir()
+    for name in ("shakedown-safety.py", "_shellparse.py", "_pathfix.py"):
+        if name != missing:
+            (copy / name).write_bytes((HOOK_PATH.parent / name).read_bytes())
+    r = _run(_payload("Bash", "ppds env list"), env_for("safe"), argv=[sys.executable, str(copy / "shakedown-safety.py")])
+    assert r.returncode == 2, r.stderr
+    assert b"could not load its helper modules" in r.stderr

@@ -1012,10 +1012,12 @@ class TestDotnetHostForms:
         if "--profile x" in argv:
             # a profile the store does not have: its environment is not known
             assert "Problem:   --profile x: profile 'x' is not in the profile store" in r.stderr
-            assert f"Command:   {argv}\n" in r.stderr
+            assert f"Command:   {argv}\n" in r.stderr or f"  (read as: {argv})\n" in r.stderr
             return
         assert self.ENV_BLOCK in r.stderr
-        assert f"Command:    {argv}\n" in r.stderr
+        # a `dotnet run` reading shows the words as written, then the reading
+        assert f"Command:    {argv}\n" in r.stderr or (
+            "Command:    dotnet run " in r.stderr and f"  (read as: {argv})\n" in r.stderr)
 
     @pytest.mark.parametrize("cmd", [c for i, c, _ in DOTNET_HOST_FORMS if i in (
         "run-project-dir", "run-no-separator", "run-mcp", "exec-dll", "cd-then-run", "tool-run")])

@@ -119,7 +119,10 @@ def test_unknown_commands_are_blocked(text):
 
 
 @pytest.mark.parametrize("text,blocked", [
-    ("query sql SELECT name FROM account", False),
+    # unquoted, the SQL is four arguments; the CLI takes one SQL text, so the
+    # hook cannot place it (the quoted form passes: test_sql_that_only_reads_passes)
+    ("query sql SELECT name FROM account", True),
+    ("query sql SELECT", False),
     ("query sql DELETE FROM account", True),
     ("query sql UPDATE account SET name = 'x'", True),
     ("query sql INSERT INTO account (name) VALUES ('x')", True),

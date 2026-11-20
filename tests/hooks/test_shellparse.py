@@ -377,3 +377,36 @@ def test_a_wrapper_says_whether_its_code_is_in_the_text(text, dialect, code_arg)
 def test_a_here_string_into_a_shell_is_flagged():
     stmt = sp.read('sh <<< "$c"', "posix").statements[-1]
     assert stmt.wrapper == "sh" and stmt.stdin_text
+
+
+@pytest.mark.parametrize("text", [
+    "env FOO=1 bash <<'EOF'\nppds env list\nEOF",
+    "FOO=1 bash <<'EOF'\nppds env list\nEOF",
+    "timeout 5 sh <<EOF\nppds env list\nEOF",
+])
+def test_a_here_document_fed_to_a_shell_after_a_prefix_is_code(text):
+    # the shell is not the first word: the reader must still take the
+    # here-document as code (`first_code or self.shell is not None`)
+    statements = sp.read(text, "posix").statements
+    body = [st for st in statements if st.texts == ["ppds", "env", "list"]]
+    assert body and all(st.code for st in body)
+    assert not any(st.stdin_text for st in statements)
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("xargs -n 4 git push", [(3, True)]),
+    ("xargs -n4 -P 2 git push", [(4, True)]),
+    ("xargs --max-args=4 git push", [(2, True)]),
+    ("xargs -I {} git push {}", [(3, True)]),
+    ("timeout 5 git push", [(2, False)]),
+    ("timeout -s KILL 5 git push", [(4, False)]),
+    ("sudo -u me git push", [(3, False)]),
+    ("nice -n 5 git push", [(3, False)]),
+    ("find . -name x -exec git add {} ;", [(5, True)]),
+    # an option the reader does not know: every later word may be the program
+    ("xargs --frob 4 git push", [(2, True), (3, True), (4, True)]),
+    ("parallel -j 4 git push", [(1, True), (2, True), (3, True), (4, True)]),
+])
+def test_prefix_options_and_operands_are_read(text, expected):
+    stmt = sp.read(text, "posix").statements[-1]
+    assert sp.command_positions(stmt) == expected

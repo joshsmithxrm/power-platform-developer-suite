@@ -9,8 +9,9 @@ messages that mention the product name, ``dotnet build`` and ``dotnet test``.
 The rule: an invocation the hook cannot fully place is refused in that mode
 only when the command text names a switch (``env`` / ``org`` / ``auth`` with
 ``select`` / ``switch`` / ``use``) or a target option (``--environment``,
-``-env``, ``--profile``, ``-p`` in a text that mentions ``ppds``,
-``--allowed-env``, a ``PPDS_`` variable that moves the target).
+``-env``, ``--profile``, ``--allowed-env``, anywhere in the text, also
+inside an assignment or next to an escape; ``-p`` and ``-e`` do not count),
+or sets a ``PPDS_`` variable that moves the target.
 
 The second half pins the other side of that rule: the same unreadable shapes
 are refused when the text names a switch or a target, fully placed
@@ -191,11 +192,89 @@ ORDINARY = [
     ("ps-rg", PS, 'rg -n "ppds-mcp-server" docs'),
     ("ps-here-string-commit", PS, 'git commit -m @"\nfix: the ppds hook reads both shells\n"@'),
     ("ps-here-string-var", PS, "$msg = @'\ndocs: the ppds CLI\n'@; git commit -m $msg"),
+    # The product name followed by option-looking words of another program.
+    ("grep-name-bundle", BASH, "grep ppds -rE docs"),
+    ("grep-name-include", BASH, "grep ppds -rn --include=*.md ."),
+    ("grep-name-e", BASH, "grep -rn ppds docs -e other"),
+    ("grep-e-name", BASH, "grep -e ppds README.md"),
+    ("git-log-s-p", BASH, "git log -S ppds -p"),
+    ("git-log-grep-p", BASH, "git log --grep ppds -p -3"),
+    ("git-grep-name", BASH, "git grep -n ppds -- '*.md'"),
+    ("rg-name-type", BASH, "rg ppds -t md -C 2 docs"),
+    ("fd-name-ext", BASH, "fd ppds -e md"),
+    ("find-name", BASH, "find . -name 'ppds*' -type f -print"),
+    ("which-name", BASH, "which ppds"),
+    ("command-v-name", BASH, "command -v ppds"),
+    ("type-a-name", BASH, "type -a ppds"),
+    ("ls-name-glob", BASH, "ls -la ppds*"),
+    ("tar-name", BASH, "tar -tzvf ppds.tar.gz -C /tmp"),
+    ("zip-name", BASH, "zip -r ppds.zip ppds -x '*.log'"),
+    ("npm-ls-name", BASH, "npm ls ppds -g --depth 0"),
+    ("tool-list-grep", BASH, "dotnet tool list -g | grep -i ppds"),
+    ("tool-update", BASH, "dotnet tool update -g PPDS.Cli --prerelease"),
+    ("echo-bundle-prose", BASH, 'echo "ppds -vp x reads as a bundle"'),
+    ("commit-short-p", BASH, 'git commit -m "fix: ppds -p handling in the hook"'),
+    ("commit-short-e", BASH, 'git commit -m "docs: ppds data schema -e is --entities"'),
+    ("commit-config-dir", BASH, 'git commit -m "docs: explain PPDS_CONFIG_DIR for ppds profiles"'),
+    ("grep-config-dir", BASH, 'grep -rn "PPDS_CONFIG_DIR" src/ docs/ | grep -v ppds'),
+    ("rsync-e-ssh", BASH, "rsync -e ssh -a src/PPDS.Cli/ backup/"),
+    ("sed-e-name", BASH, "sed -n -e '/ppds/p' README.md"),
+    ("cp-p-name", BASH, "cp -p src/PPDS.Cli/appsettings.json artifacts/"),
+    ("diff-p-name", BASH, "git diff -p -- src/PPDS.Cli"),
+    ("docker-name", BASH, "docker ps --filter name=ppds -q"),
+    ("docker-logs-name", BASH, "docker logs ppds -f --tail 50"),
+    # Process and service commands that take the product name.
+    ("pgrep-name", BASH, "pgrep -fl ppds"),
+    ("pkill-name", BASH, "pkill -f ppds -e"),
+    ("killall-name", BASH, "killall ppds -v"),
+    ("ps-grep-name", BASH, "ps -ef | grep ppds"),
+    ("ps-grep-mcp", BASH, "ps aux | grep -i ppds-mcp-server"),
+    ("pidof-name", BASH, "pidof ppds -s"),
+    ("systemctl-name", BASH, "systemctl status ppds --no-pager -l"),
+    ("journalctl-name", BASH, "journalctl -u ppds -e -n 50"),
+    ("lsof-name", BASH, "lsof -c ppds -a -i"),
+    ("taskkill-name", BASH, "taskkill /IM ppds.exe /F"),
+    ("tasklist-name", BASH, 'tasklist /FI "IMAGENAME eq ppds.exe"'),
+    ("ps-get-process", PS, "Get-Process ppds -ErrorAction SilentlyContinue"),
+    ("ps-get-process-name", PS, "Get-Process -Name ppds* -ErrorAction Ignore | Select-Object Id, Path"),
+    ("ps-stop-process", PS, "Stop-Process -Name ppds -Force"),
+    ("ps-stop-pipeline", PS, "Get-Process -Name ppds -ErrorAction SilentlyContinue | Stop-Process -Force"),
+    ("ps-wait-process", PS, "Wait-Process -Name ppds -Timeout 30 -ErrorAction SilentlyContinue"),
+    ("ps-get-service", PS, "Get-Service ppds -ErrorAction SilentlyContinue"),
+    ("ps-get-command", PS, "Get-Command ppds -ErrorAction SilentlyContinue"),
+    ("ps-get-command-all", PS, "Get-Command ppds -All | Format-List Source"),
+    ("ps-where-exe", PS, "where.exe ppds"),
+    ("ps-test-path", PS, "Test-Path ppds -PathType Leaf"),
+    ("ps-get-item", PS, "Get-Item ppds -ErrorAction Ignore"),
+    ("ps-remove-item", PS, "Remove-Item ppds -Recurse -ErrorAction SilentlyContinue"),
+    ("ps-gci-name", PS, "Get-ChildItem ppds* -Recurse -File"),
+    ("ps-gci-filter", PS, "Get-ChildItem -Path src -Recurse -Filter *ppds* -ErrorAction SilentlyContinue"),
+    ("ps-select-string-path", PS, "Select-String -Pattern 'ppds' -Path docs\\*.md"),
+    ("ps-select-string-context", PS, "Select-String ppds -Path docs\\*.md -Context 2"),
+    ("ps-get-content-sls", PS, "Get-Content README.md | Select-String ppds -SimpleMatch"),
+    ("ps-write-host-color", PS, 'Write-Host "ppds" -ForegroundColor Green'),
+    ("ps-write-output-name", PS, "Write-Output ppds -NoEnumerate"),
+    ("ps-tcp-owning", PS, "Get-NetTCPConnection -OwningProcess (Get-Process ppds).Id -ErrorAction Ignore"),
+    ("ps-sc-query", PS, "sc.exe query ppds"),
+    ("ps-taskkill", PS, "taskkill /IM ppds-mcp-server.exe /F /T"),
+    ("ps-tool-list", PS, "dotnet tool list -g | Select-String ppds"),
+    ("ps-commit-e", PS, 'git commit -m "docs: ppds metadata key create -e account"'),
+    ("ps-log-s", PS, "git log -S ppds -p -2"),
+    # Placed commands whose `-e` is --entity / --entities and whose `-p` is
+    # --password: the command path decides, the letter names no target.
+    ("schema-e-entities", BASH, "ppds data schema -e account,contact -o schema.xml"),
+    ("delete-e-entity", BASH, "ppds data delete -e account --filter \"name eq 'x'\" --dry-run"),
+    ("truncate-e-entity", BASH, "ppds data truncate -e new_scratch --dry-run"),
+    ("attribute-e-entity", BASH, "ppds metadata attribute delete -e account --name new_x --dry-run"),
+    ("entity-e-entity", BASH, "ppds metadata entity list-statusreasons -e account"),
+    ("auth-create-p-password", BASH, "ppds auth create --name dev -un someone -p secret"),
+    ("ps-schema-e", PS, "ppds data schema -e account -o schema.xml"),
+    ("ps-key-e", PS, "ppds metadata key reactivate -e account --name new_key"),
 ]
 
 
 def test_ordinary_corpus_is_large_enough():
-    assert len(ORDINARY) >= 70
+    assert len(ORDINARY) >= 150
     assert len({case[0] for case in ORDINARY}) == len(ORDINARY)
     assert {tool for _, tool, _ in ORDINARY} == {BASH, PS}
 
@@ -220,7 +299,6 @@ NAMES_TARGET = [
     ("xargs-auth-switch", BASH, "echo auth switch other | xargs ppds"),
     ("xargs-profile", BASH, "echo data list --profile other | xargs ppds"),
     ("xargs-profile-equals", BASH, "echo data list --profile=other | xargs ppds"),
-    ("xargs-short-profile", BASH, "echo data list -p other | xargs ppds"),
     ("xargs-env-colon", BASH, "echo data list -env:zz-prod | xargs ppds"),
     ("var-program-env", BASH, "$P data delete --entity account --environment zz-prod"),
     ("runner-var-switch", BASH, "timeout 5 `echo ppds` env select --environment zz-prod"),
@@ -257,6 +335,18 @@ NAMES_TARGET = [
     ("ps-call-var-profile", PS, "& $exe data delete --entity account --profile other"),
     ("ps-scriptblock-switch", PS, "$c = 'env select zz-prod'; Invoke-Expression \"ppds $c\""),
     ("unplaced-mention-profile", BASH, 'git commit -m "ppds\'s data list --profile other"'),
+    # `xargs` and `parallel` with options of their own before the program.
+    ("xargs-n-switch", BASH, "echo env select --environment zz-prod | xargs -n 4 ppds"),
+    ("xargs-L-switch", BASH, "echo env select --environment zz-prod | xargs -L 1 ppds"),
+    ("xargs-P-n-switch", BASH, "echo env select --environment zz-prod | xargs -P 2 -n 4 ppds"),
+    ("xargs-unknown-option", BASH, "echo env select zz-prod | xargs --frobnicate 4 ppds"),
+    ("parallel-switch", BASH, "echo env select zz-prod | parallel -j 4 ppds"),
+    # Target words in the text that are not whole words of their own.
+    ("printf-newlines", BASH, "printf 'env\\nselect\\n--environment\\nzz-prod\\n' | xargs ppds"),
+    ("printf-tabs", BASH, "printf 'org\\tuse\\tzz-prod' | xargs ppds"),
+    ("assigned-option", BASH, "E=--environment; ppds data export $E zz-prod"),
+    ("assigned-switch-words", BASH, "A=env B=select; echo $A $B zz-prod | xargs ppds"),
+    ("ps-backtick-newline", PS, "Write-Output \"env`nselect`nzz-prod\" | ForEach-Object { ppds $_ }"),
 ]
 
 
@@ -319,6 +409,7 @@ def test_placed_listed_targets_pass_with_a_listed_env(run, command):
 # and during a shakedown, with no switch or target in the text.
 STRICT = [
     (BASH, "echo data list | xargs ppds"),
+    (BASH, "echo data list -p other | xargs ppds"),   # a bare -p is not a target in the text
     (BASH, "ppds data delete --entity $E"),
     (BASH, "$P @args.rsp"),
     (BASH, 'git commit -m "ppds\'s hook"'),
@@ -360,3 +451,99 @@ def test_profile_whose_environment_is_listed_passes(run):
     store = _profiles(active_name="anything", env_name="zz-dev")
     rc, err = run(BASH, "ppds data list", LISTED, profiles=store)
     assert rc == 0, err
+
+
+# During a shakedown, `xargs` / `parallel` options do not hide the program:
+# the words it gets from elsewhere are unknown, so it counts as a write.
+SHAKEDOWN_WRITES = [
+    "echo --update | xargs -n 1 ppds version",
+    "echo truncate --entity account --force | xargs -n 9 ppds data",
+    "xargs -L 1 ppds data < commands.txt",
+    "echo delete | parallel -j 4 ppds data",
+    "echo delete | xargs -I {} ppds data {} --entity account",
+]
+
+
+@pytest.mark.parametrize("command", SHAKEDOWN_WRITES)
+def test_xargs_options_do_not_hide_a_write_during_a_shakedown(run, command):
+    for tool in (BASH, PS):
+        rc, err = run(tool, command, SHAKEDOWN)
+        assert rc == 2, err
+
+
+# A shell given code behind a wrapper the reader does not know: the code
+# must be read or the command refused while a gate applies.
+UNKNOWN_WRAPPERS = [
+    "setsid bash -c '$x data delete --entity account'",
+    "xvfb-run -a bash -c '$x data delete --entity account'",
+    "winpty bash -c '$x data delete --entity account'",
+    "chroot / bash -c '$x data delete --entity account'",
+    "flock /tmp/l bash -c '$x data delete --entity account'",
+    "busybox sh -c '$x data delete --entity account'",
+    "ssh host '$x data delete --entity account'",
+    "cat s.sh | setsid bash",
+    "unknown-wrapper -q 5 pwsh -Command '& $x data delete --entity account'",
+]
+
+
+@pytest.mark.parametrize("command", UNKNOWN_WRAPPERS)
+def test_a_shell_behind_an_unknown_wrapper_is_refused_in_the_strict_modes(run, command):
+    for tool in (BASH, PS):
+        for mode in (UNLISTED, SHAKEDOWN):
+            rc, err = run(tool, command, mode)
+            assert rc == 2, f"{mode}: {err}"
+
+
+@pytest.mark.parametrize("command", [
+    "setsid bash -c 'ppds env list'",
+    "xvfb-run -a bash -c 'ppds data export --entity account'",
+])
+def test_code_behind_a_known_wrapper_is_read_during_a_shakedown(run, command):
+    rc, err = run(BASH, command, SHAKEDOWN)
+    assert rc == 0, err
+
+
+# A home-folder override in front of the CLI moves the profile store, like
+# PPDS_CONFIG_DIR: refused with a listed active env.
+@pytest.mark.parametrize("command", [
+    "HOME=/tmp/x ppds env who",
+    "env HOME=/tmp/x ppds data list",
+    "export HOME=/tmp/x; ppds data list",
+    "$env:USERPROFILE = 'C:\\x'; ppds data list",
+    "$env:LOCALAPPDATA='C:\\x'; ppds env who",
+    "[Environment]::SetEnvironmentVariable('HOME', '/tmp/x'); ppds env who",
+    "HOME=/tmp/x ppds-mcp-server --read-only",
+    "export HOME=/tmp/x; ppds-mcp-server --read-only",
+    "env HOME=/tmp/x ppds-mcp-server --read-only",
+])
+def test_a_home_folder_override_is_refused(run, command):
+    for tool in (BASH, PS):
+        rc, err = run(tool, command, LISTED)
+        assert rc == 2, err
+        assert "profile store" in err
+
+
+@pytest.mark.parametrize("command", [
+    "cd $HOME/src && ppds data list",
+    "echo $HOME; ppds env who",
+    "ls $env:USERPROFILE; ppds env who",
+])
+def test_reading_the_home_folder_passes(run, command):
+    rc, err = run(BASH, command, LISTED)
+    assert rc == 0, err
+
+
+# On a placed invocation `-e` and `-p` are read by command path.
+@pytest.mark.parametrize("command,expected", [
+    ("ppds data schema -e account -o s.xml", 0),
+    ("ppds auth create --name x -p secret", 0),
+    ("ppds solutions list -e zz-prod", 2),          # -e is --environment there
+    ("ppds solutions list -e zz-dev", 0),
+    ("ppds data export -p other", 2),               # -p is --profile there
+    ("ppds data schema -e account -p other", 2),
+    ("ppds data schema -e account --environment zz-prod", 2),
+])
+def test_short_options_are_read_by_command_path(run, command, expected):
+    for tool in (BASH, PS):
+        rc, err = run(tool, command, LISTED)
+        assert rc == expected, err

@@ -65,26 +65,36 @@ level (what one invocation does). Everything else is refused (exit 2).
 - **With a listed active env and no shakedown, such an invocation is
   refused only when the command text names a switch or a target.** A
   switch is one of `env`, `org` or `auth` together with one of `select`,
-  `switch` or `use` (as separate words, any case, also with quoting
-  characters inside them, and also inside an encoded PowerShell command,
-  `-EncodedCommand`). A target is `--environment`, `-env`, `--env`,
-  `--source-env` / `-se`, `--target-env` / `-te`, `--profile`,
-  `--source-profile` / `-sp`, `--target-profile` / `-tp` or
-  `--allowed-env` anywhere in the text (alone, or with `=` / `:` and a
-  value), or `-p` / `-e` in a text that mentions `ppds`. A `PPDS_`
-  variable that moves the target is refused separately, in every mode
-  (Concern 1, step 5). Otherwise the invocation passes, as the listed
-  active env would let any other command pass, so ordinary work (a script
-  run through a shell, `find -exec`, `eval`, a runner with a variable, a
-  PowerShell pipeline, a commit message that mentions `ppds`) is not
-  refused. An invocation the hook placed in full keeps every exact check
-  below: a switch to an unlisted target, a per-command target that is not
-  listed, and a response file (`ppds @file`) or a possible bundle of short
-  options in the arguments of a word naming `ppds` are refused whatever
-  else the text holds. The limit this
-  sets: with a listed active env, a target hidden where the text does not
-  show it (inside a response file, a variable, a script file, or words
-  built at run time) is not seen.
+  `switch` or `use` (as words of their own, split at blanks, quotes,
+  operators and `=`, any case, also with quoting characters inside them,
+  also separated by escapes such as `\n` or `` `n ``, and also inside an
+  encoded PowerShell command, `-EncodedCommand`). A target is
+  `--environment`, `-env`, `--env`, `--source-env` / `-se`, `--target-env`
+  / `-te`, `--profile`, `--source-profile` / `-sp`, `--target-profile` /
+  `-tp` or `--allowed-env` anywhere in the text where it is not joined to
+  another name character: alone, with `=` / `:` and a value, inside an
+  assignment (`E=--environment`) or between escapes
+  (`'\n--environment\n'`), but not `--env-file` or `x-env`. `-p` and `-e`
+  in the text do not count: most programs have them (`mkdir -p`,
+  `git log -p`, `grep -e`). A `PPDS_` variable the command sets, and a
+  home-folder override, are refused separately (Concern 1, step 5).
+  Otherwise the invocation passes, as the listed active env would let any
+  other command pass, so ordinary work (a script run through a shell,
+  `find -exec`, `eval`, a runner with a variable, a PowerShell pipeline, a
+  commit message or a search that mentions `ppds`, `Get-Process ppds
+  -ErrorAction SilentlyContinue`) is not refused. An invocation the hook
+  placed in full keeps every exact check below: a switch to an unlisted
+  target, a per-command target that is not listed (`-e` and `-p` read by
+  command path), and a response file (`ppds @file`) or a possible bundle
+  of short options after a word naming `ppds` where a program runs are
+  refused whatever else the text holds.
+- **With a listed active env this is a guard against mistakes, not
+  containment.** The hook reads text. It does not see a target in a script
+  file, in a response file given to a program it could not identify
+  (`$P @args.rsp`), in a variable set by an earlier command, or in words
+  built at run time (`$(printf %s -- --envi ronment)`), and with a listed
+  active env such an invocation passes. During a shakedown and with an
+  unlisted active env the strict reading above applies.
 - **A token that grants a pass must be positively placed.** `--dry-run`,
   `--read-only`, `--help`, `--list` and `--show` count only as the bare
   token in the place where the CLI's parser binds it as that flag: not as
@@ -99,7 +109,10 @@ level (what one invocation does). Everything else is refused (exit 2).
   profile store to a listed environment, and it names nothing else that can
   move the target (below).
 - **Bounded work.** Every loop over the input runs under the time budget,
-  and the work per input is capped. Past a cap the command is refused.
+  and the work per input is capped. Past a cap the command is an invocation
+  the hook could not read (refused as above); a command longer than the
+  length cap is not read at all and is decided by a few byte checks
+  (Caps, below).
 
 What passes, gate by gate, is listed under Concern 1 and Concern 2 below;
 anything not listed there is refused while that gate applies.
@@ -136,8 +149,21 @@ invocation of both programs whose verb is unknown.
   the words after it), `cmd /c`, `eval`, `Invoke-Expression` and
   `pwsh -EncodedCommand` (every spelling, `/enc` included) is also read as
   one joined text in that shell's rules. A program started by
-  `Start-Process`, `xargs`, `find -exec` and the like gets its arguments
-  from elsewhere, so its verb is unknown.
+  `Start-Process`, `xargs`, `parallel`, `find -exec` and the like gets its
+  arguments from elsewhere, so its verb is unknown. The options of `xargs`,
+  `env`, `sudo`, `doas`, `nice`, `timeout`, `stdbuf`, `setsid` and
+  `xvfb-run` are read with their values (`xargs -n 4 ppds`, `timeout -s
+  KILL 5 ppds`); an option of a prefix the reader does not know, and any
+  option of `parallel`, makes every later word a possible program whose
+  arguments come from elsewhere, and so does every word after a program
+  of that kind. A word naming `ppds` where no program runs (`grep ppds -rE
+  docs`, a string, a comment) is a mention: read as an invocation whose
+  options the hook cannot place.
+- A shell given code where the reader does not take it for a wrapper
+  (`chroot / bash -c ...`, `flock f sh -c ...`, a shell after a program
+  whose arguments come from elsewhere, a shell fed text with no script
+  named), and `ssh` with a remote command or fed text, are invocations the
+  hook could not read.
 - The same programs started through the .NET host, treated exactly like the
   direct program:
   - `dotnet run`, `dotnet watch run` or `dotnet watch` whose `--project`,
@@ -173,7 +199,9 @@ may block a command that is in fact read-only.
 **When the hook cannot tell, it counts as an invocation** of both programs,
 gated by the allowlist and, during a shakedown, refused unless its verb is
 known to be read-only; when its arguments could not be read in full it is
-refused by both gates, whatever the active env: a program only known when the command runs
+refused during a shakedown and with an unlisted (or unknown) active env,
+and with a listed active env only when the text names a switch or a target
+(The principle, above): a program only known when the command runs
 (`$x data list`, `& $exe ...`, `timeout 5 $x ...`, a brace or glob in the
 program name, `[scriptblock]::Create(...)`), code for a wrapper that is not
 in the text (`pwsh -Command $c`, `$c | iex`, `echo $c | sh`,
@@ -186,13 +214,27 @@ below. During a shakedown a command is also refused when anything before
 its verb is an option (`ppds --verbose data delete`) or several words in
 one argument.
 
-**Caps.** Past any of these the command counts as an invocation of both
-programs that the hook could not read, whether or not it mentions `ppds`,
-and both gates refuse it:
+**Caps.** Past any of these but the length cap the command counts as an
+invocation of both programs that the hook could not read, whether or not
+it mentions `ppds`: refused during a shakedown and with an unlisted (or
+unknown) active env, and with a listed active env when the text names a
+switch or a target.
+
+A command longer than the length cap is not read and not scanned whole:
+before any other work the hook checks its length, and above the cap it
+decides with a few passes over the bytes. It refuses the command when it
+names a guarded program (`ppds`, `dotnet`, `dnx`), a shell or a code word
+(`bash`, `pwsh`, `cmd`, `eval`, `iex` ...; `sh` and `su` are not looked
+for), read with quoting characters removed, or holds an escape that can
+spell a letter (`\x`, `\u`, `\0`, `\1`, `` `u{ ``); during a shakedown or
+with an unlisted active env also when it holds run-time text (`$`, a
+backtick, `%`). Otherwise it passes. A hook input that is not in the known
+shape and is longer than 400,000 characters is refused when it names a
+guarded program.
 
 | Cap | Value |
 |-----|-------|
-| Command length | 200,000 characters |
+| Command length (above it: the byte checks above) | 200,000 characters |
 | Nesting (substitutions, blocks, quoted strings read again) | 8 levels |
 | Reading work | 4,000,000 characters read, counting every nested reading |
 | Time | 3.5 seconds per command; a watchdog refuses at 4.5 seconds (the hook is registered with 10) |
@@ -207,9 +249,14 @@ Real commands are far below all of them. Claude Code runs a command whose
 hook exceeds its registered timeout or exits 1, in both shell tools. So
 every loop over the input runs under the 3.5-second budget, the work per
 input is capped, and a watchdog ends the hook with exit 2 one second after
-the budget if it has not answered. On Linux a 110,000-character command of
-about 8,800 words naming `ppds` is answered in about 1.4 seconds (timing on
-Windows is not measured). Any internal error refuses the command, whatever
+the budget if it has not answered; the watchdog cannot interrupt one long
+step of the Python runtime, which is why the length is checked first. On
+an idle Linux machine a 110,000-character command of about 8,800 words
+naming `ppds` is answered in under a second, the slowest input of the
+timing tests (200,000 characters) in about 1.5 seconds, and a
+120,000,000-character command, from a file, in about 1.4 seconds (timing
+on Windows is not measured). Under heavy machine load the timing tests can
+fail and a slow input can be refused by the watchdog. Any internal error refuses the command, whatever
 it is (exit 2). With no allowlist and no shakedown, the hook exits 0 for
 every command before reading it.
 
@@ -220,8 +267,10 @@ not on the allowlist, in both shell tools.
 
 **Mentions are blocked too.** A command that merely mentions `ppds` (or one
 of these `dotnet` forms), for example in a commit message, a pull request
-body or a search pattern, is treated as an invocation and can be blocked
-when a gate applies, in both shells. The maintainer decided on #1780 to
+body or a search pattern, is treated as a guessed invocation and is
+refused during a shakedown and with an unlisted active env, in both
+shells; with a listed active env only when the text also names a switch or
+a target, or sets a `PPDS_` variable. The maintainer decided on #1780 to
 accept these false positives rather than parse them away. To avoid one,
 pass long text through a file (`git commit -F`, `gh pr create --body-file`)
 or run the search when no gate applies.
@@ -238,31 +287,50 @@ a refusal where a pass would have been safe):
   when the command runs, any command past a cap).
 - With a listed active env as well: an invocation the hook cannot place in
   a command text that names a switch or a target (above), for example a
-  commit message with an unplaced mention of `ppds` and the words `env`
-  and `use`, or `mkdir -p out` in a text with an unplaced mention; one
-  that names a `PPDS_` variable other than `PPDS_SHAKEDOWN`,
-  `PPDS_SAFE_ENVS`, `PPDS_FORCE_TUI`, `PPDS_INTERNAL`, `PPDS_MCP_LOG_LEVEL`
-  or `PPDS_HOOK_BUDGET_SECONDS`, also in a commit message; in an argument
-  list read after a word naming `ppds`, a single-dash option holding an
-  `e` or a `p` that is not one of the environment or profile options
-  (`-cdp`, `-cp`, `-pkg`, and a search such as `Select-String -Pattern
-  'ppds' -Path *.md`, read as `ppds -Path *.md`), because it may be a
-  bundle of short options; an environment given as a URL whose host is
-  not itself an allowlist entry.
+  commit message or a search with a mention of `ppds` and the words `env`
+  and `select` (`git commit -m "docs: explain ppds env select"`,
+  `grep -rn "ppds env select" docs/`), or a target option named in prose
+  (`echo "use --environment <name>"` with a mention); a command with a
+  placed invocation that names a `PPDS_` variable other than
+  `PPDS_SHAKEDOWN`, `PPDS_SAFE_ENVS`, `PPDS_FORCE_TUI`, `PPDS_INTERNAL`,
+  `PPDS_MCP_LOG_LEVEL` or `PPDS_HOOK_BUDGET_SECONDS`, or a mention and a
+  text that sets one; a home-folder variable set in a command with an
+  invocation; after a word naming `ppds` where a program runs, a
+  single-dash option holding an `e` or a `p` that is not one of the
+  environment or profile options of that command path (`-cdp`, `-pkg`),
+  because it may be a bundle of short options; an environment given as a
+  URL whose host is not itself an allowlist entry.
+- During a shakedown and with an unlisted active env: a shell named after
+  a program the reader does not know as a wrapper and given code
+  (`chroot / bash -c ...`), `ssh` with a remote command, a word after a
+  `parallel` or an unknown `xargs` option that names a guarded program.
 - `query sql` (with labels configured): SQL that contains the text of an
   unlisted environment's label anywhere, also inside a longer word.
 - During a shakedown: SQL with a write word in a string, a comment or a
   bracketed name (`SELECT '[delete]'`), or a write word right after a
   number or a non-ASCII letter (`SELECT 1set`), because the hook reads the
   SQL text the way the T-SQL lexer splits words but does not skip strings
-  and comments; `--help` anywhere but directly after the command path
+  and comments; SQL that reads but does not begin with `SELECT` or `WITH`
+  (`(SELECT 1)`), and `query sql` with an option the hook does not read;
+  `--help` anywhere but directly after the command path
   (`ppds data delete --entity x --help`); `plugins deploy --dry-run` after
   an option (`--config c.json` before it is fine, `--verbose --dry-run` is
   not) or with a value; the `--dry-run` preview of other write commands.
-- `ppds query sql "<select>" -f json` and `<write command> --help` (help
-  directly after the command path) now pass: on `query sql`, `-f` is
-  `--output-format` (`--file` has no short form), and a help flag there
-  only prints help.
+- Changes against the base of #1814 that were not named in a finding, each
+  intended:
+  - Now pass: `ppds query sql "<select>" -f json` (on `query sql`, `-f` is
+    `--output-format`; `--file` has no short form); `<write command>
+    --help` and `/h` directly after the command path (a help flag there
+    only prints help); `env config` and `env type` alone during a
+    shakedown (they print the settings); with a listed active env, a
+    commit message or search that names a `PPDS_` variable and `ppds`
+    without setting the variable; `-e` / `-p` where they are `--entity` /
+    `--password` (`ppds data schema -e account`, `ppds auth create ... -p
+    x`).
+  - Now refused: `env current` and `env show` (not CLI commands) with an
+    unlisted active env, where only the read forms of Concern 1, step 6
+    pass; a command not answered within the time budget, also with a
+    listed active env.
 
 The hook still cannot see into a script file (`scripts/ppds-dev.ps1`, and
 the CLI or TUI that `tui-verify.mjs` starts from a script), an alias or
@@ -303,21 +371,29 @@ was started.
    NOT shell out to `ppds env who` — that would be circular for a
    PreToolUse-on-Bash hook and would itself trip the hook.
 4. What the hook cannot place (arguments it could not read in full, an
-   argument only known when the command runs, and, for a program it could
-   not identify, a response file or a possible bundle of short options):
+   argument only known when the command runs, and, in a guess (a program
+   it could not identify, or a mention of `ppds` where no program runs), a
+   response file, `-e` / `-p`, a possible bundle of short options, an
+   option with no value, or a switch with no target):
    refused when the active env is not listed or not known, and
    during a shakedown. With a listed active env and no shakedown, refused
    only when the command text names a switch or a target (see "The
    principle"); otherwise the listed active env decides, as for any other
-   command. A response file (`@file`) after a word naming `ppds` is
-   refused in every mode.
+   command. A response file (`@file`) after a word naming `ppds` where a
+   program runs is refused in every mode.
 5. Check every target the invocation names (any case, value after a space,
    `=` or `:`):
    - Environment options (`--environment`, `-env`, `-e`, `--env`,
      `--source-env` / `-se`, `--target-env` / `-te`): the value must be an
      allowlist entry, or a URL whose host is one. An option with no value
-     is refused.
-   - Profile options (`--profile`, `-p`, `--source-profile` / `-sp`,
+     is refused, and so is a value only known when the command runs
+     (`-p $P`). `-e` is read by command path: on the commands where it is
+     `--entity` / `--entities` (`data schema`, `data delete`, `data
+     update`, `data load`, `data truncate`, and the `metadata attribute`,
+     `column`, `key`, `table` and `entity` commands that take an entity)
+     it names no target.
+   - Profile options (`--profile`, `-p` (except on `auth create`, where it
+     is `--password`), `--source-profile` / `-sp`,
      `--target-profile` / `-tp`): the profile (by name or index) must exist
      in the profile store and its environment must be listed. The profile's
      own name does not count here.
@@ -334,9 +410,19 @@ was started.
    - A `PPDS_` variable named anywhere in a command that runs the CLI
      (`PPDS_CONFIG_DIR=...`, `$env:PPDS_PROFILE = ...`,
      `PPDS_ENVIRONMENT_URL`, ...), other than the ones that leave the
-     target alone, is refused; so is setting one in a way that outlives
-     the command (`$env:PPDS_X = ...`, `SetEnvironmentVariable`, `setx`),
-     even with no CLI in the command. `PPDS_PROFILE` and
+     target alone, is refused. When every invocation is a guess (a
+     mention, a program the hook could not identify) and no shakedown is
+     active, only a variable the text sets counts (`NAME=`, `$env:NAME`,
+     `export` / `set` / `unset` / `env -u NAME`, `SetEnvironmentVariable`),
+     so a commit message naming one passes. Setting one in a way that
+     outlives the command (`$env:PPDS_X = ...`, `SetEnvironmentVariable`,
+     `setx`) is refused even with no CLI in the command.
+   - A home-folder variable set in a command with an invocation (`HOME=`,
+     `USERPROFILE`, `LOCALAPPDATA`, `APPDATA`, `HOMEDRIVE`, `HOMEPATH`, in
+     an assignment, `$env:NAME = ...`, `export`, `SetEnvironmentVariable`)
+     is refused: the profile store lives under the home folder (`~/.ppds`,
+     `%LOCALAPPDATA%\PPDS`), so it moves the store like `PPDS_CONFIG_DIR`.
+     Reading one (`cd $HOME/src`) is not refused. `PPDS_PROFILE` and
      `PPDS_ENVIRONMENT_URL` in the hook's own environment (inherited by
      the CLI too) are part of the active env: the profile it names, and
      the URL, must be listed.
@@ -413,19 +499,36 @@ refused too).
   value `--dry-run`), and not followed by a word the flag may take as its
   value (`--dry-run false`, `--dry-run " false"`). `--dry-run=<x>`,
   `--dry-run:<x>` and a second `--dry-run` are refused. There is no `-n`.
-- `ppds query sql` passes only with the SQL inline and no word that writes
+- `ppds query sql` passes only with one SQL text, inline and placed the
+  way the CLI's parser places it, that is positively a read: after leading
+  blanks and comments (`--` lines, `/* */`) it begins with `SELECT` or
+  `WITH`. The options of `query sql` are read with their values (`-f json`,
+  `--top 5`); a bool option (`--dry-run`, `--explain`, `--count`, ...) may
+  take `true` / `false` after it, and with any other attached value
+  (`--dry-run=no`, which the parser reads as a flag with `no` as the SQL
+  text) the command is refused; so is an option the hook does not know,
+  more than one SQL text, and any other start (`PublishAllXml`, which the
+  product's parser reads as a message call, `(SELECT 1)`, `EXEC ...`). It
+  also needs no word that writes
   (`INSERT`, `UPDATE`, `DELETE`, `MERGE`, `UPSERT`, `TRUNCATE`, `DROP`,
   `CREATE`, `ALTER`, `EXEC`, `EXECUTE`, `INTO`, `GRANT`, `REVOKE`, `DENY`,
   `BULK`, `OPENROWSET`, `DECLARE`, `SET`) in any argument, an option's
   value or SQL that starts with `-` (a `--` comment) included. Words are
   split the way the T-SQL lexer splits them: a number ends where its digits
   end, so `SELECT 1DELETE ...` and `0x12UPDATE` hold a write word, while
-  `isdeleted` or `x1delete` do not. Strings, comments and bracketed names
-  are read like code, so a write word there blocks too. `--file`,
+  `isdeleted` or `x1delete` do not; an exponent marker with no digits after
+  it ends the number too (`1eDELETE`, `1.eDELETE`, `1.5e+DELETE`: the
+  product's parser reads a SELECT and a DELETE there), and both the word
+  after the marker and the word starting at it are read (`1exec` holds
+  `exec`). Strings, comments and bracketed names are read like code, so a
+  write word there blocks too. What this test cannot see: a write that
+  needs no write word (a bare procedure call, below), and a write word the
+  lexer would build in a way this split does not follow; it errs towards
+  more words, not fewer. `--file`,
   `--stdin` (in any form) and SQL only known when the command runs are
   blocked. A bare procedure call with none of these words (`query sql
-  "PublishAllXml"`) is not recognised as a write; the CLI does not run one
-  today.
+  "PublishAllXml"`) is refused because it does not begin with `SELECT` or
+  `WITH`, not because of its words.
 - `ppds env config` passes only alone, with `--list`, `--show` / `-s`, a
   URL, or a URL then `--show` / `-s`; `ppds env type` only alone or with
   `--list`. Every other form writes local settings (labels, the
@@ -484,6 +587,13 @@ claude -p "<one tool call, verbatim command>" --tools Bash,PowerShell --model ha
 **How a refusal is attributed.** Without `--allowedTools`, an unlisted harmless command (`git rebase -h`) is refused with the same "requires approval" text that an ask rule gives. In the configuration used, the controls `git rebase -h`, `git merge -h`, `gh label list --help` and `git --version` ran in both tools. So in that configuration a "requires approval" refusal can only come from an ask rule, a "has been denied" refusal from a deny rule, and a `BLOCKED [...]` refusal from a hook.
 
 **When.** The rule rows were observed at `a93cefb`; `.claude/settings.json` is unchanged since (`git diff a93cefb -- .claude/settings.json` is empty at the current head). The environment-hook rows were observed again at `f91f3af`; the later commits change one test (`c59a8cf`) and the write-block's treatment of command paths and argument orders (`49f795b`, `3164e85`), which those rows do not exercise.
+
+**Not re-observed since.** The commits after `f91f3af` that make up the later
+review rounds of #1814 rewrite the environment gate that the `ppds --version`
+row exercises (how the hook reads invocations, mentions and the listed active
+env). That row, and every other row above, has not been observed again in a
+real Claude Code process after those commits; the unit tests cover the hook's
+decisions, not the app's enforcement.
 
 Each probe was run once through the Bash tool and once through the PowerShell tool. Refusal texts are quoted with `<tool>` for Bash or PowerShell.
 

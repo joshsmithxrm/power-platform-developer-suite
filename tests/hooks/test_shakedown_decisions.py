@@ -22,6 +22,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -296,6 +297,16 @@ def test_words_inside_longer_identifiers_do_not_block(sql):
     ("SELECT 0xAMERGE x", "merge"),
     ("SELECT 1DELETE account", "delete"),
     ("SELECT 1.DELETE", "delete"),
+    # an exponent marker with no digits ends the number (the T-SQL lexer
+    # reads `SELECT 1eDELETE FROM account` as a SELECT and a DELETE)
+    ("SELECT 1eDELETE FROM account", "delete"),
+    ("SELECT 1.eDELETE FROM account", "delete"),
+    ("SELECT 1EDELETE FROM account", "delete"),
+    ("SELECT 1.5eDELETE FROM account", "delete"),
+    ("SELECT 1e+DELETE FROM account", "delete"),
+    ("SELECT 1e-UPDATE x", "update"),
+    ("SELECT 1e5DELETE FROM account", "delete"),
+    ("SELECT 1exec", "exec"),                  # the word starting at the marker is read too
 ])
 def test_a_number_glued_to_a_word_splits_like_the_lexer(sql, word):
     assert hook.sql_write_word(sql) == word
@@ -310,6 +321,27 @@ def test_a_number_glued_to_a_word_splits_like_the_lexer(sql, word):
     (["SELECT 1", "--stdin"], True), ([], True), ([f"SELECT {DYN}"], True),
 ])
 def test_query_sql_reads_every_argument(args, blocked):
+    assert hook.is_mutation(["ppds", "query", "sql", *args])[0] is blocked, args
+
+
+# The SQL text passes only when it is positively a read, placed as the CLI's
+# parser places it: one positional text that begins with SELECT or WITH after
+# blanks and comments. A bare word is a message call to the product's parser.
+@pytest.mark.parametrize("args,blocked", [
+    (["--dry-run=no"], True), (["--dry-run:no"], True),      # `no` becomes the SQL text
+    (["--dry-run", "no"], True),
+    (["PublishAllXml"], True), (["GrantAccess @Target = 'x'"], True),
+    (["(SELECT 1)"], True), (["selectx FROM t"], True),
+    (["SELECT 1", "SELECT 2"], True), (["SELECT 1", "--frob"], True),
+    (["SELECT 1", "--dry-run=yes"], True),
+    (["SELECT 1"], False), (["  -- c\n/* x */ select name from account"], False),
+    (["WITH x AS (SELECT 1 AS n) SELECT n FROM x"], False),
+    (["WITH x AS (SELECT 1 AS n) DELETE FROM account"], True),   # the write-word test still applies
+    (["--dry-run", "SELECT 1"], False), (["--dry-run", "true", "SELECT 1"], False),
+    (["--dry-run=false", "SELECT 1"], False), (["SELECT 1", "--explain", "--top", "5"], False),
+    (["-p", "dev", "-env", "zz-dev", "SELECT 1"], False), (["--", "SELECT 1"], False),
+])
+def test_query_sql_passes_only_sql_that_is_positively_a_read(args, blocked):
     assert hook.is_mutation(["ppds", "query", "sql", *args])[0] is blocked, args
 
 
@@ -354,7 +386,13 @@ def test_the_depth_cap_is_what_refuses_deep_nesting():
 def test_past_the_program_word_cap_is_unreadable():
     below = "echo " + "ppds " * (hook._MAX_PROGRAM_WORDS // 2 - 1)
     assert not _unreadable(below)
-    assert _unreadable("echo " + "ppds " * (hook._MAX_PROGRAM_WORDS + 1))
+    # Bounded: the answer comes from the cap, not from the time budget (with
+    # the cap removed this must fail, not run on).
+    start = time.monotonic()
+    found = hook.find_ppds_invocations("echo " + "ppds " * (hook._MAX_PROGRAM_WORDS + 1), "Bash", None,
+                                       deadline=time.monotonic() + 5)
+    assert time.monotonic() - start < 3
+    assert any(hook.UNREADABLE in argv for argv in found)
 
 
 def test_past_the_argument_cap_is_unreadable():
@@ -504,7 +542,8 @@ GATE_CASES = [
     ("listed", f"{P} data delete --environment=zz-prod", 2),
     ("listed", f"{P} data delete --environment:zz-prod", 2),
     ("listed", f"{P} data delete -env:zz-prod", 2),
-    ("listed", f"{P} data delete -e zz-prod", 2),
+    ("listed", f"{P} solutions list -e zz-prod", 2),    # -e is --environment on solutions
+    ("listed", f"{P} data delete -e account", 0),       # and --entity on data delete
     ("listed", f"{P} data delete --ENVIRONMENT zz-prod", 2),
     ("listed", f"{P} data delete --environment", 2),
     ("listed", f"{P} data delete --environment https://zzprod.crm.example.com", 2),
@@ -531,7 +570,8 @@ GATE_CASES = [
     ("listed", f"xargs {P} data list", 0),
     ("listed", f"{P} @args.rsp --profile other", 2),
     ("listed", f"{P} env @args.rsp select", 2),
-    ("listed", f"{P} data list $ARGS -p dev2", 2),
+    ("listed", f"{P} data list $ARGS --profile dev2", 2),   # the text names a target option
+    ("listed", f"{P} data list $ARGS -p dev2", 0),          # a bare -p in the text does not
     ("listed", f"{P} data list --environment $E", 2),
     ("listed", f"xargs {P} env select", 2),
     ("listed", f"xargs {P} data list --allowed-env zz-dev", 2),
