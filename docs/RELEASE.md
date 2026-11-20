@@ -121,7 +121,7 @@ Keep source/dependency/signing/vacancy/public-artifact gates and sequential
 publication verification. New source must contain this workflow; retrying an old
 immutable tag still executes its historical secret-based publisher. The offline
 checks do not exercise the token exchange or package/symbol uploads; the first
-real publish is run by the maintainer, as every publication is.
+real publish is run by the maintainer, as every publication is, after the maintainer's final publication approval.
 Changes to trust/identity settings are reviewed separately. Do not remove old secrets,
 create trust settings or invoke login as part of local validation.
 
