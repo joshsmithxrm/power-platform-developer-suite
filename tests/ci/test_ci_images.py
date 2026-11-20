@@ -67,8 +67,6 @@ def test_a_second_definition_of_the_image_is_detected():
         (".github/workflows/x.yml", image.split("/", 1)[1]), ("scripts/ci/x.py", image.split("/", 1)[1])]
 
 
-@pytest.mark.xfail(strict=True, reason="#1794: the UBI 8 digest has not yet been read from the registry; "
-                                       "fill it in scripts/ci/ci_images.py and remove this marker")
 @pytest.mark.parametrize("name", sorted(ci_images.IMAGES))
 def test_each_image_is_pinned_by_digest_not_a_moving_tag(name):
     assert DIGEST.fullmatch(ci_images.IMAGES[name]), ci_images.IMAGES[name]
