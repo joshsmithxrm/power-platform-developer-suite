@@ -159,7 +159,12 @@ internal sealed class FetchXmlEvaluator
             return EvaluateAggregate(spec, rows);
         var orders = AllOrders(spec.Root).ToList();
         if (!spec.Distinct)
-            return Page(spec, Sort(rows, orders, spec.Sources).Select(r => Project(r, spec)).ToList());
+        {
+            var sorted = Sort(rows, orders, spec.Sources);
+            var projected = sorted.Select(r => Project(r, spec)).ToList();
+            RefuseObservableTies(sorted, projected, orders);
+            return Page(spec, projected);
+        }
 
         // R14 distinct (audit D05, D06, PG08): of rows that are the same, the first created is kept (D06 returns 'A', not
         // 'a'); with no ORDER BY the result is sorted by the returned columns in order, NULL first (D05, D06).
@@ -1080,6 +1085,24 @@ internal sealed class FetchXmlEvaluator
             // The sort wraps a comparer's exception; surface the refusal itself.
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(refused).Throw();
             throw;
+        }
+    }
+
+    /// <summary>
+    /// The order Dataverse gives rows that tie on every ORDER BY key is not observed: the fake breaks ties by id (R16), but no
+    /// recorded case can tell that from table order (a mutation that breaks ties by table order fails no replayed case). Ties
+    /// between rows that return the same values cannot be seen and are allowed; ties between rows that differ are refused.
+    /// </summary>
+    private static void RefuseObservableTies(List<JoinedRow> sorted, List<Entity> projected, List<Order> orders)
+    {
+        if (orders.Count == 0)
+            return;
+        string Key(JoinedRow r) => string.Join("\u0001", orders.Select(o =>
+            Normalize(r.Rows.GetValueOrDefault(o.Alias)?.GetValueOrDefault(o.Attribute)) is { } v ? v is string str ? "s" + StringKey(str, ordered: true) : "v" + Convert.ToString(v, CultureInfo.InvariantCulture) : "NULL"));
+        for (var i = 1; i < sorted.Count; i++)
+        {
+            if (Key(sorted[i]) == Key(sorted[i - 1]) && Signature(projected[i]) != Signature(projected[i - 1]))
+                throw Unsupported("rows that tie on every ORDER BY key but return different values (the order Dataverse gives them is not observed)");
         }
     }
 

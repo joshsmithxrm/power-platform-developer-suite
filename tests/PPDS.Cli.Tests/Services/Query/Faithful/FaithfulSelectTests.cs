@@ -76,10 +76,14 @@ public class FaithfulSelectTests
 
     // ───────────── TOP and ORDER BY ─────────────
 
-    [Theory]
+    [Theory(Skip = "Waiting for a live observation (LiveObservationsOwed.md): rows that tie on every ORDER BY key but return different values (here numberofemployees ties for k1 and k7)")]
     [InlineData("SELECT TOP 3 accountnumber FROM account ORDER BY numberofemployees DESC", "k8,k10,k2")]
     [InlineData("SELECT TOP (3) accountnumber FROM account ORDER BY numberofemployees DESC", "k8,k10,k2", KnownDefect.TopParenthesised, "k8,k10,k2,k6,k1,k7,k4,k5,k3,k9")]
     [InlineData("SELECT TOP 1 accountnumber FROM account WHERE LEN(name) = 4 ORDER BY numberofemployees DESC", "k4", KnownDefect.TopBeforeClientFilter, "")]
+    public Task TopAndOrderBy_OverTiedRows(string sql, string expected, string? defect = null, string? today = null)
+        => TopAndOrderBy_ReturnExactlyTheseRowsInOrder(sql, expected, defect, today);
+
+    [Theory]
     [InlineData("SELECT accountnumber FROM account ORDER BY numberofemployees, accountnumber", "k3,k9,k5,k4,k1,k7,k6,k2,k10,k8")]
     [InlineData("SELECT accountnumber FROM account ORDER BY numberofemployees DESC, accountnumber", "k8,k10,k2,k6,k1,k7,k4,k5,k3,k9")]
     [InlineData("SELECT accountnumber FROM account ORDER BY customertypecode, accountnumber", "k4,k7,k1,k5,k9,k10,k2,k6,k3,k8", KnownDefect.ChoiceOrderByLabel, "k4,k7,k10,k2,k6,k3,k8,k1,k5,k9")]

@@ -12,7 +12,10 @@ namespace PPDS.Cli.Tests.Services.Query.Faithful;
 /// Read-back facts the audit OBSERVED are applied: an unset two-option reads back 0, a stored empty string reads back NULL
 /// (the fake treats "" as NULL), and the choice values are Red=374110000, Blue=374110001, Green=374110002. A lookup carries
 /// its parent's name (V11, V12). Ids the report shows are the live ids (<see cref="RecordedIds"/>) and the replay compares them; the other ids are generated and the replay masks them.
-/// <c>createdon</c> is present because every table has it; its values are not the live ones (no replayed case reads them).
+/// <c>createdon</c> is present because every table has it; its values are invented, not the live ones. Replayed cases do
+/// read it: the engine sends queries ordered on <c>createdon</c> for aggregate cases (the shapes "order ascending DateTime
+/// (createdon)" and "order descending DateTime (createdon)" in <see cref="ObservedShapes"/>). No recorded result shows a
+/// <c>createdon</c> value; LiveObservationsOwed.md lists the live values owed.
 /// </para>
 /// </summary>
 internal static class AuditDataset

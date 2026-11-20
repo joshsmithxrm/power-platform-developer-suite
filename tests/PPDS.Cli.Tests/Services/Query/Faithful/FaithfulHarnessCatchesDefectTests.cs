@@ -48,7 +48,7 @@ public class FaithfulHarnessCatchesDefectTests
         await Assert.ThrowsAsync<TrueException>(() => AssertKeysAsync(sql, expected, dataverse: inverted));
     }
 
-    [Fact]
+    [Fact(Skip = "Waiting for a live observation (LiveObservationsOwed.md): rows that tie on every ORDER BY key but return different values; TOP stays tied to #1619 through the replayed wrong case T02")]
     public async Task DroppedTop_FailsTheTest()
     {
         const string sql = "SELECT TOP 3 accountnumber FROM account ORDER BY numberofemployees DESC";

@@ -289,7 +289,7 @@ public class FetchXmlEvaluatorRuleTests
     public void R10_TopZero_ReturnsNoRow() // audit T04
         => Assert.Empty(Fetch("", " top=\"0\"").Entities);
 
-    [Fact]
+    [Fact(Skip = "Waiting for a live observation (LiveObservationsOwed.md): rows that tie on every ORDER BY key but return different values")]
     public void R10_TopAndCountLimitTheRows()
     {
         Assert.Equal("k8,k10,k2", Keys(Fetch("<order attribute=\"numberofemployees\" descending=\"true\" />", " top=\"3\""), ordered: true));

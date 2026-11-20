@@ -10,9 +10,9 @@ namespace PPDS.Cli.Tests.Services.Query.Faithful;
 /// offline must equal live: a case the audit marks correct is correct offline, and a case it marks WRONG RESULT is wrong
 /// offline in the same way.
 /// <para>
-/// 436 cases: 424 replay and match, 1 replays and differs, 11 cannot be replayed (<see cref="Expected"/> lists each with the
+/// 436 cases: 423 replay and match (126 of them wrong results, as recorded), 1 replays and differs, 12 cannot be replayed (<see cref="Expected"/> lists each with the
 /// reason). A change to the engine or the fake that moves any case out of its class fails here. The cases that match are
-/// <see cref="Case_ReplaysAndMatchesTheAuditRecord"/>; the 12 that do not are <see cref="Case_DoesNotMatch_ForItsRecordedReason"/>.
+/// <see cref="Case_ReplaysAndMatchesTheAuditRecord"/>; the 13 that do not are <see cref="Case_DoesNotMatch_ForItsRecordedReason"/>.
 /// Each case writes how much the record let it compare (<see cref="ReplayResult.Coverage"/>), and
 /// <see cref="Coverage_Totals"/> pins the totals.
 /// </para>
@@ -34,6 +34,9 @@ public class AuditCaseReplayTests(ITestOutputHelper output)
         ["S19"] = (ReplayClass.CannotReplay, "crash:"),
         ["S20"] = (ReplayClass.CannotReplay, "crash:"),
         ["S21"] = (ReplayClass.CannotReplay, "crash:"),
+
+        // Its ORDER BY leaves rows tied that return different values; the order Dataverse gives them is not observed.
+        ["T06"] = (ReplayClass.CannotReplay, "fake refuses: Fake Dataverse refuses this FetchXML: not observed: rows that tie on every ORDER BY key"),
 
         // The report redacted the caller's identity (systemuser, owner names).
         ["V06"] = (ReplayClass.CannotReplay, "redacted:"),
@@ -250,7 +253,7 @@ public class AuditCaseReplayTests(ITestOutputHelper output)
             $"{id}: a fix would {(visible ? "" : "not ")}be visible in the record, but FixNotVisible says otherwise ({expected.Class} {expected.Reason})");
     }
 
-    /// <summary>The 12 cases that do not replay and match: each keeps its class and reason, or this fails.</summary>
+    /// <summary>The 13 cases that do not replay and match: each keeps its class and reason, or this fails.</summary>
     [Theory]
     [MemberData(nameof(NonMatchingCaseIds))]
     public async Task Case_DoesNotMatch_ForItsRecordedReason(string id)
@@ -283,7 +286,7 @@ public class AuditCaseReplayTests(ITestOutputHelper output)
     }
 
     private const string CoverageTotals =
-        "cases 424: errors 69, row results 355 (full 113, partial 242); rows compared 1099 of 38917; order compared in 44; ids compared 563, masked 19";
+        "cases 423: errors 69, row results 354 (full 113, partial 241); rows compared 1097 of 38914; order compared in 43; ids compared 561, masked 19";
 
     private async Task<(AuditCase Case, ReplayResult Result)> ReplayAsync(string id)
     {
