@@ -651,23 +651,30 @@ class TestMutationsBlocked:
 class TestReadOnlyAllowedDuringShakedown:
     @pytest.mark.parametrize("cmd", [
         "ppds env list",
-        "ppds env current",
         "ppds env who",
-        "ppds env switch ppds-dev",
         "ppds env select ppds-dev",
         "ppds env config --list",
         "ppds env type --list",
         "ppds plugins list",
         "ppds logs tail",
-        "ppds logs show",
         "ppds auth list",
         "ppds version",
-        "ppds help",
+        "ppds --help",
     ])
     def test_reads_allowed_when_var_one(self, fake_profile_dir, cmd):
         config_dir = fake_profile_dir(active_env_name="ppds-dev")
         r = _run_hook(cmd, env_extra=_shakedown_env(config_dir))
         assert r.returncode == 0, f"cmd={cmd}: stderr={r.stderr!r}"
+
+    @pytest.mark.parametrize("cmd", [
+        "ppds env current", "ppds env switch ppds-dev", "ppds logs show", "ppds help",
+        "ppds env config --label x", "ppds env type --remove x",
+    ])
+    def test_commands_the_cli_does_not_have_or_that_write_are_blocked(self, fake_profile_dir, cmd):
+        """Only commands the hook knows to be read-only pass during a shakedown."""
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(cmd, env_extra=_shakedown_env(config_dir))
+        assert r.returncode == 2, f"cmd={cmd}: stderr={r.stderr!r}"
 
 
 class TestDryRunExempt:
@@ -1127,10 +1134,11 @@ class TestIsMutation:
         is_mut, _ = hook.is_mutation(["ppds", "plugins", "deploy", "-n"])
         assert not is_mut
 
-    def test_logs_wildcard(self):
-        for verb in ("tail", "show", "stream", "anything"):
-            is_mut, _ = hook.is_mutation(["ppds", "logs", verb])
-            assert not is_mut, f"verb={verb}"
+    def test_logs_reads_pass_and_unknown_logs_commands_block(self):
+        for verb in ("tail", "dump"):
+            assert not hook.is_mutation(["ppds", "logs", verb])[0], verb
+        for verb in ("show", "stream", "anything"):
+            assert hook.is_mutation(["ppds", "logs", verb])[0], verb
 
     def test_short_argv_not_mutation(self):
         is_mut, _ = hook.is_mutation(["ppds"])

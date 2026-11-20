@@ -222,14 +222,28 @@ tool starts a fresh shell per call). Default env var name is
 `PPDS_SHAKEDOWN`; override via `safety.readonly_env_var` in
 `.claude/settings.json`. The write-block does not depend on the allowlist.
 
-**Blocked verbs (any surface):** `create`, `update`, `delete`, `remove`,
-`import`, `apply`, `register`, `unregister`, `publish`, `truncate`, `drop`,
-`reset`, `set`.
+**Only commands known to be read-only pass.** The hook holds a table of
+every `ppds` command path (`CLI_COMMANDS` in the hook, aliases such as `org`
+included) and passes a command only when its path is classified as
+read-only there, for example `data export`, `metadata entities`,
+`solutions list` or `logs tail`. Every other path is blocked: a command that
+writes, one the hook is not sure only reads (`auth select`, `env config`
+with settings, `query history execute`, `api request`, `serve`,
+`interactive`), a group followed by a word that is not one of its commands,
+and a command the hook has never heard of. A group alone (`ppds data`)
+passes, because it only prints help. A test derives the command tree from
+`src/PPDS.Cli` and fails when the CLI has a command the table does not
+classify, so a new command is blocked until someone classifies it.
 
 **Special cases:**
 
-- `ppds plugins deploy` is blocked unless `--dry-run` (or `-n`) is present.
-- Anything under `ppds logs *` is read-only by definition.
+- `ppds plugins deploy` is blocked unless `--dry-run` (or `-n`) is present
+  and not set to false.
+- `ppds query sql` passes only with the SQL inline and free of words that
+  write (`INSERT`, `UPDATE`, `DELETE`, `MERGE`, `INTO`, `EXEC`, `CREATE`,
+  `ALTER`, `DROP`, `TRUNCATE` and similar); `--file` and `--stdin` are blocked.
+- `ppds env config` and `ppds env type` pass only with `--list` or `--show`
+  alone.
 - `ppds-mcp-server` during shakedown MUST be launched with `--read-only` —
   the server can otherwise issue arbitrary writes via its tools, which
   would defeat the write-block boundary. Through `dotnet run`, a
@@ -239,8 +253,8 @@ tool starts a fresh shell per call). Default env var name is
   Only the bare flag counts: `--read-only=<value>` (`=true`, `=false`, `=`)
   is refused with a message that the server only accepts the bare flag,
   because the server ignores the valued form and starts writable (#1718).
-- `ppds env switch/select` is read-only here because the env-allowlist
-  concern above already validates the target.
+- `ppds env select` is read-only here because the env-allowlist concern
+  above already validates the target.
 
 **Bypass:** remove whichever source armed the block — `unset PPDS_SHAKEDOWN`
 (or whatever name is configured) when the env var armed it, or delete
@@ -338,4 +352,7 @@ Either:
 - `tests/hooks/test_shakedown_safety_process.py` — the hook as a process:
   input shapes, caps, the time budget against the registered timeout, and
   internal errors.
+- `tests/hooks/test_shakedown_cli_commands.py` — the write-block's command
+  table against the command tree derived from `src/PPDS.Cli`
+  (`tests/hooks/cli_command_tree.py`).
 - `.claude/hooks/_shellparse.py` — the command reader the hook uses.

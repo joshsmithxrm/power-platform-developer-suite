@@ -18,10 +18,12 @@ Two concerns, one hook:
    allowed even when currently on an unsafe one.
 
 2. **Write-block during shakedown.** When ``PPDS_SHAKEDOWN=1`` (or whichever
-   name is configured under ``safety.readonly_env_var``), write/mutation
-   verbs (``create``, ``update``, ``delete``, ``plugins deploy`` without
-   ``--dry-run``, ``solutions import``, etc.) are refused outright. This
-   provides a mechanical boundary that the shakedown / verify skills rely on.
+   name is configured under ``safety.readonly_env_var``), a ppds command
+   passes only when its command path is one ``CLI_COMMANDS`` classifies as
+   read-only (``plugins deploy`` only with ``--dry-run``, ``query sql`` only
+   with inline SQL that reads); every other path, one the hook has never
+   heard of included, is refused. This provides a mechanical boundary that
+   the shakedown / verify skills rely on.
 
 **.NET host forms.** Besides ``ppds`` / ``ppds-mcp-server`` themselves, the
 hook recognises the CLI and MCP server started through ``dotnet``:
@@ -1307,44 +1309,118 @@ def _extract_switch_target(args):
 # ---------------------------------------------------------------------------
 
 
-_READONLY_SUBCOMMANDS = {
-    "env": {"list", "current", "who", "config", "type", "show", "switch", "select", "use", "test"},
-    "logs": {"*"},
-    "auth": {"list", "show"},
-    "version": {"*"},
-    "help": {"*"},
-}
+# Every command path of the ppds CLI, with how the write-block treats it.
+# One line per parent path ("." is the root): `<child>=<class>`.
+#   r        reads only; anything after it is arguments and options.
+#   g        a group: passes only when nothing (or only a help flag) follows.
+#   w        writes, or not known to only read: blocked.
+#   dry-run  `plugins deploy`: passes only with --dry-run / -n.
+#   sql      `query sql`: passes only with inline SQL that only reads.
+#   list     `env config` / `env type`: passes only with --list / --show alone.
+# A path that is not listed is blocked. tests/hooks/test_shakedown_cli_commands.py
+# derives the command tree from src/PPDS.Cli and fails when a path is missing.
+_CLI_COMMANDS = """
+.: api=g auth=g connection-references=g connections=g custom-apis=g data=g data-providers=g data-sources=g deployment-settings=g docs=r env=g environment-variables=g flows=g forms=g import-jobs=g interactive=w internal=w logs=g metadata=g model-driven-app=g plugin-traces=g plugins=g publish=w query=g roles=g schema=g serve=w service-endpoints=g solutions=g users=g version=r views=g webresources=g
+api: request=w
+auth: clear=w create=w delete=w list=r name=w select=w update=w who=r
+connection-references: analyze=r connections=r flows=r get=r list=r
+connections: get=r list=r
+custom-apis: add-parameter=w get=r list=r register=w remove-parameter=w set-plugin=w unregister=w update=w update-parameter=w
+data: analyze=r copy=w delete=w export=r import=w load=w schema=r truncate=w update=w users=r
+data-providers: get=r list=r register=w unregister=w update=w
+data-sources: get=r list=r register=w unregister=w update=w
+deployment-settings: generate=r sync=w validate=r
+env: config=list list=r select=r type=list who=r
+environment-variables: export=r get=r list=r set=w url=r
+flows: disable=w enable=w get=r list=r url=r
+forms: add-field=w add-section=w add-subgrid=w add-tab=w find-section=r find-tab=r get=r list=r move-field=w remove-field=w remove-section=w remove-subgrid=w remove-tab=w reorder-fields=w reorder-fields-strict=w repair-bindings=w set-xml=w update-section=w update-tab=w
+import-jobs: data=r get=r list=r url=r wait=r
+logs: dump=r tail=r
+metadata: attribute=g attributes=r choice=g column=g entities=r entity=r key=g keys=r optionset=r optionsets=r publish=w relationship=g relationships=r table=g
+metadata attribute: add-option=w create=w delete=w remove-option=w update=w update-option=w
+metadata choice: add-option=w create=w delete=w remove-option=w reorder=w update=w update-option=w
+metadata column: create=w delete=w update=w
+metadata entity: add-statusreason=w create=w delete=w list-statusreasons=r remove-statusreason=w update=w update-statusreason=w
+metadata key: create=w delete=w reactivate=w
+metadata optionset: add-option=w create=w delete=w remove-option=w reorder=w update=w update-option=w
+metadata relationship: create=w delete=w update=w
+metadata table: create=w delete=w update=w
+model-driven-app: add-copilot=w add-table=w get=r inspect-app-assistant=r list=r list-copilots=r remove-copilot=w remove-table=w set-charts=w set-forms=w set-sitemap-xml=w set-views=w sitemap=r
+plugin-traces: delete=w get=r list=r related=r settings=g timeline=r
+plugin-traces settings: get=r set=w
+plugins: clean=w deploy=dry-run diff=r disable=w download=g enable=w extract=r get=r list=r register=g unregister=w update=g
+plugins download: assembly=r package=r
+plugins register: assembly=w image=w package=w step=w type=w
+plugins update: assembly=w image=w package=w step=w
+query: explain=r fetch=r history=g sql=sql
+query history: clear=w delete=w execute=w get=r list=r
+roles: assign=w list=r remove=w show=r
+schema: compare=r
+service-endpoints: get=r list=r register=g unregister=w update=w
+service-endpoints register: eventhub=w queue=w topic=w webhook=w
+solutions: components=r export=r get=r import=w list=r publish=w url=r
+users: list=r roles=r show=r
+views: add-column=w clear-filter=w clear-sort=w get=r list=r remove-column=w reorder-columns=w set-fetchxml=w set-filter=w set-sort=w update-column=w
+webresources: create=w get=r list=r publish=w pull=r push=w update=w url=r
+"""
+# Other spellings of a top-level command (deprecated names and `org`).
+_CLI_ALIASES = {"org": "env", "connectionreferences": "connection-references",
+                "environmentvariables": "environment-variables", "importjobs": "import-jobs",
+                "plugintraces": "plugin-traces"}
 
-_MUTATION_VERBS = {
-    "create",
-    "update",
-    "delete",
-    "remove",
-    "import",
-    "apply",
-    "register",
-    "unregister",
-    "publish",
-    "truncate",
-    "drop",
-    "reset",
-    "set",
-}
+
+def _parse_cli_commands(text: str) -> dict:
+    """``{path tuple: class}`` from ``_CLI_COMMANDS``."""
+    out = {(): "g"}
+    for line in text.strip().splitlines():
+        parent, _, children = line.partition(":")
+        prefix = () if parent.strip() == "." else tuple(parent.split())
+        for item in children.split():
+            name, _, cls = item.partition("=")
+            out[prefix + (name,)] = cls
+    return out
+
+
+CLI_COMMANDS = _parse_cli_commands(_CLI_COMMANDS)
+
+_HELP_FLAGS = {"--help", "-h", "-?", "/?", "--version"}
+# Words in SQL text that write (or could): any of them makes `query sql` a write.
+_SQL_WRITE_RE = re.compile(
+    r"\b(insert|update|delete|merge|upsert|truncate|drop|create|alter|exec|execute|into|grant|revoke|"
+    r"deny|bulk|openrowset|declare|set)\b", re.IGNORECASE)
 
 
 def _plugins_deploy_blocked(args: list) -> bool:
-    return not any(
-        arg in ("--dry-run", "-n") or arg.startswith("--dry-run=")
-        for arg in args
-    )
+    """True unless ``--dry-run`` / ``-n`` is given and not set to false."""
+    dry = False
+    for k, arg in enumerate(args):
+        low = arg.lower()
+        if low in ("--dry-run", "-n"):
+            nxt = args[k + 1].lower() if k + 1 < len(args) else ""
+            if nxt in ("false", "0"):
+                return True
+            dry = True
+        elif low.startswith(("--dry-run=", "--dry-run:", "-n=", "-n:")):
+            if low.split("=", 1)[-1].split(":", 1)[-1] != "true":
+                return True
+            dry = True
+    return not dry
 
 
-_NAMED_MUTATIONS = {
-    ("plugins", "deploy"): _plugins_deploy_blocked,
-}
-
-
-_HELP_FLAGS = {"--help", "-h", "-?", "/?", "--version"}
+def _sql_blocked(args: list) -> str:
+    """Why ``query sql <args>`` counts as a write, or "" when it only reads."""
+    text = [arg for arg in args if not arg.startswith("-")]
+    if any(arg.lower() in ("--file", "-f", "--stdin") or arg.lower().startswith(("--file=", "--file:"))
+           for arg in args):
+        return "SQL read from a file or stdin"
+    if any(sp.DYN in arg for arg in args):
+        return "SQL only known when the command runs"
+    if not text:
+        return "no SQL text"
+    match = _SQL_WRITE_RE.search(" ".join(text))
+    if match:
+        return f"SQL containing {match.group(1).upper()}"
+    return ""
 
 
 def _hides_verb(token: str) -> bool:
@@ -1353,12 +1429,29 @@ def _hides_verb(token: str) -> bool:
     return token.startswith(("-", "/")) or bool(re.search(r"\s", token))
 
 
+def _command_path(args: list):
+    """``(path, rest)``: the longest known command path at the start of
+    ``args`` (aliases resolved) and the arguments after it."""
+    path, k = (), 0
+    while k < len(args):
+        tok = args[k].lower()
+        if not path:
+            tok = _CLI_ALIASES.get(tok, tok)
+        if path + (tok,) not in CLI_COMMANDS:
+            break
+        path += (tok,)
+        k += 1
+    return path, args[k:]
+
+
 def is_mutation(argv: list) -> tuple:
     """Return (is_mutation, reason). reason is empty when not a mutation.
 
-    An option before the verb (``--verbose``), several words in one
-    argument or run-time text there means the verb is not known, which
-    counts as a write."""
+    During a shakedown a ppds command passes only when its command path is
+    one the hook knows to be read-only (``CLI_COMMANDS``); every other path,
+    one the hook has never heard of included, counts as a write. An option
+    before the command path, several words in one argument, or run-time text
+    there means the command is not known."""
     if not argv:
         return False, ""
 
@@ -1382,54 +1475,38 @@ def is_mutation(argv: list) -> tuple:
             return False, ""
         return True, "ppds-mcp-server (missing --read-only flag during shakedown)"
 
-    if len(argv) < 2:
+    args = argv[1:]
+    if len(args) == 1 and args[0].lower() in _HELP_FLAGS:
         return False, ""
-    sub = argv[1].lower()
-    if sub in _HELP_FLAGS and len(argv) == 2:
-        return False, ""
-    if sp.DYN in sub:
-        return True, "a subcommand only known when the command runs (treated as a write)"
-    if _hides_verb(sub):
-        return True, f"{_shown([argv[1]])} before the subcommand (the verb is not known; treated as a write)"
-    if len(argv) < 3:
-        return False, ""
+    path, rest = _command_path(args)
+    shown = " ".join(path)
+    nxt = rest[0] if rest else None
+    cls = CLI_COMMANDS[path]
 
-    allowed = _READONLY_SUBCOMMANDS.get(sub)
-    if allowed and "*" in allowed:
-        return False, ""
-
-    verb = argv[2].lower()
-    rest = argv[3:]
-    if verb in _HELP_FLAGS and len(argv) == 3:
-        return False, ""
-    if sp.DYN in verb:
-        return True, "a subcommand or verb only known when the command runs (treated as a write)"
-    if _hides_verb(verb):
-        return True, f"{_shown([argv[2]])} before the verb (the verb is not known; treated as a write)"
-
-    # 3-level commands: "metadata <noun> <verb>" has the noun at argv[2], verb at argv[3]
-    if sub == "metadata" and verb not in _MUTATION_VERBS and len(argv) >= 4:
-        nxt = argv[3].lower()
+    if cls == "g":
+        if nxt is None or (len(rest) == 1 and nxt.lower() in _HELP_FLAGS):
+            return False, ""
         if sp.DYN in nxt:
-            return True, "a verb only known when the command runs (treated as a write)"
-        if not _hides_verb(nxt):
-            verb, rest = nxt, argv[4:]
-        elif any(tok.lower() in _MUTATION_VERBS for tok in argv[4:]):
-            return True, f"metadata {argv[2]} {_shown([argv[3]])} before a write verb (treated as a write)"
-
-    if allowed and verb in allowed:
+            return True, f"{(shown + ' ') if shown else ''}$... (a command only known when it runs; treated as a write)"
+        if _hides_verb(nxt):
+            return True, (f"{_shown([nxt])} before the command{(' after ' + shown) if shown else ''} "
+                          "(the command is not known; treated as a write)")
+        return True, (f"{(shown + ' ') if shown else ''}{_shown([nxt])} "
+                      "(not a command the hook knows to be read-only; treated as a write)")
+    if cls == "r":
         return False, ""
-
-    named = _NAMED_MUTATIONS.get((sub, verb))
-    if named is not None:
-        if named(rest):
-            return True, f"{sub} {verb} (no --dry-run flag present)"
+    if cls == "dry-run":
+        if _plugins_deploy_blocked(rest):
+            return True, f"{shown} (no --dry-run flag present)"
         return False, ""
-
-    if verb in _MUTATION_VERBS:
-        return True, f"{sub} {verb}"
-
-    return False, ""
+    if cls == "list":
+        if rest and all(arg.lower() in ("--list", "--show", "-s") for arg in rest):
+            return False, ""
+        return True, f"{shown} (changes settings unless only --list / --show is given)"
+    if cls == "sql":
+        why = _sql_blocked(rest)
+        return (True, f"{shown} ({why}; treated as a write)") if why else (False, "")
+    return True, f"{shown} (writes, or is not known to only read)"
 
 
 # ---------------------------------------------------------------------------
