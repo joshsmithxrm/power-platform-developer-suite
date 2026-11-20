@@ -1,0 +1,5 @@
+{
+  "_note": "PROVISIONAL - replace with the observed payloads before committing",
+  "Bash": {"session_id": "<session>", "transcript_path": "<transcript>", "cwd": "<cwd>", "permission_mode": "default", "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "", "description": ""}, "tool_use_id": "<id>"},
+  "PowerShell": {"session_id": "<session>", "transcript_path": "<transcript>", "cwd": "<cwd>", "permission_mode": "default", "hook_event_name": "PreToolUse", "tool_name": "PowerShell", "tool_input": {"command": "", "description": ""}, "tool_use_id": "<id>"}
+}
