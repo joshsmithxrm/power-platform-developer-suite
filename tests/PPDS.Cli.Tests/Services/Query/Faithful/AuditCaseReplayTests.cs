@@ -48,6 +48,16 @@ public class AuditCaseReplayTests(ITestOutputHelper output)
         public string Marker(bool fixedSinceTheAudit) => $"{(fixedSinceTheAudit ? "Fixed" : "Wrong")}({string.Join(", ", Issues)})";
     }
 
+    /// <summary>Whether a wrong case is marked fixed since the audit (used by the other fixtures' known-defect markers).</summary>
+    internal static bool IsFixedSinceTheAudit(string id) => WrongCases.TryGetValue(id, out var w) && w.FixedSinceTheAudit;
+
+    [Fact]
+    public void EveryKnownDefectMarkerNamesAWrongCaseAsItsWitness()
+    {
+        var markers = typeof(KnownDefect).GetFields().Where(f => f.IsLiteral).Select(f => (string)f.GetRawConstantValue()!).ToList();
+        Assert.All(markers, m => Assert.True(KnownDefect.Witness.TryGetValue(m, out var id) && WrongCases.ContainsKey(id), $"{m}: no witness wrong case"));
+    }
+
     /// <summary>Still wrong as the audit recorded it.</summary>
     private static WrongCase Wrong(params int[] issues) => new(false, issues);
 
@@ -325,6 +335,8 @@ public class AuditCaseReplayTests(ITestOutputHelper output)
     public async Task RecordedFetchXml_IsWhatTheEngineSendsOffline(string id)
     {
         var recorded = AuditCaseReplay.CanonicalFetchXml(AuditCaseReplay.RecordedFetchXml[id]);
+        if (IsFixedSinceTheAudit(id))
+            return; // the recorded FetchXML is the one the defect produced; the fix may change it
         if (RecordedPlanText.Contains(id))
         {
             Assert.Null(recorded);

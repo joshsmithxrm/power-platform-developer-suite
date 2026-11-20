@@ -70,6 +70,9 @@ internal static class FaithfulSelect
     /// </summary>
     public static void Verdict(string sql, string expected, string actual, string? defect, string? today)
     {
+        // A marker whose witness audit case is marked fixed is cleared: the case must now return its T-SQL result.
+        if (defect is not null && AuditCaseReplayTests.IsFixedSinceTheAudit(KnownDefect.Witness[defect]))
+            defect = null;
         if (defect is null)
         {
             Assert.True(expected == actual, $"{sql}\n  expected: [{expected}]\n  actual:   [{actual}]");
@@ -80,7 +83,7 @@ internal static class FaithfulSelect
         Assert.True(actual == today,
             $"{defect}\n{sql}\n  T-SQL result:   [{expected}]\n  pinned today:   [{today}]\n  engine returns: [{actual}]\n" +
             (actual == expected
-                ? "The defect is fixed: remove the known-defect marker from this case."
+                ? $"The defect is fixed: in AuditCaseReplayTests.WrongCases change the witness case [\"{KnownDefect.Witness[defect]}\"] from Wrong(...) to Fixed(...); that one edit clears this marker too."
                 : "The engine's wrong result changed: check why, then update the pin."));
     }
 

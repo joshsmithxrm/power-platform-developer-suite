@@ -21,4 +21,17 @@ internal static class KnownDefect
     public const string DateTimeNoOffset = "Known defect #1620: a datetime literal without an offset is read in the caller's time zone";
     public const string ComputedInputsNull = "Known defect #1621: an aliased column next to a computed column comes back NULL";
     public const string ChoiceOrderByLabel = "Known defect #1628: ORDER BY a choice column sorts by label, not value";
+
+    /// <summary>
+    /// For each marker, the replayed audit case that shows the same defect. When that case is marked <c>Fixed(...)</c> in
+    /// <c>AuditCaseReplayTests.WrongCases</c>, a case with this marker must return its T-SQL result: the one edit there
+    /// clears the marker here too.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> Witness = new Dictionary<string, string>
+    {
+        [ExpressionDropped] = "W77", [NotInSubquery] = "S03", [JoinedCondition] = "J23", [NotLost] = "W09",
+        [NegatedMatchesNull] = "W02", [ExpressionInOr] = "W89", [NotEqualNull] = "W25", [VariableAsText] = "X01",
+        [TopParenthesised] = "T02", [TopBeforeClientFilter] = "T07", [DateTimeNoOffset] = "W101",
+        [ComputedInputsNull] = "PRJ05", [ChoiceOrderByLabel] = "O07",
+    };
 }
