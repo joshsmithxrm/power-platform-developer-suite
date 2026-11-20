@@ -21,6 +21,7 @@
   "r2-profile-override": "round 2 should-fix, made must-fix in round 3: --profile, PPDS_PROFILE or auth select picks a profile whose environment is not listed",
   "new-config-folder-override": "found by oracle 2, must-fix in round 3: PPDS_CONFIG_DIR changed in front of the invocation",
   "new-shell-feed": "found by oracle 2: code handed to a shell (here-string, here-document, -c / -Command, stdin pipe), with or without a wrapper or assignment prefix, whose program name is from a substitution or variable, passes (e.g. env FOO=1 bash <<< '$(echo ppds) plugins deploy ...')",
-  "r2-env-config-write-on-unlisted": "round 2 should-fix (B5), must-fix in round 3: a writing form of env config / env type passes with an unlisted active environment (e.g. --label swallowing --help)"
+  "r2-env-config-write-on-unlisted": "round 2 should-fix (B5), must-fix in round 3: a writing form of env config / env type passes with an unlisted active environment (e.g. --label swallowing --help)",
+  "r2-version-update": "round 2 should-fix (B3): version --update (replaces the CLI) passes the write-block; the table classes version as read"
  }
 }

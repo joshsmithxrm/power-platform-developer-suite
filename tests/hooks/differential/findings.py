@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 
 # Code handed to a shell: a here-string or here-document to bash/sh/pwsh, `-c` / `-Command`, or a pipe into one.
-_FEED = re.compile(r"(?:\b(?:bash|sh|pwsh)\b[^\n|;&]*(?:<<|\s-c\b|\s-Command\b))|(?:\|\s*(?:[^|;&\n]*\s)?(?:bash|sh|pwsh)\b)")
+_FEED = re.compile(r"(?:(?i:-(?:e|ec|encodedcommand)\s+[A-Za-z0-9+/=]{8,}))|(?:\beval\b)|(?:\b(?:bash|sh|pwsh)\b[^\n|;&]*(?:<<|\s-c\b|\s-Command\b))|(?:\|\s*(?:[^|;&\n]*\s)?(?:bash|sh|pwsh)\b)")
 _GLUED = re.compile(r"(?:\d|0x[0-9a-f]+|'|\]|\.)(?:delete|insert|update|merge|truncate)", re.I)
 
 
@@ -44,12 +44,15 @@ def _labels(f: dict) -> list:
         if argv[:2] == ["plugins", "deploy"] and "--dry-run" in argv and (f.get("truth") or {}).get(
                 "explicit_options", {}).get("--dry-run") is not True:
             out.append("r2-dry-run-swallowed")
+    if cause == "write-in-shakedown" and argv[:1] == ["version"]:
+        out.append("r2-version-update")
     if cause == "mcp-writable-in-shakedown" and "--read-only" in argv:
         out.append("r2-read-only-swallowed")
     if cause == "switch-to-unlisted" and any(w.startswith("@") for w in argv):
         out.append("r2-response-file-in-env-gate")
     cmd = f.get("command", "")
-    if f.get("recipe", "").startswith("feed:") or _FEED.search(cmd):
+    flat = re.sub(r"[\\`]\r?\n", " ", cmd)
+    if f.get("recipe", "").startswith("feed:") or _FEED.search(flat):
         out.append("new-shell-feed")
     if cause == "runs-on-unlisted-active" and len(argv) >= 2 and argv[0] in ("env", "org") \
             and argv[1] in ("config", "type"):
