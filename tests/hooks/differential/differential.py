@@ -53,6 +53,10 @@ def _shell_integrity(lab, submitted: int, unconfirmed: int = 0) -> list:
             problems.append(f"{sh}: {info[sh + '_outcomes']} recorded outcomes for {submitted} texts")
         if info[f"{sh}_timeouts"] > MAX_TIMEOUT_SHARE * max(submitted, 1):
             problems.append(f"{sh}: {info[sh + '_timeouts']} timeouts (limit {MAX_TIMEOUT_SHARE:.0%} of {submitted})")
+    if info["canary_failures"]:
+        problems.append(f"known-good texts recorded no start: {info['canary_failures']}")
+    if info["canary_checks"] == 0:
+        problems.append("no known-good text was checked")
     if unconfirmed > MAX_UNCONFIRMED:
         problems.append(f"{unconfirmed} pwsh-only failures not reproduced (limit {MAX_UNCONFIRMED})")
     return problems, info
@@ -159,6 +163,8 @@ def run_argument_oracle(size: int = CI_SIZE_ARGS, seed: int = 1814, cases_dir=No
             problems.append(f"rendering check skipped: {confirmed['skipped']}")
         if dropped > MAX_DROPPED_RENDERINGS:
             problems.append(f"{dropped} failures dropped because their rendering did not hold")
+        if (confirmed or {}).get("unverified"):
+            problems.append(f"{confirmed['unverified']} failing texts could not be rendered: the shell timed out")
         expected_writes = _truth.write_capable_paths(gen_args.Tree(oracle.tree()))
         missing = sorted(" ".join(p) for p in expected_writes - writes_judged)
         integrity = _integrity(problems, oracle_errors=oracle_errors, dropped_renderings=dropped,
@@ -195,21 +201,39 @@ def _slim(truth: dict) -> dict:
 
 def _confirm_rendering(sandbox, oracle, failures: list) -> dict:
     """Run each failing text in the real shell of its tool with stand-ins and check that the program
-    received exactly the generated vector. A failure whose rendering does not hold is re-judged with
-    what the program really received; it is dropped only if that is harmless."""
+    received exactly the generated vector. A run that times out is retried once with a long limit; if it
+    still records nothing it is counted as unverified (an integrity failure), never as a different
+    rendering. A failure whose rendering really differs is re-judged with what the program received; it
+    is dropped only if that is harmless."""
     try:
         from _shells import ShellLab, map_start
         lab = ShellLab(sandbox)
-    except Exception as exc:  # no bash or pwsh: keep everything, say so
-        return {"kept": failures, "skipped": str(exc)}
+    except Exception as exc:  # no bash or pwsh, or the self-test failed: keep everything, say so
+        return {"kept": failures, "skipped": f"{type(exc).__name__}: {exc}"}
     by_text = {}
     for f in failures:
         by_text.setdefault((f["tool"], f["command"]), []).append(f)
-    pwsh_texts = [t for (tool, t) in by_text if tool == "PowerShell"]
-    pwsh_records = dict(zip(pwsh_texts, lab.run_all(pwsh_texts)[1])) if pwsh_texts else {}
-    kept, mismatched, dropped = [], 0, 0
-    for (tool, text), fs in by_text.items():
-        records = lab.run_bash(text) if tool == "Bash" else pwsh_records.get(text, [])
+
+    def run(key):
+        tool, text = key
+        go = lab.run_bash_ex if tool == "Bash" else lab.run_pwsh_ex
+        records, outcome = go(text, 60.0)
+        if outcome == "timeout" and not records:
+            records, outcome = go(text, 300.0)
+        return records, outcome
+
+    import concurrent.futures as cf
+    keys = list(by_text)
+    with cf.ThreadPoolExecutor(max_workers=max(4, (os.cpu_count() or 4))) as pool:
+        results = dict(zip(keys, pool.map(run, keys)))
+    kept, mismatched, dropped, unverified = [], 0, 0, 0
+    for key, fs in by_text.items():
+        text = key[1]
+        records, outcome = results[key]
+        if outcome == "timeout" and not records:
+            unverified += 1
+            kept += [dict(f, detail=f["detail"] + " (rendering unverified: the shell timed out)") for f in fs]
+            continue
         starts = [s for r in records for s in map_start(r)]
         want = (fs[0]["program"], fs[0]["argv"])  # oracle 1 texts carry no environment overrides
         if any((p, a) == want for p, a, _ in starts):
@@ -220,11 +244,11 @@ def _confirm_rendering(sandbox, oracle, failures: list) -> dict:
             really = [h for p, a, _ in starts
                       for h in _truth.apply_text_rule(_truth.judge(oracle, p, a, f["mode"])[1], text, f["mode"])]
             if really:
-                f = dict(f, detail=f["detail"] + f" (shell gave {starts!r})")
-                kept.append(f)
+                kept.append(dict(f, detail=f["detail"] + f" (shell gave {starts!r})"))
             else:
                 dropped += 1
-    return {"kept": kept, "texts_checked": len(by_text), "rendering_differed": mismatched, "dropped": dropped}
+    return {"kept": kept, "texts_checked": len(by_text), "rendering_differed": mismatched, "dropped": dropped,
+            "unverified": unverified, "shell_integrity": lab.integrity(len(by_text))}
 
 
 # --------------------------------------------------------------------------------------------

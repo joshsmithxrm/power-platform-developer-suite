@@ -110,6 +110,13 @@ elif name == "parallel":
 """
 
 
+_CANARY_TEXTS = {"ppds env list", "& 'ppds' data delete --entity account", "ppds-mcp-server --read-only", "exit"}
+
+
+class HarnessError(RuntimeError):
+    """The shells do not record what they run: ground truth would be empty."""
+
+
 class ShellLab:
     def __init__(self, sandbox):
         self.sandbox = sandbox
@@ -145,7 +152,10 @@ class ShellLab:
         self.default_store = os.path.normpath(str(sandbox.home / ".ppds"))
         self.bash = shutil.which("bash", path=SYSTEM_PATH)
         self.pwsh = shutil.which("pwsh", path=SYSTEM_PATH) or shutil.which("pwsh")
+        self.canary_checks = 0
+        self.canary_failures = []
         self.assert_real_cli_unreachable()
+        self.self_test()
 
     def assert_real_cli_unreachable(self) -> None:
         for name in GUARDED_NAMES + APPROX_WRAPPERS:
@@ -199,8 +209,10 @@ class ShellLab:
         if lock:
             lock.acquire()
         try:
+            out_path = log.with_suffix(".out")
+            out = open(out_path, "wb")  # the shell's own output, kept for diagnosis (a file, not a pipe)
             proc = subprocess.Popen(argv, env=self.env(log), cwd=str(self.sandbox.work), stdin=subprocess.DEVNULL,
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                                    stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
             try:
                 proc.wait(timeout=timeout)
                 outcome = "finished"
@@ -213,7 +225,10 @@ class ShellLab:
             except (ProcessLookupError, PermissionError):
                 pass
             proc.wait()
+            out.close()
             with self._count_lock:
+                if text in _CANARY_TEXTS:
+                    return outcome  # canaries are checked separately, not counted as corpus texts
                 self.outcomes[f"{argv[0].rsplit('/', 1)[-1]}-{outcome}"] += 1
                 if outcome == "timeout":
                     self.timed_out.append((argv[0].rsplit('/', 1)[-1], text[:200]))
@@ -226,18 +241,56 @@ class ShellLab:
         """Every submitted text must have a recorded outcome under both shells."""
         done = {sh: self.outcomes[f"{sh}-finished"] + self.outcomes[f"{sh}-timeout"] for sh in ("bash", "pwsh")}
         return {"submitted": submitted, "bash_outcomes": done["bash"], "pwsh_outcomes": done["pwsh"],
+                "canary_checks": self.canary_checks, "canary_failures": self.canary_failures[:10],
                 "bash_timeouts": self.outcomes["bash-timeout"], "pwsh_timeouts": self.outcomes["pwsh-timeout"],
                 "timed_out_examples": self.timed_out[:10]}
 
-    def run_bash(self, text: str, timeout: float = 40.0) -> list:
+    def run_bash_ex(self, text: str, timeout: float = 60.0) -> tuple:
         log = self.logs / f"b-{uuid.uuid4().hex}.log"
-        self._run([self.bash, "--norc", "--noprofile", "-c", text], text, log, timeout)
-        return self._read(log)
+        outcome = self._run([self.bash, "--norc", "--noprofile", "-c", text], text, log, timeout)
+        return self._read(log), outcome
 
-    def run_pwsh(self, text: str, timeout: float = 40.0) -> list:
+    def run_pwsh_ex(self, text: str, timeout: float = 60.0) -> tuple:
         log = self.logs / f"p-{uuid.uuid4().hex}.log"
-        self._run([self.pwsh, "-NoProfile", "-NonInteractive", "-Command", text], text, log, timeout)
-        return self._read(log)
+        outcome = self._run([self.pwsh, "-NoProfile", "-NonInteractive", "-Command", text], text, log, timeout)
+        return self._read(log), outcome
+
+    def run_bash(self, text: str, timeout: float = 60.0) -> list:
+        return self.run_bash_ex(text, timeout)[0]
+
+    def run_pwsh(self, text: str, timeout: float = 60.0) -> list:
+        return self.run_pwsh_ex(text, timeout)[0]
+
+    # Known-good texts: each must record exactly this start. They run when the lab starts (after a
+    # warm-up pwsh in the lab's fresh HOME, whose first start is cold and slow) and again inside every
+    # run_all, so an oracle whose shells record nothing cannot pass (README, "Integrity").
+    CANARIES = (("ppds env list", ("ppds", ["env", "list"])),
+                ("& 'ppds' data delete --entity account", ("ppds", ["data", "delete", "--entity", "account"])),
+                ("ppds-mcp-server --read-only", ("ppds-mcp-server", ["--read-only"])))
+
+    def _canary_ok(self, records: list, want: tuple) -> bool:
+        return any((r.get("prog"), r.get("argv")) == want for r in records)
+
+    def self_test(self) -> None:
+        """Warm pwsh up, then require every canary to record its start under pwsh (and the POSIX ones
+        under bash). Raises HarnessError otherwise."""
+        log = self.logs / "warmup.log"
+        self._run([self.pwsh, "-NoProfile", "-NonInteractive", "-Command", "exit"], "exit", log, 300.0)
+        for text, want in self.CANARIES:
+            got, outcome = self.run_pwsh_ex(text, 180.0)
+            if not self._canary_ok(got, want):
+                raise HarnessError(f"pwsh records nothing for the known-good text {text!r} ({outcome}); "
+                                   f"its output: {self._tail(text)}")
+            if not text.startswith("&"):
+                got, outcome = self.run_bash_ex(text, 60.0)
+                if not self._canary_ok(got, want):
+                    raise HarnessError(f"bash records nothing for the known-good text {text!r} ({outcome})")
+        self.outcomes.clear()
+        self.timed_out.clear()
+
+    def _tail(self, text: str) -> str:
+        outs = sorted(self.logs.glob("p-*.out"), key=lambda p: p.stat().st_mtime)
+        return outs[-1].read_text("utf-8", "replace")[-300:] if outs else "(none)"
 
     def run_pwsh_batch(self, texts: list, timeout: float = 600.0) -> list:
         """Many texts in one pwsh process (start-up is slow). Each text is parsed and run as a new
@@ -274,11 +327,25 @@ class ShellLab:
         # One fresh process per text and shell, each with its own timeout (a batch would let one
         # hanging text stall all the others).
         n = max(4, (os.cpu_count() or 4))
+        canaries = [c for c, _ in self.CANARIES]
+        # canaries first, in the middle and last, so a lab that stops recording midway is noticed
+        mid = len(texts) // 2
+        batch = canaries + list(texts[:mid]) + canaries + list(texts[mid:]) + canaries
         with cf.ThreadPoolExecutor(max_workers=n) as pool:
-            bash = list(pool.map(self.run_bash, texts))
+            bash = list(pool.map(self.run_bash, batch))
         with cf.ThreadPoolExecutor(max_workers=n) as pool:
-            pwsh = list(pool.map(self.run_pwsh, texts))
-        return bash, pwsh
+            pwsh = list(pool.map(self.run_pwsh, batch))
+        k = len(canaries)
+        for shell, records in (("bash", bash), ("pwsh", pwsh)):
+            for pos in (0, k + mid, 2 * k + len(texts)):
+                for (text, want), got in zip(self.CANARIES, records[pos:pos + k]):
+                    if shell == "bash" and text.startswith("&"):
+                        continue
+                    self.canary_checks += 1
+                    if not self._canary_ok(got, want):
+                        self.canary_failures.append((shell, text))
+        strip = lambda rs: rs[k:k + mid] + rs[2 * k + mid:2 * k + len(texts)]
+        return strip(bash), strip(pwsh)
 
 
 # --------------------------------------------------------------------------------------------
