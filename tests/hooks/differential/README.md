@@ -12,6 +12,9 @@ These tests check the hook against those real things, on generated inputs, inste
 | Ground truth | The CLI's real root command (`Program.CreateRootCommand`), `McpSessionOptions.Parse` and the product's `QueryParser`, through the parse-only helper in `ParseOracle/` | Real `bash` and real `pwsh` running the text with stand-in programs, then oracle 1 for what each stand-in received |
 | Hook run | Each vector rendered as text for each tool name (`Bash`, `PowerShell`) | The same text for both tool names |
 
+A third, smaller check, the **timing oracle** (`gen_timing.py`), feeds long texts (50,000 to 200,000 characters, valid in both shells by `bash -n` and the PowerShell parser) in several shapes: a write followed by many words naming the programs and many short words, quoted names, mixed program names, many statements, `dotnet run` words.
+Its property: the hook refuses each text inside its documented budget (`_BUDGET_SECONDS`, read from the hook, plus 0.5 s for interpreter start-up) and never after the timeout registered for it in `.claude/settings.json` (read from the file).
+
 Every hook run is a subprocess with the payload on stdin, in three modes, each with a made-up allowlist (`zz-safe-a`, `zz-safe-b`) and a throwaway profile store:
 
 | Mode | Active environment | Shakedown |
@@ -24,8 +27,8 @@ Every hook run is a subprocess with the payload on stdin, in three modes, each w
 
 If the hook passes a command (any exit code but 2) in a mode, ground truth must say it is harmless in that mode:
 
-- `gate-unlisted`: it does not run at all (parse error, help), or it switches into a listed environment.
-- `gate-listed`: it does not switch the active environment to an unlisted or unknown target.
+- `gate-unlisted`: it does not run at all (parse error, help, a blank switch target, which `EnvironmentResolver` resolves to nothing), or it switches into a listed environment.
+- `gate-listed`: it does not switch the active environment to an unlisted or unknown target (`env select`, or `auth select` to a profile whose environment is not listed), and it does not point the invocation at another environment: a per-command `--environment` naming an unlisted environment, a `--profile` or `PPDS_PROFILE` that does not resolve to a listed environment in the made-up store (resolved like `ProfileCollection.GetByNameOrIndex`), a changed `PPDS_CONFIG_DIR`, or the MCP server's `--environment`, `--allowed-env` or `--profile` doing the same.
 - `shakedown`: both of the above, and it cannot write: its command path is read-only (`read_paths.json`), or it is `plugins deploy` with `--dry-run` bound to true, or `query sql` whose text the product's SQL parser reads as reads only, or the MCP server with `McpSessionOptions.ReadOnly` true.
 
 For oracle 2 the property is about both tool names: if a stand-in started under either shell with harmful arguments, the hook must refuse the text for both.
@@ -35,14 +38,16 @@ False blocks are counted and reported, never failed on: the maintainer accepted 
 
 ### Severities
 
-- `requirement`: R4 of the review requirement says the hook must refuse it. A pass fails the test.
-- `policy`: harmful by the property but outside R4's letter, or documented as allowed: per-command `--environment` and `--profile` overrides with a listed active environment, `auth select`, the MCP server's `--environment`, `--profile` and `--allowed-env`, and the `env` read-only diagnostics on an unlisted active environment. They are counted and reported; a pass fails only with `PPDS_DIFF_STRICT=1`.
+- `requirement`: the hook must refuse it (R4, and the maintainer's decisions in the third review round). A pass fails the test.
+- `policy`: counted and reported; a pass fails only with `PPDS_DIFF_STRICT=1`. Two kinds:
+  - the pure read diagnostics on an unlisted active environment: `env list`, `who`, `current`, `show`, and `env config` / `env type` in their `--list` / `--show` forms (their writing forms are `requirement`);
+  - an environment-gate harm (a switch or a target override) in a text that shows no switch words (`env`, `org` or `auth` with `select`, `switch` or `use`) and no target option (`--environment`, `-env`, `-e`, `--profile`, `-p`, `--allowed-env`, `PPDS_CONFIG_DIR`, `PPDS_PROFILE`), after quoting characters are removed and `-EncodedCommand` payloads are decoded. Example: `ppds @cmd.rsp`, where the switch is inside the response file. For such texts a pass is acceptable in the listed-environment gate; the cause is suffixed `-not-in-text`.
 - `-approx`: a .NET host form (`dotnet run`, `dnx`, `dotnet tool exec`) whose mapping from the `dotnet` stand-in's arguments to the CLI's arguments in `_shells.map_start` is an approximation of the .NET SDK's own forwarding. These are reported in their own group.
 
 ## How to run
 
 The tests need Python 3 with pytest, and for oracle 1 the .NET 10 SDK (the helper builds `src/PPDS.Cli` and `src/PPDS.Mcp` on first use).
-Oracle 2 also needs `bash` and `pwsh` (PowerShell 7).
+Oracle 2 and the timing oracle also need `bash` and `pwsh` (PowerShell 7).
 
 ```bash
 python -m pytest tests/hooks/differential -q
@@ -57,6 +62,10 @@ python tests/hooks/differential/differential.py shell --cases out/shell --json o
 ```
 
 ```bash
+python tests/hooks/differential/differential.py timing --cases out/timing --json out/timing.json
+```
+
+```bash
 python tests/hooks/differential/differential.py args --long
 ```
 
@@ -66,9 +75,9 @@ python tests/hooks/differential/repro.py out/args/<name>.case.json
 
 | Setting | Effect |
 |---|---|
-| `--size N`, `--seed S` | Corpus size and seed. Generation is deterministic for a seed and size. Defaults: oracle 1 seed 1814 and 4,500 vectors, oracle 2 seed 1780 and 700 texts; `--long` uses 40,000 and 8,000. |
+| `--size N`, `--seed S` | Corpus size and seed. Generation is deterministic for a seed and size. Defaults: oracle 1 seed 1814 and 4,500 vectors; oracle 2 seed 1780, 700 random texts plus a seeded sample of 500 of the 1,840 shell-feed texts; timing 50,000 and 110,000 characters in the shakedown mode. `--long` uses 40,000 vectors, 8,000 random texts plus every shell-feed text, and 20,000 to 200,000 characters in two modes. |
 | `--cases DIR` | Writes each failing case as `<name>.payload.json` (the hook's stdin) and `<name>.case.json` (tool, mode, command, ground truth). At most a few per group. |
-| `PPDS_DIFF_SIZE_ARGS`, `PPDS_DIFF_SIZE_SHELL` | Corpus sizes under pytest (defaults 1,500 and 700). |
+| `PPDS_DIFF_SIZE_ARGS`, `PPDS_DIFF_SIZE_SHELL`, `PPDS_DIFF_TIMING_LENGTHS` | Corpus sizes under pytest (defaults 1,500 vectors, 700 texts, and `50000`; lengths are comma-separated). |
 | `PPDS_DIFF_STRICT=1` | Policy-severity passes also fail. |
 | `PPDS_DIFF_REQUIRE=1` | A missing tool fails the test instead of skipping it. |
 | `PPDS_DIFF_XFAIL=1` | A test whose failures all carry a label in `expected_failures.json` is reported as xfail. |
@@ -87,6 +96,8 @@ A failure labelled `unlabelled` is a finding nobody has named yet.
 - Shell runs use stand-ins named `ppds`, `ppds-mcp-server`, `dotnet` and `dnx` (and `.exe` and upper-case spellings) that only record their arguments to a file and exit.
 - Each shell run has a temporary working directory, `HOME` and `PPDS_CONFIG_DIR` inside it, `PATH` set to the stand-in folder plus `/usr/bin:/bin`, and a timeout. Before the first run the lab asserts that every guarded name resolves to its stand-in and that no real `ppds` or `ppds-mcp-server` exists on the system folders.
 - The text vocabulary has no deletion, no network access and no redirection outside the temporary folder.
+- Oracle 2's generator has a systematic block for the class "code handed to a shell": every wrapper and assignment prefix (`env`, `env FOO=1`, `FOO=1`, `timeout 5`, `nohup`, `command`, `exec`, a changed `PPDS_CONFIG_DIR`) in front of every way of feeding code to `bash`, `sh` and `pwsh` (here-string, quoted and unquoted here-document, `-c` / `-Command`, stdin pipe), with the program name literal, quoted, escaped, from a variable and from a substitution.
+- Stand-ins also record `PPDS_CONFIG_DIR` and `PPDS_PROFILE` as they saw them, so environment-variable overrides in the text are judged.
 - The hook runs with a made-up allowlist and profile store and a scrubbed environment (no `PPDS_*`, `CLAUDE_*` or credential variables).
 
 ## Where it runs in CI
@@ -95,13 +106,13 @@ The Python tests job (`.github/workflows/workflow-tests.yml`, `ubuntu-latest`) r
 
 - Oracle 2 needs `bash` and `pwsh`; the hosted Ubuntu image has both.
 - Oracle 1 needs the .NET 10 SDK that `global.json` pins. That job does not run `actions/setup-dotnet`, so whether the image's preinstalled SDK satisfies `global.json` decides whether oracle 1 builds there; when it does not, oracle 1 skips with the reason, and oracle 2 then judges only the `gate-unlisted` mode.
-- To run oracle 1 in CI, add `actions/setup-dotnet` with `global-json-file: global.json` to that job. This change does not touch the workflow.
+- Recommendation: to run oracle 1 in CI, add `actions/setup-dotnet` with `global-json-file: global.json` to that job. This change does not touch the workflow.
+- The timing oracle runs two hook runs at a time so the measured time is the hook's; on a loaded runner the budget check can fail for load alone. Each run is stopped 5 s after the registered timeout.
 
 ## What is not covered
 
-- Timing: no generated input is large. The hook's run time is recorded per run (`slower_than_budget`) but the late-answer finding of round 2 needs long inputs this generator does not make.
 - Windows shells: `cmd`, Windows PowerShell 5.1 and Git Bash are not run. Windows' case-insensitive program lookup is only modelled for a few spellings (`PPDS`, `Ppds`, `DotNet`, `DOTNET` and the `.exe` names).
-- What a command does beyond its parse: write-ness of a path comes from `read_paths.json`, a frozen copy of the read-only paths of the hook's table at 3164e825, which review B checked handler by handler, plus the conditional rules above. A handler that writes despite being listed there is not caught.
+- What a command does beyond its parse: write-ness of a path comes from `read_paths.json`, a frozen copy of the read-only paths of the hook's table at 3164e825, which review B checked handler by handler, plus the conditional rules above. A handler that writes despite being listed there is not caught. **When the hook's command table changes, `read_paths.json` must be re-frozen by review** (a reviewer checks each added or reclassified read-only path against its handler); it is deliberately not derived from the hook, so a wrong classification in the hook cannot make the oracle agree with it.
 - The .NET SDK's own argument forwarding for `dotnet run`, `dnx` and `dotnet tool exec` is approximated (see `-approx`).
-- SQL that reaches another environment through a `[LABEL].entity` name, and profile-to-environment resolution for `--profile`, are not modelled.
+- SQL that reaches another environment through a `[LABEL].entity` name is not modelled. Profiles resolve only against the two-profile made-up store; `HOME` / `LOCALAPPDATA` changes are not modelled as configuration-folder overrides (every shell run sets `PPDS_CONFIG_DIR`).
 - Script files (`./x.sh`, `pwsh -File`), aliases defined in the text, and programs found through a changed `PATH` are not generated.
