@@ -113,7 +113,8 @@ def valid_in_both_shells(text: str) -> tuple:
 
 # Raw text far above the hook's caps: tens of millions of one character (or a short unit), with and
 # without a mention in front. Property: an answer inside the registered timeout.
-RAW_UNITS = ("'", '"', "(", "{", "a", "\\", "$", "`", ";", " ", "a ", "ppds ", "\"a\" ", "$(")
+RAW_UNITS = ("'", '"', "(", "{", "a", "\\", "$", "`", ";", " ", "a ", "ppds ", "\"a\" ", "$(", "dotnet ", "dotnet run ",
+             "dnx ", "ppds-mcp-server ")
 
 
 def raw_generate(lengths) -> list:

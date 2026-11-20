@@ -93,6 +93,8 @@ RESPONSE_FILES = {
     "cmd.rsp": "env\nselect\n--environment\nzz-prod-x\n",
     "del.rsp": "data\ndelete\n--entity\naccount\n--id\n00000000-0000-0000-0000-000000000001\n",
     "dry.rsp": "--dry-run\n",
+    "upd.rsp": "--update\n",
+    "sqlw.rsp": "\"DELETE FROM account WHERE name = 'x'\"\n",
 }
 
 _SCRUB_PREFIXES = ("PPDS_", "CLAUDE_", "AZURE_", "DATAVERSE_", "MSAL_", "ARM_")

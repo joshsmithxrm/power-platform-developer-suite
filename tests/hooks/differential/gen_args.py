@@ -359,6 +359,14 @@ def generate(oracle, size: int, seed: int) -> list:
         if rng.random() < 0.1:
             add([w.upper() if i < len(path) else w for i, w in enumerate(argv)], "case")
 
+    # -- response files after a read path: the file supplies the target or the write
+    reads = [p for p in paths if _truth_read(p)]
+    for path in reads:
+        for name in ("sel.rsp", "cmd.rsp", "del.rsp", "dry.rsp", "upd.rsp", "sqlw.rsp"):
+            if rng.random() < 0.15 or path in (("solutions", "list"), ("env", "list"), ("query", "sql"), ("version",)):
+                add(list(base[path]) + ["@" + name], "response-file-after-read")
+    add(["query", "sql", "@sqlw.rsp"], "response-file-after-read")
+    add(["query", "sql", "--output-format", "json", "@sqlw.rsp"], "response-file-after-read")
     # -- response files at every level
     for name in RESPONSE_FILES:
         add(["@" + name], "response-file")
@@ -439,7 +447,7 @@ def generate(oracle, size: int, seed: int) -> list:
 
 # Shapes kept whole when a smaller corpus is asked for; every other shape is sampled in proportion.
 _ALWAYS = ("bare", "root-flag", "switch", "response-file", "sql-elsewhere", "command-alias", "path", "auth-select",
-           "sql-implicit-exec", "conditional-write")
+           "sql-implicit-exec", "conditional-write", "response-file-after-read")
 
 
 def _sample(cases: list, size: int, rng: random.Random) -> list:
@@ -448,6 +456,11 @@ def _sample(cases: list, size: int, rng: random.Random) -> list:
     budget = max(0, size - len(keep))
     chosen = set(keep) | set(rng.sample(rest, min(budget, len(rest))))
     return [c for i, c in enumerate(cases) if i in chosen]
+
+
+def _truth_read(path) -> bool:
+    import _truth
+    return _truth.normal_path(path) in _truth._READ
 
 
 def _drop_option(argv: list, opt: dict) -> list:

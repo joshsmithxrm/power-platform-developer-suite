@@ -54,7 +54,7 @@ def _sample(jobs: list, per_group: int, rng: random.Random) -> list:
     return out
 
 
-def prepare(sandbox, oracle, lab, per_group: int) -> dict:
+def prepare(sandbox, oracle, lab, per_group: int, shell: bool = True) -> dict:
     rng = random.Random(4242)
     jobs = []
     cases = gen_args.generate(oracle, 4500, 1814)
@@ -67,7 +67,7 @@ def prepare(sandbox, oracle, lab, per_group: int) -> dict:
                 if req:
                     jobs.append({"oracle": "args", "tool": tool, "mode": mode, "command": text,
                                  "group": ("args", mode, req[0].cause, case.shape)})
-    texts = gen_shell.generate(700, 1780, str(lab.bin), 500)
+    texts = gen_shell.generate(700, 1780, str(lab.bin), 500) if shell else []
     bash, pwsh = lab.run_all([t.text for t in texts])
     for t, rb, rp in zip(texts, bash, pwsh):
         starts = [s + (lab.overrides(r),) for r in rb + rp for s in map_start(r)]
@@ -126,6 +126,7 @@ def main(argv=None) -> int:
     ap.add_argument("--only", nargs="*", help="mutant names (default: all)")
     ap.add_argument("--unit", action="store_true", help="name the unit test that catches what no oracle catches")
     ap.add_argument("--per-group", type=int, default=25)
+    ap.add_argument("--no-shell", action="store_true", help="skip oracle 2 (a quick targeted run)")
     ap.add_argument("--json")
     a = ap.parse_args(argv)
     t0 = time.monotonic()
@@ -134,7 +135,7 @@ def main(argv=None) -> int:
     lab = ShellLab(sandbox)
     scratch = Path(tempfile.mkdtemp(prefix="ppds-mutants-"))
     try:
-        prep = prepare(sandbox, oracle, lab, a.per_group)
+        prep = prepare(sandbox, oracle, lab, a.per_group, not a.no_shell)
         jobs = prep["jobs"]
         base = run_hooks(sandbox, [(j["tool"], j["command"], j["mode"]) for j in jobs])
         kept = [j for j, r in zip(jobs, base) if r.code == 2]

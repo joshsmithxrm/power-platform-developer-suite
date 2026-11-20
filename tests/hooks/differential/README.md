@@ -153,6 +153,50 @@ python tests/hooks/differential/mutate.py --unit --json out/mutants.json
 The results at the head this README was last updated against are in the pull request description and in the table below.
 
 <!-- mutation-table -->
+| Defect | Oracle 1 | Oracle 2 | Timing | Caught |
+|---|---|---|---|---|
+| `m01_colon_delim` | 80 | 0 |  | yes |
+| `m02a_bare_start_shakedown` | 42 | 120 |  | yes |
+| `m02b_bare_start_envgate` | 42 | 74 |  | yes |
+| `m03_sql_leading_dash_dropped` | 6 | 0 |  | yes |
+| `m04_sql_word_boundary` | 2 | 0 |  | yes |
+| `m05_dry_run_anywhere` | 6 | 0 |  | yes |
+| `m06_read_only_anywhere` | 1 | 0 |  | yes |
+| `m07_ignore_environment_option` | 271 | 154 |  | yes |
+| `m08_profile_name_as_env` | 358 | 470 |  | yes |
+| `m09_no_shell_feed_after_prefix` | 0 | 28 |  | yes |
+| `m10_unplaced_switch_passes_when_listed` | 0 | 146 |  | yes |
+| `m11_auth_select_passes` | 126 | 80 |  | yes |
+| `m12_response_file_passes_both_gates` | 43 | 0 |  | yes |
+| `m12a_response_file_passes_envgate` | 2 | 0 |  | yes |
+| `m12b_response_file_passes_writeblock` | 4 | 0 |  | yes |
+| `m13_cap_removed_runs_past_budget` | 0 | 0 | 0 | no: no effect at this head: other caps and the deadline bound the run (mutant and unmutated hook both refuse 2 M characters of `dotnet` words in 0.3 to 0.6 s); no test catches it |
+| `m13b_caps_raised_deadline_kept` | 0 | 0 | 0 | no: refuses inside the timeout, just over the budget; caught by the unit test `test_shakedown_decisions.py::test_past_the_program_word_cap_is_unreadable` |
+| `m14_ignore_source_target_env` | 68 | 0 |  | yes |
+| `m15_ignore_target_variables` | 0 | 110 |  | yes |
+| `m15b_environment_url_var_safe` | 0 | 16 |  | yes |
+| `m16_ignore_profile_option` | 255 | 83 |  | yes |
+| `m17_data_delete_classified_read` | 6 | 92 |  | yes |
+| `m18_help_flag_anywhere` | 32 | 0 |  | yes |
+| `m19_version_update_passes` | 12 | 14 |  | yes |
+| `m20_env_config_write_passes` | 51 | 0 |  | yes |
+| `m21_encoded_command_not_decoded` | 0 | 108 |  | yes |
+| `m22_mention_accounting_off` | 0 | 38 |  | yes |
+| `m23_unknown_active_passes` | 315 | 468 |  | yes |
+| `m24_env_select_passes_without_allowlist` | 51 | 91 |  | yes |
+| `m25_sentinel_ignored` | 326 | 436 |  | yes |
+| `m26_dotnet_projects_unknown` | 1100 | 212 |  | yes |
+| `m27_runtime_program_not_guessed` | 0 | 149 |  | yes |
+| `m28_switch_to_unlisted_passes` | 0 | 0 |  | no: masked: the per-command `--environment` check still refuses every real `env select` target; only a positional target (which the real CLI rejects) tells them apart; caught by the unit test `test_shakedown_ordinary_work.py::test_unplaced_invocation_naming_a_target_is_refused_with_a_listed_env[timeout-quoted-c]` |
+| `m29_mcp_targets_ignored` | 236 | 116 |  | yes |
+| `m30_watchdog_and_deadline_off` | 0 | 0 | 4 | yes |
+| `m31_only_first_invocation_checked` | 14 | 428 |  | yes |
+| `m33_only_the_tools_own_dialect_read` | 0 | 97 |  | yes |
+| `m34_five_write_paths_classified_read` | 17 | 0 |  | yes |
+| `m35_three_write_paths_classified_read` | 9 | 0 |  | yes |
+
+Caught: 36 of 39 at CI size (the review counted 22 of 39 at a39e7e68). Counts are failing hook runs among the sampled harmful jobs. m12, m12a and m12b were caught after the `response-file-after-read` shapes were added (targeted re-run, oracle 1 only).
+
 
 ## Where it runs in CI
 
