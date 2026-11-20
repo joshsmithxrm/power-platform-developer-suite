@@ -142,7 +142,7 @@ READS = [
     ("dotnet-watch-test", "dotnet watch test --project tests/PPDS.Cli.Tests",
      "dotnet watch test --project tests\\PPDS.Cli.Tests"),
     ("git", "git status", "git status"),
-    ("ps-assignment", "FOO=bar python -m pytest -q", "$env:FOO = 'bar'; python -m pytest -q"),
+    ("env-assignment", "FOO=bar python -m pytest -q", None),
 ]
 
 
@@ -252,6 +252,91 @@ def test_encoded_command(run, tool):
     good = base64.b64encode(f"ppds {DEL}".encode("utf-16-le")).decode()
     assert run(tool, f"pwsh -EncodedCommand {good}", "shakedown").returncode == 2
     assert run(tool, "pwsh -enc not-base64!", "shakedown").returncode == 2
+
+
+_VALUED = ["--read-only=false", "--read-only=true", "--read-only="]
+_MCP_FORMS = [
+    "ppds-mcp-server {flag}",
+    "ppds-mcp-server.exe {flag}",
+    "dotnet run --project src/PPDS.Mcp {flag}",
+    "dotnet run --project src/PPDS.Mcp -- {flag}",
+]
+
+
+def _shell_form(tool, form):
+    return form.replace("src/PPDS.Mcp", "src\\PPDS.Mcp") if tool == "PowerShell" else form
+
+
+@pytest.mark.parametrize("tool", ["Bash", "PowerShell"])
+@pytest.mark.parametrize("flag", _VALUED)
+@pytest.mark.parametrize("form", _MCP_FORMS)
+def test_read_only_with_a_value_blocks(run, tool, flag, form):
+    """The server accepts only the bare flag; any `--read-only=<value>` starts it writable."""
+    r = run(tool, _shell_form(tool, form).format(flag=flag), "shakedown")
+    assert r.returncode == 2, r.stderr
+    assert "only accepts the bare --read-only flag" in r.stderr
+
+
+@pytest.mark.parametrize("tool", ["Bash", "PowerShell"])
+@pytest.mark.parametrize("form", _MCP_FORMS)
+def test_bare_read_only_passes(run, tool, form):
+    r = run(tool, _shell_form(tool, form).format(flag="--read-only"), "shakedown")
+    assert r.returncode == 0, r.stderr
+
+
+@pytest.mark.parametrize("tool", ["Bash", "PowerShell"])
+def test_valued_read_only_beside_the_bare_flag_blocks(run, tool):
+    r = run(tool, "ppds-mcp-server --read-only --read-only=false", "shakedown")
+    assert r.returncode == 2, r.stderr
+
+
+def _run_bytes(stdin: bytes, env_extra: dict) -> subprocess.CompletedProcess:
+    env = os.environ.copy()
+    for k in ("PPDS_SAFE_ENVS", "PPDS_CONFIG_DIR", "PPDS_SHAKEDOWN"):
+        env.pop(k, None)
+    env.update(env_extra)
+    return subprocess.run([sys.executable, str(HOOK_PATH)], input=stdin, capture_output=True,
+                          timeout=60, env=env)
+
+
+@pytest.mark.parametrize("tool", ["Bash", "PowerShell"])
+def test_hook_reads_utf8_bytes_and_writes_non_ascii(run, tool, tmp_path):
+    """The input is read as UTF-8 bytes; a block message naming non-ASCII text
+    is written without an encoding error (an error would let the command run)."""
+    payload = _payload(tool, "ppds data delete --entity café — А", str(tmp_path))
+    r = _run_bytes(json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                   {"PPDS_SAFE_ENVS": "x", "PPDS_CONFIG_DIR": str(tmp_path), "CLAUDE_PROJECT_DIR": str(tmp_path)})
+    assert r.returncode == 2, r.stderr
+    assert "BLOCKED [shakedown-safety/env]" in r.stderr.decode("utf-8")
+
+
+def test_an_internal_error_blocks_a_ppds_command(monkeypatch, tmp_path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("shakedown_safety_crash", str(HOOK_PATH))
+    mod = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(HOOK_PATH.parent))
+    spec.loader.exec_module(mod)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("bug")
+
+    monkeypatch.setattr(mod, "find_ppds_invocations", boom)
+    data = json.dumps(_payload("PowerShell", "ppds data delete", str(tmp_path))).encode()
+    monkeypatch.setattr(mod.sys, "stdin", type("S", (), {"buffer": type("B", (), {"read": lambda self: data})()})())
+    with pytest.raises(SystemExit) as exc:
+        mod.main()
+    assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("tool", ["Bash", "PowerShell"])
+def test_a_long_command_answers_in_bounded_time(run, tool):
+    import time
+
+    start = time.monotonic()
+    r = run(tool, "echo " + "'a' " * 12000 + f"; ppds {DEL}", "shakedown")
+    assert r.returncode == 2, r.stderr
+    assert time.monotonic() - start < 8
 
 
 def test_payload_shapes_were_recorded_for_both_tools():

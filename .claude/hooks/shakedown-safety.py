@@ -9,7 +9,7 @@ safety surface harder to review and invited drift.
 Two concerns, one hook:
 
 1. **Env allowlist gating (opt-in).** Once an allowlist names at least one
-   env, every Bash invocation that mentions ``ppds`` / ``ppds-mcp-server``
+   env, every Bash or PowerShell command that mentions ``ppds`` / ``ppds-mcp-server``
    is gated against that allowlist of dev/test env names. With no allowlist
    configured the gate is off; a misconfigured allowlist blocks (see
    below). The active env is read directly from the PPDS profile
@@ -31,26 +31,43 @@ command, ``dotnet [exec] <path>/ppds.dll`` / ``ppds-mcp-server.dll``,
 ``dotnet ppds`` and ``dotnet tool run ppds``. These are normalised to the
 same argv and only ever add hits. Matching is broad and best-effort.
 
-**Both shell tools.** The hook is registered for the Bash tool and the
-PowerShell tool. The payload's ``tool_name`` picks the dialect: PowerShell
-text is read with PowerShell's rules (``_shellparse.py``: backtick escapes
-and continuations, ``''`` and ``""`` inside quotes, the call operator, script
-blocks, sub-expressions, backslash paths); Bash text with POSIX rules, in
-addition to the original matcher. Any word naming ``ppds`` /
-``ppds-mcp-server`` (with a path and ``.exe``) or ``dotnet`` / ``dnx`` is an
-invocation, at any nesting depth: inside substitutions, script blocks and
-every quoted string, so ``bash -c``, ``pwsh -Command`` and ``cmd /c`` are
-seen. A command that only mentions ``ppds`` (a commit message, a search) is
-also treated as an invocation; that is the maintainer's decision on #1780.
+**Both shell tools, both readings.** The hook is registered for the Bash
+tool and the PowerShell tool. Every command is read with PowerShell's rules
+and with POSIX rules (``_shellparse.py``), whatever ``tool_name`` says, and
+by the original matcher; a hit from any reading counts. Any word naming
+``ppds`` / ``ppds-mcp-server`` (with a path and ``.exe``) or ``dotnet`` /
+``dnx`` is an invocation, at any nesting depth: inside substitutions,
+script blocks, every quoted string, and the code handed to ``bash -c``,
+``pwsh -Command``, ``cmd /c``, ``eval`` and ``pwsh -EncodedCommand``. A
+command that only mentions ``ppds`` (a commit message, a search) is also
+treated as an invocation; that is the maintainer's decision on #1780.
+
+**Every mention is accounted for.** The reader may clear a command; it is
+never the reason one is missed. Each mention of ``ppds``, ``dotnet`` or
+``dnx`` in the raw text (any case, also with quoting, escape, brace or glob
+characters between the letters) must be placed by each reading in a word
+of a text it read to the end: a word naming the program, or a word naming
+something else that only contains it (``src/PPDS.Cli``). A mention that is
+not placed is an invocation of both programs with an unknown verb.
 
 **Cannot tell -> invocation.** When the hook cannot tell what a command
 runs, it treats it as an invocation of both programs: a program only known
-at run time (``$x data delete``, ``& $exe ...``, ``Invoke-Expression $c``),
-a ``dotnet run`` project or working directory only known at run time, an
-alias that names ``ppds``, more than ``_DOTNET_MAX_OCCURRENCES`` ``dotnet``
-words, or text the reader could not finish (an unterminated quote, a cap).
-Such an invocation is gated, and during a shakedown it is refused when its
-subcommand or verb is not known.
+at run time (``$x data delete``, ``& $exe ...``, ``timeout 5 $x``, a brace
+or glob in the name), wrapper code not in the text (``pwsh -Command $c``,
+``$c | iex``, a script file), a ``dotnet run`` project or working directory
+it could not resolve, an option before the ``dotnet`` verb it does not
+know, an alias that names ``ppds``, text the reader could not finish, and
+any cap or the time budget. Such an invocation is gated, and during a
+shakedown it is refused when its subcommand or verb is not known; an
+option or several words before the verb make the verb unknown.
+
+**Time and failures.** Claude Code runs a command whose PreToolUse hook
+exceeds its registered timeout or exits 1. The hook therefore answers
+within ``_BUDGET_SECONDS`` (well inside the registered 10 s); past it the
+command is an invocation. Any exception at the top level refuses a command
+that mentions ``ppds``, ``dotnet`` or ``dnx``, unless the hook had already
+found that no allowlist and no shakedown is in effect (then every command
+passes before it is read). Input is read as UTF-8 bytes.
 
 **Allowlist sources (checked in order; the first that names an env wins):**
 
@@ -106,6 +123,7 @@ action.
 
 from __future__ import annotations
 
+import bisect
 import json
 import os
 import re
@@ -483,8 +501,17 @@ def env_matches_allowlist(candidates: Iterable, allowlist: Iterable) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Bash command parsing (shared by both concerns)
+# Command parsing (shared by both concerns)
 # ---------------------------------------------------------------------------
+
+
+class _Deadline(Exception):
+    """The hook's time budget ran out."""
+
+
+def _tick(deadline) -> None:
+    if deadline is not None and time.monotonic() > deadline:
+        raise _Deadline()
 
 
 _PPDS_PROGRAM_RE = re.compile(
@@ -501,15 +528,60 @@ _SHELL_OPERATORS = {"|", ";", "&", "&&", "||", ">", "<", ">>", "<<", chr(96), "(
 
 
 _PPDS_PROGRAMS = ("ppds", "ppds-mcp-server")
+# Words that name a guarded program (lower case, path and .exe removed).
+_GUARDED = {"ppds", "ppds-mcp-server", "dotnet", "dnx"}
 # Argument standing for text the hook could not read; `is_mutation` treats
 # an argv that contains it as a write.
 UNREADABLE = "<unreadable>"
 # A working directory only known at run time.
 _UNKNOWN_CWD = sp.DYN
-_MENTION_RE = re.compile(r"ppds|dotnet|dnx", re.IGNORECASE)
+
+# A mention of a guarded program in the raw text: `ppds` (also inside
+# `ppds.exe`, `ppds-mcp-server`), `dotnet` or `dnx`, in any case, with
+# quoting, escape, brace or glob characters allowed between the letters.
+_QUOTING = r"""['"`^\\‘’‚‛“”„{},*?\[\]]"""
+_MENTION_RE = re.compile(
+    "|".join((_QUOTING + "*").join(re.escape(ch) for ch in name) for name in ("ppds", "dotnet", "dnx")),
+    re.IGNORECASE,
+)
+_QUOTING_CHARS = set("'\"`^\\‘’‚‛“”„{},*?[]")
+# Escapes the hook decodes on its own, to find a name spelled with them.
+_ESCAPE_RE = re.compile(
+    r"\\x([0-9A-Fa-f]{1,2})|\\u([0-9A-Fa-f]{1,4})|\\U([0-9A-Fa-f]{1,8})|\\([0-7]{1,3})"
+    r"|`u\{([0-9A-Fa-f]{1,6})\}"
+)
+# PowerShell that runs code only known at run time without a wrapper word.
+_DYNAMIC_CODE_RE = re.compile(
+    r"\[\s*(?:system\.)?(?:management\.automation\.)?(?:scriptblock|powershell)\s*\]\s*::"
+    r"|\[\s*(?:system\.)?(?:diagnostics\.)?process\s*\]\s*::"
+    r"|\.\s*invoke(?:returnasis)?\s*\(|\.\s*addscript\s*\(|\$executioncontext\b",
+    re.IGNORECASE,
+)
+# Characters that may touch a mention inside a word naming something else
+# (`src/PPDS.Cli`, `PPDS_CONFIG_DIR`, `$env:PPDS_X`, `.dotnet/tools`), and
+# `=` inside an option (`--environment=ppds-dev`).
+_GLUE_BEFORE = set("_.-/\\:$")
+_GLUE_AFTER = set("_.-/\\")
+
 _CD_WORDS = {"cd", "pushd", "chdir", "set-location", "sl", "push-location"}
 _CD_POP_WORDS = {"popd", "pop-location"}
 _ALIAS_DEFINERS = {"alias", "set-alias", "new-alias", "sal", "nal", "doskey"}
+# Anything in the raw text that may change the working directory. When the
+# reader did not consume every one as a plain `cd`, a project-less
+# `dotnet run` has an unknown working directory.
+_CDLIKE_RE = re.compile(
+    r"(?i:(?<![\w.$-])(?:cd|chdir|pushd|popd|sl|set-location|push-location|pop-location)(?![\w-]))"
+    r"|(?<![\w-])-C(?![\w-])"
+    r"|(?i:(?<![\w-])(?:--chdir|--directory|-wo[a-z]*|/d)(?![\w-]))"
+)
+# Prefixes that take values of their own before the program they run, or
+# run a program with arguments from elsewhere: a run-time word after them
+# may be the program.
+_RUNNER_PREFIXES = {
+    "env", "sudo", "doas", "nice", "timeout", "stdbuf", "ionice", "chrt", "taskset", "strace",
+    "ltrace", "watch", "xargs", "parallel", "find", "fd", "runas", "gsudo", "start-process", "saps",
+    "start", "call", "invoke-item", "ii", "invoke-command", "icm",
+}
 
 
 def _unknown(args) -> list:
@@ -529,104 +601,277 @@ def _dedupe(argvs: list) -> list:
     return out
 
 
-def find_ppds_invocations(command: str, tool_name: str = "Bash", cwd=None) -> list:
+def _mentions(text: str) -> list:
+    """``(start, end, fuzzy)`` for each mention of a guarded program in
+    ``text``; ``fuzzy`` when quoting characters sit between the letters."""
+    return [(m.start(), m.end(), any(ch in _QUOTING_CHARS for ch in m.group(0)))
+            for m in _MENTION_RE.finditer(text)]
+
+
+def _unescape(text: str) -> str:
+    def repl(m):
+        for group, radix in ((1, 16), (2, 16), (3, 16), (4, 8), (5, 16)):
+            if m.group(group):
+                try:
+                    return chr(int(m.group(group), radix))
+                except (ValueError, OverflowError):
+                    return "�"
+        return m.group(0)
+    return _ESCAPE_RE.sub(repl, text)
+
+
+def _escaped_mention(text: str) -> bool:
+    """True when decoding escapes spells a guarded name the raw text does not."""
+    if not _ESCAPE_RE.search(text):
+        return False
+    return len(_MENTION_RE.findall(_unescape(text))) > len(_MENTION_RE.findall(text))
+
+
+def mentions_guarded(text: str) -> bool:
+    """True when ``text`` mentions ppds, dotnet or dnx, plainly, with quoting
+    characters between the letters, or through an escape."""
+    return bool(text) and (bool(_MENTION_RE.search(text)) or _escaped_mention(text))
+
+
+def find_ppds_invocations(command: str, tool_name: str = "Bash", cwd=None, deadline=None) -> list:
     """Return a list of argv-style token lists for each ppds invocation.
 
-    ``tool_name`` picks the dialect: ``PowerShell`` text is read with
-    PowerShell's rules only; ``Bash`` text with the original matcher plus
-    POSIX rules; any other value with all of them. ``cwd`` is the shell's
-    working directory from the hook payload; None means a directory that is
-    not a PPDS project (the original behaviour), ``_UNKNOWN_CWD`` that it is
-    not known. Readings only ever add hits; the list is de-duplicated.
+    The text is read in both dialects whatever ``tool_name`` says, and by
+    the original matcher; a hit from any reading counts. Every mention of a
+    guarded program must be placed by each reading in a word it read to the
+    end (``_unplaced``); one that is not is an invocation of both programs
+    with an unknown verb. ``cwd`` is the shell's working directory from the
+    hook payload; None means a directory that is not a PPDS project,
+    ``_UNKNOWN_CWD`` that it is not known. Past ``deadline`` (or any cap)
+    the command is an invocation of both programs with an unknown verb.
     """
     if not command:
         return []
-    tool = (tool_name or "").lower()
-    out = []
-    if tool != "powershell":
-        out.extend(_original_invocations(command))
-    dialects = {"powershell": ["ps"], "bash": ["posix"]}.get(tool, ["posix", "ps"])
-    for dialect in dialects:
-        out.extend(_read_invocations(command, dialect, cwd))
-    if not out and tool == "powershell" and _PPDS_PROGRAM_RE.search(command):
-        out.extend(_unknown([UNREADABLE]))
-    return _dedupe(out)
+    if deadline is None:
+        deadline = time.monotonic() + _BUDGET_SECONDS
+    try:
+        out = []
+        out.extend(_original_invocations(command, deadline))
+        mentions = _mentions(command)
+        for dialect in ("posix", "ps"):
+            out.extend(_read_invocations(command, dialect, cwd, mentions, deadline))
+        if _escaped_mention(command) or _DYNAMIC_CODE_RE.search(command):
+            out.extend(_unknown([UNREADABLE]))
+        return _dedupe(out)
+    except _Deadline:
+        return _unknown([UNREADABLE])
 
 
-def _strip_quoting(text: str) -> str:
-    return re.sub(r"[`^\\'\"‘’‚‛“”„]", "", text)
+# -- mention accounting -------------------------------------------------------
 
 
-def _read_invocations(command: str, dialect: str, cwd) -> list:
+def _units(top) -> list:
+    out, stack = [], [top]
+    while stack:
+        unit = stack.pop()
+        out.append(unit)
+        stack.extend(child for child in unit.children if child.base is not None)
+    return out
+
+
+def _covering(items, starts, mentions, lo, hi, key, out) -> None:
+    k = bisect.bisect_left(starts, lo)
+    while k < len(mentions) and mentions[k][0] < hi:
+        if mentions[k][1] <= hi:
+            out.setdefault((key, k), []).append(items)
+        k += 1
+
+
+def _unplaced(result, text: str, mentions: list, deadline) -> bool:
+    """True when this reading does not place every mention.
+
+    A mention is placed when every unit (text read) covering it read to the
+    end, at least one word covers it, and each covering word that is not
+    just the container of a nested text places it: a word naming a guarded
+    program (not inside a quoted string glued to other text), or a plain
+    mention joined to identifier characters inside a word naming something
+    else (``src/PPDS.Cli``)."""
+    if not mentions:
+        return False
+    if not result.complete or result.top is None:
+        return True
+    starts = [m[0] for m in mentions]
+    words_by, kids_by, spans = {}, {}, {}
+    units = _units(result.top)
+    for unit in units:
+        _tick(deadline)
+        unit_spans = set()
+        for word in unit.words:
+            span = word.span
+            if span is None:
+                continue
+            unit_spans.add(span)
+            _covering(word, starts, mentions, span[0], span[1], id(unit), words_by)
+        spans[id(unit)] = unit_spans
+        for child in unit.children:
+            if child.base is None or child.lo is None or child.hi is None:
+                continue
+            _covering(child, starts, mentions, child.lo, child.hi, id(unit), kids_by)
+    for k, mention in enumerate(mentions):
+        _tick(deadline)
+        if not _judge(result.top, k, mention, text, words_by, kids_by, spans):
+            return True
+    return False
+
+
+def _judge(unit, k, mention, text, words_by, kids_by, spans) -> bool:
+    if not unit.ok:
+        return False
+    kids = kids_by.get((id(unit), k), [])
+    words = words_by.get((id(unit), k), [])
+    results = [_judge(child, k, mention, text, words_by, kids_by, spans) for child in kids]
+    for word in words:
+        a, b = word.span
+        if any(a <= child.lo and child.hi <= b for child in kids):
+            continue  # the mention is in a nested text of this word: judged there
+        results.append(_judge_word(word, unit, mention, text, spans))
+    return bool(results) and all(results)
+
+
+def _judge_word(word, unit, mention, text, spans) -> bool:
+    start, end, fuzzy = mention
+    if sp.program_name(word) in _GUARDED:
+        # A guarded name read out of a quoted string glued to other text
+        # (`--x="ppds ..."`, `['ppds', ...]`) may not carry its arguments.
+        x = unit
+        while x is not None:
+            if x.kind == "string" and x.outer is not None and x.parent is not None \
+                    and x.outer not in spans.get(id(x.parent), ()):
+                return False
+            x = x.parent
+        return True
+    if fuzzy:
+        return False
+    if sp.program_name(word) is None and \
+            sp.program_name(sp.Word(word.text.replace(sp.DYN, ""), False, False)) in _GUARDED:
+        return False  # run-time text next to the name may leave just the name (`${x}ppds`)
+    a, b = word.span
+    before = text[start - 1] if start > a else None
+    after = text[end] if end < b else None
+    if before is None and after is None:
+        return False
+    if before is not None and not (before.isalnum() or before in _GLUE_BEFORE
+                                   or (before == "=" and word.text.startswith("-"))):
+        return False
+    if after is not None and not (after.isalnum() or after in _GLUE_AFTER):
+        return False
+    return True
+
+
+# -- invocations from one reading --------------------------------------------
+
+
+def _read_invocations(command: str, dialect: str, cwd, mentions: list, deadline) -> list:
     """Hits from reading ``command`` with ``_shellparse`` in ``dialect``.
 
     Every word naming a PPDS program, ``dotnet`` or ``dnx`` counts, in every
-    statement the reader finds. A failure here is an invocation (when the
-    text mentions PPDS or the .NET host), never a pass.
-    """
-    try:
-        result = sp.read(command, dialect)
-        out = []
-        if not result.complete and (
-            _MENTION_RE.search(_strip_quoting(command))
-            or any("encoded" in problem for problem in result.problems)  # hides any mention
-        ):
-            out.extend(_unknown([UNREADABLE]))
-        stack = [cwd]  # working directory per subshell level
-        dotnet_words = 0
-        for stmt in result.statements:
-            level = stmt.level
-            del stack[level + 1:]
-            while len(stack) < level + 1:
-                stack.append(stack[-1])
-            words, texts = stmt.words, stmt.texts
-            for i, word in enumerate(words):
+    statement the reader finds; so does every mention this reading does not
+    place, a program only known at run time, a wrapper whose code is not in
+    the text, and any cap or the deadline."""
+    result = sp.read(command, dialect, deadline)
+    if result.capped:
+        return _unknown([UNREADABLE])  # past a cap: an invocation, unconditionally
+    _tick(deadline)
+    out = []
+    if _unplaced(result, command, mentions, deadline):
+        out.extend(_unknown([UNREADABLE]))
+    statements = result.statements
+    cd_statements = sum(
+        1 for stmt in statements
+        if stmt.code and not stmt.wrapped and stmt.words and stmt.words[0].text.lower() in _CD_WORDS | _CD_POP_WORDS
+    )
+    trust_cwd = len(_CDLIKE_RE.findall(command)) == cd_statements
+    stack = [cwd]  # working directory per subshell level
+    dotnet_words = 0
+    for stmt in statements:
+        _tick(deadline)
+        level = stmt.level
+        del stack[level + 1:]
+        while len(stack) < level + 1:
+            stack.append(stack[-1])
+        words, texts = stmt.words, stmt.texts
+        positions = dict(sp.command_positions(stmt)) if stmt.code else {}
+        for i, word in enumerate(words):
+            prog = sp.program_name(word)
+            if prog in _PPDS_PROGRAMS:
+                argv = [prog] + texts[i + 1:]
+                if positions.get(i):
+                    argv.append(UNREADABLE)  # arguments from elsewhere (xargs, Start-Process)
+                out.append(argv)
+            elif prog in ("dotnet", "dnx"):
+                dotnet_words += 1
+                if dotnet_words > _DOTNET_MAX_OCCURRENCES:
+                    out.extend(_unknown([UNREADABLE]))
+                    continue
+                if prog == "dnx":
+                    hits = _package_exec(texts[i + 1:])
+                else:
+                    known = (trust_cwd and stmt.code and not stmt.wrapped and i in positions
+                             and not positions[i] and stack[level] != _UNKNOWN_CWD)
+                    hits = _dotnet_hits(texts[i + 1:], {stack[level]} if known else {_UNKNOWN_CWD})
+                if positions.get(i):
+                    hits = [hit + [UNREADABLE] for hit in hits] or _unknown([UNREADABLE])
+                out.extend(hits)
+        if stmt.code:
+            for i, opaque in positions.items():
+                word = words[i]
                 prog = sp.program_name(word)
-                if prog in _PPDS_PROGRAMS:
-                    out.append([prog] + texts[i + 1:])
-                elif prog in ("dotnet", "dnx"):
-                    dotnet_words += 1
-                    if dotnet_words > _DOTNET_MAX_OCCURRENCES:
-                        out.extend(_unknown([UNREADABLE]))
-                    elif prog == "dnx":
-                        out.extend(_package_exec(texts[i + 1:]))
-                    else:
-                        out.extend(_dotnet_hits(texts[i + 1:], {stack[level], cwd}))
-            if stmt.code:
-                for i in sp.command_positions(stmt):
-                    if words[i].dynamic and sp.program_name(words[i]) is None:
-                        out.extend(_unknown(texts[i + 1:]))
-                first = words[0].text.lower()
-                if first in _CD_WORDS:
-                    stack[level] = _cd(stack[level], words[1:])
-                elif first in _CD_POP_WORDS:
-                    stack[level] = _UNKNOWN_CWD
-            if words[0].text.lower() in _ALIAS_DEFINERS and _MENTION_RE.search(" ".join(texts[1:])):
+                if prog in _GUARDED:
+                    continue
+                if word.dynamic or prog is None or (word.glob and word.text != "?"):
+                    out.extend(_unknown(texts[i + 1:] + ([UNREADABLE] if opaque else [])))
+                elif opaque and (prog in sp.SHELLS or prog in sp.CODE_WORDS):
+                    out.extend(_unknown([UNREADABLE]))
+            if stmt.wrapper and (not stmt.code_arg or stmt.dynamic_code or stmt.stdin_text):
+                out.extend(_unknown([UNREADABLE]))  # the code it runs is not in the text
+            lead = next((w for w in words if not sp.is_assignment(w)), None)
+            if lead is not None and not lead.dynamic and lead.text.lower() in _RUNNER_PREFIXES \
+                    and any(w.dynamic for w in words[words.index(lead) + 1:]):
                 out.extend(_unknown([UNREADABLE]))
-        return out
-    except Exception:  # noqa: BLE001 -- a reading failure must not become a pass
-        return _unknown([UNREADABLE]) if _MENTION_RE.search(_strip_quoting(command)) else []
+            first = words[0].text.lower() if words else ""
+            if first in _CD_WORDS:
+                stack[level] = _cd(stack[level], words[1:], stmt.dialect)
+            elif first in _CD_POP_WORDS:
+                stack[level] = _UNKNOWN_CWD
+        if words and words[0].text.lower() in _ALIAS_DEFINERS and (
+                mentions_guarded(" ".join(texts[1:])) or any(w.dynamic for w in words[1:])):
+            out.extend(_unknown([UNREADABLE]))
+    return out
 
 
 def _is_absolute(path: str) -> bool:
     return path.startswith(("/", "~")) or bool(re.match(r"^[A-Za-z]:", path))
 
 
-def _cd(base, args):
-    """The working directory after ``cd`` / ``Set-Location`` with ``args``."""
+def _cd(base, args, dialect="posix"):
+    """The working directory after ``cd`` / ``Set-Location`` with ``args``;
+    unknown for any option other than POSIX ``-P`` / ``-L`` / ``-e``, more
+    than one path, ``-`` or a path only known at run time."""
+    paths = []
     for word in args:
         if word.dynamic:
             return _UNKNOWN_CWD
         text = word.text
-        if text == "-":
+        if dialect == "posix" and text in ("-P", "-L", "-e", "-@", "--"):
+            continue
+        if text == "-" or text.startswith("-") or re.fullmatch(r"/[A-Za-z?]", text):
             return _UNKNOWN_CWD
-        if text.startswith("-"):
-            continue  # -P, -L, -Path, -LiteralPath
-        path = text.replace("\\", "/")
-        if _is_absolute(path) or base is None:
-            return path
-        return base.replace("\\", "/") + "/" + path
-    return "~"
+        paths.append(text)
+    if len(paths) > 1:
+        return _UNKNOWN_CWD
+    if not paths:
+        return "~"
+    path = paths[0].replace("\\", "/")
+    if _is_absolute(path) or base is None:
+        return path
+    if base == _UNKNOWN_CWD:
+        return _UNKNOWN_CWD
+    return base.replace("\\", "/") + "/" + path
 
 
 def _path_program(path):
@@ -637,16 +882,16 @@ def _path_program(path):
     parts = []
     for part in path.replace("\\", "/").split("/"):
         if part == "..":
-            if parts and sp.DYN in parts[-1]:
-                return "?"
+            if not parts or sp.DYN in parts[-1]:
+                return "?" if sp.DYN in path else None
             parts = parts[:-1]
         elif part not in ("", "."):
             parts.append(part)
     if not parts:
         return None
     last = parts[-1].lower()
-    if sp.DYN in last:
-        return "?"
+    if sp.DYN in last or any(ch in last for ch in "*?[{"):
+        return "?"  # only known at run time, or a glob / brace pattern
     return _PPDS_PROJECTS.get(last[:-7] if last.endswith(".csproj") else last)
 
 
@@ -665,35 +910,43 @@ def _project_programs(project, cwds) -> set:
     return out
 
 
-def _original_invocations(command: str) -> list:
+def _original_invocations(command: str, deadline=None) -> list:
     """The original matcher: a ``ppds`` word after whitespace or an operator,
-    its tail split with POSIX rules, plus the ``dotnet`` forms."""
+    its tail split with POSIX rules, plus the ``dotnet`` forms. At most
+    ``_DOTNET_MAX_OCCURRENCES`` words of each, and ``_DOTNET_MAX_TOKENS``
+    tokens / ``_DOTNET_MAX_CHARS`` characters after each, are examined; past
+    either cap the reading has an unknown verb."""
     out = []
-    for match in _PPDS_PROGRAM_RE.finditer(command):
+    for count, match in enumerate(_PPDS_PROGRAM_RE.finditer(command)):
+        if count >= _DOTNET_MAX_OCCURRENCES:
+            out.extend(_unknown([UNREADABLE]))
+            break
+        _tick(deadline)
         prog = match.group(1)
-        tail = command[match.end():]
+        tail = command[match.end():match.end() + _DOTNET_MAX_CHARS]
+        cut = len(command) - match.end() > _DOTNET_MAX_CHARS
         try:
             tokens = shlex.split(tail, posix=True)
         except ValueError:
             tokens = tail.split()
 
-        args = []
-        for tok in tokens:
+        args, stopped = [], False
+        for tok in tokens[:_DOTNET_MAX_TOKENS]:
             if tok in _SHELL_OPERATORS:
+                stopped = True
                 break
             args.append(tok)
+        if not stopped and (cut or len(tokens) > _DOTNET_MAX_TOKENS):
+            args.append(UNREADABLE)
         out.append([prog] + args)
-    out.extend(_dotnet_invocations(command))
+    out.extend(_dotnet_invocations(command, deadline))
     return out
 
 
-# PPDS run through the .NET host. Additive: these hits are appended to the
-# matcher above and nothing is ever cleared. Broad like that matcher: any
-# `dotnet` word after the start, whitespace, an operator, a quote or a
-# parenthesis. Caps keep the work linear: at most 500 `dotnet` occurrences
-# per command, and 400 tokens / 4096 characters after each, are examined by
-# this matcher; past 500 the `_shellparse` reading reports an unreadable
-# invocation.
+# PPDS run through the .NET host. Caps keep the work linear: at most 500
+# `dotnet` occurrences per command, and 400 tokens / 4096 characters after
+# each, are examined by the original matcher; past a cap the command counts
+# as an invocation with an unknown verb.
 _DOTNET_MAX_OCCURRENCES = 500
 _DOTNET_MAX_TOKENS = 400
 _DOTNET_MAX_CHARS = 4096
@@ -713,9 +966,11 @@ _RUN_VALUE_OPTS = set("-a --arch --artifacts-path -c --configuration -e --enviro
 _RUN_FLAGS = set("--disable-build-servers --force --interactive --no-build --no-cache "
                  "--no-dependencies --no-launch-profile --no-restore --no-self-contained "
                  "--sc --self-contained -? -h --help".split())
-# `dotnet [exec]` host options that take a value.
+# `dotnet [exec]` host options that take a value / take none. Any other
+# option before the verb is one the hook does not know.
 _HOST_VALUE_OPTS = set("--additionalprobingpath --additional-deps --depsfile --fx-version "
                        "--roll-forward --runtimeconfig --roll-forward-on-no-candidate-fx".split())
+_HOST_FLAGS = set("-d --diagnostics -h --help -? /? --info --version --list-sdks --list-runtimes".split())
 _OPTION_VALUE_RE = re.compile(r"^(--?[A-Za-z?][\w-]*)[=:](.*)$", re.DOTALL)
 
 
@@ -759,11 +1014,13 @@ def _parse_run(tokens: list):
 
 
 def _read_only_forwarded(unknown: list) -> bool:
-    """True when ``--read-only`` certainly reaches the MCP server: it is among
-    the forwarded tokens and no option ``dotnet run`` does not recognise
-    comes before it (such an option might take it as its value)."""
+    """True when ``--read-only`` certainly reaches the MCP server: the exact
+    token is among the forwarded tokens and no option ``dotnet run`` does not
+    recognise comes before it (such an option might take it as its value).
+    ``--read-only=<value>`` does not count: the server accepts only the bare
+    flag."""
     for tok in unknown:
-        if tok == "--read-only" or tok.startswith("--read-only="):
+        if tok == "--read-only":
             return True
         if tok.startswith("-"):
             return False
@@ -776,11 +1033,17 @@ def _run_readings(program: str, unknown: list, after: list) -> list:
     suffix of ``unknown`` followed by ``after``, so an option value the hook
     does not know (``--tl off``) cannot hide the verb. A reading for each;
     any one can block."""
-    if program == "ppds-mcp-server" and _read_only_forwarded(unknown):
-        return [[program] + unknown + after]
+    if program == "ppds-mcp-server":
+        # Only the flag's presence matters; the full reading comes first so a
+        # block names a --read-only=<value> token when there is one.
+        if _read_only_forwarded(unknown):
+            return [[program] + unknown + after]
+        return _dedupe([[program] + unknown + after, [program] + after])
     readings = [[program] + after]
     for k in range(min(len(unknown), _DOTNET_MAX_TOKENS)):
         readings.append([program] + unknown[k:] + after)
+    if len(unknown) > _DOTNET_MAX_TOKENS:
+        readings.append([program, UNREADABLE])
     return _dedupe(readings)
 
 
@@ -816,8 +1079,8 @@ _DOTNET_NOT_RUN = {"build", "test", "msbuild", "publish", "pack", "format", "res
 
 
 def _package_exec(tokens: list) -> list:
-    """``dotnet tool exec <package> ...`` / ``dnx <package> ...``: the PPDS
-    tool packages (``PPDS.Cli``, ``PPDS.Mcp``, optionally ``@version``)."""
+    """``dotnet tool exec|execute <package> ...`` / ``dnx <package> ...``: the
+    PPDS tool packages (``PPDS.Cli``, ``PPDS.Mcp``, optionally ``@version``)."""
     dd = tokens.index("--") if "--" in tokens else len(tokens)
     before, after = tokens[:dd], tokens[dd + 1:]
     for k, tok in enumerate(before):
@@ -840,13 +1103,28 @@ def _package_exec(tokens: list) -> list:
 def _dotnet_hits(tokens: list, cwds) -> list:
     """Normalise the words after a ``dotnet`` word to PPDS argvs (or [])."""
     i = 0
-    while i < len(tokens) and (tokens[i].startswith("-") or tokens[i].lower() == "exec"):
-        i += 2 if tokens[i] in _HOST_VALUE_OPTS else 1
+    while i < len(tokens):
+        tok = tokens[i]
+        low = tok.lower()
+        if low == "exec" or low in _HOST_FLAGS:
+            i += 1
+            continue
+        if tok in _HOST_VALUE_OPTS:
+            i += 2
+            continue
+        m = _OPTION_VALUE_RE.match(tok)
+        if m and m.group(1) in _HOST_VALUE_OPTS:
+            i += 1
+            continue
+        if tok.startswith("-") or sp.DYN in tok:
+            # an option the hook does not know, or run-time text, before the verb
+            return _unknown(tokens[i:] + [UNREADABLE])
+        break
     if i >= len(tokens):
         return []
     verb, rest = tokens[i].lower(), list(tokens[i + 1:])
-    if sp.DYN in verb:
-        return _unknown(rest)
+    if re.search(r"\s", verb) and not verb.endswith(".dll"):
+        return _unknown([UNREADABLE])  # several words in one argument
     if verb == "watch":
         # `dotnet watch [run]` runs the project; `dotnet watch test` does not.
         k = 0
@@ -863,19 +1141,21 @@ def _dotnet_hits(tokens: list, cwds) -> list:
         verb = "run"
     if verb == "run":
         return _run_hits(rest, cwds)
-    if verb == "dnx" or (verb == "tool" and rest[:1] and rest[0].lower() == "exec"):
+    if verb == "dnx" or (verb == "tool" and rest[:1] and rest[0].lower() in ("exec", "execute")):
         return _package_exec(rest if verb == "dnx" else rest[1:])
     return _dotnet_other(verb, rest)
 
 
 def _dotnet_other(verb: str, rest: list) -> list:
     """``dotnet tool run ppds``, ``dotnet [exec] <path>/ppds.dll``, ``dotnet ppds``."""
-    if verb == "tool" and rest[:1] == ["run"]:
+    if verb == "tool" and rest[:1] and rest[0].lower() == "run":
         j = 1
         while j < len(rest) and rest[j].startswith("-"):
             j += 1
         verb, rest = (rest[j].lower(), rest[j + 1:]) if j < len(rest) else ("", [])
         rest = rest[1:] if rest[:1] == ["--"] else rest
+    if sp.DYN in verb:
+        return _unknown(rest + [UNREADABLE])
     verb = _PPDS_ASSEMBLIES.get(re.split(r"[\\/]", verb)[-1], verb)
     return [[verb] + rest] if verb in _PPDS_PROGRAMS else []
 
@@ -901,43 +1181,55 @@ def _dotnet_argvs(tokens: list, cwd) -> list:
     return [[verb] + rest] if verb in ("ppds", "ppds-mcp-server") else []
 
 
-def _dotnet_invocations(command: str) -> list:
-    """Hits for PPDS started through ``dotnet``; [] on any error."""
-    try:
-        cds, parts = [], []  # (position, directory after each cd / pushd)
-        for m in _CD_RE.finditer(command):
-            target = m.group(1).strip("'\"").replace("\\", "/")
-            if target.startswith("/") or target[1:2] == ":":
-                parts = []
-            parts = (parts + target.split("/"))[-32:]
-            cds.append((m.start(), "/".join(parts)))
-        out, cwd, k = [], None, 0
-        for count, match in enumerate(_DOTNET_RE.finditer(command)):
-            if count >= _DOTNET_MAX_OCCURRENCES:
-                break
-            while k < len(cds) and cds[k][0] < match.start():
-                cwd, k = cds[k][1], k + 1
-            tail = command[match.end():match.end() + _DOTNET_MAX_CHARS]
-            tail = tail[1:] if tail[:1] in ("'", '"') else tail
-            lexer = shlex.shlex(tail, posix=True)
-            # As shlex.split, but a backslash stays literal (Windows paths).
-            lexer.whitespace_split, lexer.commenters, lexer.escape = True, "", ""
-            args = []
-            try:
+def _dotnet_invocations(command: str, deadline=None) -> list:
+    """Hits for PPDS started through ``dotnet`` in the original matcher."""
+    cds, parts = [], []  # (position, directory after each cd / pushd)
+    for m in _CD_RE.finditer(command):
+        _tick(deadline)
+        target = m.group(1).strip("'\"").replace("\\", "/")
+        if target.startswith("/") or target[1:2] == ":":
+            parts = []
+        parts = (parts + target.split("/"))[-32:]
+        cds.append((m.start(), "/".join(parts)))
+    out, cwd, k = [], None, 0
+    for count, match in enumerate(_DOTNET_RE.finditer(command)):
+        if count >= _DOTNET_MAX_OCCURRENCES:
+            out.extend(_unknown([UNREADABLE]))
+            break
+        _tick(deadline)
+        while k < len(cds) and cds[k][0] < match.start():
+            cwd, k = cds[k][1], k + 1
+        tail = command[match.end():match.end() + _DOTNET_MAX_CHARS]
+        cut = len(command) - match.end() > _DOTNET_MAX_CHARS
+        tail = tail[1:] if tail[:1] in ("'", '"') else tail
+        lexer = shlex.shlex(tail, posix=True)
+        # As shlex.split, but a backslash stays literal (Windows paths).
+        lexer.whitespace_split, lexer.commenters, lexer.escape = True, "", ""
+        args, stopped = [], False
+        try:
+            tok = lexer.get_token()
+            while tok is not None and len(args) < _DOTNET_MAX_TOKENS:
+                if tok in _SHELL_OPERATORS:
+                    stopped = True
+                    break
+                args.append(tok.rstrip(";"))
+                if tok.endswith(";"):
+                    stopped = True
+                    break
                 tok = lexer.get_token()
-                while tok is not None and tok not in _SHELL_OPERATORS and len(args) < _DOTNET_MAX_TOKENS:
-                    args.append(tok.rstrip(";"))
-                    tok = None if tok.endswith(";") else lexer.get_token()
-            except ValueError:
-                args = []
-                for tok in tail.split(None, _DOTNET_MAX_TOKENS)[:_DOTNET_MAX_TOKENS]:
-                    if tok in _SHELL_OPERATORS:
-                        break
-                    args.append(tok)
-            out.extend(_dotnet_argvs(args, cwd))
-        return out
-    except Exception:  # noqa: BLE001 -- new detection must never remove existing hits
-        return []
+            if tok is None:
+                stopped = stopped or not cut
+        except ValueError:
+            args = []
+            for tok in tail.split(None, _DOTNET_MAX_TOKENS)[:_DOTNET_MAX_TOKENS]:
+                if tok in _SHELL_OPERATORS:
+                    stopped = True
+                    break
+                args.append(tok)
+        if not stopped and (cut or len(args) >= _DOTNET_MAX_TOKENS):
+            out.extend(_unknown([UNREADABLE]))
+        out.extend(_dotnet_argvs(args, cwd))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1052,8 +1344,21 @@ _NAMED_MUTATIONS = {
 }
 
 
+_HELP_FLAGS = {"--help", "-h", "-?", "/?", "--version"}
+
+
+def _hides_verb(token: str) -> bool:
+    """True for a token before the verb that may change what runs: an option
+    (``--verbose``, ``/x``) or several words in one argument."""
+    return token.startswith(("-", "/")) or bool(re.search(r"\s", token))
+
+
 def is_mutation(argv: list) -> tuple:
-    """Return (is_mutation, reason). reason is empty when not a mutation."""
+    """Return (is_mutation, reason). reason is empty when not a mutation.
+
+    An option before the verb (``--verbose``), several words in one
+    argument or run-time text there means the verb is not known, which
+    counts as a write."""
     if not argv:
         return False, ""
 
@@ -1067,32 +1372,52 @@ def is_mutation(argv: list) -> tuple:
         return True, "a command the hook could not read in full (treated as a write)"
 
     if prog == "ppds-mcp-server":
-        if any(
-            arg == "--read-only" or arg.startswith("--read-only=")
-            for arg in argv[1:]
-        ):
+        # The server honours only the exact token: --read-only=<anything>
+        # (false, true, empty) starts it writable.
+        valued = [arg for arg in argv[1:] if arg.lower().startswith("--read-only=")]
+        if valued:
+            return True, (f"ppds-mcp-server {valued[0]} (the server only accepts the bare "
+                          "--read-only flag; --read-only=<value> starts it writable)")
+        if "--read-only" in argv[1:]:
             return False, ""
         return True, "ppds-mcp-server (missing --read-only flag during shakedown)"
 
+    if len(argv) < 2:
+        return False, ""
+    sub = argv[1].lower()
+    if sub in _HELP_FLAGS and len(argv) == 2:
+        return False, ""
+    if sp.DYN in sub:
+        return True, "a subcommand only known when the command runs (treated as a write)"
+    if _hides_verb(sub):
+        return True, f"{_shown([argv[1]])} before the subcommand (the verb is not known; treated as a write)"
     if len(argv) < 3:
-        if len(argv) == 2 and sp.DYN in argv[1]:
-            return True, "a subcommand only known when the command runs (treated as a write)"
         return False, ""
 
-    sub = argv[1].lower()
+    allowed = _READONLY_SUBCOMMANDS.get(sub)
+    if allowed and "*" in allowed:
+        return False, ""
+
     verb = argv[2].lower()
     rest = argv[3:]
+    if verb in _HELP_FLAGS and len(argv) == 3:
+        return False, ""
+    if sp.DYN in verb:
+        return True, "a subcommand or verb only known when the command runs (treated as a write)"
+    if _hides_verb(verb):
+        return True, f"{_shown([argv[2]])} before the verb (the verb is not known; treated as a write)"
 
     # 3-level commands: "metadata <noun> <verb>" has the noun at argv[2], verb at argv[3]
     if sub == "metadata" and verb not in _MUTATION_VERBS and len(argv) >= 4:
-        verb = argv[3].lower()
-        rest = argv[4:]
+        nxt = argv[3].lower()
+        if sp.DYN in nxt:
+            return True, "a verb only known when the command runs (treated as a write)"
+        if not _hides_verb(nxt):
+            verb, rest = nxt, argv[4:]
+        elif any(tok.lower() in _MUTATION_VERBS for tok in argv[4:]):
+            return True, f"metadata {argv[2]} {_shown([argv[3]])} before a write verb (treated as a write)"
 
-    if sp.DYN in sub or sp.DYN in verb:
-        return True, "a subcommand or verb only known when the command runs (treated as a write)"
-
-    allowed = _READONLY_SUBCOMMANDS.get(sub)
-    if allowed and ("*" in allowed or verb in allowed):
+    if allowed and verb in allowed:
         return False, ""
 
     named = _NAMED_MUTATIONS.get((sub, verb))
@@ -1220,61 +1545,126 @@ def _block_msg_mutation(
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
-    try:
-        payload = json.loads(sys.stdin.read())
-    except (json.JSONDecodeError, ValueError):
-        sys.exit(0)
+# Answer well inside the 10 s the hook is registered with: Claude Code runs a
+# command whose hook times out or exits 1, in both shell tools, so neither
+# may happen while a gate applies. `PPDS_HOOK_BUDGET_SECONDS` can only lower
+# the budget (tests use it to reach the deadline).
+_BUDGET_SECONDS = 3.5
 
+
+def _budget() -> float:
+    try:
+        value = float(os.environ.get("PPDS_HOOK_BUDGET_SECONDS", ""))
+    except ValueError:
+        return _BUDGET_SECONDS
+    if value != value:  # NaN
+        return _BUDGET_SECONDS
+    return max(0.0, min(value, _BUDGET_SECONDS))
+
+
+def _refuse(message: str) -> None:
+    """Print ``message`` and exit 2. A failure to print still exits 2."""
+    try:
+        print(message, file=sys.stderr)
+    finally:
+        sys.exit(2)
+
+
+def _payload_command(raw: str):
+    """``(command, tool_name, cwd)`` from the hook input, or None when the
+    input does not have the shape ``{"tool_input": {"command": "..."}}``."""
+    try:
+        payload = json.loads(raw[1:] if raw.startswith("﻿") else raw)
+    except ValueError:
+        return None
     if not isinstance(payload, dict):
-        sys.exit(0)
-    tool_input = payload.get("tool_input") or {}
-    command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
-    if not isinstance(command, str) or not command.strip():
-        sys.exit(0)
+        return None
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return None
+    command = tool_input.get("command")
+    if not isinstance(command, str):
+        return None
     tool_name = payload.get("tool_name")
     tool_name = tool_name if isinstance(tool_name, str) else ""
     # The shell's working directory; when the payload has none, `dotnet run`
     # without a project path cannot be told apart from PPDS, so it counts.
     cwd = payload.get("cwd")
     cwd = cwd if isinstance(cwd, str) and cwd.strip() else _UNKNOWN_CWD
+    return command, tool_name, cwd
 
-    invocations = find_ppds_invocations(command, tool_name, cwd)
-    if not invocations:
+
+def main() -> None:
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+    state = {"raw": "", "gate_off": False}
+    try:
+        _main(state)
+    except SystemExit:
+        raise
+    except BaseException:  # noqa: BLE001 -- a crash (exit 1) would let the command run
+        if state["gate_off"]:
+            sys.exit(0)
+        if mentions_guarded(state["raw"]):
+            _refuse("BLOCKED [shakedown-safety]: the hook could not check this command "
+                    "(internal error); it mentions ppds, dotnet or dnx, so it is refused.")
         sys.exit(0)
+
+
+def _main(state: dict) -> None:
+    deadline = time.monotonic() + _budget()
+    stream = getattr(sys.stdin, "buffer", None)
+    raw = stream.read().decode("utf-8", errors="replace") if stream is not None else sys.stdin.read()
+    state["raw"] = raw
 
     config = load_safety_config()
     env_var_name = config["readonly_env_var"]
     env_active = os.environ.get(env_var_name, "").strip() == "1"
     sentinel_active = check_sentinel_active()
     shakedown_active = env_active or sentinel_active
+    misconfigured = None
+    try:
+        allowlist = load_allowlist(config)
+    except AllowlistConfigError as exc:
+        allowlist, misconfigured = [], str(exc)
+    if not allowlist and misconfigured is None and not shakedown_active:
+        # No allowlist and no shakedown: nothing is gated, for any command.
+        state["gate_off"] = True
+        sys.exit(0)
+
+    parsed = _payload_command(raw)
+    if parsed is None:
+        # Not the input shape the hook knows: any mention is an invocation.
+        invocations = _unknown([UNREADABLE]) if mentions_guarded(raw) else []
+    else:
+        command, tool_name, cwd = parsed
+        invocations = find_ppds_invocations(command, tool_name, cwd, deadline) if command.strip() else []
+    if not invocations:
+        sys.exit(0)
 
     # Concern 2: write-block first -- it's the tighter gate when active.
     if shakedown_active:
         for argv in invocations:
             blocked, reason = is_mutation(argv)
             if blocked:
-                print(
+                _refuse(
                     _block_msg_mutation(
                         argv,
                         reason,
                         env_var_name,
                         env_active=env_active,
                         sentinel_active=sentinel_active,
-                    ),
-                    file=sys.stderr,
+                    )
                 )
-                sys.exit(2)
 
     # Concern 1: env allowlist gating -- opt-in. It is active once an
     # allowlist names at least one env; with none configured (missing or
     # empty) the hook does not gate ppds commands, so a fresh clone works
     # without setup. A source that is present but unusable blocks.
-    try:
-        allowlist = load_allowlist(config)
-    except AllowlistConfigError as exc:
-        print(_block_msg_misconfigured(str(exc), invocations[0]), file=sys.stderr)
-        sys.exit(2)
+    if misconfigured is not None:
+        _refuse(_block_msg_misconfigured(misconfigured, invocations[0]))
     if not allowlist:
         sys.exit(0)
 
@@ -1283,8 +1673,7 @@ def main() -> None:
     for argv in invocations:
         allow, reason = decide_env(argv, allowlist, active)
         if not allow:
-            print(reason, file=sys.stderr)
-            sys.exit(2)
+            _refuse(reason)
 
     sys.exit(0)
 

@@ -714,13 +714,15 @@ class TestMcpServerReadOnly:
         )
         assert r.returncode == 0, f"stderr={r.stderr!r}"
 
-    def test_mcp_server_allowed_with_read_only_equals_true(self, fake_profile_dir):
+    def test_mcp_server_blocked_with_read_only_equals_true(self, fake_profile_dir):
+        """The server honours only the bare `--read-only`; `=true` starts it writable."""
         config_dir = fake_profile_dir(active_env_name="ppds-dev")
         r = _run_hook(
             "ppds-mcp-server --read-only=true",
             env_extra=_shakedown_env(config_dir),
         )
-        assert r.returncode == 0, f"stderr={r.stderr!r}"
+        assert r.returncode == 2, f"stderr={r.stderr!r}"
+        assert "only accepts the bare --read-only flag" in r.stderr
 
 
 class TestSentinelActivation:
@@ -1045,24 +1047,18 @@ class TestDotnetHostForms:
         found = hook.find_ppds_invocations(f"dotnet run --project src/PPDS.Cli --tl off -- {_DEL}")
         assert found == [["ppds"] + _DEL.split(), ["ppds", "off"] + _DEL.split()]
 
-    def test_existing_hits_survive_a_failure(self, monkeypatch):
+    @pytest.mark.parametrize("target", ["_dotnet_argvs", "sp.read"])
+    def test_a_failure_inside_the_reading_is_not_swallowed(self, monkeypatch, target):
+        """An error anywhere in the reading reaches main(), which refuses a
+        command that mentions a guarded program (the process tests in
+        test_shakedown_safety_process.py); no part of it turns into a pass."""
         def boom(*_args, **_kwargs):
             raise RuntimeError("bug")
 
-        monkeypatch.setattr(hook, "_dotnet_argvs", boom)
-        found = hook.find_ppds_invocations(f"ppds {_DEL} && dotnet run --project src/PPDS.Cli -- x")
-        # The original matcher's hit survives; the shell reader adds its own.
-        assert ["ppds"] + _DEL.split() in found
-        assert ["ppds", "x"] in found
-
-    def test_a_reader_failure_is_an_invocation(self, monkeypatch):
-        def boom(*_args, **_kwargs):
-            raise RuntimeError("bug")
-
-        monkeypatch.setattr(hook.sp, "read", boom)
-        found = hook.find_ppds_invocations("p`pds data delete", "PowerShell")
-        assert ["ppds", hook.UNREADABLE] in found
-        assert hook.is_mutation(["ppds", hook.UNREADABLE])[0]
+        owner, name = (hook.sp, "read") if target == "sp.read" else (hook, target)
+        monkeypatch.setattr(owner, name, boom)
+        with pytest.raises(RuntimeError):
+            hook.find_ppds_invocations(f"ppds {_DEL} && dotnet run --project src/PPDS.Cli -- x")
 
 
 # ===========================================================================
