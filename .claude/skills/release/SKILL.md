@@ -1,6 +1,6 @@
 ---
 name: release
-description: Walk the maintainer through a PPDS release by following docs/runbooks/release.md — scope advisory, CHANGELOGs, version bumps, tag pushes, CI monitoring and publish verification. Use when preparing a prerelease, stable or patch release of the CLI, TUI, MCP, Extension or NuGet libraries.
+description: Walk the maintainer through a PPDS release by following docs/runbooks/release.md — scope advisory, CHANGELOGs, version bumps, the tag commands the maintainer runs, CI monitoring and publish verification. Use when preparing a prerelease, stable or patch release of the CLI, TUI, MCP, Extension or NuGet libraries.
 ---
 
 # Release
@@ -21,16 +21,32 @@ Not for implementing a hot-fix (open a PR first) or documentation-only changes.
 Arguments: `/release` (prerelease, the default), `/release prerelease`, or
 `/release stable v1.0.0` (stable, version given).
 
+## Never Done by a Session
+
+The maintainer creates and pushes every tag and makes every publication
+([VERSIONING.md](../../../docs/VERSIONING.md#9-decisions-in-documents), rule
+9.2). You prepare the release and verify it; you never run any of these, and the
+maintainer's yes in chat does not change that:
+
+- `git tag` for a release tag, and every tag push (`git push origin
+  "refs/tags/..."`, `git push --tags`), including the unified `v*` tag
+- every `gh release` write (`create`, `edit`, `upload`, `delete`, including of a
+  draft)
+- `gh workflow run` of `extension-publish.yml` or `docs-release.yml`, and any
+  other publish or signing workflow
+- `gh run rerun` of a publish or docs workflow
+- anything that deletes, unlists, deprecates, moves or replaces a published tag,
+  release or package
+
+For each of these, prepare the exact command with the real versions and the full
+hash of the commit it applies to, put it in a block headed **Maintainer runs**
+(as the runbook does), hand it to the maintainer in chat, and wait for them to
+say it has run. Then verify the result with the read-only probes below.
+
 ## Confirm With the User Before Running
 
-Ask in chat and wait for an explicit yes, separately for each action. Approval
-of one tag or wave does not cover the next.
+Ask in chat and wait for an explicit yes, separately for each action.
 
-- **Publishing:** every tag push (`git push origin "refs/tags/..."`, one at a
-  time), including the unified `v*` tag; every `gh release` write (`create`,
-  `edit`, `upload`, `delete`, including of a draft);
-  `gh workflow run` of `extension-publish.yml` or `docs-release.yml`;
-  `gh run rerun` of a publish or docs workflow
 - **Branches and PRs:** pushing a `release/prerelease-*`, `release/vX.Y.Z` or
   `release/X.Y` branch or `main`; deleting a remote branch
   (`git push origin :release/X.Y`); `gh pr create`, `gh pr ready`, merging
@@ -39,7 +55,6 @@ of one tag or wave does not cover the next.
   sending a contributor reply, closing a contributor's original PR
 - **The maintainer's machine:** `dotnet tool install -g`/`uninstall -g PPDS.Cli`
   (replaces their installed CLI) and `code --install-extension`
-- Anything that deletes, unlists, moves or replaces a published tag or artifact
 
 Reading state is fine without asking: `release_plan.py`, `gh run list`,
 `gh release view`, `git tag -l`, the public verification probes.
@@ -53,7 +68,7 @@ Reading state is fine without asking: `release_plan.py`, `gh run list`,
 - For the stable-release security review gate, run `/security-review` on the
   diff since the last stable tag and save the result as the
   `docs/qa/security-review-*.md` artifact the runbook requires.
-- Report each wave's public verification result before asking to push the next
-  wave. Never batch tag pushes to save time.
+- Report each wave's public verification result before handing over the next
+  wave's tag commands. Never batch waves to save time.
 - If a step in the runbook is wrong or missing, propose the correction to
   docs/runbooks/release.md at the end of the release.

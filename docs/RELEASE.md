@@ -4,11 +4,13 @@ Tool-neutral reference for the release model and policy: tags, channels and
 package lineage, the closeout ledger, release scope analysis, CLI/Extension
 co-release reconciliation, publisher input checks, public artifact verification,
 signing and key custody, strong-name rotation, and the distributed native
-runtime. Automation may advise what should be released, but a maintainer must
-approve every tag and publish.
+runtime. Automation may advise what should be released. The maintainer creates
+and pushes every tag and makes every publication; neither automation nor an agent
+session does ([VERSIONING.md](VERSIONING.md#9-decisions-in-documents), rule 9.2).
 
-The step-by-step release procedure (CHANGELOGs, version bumps, tag pushes, CI
-monitoring, verification, patches, stabilization branches, recovery) is in
+The step-by-step release procedure (CHANGELOGs, version bumps, the tag commands
+the maintainer runs, CI monitoring, verification, patches, stabilization
+branches, recovery) is in
 [docs/runbooks/release.md](runbooks/release.md). The docs-site release is in
 [docs/runbooks/docs-release.md](runbooks/docs-release.md), and the policy for
 when to release is [specs/release-cycle.md](../specs/release-cycle.md).
