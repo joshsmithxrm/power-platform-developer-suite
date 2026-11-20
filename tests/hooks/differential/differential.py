@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import os
 import hashlib
 import json
 import random
@@ -23,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _harness import MODES, TOOLS, OracleUnavailable, ParseOracle, Sandbox, run_hooks, write_case  # noqa: E402
+from _harness import MODES, TOOLS, OracleUnavailable, ParseOracle, Sandbox, run_hooks, truth_mode, write_case  # noqa: E402
 import _truth  # noqa: E402
 import findings  # noqa: E402
 
@@ -31,6 +32,30 @@ CI_SIZE_ARGS = 4500
 CI_SIZE_SHELL = 700
 LONG_SIZE_ARGS = 40000
 LONG_SIZE_SHELL = 8000
+
+
+# Limits on harness trouble. Above them a run fails, whatever the hook did (README, "Integrity").
+MAX_TIMEOUT_SHARE = 0.01          # shell runs that hit their per-text timeout
+MAX_UNCONFIRMED = 2               # pwsh-only failures that a fresh pwsh run did not reproduce
+MAX_ORACLE_ERRORS = 0             # parse-oracle answers that are errors
+MAX_DROPPED_RENDERINGS = 0        # oracle-1 failures whose shell rendering did not hold
+
+
+def _integrity(problems: list, **counts) -> dict:
+    return {"ok": not problems, "problems": problems, **counts}
+
+
+def _shell_integrity(lab, submitted: int, unconfirmed: int = 0) -> list:
+    info = lab.integrity(submitted)
+    problems = []
+    for sh in ("bash", "pwsh"):
+        if info[f"{sh}_outcomes"] != submitted:
+            problems.append(f"{sh}: {info[sh + '_outcomes']} recorded outcomes for {submitted} texts")
+        if info[f"{sh}_timeouts"] > MAX_TIMEOUT_SHARE * max(submitted, 1):
+            problems.append(f"{sh}: {info[sh + '_timeouts']} timeouts (limit {MAX_TIMEOUT_SHARE:.0%} of {submitted})")
+    if unconfirmed > MAX_UNCONFIRMED:
+        problems.append(f"{unconfirmed} pwsh-only failures not reproduced (limit {MAX_UNCONFIRMED})")
+    return problems, info
 
 
 def _blocked(result) -> bool:
@@ -75,13 +100,17 @@ def run_argument_oracle(size: int = CI_SIZE_ARGS, seed: int = 1814, cases_dir=No
     import gen_args
     t0 = time.monotonic()
     sandbox = Sandbox()
-    oracle = ParseOracle(sandbox)
+    oracle = ParseOracle(sandbox, rebuild=os.environ.get('PPDS_DIFF_REBUILD') == '1')
     try:
         cases = gen_args.generate(oracle, size, seed)
         jobs, meta = [], []
+        writes_judged, oracle_errors = set(), 0
         for ci, case in enumerate(cases):
             for mode in MODES:
                 truth, harms = _truth.judge(oracle, case.program, case.argv, mode)
+                oracle_errors += any(h.cause == "oracle-error" for h in harms)
+                if mode == "shakedown" and case.program == "ppds" and any(h.cause == "write-in-shakedown" for h in harms):
+                    writes_judged.add(_truth.normal_path(truth.get("path", [])))
                 for tool in TOOLS:
                     jobs.append((tool, gen_args.render(case.words(), tool), mode))
                     meta.append((ci, mode, harms, truth))
@@ -92,7 +121,7 @@ def run_argument_oracle(size: int = CI_SIZE_ARGS, seed: int = 1814, cases_dir=No
         failures, false_blocks = [], collections.Counter()
         for (tool, text, mode), (ci, _, harms, truth), res in zip(jobs, meta, results):
             case = cases[ci]
-            harms = _truth.apply_text_rule(harms, text)
+            harms = _truth.apply_text_rule(harms, text, mode)
             s = stats[f"{mode}/{tool}"]
             s["runs"] += 1
             s["hook_blocked" if _blocked(res) else "hook_passed"] += 1
@@ -122,6 +151,19 @@ def run_argument_oracle(size: int = CI_SIZE_ARGS, seed: int = 1814, cases_dir=No
         req_fail = [f for f in failures if f["severity"] == "requirement"]
         pol_fail = [f for f in failures if f["severity"] == "policy"]
         saved = _save_cases(req_fail + pol_fail, cases_dir, "args", sandbox)
+        problems = []
+        if oracle_errors > MAX_ORACLE_ERRORS:
+            problems.append(f"{oracle_errors} parse-oracle errors")
+        dropped = (confirmed or {}).get("dropped", 0)
+        if confirmed is not None and "skipped" in confirmed:
+            problems.append(f"rendering check skipped: {confirmed['skipped']}")
+        if dropped > MAX_DROPPED_RENDERINGS:
+            problems.append(f"{dropped} failures dropped because their rendering did not hold")
+        expected_writes = _truth.write_capable_paths(gen_args.Tree(oracle.tree()))
+        missing = sorted(" ".join(p) for p in expected_writes - writes_judged)
+        integrity = _integrity(problems, oracle_errors=oracle_errors, dropped_renderings=dropped,
+                               write_paths=len(expected_writes), write_paths_judged=len(expected_writes & writes_judged),
+                               write_paths_not_judged=missing)
         return {
             "oracle": "args", "seed": seed, "size": size, "cases": len(cases), "hook_runs": len(jobs),
             "seconds": {"truth": round(t_truth, 1), "hook": round(t_hook, 1), "total": round(time.monotonic() - t0, 1)},
@@ -133,6 +175,7 @@ def run_argument_oracle(size: int = CI_SIZE_ARGS, seed: int = 1814, cases_dir=No
             "false_blocks_by_mode_shape": {" | ".join(k): v for k, v in sorted(false_blocks.items(), key=lambda kv: -kv[1])},
             "render_check": None if confirmed is None else {k: v for k, v in confirmed.items() if k != "kept"},
             "saved_cases": saved,
+            "integrity": integrity,
             "failures": failures,
         }
     finally:
@@ -175,7 +218,7 @@ def _confirm_rendering(sandbox, oracle, failures: list) -> dict:
         mismatched += 1
         for f in fs:
             really = [h for p, a, _ in starts
-                      for h in _truth.apply_text_rule(_truth.judge(oracle, p, a, f["mode"])[1], text)]
+                      for h in _truth.apply_text_rule(_truth.judge(oracle, p, a, f["mode"])[1], text, f["mode"])]
             if really:
                 f = dict(f, detail=f["detail"] + f" (shell gave {starts!r})")
                 kept.append(f)
@@ -222,9 +265,10 @@ def run_statement_oracle(size: int = CI_SIZE_SHELL, seed: int = 1780, cases_dir=
                 for shell, ss in starts.items():
                     for program, argv, exact, ov in ss:
                         if oracle is None:
-                            hs = [_truth.Harm("starts-on-unlisted-active", "requirement")] if mode == "gate-unlisted" else []
+                            hs = ([_truth.Harm("starts-on-unlisted-active", "requirement")]
+                                  if truth_mode(mode) == "gate-unlisted" else [])
                         else:
-                            hs = _truth.apply_text_rule(_truth.judge(oracle, program, argv, mode, ov)[1], t.text)
+                            hs = _truth.apply_text_rule(_truth.judge(oracle, program, argv, mode, ov)[1], t.text, mode)
                         for h in hs:
                             harms.append((h, shell, program, argv, exact))
                 per_mode[mode] = harms
@@ -232,7 +276,7 @@ def run_statement_oracle(size: int = CI_SIZE_SHELL, seed: int = 1780, cases_dir=
         jobs, meta = [], []
         for i, t in enumerate(texts):
             for mode in MODES:
-                if oracle is None and mode != "gate-unlisted":
+                if oracle is None and truth_mode(mode) != "gate-unlisted":
                     continue
                 for tool in TOOLS:
                     jobs.append((tool, t.text, mode))
@@ -275,11 +319,18 @@ def run_statement_oracle(size: int = CI_SIZE_SHELL, seed: int = 1780, cases_dir=
                                  "program": program, "argv": argv, "hook_exit": res[tool].code,
                                  "starts": {k: [[p, a] for p, a, _, _ in v] for k, v in starts.items()}})
                 s["fail_" + sev] += 1
-        failures = _confirm_shell(lab, failures)
+        failures, unconfirmed = _confirm_shell(lab, failures)
         for f in failures:
             f["label"] = findings.classify(f)
         req_fail = [f for f in failures if f["severity"] == "requirement"]
         saved = _save_cases(failures, cases_dir, "shell", sandbox, per_group=4)
+        problems, info = _shell_integrity(lab, len(texts), unconfirmed)
+        oracle_errors = sum(1 for f in failures if f["cause"] == "oracle-error")
+        if oracle_errors > MAX_ORACLE_ERRORS:
+            problems.append(f"{oracle_errors} parse-oracle errors")
+        if oracle is None:
+            problems.append(f"argument truth unavailable ({oracle_note}): only the unlisted-environment rule judged")
+        integrity = _integrity(problems, unconfirmed_pwsh_only=unconfirmed, **info)
         return {
             "oracle": "shell", "seed": seed, "size": size, "texts": len(texts), "hook_runs": len(jobs),
             "argument_truth": "parse oracle" if oracle else f"unavailable ({oracle_note}); gate-unlisted mode only",
@@ -291,6 +342,7 @@ def run_statement_oracle(size: int = CI_SIZE_SHELL, seed: int = 1780, cases_dir=
             "groups": _summarise(failures, strict),
             "findings": findings.rediscovered(failures),
             "saved_cases": saved,
+            "integrity": integrity,
             "failures": failures,
         }
     finally:
@@ -312,7 +364,8 @@ def _confirm_shell(lab, failures: list) -> list:
             cache[f["command"]] = lab.run_pwsh(f["command"])
         if cache[f["command"]]:
             out.append(f)
-    return out
+    unconfirmed = sum(1 for c, r in cache.items() if not r)
+    return out, unconfirmed
 
 
 # --------------------------------------------------------------------------------------------
@@ -453,11 +506,13 @@ def run_ordinary_oracle(limit=None, seed: int = 7, cases_dir=None) -> dict:
                 else:
                     stats["passed"] += 1
         saved = _save_cases(failures, cases_dir, "ordinary", sandbox, per_group=200)
+        problems, info = _shell_integrity(lab, len(texts))
         by_template = collections.Counter(f["recipe"].split(":", 2)[2] for f in failures)
         return {"oracle": "ordinary", "texts": len(texts), "hook_runs": len(jobs),
                 "seconds": {"total": round(time.monotonic() - t0, 1)}, "stats": dict(stats),
                 "requirement_failures": len(failures), "by_template": dict(by_template.most_common()),
-                "groups": _summarise(failures, False), "saved_cases": saved, "failures": failures}
+                "groups": _summarise(failures, False), "saved_cases": saved,
+                "integrity": _integrity(problems, **info), "failures": failures}
     finally:
         sandbox.cleanup()
 
@@ -473,6 +528,8 @@ def main(argv=None) -> int:
     ap.add_argument("--strict", action="store_true", help="policy-severity failures also fail the run")
     ap.add_argument("--round4", action="store_true", help="shell: only the round-4 blocks, all of them")
     a = ap.parse_args(argv)
+    if a.long:
+        os.environ["PPDS_DIFF_REBUILD"] = "1"  # the long run always rebuilds the parse helper
     if a.oracle == "args":
         size = a.size or (LONG_SIZE_ARGS if a.long else CI_SIZE_ARGS)
         rep = run_argument_oracle(size, a.seed if a.seed is not None else 1814, a.cases, a.strict)
@@ -492,8 +549,14 @@ def main(argv=None) -> int:
         Path(a.json).write_text(json.dumps(rep, indent=1, ensure_ascii=False), encoding="utf-8")
     shown = {k: v for k, v in rep.items() if k not in ("failures", "rows")}
     print(json.dumps(shown, indent=1, ensure_ascii=False))
-    bad = rep["requirement_failures"] + (rep.get("policy_failures", 0) + rep.get("other_failures", 0) if a.strict else 0)
-    return 1 if bad else 0
+    approx = sum(1 for f in rep["failures"] if f.get("severity") == "requirement-approx")
+    bad = rep["requirement_failures"] + approx
+    if a.strict:
+        bad += sum(1 for f in rep["failures"] if f.get("severity", "").startswith("policy"))
+    integrity = rep.get("integrity", {"ok": True})
+    if not integrity.get("ok", True):
+        print("HARNESS INTEGRITY FAILED: " + "; ".join(integrity["problems"]), file=sys.stderr)
+    return 1 if bad or not integrity.get("ok", True) else 0
 
 
 if __name__ == "__main__":

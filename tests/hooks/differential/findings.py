@@ -12,6 +12,19 @@ import re
 
 # Code handed to a shell: a here-string or here-document to bash/sh/pwsh, `-c` / `-Command`, or a pipe into one.
 _FEED = re.compile(r"(?:(?i:-(?:e|ec|encodedcommand)\s+[A-Za-z0-9+/=]{8,}))|(?:\beval\b)|(?:\b(?:bash|sh|pwsh)\b[^\n|;&]*(?:<<|\s-c\b|\s-Command\b))|(?:\|\s*(?:[^|;&\n]*\s)?(?:bash|sh|pwsh)\b)")
+_NEW_MODES = ("gate-unknown", "gate-profile-named", "gate-settings", "shakedown-sentinel", "shakedown-noal")
+_EXTRA_FAMILY = {k: fam for fam, kinds in {
+    "launcher": ("sudo", "sudo-opts", "time", "time-p", "find-exec", "find-exec-plus", "start-process",
+                 "start-process-string", "cmd-c", "cmd-exe"),
+    "shell-flag": ("pwsh-e", "pwsh-ec", "pwsh-enc", "bash-lc", "bash-ec", "sh-ec", "bash-xc"),
+    "syntax": ("ansi-c-quote", "ansi-c-program", "process-substitution", "source-process-substitution",
+               "dot-process-substitution"),
+    "two-invocations": ("two-invocations", "two-and", "two-switch-first"),
+    "dotnet-form": ("dotnet-tool-run", "dotnet-tool-run-dd", "host-option-dll", "exec-host-option",
+                    "project-substitution", "project-pwd", "watch-without-run", "project-dot-after-cd"),
+    "environment-url": ("environment-url", "environment-url-pwsh", "mcp-environment-url"),
+    "mcp": ("mcp-upper", "mcp-mixed-case", "mcp-override"),
+}.items() for k in kinds}
 _EXP = re.compile(r"(?:\d|\.)e(?:[+-]?\d*)?(?:delete|insert|update|merge|truncate|with|exec|select)", re.I)
 _GLUED = re.compile(r"(?:\d|0x[0-9a-f]+|'|\]|\.)(?:delete|insert|update|merge|truncate)", re.I)
 
@@ -77,8 +90,20 @@ def _labels(f: dict) -> list:
         out.append("new-hidden-words")
     if recipe.startswith("wrapper:"):
         out.append("new-unknown-wrapper")
-    if cause == "home-override":
+    if cause == "home-override" or recipe.startswith("home:"):
         out.append("new-home-override")
+    if cause == "runs-on-unlisted-active" and argv[:2] in (["env", "who"], ["org", "who"]):
+        out.append("r5-env-who-on-unlisted")
+    if cause == "environment-url-override":
+        out.append("r5-environment-url")
+    if cause == "switch-without-allowlist":
+        out.append("r5-switch-without-allowlist")
+    if recipe.startswith("extra:"):
+        out.append("r5-extra-" + _EXTRA_FAMILY.get(recipe.split(":")[1], "other"))
+    if f.get("shape") in ("auth-select", "sql-implicit-exec"):
+        out.append("r5-" + f["shape"])
+    if f.get("mode") in _NEW_MODES:
+        out.append("r5-mode-" + f["mode"])
     if cause == "write-in-shakedown" and _EXP.search(_sql_text(f) or ""):
         out.append("new-sql-exponent-glue")
     if f.get("severity", "").startswith("policy"):

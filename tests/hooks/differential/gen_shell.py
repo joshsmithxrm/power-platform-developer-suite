@@ -46,6 +46,8 @@ OVERRIDE_WRAPS = [
     lambda s: f"PPDS_PROFILE=p-zz-prod-x {s}",
     lambda s: f"$env:PPDS_PROFILE = 'p-zz-prod-x'; {s}",
     lambda s: f"env PPDS_PROFILE=2 {s}",
+    lambda s: f"PPDS_ENVIRONMENT_URL=https://zz-prod-x.invalid/ {s}",
+    lambda s: f"HOME=other {s}",
 ]
 
 # The class behind "env FOO=1 bash <<< '$(echo ppds) ...'": wrappers and assignment prefixes in front of
@@ -55,7 +57,7 @@ FEED_PREFIXES = ("", "env ", "env FOO=1 ", "FOO=1 ", "timeout 5 ", "nohup ", "co
                  "env FOO=1 timeout 5 ", "PPDS_CONFIG_DIR=other ")
 FEED_POSIX_FORMS = ("ppds", '"ppds"', "\\ppds", "P=ppds; $P", "$(echo ppds)", "`echo ppds`")
 FEED_PWSH_FORMS = ("ppds", "& 'ppds'", '& "ppds"', "$P = 'ppds'; & $P", "& (echo ppds)")
-FEED_CORES = (["data", "delete", "--entity", "account"], ["env", "select", "--environment", "zz-prod-x"])
+FEED_CORES = (["data", "delete", "--entity", "account", "--id", "00000000-0000-0000-0000-000000000001"], ["env", "select", "--environment", "zz-prod-x"])
 
 
 def feed_texts(rng: random.Random, limit=None) -> list:
@@ -421,14 +423,75 @@ def home_texts() -> list:
     return out
 
 
-ROUND4_CI_LIMIT = 400
+ROUND4_CI_LIMIT = 500
 
 
 def round4_texts(rng: random.Random, limit=None) -> list:
-    out = xargs_texts() + hidden_texts() + wrapper_texts() + home_texts()
+    out = xargs_texts() + hidden_texts() + wrapper_texts() + home_texts() + extra_texts()
     if limit is not None and limit < len(out):
-        # keep every hidden and home text (small), sample the large xargs and wrapper blocks
-        small = [t for t in out if t.recipe.startswith(("hidden:", "home:"))]
-        big = [t for t in out if not t.recipe.startswith(("hidden:", "home:"))]
+        # keep every hidden, home and extra text (small), sample the large xargs and wrapper blocks
+        keep = ("hidden:", "home:", "extra:")
+        small = [t for t in out if t.recipe.startswith(keep)]
+        big = [t for t in out if not t.recipe.startswith(keep)]
         out = small + rng.sample(big, max(0, limit - len(small)))
+    return out
+
+
+# --------------------------------------------------------------------------------------------
+# Classes the review of the oracles listed as not generated (recipe "extra:")
+# --------------------------------------------------------------------------------------------
+
+_G = "00000000-0000-0000-0000-000000000001"
+EXTRA_CORES = (
+    ("write", f"data delete --entity account --id {_G}"),
+    ("switch", "env select --environment zz-prod-x"),
+    ("target", "solutions list --environment zz-prod-x"),
+)
+
+
+def _enc(code: str) -> str:
+    return base64.b64encode(code.encode("utf-16-le")).decode("ascii")
+
+
+def extra_texts() -> list:
+    out = []
+    for label, args in EXTRA_CORES:
+        words = args.split()
+        plist = ",".join(pq(w) for w in words)
+        forms = [
+            (f"sudo ppds {args}", "sudo:approx"), (f"sudo -n -E ppds {args}", "sudo-opts:approx"),
+            (f"time ppds {args}", "time"), (f"time -p ppds {args}", "time-p"),
+            (f"find . -maxdepth 0 -exec ppds {args} \\;", "find-exec"),
+            (f"find docs -name notes.md -exec ppds {args} {{}} +", "find-exec-plus"),
+            (f"Start-Process ppds -ArgumentList {plist} -Wait -NoNewWindow", "start-process"),
+            (f"Start-Process -FilePath 'ppds' -ArgumentList '{args}' -Wait -NoNewWindow", "start-process-string"),
+            (f"cmd /c ppds {args}", "cmd-c:approx"), (f"cmd.exe /C \"ppds {args}\"", "cmd-exe:approx"),
+            (f"pwsh -NoProfile -e {_enc('ppds ' + args)}", "pwsh-e"), (f"pwsh -NoProfile -ec {_enc('ppds ' + args)}", "pwsh-ec"),
+            (f"pwsh -NoProfile -enc {_enc('ppds ' + args)}", "pwsh-enc"),
+            (f"bash -lc {bq('ppds ' + args)}", "bash-lc"), (f"bash -ec {bq('ppds ' + args)}", "bash-ec"),
+            (f"sh -ec {bq('ppds ' + args)}", "sh-ec"), (f"bash -xc {bq('ppds ' + args)}", "bash-xc"),
+            (f"ppds $'{words[0]}' {' '.join(words[1:])}", "ansi-c-quote"),
+            (f"$'\\x70pds' {args}", "ansi-c-program"),
+            (f"bash <(echo {bq('ppds ' + args)})", "process-substitution"),
+            (f"source <(echo {bq('ppds ' + args)})", "source-process-substitution"),
+            (f". <(printf '%s' {bq('ppds ' + args)})", "dot-process-substitution"),
+            (f"ppds env list; ppds {args}", "two-invocations"), (f"ppds solutions list && ppds {args}", "two-and"),
+            (f"ppds env select --environment zz-safe-b; ppds {args}", "two-switch-first"),
+            (f"dotnet tool run ppds {args}", "dotnet-tool-run"), (f"dotnet tool run ppds -- {args}", "dotnet-tool-run-dd"),
+            (f"dotnet --roll-forward Major out/ppds.dll {args}", "host-option-dll"),
+            (f"dotnet exec --runtimeconfig x.json out/ppds.dll {args}", "exec-host-option"),
+            (f"dotnet run --project $(echo src/PPDS.Cli) -- {args}", "project-substitution"),
+            (f"dotnet run --project \"$(pwd)/src/PPDS.Cli\" -- {args}", "project-pwd"),
+            (f"dotnet watch --project src/PPDS.Cli -- {args}", "watch-without-run"),
+            (f"cd src/PPDS.Cli && dotnet run --project . -- {args}", "project-dot-after-cd"),
+            (f"PPDS_ENVIRONMENT_URL=https://zz-prod-x.invalid/ ppds {args}", "environment-url"),
+            (f"$env:PPDS_ENVIRONMENT_URL = 'https://zz-prod-x.invalid/'; ppds {args}", "environment-url-pwsh"),
+        ]
+        for text, kind in forms:
+            out.append(Text(text, "extra-" + label, "ppds", words, f"extra:{kind}"))
+    for text, kind in (("PPDS-MCP-SERVER --environment zz-prod-x", "mcp-upper"),
+                       ("Ppds-Mcp-Server", "mcp-mixed-case"),
+                       ("ppds-mcp-server --read-only --environment zz-prod-x", "mcp-override"),
+                       ("PPDS_ENVIRONMENT_URL=https://zz-prod-x.invalid/ ppds-mcp-server --read-only", "mcp-environment-url")):
+        out.append(Text(text, "extra-mcp", "ppds-mcp-server", [], f"extra:{kind}"))
     return out

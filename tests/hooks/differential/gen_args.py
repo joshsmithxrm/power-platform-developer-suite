@@ -22,6 +22,8 @@ from _harness import LISTED, RESPONSE_FILES, UNLISTED
 HELP = ("--help", "-h", "-?", "/?", "/h")
 DELIMS = (" ", "=", ":")
 NAMES = LISTED + UNLISTED
+# --profile values: names in the made-up stores, indexes, and a name that is a listed environment's.
+PROFILE_VALUES = ("p-zz-safe-a", "p-zz-prod-x", "1", "2", "[2]", "[1] p-zz-safe-a", "zz-safe-b", "P-ZZ-PROD-X")
 
 # Words that start the program. The hook must read each the same way as plain ``ppds``.
 CLI_PREFIXES = (
@@ -65,6 +67,11 @@ SQL_WRITES = [
     "EXEC ('DELETE FROM account')",
     "IF 1 = 1 DELETE FROM account",
     "BEGIN DELETE FROM account END",
+    "PublishAllXml",
+    "GrantAccess @Target = 'x'",
+    "no",
+    "EXEC PublishAllXml",
+    "EXECUTE sp_x",
 ]
 # Ways to put text in front of, around or into a statement. Applied to reads and writes alike.
 SQL_WRAPS = [
@@ -140,10 +147,33 @@ class Tree:
         return next((o for o in self.options(path) if o["name"] == name), None)
 
 
+# Custom validators of the CLI (messages from the real parser) and words that satisfy them. Each is
+# re-checked by the parser: a hint that does not make the vector parse is simply not used.
+_VALIDATOR_HINTS = (
+    ("Specify one of: --id, --key, --file, or --filter", ["--id", "00000000-0000-0000-0000-000000000001"]),
+    ("The entity logical name is required", ["--entity", "account"]),
+    ("Specify exactly one of --id, --name, or --all", ["--name", "x1"]),
+    ("--set is required when using --id", ["--set", "name=x"]),
+    ("A SQL source is required", ["SELECT name FROM account"]),
+    ("A FetchXML source is required", ["<fetch><entity name='account'/></fetch>"]),
+    ("Provide either (--data + --environment)", ["--source-env", "zz-safe-a", "--target-env", "zz-safe-b"]),
+)
+_ONE_OF = re.compile(r"Must be one of:\s*(?:\n\t)?'?([A-Za-z0-9_.-]+)")
+_BAD_VALUE = re.compile(r"(?:Argument|Invalid type) '([^']*)'")
+
+
+def _argument_value(c: dict) -> str:
+    args = c.get("arguments") or []
+    a = args[0] if args else {}
+    if a.get("enum"):
+        return a["enum"][0]
+    return {"Guid": "00000000-0000-0000-0000-000000000001", "FileInfo": "f.txt", "Int32": "1"}.get(a.get("type"), "x1")
+
+
 def complete(oracle, path: list, extra: list, rng: random.Random, tree: Tree) -> list:
-    """Add what the real parser says is required, so the vector actually runs (up to 6 rounds)."""
+    """Add what the real parser says is required, so the vector actually runs (up to 8 rounds)."""
     argv = list(path) + list(extra)
-    for _ in range(6):
+    for _ in range(8):
         t = oracle.cli(argv)
         errs = t.get("errors", [])
         if not errs:
@@ -151,12 +181,30 @@ def complete(oracle, path: list, extra: list, rng: random.Random, tree: Tree) ->
         changed = False
         for e in errs:
             m = _REQ_OPT.search(e)
+            hint = next((h for key, h in _VALIDATOR_HINTS if key in e), None)
             if m:
                 opt = tree.option(path, m.group(1)) or {"name": m.group(1), "type": "String", "max": 1}
                 argv += [opt["name"]] + _value_for(opt, rng)
                 changed = True
             elif _REQ_ARG.search(e):
-                argv.insert(len(path), "x1")
+                argv.insert(len(path), _argument_value(tree.by_path[tuple(path)]))
+                changed = True
+            elif "Cannot parse argument" in e and "System.Guid" in e:
+                bad = re.search(r"argument '([^']*)'", e).group(1)
+                if bad in argv:
+                    argv[argv.index(bad)] = "00000000-0000-0000-0000-000000000001"
+                    changed = True
+            elif _ONE_OF.search(e) and _BAD_VALUE.search(e):
+                bad, good = _BAD_VALUE.search(e).group(1), _ONE_OF.search(e).group(1)
+                for i in range(len(path), len(argv)):
+                    if argv[i] == bad:
+                        trial = argv[:i] + [good] + argv[i + 1:]
+                        if e not in oracle.cli(trial).get("errors", []):
+                            argv = trial
+                            changed = True
+                            break
+            elif hint and not all(w in argv for w in hint):
+                argv = argv[:len(path)] + hint + argv[len(path):] if not hint[0].startswith("-") else argv + hint
                 changed = True
         if not changed:
             return argv
@@ -209,18 +257,18 @@ def generate(oracle, size: int, seed: int) -> list:
     paths = list(base)
 
     # -- the target options with every delimiter and alias, before and after the subcommand
+    target_options = ("--environment", "--source-env", "--target-env", "--profile", "--source-profile", "--target-profile")
     for path in paths:
-        opt = tree.option(path, "--environment")
-        prof = tree.option(path, "--profile")
-        for o in (opt, prof):
+        for o in (tree.option(path, n) for n in target_options):
             if not o:
                 continue
+            values = NAMES if o["name"].endswith("env") or o["name"] == "--environment" else PROFILE_VALUES
             spellings = [o["name"]] + [a for a in o["aliases"] if not a.startswith("/")]
             for spelling in spellings:
                 for delim in DELIMS:
                     if rng.random() > (0.9 if path[-1] in ("select",) else 0.25):
                         continue
-                    name = rng.choice(NAMES)
+                    name = rng.choice(values)
                     argv = [a for a in base[path]]
                     # drop a generated value of the same option, so there is only one
                     argv = _drop_option(argv, o)
@@ -246,6 +294,23 @@ def generate(oracle, size: int, seed: int) -> list:
         add([group, "select", "--environment", ""], "switch-empty")
         add([group, "select", "--", "--environment", rng.choice(UNLISTED)], "switch-after-dashdash")
 
+    # -- the writing forms of the conditional paths
+    for argv in (["env", "config", "https://zz-safe-a.invalid/", "--label", "x1"], ["env", "config", "--remove"],
+                 ["org", "config", "https://zz-safe-a.invalid/", "--type", "Production"],
+                 ["env", "type", "Production", "--color", "Red"], ["env", "type", "Production", "--remove"],
+                 ["version", "--update"], ["version", "--update", "--yes"], ["version", "--update", "--prerelease"]):
+        add(complete(oracle, argv[:2] if argv[0] != "version" else argv[:1], argv[2:] if argv[0] != "version" else argv[1:],
+                     rng, tree), "conditional-write")
+
+    # -- auth select: every way of naming a profile
+    for value in PROFILE_VALUES:
+        for spelling in ("--name", "-n"):
+            for delim in DELIMS:
+                add(["auth", "select"] + _with_value(spelling, value, delim), "auth-select")
+        if value.strip("[]").isdigit():
+            for spelling in ("--index", "-i"):
+                add(["auth", "select"] + _with_value(spelling, value.strip("[]"), rng.choice(DELIMS)), "auth-select")
+
     # -- a value option followed by a flag: the flag becomes the value
     flags_of_interest = ("--dry-run", "--help", "--environment", "--yes", "--confirm")
     for path in paths:
@@ -261,7 +326,7 @@ def generate(oracle, size: int, seed: int) -> list:
                 "value-swallows-flag", note=f"{v['name']} {f['name']}")
 
     # -- flags with attached or separate values
-    bool_values = ("true", "false", "False", " false", "false ", "0", "1", "no", "")
+    bool_values = ("true", "false", "False", " false", "false ", "0", "1", "no", "yes", "off", "")
     for path in paths:
         for o in tree.options(path):
             if o["type"] != "Boolean" or o["name"] not in ("--dry-run", "--update", "--yes", "--confirm", "--list", "--show"):
@@ -320,6 +385,11 @@ def generate(oracle, size: int, seed: int) -> list:
         add(argv, f"sql-{kind}")
     for opt in ("--file", "--stdin"):
         add(["query", "sql", opt] + (["q.sql"] if opt == "--file" else []), "sql-elsewhere")
+    # implicit EXEC: a flag with an attached word the parser takes as the SQL, and bare message names
+    for flag in ("--dry-run", "--explain", "--confirm", "--show-fetchxml", "--tds", "--count"):
+        for word in ("no", "yes", "off", "PublishAllXml"):
+            for delim in DELIMS:
+                add(["query", "sql"] + _with_value(flag, word, delim), "sql-implicit-exec")
 
     # -- the MCP server's own options
     mcp_vals = ("--profile", "--environment", "--allowed-env", "--log-level")
@@ -368,7 +438,8 @@ def generate(oracle, size: int, seed: int) -> list:
 
 
 # Shapes kept whole when a smaller corpus is asked for; every other shape is sampled in proportion.
-_ALWAYS = ("bare", "root-flag", "switch", "response-file", "sql-elsewhere", "command-alias", "path")
+_ALWAYS = ("bare", "root-flag", "switch", "response-file", "sql-elsewhere", "command-alias", "path", "auth-select",
+           "sql-implicit-exec", "conditional-write")
 
 
 def _sample(cases: list, size: int, rng: random.Random) -> list:

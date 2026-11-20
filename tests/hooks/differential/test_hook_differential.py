@@ -24,7 +24,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import differential  # noqa: E402
-from _harness import MODES, OracleUnavailable, build_oracle  # noqa: E402
+from _harness import MODES, OracleUnavailable, build_oracle, truth_mode  # noqa: E402
 
 SIZE_ARGS = int(os.environ.get("PPDS_DIFF_SIZE_ARGS", "1500"))
 SIZE_SHELL = int(os.environ.get("PPDS_DIFF_SIZE_SHELL", "700"))
@@ -88,7 +88,7 @@ def test_argument_oracle_hook_never_passes_a_harmful_vector(args_report, mode):
 
 @pytest.mark.parametrize("mode", MODES)
 def test_statement_oracle_hook_never_passes_a_harmful_text(shell_report, mode):
-    if shell_report["argument_truth"] != "parse oracle" and mode != "gate-unlisted":
+    if shell_report["argument_truth"] != "parse oracle" and truth_mode(mode) != "gate-unlisted":
         _missing("argument oracle unavailable; only the unlisted-environment gate can be judged")
     _check(shell_report, mode)
 
@@ -102,9 +102,22 @@ def test_argument_oracle_renders_each_failing_vector_exactly(args_report):
     assert check["dropped"] == 0, check
 
 
-def test_argument_oracle_covers_every_command_path(args_report):
-    """The generator reached every runnable command path of the real tree at least once."""
-    assert args_report["shapes"].get("path", 0) >= 200, args_report["shapes"]
+def test_argument_oracle_judges_every_write_path_as_a_write(args_report):
+    """Every command path that can write (not in read_paths.json, or a conditional one) has at least
+    one generated vector that the real parser runs and ground truth judges a write in the shakedown."""
+    integ = args_report["integrity"]
+    assert not integ["write_paths_not_judged"], integ["write_paths_not_judged"]
+
+
+def test_argument_oracle_harness_integrity(args_report):
+    """No parse-oracle errors, no skipped rendering check, no dropped renderings."""
+    assert args_report["integrity"]["ok"], args_report["integrity"]["problems"]
+
+
+def test_statement_oracle_harness_integrity(shell_report):
+    """Every text has a recorded outcome under bash and under pwsh; timeouts and unreproduced
+    pwsh-only failures stay under the stated limits (differential.MAX_*)."""
+    assert shell_report["integrity"]["ok"], shell_report["integrity"]["problems"]
 
 
 def test_statement_oracle_starts_stand_ins_under_both_shells(shell_report):
@@ -138,6 +151,10 @@ def ordinary_report():
 @pytest.fixture(scope="module")
 def raw_report():
     return differential.run_raw_timing_oracle(RAW_LENGTHS, 0, CASES)
+
+
+def test_ordinary_oracle_harness_integrity(ordinary_report):
+    assert ordinary_report["integrity"]["ok"], ordinary_report["integrity"]["problems"]
 
 
 def test_ordinary_mentions_pass_with_a_listed_environment(ordinary_report):

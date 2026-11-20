@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from _harness import LISTED, profile_environment
+from _harness import LISTED, profile_environment, truth_mode
 
 _READ = {tuple(p.split()) for p in json.loads((Path(__file__).with_name("read_paths.json")).read_text("utf-8"))["read"]}
 
@@ -30,7 +30,13 @@ READ_SQL_KINDS = {"SelectStatement", "PrintStatement", "DeclareVariableStatement
                   "IfStatement", "WhileStatement", "BeginEndBlockStatement"}
 
 ENV_GROUPS = {"env", "org"}
-ENV_READ_DIAGNOSTICS = {"list", "current", "who", "config", "type", "show"}
+# Pure local or discovery reads on an unlisted active environment (policy severity). `env who` is not one:
+# it sends WhoAmI to the active environment (EnvCommandGroup.ExecuteWhoAsync), so it is a requirement harm.
+# `env list` asks Global Discovery, not the active environment; `env config` / `env type` in their --list /
+# --show forms only read local settings.
+ENV_READ_DIAGNOSTICS = {"list", "config", "type"}
+ENV_OPTIONS = ("--environment", "--source-env", "--target-env")
+PROFILE_OPTIONS = ("--profile", "--source-profile", "--target-profile")
 ENV_SWITCHES = {"select", "switch", "use"}
 
 
@@ -96,33 +102,40 @@ def _profile_harm(value, mode: str, cause: str, what: str):
 
 
 def judge(oracle, program: str, argv: list, mode: str, overrides: dict | None = None) -> tuple:
-    """(truth, harms) for one invocation. ``truth`` is the oracle's answer.
+    """(truth, harms) for one invocation in a hook mode. ``truth`` is the oracle's answer.
+
+    The mode's rule is ``truth_mode(mode)``: ``gate-unlisted`` (the active environment is not listed or
+    cannot be determined), ``gate-listed``, ``shakedown`` (listed, write-block on) or ``shakedown-noal``
+    (write-block on, no allowlist). Profiles resolve against the mode's own store.
 
     ``overrides`` (oracle 2 only) describes the process environment the stand-in saw:
-    ``config_dir_changed`` (PPDS_CONFIG_DIR differs from the one the hook read) and ``profile``
-    (a PPDS_PROFILE value)."""
+    ``config_dir_changed`` / ``home_changed`` (it reads another profile store), ``profile`` (a PPDS_PROFILE
+    value) and ``environment_url`` (a PPDS_ENVIRONMENT_URL value)."""
     overrides = overrides or {}
+    rule = truth_mode(mode)
+    gate = rule != "shakedown-noal"
     harms = []
     if program == "ppds-mcp-server":
         t = oracle.mcp(argv)
         if not t.get("runs"):
             return t, harms
-        if mode == "gate-unlisted":
+        if rule == "gate-unlisted":
             harms.append(Harm("mcp-starts-on-unlisted-active", "requirement"))
             return t, harms
-        if mode == "shakedown" and not t.get("read_only"):
+        if rule.startswith("shakedown") and not t.get("read_only"):
             harms.append(Harm("mcp-writable-in-shakedown", "requirement", "McpSessionOptions.ReadOnly is false"))
-        env = t.get("environment")
-        if env is not None and not _listed(env):
-            harms.append(Harm("mcp-environment-override", "requirement", f"--environment {env!r}"))
-        if t.get("profile") is not None:
-            h = _profile_harm(t["profile"], mode, "mcp-profile-override", "--profile")
-            if h:
-                harms.append(h)
-        bad = [e for e in t.get("allowed_env", []) if not _listed(e)]
-        if bad:
-            harms.append(Harm("mcp-allowed-env-unlisted", "requirement", f"--allowed-env {bad!r}"))
-        _process_overrides(overrides, mode, harms)
+        if gate:
+            env = t.get("environment")
+            if env is not None and not _listed(env):
+                harms.append(Harm("mcp-environment-override", "requirement", f"--environment {env!r}"))
+            if t.get("profile") is not None:
+                h = _profile_harm(t["profile"], mode, "mcp-profile-override", "--profile")
+                if h:
+                    harms.append(h)
+            bad = [e for e in t.get("allowed_env", []) if not _listed(e)]
+            if bad:
+                harms.append(Harm("mcp-allowed-env-unlisted", "requirement", f"--allowed-env {bad!r}"))
+            _process_overrides(overrides, mode, harms)
         return t, harms
 
     t = oracle.cli(argv)
@@ -134,15 +147,22 @@ def judge(oracle, program: str, argv: list, mode: str, overrides: dict | None = 
     path = tuple(t.get("path", []))
     opts = t.get("options", {})
     is_env = len(path) == 2 and path[0] in ENV_GROUPS
-    if is_env and path[1] in ENV_SWITCHES:
-        target = _opt_value(opts, "--environment")
-        if not isinstance(target, str) or not target.strip():
-            # src/PPDS.Auth/Discovery/EnvironmentResolver.cs: a blank identifier resolves to nothing,
-            # and env select then fails without saving anything.
-            return t, harms
-    if mode == "gate-unlisted":
-        if is_env and path[1] in ENV_SWITCHES and _listed(_opt_value(opts, "--environment")):
+    is_switch = is_env and path[1] in ENV_SWITCHES
+    target = _opt_value(opts, "--environment") if is_switch else None
+    if is_switch and (not isinstance(target, str) or not target.strip()):
+        # src/PPDS.Auth/Discovery/EnvironmentResolver.cs: a blank identifier resolves to nothing,
+        # and env select then fails without saving anything.
+        return t, harms
+    chosen_profile = None
+    if path == ("auth", "select"):
+        idx = _opt_value(opts, "--index")
+        chosen_profile = str(idx) if idx is not None else _opt_value(opts, "--name")
+
+    if rule == "gate-unlisted":
+        if is_switch and _listed(target) and not _any_override(overrides):
             return t, harms  # switching INTO a listed environment is allowed (R4)
+        if path == ("auth", "select") and _listed(profile_environment(chosen_profile, mode)) and not _any_override(overrides):
+            return t, harms  # selecting a profile whose environment is listed is a switch into a listed one
         if is_env and path[1] in ENV_READ_DIAGNOSTICS and not (
                 path[1] in ("config", "type") and cli_can_write(t)[0]):
             harms.append(Harm("env-diagnostic-on-unlisted-active", "policy", " ".join(path)))
@@ -150,35 +170,42 @@ def judge(oracle, program: str, argv: list, mode: str, overrides: dict | None = 
             harms.append(Harm("runs-on-unlisted-active", "requirement", " ".join(path) or "<root>"))
         return t, harms
 
-    # Environment gate with a listed active environment (also applies during the shakedown,
-    # because the allowlist is configured in every mode).
-    if is_env and path[1] in ENV_SWITCHES:
-        target = _opt_value(opts, "--environment")
-        if not _listed(target):
-            harms.append(Harm("switch-to-unlisted", "requirement", f"--environment binds {target!r}"))
-    else:
-        env = _opt_value(opts, "--environment")
-        if env is not None and not _listed(env):
-            harms.append(Harm("environment-override", "requirement", f"--environment binds {env!r}"))
-    if path == ("auth", "select"):
-        idx = _opt_value(opts, "--index")
-        name = _opt_value(opts, "--name")
-        chosen = str(idx) if idx is not None else name
-        h = _profile_harm(chosen, mode, "profile-switch", "auth select")
-        if h:
-            harms.append(h)
-    prof = _opt_value(opts, "--profile")
-    if prof is not None:
-        h = _profile_harm(prof, mode, "profile-override", "--profile")
-        if h:
-            harms.append(h)
-    _process_overrides(overrides, mode, harms)
+    if gate:
+        # Environment gate with a listed active environment (also during the shakedown with an allowlist).
+        if is_switch:
+            if not _listed(target):
+                harms.append(Harm("switch-to-unlisted", "requirement", f"--environment binds {target!r}"))
+        for name in ENV_OPTIONS:
+            if is_switch and name == "--environment":
+                continue
+            env = _opt_value(opts, name)
+            if env is not None and not _listed(env):
+                harms.append(Harm("environment-override", "requirement", f"{name} binds {env!r}"))
+        if path == ("auth", "select"):
+            h = _profile_harm(chosen_profile, mode, "profile-switch", "auth select")
+            if h:
+                harms.append(h)
+        for name in PROFILE_OPTIONS:
+            prof = _opt_value(opts, name)
+            if prof is not None:
+                h = _profile_harm(prof, mode, "profile-override", name)
+                if h:
+                    harms.append(h)
+        _process_overrides(overrides, mode, harms)
+    elif is_switch or path == ("auth", "select"):
+        # Write-block without an allowlist: nothing checks the target, and the switch rewrites the
+        # profile store's active environment.
+        harms.append(Harm("switch-without-allowlist", "requirement", " ".join(path)))
 
-    if mode == "shakedown":
+    if rule.startswith("shakedown"):
         writes, why = cli_can_write(t)
         if writes:
             harms.append(Harm("write-in-shakedown", "requirement", f"{' '.join(path) or '<root>'}: {why}"))
     return t, harms
+
+
+def _any_override(ov: dict) -> bool:
+    return bool(ov.get("config_dir_changed") or ov.get("home_changed") or ov.get("profile") or ov.get("environment_url"))
 
 
 def _process_overrides(overrides: dict, mode: str, harms: list) -> None:
@@ -192,6 +219,11 @@ def _process_overrides(overrides: dict, mode: str, harms: list) -> None:
         h = _profile_harm(overrides["profile"], mode, "profile-override", "PPDS_PROFILE")
         if h:
             harms.append(h)
+    url = overrides.get("environment_url")
+    if url:
+        host = url.split("//", 1)[-1].split("/", 1)[0].split(".", 1)[0]
+        if not _listed(host):
+            harms.append(Harm("environment-url-override", "requirement", f"PPDS_ENVIRONMENT_URL={url!r}"))
 
 
 # Cause families of the environment gate (listed active environment). For these, R4 asks for a refusal
@@ -200,11 +232,11 @@ def _process_overrides(overrides: dict, mode: str, harms: list) -> None:
 # policy severity.
 ENV_GATE_CAUSES = {"switch-to-unlisted", "environment-override", "profile-override", "profile-switch",
                    "mcp-environment-override", "mcp-profile-override", "mcp-allowed-env-unlisted",
-                   "config-folder-override", "home-override"}
+                   "config-folder-override", "home-override", "environment-url-override"}
 _SWITCH_GROUP = re.compile(r"(?i)(?<![\w-])(env|org|auth)(?![\w-])")
 _SWITCH_VERB = re.compile(r"(?i)(?<![\w-])(select|switch|use)(?![\w-])")
 _TARGET_OPT = re.compile(r"(?i)(--environment|(?<![\w-])-env|(?<![\w-])-e(?![\w-])|--profile|(?<![\w-])-p(?![\w-])|--allowed-env|"
-                         r"PPDS_CONFIG_DIR|PPDS_PROFILE|(?<![\w-])HOME=|\$env:HOME|USERPROFILE|LOCALAPPDATA)")
+                         r"PPDS_CONFIG_DIR|PPDS_PROFILE|PPDS_ENVIRONMENT_URL|--source-env|--target-env|--source-profile|--target-profile|(?<![\w-])HOME=|\$env:HOME|USERPROFILE|LOCALAPPDATA)")
 
 
 _ENCODED = re.compile(r"(?i)-(?:e|ec|encodedcommand)\s+([A-Za-z0-9+/=]{8,})")
@@ -244,8 +276,27 @@ def text_shows_target(text: str) -> bool:
     return bool((_SWITCH_GROUP.search(t) and _SWITCH_VERB.search(t)) or _TARGET_OPT.search(t))
 
 
-def apply_text_rule(harms: list, text: str) -> list:
-    """Downgrade env-gate harms of a text that shows no switch words and no target option."""
-    if text_shows_target(text):
+def apply_text_rule(harms: list, text: str, mode: str) -> list:
+    """Downgrade env-gate harms of a text that shows no switch words and no target option. Only in a
+    listed-environment gate without the shakedown: during a shakedown no such excuse applies."""
+    if truth_mode(mode) != "gate-listed" or text_shows_target(text):
         return harms
     return [Harm(h.cause + "-not-in-text", "policy", h.detail) if h.cause in ENV_GATE_CAUSES else h for h in harms]
+
+
+_CONDITIONAL = {("plugins", "deploy"), ("query", "sql"), ("env", "config"), ("env", "type"), ("version",)}
+
+
+def normal_path(path) -> tuple:
+    path = tuple(path)
+    return ("env",) + path[1:] if path[:1] == ("org",) else path
+
+
+def write_capable_paths(tree) -> set:
+    """Every runnable path that is not read-only, plus the conditional ones (which write in some form)."""
+    out = set()
+    for c in tree.runnable:
+        p = normal_path(c["path"])
+        if p in _CONDITIONAL or p not in _READ:
+            out.add(p)
+    return out

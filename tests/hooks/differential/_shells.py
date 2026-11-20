@@ -31,14 +31,14 @@ SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin"
 # case-insensitive and the extension may be written.
 GUARDED_NAMES = ("ppds", "ppds-mcp-server", "dotnet", "dnx")
 EXTRA_SPELLINGS = ("ppds.exe", "ppds-mcp-server.exe", "dotnet.exe", "dnx.exe", "PPDS", "Ppds", "DotNet", "DOTNET",
-                   "PPDS.exe")
+                   "PPDS.exe", "PPDS-MCP-SERVER", "Ppds-Mcp-Server", "DNX", "Dnx", "PPDS.EXE", "DOTNET.EXE")
 
 _STANDIN = """#!{python} -I
 import json, os, sys
 with open(os.environ.get("STANDIN_LOG", os.devnull), "a", encoding="utf-8", errors="surrogateescape") as fh:
     fh.write(json.dumps({{"prog": os.path.basename(sys.argv[0]), "argv": sys.argv[1:], "cwd": os.getcwd(),
                          "config_dir": os.environ.get("PPDS_CONFIG_DIR"), "profile": os.environ.get("PPDS_PROFILE"),
-                         "home": os.environ.get("HOME")}},
+                         "home": os.environ.get("HOME"), "environment_url": os.environ.get("PPDS_ENVIRONMENT_URL")}},
                         ensure_ascii=False) + "\\n")
 """
 
@@ -47,7 +47,7 @@ with open(os.environ.get("STANDIN_LOG", os.devnull), "a", encoding="utf-8", erro
 # xvfb-run: starts an X server). Each applies the wrapper's own option rules and then runs the rest
 # locally, so the guarded stand-ins see what the real wrapper would start. Texts that use one of them
 # are reported with an ``-approx`` severity.
-APPROX_WRAPPERS = ("ssh", "parallel", "busybox", "winpty", "xvfb-run")
+APPROX_WRAPPERS = ("ssh", "parallel", "busybox", "winpty", "xvfb-run", "sudo", "cmd", "cmd.exe")
 _WRAPPER = """#!{python} -I
 import os, sys
 name = os.path.basename(sys.argv[0])
@@ -64,6 +64,19 @@ if name == "ssh":
         i += 2 if a[i] in with_value else 1
     rest = a[i + 1:]
     run(["sh", "-c", " ".join(rest)] if rest else [])
+elif name == "sudo":
+    with_value = set("-u --user -g --group -C -h --host -p --prompt -U -r -t -T".split())
+    i = 0
+    while i < len(a) and a[i].startswith("-"):
+        i += 2 if a[i] in with_value else 1
+    run(a[i:])
+elif name in ("cmd", "cmd.exe"):
+    # cmd /c <command line>: the rest is one command line; run it the way a POSIX shell splits it.
+    i = 0
+    while i < len(a) and a[i].lower() not in ("/c", "/k"):
+        i += 1
+    rest = " ".join(a[i + 1:])
+    run(["sh", "-c", rest] if rest else [])
 elif name == "busybox":
     run(a if not a or a[0] not in ("sh", "ash") else ["sh"] + a[1:])
 elif name == "winpty":
@@ -125,6 +138,10 @@ class ShellLab:
         # The lab sets no PPDS_CONFIG_DIR, so the store a program reaches is $HOME/.ppds unless the
         # text changes PPDS_CONFIG_DIR or HOME (ProfilePaths.cs, Linux). This is the default store.
         self.config_dir = None
+        import collections
+        self.outcomes = collections.Counter()   # "<shell>-finished" / "<shell>-timeout" per run
+        self.timed_out = []
+        self._count_lock = threading.Lock()
         self.default_store = os.path.normpath(str(sandbox.home / ".ppds"))
         self.bash = shutil.which("bash", path=SYSTEM_PATH)
         self.pwsh = shutil.which("pwsh", path=SYSTEM_PATH) or shutil.which("pwsh")
@@ -164,7 +181,7 @@ class ShellLab:
     def overrides(self, record: dict) -> dict:
         return {"config_dir_changed": self.reached_store(record) != self.default_store,
                 "home_changed": not record.get("config_dir") and self.reached_store(record) != self.default_store,
-                "profile": record.get("profile")}
+                "profile": record.get("profile"), "environment_url": record.get("environment_url")}
 
     def reached_store(self, record: dict) -> str:
         """The profile-store folder the program would read (ProfilePaths: PPDS_CONFIG_DIR, else ~/.ppds)."""
@@ -186,8 +203,9 @@ class ShellLab:
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             try:
                 proc.wait(timeout=timeout)
+                outcome = "finished"
             except subprocess.TimeoutExpired:
-                pass
+                outcome = "timeout"
             if "setsid" in text or "&" in text:
                 time.sleep(0.5)  # a detached child may still be starting
             try:
@@ -195,9 +213,21 @@ class ShellLab:
             except (ProcessLookupError, PermissionError):
                 pass
             proc.wait()
+            with self._count_lock:
+                self.outcomes[f"{argv[0].rsplit('/', 1)[-1]}-{outcome}"] += 1
+                if outcome == "timeout":
+                    self.timed_out.append((argv[0].rsplit('/', 1)[-1], text[:200]))
+            return outcome
         finally:
             if lock:
                 lock.release()
+
+    def integrity(self, submitted: int) -> dict:
+        """Every submitted text must have a recorded outcome under both shells."""
+        done = {sh: self.outcomes[f"{sh}-finished"] + self.outcomes[f"{sh}-timeout"] for sh in ("bash", "pwsh")}
+        return {"submitted": submitted, "bash_outcomes": done["bash"], "pwsh_outcomes": done["pwsh"],
+                "bash_timeouts": self.outcomes["bash-timeout"], "pwsh_timeouts": self.outcomes["pwsh-timeout"],
+                "timed_out_examples": self.timed_out[:10]}
 
     def run_bash(self, text: str, timeout: float = 40.0) -> list:
         log = self.logs / f"b-{uuid.uuid4().hex}.log"
@@ -261,6 +291,9 @@ _DOTNET_RUN_VALUE = {"-c", "--configuration", "-f", "--framework", "-r", "--runt
 _DOTNET_RUN_FLAGS = {"--no-build", "--no-restore", "--no-launch-profile", "--interactive", "--force",
                      "--no-dependencies", "--disable-build-servers", "--no-cache", "--tl", "-q", "--quiet",
                      "--no-hot-reload", "--non-interactive"}
+_HOST_VALUE_OPTIONS = {"--additionalprobingpath", "--additional-deps", "--depsfile", "--fx-version", "--roll-forward",
+                       "--runtimeconfig", "--roll-forward-on-no-candidate-fx"}
+_HOST_FLAGS = {"-d", "--diagnostics"}
 _DNX_VALUE = {"--version", "--source", "--add-source", "--configfile", "-v", "--verbosity"}
 _DNX_FLAGS = {"--yes", "-y", "--prerelease", "--allow-roll-forward", "--interactive", "--ignore-failed-sources",
               "--no-http-cache", "--disable-parallel"}
@@ -321,6 +354,11 @@ def map_start(record: dict) -> list:
         return []
     if not argv:
         return []
+    # host options before the verb or the .dll (dotnet [host-options] path.dll / exec)
+    while argv and argv[0].startswith("-") and argv[0].lower() in _HOST_VALUE_OPTIONS | _HOST_FLAGS:
+        argv = argv[2:] if argv[0].lower() in _HOST_VALUE_OPTIONS else argv[1:]
+    if not argv:
+        return []
     verb = argv[0].lower()
     rest = argv[1:]
     if verb == "watch":
@@ -336,9 +374,12 @@ def map_start(record: dict) -> list:
                 project = rest[i + 1]
             elif w.startswith(("--project=", "--project:")):
                 project = w.split(w[9], 1)[1] if len(w) > 9 else ""
+        cwd = record.get("cwd", "").replace("\\", "/")
         if project is None:
-            cwd = record.get("cwd", "").replace("\\", "/")
             project = cwd
+        elif not project.startswith("/"):
+            # a relative project (``--project .`` after ``cd src/PPDS.Cli``) is relative to the cwd
+            project = os.path.normpath(os.path.join(cwd, project)).replace("\\", "/")
         program = _project_program(project) if project else None
         if program:
             return [(program, _app_args_after_run(rest), False)]
@@ -346,7 +387,7 @@ def map_start(record: dict) -> list:
     if verb in ("exec",):
         rest = [w for w in rest]
         while rest and rest[0].startswith("-"):
-            rest = rest[2:] if rest[0] in ("--runtimeconfig", "--depsfile", "--additionalprobingpath") else rest[1:]
+            rest = rest[2:] if rest[0].lower() in _HOST_VALUE_OPTIONS else rest[1:]
         verb = rest[0] if rest else ""
         rest = rest[1:]
     if verb.lower().endswith(".dll"):

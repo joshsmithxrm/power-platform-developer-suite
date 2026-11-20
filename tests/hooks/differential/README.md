@@ -91,6 +91,7 @@ python tests/hooks/differential/repro.py out/args/<name>.case.json
 At commit 3164e825 (the second review round of #1814) the requirement-severity tests fail: they rediscover the round-2 must-fix findings and find more.
 `findings.py` labels each failure after the fact (the generators never use these labels), and `expected_failures.json` lists the labels known at that commit with the finding each belongs to.
 When a fix lands, the failures with its label disappear; remove the label from `expected_failures.json`.
+Round-4 labels (`new-xargs-options`, `new-hidden-words`, `new-unknown-wrapper`, `new-home-override`, `new-sql-exponent-glue`, `cost-rule-false-block`) were added against the #1814 head a39e7e68; some earlier labels are listed again because they reappear combined with a round-4 one.
 A failure labelled `unlabelled` is a finding nobody has named yet.
 
 ## Safety of the runs
@@ -114,6 +115,7 @@ The Python tests job (`.github/workflows/workflow-tests.yml`, `ubuntu-latest`) r
 - Oracle 2 needs `bash` and `pwsh`; the hosted Ubuntu image has both.
 - Oracle 1 needs the .NET 10 SDK that `global.json` pins. That job does not run `actions/setup-dotnet`, so whether the image's preinstalled SDK satisfies `global.json` decides whether oracle 1 builds there; when it does not, oracle 1 skips with the reason, and oracle 2 then judges only the `gate-unlisted` mode.
 - Recommendation: to run oracle 1 in CI, add `actions/setup-dotnet` with `global-json-file: global.json` to that job. This change does not touch the workflow.
+- Shell ground truth starts one fresh `bash` and one fresh `pwsh` per text. On a heavily loaded machine a `pwsh` start can take tens of seconds; the CI sample of oracle 2 (700 random, 500 shell-feed and 400 round-4 texts) is sized for an unloaded runner. `differential.py shell --round4` runs only the round-4 blocks, all of them.
 - The timing oracle runs two hook runs at a time so the measured time is the hook's; on a loaded runner the budget check can fail for load alone. Each run is stopped 5 s after the registered timeout.
 
 ## What is not covered

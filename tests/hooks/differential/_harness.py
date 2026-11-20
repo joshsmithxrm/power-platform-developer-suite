@@ -27,21 +27,42 @@ REPO = HERE.parents[2]
 HOOK = Path(os.environ.get("PPDS_DIFF_HOOK", str(REPO / ".claude" / "hooks" / "shakedown-safety.py")))
 
 TOOLS = ("Bash", "PowerShell")
-MODES = ("gate-unlisted", "gate-listed", "shakedown")
-
 # Made-up environment names. LISTED are on the allowlist, UNLISTED are not.
 LISTED = ("zz-safe-a", "zz-safe-b")
 UNLISTED = ("zz-prod-x", "zz-prod-y")
 ALLOWLIST = ",".join(LISTED)
-ACTIVE = {"gate-unlisted": "zz-prod-x", "gate-listed": "zz-safe-a", "shakedown": "zz-safe-a"}
 
-# Profiles in each mode's made-up store: index 1 is the active one, index 2 the other.
-PROFILES = {"p-zz-safe-a": "zz-safe-a", "p-zz-prod-x": "zz-prod-x"}
+_LISTED_STORE = [("p-zz-safe-a", "zz-safe-a"), ("p-zz-prod-x", "zz-prod-x")]
+_UNLISTED_STORE = [("p-zz-prod-x", "zz-prod-x"), ("p-zz-safe-a", "zz-safe-a")]
+
+# Every mode the hook is run in. ``truth`` names the rule ground truth applies (``_truth.judge``);
+# ``store`` is the made-up profile store (index 1 active; None = no store at all, so the active
+# environment cannot be determined); ``allow`` says where the allowlist comes from (``env`` =
+# PPDS_SAFE_ENVS, ``settings`` = .claude/settings.json, None = no allowlist); ``shakedown`` says how
+# the write-block is switched on (``env`` = PPDS_SHAKEDOWN=1, ``sentinel`` = a fresh sentinel file).
+MODE_SPEC = {
+    "gate-unlisted": {"truth": "gate-unlisted", "store": _UNLISTED_STORE, "allow": "env", "shakedown": None},
+    "gate-listed": {"truth": "gate-listed", "store": _LISTED_STORE, "allow": "env", "shakedown": None},
+    "shakedown": {"truth": "shakedown", "store": _LISTED_STORE, "allow": "env", "shakedown": "env"},
+    "gate-unknown": {"truth": "gate-unlisted", "store": None, "allow": "env", "shakedown": None},
+    # The active profile is named like a listed environment but holds an unlisted one.
+    "gate-profile-named": {"truth": "gate-unlisted", "store": [("zz-safe-b", "zz-prod-y"), ("p-zz-safe-a", "zz-safe-a")],
+                           "allow": "env", "shakedown": None},
+    "gate-settings": {"truth": "gate-listed", "store": _LISTED_STORE, "allow": "settings", "shakedown": None},
+    "shakedown-sentinel": {"truth": "shakedown", "store": _LISTED_STORE, "allow": "env", "shakedown": "sentinel"},
+    "shakedown-noal": {"truth": "shakedown-noal", "store": _LISTED_STORE, "allow": None, "shakedown": "env"},
+}
+MODES = tuple(MODE_SPEC)
+ACTIVE = {m: (spec["store"][0][1] if spec["store"] else None) for m, spec in MODE_SPEC.items()}
+PROFILES = dict(_LISTED_STORE)
+
+
+def truth_mode(mode: str) -> str:
+    return MODE_SPEC[mode]["truth"]
 
 
 def store_profiles(mode: str) -> list:
-    active = "p-" + ACTIVE[mode]
-    return [(active, PROFILES[active])] + [(n, e) for n, e in PROFILES.items() if n != active]
+    return list(MODE_SPEC[mode]["store"] or [])
 
 
 def profile_environment(value, mode: str):
@@ -67,7 +88,7 @@ def profile_environment(value, mode: str):
 RESPONSE_FILES = {
     "sel.rsp": "--environment\nzz-prod-x\n",
     "cmd.rsp": "env\nselect\n--environment\nzz-prod-x\n",
-    "del.rsp": "data\ndelete\n--entity\naccount\n--filter\nname eq 'x'\n",
+    "del.rsp": "data\ndelete\n--entity\naccount\n--id\n00000000-0000-0000-0000-000000000001\n",
     "dry.rsp": "--dry-run\n",
 }
 
@@ -91,36 +112,41 @@ class Sandbox:
         for name in ("f.txt", "q.sql", "x1"):
             (self.work / name).write_text("", encoding="utf-8")
         (self.work / "d").mkdir(exist_ok=True)
-        self.stores = {}
         # The hook finds each mode's store the way the product does on Linux when PPDS_CONFIG_DIR is
         # not set: under $HOME/.ppds. (PPDS_CONFIG_DIR is left unset so that a HOME change in a text
         # is a real change of store; see ProfilePaths.cs.)
-        self.mode_homes = {}
-        for mode, env_name in ACTIVE.items():
-            self.mode_homes[mode] = self.root / f"home-{mode}"
-            cfg = self.mode_homes[mode] / ".ppds"
-            cfg.mkdir(parents=True, exist_ok=True)
-            (cfg / "profiles.json").write_text(json.dumps({
-                "version": 2, "activeProfileIndex": 1,
-                "profiles": [{"index": i, "name": name, "environment": {
-                    "displayName": env, "uniqueName": env, "url": f"https://{env}.invalid/"}}
-                    for i, (name, env) in enumerate(store_profiles(mode), start=1)],
-            }), encoding="utf-8")
-            self.stores[mode] = cfg
-        self.project = self.root / "project"
-        (self.project / ".claude" / "state").mkdir(parents=True, exist_ok=True)
-        (self.project / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
+        self.mode_homes, self.projects = {}, {}
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        for mode, spec in MODE_SPEC.items():
+            home = self.mode_homes[mode] = self.root / f"home-{mode}"
+            home.mkdir(parents=True, exist_ok=True)
+            if spec["store"] is not None:
+                cfg = home / ".ppds"
+                cfg.mkdir(exist_ok=True)
+                (cfg / "profiles.json").write_text(json.dumps({
+                    "version": 2, "activeProfileIndex": 1,
+                    "profiles": [{"index": i, "name": name, "environment": {
+                        "displayName": env, "uniqueName": env, "url": f"https://{env}.invalid/"}}
+                        for i, (name, env) in enumerate(spec["store"], start=1)],
+                }), encoding="utf-8")
+            project = self.projects[mode] = self.root / f"project-{mode}"
+            (project / ".claude" / "state").mkdir(parents=True, exist_ok=True)
+            settings = {"safety": {"shakedown_safe_envs": list(LISTED)}} if spec["allow"] == "settings" else {}
+            (project / ".claude" / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+            if spec["shakedown"] == "sentinel":
+                (project / ".claude" / "state" / "shakedown-active.json").write_text(
+                    json.dumps({"started_at": now}), encoding="utf-8")
+        self.project = self.projects["gate-listed"]
         self.home = self.root / "home"
         self.home.mkdir(exist_ok=True)
 
     def hook_env(self, mode: str) -> dict:
+        spec = MODE_SPEC[mode]
         env = _scrubbed_env()
-        env.update({
-            "CLAUDE_PROJECT_DIR": str(self.project),
-            "HOME": str(self.mode_homes[mode]),
-            "PPDS_SAFE_ENVS": ALLOWLIST,
-        })
-        if mode == "shakedown":
+        env.update({"CLAUDE_PROJECT_DIR": str(self.projects[mode]), "HOME": str(self.mode_homes[mode])})
+        if spec["allow"] == "env":
+            env["PPDS_SAFE_ENVS"] = ALLOWLIST
+        if spec["shakedown"] == "env":
             env["PPDS_SHAKEDOWN"] = "1"
         return env
 
@@ -141,23 +167,23 @@ class HookResult:
     stderr: str
 
 
-def run_hook(sandbox: Sandbox, tool: str, command: str, mode: str, timeout: float = 30.0) -> HookResult:
+def run_hook(sandbox: Sandbox, tool: str, command: str, mode: str, timeout: float = 30.0, hook=None) -> HookResult:
     data = json.dumps(payload(tool, command, str(sandbox.work)), ensure_ascii=False).encode("utf-8", "surrogatepass")
     t0 = time.monotonic()
     try:
-        r = subprocess.run([sys.executable, str(HOOK)], input=data, capture_output=True,
+        r = subprocess.run([sys.executable, str(hook or HOOK)], input=data, capture_output=True,
                            timeout=timeout, env=sandbox.hook_env(mode), cwd=str(sandbox.work))
         return HookResult(r.returncode, time.monotonic() - t0, r.stderr.decode("utf-8", "replace"))
     except subprocess.TimeoutExpired:
         return HookResult("TIMEOUT", time.monotonic() - t0, "")
 
 
-def run_hooks(sandbox: Sandbox, jobs: Iterable[tuple], workers: Optional[int] = None) -> list:
+def run_hooks(sandbox: Sandbox, jobs: Iterable[tuple], workers: Optional[int] = None, hook=None) -> list:
     """Run (tool, command, mode) jobs in parallel; results in job order."""
     jobs = list(jobs)
     workers = workers or max(2, min(32, (os.cpu_count() or 4)))
     with cf.ThreadPoolExecutor(max_workers=workers) as pool:
-        return list(pool.map(lambda j: run_hook(sandbox, *j), jobs))
+        return list(pool.map(lambda j: run_hook(sandbox, *j, hook=hook), jobs))
 
 
 def write_case(folder: Path, name: str, tool: str, command: str, mode: str, sandbox: Sandbox, info: dict) -> Path:
@@ -184,16 +210,31 @@ class OracleUnavailable(RuntimeError):
     pass
 
 
-def _oracle_sources_newer() -> bool:
-    if not ORACLE_DLL.exists():
-        return True
-    built = ORACLE_DLL.stat().st_mtime
-    return any(p.stat().st_mtime > built for p in ORACLE_DIR.glob("*.cs*"))
+def _newest_source_mtime() -> float:
+    """Newest change among the helper's sources and every product source or project file it builds on."""
+    newest = 0.0
+    roots = [ORACLE_DIR, REPO / "src"]
+    for root in roots:
+        for path in root.rglob("*"):
+            if path.suffix not in (".cs", ".csproj", ".props", ".targets", ".json") or not path.is_file():
+                continue
+            if any(part in ("bin", "obj", "node_modules") for part in path.parts):
+                continue
+            newest = max(newest, path.stat().st_mtime)
+    for extra in ("Directory.Build.props", "Directory.Packages.props", "global.json"):
+        if (REPO / extra).exists():
+            newest = max(newest, (REPO / extra).stat().st_mtime)
+    return newest
 
 
-def build_oracle() -> None:
-    """Build the helper (and so src/PPDS.Cli) if needed. Raises OracleUnavailable when it cannot."""
-    if not _oracle_sources_newer():
+def oracle_is_stale() -> bool:
+    return not ORACLE_DLL.exists() or _newest_source_mtime() > ORACLE_DLL.stat().st_mtime
+
+
+def build_oracle(force: bool = False) -> None:
+    """Build the helper (and so src/PPDS.Cli) when it is missing, when any product source is newer than
+    it, or when forced. Raises OracleUnavailable when it cannot."""
+    if not force and not oracle_is_stale():
         return
     if shutil.which("dotnet") is None:
         raise OracleUnavailable("dotnet is not on PATH")
@@ -202,13 +243,14 @@ def build_oracle() -> None:
     if r.returncode != 0 or not ORACLE_DLL.exists():
         tail = "\n".join((r.stdout + r.stderr).splitlines()[-15:])
         raise OracleUnavailable("building ParseOracle failed:\n" + tail)
+    ORACLE_DLL.touch()  # an up-to-date build may not rewrite the file
 
 
 class ParseOracle:
     """One long-lived helper process; answers are cached by request."""
 
-    def __init__(self, sandbox: Sandbox):
-        build_oracle()
+    def __init__(self, sandbox: Sandbox, rebuild: bool = False):
+        build_oracle(force=rebuild or os.environ.get("PPDS_DIFF_REBUILD") == "1")
         empty_cfg = sandbox.root / "cfg-oracle-empty"
         empty_cfg.mkdir(exist_ok=True)
         env = _scrubbed_env()
