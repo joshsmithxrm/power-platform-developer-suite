@@ -84,21 +84,44 @@ internal static class AuditDataset
     public static FakeDataverse Dataverse => Shared.Value;
 
     /// <summary>
-    /// The live run's record ids, read from the rows the audit's report shows: 35 of the 36 parent ids (key 27's never
-    /// appears; key 8's appears 6 times, and one stray row in a joined case pairs it with key 11's id, so the majority
-    /// is taken) and 11 of the 24 child ids. Using them lets <c>WHERE Pid = '...'</c> (W113, W114) and the order Dataverse
-    /// returns rows in when nothing else decides (by id) replay. Ids the report never shows are generated.
+    /// The live run's record ids, read from the rows the audit's report shows in full: 35 of the 36 parent ids (key 8's
+    /// appears 6 times, and one stray row in a joined case pairs it with key 11's id, so the majority is taken), 12 of the
+    /// 24 child ids (child key 3 from J13: the only child named 'x' under parent 'Beta' with key &lt;= 5), and 11 of the 5,050
+    /// bulk ids (PG01 to PG06). Key 27's id is shown only cut short (W35: <c>84c24e9c-a9af-4bba-83b4-bf2…</c>); its recorded
+    /// prefix is kept and the rest is zeros, which fixes its place in id order (the last group is compared first) but not
+    /// its value, so it is not in <see cref="RecordedIds"/>. Using them lets <c>WHERE Pid = '...'</c> (W113, W114) and the
+    /// order Dataverse returns rows in when nothing else decides (by id) replay. Ids the report never shows are generated.
     /// </summary>
     public static Guid Id(string table, int key)
-        => (table == P ? LiveParentIds : table == C ? LiveChildIds : null)?.GetValueOrDefault(key) is { } live && live != Guid.Empty
+        => (table == P ? LiveParentIds : table == C ? LiveChildIds : table == B ? LiveBulkIds : null)?.GetValueOrDefault(key) is { } live && live != Guid.Empty
             ? live
+            : table == P && key == 27
+            ? Key27FromItsRecordedPrefix
             : FakeTable.DeterministicId(table, key);
 
     /// <summary>The ids taken from the report (live ids); every other id here is generated and means nothing live.</summary>
     public static IReadOnlySet<Guid> RecordedIds => RecordedIdSet.Value;
 
     private static readonly Lazy<HashSet<Guid>> RecordedIdSet =
-        new(() => [.. LiveParentIds.Values.Concat(LiveChildIds.Values).Where(g => g != Guid.Empty)]);
+        new(() => [.. LiveParentIds.Values.Concat(LiveChildIds.Values).Concat(LiveBulkIds.Values).Where(g => g != Guid.Empty)]);
+
+    /// <summary>W35 shows key 27's id cut after <c>84c24e9c-a9af-4bba-83b4-bf2</c>; the rest is filled with zeros.</summary>
+    private static readonly Guid Key27FromItsRecordedPrefix = Guid.Parse("84c24e9c-a9af-4bba-83b4-bf2000000000");
+
+    private static readonly Dictionary<int, Guid> LiveBulkIds = new()
+    {
+        [1] = Guid.Parse("7adf238c-7a36-481b-b75a-0a9dc3c7c6ad"),
+        [2] = Guid.Parse("aa753305-5ebe-466c-b99c-e334c1175588"),
+        [3] = Guid.Parse("f65ba8be-cec9-49c3-b1d7-c772011316d4"),
+        [12] = Guid.Parse("f98a58ba-6411-4428-81e5-005b501b0588"),
+        [443] = Guid.Parse("f2f691cf-8e38-4de3-897b-0019fc6b2da2"),
+        [596] = Guid.Parse("eb4c6572-81b1-462c-9ae1-004e1b055457"),
+        [1565] = Guid.Parse("caddba35-e87b-491d-98d3-002bdf364616"),
+        [4640] = Guid.Parse("b5ac6c28-ca7c-43f7-b80f-0022e32755eb"),
+        [5048] = Guid.Parse("488ac01b-a454-4459-bc83-59fe1ce6d1b5"),
+        [5049] = Guid.Parse("237e1a05-f8aa-4548-aa24-06ef04d6e14c"),
+        [5050] = Guid.Parse("76a76eb3-8c5d-4a5c-b6a0-4fd34419f541"),
+    };
 
     private static readonly Dictionary<int, Guid> LiveParentIds = new()
     {
@@ -143,6 +166,7 @@ internal static class AuditDataset
     {
         [1] = Guid.Parse("d668c4f1-a410-4701-a1bc-20fdf9a8cf05"),
         [2] = Guid.Parse("03c5c3a1-5369-4c96-89fe-001cce22b902"),
+        [3] = Guid.Parse("5f0d4bd4-affa-4251-a357-ad58cf9c0c9e"),
         [4] = Guid.Parse("255db75e-f762-4f12-bb95-f6b6986a8203"),
         [7] = Guid.Parse("b19030d7-ea44-4278-bb13-770d8ea9406c"),
         [8] = Guid.Parse("6f9dca41-ea05-4a64-a997-f06197fde3ac"),

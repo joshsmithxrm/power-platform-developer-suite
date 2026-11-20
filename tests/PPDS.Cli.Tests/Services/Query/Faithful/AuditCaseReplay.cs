@@ -231,28 +231,38 @@ internal static class AuditCaseReplay
 
     private static readonly Regex Redaction = new(@"…|\[REDACTED\]|<[a-z]+(?: [a-z]+)*>");
 
-    /// <summary>The recorded message's segments between cuts and redactions, without live-organisation detail.</summary>
-    public static (IReadOnlyList<string> Segments, bool StartsCut) MessageSegments(string message)
+    /// <summary>
+    /// The recorded message's segments between cuts and redactions, without live-organisation detail; whether the record
+    /// begins with a cut, and whether it ends with one (a cut, a redaction, or dropped live-organisation detail).
+    /// </summary>
+    public static (IReadOnlyList<string> Segments, bool StartsCut, bool EndsCut) MessageSegments(string message)
     {
         var end = new[] { message.IndexOf("orgIndex", StringComparison.Ordinal), message.IndexOf("LazyDynamicMetadataCache", StringComparison.Ordinal) }
             .Where(i => i >= 0).DefaultIfEmpty(message.Length).Min();
-        message = message[..end];
+        var orgDetailDropped = end < message.Length;
+        message = message[..end].TrimEnd();
         var startsCut = Redaction.Match(message) is { Success: true, Index: 0 };
-        return (Redaction.Split(message).Select(s => s.Trim()).Where(s => s.Length > 0).ToList(), startsCut);
+        var endsCut = orgDetailDropped || Redaction.Matches(message).Any(m => m.Index + m.Length == message.Length);
+        return (Redaction.Split(message).Select(s => s.Trim()).Where(s => s.Length > 0).ToList(), startsCut, endsCut);
     }
 
-    /// <summary>Null when the offline message holds every recorded segment in order; otherwise the first one missing.</summary>
+    /// <summary>
+    /// Null when the offline message holds every recorded segment in order, starting where the record starts and, where the
+    /// record has no cut at its end, ending where the record ends; otherwise what is missing or extra.
+    /// </summary>
     public static string? MissingSegment(string recorded, string offline)
     {
-        var (segments, startsCut) = MessageSegments(recorded);
+        var (segments, startsCut, endsCut) = MessageSegments(recorded);
         var at = 0;
         for (var i = 0; i < segments.Count; i++)
         {
             var found = offline.IndexOf(segments[i], at, StringComparison.Ordinal);
             if (found < 0 || (i == 0 && !startsCut && found != 0))
-                return segments[i];
+                return $"the recorded segment \"{segments[i]}\"";
             at = found + segments[i].Length;
         }
+        if (!endsCut && offline[at..].Trim().Length > 0)
+            return $"the record's end (offline continues: \"{offline[at..].Trim()}\")";
         return null;
     }
 
@@ -273,19 +283,150 @@ internal static class AuditCaseReplay
         return Compare(c, c.Actual, run);
     }
 
+    /// <summary>A recorded row result: its columns, its row count, the rows the report shows in full, and whether it shows all.</summary>
+    public sealed record RecordedRows(IReadOnlyList<string> Columns, int Count, IReadOnlyList<string> Shown, bool Complete);
+
+    /// <summary>Null when the text is not a row result, or the report cut its column list.</summary>
+    public static RecordedRows? ParseRows(string recorded)
+    {
+        var m = Regex.Match(recorded, @"^\[(?<cols>[^\]]*)\] (?<n>\d+) rows?(: (?<rows>.*))?$", RegexOptions.Singleline);
+        if (!m.Success)
+            return null;
+        var columns = m.Groups["cols"].Value.Length == 0 ? [] : m.Groups["cols"].Value.Split(", ");
+        var shownText = m.Groups["rows"].Value;
+        var complete = !shownText.EndsWith('…') && !shownText.Contains("…(+", StringComparison.Ordinal);
+        shownText = Regex.Replace(shownText, @" …\(\+\d+\)$", "");
+        var shown = shownText.Length == 0 ? new List<string>() : Regex.Split(shownText, @"(?<=\)) (?=\()").ToList();
+        if (shown.Count > 0 && (!shown[^1].EndsWith(')') || shownText.EndsWith('…')))
+            shown.RemoveAt(shown.Count - 1); // cut short by the report
+        return new(columns, int.Parse(m.Groups["n"].Value, CultureInfo.InvariantCulture), shown, complete);
+    }
+
+    /// <summary>Whether the replay compares the order of the shown rows: a top-level ORDER BY, or a DISTINCT without one (R14).</summary>
+    public static bool OrderIsCompared(AuditCase c) => HasTopLevelOrderBy(c.Sql) || IsDistinctWithoutOrderBy(c.Sql);
+
     /// <summary>
-    /// For a case the audit marks WRONG RESULT: whether the offline (wrong) result also matches what the audit expected,
-    /// with the columns the audit's verdict ignored dropped (auto-added <c>*name</c> columns, the unrequested primary key,
-    /// named in its Detail). Matches means the record cannot tell the wrong result from the right one, so a fix of the
-    /// defect would not be visible to the replay.
+    /// How much of a case the record lets the replay compare, from the record alone (so it does not change when a defect is
+    /// fixed): rows compared of the total, whether order is compared, ids compared and masked, or the error's segments.
     /// </summary>
-    public static async Task<ReplayResult> CompareWithExpectedAsync(AuditCase c)
+    public static ReplayResult RecordCoverage(AuditCase c)
+    {
+        if (!c.Actual.StartsWith('['))
+        {
+            var colon = c.Actual.IndexOf(": ", StringComparison.Ordinal);
+            return new(ReplayClass.Matches, "", "") { MessageSegments = MessageSegments(colon < 0 ? "" : c.Actual[(colon + 2)..]).Segments.Count };
+        }
+        var rows = ParseRows(c.Actual);
+        if (rows is null)
+            return new(ReplayClass.CannotReplay, "the report cut the recorded column list", "");
+        int compared = 0, masked = 0;
+        foreach (var row in rows.Shown)
+            Mask(row, ref compared, ref masked);
+        return new(ReplayClass.Matches, "", "")
+        {
+            RowsCompared = rows.Complete ? rows.Count : rows.Shown.Count, RowsTotal = rows.Count,
+            OrderCompared = OrderIsCompared(c) && rows.Shown.Count > 1, IdsCompared = compared, IdsMasked = masked
+        };
+    }
+
+    /// <summary>
+    /// For a WRONG RESULT case, whether a fix of its defect would show in what the record holds, decided from the record
+    /// alone. A fixed engine returns what the audit expected, so the fix is visible when the expected result differs from
+    /// the recorded one in something the replay compares: an error instead of rows, the row count, the columns (once the
+    /// columns the audit's verdict ignored are dropped), the order of the shown rows where order is compared, or a shown row
+    /// that the audit's Detail lists as unexpected (or that the complete expected result lacks).
+    /// </summary>
+    public static (bool Visible, string Why) FixVisibleInRecord(AuditCase c)
+    {
+        if (c.Actual.StartsWith('[') != c.Expected.StartsWith('['))
+            return (true, "an error on one side, rows on the other");
+        if (!c.Actual.StartsWith('['))
+            return (c.Actual != c.Expected, c.Actual != c.Expected ? "a different error" : "the same error text");
+        var actual = ParseRows(c.Actual);
+        var expected = ParseRows(c.Expected);
+        if (actual is null || expected is null)
+            return (true, "a column list the report cut");
+        if (actual.Count != expected.Count)
+            return (true, $"the row count ({actual.Count} recorded, {expected.Count} expected)");
+        var ignored = IgnoredColumns(c.Detail);
+        var kept = actual.Columns.Select((name, i) => (name, i)).Where(x => !ignored.Contains(x.name)).ToList();
+        if (!kept.Select(x => x.name).SequenceEqual(expected.Columns))
+            return (true, "the columns");
+        var projected = new List<string>();
+        foreach (var row in actual.Shown)
+        {
+            var values = SplitRow(row);
+            if (values is null || values.Count != actual.Columns.Count)
+                return (true, $"undecided: the row {row} does not split into its columns, so it is counted as visible");
+            projected.Add(Mask("(" + string.Join(",", kept.Select(x => values[x.i])) + ")"));
+        }
+        var expectedShown = expected.Shown.Select(Mask).ToList();
+        if (OrderIsCompared(c))
+        {
+            var n = Math.Min(projected.Count, expectedShown.Count);
+            for (var i = 0; i < n; i++)
+            {
+                if (projected[i] != expectedShown[i])
+                    return (true, $"the shown row {i + 1} ({actual.Shown[i]} recorded, {expected.Shown[i]} expected)");
+            }
+        }
+        var unexpected = DetailRows(c.Detail, "unexpected").Select(Mask).ToList();
+        foreach (var row in projected)
+        {
+            if (unexpected.Remove(row))
+                return (true, $"the shown row {row}, which the audit lists as unexpected");
+            if (expected.Complete && !expectedShown.Contains(row))
+                return (true, $"the shown row {row}, which the complete expected result lacks");
+        }
+        return (false, "every row the record shows, the count and the columns are the same in the expected result");
+    }
+
+    /// <summary>The columns the audit's verdict ignored, named in its Detail.</summary>
+    public static HashSet<string> IgnoredColumns(string detail)
     {
         var ignored = new HashSet<string>(StringComparer.Ordinal);
-        foreach (Match m in Regex.Matches(c.Detail, @"(?:auto-added \*name columns|unrequested primary-key column) ignored: (?<names>[^;|]+)"))
+        foreach (Match m in Regex.Matches(detail, @"(?:auto-added \*name columns|unrequested primary-key column) ignored: (?<names>[^;|]+)"))
             foreach (var name in m.Groups["names"].Value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
                 ignored.Add(name);
-        return Compare(c, c.Expected, await ExecuteAsync(c, ignored));
+        return ignored;
+    }
+
+    private static List<string> DetailRows(string detail, string label)
+    {
+        var m = Regex.Match(detail, label + @" \d+: (?<rows>.*?)(?:;|$)");
+        return m.Success ? Regex.Matches(m.Groups["rows"].Value, @"\((?:[^()']|'[^']*')*\)").Select(x => x.Value).ToList() : [];
+    }
+
+    /// <summary>A rendered row's values, or null when its text does not split unambiguously.</summary>
+    private static List<string>? SplitRow(string row)
+    {
+        if (!row.StartsWith('(') || !row.EndsWith(')'))
+            return null;
+        var body = row[1..^1];
+        var values = new List<string>();
+        var i = 0;
+        while (i <= body.Length)
+        {
+            if (i < body.Length && body[i] == '\'')
+            {
+                // A string runs to the next quote that is followed by a comma or the end.
+                var close = i + 1;
+                while (close < body.Length && !(body[close] == '\'' && (close + 1 == body.Length || body[close + 1] == ',')))
+                    close++;
+                if (close >= body.Length)
+                    return null;
+                values.Add(body[i..(close + 1)]);
+                i = close + 2;
+            }
+            else
+            {
+                var comma = body.IndexOf(',', i);
+                var end = comma < 0 ? body.Length : comma;
+                values.Add(body[i..end]);
+                i = end + 1;
+            }
+        }
+        return values;
     }
 
     private static ReplayResult Compare(AuditCase c, string recorded, Run run)
@@ -304,39 +445,27 @@ internal static class AuditCaseReplay
             if (offlineType != type)
                 return new(ReplayClass.Differs, $"live raised {type}; offline raised {offlineType}", run.Text);
             if (MissingSegment(message, offlineMessage) is { } missing)
-                return new(ReplayClass.Differs, $"same exception type; offline message lacks the recorded segment \"{missing}\"", run.Text) { MessageSegments = segments };
+                return new(ReplayClass.Differs, $"same exception type; the offline message does not match {missing}", run.Text) { MessageSegments = segments };
             return new(ReplayClass.Matches, "", run.Text) { MessageSegments = segments };
         }
 
         if (run.Error is not null)
             return new(ReplayClass.Differs, "live returned rows; offline raised an error", run.Text);
 
-        var m = Regex.Match(recorded, @"^\[(?<cols>[^\]]*)\] (?<n>\d+) rows?(: (?<rows>.*))?$", RegexOptions.Singleline);
-        if (!m.Success)
+        var parsed = ParseRows(recorded);
+        if (parsed is null)
             return new(ReplayClass.CannotReplay, "the report cut the recorded column list", run.Text);
-        var columns = m.Groups["cols"].Value.Length == 0 ? [] : m.Groups["cols"].Value.Split(", ");
+        var (columns, count, _, complete) = parsed;
         if (!columns.SequenceEqual(run.Columns))
             return new(ReplayClass.Differs, $"columns: live [{string.Join(", ", columns)}], offline [{string.Join(", ", run.Columns)}]", run.Text);
-        var count = int.Parse(m.Groups["n"].Value, CultureInfo.InvariantCulture);
         if (count != run.Rows.Count)
             return new(ReplayClass.Differs, $"rows: live {count}, offline {run.Rows.Count}", run.Text);
 
-        var shownText = m.Groups["rows"].Value;
-        var complete = !shownText.EndsWith('…') && !shownText.Contains("…(+", StringComparison.Ordinal);
-        shownText = Regex.Replace(shownText, @" …\(\+\d+\)$", "");
-        var shown = shownText.Length == 0 ? new List<string>() : Regex.Split(shownText, @"(?<=\)) (?=\()").ToList();
-        if (shown.Count > 0 && (!shown[^1].EndsWith(')') || shownText.EndsWith('…')))
-            shown.RemoveAt(shown.Count - 1); // cut short by the report
-        int idsCompared = 0, idsMasked = 0;
-        shown = shown.Select(r => Mask(r, ref idsCompared, ref idsMasked)).ToList();
+        var shown = parsed.Shown.Select(Mask).ToList();
         var offline = run.Rows.Select(Mask).ToList();
         // R14 (D01-D06, PG08): a DISTINCT without ORDER BY comes back sorted by the returned columns, so its order is compared.
-        var ordered = HasTopLevelOrderBy(c.Sql) || IsDistinctWithoutOrderBy(c.Sql);
-        var coverage = new ReplayResult(ReplayClass.Matches, "", run.Text)
-        {
-            RowsCompared = complete ? count : shown.Count, RowsTotal = count, OrderCompared = ordered && shown.Count > 1,
-            IdsCompared = idsCompared, IdsMasked = idsMasked
-        };
+        var ordered = OrderIsCompared(c);
+        var coverage = (ReferenceEquals(recorded, c.Actual) ? RecordCoverage(c) : new ReplayResult(ReplayClass.Matches, "", "")) with { Offline = run.Text };
 
         if (ordered)
         {

@@ -22,7 +22,7 @@ namespace PPDS.Cli.Tests.Services.Query.Faithful;
 /// <item>R3 (OBSERVED): <c>eq ""</c> matches nothing; a stored empty string reads back as NULL ("stored string values"); W25:
 /// <c>ne ""</c> matches every row.</item>
 /// <item>R4 (OBSERVED): strings compare case- and accent-insensitive, trailing spaces ignored, leading spaces significant. Order
-/// is a fixed key (no ICU/NLS data) that reproduces "order by name asc"; a comparison first decided at a pair that line does not
+/// is a fixed key (see <see cref="StringKey"/> for what it depends on) that reproduces "order by name asc"; a comparison first decided at a pair that line does not
 /// order (space/<c>%</c>, <c>_</c>/digit, <c>]</c>, apostrophe) is refused. In an equality, plain ASCII punctuation matches only
 /// itself (X01 <c>@n</c>); any other character is refused.</item>
 /// <item>R5: <c>%</c>, <c>_</c>, <c>[...]</c> wildcards in <c>like</c> and <c>begins-with</c> (OBSERVED); <c>[^...]</c> and ranges
@@ -162,7 +162,7 @@ internal sealed class FetchXmlEvaluator
         {
             var sorted = Sort(rows, orders, spec.Sources);
             var projected = sorted.Select(r => Project(r, spec)).ToList();
-            RefuseObservableTies(sorted, projected, orders);
+            RefuseObservableTies(sorted, projected, orders, ReturnedRange(spec, projected.Count));
             return Page(spec, projected);
         }
 
@@ -391,7 +391,9 @@ internal sealed class FetchXmlEvaluator
                 throw Unsupported("an <attribute> outside an entity or link-entity");
             var node = attribute.ToString(SaveOptions.DisableFormatting);
             if (attribute.Attribute("name") is null)
-                throw Fault($"Attribute: name not found in XNode: {node}");
+                // A17 records exactly "Attribute: name not found in XNode:" and nothing after it (A09 shows the report keeps
+                // node XML where there is some), so nothing more is emitted; LiveObservationsOwed.md asks for the full text.
+                throw Fault("Attribute: name not found in XNode:");
             if (attribute.Attribute("aggregate") is null && attribute.Attribute("groupby") is null)
                 throw Fault($"An attribute can not be requested when an aggregate operation has been specified and its neither groupby nor aggregate.  NodeXml : {node}");
             if (attribute.Attribute("alias") is null)
@@ -843,9 +845,18 @@ internal sealed class FetchXmlEvaluator
     }
 
     /// <summary>
-    /// R4: the machine-independent comparison key of a string. Accents are removed (Unicode canonical decomposition),
-    /// letters folded to A-Z, and the characters mapped so that ordinal order is space &lt; % &lt; [ &lt; ] &lt; _ &lt; digits &lt;
-    /// letters. Any other character is refused.
+    /// R4: the comparison key of a string. Accents are removed (Unicode canonical decomposition), letters folded to A-Z, and
+    /// the characters mapped so that ordinal order is space &lt; % &lt; [ &lt; ] &lt; _ &lt; digits &lt; letters. Any other
+    /// character is refused.
+    /// <para>
+    /// What it depends on: <see cref="string.Normalize(NormalizationForm)"/> takes its decomposition data from the platform
+    /// (ICU on Linux and macOS, the operating system's normalization on Windows) and does not work in invariant-globalization
+    /// mode; <see cref="CharUnicodeInfo"/> and the key table are .NET's own. Canonical decomposition is fixed by the Unicode
+    /// standard, so the accented letters the datasets use decompose the same everywhere, but that is verified on Linux only.
+    /// Tests whose result rests on it: R4_StringOrder_IsTheObservedOrder_OnEveryMachine, the R4 string equality tests,
+    /// R5_Like_WildcardsClassesAccentsAndTrailingSpaces, AuditObservedReplayTests.ObservedRows and ObservedOrder, and the
+    /// replayed cases over accented names (Café, Ångström and the like).
+    /// </para>
     /// </summary>
     private static string StringKey(string s, bool trimEnd = true, bool ordered = false)
     {
@@ -1090,16 +1101,17 @@ internal sealed class FetchXmlEvaluator
 
     /// <summary>
     /// The order Dataverse gives rows that tie on every ORDER BY key is not observed: the fake breaks ties by id (R16), but no
-    /// recorded case can tell that from table order (a mutation that breaks ties by table order fails no replayed case). Ties
-    /// between rows that return the same values cannot be seen and are allowed; ties between rows that differ are refused.
+    /// recorded case can tell that from table order (a mutation that breaks ties by table order fails no replayed case). Only
+    /// the rows returned and the row on each side of them decide what comes back, so only ties there count. Ties between rows
+    /// that return the same values cannot be seen and are allowed; ties between rows that differ are refused.
     /// </summary>
-    private static void RefuseObservableTies(List<JoinedRow> sorted, List<Entity> projected, List<Order> orders)
+    private static void RefuseObservableTies(List<JoinedRow> sorted, List<Entity> projected, List<Order> orders, (int Start, int End) returned)
     {
         if (orders.Count == 0)
             return;
         string Key(JoinedRow r) => string.Join("\u0001", orders.Select(o =>
             Normalize(r.Rows.GetValueOrDefault(o.Alias)?.GetValueOrDefault(o.Attribute)) is { } v ? v is string str ? "s" + StringKey(str, ordered: true) : "v" + Convert.ToString(v, CultureInfo.InvariantCulture) : "NULL"));
-        for (var i = 1; i < sorted.Count; i++)
+        for (var i = Math.Max(returned.Start, 1); i <= Math.Min(returned.End, sorted.Count - 1); i++)
         {
             if (Key(sorted[i]) == Key(sorted[i - 1]) && Signature(projected[i]) != Signature(projected[i - 1]))
                 throw Unsupported("rows that tie on every ORDER BY key but return different values (the order Dataverse gives them is not observed)");
@@ -1181,6 +1193,16 @@ internal sealed class FetchXmlEvaluator
             }}"));
 
     // ───────────────────────────── paging (R10) ─────────────────────────────
+
+    /// <summary>The rows <see cref="Page"/> returns, as [Start, End).</summary>
+    private static (int Start, int End) ReturnedRange(Spec spec, int total)
+    {
+        if (spec.Top is { } top)
+            return (0, Math.Min(top, total));
+        var size = spec.Count ?? MaxPageSize;
+        var start = (int)Math.Min((long)((spec.Page ?? 1) - 1) * size, total);
+        return (start, (int)Math.Min((long)start + size, total));
+    }
 
     private static EntityCollection Page(Spec spec, List<Entity> entities)
     {

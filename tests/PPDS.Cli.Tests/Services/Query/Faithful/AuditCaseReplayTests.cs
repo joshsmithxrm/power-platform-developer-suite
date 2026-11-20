@@ -10,9 +10,9 @@ namespace PPDS.Cli.Tests.Services.Query.Faithful;
 /// offline must equal live: a case the audit marks correct is correct offline, and a case it marks WRONG RESULT is wrong
 /// offline in the same way.
 /// <para>
-/// 436 cases: 423 replay and match (126 of them wrong results, as recorded), 1 replays and differs, 12 cannot be replayed (<see cref="Expected"/> lists each with the
+/// 436 cases: 425 replay and match (127 of them wrong results, as recorded) and 11 cannot be replayed (<see cref="Expected"/> lists each with the
 /// reason). A change to the engine or the fake that moves any case out of its class fails here. The cases that match are
-/// <see cref="Case_ReplaysAndMatchesTheAuditRecord"/>; the 13 that do not are <see cref="Case_DoesNotMatch_ForItsRecordedReason"/>.
+/// <see cref="Case_ReplaysAndMatchesTheAuditRecord"/>; the 127 wrong results are <see cref="WrongCase_ReproducesItsRecordedDefectUntilTheIssueIsFixed"/> (or, once fixed, <see cref="FixedCases_NoLongerReproduceTheRecordedWrongOutcome"/>); the 11 that cannot be replayed are <see cref="Case_DoesNotMatch_ForItsRecordedReason"/>.
 /// Each case writes how much the record let it compare (<see cref="ReplayResult.Coverage"/>), and
 /// <see cref="Coverage_Totals"/> pins the totals.
 /// </para>
@@ -23,10 +23,6 @@ public class AuditCaseReplayTests(ITestOutputHelper output)
     /// <summary>The cases that do not replay and match, with why. Every other case must match.</summary>
     private static readonly Dictionary<string, (ReplayClass Class, string Reason)> Expected = new()
     {
-        // The engine ignores ORDER BY 2, 1 (#1628), so the rows come in Dataverse's id order. The live id of key 27 never
-        // appears in the report, so its place in that order cannot be reproduced; every other row is where live has it.
-        ["O05"] = (ReplayClass.Differs, "ordered rows differ"),
-
         // Not run in-process by the audit either: planning recurses without bound and the stack overflow ends the process.
         ["S05"] = (ReplayClass.CannotReplay, "crash:"),
         ["S16"] = (ReplayClass.CannotReplay, "crash:"),
@@ -34,9 +30,6 @@ public class AuditCaseReplayTests(ITestOutputHelper output)
         ["S19"] = (ReplayClass.CannotReplay, "crash:"),
         ["S20"] = (ReplayClass.CannotReplay, "crash:"),
         ["S21"] = (ReplayClass.CannotReplay, "crash:"),
-
-        // Its ORDER BY leaves rows tied that return different values; the order Dataverse gives them is not observed.
-        ["T06"] = (ReplayClass.CannotReplay, "fake refuses: Fake Dataverse refuses this FetchXML: not observed: rows that tie on every ORDER BY key"),
 
         // The report redacted the caller's identity (systemuser, owner names).
         ["V06"] = (ReplayClass.CannotReplay, "redacted:"),
@@ -48,147 +41,161 @@ public class AuditCaseReplayTests(ITestOutputHelper output)
         ["PRJ03"] = (ReplayClass.CannotReplay, "the report cut the recorded column list"),
     };
 
-    /// <summary>
-    /// The 126 replayed cases the audit marks WRONG RESULT, each with the open issues that track its defect (the audit's
-    /// numbered defect n is issue 1611 + n; a case named in an issue body counts too). Empty: no issue names the case yet.
-    /// When a case stops reproducing the recorded wrong outcome, the failure names the issue: remove its entry here.
-    /// </summary>
-    private static readonly Dictionary<string, int[]> WrongCases = new()
+    /// <summary>A WRONG RESULT case's state and the issues that track its defect (none: no issue names it yet).</summary>
+    private sealed record WrongCase(bool FixedSinceTheAudit, int[] Issues)
     {
-        ["PRJ01"] = [1625],
-        ["PRJ05"] = [1621],
-        ["PRJ12"] = [1625],
-        ["PRJ13"] = [1625],
-        ["PRJ22"] = [1625],
-        ["PRJ15"] = [1625],
-        ["PRJ20"] = [1621],
-        ["PRJ21"] = [1621],
-        ["FN10"] = [],
-        ["FN11"] = [],
-        ["FN12"] = [],
-        ["FN17"] = [],
-        ["FN52"] = [1622],
-        ["FN61"] = [1621],
-        ["FN62"] = [1621],
-        ["FN63"] = [1621],
-        ["FN64"] = [1621],
-        ["FN65"] = [],
-        ["FN66"] = [1621, 1622],
-        ["FN67"] = [1621],
-        ["FN68"] = [1622],
-        ["FN69"] = [1622],
-        ["FN70"] = [1621],
-        ["FN71"] = [1621],
-        ["FN86"] = [1621],
-        ["FN87"] = [1621],
-        ["FN91"] = [1629],
-        ["W02"] = [1616],
-        ["W03"] = [1616],
-        ["W09"] = [1615],
-        ["W10"] = [1615],
-        ["W11"] = [1615],
-        ["W12"] = [1615],
-        ["W19"] = [1616],
-        ["W25"] = [1616],
-        ["W29"] = [1615],
-        ["W31"] = [1615],
-        ["W44"] = [1615],
-        ["W45"] = [1615],
-        ["W46"] = [],
-        ["W47"] = [],
-        ["W48"] = [1615],
-        ["W50"] = [1616],
-        ["W52"] = [1616],
-        ["W55"] = [1616],
-        ["W60"] = [1622],
-        ["W68"] = [1616],
-        ["W74"] = [1622],
-        ["W75"] = [1616],
-        ["W76"] = [1612],
-        ["W77"] = [1612],
-        ["W86"] = [1625],
-        ["W87"] = [],
-        ["W88"] = [],
-        ["W89"] = [1617],
-        ["W90"] = [1622],
-        ["W91"] = [],
-        ["W92"] = [1622],
-        ["W93"] = [],
-        ["W94"] = [],
-        ["W95"] = [],
-        ["W96"] = [1625],
-        ["W97"] = [1612],
-        ["W98"] = [1612],
-        ["W99"] = [1612],
-        ["W100"] = [1622],
-        ["W101"] = [1620],
-        ["W103"] = [1620],
-        ["W109"] = [1625],
-        ["W110"] = [1622],
-        ["W120"] = [1616],
-        ["W134"] = [1631],
-        ["W135"] = [1631],
-        ["W136"] = [1612],
-        ["W137"] = [1612],
-        ["W138"] = [1617],
-        ["X01"] = [1618],
-        ["X08"] = [1631],
-        ["X11"] = [1612],
-        ["T02"] = [1619],
-        ["T05"] = [1619],
-        ["T07"] = [1619, 1625],
-        ["T08"] = [1628],
-        ["T11"] = [1625],
-        ["D08"] = [1629],
-        ["O04"] = [1628],
-        ["O07"] = [1628],
-        ["A10"] = [1629],
-        ["A30"] = [1612],
-        ["J04"] = [1614],
-        ["J08"] = [1627],
-        ["J09"] = [1627],
-        ["J10"] = [1627],
-        ["J11"] = [1627],
-        ["J13"] = [1627],
-        ["J16"] = [1614],
-        ["J17"] = [1621],
-        ["J19"] = [],
-        ["J23"] = [1614],
-        ["J24"] = [1627],
-        ["V03"] = [1626],
-        ["V04"] = [1626],
-        ["V15"] = [1625],
-        ["V16"] = [1626],
-        ["S03"] = [1613],
-        ["S13"] = [],
-        ["S14"] = [1613],
-        ["S15"] = [1613],
-        ["C03"] = [1630],
-        ["C04"] = [1630],
-        ["U01"] = [1623],
-        ["U02"] = [1623],
-        ["U03"] = [1623],
-        ["U04"] = [1623],
-        ["U05"] = [1623],
-        ["U06"] = [1623],
-        ["U07"] = [1623],
-        ["U08"] = [1623],
-        ["U09"] = [1623],
-        ["WF02"] = [1621],
-        ["WF03"] = [1621],
-        ["WF07"] = [1621],
-        ["WF11"] = [1621],
-        ["WF13"] = [1621],
-        ["PG11"] = [1619],
-        ["E13"] = [1631],
+        public string IssueText => Issues.Length == 0 ? "no issue yet" : string.Join(", ", Issues.Select(n => "#" + n));
+        public string Marker(bool fixedSinceTheAudit) => $"{(fixedSinceTheAudit ? "Fixed" : "Wrong")}({string.Join(", ", Issues)})";
+    }
+
+    /// <summary>Still wrong as the audit recorded it.</summary>
+    private static WrongCase Wrong(params int[] issues) => new(false, issues);
+
+    /// <summary>Fixed since the audit: the replay must no longer reproduce the recorded wrong outcome.</summary>
+    private static WrongCase Fixed(params int[] issues) => new(true, issues);
+
+    /// <summary>
+    /// Every replayed case the audit marks WRONG RESULT, with the open issues that track its defect. The audit's numbered
+    /// defect n is issue 1611 + n, defect 21 is #1632, and a case named in an issue body counts too. When a defect is fixed,
+    /// the one edit is to change its cases here from <c>Wrong(...)</c> to <c>Fixed(...)</c>; the failure message says so.
+    /// </summary>
+    private static readonly Dictionary<string, WrongCase> WrongCases = new()
+    {
+        ["PRJ01"] = Wrong(1625),
+        ["PRJ05"] = Wrong(1621),
+        ["PRJ12"] = Wrong(1625),
+        ["PRJ13"] = Wrong(1625),
+        ["PRJ22"] = Wrong(1625),
+        ["PRJ15"] = Wrong(1625),
+        ["PRJ20"] = Wrong(1621),
+        ["PRJ21"] = Wrong(1621),
+        ["FN10"] = Wrong(1632),
+        ["FN11"] = Wrong(1632),
+        ["FN12"] = Wrong(1632),
+        ["FN17"] = Wrong(1632),
+        ["FN52"] = Wrong(1622),
+        ["FN61"] = Wrong(1621),
+        ["FN62"] = Wrong(1621),
+        ["FN63"] = Wrong(1621),
+        ["FN64"] = Wrong(1621),
+        ["FN65"] = Wrong(1621),
+        ["FN66"] = Wrong(1621, 1622),
+        ["FN67"] = Wrong(1621),
+        ["FN68"] = Wrong(1622),
+        ["FN69"] = Wrong(1622),
+        ["FN70"] = Wrong(1621),
+        ["FN71"] = Wrong(1621),
+        ["FN86"] = Wrong(1621),
+        ["FN87"] = Wrong(1621),
+        ["FN91"] = Wrong(1629),
+        ["W02"] = Wrong(1616),
+        ["W03"] = Wrong(1616),
+        ["W09"] = Wrong(1615),
+        ["W10"] = Wrong(1615),
+        ["W11"] = Wrong(1615),
+        ["W12"] = Wrong(1615),
+        ["W19"] = Wrong(1616),
+        ["W25"] = Wrong(1616),
+        ["W29"] = Wrong(1615),
+        ["W31"] = Wrong(1615),
+        ["W44"] = Wrong(1615),
+        ["W45"] = Wrong(1615),
+        ["W46"] = Wrong(1615),
+        ["W47"] = Wrong(1615),
+        ["W48"] = Wrong(1615),
+        ["W50"] = Wrong(1616),
+        ["W52"] = Wrong(1616),
+        ["W55"] = Wrong(1616),
+        ["W60"] = Wrong(1622),
+        ["W68"] = Wrong(1616),
+        ["W74"] = Wrong(1622),
+        ["W75"] = Wrong(1616),
+        ["W76"] = Wrong(1612),
+        ["W77"] = Wrong(1612),
+        ["W86"] = Wrong(1625),
+        ["W87"] = Wrong(1625),
+        ["W88"] = Wrong(1625),
+        ["W89"] = Wrong(1617),
+        ["W90"] = Wrong(1622),
+        ["W91"] = Wrong(1625),
+        ["W92"] = Wrong(1622),
+        ["W93"] = Wrong(1625),
+        ["W94"] = Wrong(1625),
+        ["W95"] = Wrong(1625),
+        ["W96"] = Wrong(1625),
+        ["W97"] = Wrong(1612),
+        ["W98"] = Wrong(1612),
+        ["W99"] = Wrong(1612),
+        ["W100"] = Wrong(1622),
+        ["W101"] = Wrong(1620),
+        ["W103"] = Wrong(1620),
+        ["W109"] = Wrong(1625),
+        ["W110"] = Wrong(1622),
+        ["W120"] = Wrong(1616),
+        ["W134"] = Wrong(1631),
+        ["W135"] = Wrong(1631),
+        ["W136"] = Wrong(1612),
+        ["W137"] = Wrong(1612),
+        ["W138"] = Wrong(1617),
+        ["X01"] = Wrong(1618),
+        ["X08"] = Wrong(1631),
+        ["X11"] = Wrong(1612),
+        ["T02"] = Wrong(1619),
+        ["T05"] = Wrong(1619),
+        ["T07"] = Wrong(1619, 1625),
+        ["T08"] = Wrong(1628),
+        ["T11"] = Wrong(1625),
+        ["D08"] = Wrong(1629),
+        ["O04"] = Wrong(1628),
+        ["O05"] = Wrong(1628),
+        ["O07"] = Wrong(1628),
+        ["A10"] = Wrong(1629),
+        ["A30"] = Wrong(1612),
+        ["J04"] = Wrong(1614),
+        ["J08"] = Wrong(1627),
+        ["J09"] = Wrong(1627),
+        ["J10"] = Wrong(1627),
+        ["J11"] = Wrong(1627),
+        ["J13"] = Wrong(1627),
+        ["J16"] = Wrong(1614),
+        ["J17"] = Wrong(1621),
+        ["J19"] = Wrong(),
+        ["J23"] = Wrong(1614),
+        ["J24"] = Wrong(1627),
+        ["V03"] = Wrong(1626),
+        ["V04"] = Wrong(1626),
+        ["V15"] = Wrong(1625),
+        ["V16"] = Wrong(1626),
+        ["S03"] = Wrong(1613),
+        ["S13"] = Wrong(),
+        ["S14"] = Wrong(1613),
+        ["S15"] = Wrong(1613),
+        ["C03"] = Wrong(1630),
+        ["C04"] = Wrong(1630),
+        ["U01"] = Wrong(1623),
+        ["U02"] = Wrong(1623),
+        ["U03"] = Wrong(1623),
+        ["U04"] = Wrong(1623),
+        ["U05"] = Wrong(1623),
+        ["U06"] = Wrong(1623),
+        ["U07"] = Wrong(1623),
+        ["U08"] = Wrong(1623),
+        ["U09"] = Wrong(1623),
+        ["WF02"] = Wrong(1621),
+        ["WF03"] = Wrong(1621),
+        ["WF07"] = Wrong(1621),
+        ["WF11"] = Wrong(1621),
+        ["WF13"] = Wrong(1621),
+        ["PG11"] = Wrong(1619),
+        ["E13"] = Wrong(1631),
     };
 
     /// <summary>
-    /// Wrong cases whose fix the record cannot show: with the columns the audit's verdict ignored dropped, the wrong
-    /// offline result also matches what the audit expected (the shown rows and the count are the same either way). A fix
-    /// would leave these green; they are on the live-observations list (LiveObservationsOwed.md).
+    /// Wrong cases whose fix the record cannot show, decided from the record alone (<see cref="AuditCaseReplay.FixVisibleInRecord"/>):
+    /// the expected result has the same count and columns, and every row the record shows would stay. A fix would leave
+    /// these green; they are on the live-observations list (LiveObservationsOwed.md).
     /// </summary>
-    private static readonly HashSet<string> FixNotVisible = ["FN10", "FN11", "FN12", "FN17", "FN69", "FN86", "FN87", "J16", "O07", "U02"];
+    private static readonly HashSet<string> FixNotVisible = ["FN10", "FN11", "FN12", "FN68", "FN69", "FN71", "FN86", "FN87", "J16", "O07", "U02"];
 
     /// <summary>Recorded "FetchXML" entries that are plan text, not FetchXML (client-side plans, set operations, scripts).</summary>
     private static readonly HashSet<string> RecordedPlanText =
@@ -196,7 +203,9 @@ public class AuditCaseReplayTests(ITestOutputHelper output)
 
     public static IEnumerable<object[]> MatchingCaseIds() => AuditCaseReplay.Cases.Where(c => !Expected.ContainsKey(c.Id) && !WrongCases.ContainsKey(c.Id)).Select(c => new object[] { c.Id });
 
-    public static IEnumerable<object[]> WrongCaseIds() => WrongCases.Keys.Select(id => new object[] { id });
+    public static IEnumerable<object[]> WrongCaseIds() => WrongCases.Where(w => !w.Value.FixedSinceTheAudit).Select(w => new object[] { w.Key });
+
+    public static IEnumerable<object[]> FixedCaseIds() => WrongCases.Where(w => w.Value.FixedSinceTheAudit).Select(w => new object[] { w.Key });
 
     public static IEnumerable<object[]> NonMatchingCaseIds() => Expected.Keys.Select(id => new object[] { id });
 
@@ -225,35 +234,51 @@ public class AuditCaseReplayTests(ITestOutputHelper output)
     {
         var recorded = AuditCaseReplay.Cases.Where(c => c.Verdict == "WRONG RESULT" && !Expected.ContainsKey(c.Id)).Select(c => c.Id).Order().ToList();
         Assert.Equal(recorded, WrongCases.Keys.Order().ToList());
-        Assert.Equal(126, recorded.Count);
-        Assert.All(FixNotVisible, id => Assert.Contains(id, WrongCases.Keys));
+        var computed = WrongCases.Keys.Where(id => !AuditCaseReplay.FixVisibleInRecord(AuditCaseReplay.Cases.Single(c => c.Id == id)).Visible).Order().ToList();
+        foreach (var id in WrongCases.Keys.Order())
+        {
+            var (visible, why) = AuditCaseReplay.FixVisibleInRecord(AuditCaseReplay.Cases.Single(c => c.Id == id));
+            output.WriteLine($"{id} {WrongCases[id].IssueText}: a fix is {(visible ? "visible" : "NOT visible")} in the record ({why})");
+        }
+        Assert.True(computed.SequenceEqual(FixNotVisible.Order()),
+            $"FixNotVisible must be exactly the wrong cases whose fix the record cannot show: [{string.Join(", ", computed)}]");
     }
 
     /// <summary>
-    /// A WRONG RESULT case: offline reproduces the wrong outcome the audit recorded live. When it no longer does, the
-    /// failure names the issue that tracks the defect and says to remove the marker. Also pins whether a fix would be
-    /// visible in what the record shows.
+    /// A WRONG RESULT case that is still wrong: offline reproduces the wrong outcome the audit recorded live. When it no
+    /// longer does, the failure names the issue that tracks the defect and the one edit to make.
     /// </summary>
     [Theory]
     [MemberData(nameof(WrongCaseIds))]
     public async Task WrongCase_ReproducesItsRecordedDefectUntilTheIssueIsFixed(string id)
     {
         var (c, result) = await ReplayAsync(id);
-        var issues = WrongCases[id].Length == 0 ? "no issue yet" : string.Join(", ", WrongCases[id].Select(n => "#" + n));
+        var w = WrongCases[id];
 
         Assert.True(result.Class == ReplayClass.Matches,
-            $"{id} no longer reproduces the wrong result the audit recorded live (defect tracked by {issues}). If that defect is " +
-            $"fixed, remove the known-defect marker: the entry for {id} in WrongCases.\n  got:     {result.Class} {result.Reason}\n" +
-            $"  live:    {c.Actual}\n  offline: {result.Offline}");
-
-        var expected = await AuditCaseReplay.CompareWithExpectedAsync(c);
-        var visible = expected.Class != ReplayClass.Matches;
-        output.WriteLine($"{id}: {issues}; a fix is {(visible ? "visible" : "NOT visible")} in the record ({expected.Class} {expected.Reason})");
-        Assert.True(visible == !FixNotVisible.Contains(id),
-            $"{id}: a fix would {(visible ? "" : "not ")}be visible in the record, but FixNotVisible says otherwise ({expected.Class} {expected.Reason})");
+            $"{id} no longer reproduces the wrong result the audit recorded live (defect tracked by {w.IssueText}). If that defect " +
+            $"is fixed, remove the known-defect marker: in WrongCases change [\"{id}\"] = {w.Marker(false)} to {w.Marker(true)}. " +
+            $"That is the only edit needed.\n  got:     {result.Class} {result.Reason}\n  live:    {c.Actual}\n  offline: {result.Offline}");
     }
 
-    /// <summary>The 13 cases that do not replay and match: each keeps its class and reason, or this fails.</summary>
+    /// <summary>
+    /// The WRONG RESULT cases fixed since the audit (none yet): offline must no longer reproduce the recorded wrong outcome.
+    /// A fact over the list rather than a theory, so that an empty list is a pass.
+    /// </summary>
+    [Fact]
+    public async Task FixedCases_NoLongerReproduceTheRecordedWrongOutcome()
+    {
+        foreach (var id in FixedCaseIds().Select(row => (string)row[0]))
+        {
+            var (c, result) = await ReplayAsync(id);
+            var w = WrongCases[id];
+            Assert.True(result.Class != ReplayClass.Matches,
+                $"{id} reproduces the wrong result the audit recorded again (defect tracked by {w.IssueText}): the fix regressed. " +
+                $"If the defect is back on purpose, change [\"{id}\"] = {w.Marker(true)} to {w.Marker(false)}.\n  live:    {c.Actual}\n  offline: {result.Offline}");
+        }
+    }
+
+    /// <summary>The 11 cases that cannot be replayed: each keeps its class and reason, or this fails.</summary>
     [Theory]
     [MemberData(nameof(NonMatchingCaseIds))]
     public async Task Case_DoesNotMatch_ForItsRecordedReason(string id)
@@ -266,15 +291,14 @@ public class AuditCaseReplayTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// How much the record let the replay compare, over every matching case. A partial case is one whose report shows only
-    /// the first rows; the rest of its rows are compared by count alone.
+    /// How much the record lets the replay compare, over every case that replays. It is computed from the record alone
+    /// (<see cref="AuditCaseReplay.RecordCoverage"/>), so fixing a defect does not change it. A partial case is one whose
+    /// report shows only the first rows; the rest of its rows are compared by count alone.
     /// </summary>
     [Fact]
-    public async Task Coverage_Totals()
+    public void Coverage_Totals()
     {
-        var results = new List<ReplayResult>();
-        foreach (var c in AuditCaseReplay.Cases.Where(c => !Expected.ContainsKey(c.Id)))
-            results.Add((await ReplayAsync(c.Id)).Result);
+        var results = AuditCaseReplay.Cases.Where(c => !Expected.ContainsKey(c.Id)).Select(AuditCaseReplay.RecordCoverage).ToList();
         var rows = results.Where(r => r.MessageSegments == 0).ToList();
         var errors = results.Count - rows.Count;
         var full = rows.Count(r => r.Full);
@@ -286,7 +310,7 @@ public class AuditCaseReplayTests(ITestOutputHelper output)
     }
 
     private const string CoverageTotals =
-        "cases 423: errors 69, row results 354 (full 113, partial 241); rows compared 1097 of 38914; order compared in 43; ids compared 561, masked 19";
+        "cases 425: errors 69, row results 356 (full 113, partial 243); rows compared 1101 of 38953; order compared in 45; ids compared 584, masked 0";
 
     private async Task<(AuditCase Case, ReplayResult Result)> ReplayAsync(string id)
     {
