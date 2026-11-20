@@ -1,0 +1,20 @@
+{
+ "_comment": [
+  "Failure labels (findings.py) the requirement-severity tests are known to fail with at commit 3164e825.",
+  "Used only with PPDS_DIFF_XFAIL=1: a test whose failures all carry these labels is reported as xfail.",
+  "A failure with any other label, or 'unlabelled', still fails. Remove a label when its fix lands."
+ ],
+ "labels": {
+  "r2-switch-colon": "round 2 must-fix (A2, B1): env select --environment:<unlisted> / -env:<unlisted> passes",
+  "r2-bare-start": "round 2 must-fix (A3, B2): the CLI started with no arguments (TUI) passes both gates",
+  "r2-sql-leading-comment": "round 2 must-fix (B3): query sql text starting with a -- comment line hides a write",
+  "r2-sql-glued-write-word": "round 2 must-fix (B4): a write word glued to a literal (SELECT 1DELETE ...)",
+  "r2-dry-run-swallowed": "round 2 must-fix (B5): --dry-run consumed as the value of another option",
+  "r2-read-only-swallowed": "round 2 must-fix (B6): --read-only consumed as the value of an MCP server option",
+  "r2-response-file-in-env-gate": "round 2 should-fix (A note, B should-fix 4): a response file passes the env gate",
+  "new-switch-delimiter-then-space": "found by oracle 1: env select --environment= <unlisted> (delimiter, then the value as the next word)",
+  "new-env-wrapper-here-string": "found by oracle 2: env FOO=1 bash <<< '$(echo ppds) <write>' passes every mode",
+  "new-switch-behind-runtime-program": "found by oracle 2: a switch behind a program word known only at run time, after a runner (timeout 5 `echo ppds` env select ...), passes the listed-env gate",
+  "new-switch-args-from-elsewhere": "found by oracle 2: a switch whose words come from xargs passes the listed-env gate"
+ }
+}

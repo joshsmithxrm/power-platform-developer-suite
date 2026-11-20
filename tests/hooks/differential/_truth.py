@@ -117,6 +117,12 @@ def judge(oracle, program: str, argv: list, mode: str) -> tuple:
     path = tuple(t.get("path", []))
     opts = t.get("options", {})
     is_env = len(path) == 2 and path[0] in ENV_GROUPS
+    if is_env and path[1] in ENV_SWITCHES:
+        target = _opt_value(opts, "--environment")
+        if not isinstance(target, str) or not target.strip():
+            # src/PPDS.Auth/Discovery/EnvironmentResolver.cs: a blank identifier resolves to nothing,
+            # and env select then fails without saving anything.
+            return t, harms
     if mode == "gate-unlisted":
         if is_env and path[1] in ENV_SWITCHES and _listed(_opt_value(opts, "--environment")):
             return t, harms  # switching INTO a listed environment is allowed (R4)

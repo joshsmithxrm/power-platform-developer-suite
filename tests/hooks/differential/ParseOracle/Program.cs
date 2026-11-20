@@ -65,7 +65,7 @@ internal static class Program
             }
             catch (Exception ex)
             {
-                answer = new JsonObject { ["oracle_error"] = ex.GetType().Name + ": " + ex.Message };
+                answer = new JsonObject { ["oracle_error"] = ex.GetType().Name + ": " + ex.Message, ["at"] = ex.StackTrace?.Split('\n').FirstOrDefault()?.Trim() };
             }
             stdout.WriteLine(answer.ToJsonString());
             stdout.Flush();
@@ -141,7 +141,21 @@ internal static class Program
         if (argv.Length == 0)
             return new JsonObject { ["tui"] = true, ["runs"] = true, ["path"] = new JsonArray(), ["errors"] = new JsonArray() };
 
-        var pr = Root.Parse(argv);
+        ParseResult pr;
+        try
+        {
+            pr = Root.Parse(argv);
+        }
+        catch (Exception ex)
+        {
+            // Program.Main parses inside its try block: an exception from Parse (a product validator
+            // that throws) is caught and rendered as an error, and no command runs.
+            return new JsonObject
+            {
+                ["tui"] = false, ["runs"] = false, ["path"] = new JsonArray(),
+                ["errors"] = new JsonArray((JsonNode)("parse threw " + ex.GetType().Name + ": " + ex.Message)),
+            };
+        }
         var path = new List<string>();
         for (SymbolResult? r = pr.CommandResult; r != null; r = r.Parent)
             if (r is CommandResult cr && cr.Command is not RootCommand)
@@ -177,7 +191,9 @@ internal static class Program
                 }
             }
         }
-        Collect(pr.RootCommandResult);
+        string? collectError = null;
+        try { Collect(pr.RootCommandResult); }
+        catch (Exception ex) { collectError = ex.GetType().Name + ": " + ex.Message; }
 
         var action = pr.Action;
         var own = pr.CommandResult.Command.Action;
@@ -191,6 +207,7 @@ internal static class Program
             ["options"] = options,
             ["arguments"] = arguments,
             ["unmatched"] = new JsonArray(pr.UnmatchedTokens.Select(t => (JsonNode)t).ToArray()),
+            ["collect_error"] = collectError,
         };
         if (path.SequenceEqual(new[] { "query", "sql" }) && arguments["sql"]?["value"] is JsonValue v
             && v.TryGetValue<string>(out var text))

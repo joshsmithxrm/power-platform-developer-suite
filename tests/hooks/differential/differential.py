@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _harness import MODES, TOOLS, OracleUnavailable, ParseOracle, Sandbox, run_hooks, write_case  # noqa: E402
 import _truth  # noqa: E402
+import findings  # noqa: E402
 
 CI_SIZE_ARGS = 4500
 CI_SIZE_SHELL = 700
@@ -114,6 +115,8 @@ def run_argument_oracle(size: int = CI_SIZE_ARGS, seed: int = 1814, cases_dir=No
         confirmed = _confirm_rendering(sandbox, oracle, failures) if confirm else None
         if confirmed is not None:
             failures = confirmed["kept"]
+        for f in failures:
+            f["label"] = findings.classify(f)
         req_fail = [f for f in failures if f["severity"] == "requirement"]
         pol_fail = [f for f in failures if f["severity"] == "policy"]
         saved = _save_cases(req_fail + pol_fail, cases_dir, "args", sandbox)
@@ -124,6 +127,7 @@ def run_argument_oracle(size: int = CI_SIZE_ARGS, seed: int = 1814, cases_dir=No
             "stats": {k: dict(v) for k, v in sorted(stats.items())},
             "requirement_failures": len(req_fail), "policy_failures": len(pol_fail),
             "groups": _summarise(failures, strict),
+            "findings": findings.rediscovered(failures),
             "false_blocks_by_mode_shape": {" | ".join(k): v for k, v in sorted(false_blocks.items(), key=lambda kv: -kv[1])},
             "render_check": None if confirmed is None else {k: v for k, v in confirmed.items() if k != "kept"},
             "saved_cases": saved,
@@ -261,6 +265,8 @@ def run_statement_oracle(size: int = CI_SIZE_SHELL, seed: int = 1780, cases_dir=
                                  "starts": {k: [[p, a] for p, a, _ in v] for k, v in starts.items()}})
                 s["fail_" + sev] += 1
         failures = _confirm_shell(lab, failures)
+        for f in failures:
+            f["label"] = findings.classify(f)
         req_fail = [f for f in failures if f["severity"] == "requirement"]
         saved = _save_cases(failures, cases_dir, "shell", sandbox, per_group=4)
         return {
@@ -272,6 +278,7 @@ def run_statement_oracle(size: int = CI_SIZE_SHELL, seed: int = 1780, cases_dir=
             "requirement_failures": len(req_fail),
             "other_failures": len(failures) - len(req_fail),
             "groups": _summarise(failures, strict),
+            "findings": findings.rediscovered(failures),
             "saved_cases": saved,
             "failures": failures,
         }

@@ -355,7 +355,21 @@ def generate(oracle, size: int, seed: int) -> list:
                 argv += [rng.choice(("--environment", "-env", "--profile")) + rng.choice((" ", "=", ":")).strip(),
                          rng.choice(NAMES)]
         add(argv, "random")
+    if size < len(cases):
+        cases = _sample(cases, size, rng)
     return cases
+
+
+# Shapes kept whole when a smaller corpus is asked for; every other shape is sampled in proportion.
+_ALWAYS = ("bare", "root-flag", "switch", "response-file", "sql-elsewhere", "command-alias", "path")
+
+
+def _sample(cases: list, size: int, rng: random.Random) -> list:
+    keep = [i for i, c in enumerate(cases) if c.shape.startswith(_ALWAYS)]
+    rest = [i for i, c in enumerate(cases) if not c.shape.startswith(_ALWAYS)]
+    budget = max(0, size - len(keep))
+    chosen = set(keep) | set(rng.sample(rest, min(budget, len(rest))))
+    return [c for i, c in enumerate(cases) if i in chosen]
 
 
 def _drop_option(argv: list, opt: dict) -> list:
