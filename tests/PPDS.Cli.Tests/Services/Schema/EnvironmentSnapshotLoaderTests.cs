@@ -8,6 +8,7 @@ using Moq;
 using PPDS.Cli.Services.Schema.Snapshots;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Models;
+using PPDS.Tests.Shared;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Services.Schema;
@@ -286,6 +287,7 @@ public class EnvironmentSnapshotLoaderTests
         const int entityCount = 8;
         var peak = 0;
         var current = 0;
+        var secondInFlight = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var mock = new Mock<IMetadataQueryService>();
         mock.Setup(m => m.GetEntitiesAsync(false, null, false, It.IsAny<CancellationToken>()))
@@ -302,14 +304,23 @@ public class EnvironmentSnapshotLoaderTests
                     if (c <= observedPeak) break;
                 } while (Interlocked.CompareExchange(ref peak, c, observedPeak) != observedPeak);
 
-                await Task.Delay(50).ConfigureAwait(false);
+                // Hold every load until a second one is in flight: overlap is then certain when the loader
+                // is parallel, and a serial loader never gets there, so no timing window decides the result.
+                if (c >= 2) secondInFlight.TrySetResult();
+                await secondInFlight.Task.ConfigureAwait(false);
                 Interlocked.Decrement(ref current);
                 return BuildEntity(name);
             });
 
         var loader = new EnvironmentSnapshotLoader(mock.Object, "env:test", progress: null, parallelism: parallelism);
 
-        await loader.LoadAsync();
+        try
+        {
+            var load = loader.LoadAsync();
+            await HangBackstop.WaitAsync(secondInFlight.Task, "a second entity load to start while the first is in flight");
+            await HangBackstop.WaitAsync(load, "the snapshot load to finish");
+        }
+        finally { secondInFlight.TrySetResult(); } // Releases a serial loader's held load after a failure.
 
         peak.Should().BeGreaterThan(1);
     }

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Services.WebResources;
 using PPDS.Dataverse.Models;
+using PPDS.Tests.Shared;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Services.WebResources;
@@ -89,13 +90,8 @@ public class WebResourceSyncServiceTests : IDisposable
     }
 
     /// <summary>AC-WR-38: parallel downloads — multiple GetContentAsync calls observed concurrently.</summary>
-    // SUGGESTION: This already uses the deterministic counter pattern requested
-    // (FakeWebResourceService.GetContentAsync increments/decrements _currentParallel via
-    // Interlocked and tracks PeakConcurrency). The 80ms latency only ensures the in-flight
-    // window overlaps during the run; the assertion observes concurrency directly, not
-    // wall-clock time. BeGreaterThan(1) is the loosest claim we can make without coupling
-    // to thread-pool scheduling (the service's MaxParallelism is intentionally an upper
-    // bound, not a guarantee of how many slots fill at any instant on small inputs).
+    // The fake holds every download until a second one is in flight, so overlap is certain when the
+    // service downloads in parallel and impossible when it is serial; no latency window decides it.
     [Fact]
     public async Task PullDownloadsInParallel()
     {
@@ -103,11 +99,17 @@ public class WebResourceSyncServiceTests : IDisposable
         {
             _fake.AddText($"new_/file{i}.js", $"// file {i}");
         }
-        _fake.SimulateContentLatencyMs = 80;
         _fake.TrackConcurrency = true;
+        _fake.HoldContentUntilInFlight = 2;
         var progress = new RecordingOperationProgress();
 
-        await _service.PullAsync(PullOpts(), progress);
+        try
+        {
+            var pull = _service.PullAsync(PullOpts(), progress);
+            await HangBackstop.WaitAsync(_fake.ContentInFlightReached, "a second download to start while the first is in flight");
+            await HangBackstop.WaitAsync(pull, "the pull to finish");
+        }
+        finally { _fake.ReleaseHeldContent(); } // Releases a serial service's held download after a failure.
 
         _fake.PeakConcurrency.Should().BeGreaterThan(1);
         _fake.GetContentCallCount.Should().Be(6);
@@ -452,7 +454,11 @@ internal sealed class FakeWebResourceService : IWebResourceService
     public int UpdateContentCallCount;
     public int PeakConcurrency => _peak;
     public bool TrackConcurrency;
-    public int SimulateContentLatencyMs;
+    // With TrackConcurrency, GetContentAsync waits until this many calls are in flight (0: no hold).
+    public int HoldContentUntilInFlight;
+    private readonly TaskCompletionSource _contentInFlight = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public Task ContentInFlightReached => _contentInFlight.Task;
+    public void ReleaseHeldContent() => _contentInFlight.TrySetResult();
     public List<IReadOnlyList<Guid>> PublishCalls { get; } = new();
 
     public void AddText(string name, string content, int type = 3)
@@ -544,9 +550,10 @@ internal sealed class FakeWebResourceService : IWebResourceService
         }
         try
         {
-            if (SimulateContentLatencyMs > 0)
+            if (TrackConcurrency && HoldContentUntilInFlight > 0)
             {
-                await Task.Delay(SimulateContentLatencyMs, cancellationToken);
+                if (Volatile.Read(ref _currentParallel) >= HoldContentUntilInFlight) _contentInFlight.TrySetResult();
+                await _contentInFlight.Task.WaitAsync(cancellationToken);
             }
             if (!_idToName.TryGetValue(id, out var name)) return null;
             var s = _byName[name];

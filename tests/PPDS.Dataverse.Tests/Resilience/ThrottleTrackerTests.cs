@@ -153,12 +153,12 @@ public class ThrottleTrackerTests
 
         // Act
         _tracker.RecordThrottle(connectionName, retryAfter);
+        var after = DateTime.UtcNow;
         var expiry = _tracker.GetThrottleExpiry(connectionName);
 
-        // Assert
+        // Assert: the tracker reads the clock between the two readings, so load cannot move it outside.
         expiry.Should().NotBeNull();
-        expiry!.Value.Should().BeAfter(before);
-        expiry.Value.Should().BeCloseTo(before + retryAfter, TimeSpan.FromSeconds(1));
+        expiry!.Value.Should().BeOnOrAfter(before + retryAfter).And.BeOnOrBefore(after + retryAfter);
     }
 
     [Fact]

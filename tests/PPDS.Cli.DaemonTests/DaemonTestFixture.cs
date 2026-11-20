@@ -15,6 +15,10 @@ namespace PPDS.Cli.DaemonTests;
 /// </summary>
 public sealed class DaemonTestFixture : IAsyncLifetime, IAsyncDisposable
 {
+    // Limits for the real daemon (`dotnet run ... serve`), the behaviour of this fixture rather than a test
+    // deadline: startup is a process launch plus one heartbeat, and a failure names the phase. Only the
+    // Integration-category collection fixture runs on the system clock; the offline tests inject a clock
+    // whose timers fire only when a test fires them, and bound their own waits with the shared hang guard.
     private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan DisposalTimeout = TimeSpan.FromSeconds(30);
     private readonly TimeProvider _clock;
@@ -62,6 +66,9 @@ public sealed class DaemonTestFixture : IAsyncLifetime, IAsyncDisposable
     internal long StderrCharactersDiscarded => Interlocked.Read(ref _stderrCharacters);
     internal Task StderrCompletion => _stderrDrain ?? Task.CompletedTask;
     internal Task ResourceCleanupCompletion => _resourceCleanupTask ?? Task.CompletedTask;
+    // Offline tests only: called on the cleanup worker once a phase is recorded and before its operation
+    // runs, so a test can act at a known phase instead of at a signal that precedes it.
+    internal Action<string>? ResourcePhaseEntered { get; set; }
 
     /// <summary>
     /// Gets the isolated config directory for this test instance.
@@ -353,6 +360,7 @@ public sealed class DaemonTestFixture : IAsyncLifetime, IAsyncDisposable
     private async Task CompleteResourceAsync(string phase, Func<Task> operation)
     {
         lock (_gate) _resourceCleanupPhase = phase;
+        ResourcePhaseEntered?.Invoke(phase);
         try
         {
             // The single worker bounds invocation from the fixture's perspective; within
