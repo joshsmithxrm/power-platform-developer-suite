@@ -28,15 +28,16 @@ internal sealed class FakeDataverse
     private readonly List<string> _fetchXml = new();
     private readonly object _gate = new();
 
-    /// <summary>Every FetchXML request received, in order, as sent (before <see cref="Rewrite"/>).</summary>
+    /// <summary>Every FetchXML request Dataverse received, in order (after <see cref="Rewrite"/> and the executor's paging).</summary>
     public IReadOnlyList<string> FetchXml
     {
         get { lock (_gate) return _fetchXml.ToList(); }
     }
 
     /// <summary>
-    /// Optional change applied to each FetchXML request before it is evaluated. Used only by the tests that prove the
-    /// fake catches an engine that drops a condition, a TOP or an alias.
+    /// Optional change applied to the FetchXML the engine produced, before the product's <see cref="QueryExecutor"/> sees
+    /// it: it stands in for an engine that drops a condition, a TOP or an alias. Used only by the tests that prove such an
+    /// engine fails the faithful tests.
     /// </summary>
     public Func<string, string>? Rewrite { get; set; }
 
@@ -56,8 +57,7 @@ internal sealed class FakeDataverse
     public EntityCollection RetrieveMultiple(string fetchXml)
     {
         lock (_gate) _fetchXml.Add(fetchXml);
-        var effective = Rewrite?.Invoke(fetchXml) ?? fetchXml;
-        return new FetchXmlEvaluator(_tables, CallerUtcOffset).Evaluate(effective);
+        return new FetchXmlEvaluator(_tables, CallerUtcOffset).Evaluate(fetchXml);
     }
 
     /// <summary>A connection pool whose clients answer from this fake.</summary>
@@ -70,7 +70,7 @@ internal sealed class FakeDataverse
     }
 
     /// <summary>The product's <see cref="QueryExecutor"/> over this fake.</summary>
-    public IQueryExecutor CreateQueryExecutor() => new QueryExecutor(CreatePool());
+    public IQueryExecutor CreateQueryExecutor() => new RewritingExecutor(new QueryExecutor(CreatePool()), this);
 
     /// <summary>A <see cref="SqlQueryService"/> over this fake, as the CLI builds it for a read.</summary>
     public SqlQueryService CreateSqlQueryService() => new(CreateQueryExecutor(), guard: new InactiveFakeShakedownGuard());
@@ -110,6 +110,29 @@ internal sealed class FakeDataverse
             default:
                 throw new NotSupportedException($"Fake Dataverse: request {request.RequestName} is not modelled.");
         }
+    }
+
+    /// <summary>Applies <see cref="Rewrite"/> to the engine's FetchXML, then runs the product's executor.</summary>
+    private sealed class RewritingExecutor(IQueryExecutor inner, FakeDataverse owner) : IQueryExecutor
+    {
+        private string R(string fetchXml) => owner.Rewrite?.Invoke(fetchXml) ?? fetchXml;
+
+        public Task<QueryResult> ExecuteFetchXmlAsync(string fetchXml, int? pageNumber = null, string? pagingCookie = null,
+            bool includeCount = false, CancellationToken cancellationToken = default)
+            => inner.ExecuteFetchXmlAsync(R(fetchXml), pageNumber, pagingCookie, includeCount, cancellationToken);
+
+        public Task<QueryResult> ExecuteFetchXmlAsync(string fetchXml, int? pageNumber, string? pagingCookie, bool includeCount,
+            QueryExecutionOptions? executionOptions, CancellationToken cancellationToken = default)
+            => inner.ExecuteFetchXmlAsync(R(fetchXml), pageNumber, pagingCookie, includeCount, executionOptions, cancellationToken);
+
+        public Task<QueryResult> ExecuteFetchXmlAllPagesAsync(string fetchXml, int maxRecords = 5000, CancellationToken cancellationToken = default)
+            => inner.ExecuteFetchXmlAllPagesAsync(R(fetchXml), maxRecords, cancellationToken);
+
+        public Task<long?> GetTotalRecordCountAsync(string entityLogicalName, CancellationToken cancellationToken = default)
+            => inner.GetTotalRecordCountAsync(entityLogicalName, cancellationToken);
+
+        public Task<(DateTime? Min, DateTime? Max)> GetMinMaxCreatedOnAsync(string entityLogicalName, CancellationToken cancellationToken = default)
+            => inner.GetMinMaxCreatedOnAsync(entityLogicalName, cancellationToken);
     }
 
     private static string FetchOf(QueryBase query) => query is FetchExpression fetch
