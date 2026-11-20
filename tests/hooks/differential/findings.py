@@ -100,6 +100,9 @@ def _labels(f: dict) -> list:
         out.append("r5-switch-without-allowlist")
     if recipe.startswith("extra:"):
         out.append("r5-extra-" + _EXTRA_FAMILY.get(recipe.split(":")[1], "other"))
+    kinds = (((f.get("truth") or {}).get("sql") or {}).get("kinds")) or []
+    if cause == "write-in-shakedown" and "ExecuteStatement" in kinds and f.get("shape") != "sql-implicit-exec":
+        out.append("r5-sql-implicit-exec")
     if f.get("shape") in ("auth-select", "sql-implicit-exec"):
         out.append("r5-" + f["shape"])
     if f.get("mode") in _NEW_MODES:

@@ -110,9 +110,6 @@ elif name == "parallel":
 """
 
 
-_CANARY_TEXTS = {"ppds env list", "& 'ppds' data delete --entity account", "ppds-mcp-server --read-only", "exit"}
-
-
 class HarnessError(RuntimeError):
     """The shells do not record what they run: ground truth would be empty."""
 
@@ -202,7 +199,7 @@ class ShellLab:
         home = record.get("home") or ""
         return os.path.normpath(os.path.join(cwd, home, ".ppds"))
 
-    def _run(self, argv: list, text: str, log: Path, timeout: float) -> None:
+    def _run(self, argv: list, text: str, log: Path, timeout: float, count: bool = True) -> None:
         """Run one shell in its own process group; on timeout, kill the whole group, so that no child
         of a hanging text is left behind. Texts that take a file lock run one at a time."""
         lock = _FLOCK if "flock" in text else None
@@ -227,7 +224,7 @@ class ShellLab:
             proc.wait()
             out.close()
             with self._count_lock:
-                if text in _CANARY_TEXTS:
+                if not count:
                     return outcome  # canaries are checked separately, not counted as corpus texts
                 self.outcomes[f"{argv[0].rsplit('/', 1)[-1]}-{outcome}"] += 1
                 if outcome == "timeout":
@@ -245,14 +242,14 @@ class ShellLab:
                 "bash_timeouts": self.outcomes["bash-timeout"], "pwsh_timeouts": self.outcomes["pwsh-timeout"],
                 "timed_out_examples": self.timed_out[:10]}
 
-    def run_bash_ex(self, text: str, timeout: float = 60.0) -> tuple:
+    def run_bash_ex(self, text: str, timeout: float = 60.0, count: bool = True) -> tuple:
         log = self.logs / f"b-{uuid.uuid4().hex}.log"
-        outcome = self._run([self.bash, "--norc", "--noprofile", "-c", text], text, log, timeout)
+        outcome = self._run([self.bash, "--norc", "--noprofile", "-c", text], text, log, timeout, count)
         return self._read(log), outcome
 
-    def run_pwsh_ex(self, text: str, timeout: float = 60.0) -> tuple:
+    def run_pwsh_ex(self, text: str, timeout: float = 60.0, count: bool = True) -> tuple:
         log = self.logs / f"p-{uuid.uuid4().hex}.log"
-        outcome = self._run([self.pwsh, "-NoProfile", "-NonInteractive", "-Command", text], text, log, timeout)
+        outcome = self._run([self.pwsh, "-NoProfile", "-NonInteractive", "-Command", text], text, log, timeout, count)
         return self._read(log), outcome
 
     def run_bash(self, text: str, timeout: float = 60.0) -> list:
@@ -275,14 +272,14 @@ class ShellLab:
         """Warm pwsh up, then require every canary to record its start under pwsh (and the POSIX ones
         under bash). Raises HarnessError otherwise."""
         log = self.logs / "warmup.log"
-        self._run([self.pwsh, "-NoProfile", "-NonInteractive", "-Command", "exit"], "exit", log, 300.0)
+        self._run([self.pwsh, "-NoProfile", "-NonInteractive", "-Command", "exit"], "exit", log, 300.0, False)
         for text, want in self.CANARIES:
-            got, outcome = self.run_pwsh_ex(text, 180.0)
+            got, outcome = self.run_pwsh_ex(text, 180.0, count=False)
             if not self._canary_ok(got, want):
                 raise HarnessError(f"pwsh records nothing for the known-good text {text!r} ({outcome}); "
                                    f"its output: {self._tail(text)}")
             if not text.startswith("&"):
-                got, outcome = self.run_bash_ex(text, 60.0)
+                got, outcome = self.run_bash_ex(text, 60.0, count=False)
                 if not self._canary_ok(got, want):
                     raise HarnessError(f"bash records nothing for the known-good text {text!r} ({outcome})")
         self.outcomes.clear()
@@ -330,12 +327,14 @@ class ShellLab:
         canaries = [c for c, _ in self.CANARIES]
         # canaries first, in the middle and last, so a lab that stops recording midway is noticed
         mid = len(texts) // 2
-        batch = canaries + list(texts[:mid]) + canaries + list(texts[mid:]) + canaries
-        with cf.ThreadPoolExecutor(max_workers=n) as pool:
-            bash = list(pool.map(self.run_bash, batch))
-        with cf.ThreadPoolExecutor(max_workers=n) as pool:
-            pwsh = list(pool.map(self.run_pwsh, batch))
         k = len(canaries)
+        batch = canaries + list(texts[:mid]) + canaries + list(texts[mid:]) + canaries
+        canary_pos = set(range(k)) | set(range(k + mid, 2 * k + mid)) | set(range(2 * k + len(texts), 3 * k + len(texts)))
+        jobs = list(enumerate(batch))
+        with cf.ThreadPoolExecutor(max_workers=n) as pool:
+            bash = list(pool.map(lambda j: self.run_bash_ex(j[1], count=j[0] not in canary_pos)[0], jobs))
+        with cf.ThreadPoolExecutor(max_workers=n) as pool:
+            pwsh = list(pool.map(lambda j: self.run_pwsh_ex(j[1], count=j[0] not in canary_pos)[0], jobs))
         for shell, records in (("bash", bash), ("pwsh", pwsh)):
             for pos in (0, k + mid, 2 * k + len(texts)):
                 for (text, want), got in zip(self.CANARIES, records[pos:pos + k]):
