@@ -24,7 +24,10 @@ from typing import Iterable, Optional
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
-HOOK = Path(os.environ.get("PPDS_DIFF_HOOK", str(REPO / ".claude" / "hooks" / "shakedown-safety.py")))
+# An empty PPDS_DIFF_HOOK means unset. A set one must name an existing file.
+HOOK = Path(os.environ.get("PPDS_DIFF_HOOK") or str(REPO / ".claude" / "hooks" / "shakedown-safety.py"))
+if not HOOK.is_file():
+    raise SystemExit(f"PPDS_DIFF_HOOK does not name a file: {HOOK}")
 
 TOOLS = ("Bash", "PowerShell")
 # Made-up environment names. LISTED are on the allowlist, UNLISTED are not.
