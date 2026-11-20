@@ -89,7 +89,10 @@ internal static class AuditDataset
     /// 24 child ids (child key 3 from J13: the only child named 'x' under parent 'Beta' with key &lt;= 5), and 11 of the 5,050
     /// bulk ids (PG01 to PG06). Key 27's id is shown only cut short (W35: <c>84c24e9c-a9af-4bba-83b4-bf2…</c>); its recorded
     /// prefix is kept and the rest is zeros, which fixes its place in id order (the last group is compared first) but not
-    /// its value, so it is not in <see cref="RecordedIds"/>. Using them lets <c>WHERE Pid = '...'</c> (W113, W114) and the
+    /// its value, so it is not in <see cref="RecordedIds"/>. Two more ids are shown only cut short and are not adopted: bulk key
+    /// 4 (PG02, PG05: <c>eafb57ca-f124-4fec-9…</c>) and child key 5 (J13: <c>216…</c>). Their prefixes stop before the last
+    /// group, which SQL Server compares first, so they fix nothing about the order, and no row the record shows in full holds
+    /// them. Using them lets <c>WHERE Pid = '...'</c> (W113, W114) and the
     /// order Dataverse returns rows in when nothing else decides (by id) replay. Ids the report never shows are generated.
     /// </summary>
     public static Guid Id(string table, int key)

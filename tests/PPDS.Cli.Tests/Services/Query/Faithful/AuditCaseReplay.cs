@@ -233,16 +233,16 @@ internal static class AuditCaseReplay
 
     /// <summary>
     /// The recorded message's segments between cuts and redactions, without live-organisation detail; whether the record
-    /// begins with a cut, and whether it ends with one (a cut, a redaction, or dropped live-organisation detail).
+    /// begins with a cut, and whether it ends with one (a cut or a redaction). Live-organisation detail (<c>orgIndex</c>, the
+    /// metadata cache's version) is not a cut: the record is complete up to it, so the offline message must end where it begins.
     /// </summary>
     public static (IReadOnlyList<string> Segments, bool StartsCut, bool EndsCut) MessageSegments(string message)
     {
         var end = new[] { message.IndexOf("orgIndex", StringComparison.Ordinal), message.IndexOf("LazyDynamicMetadataCache", StringComparison.Ordinal) }
             .Where(i => i >= 0).DefaultIfEmpty(message.Length).Min();
-        var orgDetailDropped = end < message.Length;
         message = message[..end].TrimEnd();
         var startsCut = Redaction.Match(message) is { Success: true, Index: 0 };
-        var endsCut = orgDetailDropped || Redaction.Matches(message).Any(m => m.Index + m.Length == message.Length);
+        var endsCut = Redaction.Matches(message).Any(m => m.Index + m.Length == message.Length);
         return (Redaction.Split(message).Select(s => s.Trim()).Where(s => s.Length > 0).ToList(), startsCut, endsCut);
     }
 

@@ -65,9 +65,13 @@ public class FetchXmlEvaluatorRuleTests
     [InlineData("numberofemployees", "gt", "10", "k8,k10")]
     [InlineData("numberofemployees", "ge", "10", "k2,k8,k10")]
     [InlineData("name", "like", "%", "k1,k2,k3,k4,k5,k7,k8,k9,k10")]
-    [InlineData("name", "begins-with", "", "k1,k2,k3,k4,k5,k7,k8,k9,k10")]
     public void R2_OtherOperators_DoNotMatchNullRows(string attribute, string op, string value, string expected)
         => Assert.Equal(expected, Keys(Fetch(Where(Cond(attribute, op, value)))));
+
+    [Theory(Skip = "Waiting for a live observation (LiveObservationsOwed.md): an empty value with operator begins-with (no recorded case sends one; W67 sends like '%')")]
+    [InlineData("name", "begins-with", "", "k1,k2,k3,k4,k5,k7,k8,k9,k10")]
+    public void R2_BeginsWithAnEmptyValue_DoesNotMatchNullRows(string attribute, string op, string value, string expected)
+        => R2_OtherOperators_DoNotMatchNullRows(attribute, op, value, expected);
 
     [Theory]
     [InlineData("<condition attribute=\"numberofemployees\" operator=\"in\"><value>5</value><value>100</value></condition>", "k1,k7,k8")]

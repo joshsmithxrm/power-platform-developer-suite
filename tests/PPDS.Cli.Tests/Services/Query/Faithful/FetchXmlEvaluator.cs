@@ -182,8 +182,10 @@ internal sealed class FetchXmlEvaluator
             Shape("distinct with link attributes");
         if (!spec.Root.AllAttributes && spec.Root.Attributes.Count == 0)
             Shape("distinct with no attributes");
-        if (spec.Top is not null || spec.Count is not null || spec.Page is not null)
-            Shape("distinct with top, count or page");
+        if (spec.Top is not null)
+            Shape("distinct with top"); // D07 (SELECT DISTINCT TOP 3) goes out with count="3", not top
+        if (spec.Count is not null || spec.Page is not null)
+            Shape("distinct with count or page");
         if (orders.Count > 0)
         {
             var selected = spec.Root.AllAttributes ? spec.Root.Table.Columns.Keys.ToList() : spec.Root.Attributes.Select(a => a.Name).ToList();
@@ -261,7 +263,8 @@ internal sealed class FetchXmlEvaluator
         {
             var cookiePage = Regex.Match(cookie.Value, @"^<cookie page=""(?<n>[0-9]+)"" />$");
             Shape(!cookiePage.Success ? "paging-cookie of another form"
-                : int.Parse(cookiePage.Groups["n"].Value, CultureInfo.InvariantCulture) == (page ?? 1) - 1 ? "paging-cookie of the previous page" : "paging-cookie of another page");
+                : int.TryParse(cookiePage.Groups["n"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var cookieNumber) && cookieNumber == (page ?? 1) - 1
+                    ? "paging-cookie of the previous page" : "paging-cookie of another page");
         }
         var distinct = fetch.Attribute("distinct") is { } d && Bool(d);
         if (isAggregate && (distinct || top != null || count != null || page is > 1 || root.Links.Any(l => l.Orders.Count > 0) || root.Orders.Count > 0))
@@ -541,6 +544,8 @@ internal sealed class FetchXmlEvaluator
                     ? values.Select(v => Normalize(v) is string s ? StringKey(s) : Normalize(v)).Distinct().Count() // A22, A24
                     : values.Count;
         }
+        if (values.Count == 0 && rowCount > 0)
+            Shape($"aggregate {a.Function} of a {a.Type} column over rows whose values are all NULL"); // A10 observed no rows only
         if (values.Count == 0)
         {
             // Over no rows Dataverse returns 0 for sum and max of a whole number (A10); nothing else is observed.
@@ -643,6 +648,8 @@ internal sealed class FetchXmlEvaluator
         {
             if (type != FakeColumnType.String)
                 throw Unsupported($"{op} on a {type} column");
+            if (raw[0].Length == 0)
+                throw Unsupported($"an empty value with operator {op}");
             var pattern = op switch
             {
                 "begins-with" or "not-begin-with" => raw[0] + "%",
@@ -756,7 +763,9 @@ internal sealed class FetchXmlEvaluator
 
     /// <summary>R12.</summary>
     private static FakeColumnType RequireColumn(FakeTable table, string attribute)
-        => table.HasColumn(attribute)
+        => attribute.Length == 0
+            ? throw Unsupported("an empty attribute name (no recorded fault names one)")
+            : table.HasColumn(attribute)
             ? table.TypeOf(attribute)
             // The live text (audit E01, O03): "'P' entity doesn't contain attribute with Name = 'x' and NameMapping = 'Logical' (...)".
             : throw Fault($"'{table.LogicalName}' entity doesn't contain attribute with Name = '{attribute}' and NameMapping = 'Logical' (look up attribute by name is case-sensitive).");
@@ -896,9 +905,9 @@ internal sealed class FetchXmlEvaluator
     /// (ICU on Linux and macOS, the operating system's normalization on Windows) and does not work in invariant-globalization
     /// mode; <see cref="CharUnicodeInfo"/> and the key table are .NET's own. Canonical decomposition is fixed by the Unicode
     /// standard, so the accented letters the datasets use decompose the same everywhere, but that is verified on Linux only.
-    /// Tests whose result rests on it: R4_StringOrder_IsTheObservedOrder_OnEveryMachine, the R4 string equality tests,
-    /// R5_Like_WildcardsClassesAccentsAndTrailingSpaces, AuditObservedReplayTests.ObservedRows and ObservedOrder, and the
-    /// replayed cases over accented names (Café, Ångström and the like).
+    /// Every string the fake compares, orders, groups, makes distinct or matches with LIKE goes through this key, so every
+    /// test that does any of that rests on it: in invariant-globalization mode they all fail (by refusal), and on Windows
+    /// the only results that could differ are those over characters outside ASCII (Café, Ångström and the like).
     /// </para>
     /// </summary>
     private static string StringKey(string s, bool trimEnd = true, bool ordered = false)
@@ -958,8 +967,6 @@ internal sealed class FetchXmlEvaluator
     /// <summary>R5: <c>%</c>, <c>_</c>, <c>[...]</c> and <c>[^...]</c> over R4 keys; trailing spaces count.</summary>
     private static Regex LikeRegex(string pattern)
     {
-        if (pattern.Length == 0)
-            throw Unsupported("an empty LIKE pattern");
         var regex = new StringBuilder("^");
         for (var i = 0; i < pattern.Length; i++)
         {
