@@ -43,7 +43,7 @@ internal sealed record ReplayResult(ReplayClass Class, string Reason, string Off
 
     public string Coverage => RowsTotal == 0 && MessageSegments > 0
         ? $"error: {MessageSegments} recorded message segment(s) compared in order"
-        : $"{(Full ? "full" : "partial")}: {RowsCompared} of {RowsTotal} rows compared; order {(OrderCompared ? "compared" : "not compared (no top-level ORDER BY)")}; ids {IdsCompared} compared, {IdsMasked} masked (generated offline)";
+        : $"{(Full ? "full" : "partial")}: {RowsCompared} of {RowsTotal} rows compared; order {(OrderCompared ? "compared" : "not compared (no top-level ORDER BY or DISTINCT, or one row shown)")}; ids {IdsCompared} compared, {IdsMasked} masked (generated offline)";
 }
 
 /// <summary>
@@ -57,8 +57,9 @@ internal sealed record ReplayResult(ReplayClass Class, string Reason, string Off
 /// redacted (<c>…</c>, <c>[REDACTED]</c>, <c>&lt;user id&gt;</c>-style placeholders), in order; the first segment is a prefix
 /// unless the record begins with a cut. Text from where live-organisation detail begins (<c>orgIndex</c>, the metadata
 /// cache's version) is not compared.</item>
-/// <item>Rows: the column names exactly, the row count exactly, and every row the report shows. With a top-level ORDER BY
-/// the shown rows are the first rows in order; without one Dataverse's order is its own (it follows the live run's random
+/// <item>Rows: the column names exactly, the row count exactly, and every row the report shows. With a top-level ORDER BY,
+/// or a <c>SELECT DISTINCT</c> without one (Dataverse sorts it by the returned columns, R14), the shown rows are the first
+/// rows in order; without one Dataverse's order is its own (it follows the live run's random
 /// record ids), so each shown row must occur in the offline result, and when the report shows all rows the two must be the
 /// same multiset. A row the report cut short is not compared. An id the report shows is compared when the dataset holds it
 /// (<see cref="AuditDataset.RecordedIds"/>); an id the dataset generated is masked on both sides. Each result says how
@@ -329,7 +330,8 @@ internal static class AuditCaseReplay
         int idsCompared = 0, idsMasked = 0;
         shown = shown.Select(r => Mask(r, ref idsCompared, ref idsMasked)).ToList();
         var offline = run.Rows.Select(Mask).ToList();
-        var ordered = HasTopLevelOrderBy(c.Sql);
+        // R14 (D01-D06, PG08): a DISTINCT without ORDER BY comes back sorted by the returned columns, so its order is compared.
+        var ordered = HasTopLevelOrderBy(c.Sql) || IsDistinctWithoutOrderBy(c.Sql);
         var coverage = new ReplayResult(ReplayClass.Matches, "", run.Text)
         {
             RowsCompared = complete ? count : shown.Count, RowsTotal = count, OrderCompared = ordered && shown.Count > 1,
@@ -365,6 +367,10 @@ internal static class AuditCaseReplay
         }
         return null;
     }
+
+    /// <summary>A top-level <c>SELECT DISTINCT</c> with no top-level ORDER BY (a hint line may precede it).</summary>
+    public static bool IsDistinctWithoutOrderBy(string sql)
+        => Regex.IsMatch(sql, @"^(-- ppds:\S+(?: \S+)? )?SELECT DISTINCT\b", RegexOptions.IgnoreCase) && !HasTopLevelOrderBy(sql);
 
     /// <summary>An ORDER BY at parenthesis depth 0 (not inside OVER (...) or a subquery).</summary>
     public static bool HasTopLevelOrderBy(string sql)

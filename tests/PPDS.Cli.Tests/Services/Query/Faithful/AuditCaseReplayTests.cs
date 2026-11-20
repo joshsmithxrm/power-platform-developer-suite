@@ -283,7 +283,7 @@ public class AuditCaseReplayTests(ITestOutputHelper output)
     }
 
     private const string CoverageTotals =
-        "cases 424: errors 69, row results 355 (full 113, partial 242); rows compared 1099 of 38917; order compared in 36; ids compared 563, masked 19";
+        "cases 424: errors 69, row results 355 (full 113, partial 242); rows compared 1099 of 38917; order compared in 44; ids compared 563, masked 19";
 
     private async Task<(AuditCase Case, ReplayResult Result)> ReplayAsync(string id)
     {
