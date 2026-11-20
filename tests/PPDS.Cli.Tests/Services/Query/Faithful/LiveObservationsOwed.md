@@ -219,16 +219,16 @@ query tests.
 - **`statecode` and `statuscode` option sets.** These are invented; V05 shows only 'Active'. Owed: `SELECT DISTINCT statecode, statecodename, statuscode, statuscodename FROM P`. Compare with the fake's choices.
 - **System columns.** `ownerid`, `modifiedon` and the other columns a live `SELECT *` returns (PRJ02, which the report cut) are absent from the fake. Owed: `SELECT * FROM P`. Compare the full column list.
 
-## 6. Wrong cases no issue names yet (for filing)
+## 6. Wrong cases filed from this list
 
-### J19: a joined table's choice-name column reads NULL
+### J19 (#1840): a joined table's choice-name column reads NULL
 - **SQL:** `SELECT c.ppds_key AS ck, p.ppds_colorcodename FROM C c INNER JOIN P p ON c.ppds_parentid = p.Pid`
 - **Recorded:** 20 rows, `[ck, ckname, p.ppds_colorcodename, Cid]`, with `p.ppds_colorcodename` NULL for the 17 children whose parent has a colour, e.g. `(2,'2',NULL,{…})`. The engine sent `<link-entity … alias="p"><attribute name="ppds_colorcodename" /></link-entity>`.
 - **Correct:** 20 rows `[ck, ppds_colorcodename]`, each child with its parent's colour label, e.g. `(1,'Blue') (2,'Green') (3,NULL) (4,'Red')`. NULL only where the parent has no colour.
 - **Cause (my reading):** the generator turns a `*name` column into its base column plus the formatted value only for the main entity (`src/PPDS.Query/Transpilation/FetchXmlGenerator.cs:434-436`, "Only process columns belonging to the main entity"). On a joined table, `p.ppds_colorcodename` goes out as a plain link attribute, which Dataverse does not return, so it reads NULL. The unrequested `ckname` and `Cid` are #1625's defect.
 - **Live check:** none needed; the record shows it.
 
-### S13: `IN (subquery)` on a column the SELECT does not return gives no rows
+### S13 (#1841): `IN (subquery)` on a column the SELECT does not return gives no rows
 - **SQL:** `SELECT ppds_key FROM P WHERE ppds_num IN (SELECT ppds_num FROM C)`
 - **Recorded:** `[] 0 rows`. The engine sent only `<fetch><entity name="P"><attribute name="ppds_key" /></entity></fetch>`.
 - **Correct:** 9 rows `[ppds_key]`, keys 2, 4, 5, 18, 21, 28 and 3 more: the parents whose `ppds_num` occurs in C.
