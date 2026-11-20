@@ -161,7 +161,7 @@ internal sealed class FetchXmlEvaluator
 
         // R14 distinct (audit D05, D06, PG08): of rows that are the same, the first created is kept (D06 returns 'A', not
         // 'a'); with no ORDER BY the result is sorted by the returned columns in order, NULL first (D05, D06).
-        var created = spec.Root.Table.Rows.Select((r, i) => (r, i)).ToDictionary(x => x.r, x => x.i, ReferenceEqualityComparer.Instance);
+        var created = spec.Root.Table.Rows.Select((r, i) => (Row: (object)r, Index: i)).ToDictionary(x => x.Row, x => x.Index, ReferenceEqualityComparer.Instance);
         var firstCreated = rows.OrderBy(r => created[r.Rows[BaseAlias]!]).ToList();
         var kept = Sort(firstCreated, orders, spec.Sources, tieBreakById: false)
             .Select(r => Project(r, spec)).DistinctBy(Signature).ToList();
