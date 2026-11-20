@@ -29,22 +29,26 @@ else is refused (exit 2):
 * *Cannot tell means refuse*, also inside an invocation. An argument list
   the hook could not read in full (``UNREADABLE``: a cap, the deadline, an
   unplaced mention, a program only known at run time with arguments from
-  elsewhere), an argument only known at run time, and, in the argv of a
-  program the hook could not identify, a response file (``@file``) or a
-  single-dash token that may be a bundle naming an environment or profile
-  are refused by the write-block and, with an unlisted or unknown active
-  env, by the environment gate. A response file or a possible bundle after
-  a word naming ``ppds`` is placed text, refused in every mode. With a
-  listed active env and no shakedown, an invocation the hook cannot place
-  is refused **only when** the command
-  text names a switch or a target (``text_names_target``): one of ``env`` /
-  ``org`` / ``auth`` together with one of ``select`` / ``switch`` / ``use``,
-  or a target option (``--environment``, ``-env``, ``--profile``,
-  ``--allowed-env`` and their source/target forms anywhere; ``-p`` / ``-e``
-  in a text that mentions ``ppds``). Otherwise it passes, as the listed active
-  env would. A ``PPDS_`` variable that moves the target is refused
-  separately, in every mode. A switch with no target the hook can place is
-  refused (its text names the switch).
+  elsewhere), an argument only known at run time, and, in a guess (the
+  argv of a program the hook could not identify, or of a word naming
+  ``ppds`` where no program runs: ``grep ppds -rE docs``), a response file
+  (``@file``), ``-e`` / ``-p``, or a single-dash token that may be a bundle
+  naming an environment or profile are refused by the write-block and,
+  with an unlisted or unknown active env, by the environment gate. A
+  response file or a possible bundle after a word naming ``ppds`` where a
+  program runs is placed text, refused in every mode. With a listed active
+  env and no shakedown, an invocation the hook cannot place is refused
+  **only when** the command text names a switch or a target
+  (``text_names_target``): one of ``env`` / ``org`` / ``auth`` together
+  with one of ``select`` / ``switch`` / ``use``, or a target option
+  (``--environment``, ``-env``, ``--profile``, ``--allowed-env`` and their
+  source/target forms anywhere, also inside an assignment or between
+  escapes; ``-p`` / ``-e`` do not count). Otherwise it passes, as the
+  listed active env would: with a listed active env the hook is a guard
+  against mistakes, not containment (it does not see a target in a script
+  file, a response file to a guessed program, or run-time words). A
+  ``PPDS_`` variable or home-folder variable that moves the target is
+  refused separately.
 * *A token that grants a pass must be positively placed.* ``--dry-run``
   counts only as the exact bare token, before any ``--``, not directly
   after an option-looking token (it might be that option's value), and not
@@ -57,7 +61,8 @@ else is refused (exit 2):
   value``, ``--name=value`` and ``--name:value`` (and the aliases) are read.
 * *Everything that can change which environment is reached is a target.*
   With an allowlist, an invocation passes only if every environment it
-  names (``--environment`` / ``-env`` / ``-e``, ``--source-env``,
+  names (``--environment`` / ``-env`` / ``-e`` (by command path: ``-e`` is
+  ``--entity`` on some), ``--source-env``,
   ``--target-env``, the MCP server's ``--environment`` / ``--allowed-env``)
   is listed, literally or as the host of a URL; every profile it names
   (``--profile`` / ``-p``, ``--source-profile``, ``--target-profile``, and
@@ -74,9 +79,11 @@ else is refused (exit 2):
   name of the profile that holds it.
 * *Bounded work.* Every loop over the input runs under the deadline, and
   the work per input is capped (``_MAX_*``, ``_DOTNET_MAX_*`` and the
-  reader's caps); past a cap the command is an unreadable invocation,
-  refused by both gates. A watchdog refuses the command if the hook has
-  not answered ``_WATCHDOG_GRACE_SECONDS`` after its budget.
+  reader's caps); past a cap the command is an unreadable invocation
+  (refused as above). A command longer than the reader's length cap is not
+  scanned whole: its length is checked first and ``_decide_oversized``
+  answers with a few byte checks. A watchdog refuses the command if the
+  hook has not answered ``_WATCHDOG_GRACE_SECONDS`` after its budget.
 
 What passes the environment gate with an unlisted (or unknown) active env:
 ``env`` alone, ``env list``, ``env who``, the read forms of ``env config`` /
@@ -204,8 +211,18 @@ from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _pathfix import normalize_msys_path  # noqa: E402
-import _shellparse as sp  # noqa: E402
+try:
+    from _pathfix import normalize_msys_path  # noqa: E402
+    import _shellparse as sp  # noqa: E402
+except BaseException:  # noqa: BLE001 -- a missing or broken helper must not exit 1
+    if __name__ != "__main__":
+        raise
+    try:
+        sys.stderr.write("BLOCKED [shakedown-safety]: the hook could not load its helper modules "
+                         "(_pathfix.py, _shellparse.py next to it), so it is refused.\n")
+        sys.stderr.flush()
+    finally:
+        os._exit(2)
 
 
 # ---------------------------------------------------------------------------
@@ -664,14 +681,20 @@ _RUNNER_PREFIXES = {
 
 class _Guess(list):
     """An argv for a program the hook could not identify (read as both PPDS
-    programs). ``origin`` is the text as written, for block messages; None
-    when there is nothing to show (an unread command, a cap)."""
+    programs), or for a word naming one where no program runs (a mention:
+    ``grep ppds -rE docs``). ``origin`` is the text as written, for block
+    messages; None when there is nothing to show (an unread command, a cap).
+    ``note`` says what the reading is, after the text in a block message."""
 
-    __slots__ = ("origin",)
+    __slots__ = ("origin", "note")
 
-    def __init__(self, items, origin=None):
+    def __init__(self, items, origin=None, note=None):
         super().__init__(items)
         self.origin = origin
+        self.note = note or "a program the hook cannot identify; read as ppds"
+
+
+_MENTION_NOTE = "ppds named where the hook cannot tell that it runs; read as a ppds command"
 
 
 def _unknown(args, origin=None) -> list:
@@ -689,15 +712,19 @@ def _tail(texts: list, start: int) -> list:
 
 
 def _dedupe(argvs: list, deadline=None) -> list:
-    seen, out = set(), []
+    """``argvs`` without repeats, in order; of two equal readings the placed
+    one (a plain list) is kept, not the guess."""
+    seen, out = {}, []
     for argv in argvs:
         _tick(deadline)
         program = argv[0].lower()
         program = program[:-4] if program.endswith(".exe") else program
         key = (program,) + tuple(argv[1:])  # `ppds.exe env list` == `ppds env list`
         if key not in seen:
-            seen.add(key)
+            seen[key] = len(out)
             out.append(argv)
+        elif isinstance(out[seen[key]], _Guess) and not isinstance(argv, _Guess):
+            out[seen[key]] = argv
     return out
 
 
@@ -906,6 +933,9 @@ def _read_invocations(command: str, dialect: str, cwd, mentions: list, deadline)
             stack.append(stack[-1])
         words, texts = stmt.words, stmt.texts
         positions = dict(sp.command_positions(stmt)) if stmt.code else {}
+        # A word after a program whose arguments come from elsewhere (`xargs
+        # -n 4 ppds`, `parallel -j 4 ppds`) may itself be run with them.
+        first_opaque = min((j for j, o in positions.items() if o), default=None)
         for i, word in enumerate(words):
             _tick(deadline)
             prog = sp.program_name(word)
@@ -915,10 +945,17 @@ def _read_invocations(command: str, dialect: str, cwd, mentions: list, deadline)
             if program_words > _MAX_PROGRAM_WORDS or elements > _MAX_ARG_ELEMENTS:
                 out.extend(_unknown([UNREADABLE]))  # past a cap: an invocation, unconditionally
                 return out
+            fed = positions.get(i) or (i not in positions and first_opaque is not None and i > first_opaque)
             if prog in _PPDS_PROGRAMS:
                 argv = [prog] + _tail(texts, i + 1)
-                if positions.get(i):
+                if fed:
                     argv.append(UNREADABLE)  # arguments from elsewhere (xargs, Start-Process)
+                elif i not in positions:
+                    # Not where a program runs (`grep ppds -rE docs`, a string,
+                    # a comment): a mention, read as an invocation whose
+                    # options the hook cannot place.
+                    argv = _Guess(argv, _shown(texts[max(0, i - 3):i + 9]) + (
+                        " ..." if len(texts) > i + 9 else ""), _MENTION_NOTE)
                 hits = [argv]
             else:
                 if prog == "dnx":
@@ -927,11 +964,12 @@ def _read_invocations(command: str, dialect: str, cwd, mentions: list, deadline)
                     known = (trust_cwd and stmt.code and not stmt.wrapped and i in positions
                              and not positions[i] and stack[level] != _UNKNOWN_CWD)
                     hits = _dotnet_hits(_tail(texts, i + 1), {stack[level]} if known else {_UNKNOWN_CWD})
-                if positions.get(i):
+                if fed:
                     hits = [hit + [UNREADABLE] for hit in hits] or _unknown([UNREADABLE])
             elements += sum(len(hit) for hit in hits)
             out.extend(hits)
         if stmt.code:
+            out.extend(_hidden_shell_code(stmt, positions, first_opaque))
             for i, opaque in positions.items():
                 word = words[i]
                 prog = sp.program_name(word)
@@ -963,6 +1001,47 @@ def _read_invocations(command: str, dialect: str, cwd, mentions: list, deadline)
                 mentions_guarded(" ".join(texts[1:])) or any(w.dynamic for w in words[1:])):
             out.extend(_unknown([UNREADABLE]))
     return out
+
+
+# Programs that take a shell's name as data (`grep bash`, `ps | grep pwsh`):
+# fed text, a shell named after them is not run.
+_NAME_READERS = {
+    "grep", "egrep", "fgrep", "rg", "ag", "ack", "pgrep", "pkill", "killall", "pidof", "which",
+    "where", "whereis", "type", "man", "help", "select-string", "sls", "get-command", "gcm",
+    "get-process", "gps", "ps", "stop-process", "kill", "echo", "printf", "write-output",
+    "write-host", "apt", "apt-get", "brew", "choco", "winget", "dnf", "yum", "pacman", "sort",
+    "uniq", "wc", "head", "tail", "cut", "tr", "sed", "awk", "cat", "less", "more", "tee",
+}
+
+
+def _hidden_shell_code(stmt, positions: dict, first_opaque) -> list:
+    """An invocation the hook could not read when a shell sits where the
+    reader did not take it for a wrapper and is given code: behind a prefix
+    the reader does not know (`chroot / bash -c ...`, `flock f sh -c ...`),
+    after a program whose arguments come from elsewhere, or fed text with no
+    script named; and `ssh` with a remote command or fed text."""
+    words = stmt.words
+    lead = next((w for w in words if not sp.is_assignment(w)), None)
+    lead_name = sp.program_name(lead) if lead is not None else None
+    for i, word in enumerate(words):
+        prog = sp.program_name(word)
+        if prog == "ssh" and i in positions:
+            operands = [w for w in words[i + 1:] if not w.text.startswith("-")]
+            if len(operands) > 1 or stmt.piped or stmt.stdin_text:
+                return _unknown([UNREADABLE])
+            continue
+        if prog not in sp.SHELLS or i == 0 or (i in positions and not positions[i]):
+            continue
+        if stmt.wrapper is not None and i in positions:
+            continue  # the reader read this shell as a wrapper
+        later = words[i + 1:]
+        if (first_opaque is not None and i >= first_opaque) \
+                or any(sp._wrapper_code_flag(prog, w.text) for w in later):
+            return _unknown([UNREADABLE])
+        if (stmt.piped or stmt.stdin_text) and lead_name not in _NAME_READERS \
+                and all(w.text.startswith("-") for w in later):
+            return _unknown([UNREADABLE])
+    return []
 
 
 def _is_absolute(path: str) -> bool:
@@ -1059,7 +1138,10 @@ def _original_invocations(command: str, deadline=None) -> list:
             args.append(tok)
         if not stopped and (cut or len(tokens) > _DOTNET_MAX_TOKENS):
             args.append(UNREADABLE)
-        out.append([prog] + args)
+        # This matcher cannot tell where a program runs: a reading of the
+        # reader that places the word replaces it (``_dedupe``).
+        out.append(_Guess([prog] + args, _shown([prog] + args[:12]) + (" ..." if len(args) > 12 else ""),
+                          _MENTION_NOTE))
     out.extend(_dotnet_invocations(command, deadline))
     return out
 
@@ -1157,7 +1239,22 @@ def _read_only_forwarded(unknown: list) -> bool:
     return False
 
 
-def _run_readings(program: str, unknown: list, after: list) -> list:
+class _Reading(list):
+    """An argv the hook read out of a ``dotnet`` command: ``origin`` is the
+    text as written after ``dotnet``, for block messages."""
+
+    __slots__ = ("origin",)
+
+    def __init__(self, items, origin):
+        super().__init__(items)
+        self.origin = origin
+
+
+def _written(tokens: list) -> str:
+    return _shown(tokens[:16]) + (" ..." if len(tokens) > 16 else "")
+
+
+def _run_readings(program: str, unknown: list, after: list, origin=None) -> list:
     """argv readings for an application started with forwarded ``unknown``
     tokens and ``after`` (the tokens after ``--``): ``after`` alone, and each
     suffix of ``unknown`` followed by ``after``, so an option value the hook
@@ -1180,7 +1277,8 @@ def _run_readings(program: str, unknown: list, after: list) -> list:
         readings.append([program])
     if len(unknown) > _DOTNET_MAX_TOKENS:
         readings.append([program, UNREADABLE])
-    return _dedupe(readings)
+    readings = _dedupe(readings)
+    return [_Reading(r, origin) for r in readings] if origin else readings
 
 
 def _dotnet_run(tokens: list, project) -> list:
@@ -1192,7 +1290,7 @@ def _dotnet_run(tokens: list, project) -> list:
     program = _dotnet_project(value if value is not None else project)
     if program is None:
         return []
-    return _run_readings(program, unknown, after)
+    return _run_readings(program, unknown, after, "dotnet run " + _written(tokens))
 
 
 def _run_hits(tokens: list, cwds) -> list:
@@ -1205,7 +1303,7 @@ def _run_hits(tokens: list, cwds) -> list:
     out = []
     for program in _project_programs(project, cwds):
         for prog in (_PPDS_PROGRAMS if program == "?" else (program,) if program else ()):
-            out.extend(_run_readings(prog, unknown, after))
+            out.extend(_run_readings(prog, unknown, after, "dotnet run " + _written(tokens)))
     return out
 
 
@@ -1231,7 +1329,7 @@ def _package_exec(tokens: list) -> list:
             continue  # an option value, or another package
         out = []
         for program in programs:
-            out.extend(_run_readings(program, before[k + 1:], after))
+            out.extend(_run_readings(program, before[k + 1:], after, _written(tokens)))
         return out
     return []
 
@@ -1495,13 +1593,48 @@ def profile_target_problem(store, ref: str, allowlist) -> str:
     return ""
 
 
-def _target_problem(args: list, allowlist, store):
+# Commands on which `-e` is `--entity` / `--entities` (src/PPDS.Cli: their
+# environment option is `-env`), and on which `-p` is `--password`. There the
+# letter names no target; on every other path it is read as one.
+_ENTITY_E_PATHS = frozenset(
+    [("data", verb) for verb in ("schema", "delete", "update", "load", "truncate")]
+    + [("metadata", "attribute", verb) for verb in
+       ("create", "update", "delete", "add-option", "update-option", "remove-option")]
+    + [("metadata", "column", verb) for verb in ("create", "update", "delete")]
+    + [("metadata", "key", verb) for verb in ("create", "delete", "reactivate")]
+    + [("metadata", "table", verb) for verb in ("update", "delete")]
+    + [("metadata", "entity", verb) for verb in
+       ("update", "delete", "add-statusreason", "list-statusreasons", "update-statusreason",
+        "remove-statusreason")])
+_PASSWORD_P_PATHS = frozenset({("auth", "create")})
+
+
+def _target_options(path):
+    """``(names, letters)``: the target options and the bundle letters that
+    may name a target on command ``path``."""
+    names, letters = set(_ENV_OPTIONS | _PROFILE_OPTIONS), set(_TARGET_LETTERS)
+    if path in _ENTITY_E_PATHS:
+        names.discard("-e")
+        letters.discard("e")
+    if path in _PASSWORD_P_PATHS:
+        names.discard("-p")
+        letters.discard("p")
+    return names, letters
+
+
+def _target_problem(args: list, allowlist, store, path=(), guess=False):
     """``(why, unplaced)``: why the environment and profile options in
     ``args`` may reach an environment not on the allowlist, or "";
     ``unplaced`` when the reason is an option the hook cannot place (no
     value, or a possible bundle of short options) rather than a target it
-    placed and found not listed."""
-    envs, problem = _option_values(args, _ENV_OPTIONS | _PROFILE_OPTIONS, _TARGET_LETTERS)
+    placed and found not listed. ``path`` is the command path: on some
+    commands ``-e`` and ``-p`` name no target (``_target_options``). In a
+    ``guess`` the hook does not know the program, so ``-e`` and ``-p`` are
+    options it cannot place (``grep -e x``, ``git log -p``), not targets."""
+    names, letters = _target_options(path)
+    if guess:
+        names -= {"-e", "-p"}
+    envs, problem = _option_values(args, names, letters)
     if problem:
         return f"{problem} (an environment or profile the hook cannot place)", True
     for tok, value in envs:
@@ -1656,12 +1789,31 @@ _SWITCH_VERBS = frozenset({"select", "switch", "use"})
 _TEXT_TARGET_OPTIONS = frozenset({
     "--environment", "-env", "--env", "--source-env", "--target-env", "-se", "-te",
     "--profile", "--source-profile", "--target-profile", "-sp", "-tp", "--allowed-env"})
-# `-p` (profile) and `-e` (environment on some paths): only in a text that
-# mentions `ppds` somewhere (before or after: `echo -p x | xargs ppds`); in a
-# text with no mention they are other programs' options (`mkdir -p`, `sh -e`).
-_TEXT_TARGET_SHORT = frozenset({"-p", "-e"})
-_TEXT_WORD_RE = re.compile(r"[^\s;|&()<>'\"`,{}\[\]^\\‘’‚‛“”„]+")
-_TEXT_PPDS_RE = re.compile(r"ppds", re.IGNORECASE)
+# `-p` and `-e` do not count in the text: most programs have them
+# (`mkdir -p`, `git log -p`, `grep -e`), and on some ppds commands they are
+# `--password` and `--entity`. In an invocation the hook placed they are
+# read by command path (`_target_options`).
+# Words for the switch test: split also at `=` (`A=env B=select`).
+_TEXT_WORD_RE = re.compile(r"[^\s;|&()<>'\"`,{}\[\]^\\‘’‚‛“”„=]+")
+# A target option name anywhere in the text, not only as a word of its own
+# (`E=--environment`, `$'\n--profile\n'`): the name not joined to another
+# name character on either side (`--env-file` and `x-env` are not it).
+_TEXT_OPTION_RE = re.compile(
+    r"(?<![A-Za-z0-9_-])(?:" + "|".join(sorted((re.escape(o) for o in _TEXT_TARGET_OPTIONS),
+                                               key=len, reverse=True)) + r")(?![A-Za-z0-9_-])",
+    re.IGNORECASE)
+# Single-letter escapes of C-style strings (`$'...'`, printf, echo -e) and
+# of PowerShell (`` `n ``): decoded to the character so the words they
+# separate are seen.
+_LETTER_ESCAPE_RE = re.compile(r"[\\`]([ntrabfve0])")
+_LETTER_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "f": "\f", "v": "\v",
+                   "e": "\x1b", "0": "\x00"}
+
+
+def _decode_text(text: str) -> str:
+    """``text`` with every escape the hook knows decoded: ``\\x``, ``\\u``,
+    octal and `` `u{} `` (``_unescape``), then single-letter escapes."""
+    return _LETTER_ESCAPE_RE.sub(lambda m: _LETTER_ESCAPES[m.group(1)], _unescape(text))
 
 
 _B64_WORD_RE = re.compile(r"[A-Za-z0-9+/]{8,}={0,2}")
@@ -1683,13 +1835,17 @@ def _encoded_payloads(text: str) -> list:
 
 def text_names_target(command: str) -> bool:
     """True when ``command`` names a switch or a target anywhere: a word of
-    ``_SWITCH_NOUNS`` and a word of ``_SWITCH_VERBS`` (any case), or an
-    option of ``_TEXT_TARGET_OPTIONS`` (any case, alone or with ``=`` / ``:``
-    and a value), or ``-p`` / ``-e`` in a text that mentions ``ppds``. The
-    text is read as written, with escapes decoded, and both again with every quoting
-    character removed, so ``e"n"v`` and ``\\-\\-profile`` count; so is every
-    word that decodes as an encoded PowerShell command (base64 of UTF-16LE,
-    as ``pwsh -EncodedCommand`` takes it), to three levels."""
+    ``_SWITCH_NOUNS`` and a word of ``_SWITCH_VERBS`` (any case; words split
+    at blanks, quotes, operators and ``=``), or an option of
+    ``_TEXT_TARGET_OPTIONS`` anywhere in the text (any case, not joined to
+    another name character: ``E=--environment`` counts, ``--env-file`` does
+    not); ``-p`` and ``-e`` do not count.
+    The text is read as written, with escapes decoded (``\\x``, ``\\u``,
+    octal and single-letter ones such as ``\\n`` and `` `n ``), and both
+    again with every quoting character removed, so ``e"n"v``,
+    ``\\-\\-profile`` and ``env\\nselect`` count; so is every word that
+    decodes as an encoded PowerShell command (base64 of UTF-16LE, as ``pwsh
+    -EncodedCommand`` takes it), to three levels."""
     if not command:
         return False
     sources, fresh = [command], [command]
@@ -1698,11 +1854,12 @@ def text_names_target(command: str) -> bool:
         sources.extend(fresh)
     texts = []
     for source in sources:
-        decoded = _unescape(source)
+        decoded = _decode_text(source)
         texts.extend((source, decoded,
                       "".join(ch for ch in source if ch not in _QUOTING_CHARS),
                       "".join(ch for ch in decoded if ch not in _QUOTING_CHARS)))
-    mentioned = any(_TEXT_PPDS_RE.search(text) for text in texts)
+    if any(_TEXT_OPTION_RE.search(text) for text in texts):
+        return True
     nouns = verbs = False
     for text in texts:
         for m in _TEXT_WORD_RE.finditer(text):
@@ -1712,13 +1869,6 @@ def text_names_target(command: str) -> bool:
             elif word in _SWITCH_VERBS:
                 verbs = True
             if nouns and verbs:
-                return True
-            if not word.startswith("-"):
-                continue
-            name = _split_option(word)[0]
-            if name in _TEXT_TARGET_OPTIONS:
-                return True
-            if name in _TEXT_TARGET_SHORT and mentioned:
                 return True
     return False
 
@@ -1732,9 +1882,10 @@ def decide_env(argv, allowlist, active, store=_MISSING, required=None, names_tar
     further candidate lists that must also match), every environment and
     profile option, and for ``env select`` / ``auth select`` the target.
 
-    What it cannot place (text it could not read, run-time text, and in the
-    argv of a program it could not identify (a ``_Guess``) a response file,
-    an option bundle or an option with no value) is refused when
+    What it cannot place (text it could not read, run-time text, and in a
+    guess (a ``_Guess``: a program it could not identify, or a mention where
+    no program runs) a response file, ``-e`` / ``-p``, an option bundle, an
+    option with no value, or a switch with no target) is refused when
     ``names_target`` (``text_names_target`` of the whole command text: it
     names a switch or a target option); otherwise only the active env
     decides, so a listed active env passes it. The default is the strict
@@ -1771,35 +1922,47 @@ def decide_env(argv, allowlist, active, store=_MISSING, required=None, names_tar
         # identify it is a guess, judged like the rest of the unplaced text.
         why = f"{response} is a response file; its arguments may name another environment"
         return unplaced(why) if isinstance(argv, _Guess) else refuse(why)
-    if any(sp.DYN in arg for arg in args):
-        return unplaced("an argument only known when the command runs may name another environment")
+    dynamic = any(sp.DYN in arg for arg in args)
+    run_time = "an argument only known when the command runs may name another environment"
 
     if prog == "ppds-mcp-server":
+        if dynamic:
+            return unplaced(run_time)
         why = _mcp_target_problem(args, allowlist, store)
         return refuse(why) if why else active_check()
 
+    guess = isinstance(argv, _Guess)
+    # What the hook cannot place in a guess (a mention, a program it could not
+    # identify) is judged like the rest of the unplaced text.
+    cannot = unplaced if guess else refuse
     path, rest = _command_path(args)
     if path == ("env",) and rest and rest[0].lower() in ("switch", "use"):
         path, rest = ("env", "select"), rest[1:]  # not CLI commands; checked like `select`
     if path == ("env", "select"):
+        if dynamic:
+            return unplaced(run_time)
         targets, problem = _switch_targets(rest, {"--environment", "-env"}, _TARGET_LETTERS)
         if problem or not targets:
-            return refuse(problem or "env select with no target the hook can place")
+            return cannot(problem or "env select with no target the hook can place")
         bad = next((t for t in targets if not target_listed(t, allowlist)), None)
         if bad is not None:
             return False, _block_msg_target_not_allowed(bad, allowlist, argv)
-    why, cannot_place = _target_problem(args, allowlist, store)
+    why, cannot_place = _target_problem(args, allowlist, store, path, guess)
     if why:
         # An option the hook cannot place (no value, a possible bundle) is
-        # placed text in a ``ppds`` word's argv: refused. In the argv of a
-        # program the hook could not identify (``$x -ne 0``) it is a guess.
-        return unplaced(why) if cannot_place and isinstance(argv, _Guess) else refuse(why)
+        # placed text in a ``ppds`` word's argv: refused. In a guess
+        # (``$x -ne 0``, ``grep ppds -rE docs``) it is unplaced text.
+        return cannot(why) if cannot_place else refuse(why)
+    if dynamic:
+        # After the target options, so a run-time value of one (`-p $P`) is
+        # a target the hook placed and cannot find listed.
+        return unplaced(run_time)
     if path == ("env", "select"):
         return True, ""
     if path == ("auth", "select"):
         targets, problem = _switch_targets(rest, {"--index", "-i", "--name", "-n"}, set("in"))
         if problem or not targets:
-            return refuse(problem or "auth select with no profile the hook can place")
+            return cannot(problem or "auth select with no profile the hook can place")
         for ref in targets:
             why = profile_target_problem(store, ref, allowlist)
             if why:
@@ -1841,13 +2004,69 @@ def _ppds_vars(command: str) -> list:
     return out
 
 
-def target_variable_problem(command: str, invocations: list) -> str:
+# Variables that decide the home folder the profile store lives under
+# (`~/.ppds`; `%LOCALAPPDATA%\PPDS` on Windows), the way `PPDS_CONFIG_DIR`
+# overrides it. Setting one in a command with an invocation is refused.
+_HOME_VARS = r"home|userprofile|localappdata|appdata|homedrive|homepath"
+
+
+def _set_re(names: str, any_drive_use: bool = True):
+    """A pattern for a text that sets (or unsets) a variable matching
+    ``names``: ``NAME=x`` (also after ``env``, ``set``, ``export``),
+    ``$env:NAME = x`` (any other use of the ``env:`` drive too unless
+    ``any_drive_use`` is False),
+    ``SetEnvironmentVariable(... NAME``, ``export`` / ``declare`` /
+    ``unset`` / ``env -u`` and their kin before it. Group 1 to 5 is the name."""
+    return re.compile(
+        r"(?<![\w$.:-])(" + names + r")\+?=(?!=)"
+        r"|env:(" + names + r")" + ("" if any_drive_use else r"\s*[+]?=(?!=)") +
+        r"|(?:setenvironmentvariable|set-item|new-item|set-content|remove-item|\bsi\b|\bni\b|\bsc\b|\bri\b)"
+        r"[^;|&\n]*?(?<![\w$])(" + names + r")"
+        r"|\b(?:export|declare|typeset|readonly|local|unset|setx|set)\s+(?:-\w+\s+)*(" + names + r")"
+        r"|(?<![\w-])(?:-u|--unset)[=\s]+(" + names + r")",
+        re.IGNORECASE)
+
+
+_HOME_SET_RE = _set_re(r"(?:" + _HOME_VARS + r")(?![\w$])", any_drive_use=False)
+_PPDS_SET_RE = _set_re(r"ppds_[a-z0-9_$]*")
+
+
+def _set_names(pattern, command: str) -> list:
+    """The variable names ``command`` sets by ``pattern`` (quoting removed,
+    escapes decoded), as written."""
+    out = []
+    for text in (command, _unescape(command)):
+        flat = "".join(ch for ch in text if ch not in _QUOTING_CHARS)
+        for m in pattern.finditer(flat):
+            out.append(next(g for g in m.groups() if g))
+    return out
+
+
+def _home_override(command: str) -> str:
+    """The home-folder variable ``command`` sets (``HOME=/tmp/x``,
+    ``$env:USERPROFILE = ...``, ``export HOME``), upper case, or ""."""
+    names = _set_names(_HOME_SET_RE, command)
+    return names[0].upper() if names else ""
+
+
+def target_variable_problem(command: str, invocations: list, strict: bool = True) -> str:
     """Why ``command`` may change the environment the CLI reaches through
     a variable (``PPDS_CONFIG_DIR``, ``PPDS_PROFILE``,
-    ``PPDS_ENVIRONMENT_URL`` ...), or "". With an invocation any such name
-    counts; without one, a PowerShell-style assignment that outlives the
-    command (``$env:PPDS_X = ...``, ``SetEnvironmentVariable``, ``setx``)."""
+    ``PPDS_ENVIRONMENT_URL`` ...) or the home folder (``HOME=``,
+    ``$env:USERPROFILE =``), or "". With an invocation any such ``PPDS_``
+    name counts; when ``strict`` is False and every invocation is a guess
+    (a mention, a program the hook could not identify), only a name the
+    text sets (``_PPDS_SET_RE``). Without an invocation, a PowerShell-style
+    assignment that outlives the command (``$env:PPDS_X = ...``,
+    ``SetEnvironmentVariable``, ``setx``)."""
     names = _ppds_vars(command)
+    if names and invocations and not strict and all(isinstance(argv, _Guess) for argv in invocations):
+        names = [n for n in _set_names(_PPDS_SET_RE, command) if n.lower() not in _SAFE_PPDS_VARS]
+    if invocations:
+        home = _home_override(command)
+        if home:
+            return (f"the command sets {home}, which decides where the CLI finds its profile "
+                    "store and so the environment it reaches")
     if not names:
         return ""
     if invocations:
@@ -1962,7 +2181,10 @@ def sql_words(text: str):
     """The identifier-like words of ``text`` the way the T-SQL lexer splits
     them, erring towards more words: a number (``1``, ``1.5e3``, ``0x1F``)
     ends where its digits end, so ``1DELETE`` and ``0x12UPDATE`` hold a
-    word; a word is ASCII letters, digits, ``_ @ # $`` after a letter, ``_``,
+    word; an exponent marker with no digits after it (``1eDELETE``,
+    ``1.e+DELETE``) ends the number too, and both the word after the marker
+    and the word starting at it are read; a word is ASCII letters, digits,
+    ``_ @ # $`` after a letter, ``_``,
     ``@`` or ``#``; every other character, a non-ASCII letter included,
     separates. Strings, comments and bracketed names are read like code."""
     i, n = 0, len(text)
@@ -1980,11 +2202,24 @@ def sql_words(text: str):
                 i += 1
                 while i < n and "0" <= text[i] <= "9":
                     i += 1
-            if i + 1 < n and text[i] in "eE" and ("0" <= text[i + 1] <= "9" or (
-                    text[i + 1] in "+-" and i + 2 < n and "0" <= text[i + 2] <= "9")):
-                i += 2
-                while i < n and "0" <= text[i] <= "9":
-                    i += 1
+            if i < n and text[i] in "eE":
+                j = i + 1
+                if j < n and text[j] in "+-":
+                    j += 1
+                if j < n and "0" <= text[j] <= "9":
+                    i = j
+                    while i < n and "0" <= text[i] <= "9":
+                        i += 1
+                    continue
+                # An exponent marker with no digits: the T-SQL lexer takes
+                # `1e` / `1.e` / `1e+` as the number, so a word starts right
+                # after it (`1eDELETE` holds DELETE). The word that starts at
+                # the marker itself (`1exec` holds `exec`) is read as well.
+                k = j
+                while k < n and text[k].isascii() and (text[k].isalnum() or text[k] in "_@#$"):
+                    k += 1
+                if j < k and (text[j].isalpha() or text[j] in "_@#"):
+                    yield text[j:k]
             continue
         if c.isascii() and (c.isalpha() or c in "_@#"):
             j = i + 1
@@ -2025,9 +2260,63 @@ def _plugins_deploy_blocked(args: list) -> bool:
     return not dry
 
 
+# `query sql` options (src/PPDS.Cli/Commands/Query/SqlCommand.cs, the query
+# group's options, GlobalOptions): the ones that take a value, and the bool
+# ones, which the parser lets take an optional `true` / `false`.
+_SQL_VALUE_OPTIONS = frozenset({"--file", "--profile", "-p", "--environment", "-env", "--top", "-t",
+                                "--page", "--paging-cookie", "--correlation-id", "--output-format", "-f"})
+_SQL_BOOL_OPTIONS = frozenset({"--stdin", "--show-fetchxml", "--explain", "--tds", "--confirm",
+                               "--dry-run", "--no-limit", "--count", "-c", "--debug", "--quiet", "-q",
+                               "--verbose", "-v"})
+_SQL_COMMENT_RE = re.compile(r"\A(?:\s+|--[^\n]*(?:\n|\Z)|/\*.*?\*/)*", re.DOTALL)
+_SQL_READ_START_RE = re.compile(r"(?:select|with)(?![A-Za-z0-9_@#$])", re.IGNORECASE)
+
+
+def _sql_text_args(args: list):
+    """``(sql, problem)``: the positional SQL text of ``query sql <args>`` as
+    the CLI's parser places it, or a problem when the hook cannot place it:
+    an option it does not know, a bool option with an attached value other
+    than ``true`` / ``false`` (``--dry-run=no``), or not exactly one SQL
+    text. A token with a blank in it is text, not an option."""
+    positional, i = [], 0
+    while i < len(args):
+        tok = args[i]
+        if tok == "--":
+            positional.extend(args[i + 1:])
+            break
+        if not tok.startswith("-") or re.search(r"\s", tok):
+            positional.append(tok)
+            i += 1
+            continue
+        name, inline = _split_option(tok)
+        if name in _SQL_VALUE_OPTIONS:
+            i += 1 if inline is not None else 2
+            continue
+        if name in _SQL_BOOL_OPTIONS:
+            if inline is not None and inline.lower() not in ("true", "false"):
+                return None, f"{tok} (a value the parser does not take as true or false)"
+            if inline is None and i + 1 < len(args) and args[i + 1].lower() in ("true", "false"):
+                i += 1
+            i += 1
+            continue
+        return None, f"{tok} (an option the hook does not know on query sql)"
+    if len(positional) != 1:
+        return None, "no SQL text the hook can place" if not positional else "more than one SQL text"
+    return positional[0], ""
+
+
+def sql_reads(text: str) -> bool:
+    """True when SQL ``text`` is positively a read: after leading blanks and
+    comments it begins with ``SELECT`` or ``WITH`` (any case)."""
+    rest = text[_SQL_COMMENT_RE.match(text).end():]
+    return bool(_SQL_READ_START_RE.match(rest))
+
+
 def _sql_blocked(args: list) -> str:
     """Why ``query sql <args>`` counts as a write, or "" when it only reads.
-    Every argument is SQL text for this test (an option value as well)."""
+    It passes only with one SQL text placed as the CLI's parser places it
+    that is positively a read (``sql_reads``), and with no word that writes
+    in any argument (an option value as well)."""
     if any(arg.lower().startswith(("--file", "--stdin")) for arg in args):
         return "SQL read from a file or stdin"
     if any(sp.DYN in arg for arg in args):
@@ -2037,6 +2326,11 @@ def _sql_blocked(args: list) -> str:
     word = sql_write_word("\n".join(args))
     if word:
         return f"SQL containing {word.upper()}"
+    sql, problem = _sql_text_args(args)
+    if problem:
+        return problem
+    if not sql_reads(sql):
+        return "SQL that does not begin with SELECT or WITH, so it is not known to only read"
     return ""
 
 
@@ -2189,8 +2483,10 @@ def _command_line(argv) -> str:
     nothing when it has none to show."""
     if isinstance(argv, _Guess):
         if argv.origin:
-            return f"{argv.origin}  (a program the hook cannot identify; read as ppds)"
+            return f"{argv.origin}  ({argv.note})"
         return "(not shown: the hook could not read the command in full)"
+    if isinstance(argv, _Reading) and argv.origin:
+        return f"{argv.origin}  (read as: {_shown(argv)})"
     return _shown(argv)
 
 
@@ -2382,6 +2678,48 @@ def _payload_command(raw: str):
     return command, tool_name, cwd
 
 
+# Above the reader's length cap (``sp.MAX_TEXT_CHARS``) the hook does not
+# read a command; a hook input that is not in the known shape is not
+# searched with the mention pattern above this length.
+_MAX_RAW_CHARS = 2 * sp.MAX_TEXT_CHARS
+# Spelled in a text above the cap, these refuse it: guarded programs, shells
+# and code words (lower case, read with quoting characters removed), and
+# escapes that can spell a letter.
+_OVERSIZED_NAMES = tuple(name.encode() for name in sorted(
+    _GUARDED | {s for s in sp.SHELLS if len(s) > 2} | sp.CODE_WORDS))
+_OVERSIZED_ESCAPES = (b"\\x", b"\\u", b"\\0", b"\\1", b"`u{")
+# Run-time text that may name a program (`$X data delete`): it also refuses
+# a text above the cap during a shakedown or with an active environment that
+# is not on the allowlist, where what the hook cannot read is refused.
+_OVERSIZED_RUNTIME = (b"$", b"`", b"%")
+_OVERSIZED_QUOTING = "".join(sorted(_QUOTING_CHARS)).encode("utf-8")
+
+
+def _decide_oversized(data: bytes, shakedown_active: bool, allowlist, misconfigured) -> None:
+    """Answer for a hook input or command longer than the hook reads, with
+    checks whose cost is a few passes over the bytes (no parsing): refused
+    when the text spells a program name (``_OVERSIZED_NAMES``, quoting
+    characters removed) or an escape that can spell one; during a shakedown
+    or with an active environment not on the allowlist, also when it holds
+    run-time text. Otherwise it passes. Exits."""
+    low = data.lower()
+    flat = low.translate(None, _OVERSIZED_QUOTING)
+    why = ""
+    if any(name in flat for name in _OVERSIZED_NAMES):
+        why = "it names a program the hook guards, a shell or a code word"
+    elif any(esc in data for esc in _OVERSIZED_ESCAPES):
+        why = "it holds an escape that can spell a program name"
+    elif any(mark in data for mark in _OVERSIZED_RUNTIME):
+        strict = shakedown_active or misconfigured is not None or (
+            bool(allowlist) and not env_matches_allowlist(get_active_env_names(), allowlist))
+        if strict:
+            why = "it holds text only known when it runs, which may name a program"
+    if why:
+        _refuse(f"BLOCKED [shakedown-safety]: the command is longer than the hook reads "
+                f"({sp.MAX_TEXT_CHARS:,} characters) and {why}, so it is refused.")
+    sys.exit(0)
+
+
 def main() -> None:
     try:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -2419,6 +2757,18 @@ def _main(deadline: float) -> None:
     stream = getattr(sys.stdin, "buffer", None)
     raw = stream.read().decode("utf-8", errors="replace") if stream is not None else sys.stdin.read()
     parsed = _payload_command(raw)
+    # Length first: a text longer than the reader's cap is not scanned whole.
+    if parsed is not None and len(parsed[0]) > sp.MAX_TEXT_CHARS:
+        _decide_oversized(parsed[0].encode("utf-8", errors="replace"), shakedown_active, allowlist,
+                          misconfigured)
+    if parsed is None and len(raw) > _MAX_RAW_CHARS:
+        # Not the known shape, and too long to search with the mention
+        # pattern: any guarded name in it refuses.
+        flat = raw.encode("utf-8", errors="replace").lower().translate(None, _OVERSIZED_QUOTING)
+        if any(name.encode() in flat for name in _GUARDED):
+            _refuse("BLOCKED [shakedown-safety]: the hook input is not in the shape the hook "
+                    "knows and names a program it guards, so it is refused.")
+        sys.exit(0)
     command = ""
     if parsed is None:
         # Not the input shape the hook knows: any mention is an invocation.
@@ -2445,7 +2795,7 @@ def _main(deadline: float) -> None:
             _refuse(_block_msg_misconfigured(misconfigured, invocations[0]))
         if not allowlist:
             sys.exit(0)
-        why = target_variable_problem(command, invocations)
+        why = target_variable_problem(command, invocations, strict=shakedown_active)
         if why:
             _refuse(_block_msg_target(why, allowlist, invocations[0] if invocations else ["(none)"]))
         if not invocations:

@@ -1278,6 +1278,7 @@ COMMAND_PREFIXES = {
     "env", "command", "exec", "nohup", "time", "sudo", "nice", "builtin",
     "then", "do", "else", "elif", "if", "while", "until", "!", "timeout", "stdbuf",
     "&", ".", "wsl", "source", "ionice", "chrt", "taskset", "strace", "ltrace", "doas",
+    "setsid", "winpty", "busybox", "xvfb-run",
 }
 # Words that run a program whose arguments come from elsewhere, or decide
 # them at run time ("opaque" prefixes).
@@ -1286,20 +1287,83 @@ OPAQUE_PREFIXES = {
     "iex", "invoke-expression", "invoke-command", "icm", "eval", "foreach-object", "%",
     "watch", "find", "fd", "runas", "gsudo", "start-job", "sajb", "start-threadjob",
 }
+# How the prefixes the reader knows in detail are written: the options that
+# take the next word as their value (when the value is not attached: `-n4`,
+# `--max-args=4`), the options known to take none, and how many operands
+# come before the program (`timeout 5 cmd`). An option of such a prefix in
+# neither set, or any option of another prefix, makes the program's place
+# uncertain: every later word may be it.
+_PREFIX_SYNTAX = {
+    "env": ({"-u", "--unset", "-C", "--chdir", "-S", "--split-string"},
+            {"-i", "--ignore-environment", "-0", "--null", "-v", "--debug", "-"}, 0),
+    "sudo": ({"-u", "--user", "-g", "--group", "-C", "--close-from", "-D", "--chdir", "-h", "--host",
+              "-p", "--prompt", "-r", "--role", "-t", "--type", "-U", "--other-user", "-T",
+              "--command-timeout", "-R", "--chroot"},
+             {"-A", "--askpass", "-b", "--background", "-E", "--preserve-env", "-H", "--set-home",
+              "-k", "--reset-timestamp", "-n", "--non-interactive", "-P", "--preserve-groups",
+              "-S", "--stdin", "-B", "--bell", "-N", "--no-update"}, 0),
+    "doas": ({"-u", "-C"}, {"-n"}, 0),
+    "nice": ({"-n", "--adjustment"}, set(), 0),
+    "timeout": ({"-s", "--signal", "-k", "--kill-after"},
+                {"--preserve-status", "--foreground", "-v", "--verbose", "-f", "-p"}, 1),
+    "stdbuf": ({"-i", "--input", "-o", "--output", "-e", "--error"}, set(), 0),
+    "xargs": ({"-a", "--arg-file", "-d", "--delimiter", "-E", "-I", "-L", "--max-lines", "-n",
+               "--max-args", "-P", "--max-procs", "-s", "--max-chars", "--process-slot-var",
+               "-J", "-R", "-S"},
+              {"-0", "--null", "-r", "--no-run-if-empty", "-t", "--verbose", "-p", "--interactive",
+               "-x", "--exit", "-o", "--open-tty", "-e", "-i", "-l"}, 0),
+    "nohup": (set(), set(), 0),
+    "setsid": (set(), {"-c", "--ctty", "-f", "--fork", "-w", "--wait"}, 0),
+    "winpty": (set(), set(), 0),
+    "busybox": (set(), set(), 0),
+    "xvfb-run": ({"-e", "--error-file", "-f", "--auth-file", "-n", "--server-num", "-p",
+                  "--xauth-protocol", "-s", "--server-args", "-w", "--wait"},
+                 {"-a", "--auto-servernum", "-l", "--listen-tcp"}, 0),
+}
+# `find` / `fd` run the word after one of these as a program, per match.
+_EXEC_OPTIONS = {"find": {"-exec", "-execdir", "-ok", "-okdir"},
+                 "fd": {"-x", "--exec", "-X", "--exec-batch"}}
+
+
+def _prefix_option(name: str, text: str):
+    """How ``text`` reads as an option of prefix ``name``: ``"value"`` (it
+    takes the next word), ``"flag"`` (it takes none, or its value is
+    attached) or None (not known: the program's place is uncertain)."""
+    syntax = _PREFIX_SYNTAX.get(name)
+    if syntax is None:
+        return None
+    values, flags, _ = syntax
+    if text in flags or (name == "nice" and re.fullmatch(r"-\d+", text)):
+        return "flag"
+    if name == "xargs" and re.fullmatch(r"-[eil].+", text):
+        return "flag"  # GNU `-eEOF`, `-iR`, `-l5`: the value is attached
+    if text in values:
+        return "value"
+    head, sep, _ = text.partition("=")
+    if sep and head.startswith("--") and head in values:
+        return "flag"
+    if not text.startswith("--") and len(text) > 2 and text[:2] in values:
+        return "flag"  # `-n4`: a short option with its value attached
+    return None
 
 
 def command_positions(stmt: Statement):
     """Indices of the words that are run as programs in ``stmt``, each with
     whether its arguments are only known at run time: the first word after
     assignments, and the word after a prefix such as ``env``, ``sudo``,
-    ``&``, ``xargs`` or ``Start-Process`` (options of the prefix skipped).
-    Returns a list of ``(index, opaque)``."""
+    ``&``, ``xargs`` or ``Start-Process``. The options of a prefix in
+    ``_PREFIX_SYNTAX`` are read with their values and operands; an option
+    the reader cannot place (one it does not know, or any option of another
+    prefix) makes every later word a possible program, each opaque. ``find``
+    and ``fd`` run the word after ``-exec`` and its kin. Returns a list of
+    ``(index, opaque)``."""
     words = stmt.words
     out = []
     i = 0
     expect = True
     after_prefix = False
     opaque = False
+    uncertain = None  # index from which every word may be the program
     while i < len(words):
         w = words[i]
         if expect:
@@ -1315,19 +1379,42 @@ def command_positions(stmt: Statement):
                     continue
                 break
             name = w.text.lower() if not w.dynamic else None
+            if name in _EXEC_OPTIONS:
+                for j in range(i + 1, len(words) - 1):
+                    if words[j].text in _EXEC_OPTIONS[name]:
+                        out.append((j + 1, True))
+                return out
             if name in COMMAND_PREFIXES or name in OPAQUE_PREFIXES:
                 after_prefix = True
                 opaque = opaque or name in OPAQUE_PREFIXES
                 i += 1
-                # skip options and assignments of the prefix (env -i X=1 cmd)
+                operands = _PREFIX_SYNTAX[name][2] if name in _PREFIX_SYNTAX else 0
+                if name == "parallel":
+                    uncertain = i if uncertain is None else uncertain  # too many options to read
+                # skip options (with their values) and assignments of the
+                # prefix (env -i X=1 cmd, xargs -n 4 cmd, timeout -s KILL 5 cmd)
                 while i < len(words) and not words[i].dynamic and (
                     words[i].text.startswith("-") or is_assignment(words[i])
                 ) and words[i].text not in ("--",):
+                    if not is_assignment(words[i]):
+                        how = _prefix_option(name, words[i].text)
+                        if how is None and uncertain is None:
+                            uncertain = i + 1
+                        if how == "value":
+                            i += 1
                     i += 1
                 if i < len(words) and words[i].text == "--":
+                    i += 1
+                while operands and i < len(words) and not words[i].dynamic:
+                    operands -= 1
                     i += 1
                 continue
             out.append((i, opaque))
             expect = False
         i += 1
+    if uncertain is not None:
+        placed = {j for j, _ in out}
+        out = [(j, o or j >= uncertain) for j, o in out]
+        out.extend((j, True) for j in range(uncertain, len(words)) if j not in placed)
+        out.sort()
     return out
