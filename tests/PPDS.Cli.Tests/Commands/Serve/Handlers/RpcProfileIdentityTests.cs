@@ -7,6 +7,7 @@ using PPDS.Cli.Commands.Serve.Handlers;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.History;
+using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Query;
 using Xunit;
 
@@ -116,11 +117,20 @@ public sealed class RpcProfileIdentityTests
     public async Task CapturedProvider_DoesNotReloadMutableProfileName_AndSeparatesIdentities()
     {
         var loads = 0;
+        var poolsBuilt = new List<(string? ObjectId, string Url)>();
+        // The pool is a fake: a real one would authenticate the profile and connect to the URL.
         await using var manager = new DaemonConnectionPoolManager(loadProfilesAsync: _ =>
         {
             loads++;
             throw new InvalidOperationException("Captured profiles must not be looked up again.");
-        });
+        })
+        {
+            CapturedPoolFactory = (captured, url) =>
+            {
+                lock (poolsBuilt) poolsBuilt.Add((captured.ObjectId, url));
+                return Mock.Of<IDataverseConnectionPool>();
+            }
+        };
         var profile = Profile();
         var first = await manager.GetOrCreateCapturedServiceProviderAsync(profile, "https://target.crm.dynamics.com");
         var again = await manager.GetOrCreateCapturedServiceProviderAsync(profile.Clone(), "https://target.crm.dynamics.com/");
@@ -132,6 +142,12 @@ public sealed class RpcProfileIdentityTests
         manager.InvalidateProfile("first");
         var invalidated = await manager.GetOrCreateCapturedServiceProviderAsync(profile, "https://target.crm.dynamics.com");
         Assert.NotSame(different, invalidated);
+        Assert.Equal(new (string?, string)[]
+        {
+            ("principal", "https://target.crm.dynamics.com"),
+            ("different-principal", "https://target.crm.dynamics.com"),
+            ("different-principal", "https://target.crm.dynamics.com"),
+        }, poolsBuilt);
     }
 
     [Fact]

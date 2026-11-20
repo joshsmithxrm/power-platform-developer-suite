@@ -45,6 +45,10 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
     private readonly Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? _beforeInteractiveAuth;
     private int _disposed;
 
+    // Lets cache and identity tests replace the captured-profile pool, which otherwise
+    // authenticates and connects in the background (same seam as McpConnectionPoolManager).
+    internal Func<AuthProfile, string, IDataverseConnectionPool>? CapturedPoolFactory { get; init; }
+
     /// <summary>
     /// Initializes a new instance of the <see cref="DaemonConnectionPoolManager"/> class.
     /// </summary>
@@ -331,6 +335,23 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
             ? await _loadProfilesAsync(cancellationToken).ConfigureAwait(false)
             : null;
         var credentialStore = new NativeCredentialStore();
+
+        if (profileSnapshots is not null && CapturedPoolFactory is not null)
+        {
+            var capturedProfile = profileSnapshots[0];
+            var services = new ServiceCollection();
+            services.AddSingleton<ISecureCredentialStore>(_ => credentialStore);
+            services.AddSingleton<IDataverseConnectionPool>(_ => CapturedPoolFactory(capturedProfile, environmentUrl));
+            var provider = services.BuildServiceProvider();
+            return new CachedPoolEntry
+            {
+                ServiceProvider = provider,
+                Pool = provider.GetRequiredService<IDataverseConnectionPool>(),
+                ProfileNames = profileNames.ToHashSet(StringComparer.OrdinalIgnoreCase),
+                EnvironmentUrl = environmentUrl,
+                CredentialStore = provider.GetRequiredService<ISecureCredentialStore>()
+            };
+        }
 
         // Create connection sources for each profile
         var sources = new List<IConnectionSource>();
