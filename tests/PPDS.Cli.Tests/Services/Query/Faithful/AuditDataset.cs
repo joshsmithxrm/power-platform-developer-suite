@@ -81,8 +81,9 @@ internal static class AuditDataset
     public static FakeDataverse Dataverse => Shared.Value;
 
     /// <summary>
-    /// The live run's record ids, read from the rows the audit's report shows (every parent row's id appears there; a
-    /// child's id appears for 11 of 24 rows). Using them lets <c>WHERE Pid = '...'</c> (W113, W114) and the order Dataverse
+    /// The live run's record ids, read from the rows the audit's report shows: 35 of the 36 parent ids (key 27's never
+    /// appears; key 8's appears 6 times, and one stray row in a joined case pairs it with key 11's id, so the majority
+    /// is taken) and 11 of the 24 child ids. Using them lets <c>WHERE Pid = '...'</c> (W113, W114) and the order Dataverse
     /// returns rows in when nothing else decides (by id) replay. Ids the report never shows are generated.
     /// </summary>
     public static Guid Id(string table, int key)
@@ -92,7 +93,6 @@ internal static class AuditDataset
 
     private static readonly Dictionary<int, Guid> LiveParentIds = new()
     {
-        [-4] = Guid.Parse("cef08609-fe31-425d-bde2-0467d85acf2b"),
         [1] = Guid.Parse("a3a6e420-0107-49f7-86cf-52cfb3670557"),
         [2] = Guid.Parse("ad6a1d7e-4347-43da-aa01-b99c95af9d19"),
         [3] = Guid.Parse("a21b1361-2d6a-4f74-ad3e-7c0901cf773d"),
