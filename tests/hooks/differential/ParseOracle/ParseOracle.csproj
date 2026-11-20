@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Parse-only ground truth for the differential tests of .claude/hooks/shakedown-safety.py.
+    Not part of the product and not in PPDS.sln. It builds the CLI's real root command and the MCP
+    server's real option parser and only ever calls Parse: no command action is invoked, so nothing
+    can reach an environment. See ../README.md.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsPublishable>false</IsPublishable>
+    <IsTestProject>false</IsTestProject>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\src\PPDS.Cli\PPDS.Cli.csproj" />
+    <ProjectReference Include="..\..\..\..\src\PPDS.Mcp\PPDS.Mcp.csproj" />
+    <ProjectReference Include="..\..\..\..\src\PPDS.Query\PPDS.Query.csproj" />
+  </ItemGroup>
+</Project>
