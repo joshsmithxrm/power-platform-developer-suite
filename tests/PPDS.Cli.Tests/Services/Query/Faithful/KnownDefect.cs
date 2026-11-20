@@ -1,9 +1,10 @@
 namespace PPDS.Cli.Tests.Services.Query.Faithful;
 
 /// <summary>
-/// Skip reasons for faithful SELECT tests that fail because the engine returns the wrong result today. Each names the
-/// open issue that tracks the defect; the fix for that issue removes the skip. The expectation of a skipped test is what
-/// T-SQL returns and must not be changed to match the engine.
+/// Markers for faithful SELECT cases that the engine gets wrong today. Each names the open issue that tracks the defect. A
+/// marked case asserts that the engine still returns the pinned wrong result (<see cref="FaithfulSelect.Verdict"/>), so it
+/// fails the day the engine changes; the fix for the issue then removes the marker. The T-SQL expectation of a marked case
+/// must not be changed to match the engine.
 /// </summary>
 internal static class KnownDefect
 {

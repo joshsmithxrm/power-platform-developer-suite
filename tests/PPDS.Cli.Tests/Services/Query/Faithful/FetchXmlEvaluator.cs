@@ -23,7 +23,8 @@ namespace PPDS.Cli.Tests.Services.Query.Faithful;
 /// space &lt; <c>%</c> &lt; <c>[</c> &lt; <c>]</c> &lt; <c>_</c> &lt; digits &lt; letters, a shorter prefix first. Observed
 /// ("order by name asc"): <c>%</c> &lt; <c>[</c> &lt; <c>_</c> &lt; letters, space &lt; <c>[</c> &lt; digits &lt; letters.
 /// Not observed: space against <c>%</c>, <c>]</c> against anything, and <c>%</c> or <c>_</c> against digits. Any other
-/// character (an apostrophe, a letter that does not fold to A-Z, kana, ...) is refused.</item>
+/// character in an order or a range comparison is refused (an apostrophe, a letter that does not fold to A-Z, kana, ...);
+/// in an equality or LIKE, other printable ASCII punctuation compares equal only to itself and anything else is refused.</item>
 /// <item>R5: <c>like</c> and <c>begins-with</c> treat <c>%</c>, <c>_</c> and <c>[...]</c> as wildcards, also in a
 /// <c>begins-with</c> value (audit OBSERVED); <c>[^...]</c> and ranges as in W63 and W79 (audit, through PPDS); trailing spaces
 /// count in LIKE (audit W69 and the OBSERVED <c>not-end-with</c> line). <c>ends-with</c> is taken to behave like
@@ -330,7 +331,8 @@ internal sealed class FetchXmlEvaluator
         if (RangeOperators.Contains(op) && type is FakeColumnType.Uniqueidentifier or FakeColumnType.Lookup or FakeColumnType.Boolean)
             throw Unsupported($"operator {op} on a {type} column");
 
-        return new Condition(source.Alias, attribute, type, op, raw.Select(x => Parse(x, type, attribute)).ToArray());
+        var ordered = RangeOperators.Contains(op);
+        return new Condition(source.Alias, attribute, type, op, raw.Select(x => Parse(x, type, attribute, ordered)).ToArray());
     }
 
     private static Order ReadOrder(XElement order, string alias, IReadOnlyDictionary<string, Source> sources)
@@ -431,13 +433,13 @@ internal sealed class FetchXmlEvaluator
     };
 
     /// <summary>R13: a value Dataverse cannot convert to the column's type is a fault (W15: "5.0" on a whole number).</summary>
-    private object Parse(string value, FakeColumnType type, string attribute)
+    private object Parse(string value, FakeColumnType type, string attribute, bool ordered)
     {
         const NumberStyles Whole = NumberStyles.AllowLeadingSign;
         const NumberStyles Fraction = NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint;
         object? parsed = type switch
         {
-            FakeColumnType.String => StringKey(value),
+            FakeColumnType.String => StringKey(value, ordered: ordered),
             FakeColumnType.Integer or FakeColumnType.Choice
                 => int.TryParse(value, Whole, CultureInfo.InvariantCulture, out var i) ? (decimal)i : null,
             FakeColumnType.BigInt => long.TryParse(value, Whole, CultureInfo.InvariantCulture, out var l) ? (decimal)l : null,
@@ -475,19 +477,23 @@ internal sealed class FetchXmlEvaluator
     /// letters folded to A-Z, and the characters mapped so that ordinal order is space &lt; % &lt; [ &lt; ] &lt; _ &lt; digits &lt;
     /// letters. Any other character is refused.
     /// </summary>
-    private static string StringKey(string s, bool trimEnd = true)
+    private static string StringKey(string s, bool trimEnd = true, bool ordered = false)
     {
         var sb = new StringBuilder(s.Length);
         foreach (var ch in (trimEnd ? s.TrimEnd(' ') : s).Normalize(NormalizationForm.FormD))
         {
             if (CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark)
                 continue;
-            sb.Append(KeyChar(ch));
+            sb.Append(KeyChar(ch, ordered));
         }
         return sb.ToString();
     }
 
-    private static char KeyChar(char ch) => ch switch
+    /// <summary>
+    /// Other printable ASCII punctuation has no case or accent variant, so it compares equal only to itself; its position
+    /// in the order is not observed, so ordering and range comparisons refuse it.
+    /// </summary>
+    private static char KeyChar(char ch, bool ordered) => ch switch
     {
         ' ' => '\u0001',
         '%' => '\u0002',
@@ -497,7 +503,8 @@ internal sealed class FetchXmlEvaluator
         >= '0' and <= '9' => ch,
         >= 'A' and <= 'Z' => ch,
         >= 'a' and <= 'z' => (char)(ch - 'a' + 'A'),
-        _ => throw Unsupported($"comparing the character '{ch}' (U+{(int)ch:X4}); its collation is not observed")
+        > ' ' and <= '~' when !ordered => ch,
+        _ => throw Unsupported($"{(ordered ? "ordering by" : "comparing")} the character '{ch}' (U+{(int)ch:X4}); its collation is not observed")
     };
 
     /// <summary>R5: <c>%</c>, <c>_</c>, <c>[...]</c> and <c>[^...]</c> over R4 keys; trailing spaces count.</summary>
@@ -540,9 +547,9 @@ internal sealed class FetchXmlEvaluator
         return new Regex(regex.ToString(), RegexOptions.Singleline | RegexOptions.CultureInvariant);
     }
 
-    private static int Compare(object actual, object value, FakeColumnType type) => type switch
+    private static int Compare(object actual, object value, FakeColumnType type, bool ordered = false) => type switch
     {
-        FakeColumnType.String => string.CompareOrdinal(StringKey((string)actual), (string)value),
+        FakeColumnType.String => string.CompareOrdinal(StringKey((string)actual, ordered: ordered), (string)value),
         FakeColumnType.DateOnly => ((DateTime)actual).Date.CompareTo((DateTime)value),
         FakeColumnType.DateTime => DateTime.SpecifyKind((DateTime)actual, DateTimeKind.Utc).CompareTo((DateTime)value),
         FakeColumnType.Double => Convert.ToDouble(actual, CultureInfo.InvariantCulture).CompareTo((double)value),
@@ -606,7 +613,8 @@ internal sealed class FetchXmlEvaluator
             return c.Operator is "like" or "begins-with" or "ends-with" ? like : !like;
         }
 
-        int Cmp(object value) => Compare(actual, value, c.Type);
+        var ordered = RangeOperators.Contains(c.Operator);
+        int Cmp(object value) => Compare(actual, value, c.Type, ordered);
         return c.Operator switch
         {
             "eq" => Cmp(c.Values[0]) == 0,
@@ -642,8 +650,8 @@ internal sealed class FetchXmlEvaluator
                 var value = Normalize(r.Rows.GetValueOrDefault(order.Alias)?.GetValueOrDefault(order.Attribute));
                 // R6: a choice column orders by its label.
                 if (order.Type == FakeColumnType.Choice && value is decimal d)
-                    return table.Label(order.Attribute, (int)d) is { } label ? StringKey(label) : throw Unsupported($"a choice value {d} without a label");
-                return value is string s ? StringKey(s) : value;
+                    return table.Label(order.Attribute, (int)d) is { } label ? StringKey(label, ordered: true) : throw Unsupported($"a choice value {d} without a label");
+                return value is string s ? StringKey(s, ordered: true) : value;
             }
             var type = order.Type == FakeColumnType.Choice ? FakeColumnType.String : order.Type;
             var comparer = Comparer<object?>.Create((a, b) => CompareForOrder(a, b, type));

@@ -151,11 +151,23 @@ public class FetchXmlEvaluatorRuleTests
         => Assert.Equal(expected, Keys(Fetch(Where(Cond("name", op, value)))));
 
     [Theory]
-    [InlineData("O'Brien")]
-    [InlineData("straße")]
-    [InlineData("ｱ")]
-    public void R4_CharactersWhoseCollationIsNotObserved_AreRefused(string value)
-        => Assert.Throws<NotSupportedException>(() => Fetch(Where(Cond("name", "eq", value)), dataverse: Empty()));
+    [InlineData("eq", "straße")]
+    [InlineData("eq", "ｱ")]
+    [InlineData("lt", "O'Brien")]
+    [InlineData("ge", "@n")]
+    public void R4_CharactersWhoseCollationIsNotObserved_AreRefused(string op, string value)
+        => Assert.Throws<NotSupportedException>(() => Fetch(Where(Cond("name", op, value)), dataverse: Empty()));
+
+    [Fact]
+    public void R4_AsciiPunctuation_InAnEquality_MatchesOnlyItself()
+    {
+        Assert.Equal("", Keys(Fetch(Where(Cond("name", "eq", "@n")))));
+        var dataverse = new FakeDataverse().Add(new FakeTable("account")
+            .Column("accountnumber", FakeColumnType.String).Column("name", FakeColumnType.String)
+            .Row(("accountnumber", "k1"), ("name", "O'Brien")).Row(("accountnumber", "k2"), ("name", "OBrien")));
+        Assert.Equal("k1", Keys(Fetch(Where(Cond("name", "eq", "o'brien")), dataverse: dataverse)));
+        Assert.Throws<NotSupportedException>(() => Fetch("<order attribute=\"name\" />", dataverse: dataverse));
+    }
 
     // ───────────── R5 (audit OBSERVED "like name '[ab]%'", "begins-with name '[ab]'", "begins-with name 'a_'",
     // "like name 'a[_]c'", "not-end-with name 'a'" (key 30 'Alpha ' included); W63 '[^a]%', W69 LIKE 'alpha' (not 'Alpha '),
