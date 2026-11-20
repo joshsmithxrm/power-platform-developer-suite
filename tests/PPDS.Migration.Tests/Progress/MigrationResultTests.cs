@@ -98,14 +98,17 @@ public class MigrationErrorTests
     [Fact]
     public void Constructor_InitializesWithDefaults()
     {
+        var before = DateTime.UtcNow;
         var error = new MigrationError();
+        var after = DateTime.UtcNow;
 
         error.Phase.Should().Be(MigrationPhase.Analyzing);
         error.EntityLogicalName.Should().BeNull();
         error.RecordIndex.Should().BeNull();
         error.ErrorCode.Should().BeNull();
         error.Message.Should().BeEmpty();
-        error.Timestamp.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(1));
+        // Bracketed by two readings of the clock the default uses, so load cannot move it outside the range.
+        error.Timestamp.Should().BeOnOrAfter(before).And.BeOnOrBefore(after);
     }
 
     [Fact]

@@ -85,6 +85,50 @@ public sealed class HangBackstopTests
     }
 
     [Fact]
+    public async Task AtTheBound_TheOperationsTokenIsCancelled()
+    {
+        var observed = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var never = new TaskCompletionSource<int>();
+
+        await Assert.ThrowsAsync<FailException>(() => HangBackstop.WaitAsync(token =>
+        {
+            observed.TrySetResult(token);
+            return never.Task; // Ignores the token, so only the guard can cancel it.
+        }, "a signal that never completes", ShortBound));
+
+        Assert.True((await observed.Task).IsCancellationRequested);
+    }
+
+    public static TheoryData<string> TwoArgumentOverloads => new() { "signal of T", "operation of T", "signal", "operation" };
+
+    // The two-argument overloads are the ones every other test calls; each must apply a bound, not hand back
+    // the bare signal. The override shortens the bound for this async flow only.
+    [Theory]
+    [MemberData(nameof(TwoArgumentOverloads))]
+    public async Task TwoArgumentOverload_FailsAtTheDefaultBound(string overload)
+    {
+        var never = new TaskCompletionSource<int>();
+        Task call;
+        HangBackstop.BoundOverrideForHelperTests.Value = ShortBound;
+        try
+        {
+            call = overload switch
+            {
+                "signal of T" => HangBackstop.WaitAsync(never.Task, "the signal of T"),
+                "operation of T" => HangBackstop.WaitAsync(_ => never.Task, "the operation of T"),
+                "signal" => HangBackstop.WaitAsync((Task)never.Task, "the signal"),
+                _ => HangBackstop.WaitAsync(_ => (Task)never.Task, "the operation"),
+            };
+        }
+        finally { HangBackstop.BoundOverrideForHelperTests.Value = null; }
+
+        // An unguarded overload never completes; the full bound turns that into a clean failure, not a hang.
+        Assert.Same(call, await Task.WhenAny(call, Task.Delay(HangBackstop.Bound)));
+        var error = await Assert.ThrowsAsync<FailException>(() => call);
+        Assert.StartsWith($"No completion after 50ms waiting for the {overload}.", error.Message);
+    }
+
+    [Fact]
     public async Task CompletedOperation_ReturnsItsResult()
     {
         Assert.Equal(42, await HangBackstop.WaitAsync(Task.FromResult(42), "an already completed signal"));
