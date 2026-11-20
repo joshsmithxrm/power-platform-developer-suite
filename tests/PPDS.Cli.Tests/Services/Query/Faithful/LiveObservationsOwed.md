@@ -128,7 +128,8 @@ one refusal fails its probe. Here each form is over the audit's tables.
 
 | Form | FetchXML to run | Compare |
 |---|---|---|
-| distinct with an order returning a float, money, date-time, two-option or date-only column | `<fetch distinct="true"><entity name="ppds_sqlp"><attribute name="ppds_key" /><attribute name="ppds_flt" /><order attribute="ppds_key" /></entity></fetch>`, then the same with `ppds_money`, `ppds_dt`, `ppds_flag` and `ppds_donly` in place of `ppds_flt` | the rows and their order |
+| distinct with an order returning a float, money, date-time, two-option, date-only, string, decimal or choice column | `<fetch distinct="true"><entity name="ppds_sqlp"><attribute name="ppds_key" /><attribute name="ppds_flt" /><order attribute="ppds_key" /></entity></fetch>`, then the same with `ppds_money`, `ppds_dt`, `ppds_flag`, `ppds_donly`, `ppds_name`, `ppds_dec` and `ppds_colorcode` in place of `ppds_flt`. Every one of these orders by the whole-number key, as D07 does; ordering by another type is a separate observation (next line). | the rows and their order |
+| distinct ordered by a column of another type than a whole number | `<fetch distinct="true"><entity name="ppds_sqlp"><attribute name="ppds_name" /><order attribute="ppds_name" /></entity></fetch>` | the rows and their order (by the R4 string order?) |
 | distinct ordered by a column it does not return | `<fetch distinct="true"><entity name="ppds_sqlp"><attribute name="ppds_key" /><order attribute="ppds_name" /></entity></fetch>` | the rows, or the fault |
 | distinct with a link attribute | `<fetch distinct="true"><entity name="ppds_sqlp"><attribute name="ppds_key" /><link-entity name="ppds_sqlc" from="ppds_parentid" to="ppds_sqlpid" link-type="inner" alias="c"><attribute name="ppds_name" /></link-entity></entity></fetch>` | the rows |
 | distinct with no attributes | `<fetch distinct="true"><entity name="ppds_sqlp" /></fetch>` | the columns and rows returned |
@@ -192,8 +193,8 @@ green. For each, run the SQL and compare every row with T-SQL's result.
 
 ## 4. Behaviours the record cannot settle
 
-Each was checked by a mutation of the fake, switched by an environment variable in a scratch copy, against the 1,117
-query tests.
+Each was checked by a mutation of the fake, switched by an environment variable in a scratch copy, against all the query
+tests (`--filter "FullyQualifiedName~Services.Query"`).
 
 - **The order of rows that tie on every ORDER BY key.** The fake breaks ties by id (R16); the audit's R6 says "table order". A mutation that breaks ties by table order failed no test. So the fake refuses ties between rows that return different values, among the returned rows and at their edges. Owed: `SELECT ppds_key, ppds_num FROM P ORDER BY ppds_num` unbounded. Compare the order of the keys within each tied `ppds_num`.
 - **A `top` lost or changed only in the FetchXML.** The planner applies TOP as its own row limit too, so no replayed case changes when the fake ignores `top` or returns one row too many. Only `R10_TopLimitsTheRows` fails on those mutations. Through the engine the record cannot catch them. `DroppedTop_FailsTheTest` covers an engine that loses TOP altogether. Owed: nothing live; this is a property of the engine.

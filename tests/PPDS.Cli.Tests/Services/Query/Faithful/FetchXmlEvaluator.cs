@@ -261,7 +261,8 @@ internal sealed class FetchXmlEvaluator
             Shape($"order on createdon, top {top?.ToString(CultureInfo.InvariantCulture) ?? "none"}");
         if (fetch.Attribute("paging-cookie") is { } cookie)
         {
-            var cookiePage = Regex.Match(cookie.Value, @"^<cookie page=""(?<n>[0-9]+)"" />$");
+            // Only the exact form the fake issues (Page): no leading zero, nothing after it (\z, not $, which allows a final line feed).
+            var cookiePage = Regex.Match(cookie.Value, @"\A<cookie page=""(?<n>[1-9][0-9]*)"" />\z");
             Shape(!cookiePage.Success ? "paging-cookie of another form"
                 : int.TryParse(cookiePage.Groups["n"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var cookieNumber) && cookieNumber == (page ?? 1) - 1
                     ? "paging-cookie of the previous page" : "paging-cookie of another page");
@@ -906,8 +907,9 @@ internal sealed class FetchXmlEvaluator
     /// mode; <see cref="CharUnicodeInfo"/> and the key table are .NET's own. Canonical decomposition is fixed by the Unicode
     /// standard, so the accented letters the datasets use decompose the same everywhere, but that is verified on Linux only.
     /// Every string the fake compares, orders, groups, makes distinct or matches with LIKE goes through this key, so every
-    /// test that does any of that rests on it: in invariant-globalization mode they all fail (by refusal), and on Windows
-    /// the only results that could differ are those over characters outside ASCII (Café, Ångström and the like).
+    /// test that does any of that rests on it. The class whose result depends on the platform is the tests over characters
+    /// outside ASCII (Café, Ångström and the like): those are the ones that fail (by refusal) in invariant-globalization
+    /// mode, while ASCII-only string tests pass there, and they are the only ones whose results could differ on Windows.
     /// </para>
     /// </summary>
     private static string StringKey(string s, bool trimEnd = true, bool ordered = false)

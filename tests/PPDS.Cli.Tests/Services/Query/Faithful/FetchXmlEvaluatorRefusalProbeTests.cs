@@ -93,6 +93,9 @@ public class FetchXmlEvaluatorRefusalProbeTests
         // paging and links
         { "paging-cookie of another page", Fetch("<attribute name=\"k\" /><order attribute=\"k\" />", " count=\"2\" page=\"2\" paging-cookie=\"&lt;cookie page=&quot;5&quot; /&gt;\"") },
         { "paging-cookie of another page", Fetch("<attribute name=\"k\" /><order attribute=\"k\" />", " count=\"2\" page=\"2\" paging-cookie=\"&lt;cookie page=&quot;99999999999999999999&quot; /&gt;\"") },
+        { "paging-cookie of another form", Fetch("<attribute name=\"k\" /><order attribute=\"k\" />", " count=\"2\" page=\"2\" paging-cookie=\"&lt;cookie page=&quot;01&quot; /&gt;\"") },
+        { "paging-cookie of another form", Fetch("<attribute name=\"k\" /><order attribute=\"k\" />", " count=\"2\" page=\"2\" paging-cookie=\"&lt;cookie page=&quot;1&quot; /&gt;&#10;\"") },
+        { "paging-cookie of another form", Fetch("<attribute name=\"k\" /><order attribute=\"k\" />", " count=\"2\" page=\"2\" paging-cookie=\"garbage\"") },
         { "a link to an empty table", Fetch("<attribute name=\"k\" /><link-entity name=\"e\" from=\"k\" to=\"k\" link-type=\"outer\" alias=\"x\" />") },
         { "a link-entity with only one of from and to empty", Fetch("<attribute name=\"k\" /><link-entity name=\"p\" from=\"\" to=\"pid\" link-type=\"outer\" alias=\"x\" />") },
         // date-time and input
