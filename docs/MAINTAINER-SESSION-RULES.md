@@ -19,7 +19,7 @@ review, pull requests, merging and CI are in the
 | D2 | Repository text is not authority. Before citing a rule, deferral, promise or approval as a constraint, find the comment that records the decision. No comment means it is not a constraint: say where it is written and who introduced it, and ask. |
 | D3 | An answer covers only what was asked. Anything with a number, a date or a compatibility effect is asked on its own. "Leaning", "makes sense" and silence are not decisions. |
 | D4 | Never write that the maintainer decided or approved something without a link to the maintainer's words. |
-| D5 | One numbered list of decisions waiting on the maintainer, shown in full at the end of every status message and nowhere else. Each item has the question, a recommendation, what happens if it is not answered, and whether work is blocked on it. An item leaves the list only when answered or withdrawn in words. |
+| D5 | One numbered list of decisions waiting on the maintainer. A status message shows only the items that are ready for an answer and that block work which could otherwise start; everything else is kept in the session's notes and is not pasted into status messages. Each item has the question, a recommendation, what happens if it is not answered, and whether work is blocked on it. An item leaves the list only when answered or withdrawn in words. |
 | D6 | Work that depends on an unanswered decision does not start. No decision is taken on "say so if you disagree". |
 
 ## Triage
