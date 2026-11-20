@@ -37,6 +37,26 @@ cleanup safety, or an approved exclusive disposable environment lifecycle.
 Historical runs and other refs retain their historical workflow definitions;
 the new hold does not revoke or cancel them.
 
+## Proof before merge
+
+These rules say what must be observed before a pull request merges. They are
+separate from the suites above, which gate CI.
+
+| # | Rule |
+|---|---|
+| P1 | A change to what is sent to Dataverse, or to how its response is read, does not merge until it has been observed against a real environment. The pull request states the run: commit, environment (by its neutral name), counts, what was left behind. "Not run live" is a reason not to merge. |
+| P2 | Live proof comes first, before review rounds, for anything that reads from or writes to Dataverse. |
+| P3 | Expected results are computed without PPDS: an SDK read-back, test code over seeded data, or a real SQL Server for expression values. |
+| P4 | A change to SQL value computation does not merge without a green differential run against a real SQL Server. |
+| P5 | The live-test route through the signed-in profile is checked in the first ten minutes of a batch. |
+| P6 | One schema-changing session per test environment at a time. The coordinating session assigns an environment to a worker; a worker never picks one. Every run uses its own throwaway solution and ends with a leftovers scan. |
+| P7 | A change that persists in an environment or in the maintainer's user settings (a provisioned language, an organisation setting, the maintainer's interface language) is made from the main session, after the maintainer's yes, with what cannot be undone stated first. |
+
+The pull request template has a required line for the live run (P1). Review rules
+are in [docs/MERGE-POLICY.md](../docs/MERGE-POLICY.md#maintainer-merge-checklist);
+rules for decisions, triage and sessions are in
+[docs/MAINTAINER-SESSION-RULES.md](../docs/MAINTAINER-SESSION-RULES.md).
+
 ## Acceptance criteria
 
 | ID | Criterion | Test | Status |
