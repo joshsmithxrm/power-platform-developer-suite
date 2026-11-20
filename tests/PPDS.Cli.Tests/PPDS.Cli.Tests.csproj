@@ -49,4 +49,9 @@
       DestinationFiles="$(OutDir)TestAssets\mscorlib.dll" />
   </Target>
 
+  <ItemGroup>
+    <!-- Shared hang guard for tests that wait on a completion signal (#1684). -->
+    <Compile Include="..\Shared\HangBackstop.cs" Link="Shared\HangBackstop.cs" />
+  </ItemGroup>
+
 </Project>

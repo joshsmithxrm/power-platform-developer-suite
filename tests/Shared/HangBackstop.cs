@@ -1,11 +1,16 @@
 using Xunit;
 
-namespace PPDS.Cli.Tests.TestHelpers;
+namespace PPDS.Tests.Shared;
 
 /// <summary>
-/// The upper bound on a test's wait for a completion signal (an RPC response, a reported error).
+/// The upper bound on a test's wait for a completion signal (an RPC response, a reported error, a child
+/// process exiting).
 /// </summary>
 /// <remarks>
+/// One source file, linked into each test project that needs it (the repository's pattern for shared test
+/// code, as with FixtureProcessInterruption.cs), so every project gets the same bound and message without
+/// a shared test assembly or InternalsVisibleTo. Python tests use the same rule with their own constant.
+/// <para/>
 /// It is a hang guard, not a speed assertion: a test that waits for its signal finishes as soon as the
 /// signal arrives, so the bound never decides the outcome of a correct test. It is deliberately not
 /// derived from observed durations: the in-process work these tests wait for takes milliseconds idle,
@@ -35,6 +40,18 @@ internal static class HangBackstop
     /// </summary>
     public static Task<T> WaitAsync<T>(Task<T> signal, string awaiting)
         => WaitAsync(_ => signal, awaiting, Bound);
+
+    /// <summary>As <see cref="WaitAsync{T}(Func{CancellationToken, Task{T}}, string)"/> for an operation with no result.</summary>
+    public static Task WaitAsync(Func<CancellationToken, Task> operation, string awaiting)
+        => WaitAsync(operation, awaiting, Bound);
+
+    /// <summary>As <see cref="WaitAsync{T}(Task{T}, string)"/> for a signal with no result.</summary>
+    public static Task WaitAsync(Task signal, string awaiting)
+        => WaitAsync(_ => signal, awaiting, Bound);
+
+    /// <summary>As <see cref="WaitAsync(Func{CancellationToken, Task}, string)"/> with an explicit bound (tests of this helper only).</summary>
+    internal static Task WaitAsync(Func<CancellationToken, Task> operation, string awaiting, TimeSpan bound)
+        => WaitAsync<bool>(async token => { await operation(token); return true; }, awaiting, bound);
 
     /// <summary>
     /// As <see cref="WaitAsync{T}(Func{CancellationToken, Task{T}}, string)"/> with an explicit bound.

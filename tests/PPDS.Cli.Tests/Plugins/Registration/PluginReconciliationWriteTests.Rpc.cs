@@ -9,7 +9,7 @@ using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services.Plugins;
-using PPDS.Cli.Tests.TestHelpers;
+using PPDS.Tests.Shared;
 using Xunit;
 using System.Text;
 using System.Text.Json;
