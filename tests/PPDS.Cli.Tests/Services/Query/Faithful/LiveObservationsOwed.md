@@ -5,120 +5,205 @@ This list is everything only a live run can settle. Each line gives the query to
 
 Conventions:
 - Run against the audit's tables, seeded by its `SeedAsync` (`SelectFidelityLiveTests.cs` on `test/select-fidelity-live`).
-  The report calls them P, C and B (`ppds_sqlp`, `ppds_sqlc`, `ppds_sqlb`).
+  The tables are `ppds_sqlp`, `ppds_sqlc` and `ppds_sqlb`; the report calls them P, C and B.
 - Run raw FetchXML with `RetrieveMultiple`, as the audit's `RawFilterAsync` does, and SQL through PPDS, as its `RunCaseAsync`
   does.
 - An observation is adopted by adding a replayed case or an OBSERVED line that sends the shape. `ObservedShapesTests` then
-  requires it in `ObservedShapes.All`.
+  requires the shape in `ObservedShapes.All`.
 
 ## 1. Shapes the fake refuses because no recorded case sends them
 
-`ObservedShapes.All` holds the 138 shapes the 436 replayed cases and the OBSERVED lines send. Every other shape is refused,
-naming the shape.
+`ObservedShapes.All` holds the 147 shapes that the replayed cases and the OBSERVED lines send. Every other shape is
+refused, and the refusal names the shape.
 
 ### 1a. Shapes existing tests need (those tests are marked Skip, "waiting for a live observation")
 
 | Shape | Skipped test | FetchXML to run | Compare |
 |---|---|---|---|
-| `condition eq Lookup` | `R13_BracedGuidOnALookup_Matches` | `<fetch><entity name="ppds_sqlc"><attribute name="ppds_key" /><filter><condition attribute="ppds_parentid" operator="eq" value="{PARENT-1-ID}" /></filter></entity></fetch>`, once braced upper case and once as plain `D` form | the child keys of parent key 1, for both forms |
-| `condition ge Double` | `Double_ComparesNumerically_Ge` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_flt" operator="ge" value="2.5" /></filter></entity></fetch>` | the keys with `ppds_flt` ≥ 2.5 |
-| `condition lt String`, `condition ge String` | `R4_StringRange_UsesTheSameOrder` | `<condition attribute="ppds_name" operator="lt" value="b" />` and `operator="ge" value="Zeta"` in the same fetch | the keys, against the order of "order by name asc" (R4) |
-| `condition not-null Money` | `R14_Distinct_ComparesMoneyByValue_AndKeepsColumnsApart` | `<fetch distinct="true"><entity name="ppds_sqlp"><attribute name="ppds_money" /><filter><condition attribute="ppds_money" operator="not-null" /></filter></entity></fetch>` | the distinct money values and their order |
-| date-time literal with a negative offset (`9999-99-99A99:99:99-99:99`) | `R7_DateTimeWithANegativeOffset_IsHonoured` | `<condition attribute="ppds_dt" operator="eq" value="2024-01-14T18:30:00-06:00" />` | key 1 (stored 2024-01-15T00:30Z) |
-| whole-number fault for `-1.5`, `1e1`, `5,0`, `5.` | `R13_WholeNumberFault_OtherValueForms` | `<condition attribute="ppds_num" operator="eq" value="…" />`, one per value | fault type and message, against the W15 message; or rows, if the value is accepted |
-| a link without `link-type`, or a link nested under a link | `NestedLinkEntity_JoinsOnItsParentLink`, `R11_NullKeys_NeverJoin` | `<link-entity name="ppds_sqlc" from="ppds_parentid" to="ppds_sqlpid" alias="c">` with no `link-type`, and the same with a second link nested inside it | the rows (is the default inner?) and the nested join's rows |
-| `link join Lookup=Lookup` | `R11_NullKeys_NeverJoin` | a link from `ppds_parentid` to a lookup column of the same parent | whether NULL keys join (expected: never) |
-| rows that tie on every ORDER BY key but return different values | `R10_TopLimitsTheRows`, `DroppedTop_FailsTheTest`, `TopAndOrderBy_OverTiedRows`, and replayed case T06 (now "cannot be replayed") | `SELECT ppds_key, ppds_num FROM P ORDER BY ppds_num` and T06's `SELECT TOP 3 WITH TIES ppds_key, ppds_num FROM P WHERE ppds_num IS NOT NULL ORDER BY ppds_num` | the order of the keys within each tied `ppds_num`: id order (R16) or table order (R6) |
-| `returntotalrecordcount` | `Paging_ReportsMoreRecordsCookieAndTotal`, `SqlQueryServiceTests.ExecuteAsync_PassesRequestParametersToExecutor` | `<fetch count="5" page="1" returntotalrecordcount="true"><entity name="ppds_sqlb"><attribute name="ppds_key" /></entity></fetch>` | `TotalRecordCount`, `TotalRecordCountLimitExceeded`, `MoreRecords`, and the cookie text |
+| `condition eq Lookup` | `R13_BracedGuidOnALookup_Matches` | `<fetch><entity name="ppds_sqlc"><attribute name="ppds_key" /><filter><condition attribute="ppds_parentid" operator="eq" value="{A3A6E420-0107-49F7-86CF-52CFB3670557}" /></filter></entity></fetch>`, and again with the plain `D` form | the child keys of parent key 1, for both forms |
+| `condition ge Double` | `Double_ComparesNumerically_Ge` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_flt" operator="ge" value="2.5" /></filter></entity></fetch>` | the keys |
+| `condition lt String`, `condition ge String` | `R4_StringRange_UsesTheSameOrder` | the same fetch with `<condition attribute="ppds_name" operator="lt" value="b" />`, then `operator="ge" value="Zeta"` | the keys, against the order of "order by name asc" (R4) |
+| `condition not-null Money` | `R14_Distinct_ComparesMoneyByValue_AndKeepsColumnsApart` | `<fetch distinct="true"><entity name="ppds_sqlp"><attribute name="ppds_money" /><filter><condition attribute="ppds_money" operator="not-null" /></filter></entity></fetch>` | the distinct values and their order |
+| a date-time literal with a negative offset | `R7_DateTimeWithANegativeOffset_IsHonoured` | `<condition attribute="ppds_dt" operator="eq" value="2024-01-14T18:30:00-06:00" />` | key 1 (stored 2024-01-15T00:30Z) |
+| the whole-number fault for `-1.5`, `1e1`, `5,0` and `5.` | `R13_WholeNumberFault_OtherValueForms` | `<condition attribute="ppds_num" operator="eq" value="…" />`, once per value | the fault type and full message, or rows if the value is accepted |
+| a link without `link-type`; a link nested under a link; `link join Lookup=Lookup` | `NestedLinkEntity_JoinsOnItsParentLink`, `R11_NullKeys_NeverJoin` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><link-entity name="ppds_sqlc" from="ppds_parentid" to="ppds_sqlpid" alias="c"><attribute name="ppds_key" /><link-entity name="ppds_sqlp" from="ppds_sqlpid" to="ppds_parentid" alias="p2" /></link-entity></entity></fetch>`, then a link joining `ppds_parentid` to `ppds_parentid` | the rows (is the default inner?), the nested join, and whether NULL keys join |
+| `returntotalrecordcount` | `Paging_ReportsMoreRecordsCookieAndTotal` | `<fetch count="5" page="1" returntotalrecordcount="true"><entity name="ppds_sqlb"><attribute name="ppds_n" /></entity></fetch>` | `TotalRecordCount`, `TotalRecordCountLimitExceeded`, `MoreRecords` and the cookie text |
+| `top 0` | `R10_TopZero_ReturnsNoRow` | `<fetch top="0"><entity name="ppds_sqlp"><attribute name="ppds_key" /></entity></fetch>` | no rows, or the fault; T04 (`SELECT TOP 0`) is answered by the engine without sending `top="0"` |
 
-### 1b. Other shapes the fake evaluated before this round and now refuses (no test needs them yet)
+### 1b. Condition and order pairs by column type that no recorded case sends
 
-Each is refused by its own shape name; run the FetchXML and compare the rows with the fake's former rule.
+These are generated from `ObservedShapes.All`. They are the pairs the evaluator's type rules would otherwise accept:
+- LIKE-family operators on strings only;
+- no range operator on an id, a lookup or a two-option;
+- a multi-select only with `null` and `not-null`.
 
-- **Conditions by column type.** Examples the check found:
-  - `eq` on a float;
-  - `ne`, `in`, `eq` on a lookup;
-  - `lt`, `le`, `ge`, `not-between` on a string;
-  - `gt`, `between` on a choice;
-  - `in` on a date-time and on a two-option;
-  - most operators on decimal, money and date-only.
+67 condition pairs and 9 order pairs.
 
-  For each: `<condition attribute="ppds_<col>" operator="<op>" value="<v>" />` over P. Compare the keys.
-- **Orders by column type:** float, date-only, money descending and two-option descending. `<order attribute="ppds_<col>" descending="true|false" />` over P. Compare the full key order, including where NULL goes.
-- **Value forms:**
-  - `eq` with a `<value>` child: `<condition attribute="ppds_num" operator="eq"><value>5</value></condition>`.
-  - `in` with `value=`: `<condition attribute="ppds_num" operator="in" value="5" />`.
+| Refused pair | FetchXML to run | Compare |
+|---|---|---|
+| `condition lt String` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_name" operator="lt" value="Alpha" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition le String` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_name" operator="le" value="Alpha" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition ge String` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_name" operator="ge" value="Alpha" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-between String` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_name" operator="not-between"><value>Alpha</value><value>Beta</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition ne Decimal` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_dec" operator="ne" value="1.25" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition lt Decimal` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_dec" operator="lt" value="1.25" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition gt Decimal` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_dec" operator="gt" value="1.25" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition le Decimal` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_dec" operator="le" value="1.25" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition ge Decimal` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_dec" operator="ge" value="1.25" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition in Decimal` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_dec" operator="in"><value>1.25</value><value>5</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-in Decimal` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_dec" operator="not-in"><value>1.25</value><value>5</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-between Decimal` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_dec" operator="not-between"><value>1.25</value><value>5</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-null Decimal` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_dec" operator="not-null" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition ne Money` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_money" operator="ne" value="100" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition lt Money` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_money" operator="lt" value="100" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition gt Money` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_money" operator="gt" value="100" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition le Money` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_money" operator="le" value="100" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition in Money` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_money" operator="in"><value>100</value><value>500</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-in Money` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_money" operator="not-in"><value>100</value><value>500</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition between Money` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_money" operator="between"><value>100</value><value>500</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-between Money` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_money" operator="not-between"><value>100</value><value>500</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-null Money` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_money" operator="not-null" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition eq Double` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_flt" operator="eq" value="3.25" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition ne Double` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_flt" operator="ne" value="3.25" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition gt Double` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_flt" operator="gt" value="3.25" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition le Double` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_flt" operator="le" value="3.25" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition ge Double` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_flt" operator="ge" value="3.25" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition in Double` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_flt" operator="in"><value>3.25</value><value>10</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-in Double` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_flt" operator="not-in"><value>3.25</value><value>10</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition between Double` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_flt" operator="between"><value>3.25</value><value>10</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-between Double` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_flt" operator="not-between"><value>3.25</value><value>10</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-null Double` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_flt" operator="not-null" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition in Boolean` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_flag" operator="in"><value>1</value><value>0</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-in Boolean` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_flag" operator="not-in"><value>1</value><value>0</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-null Boolean` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_flag" operator="not-null" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition le DateTime` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_dt" operator="le" value="2024-01-15T00:30:00Z" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition in DateTime` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_dt" operator="in"><value>2024-01-15T00:30:00Z</value><value>2024-06-30T12:00:00Z</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-in DateTime` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_dt" operator="not-in"><value>2024-01-15T00:30:00Z</value><value>2024-06-30T12:00:00Z</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-between DateTime` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_dt" operator="not-between"><value>2024-01-15T00:30:00Z</value><value>2024-06-30T12:00:00Z</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-null DateTime` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_dt" operator="not-null" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition ne DateOnly` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_donly" operator="ne" value="2024-01-15" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition lt DateOnly` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_donly" operator="lt" value="2024-01-15" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition gt DateOnly` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_donly" operator="gt" value="2024-01-15" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition le DateOnly` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_donly" operator="le" value="2024-01-15" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition in DateOnly` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_donly" operator="in"><value>2024-01-15</value><value>2024-06-30</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-in DateOnly` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_donly" operator="not-in"><value>2024-01-15</value><value>2024-06-30</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-between DateOnly` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_donly" operator="not-between"><value>2024-01-15</value><value>2024-06-30</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-null DateOnly` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_donly" operator="not-null" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition lt Choice` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_colorcode" operator="lt" value="374110000" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition gt Choice` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_colorcode" operator="gt" value="374110000" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition le Choice` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_colorcode" operator="le" value="374110000" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition ge Choice` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_colorcode" operator="ge" value="374110000" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-in Choice` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_colorcode" operator="not-in"><value>374110000</value><value>374110001</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition between Choice` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_colorcode" operator="between"><value>374110000</value><value>374110001</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-between Choice` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_colorcode" operator="not-between"><value>374110000</value><value>374110001</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-null Choice` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_colorcode" operator="not-null" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-null MultiChoice` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_multi" operator="not-null" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition eq Lookup` | `<fetch><entity name="ppds_sqlc"><attribute name="ppds_key" /><filter><condition attribute="ppds_parentid" operator="eq" value="a3a6e420-0107-49f7-86cf-52cfb3670557" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition ne Lookup` | `<fetch><entity name="ppds_sqlc"><attribute name="ppds_key" /><filter><condition attribute="ppds_parentid" operator="ne" value="a3a6e420-0107-49f7-86cf-52cfb3670557" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition in Lookup` | `<fetch><entity name="ppds_sqlc"><attribute name="ppds_key" /><filter><condition attribute="ppds_parentid" operator="in"><value>a3a6e420-0107-49f7-86cf-52cfb3670557</value><value>ad6a1d7e-4347-43da-aa01-b99c95af9d19</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-in Lookup` | `<fetch><entity name="ppds_sqlc"><attribute name="ppds_key" /><filter><condition attribute="ppds_parentid" operator="not-in"><value>a3a6e420-0107-49f7-86cf-52cfb3670557</value><value>ad6a1d7e-4347-43da-aa01-b99c95af9d19</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition null Lookup` | `<fetch><entity name="ppds_sqlc"><attribute name="ppds_key" /><filter><condition attribute="ppds_parentid" operator="null" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition ne Uniqueidentifier` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_sqlpid" operator="ne" value="a3a6e420-0107-49f7-86cf-52cfb3670557" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition in Uniqueidentifier` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_sqlpid" operator="in"><value>a3a6e420-0107-49f7-86cf-52cfb3670557</value><value>ad6a1d7e-4347-43da-aa01-b99c95af9d19</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-in Uniqueidentifier` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_sqlpid" operator="not-in"><value>a3a6e420-0107-49f7-86cf-52cfb3670557</value><value>ad6a1d7e-4347-43da-aa01-b99c95af9d19</value></condition></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition null Uniqueidentifier` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_sqlpid" operator="null" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `condition not-null Uniqueidentifier` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter><condition attribute="ppds_sqlpid" operator="not-null" /></filter></entity></fetch>` | the keys returned, or the fault |
+| `order descending Decimal` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><attribute name="ppds_dec" /><order attribute="ppds_dec" descending="true" /><order attribute="ppds_key" /></entity></fetch>` | the full key order (where NULL goes, and the order of ties by ppds_key) |
+| `order descending Money` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><attribute name="ppds_money" /><order attribute="ppds_money" descending="true" /><order attribute="ppds_key" /></entity></fetch>` | the full key order (where NULL goes, and the order of ties by ppds_key) |
+| `order ascending Double` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><attribute name="ppds_flt" /><order attribute="ppds_flt" /><order attribute="ppds_key" /></entity></fetch>` | the full key order (where NULL goes, and the order of ties by ppds_key) |
+| `order descending Double` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><attribute name="ppds_flt" /><order attribute="ppds_flt" descending="true" /><order attribute="ppds_key" /></entity></fetch>` | the full key order (where NULL goes, and the order of ties by ppds_key) |
+| `order descending Boolean` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><attribute name="ppds_flag" /><order attribute="ppds_flag" descending="true" /><order attribute="ppds_key" /></entity></fetch>` | the full key order (where NULL goes, and the order of ties by ppds_key) |
+| `order ascending DateTime` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><attribute name="ppds_dt" /><order attribute="ppds_dt" /><order attribute="ppds_key" /></entity></fetch>` | the full key order (where NULL goes, and the order of ties by ppds_key) |
+| `order ascending DateOnly` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><attribute name="ppds_donly" /><order attribute="ppds_donly" /><order attribute="ppds_key" /></entity></fetch>` | the full key order (where NULL goes, and the order of ties by ppds_key) |
+| `order descending DateOnly` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><attribute name="ppds_donly" /><order attribute="ppds_donly" descending="true" /><order attribute="ppds_key" /></entity></fetch>` | the full key order (where NULL goes, and the order of ties by ppds_key) |
+| `order descending Choice` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><attribute name="ppds_colorcode" /><order attribute="ppds_colorcode" descending="true" /><order attribute="ppds_key" /></entity></fetch>` | the full key order (where NULL goes, and the order of ties by ppds_key) |
 
-  Compare the keys, or the fault.
-- **Date-time literal forms:**
-  - a space and no seconds: `2024-01-15 00:30`;
-  - fractional seconds: `2024-01-15T00:30:00.5`;
-  - a local value in daylight-saving months: `2024-07-01T12:00:00`. Compare which key matches. This also settles section 5's caller offset.
-- **Sibling filters:** `<filter><condition … /></filter><filter><condition … /></filter>` directly under the entity. Are they ANDed? Compare the keys.
-- **`<order entityname="c" …>`** on a linked column. Compare the order.
-- **Sibling links** (J14 is the only three-table case, and it cannot be replayed): two `<link-entity>` under P. Compare the rows.
-- **`<all-attributes />` inside a link.** Compare the columns returned.
-- **A paging cookie of another form:** `paging-cookie="garbage"` with `page="2"`. Fault or rows?
-- **Group by and count on a lookup:** `<fetch aggregate="true"><entity name="ppds_sqlc"><attribute name="ppds_parentid" groupby="true" alias="g" /><attribute name="ppds_key" aggregate="count" alias="n" /></entity></fetch>`. Compare the groups and counts.
-- **Conditions on `createdon`, and `statuscodename`:**
-  - `<condition attribute="createdon" operator="gt" value="…" />`
-  - `<condition attribute="statuscodename" operator="eq" value="Inactive" />`
 
-  Compare the keys.
-- **Distinct without order** on float, two-option, date-time, date-only, multi-select, id and lookup columns. Before this round these threw a raw `InvalidOperationException`; now they are refused. `<fetch distinct="true"><entity name="ppds_sqlp"><attribute name="ppds_<col>" /></entity></fetch>`. Compare the values and their order.
-- **A query on an empty table.** Create an empty table and run `count`, `sum`, `max`, and a plain select. Compare: 0 rows, and the aggregate values (A10 covers only sum and max of a whole number).
+### 1c. Other forms no recorded case sends
+
+`FetchXmlEvaluatorRefusalProbeTests` requires each of these to be refused (or to raise the observed fault). The FetchXML
+there uses a small table; here it is over `ppds_sqlp`.
+
+| Form | FetchXML to run | Compare |
+|---|---|---|
+| distinct with an order returning a float, money or date-time | `<fetch distinct="true"><entity name="ppds_sqlp"><attribute name="ppds_flt" /><order attribute="ppds_flt" /></entity></fetch>` (also `ppds_money`, `ppds_dt`) | the values and their order |
+| distinct ordered by a column it does not return | `<fetch distinct="true"><entity name="ppds_sqlp"><attribute name="ppds_key" /><order attribute="ppds_name" /></entity></fetch>` | rows or fault |
+| distinct with a link attribute | `<fetch distinct="true"><entity name="ppds_sqlp"><attribute name="ppds_key" /><link-entity name="ppds_sqlc" from="ppds_parentid" to="ppds_sqlpid" link-type="inner" alias="c"><attribute name="ppds_name" /></link-entity></entity></fetch>` | the rows |
+| distinct with no attributes | `<fetch distinct="true"><entity name="ppds_sqlp" /></fetch>` | the columns and rows returned |
+| an aggregate fetch with `<all-attributes/>` | `<fetch aggregate="true"><entity name="ppds_sqlp"><all-attributes /></entity></fetch>` | the fault, or the row |
+| group by over no rows | `<fetch aggregate="true"><entity name="ppds_sqlp"><attribute name="ppds_itemtype" groupby="true" alias="g" /><attribute name="ppds_key" aggregate="count" alias="n" /><filter><condition attribute="ppds_key" operator="lt" value="0" /></filter></entity></fetch>` | no rows, or one |
+| raw aggregates over no matching rows | `<fetch aggregate="true"><entity name="ppds_sqlp"><attribute name="ppds_key" aggregate="count" alias="c" /><attribute name="ppds_num" aggregate="sum" alias="s" /><attribute name="ppds_num" aggregate="max" alias="m" /><attribute name="ppds_dec" aggregate="sum" alias="ds" /><attribute name="ppds_num" aggregate="avg" alias="a" /><filter><condition attribute="ppds_key" operator="lt" value="0" /></filter></entity></fetch>` | each value: 0 or NULL. A10 shows the engine returns 0 for sum and max of a whole number; the audit calls its cause unverified. |
+| `mapping="logical"`, `distinct="false"`, `aggregate="false"` | `<fetch mapping="logical"><entity name="ppds_sqlp"><attribute name="ppds_key" /></entity></fetch>` (and the other two) | the same rows as without the attribute |
+| an order on `createdon` in a plain query (no `top="1"`) | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><attribute name="createdon" /><order attribute="createdon" /></entity></fetch>` | the `createdon` values and the order (see section 5) |
+| conditions on `statuscode`; distinct on `statecode` | `<condition attribute="statuscode" operator="eq" value="1" />`; `<fetch distinct="true"><entity name="ppds_sqlp"><attribute name="statecode" /></entity></fetch>` | the keys; the values (see section 5) |
+| LIKE `''`, `[a-]%`, `[-a]%`, `[^^]%`, `[z-a]%`, and an emoji | `<condition attribute="ppds_name" operator="like" value="…" />`, once per pattern | the keys, or the fault |
+| a 34-digit decimal; a 400-digit float; a 32-digit whole number; a full-width digit | `<condition attribute="ppds_dec" operator="eq" value="1.250000000000000000000000000000001" />`; `ppds_flt lt` 400 nines; `ppds_num eq` 32 nines; `ppds_num eq 1５` | rows (and rounding), or the fault |
+| a paging cookie for another page | `<fetch count="2" page="2" paging-cookie="&lt;cookie page=&quot;5&quot; /&gt;"><entity name="ppds_sqlp"><attribute name="ppds_key" /><order attribute="ppds_key" /></entity></fetch>` | which rows come back |
+| a link to an empty table | an outer link to a table with no rows | the parent rows, with the link's columns NULL |
+| a link with only one of `from` and `to` empty | `<link-entity name="ppds_sqlc" from="" to="ppds_sqlpid" link-type="outer" alias="x" />` | the fault text (the fake answered `Name = ''` before) |
+| a local date-time at the end of the range | `<condition attribute="ppds_dt" operator="eq" value="9999-12-31T23:59:59" />` | the fault, or rows |
 
 ## 2. Comparisons the record allows only in part
 
-- **242 of the 355 row results are partial:** the report shows 1 to 6 rows (1,099 of 38,917 rows are compared). Owed: re-run the audit's suite with the row preview unbounded. Compare every row of every case.
-- **Order is compared in 44 cases:**
-  - every case with a top-level ORDER BY and more than one shown row;
+These are the pinned numbers (`AuditCaseReplayTests.Coverage_Totals`, computed from the record).
+
+- **Rows.** Of the 425 replayed cases, 356 return rows and 69 are errors. Of the 356, 113 are compared in full and 243 in part, because the report shows 1 to 6 rows. In all, 1,101 of 38,953 rows are compared. Owed: re-run the audit's suite with the row preview unbounded. Compare every row of every case.
+- **Order.** It is compared in 45 cases:
+  - those with a top-level ORDER BY and more than one shown row;
   - every `SELECT DISTINCT` without ORDER BY (R14).
 
-  Elsewhere, row order is Dataverse's own (R16, fitted to the replay). Owed: `SELECT ppds_key, Pid FROM P` and `SELECT ppds_key, Cid FROM C`. Compare the full order with id order.
-- **Ids:** 563 shown ids are compared and 19 are masked, because the dataset generated them (parent key 27, 13 child ids, all bulk ids). Owed: the same two queries, plus `SELECT ppds_key, Bid FROM B`.
-- **Error messages:** compared segment by segment, but the report cut 47 of 70. The whole-number fault's text after `Exception raised: Input string` is not in the record. The fake ends it with `was not in a correct format.`, which is the .NET Framework text and not observed. Owed: `SELECT ppds_key FROM P WHERE ppds_num = '5.0'`. Compare the whole `FaultException` message, with no redaction.
+  Elsewhere the order is Dataverse's own: id order, fitted to the replay (R16). Owed: `SELECT ppds_key, Pid FROM P` and `SELECT ppds_key, Cid FROM C` unbounded. Compare the full order with id order.
+- **Ids.** All 584 ids that the shown rows hold in full are compared; none is masked. The ids never shown are generated (section 5).
+- **Error messages.** They are compared segment by segment, and up to the end where the record has no cut at its end. Owed, the parts the report cut or redacted:
+  - The value text that E06, X02, X03 and X12 record as `'[REDACTED]'`. Run each case's SQL and compare the whole fault message:
+    - E06: `SELECT ppds_key FROM P WHERE ppds_num = 'abc'`
+    - X02: `DECLARE @i int = 5; SELECT ppds_key FROM P WHERE ppds_num = @i`
+    - X03: `DECLARE @i int; SET @i = 7; SELECT ppds_key FROM P WHERE ppds_num > @i`
+    - X12: `DECLARE @i int = 5; SELECT ppds_key FROM P WHERE ppds_num IN (@i, 10)`
+  - The whole-number fault's text after `Exception raised: Input string`, cut in every record. The fake ends it with `was not in a correct format.`, which is .NET Framework's text and is not observed. Owed: W15, `SELECT ppds_key FROM P WHERE ppds_num = '5.0'`. Compare the whole message.
+  - A17 records exactly `Attribute: name not found in XNode:`, and the fake says no more. Owed: `SELECT SUM(ppds_num * 2) AS s FROM P`. Compare the whole message, including any line after the first.
 
 ## 3. Wrong cases whose fix the record cannot show
 
-For each case below, the wrong offline result still matches what the audit expected (`FixNotVisible` in `AuditCaseReplayTests`). A fix would leave the replay green. For each, run the SQL and compare every row with T-SQL's result.
+`AuditCaseReplay.FixVisibleInRecord` decides this from the record. For each case below, the expected result has the
+same count and columns as the recorded wrong one, and every row the record shows would stay. A fix would leave the replay
+green. For each, run the SQL and compare every row with T-SQL's result.
 
 | Case | Issue | SQL | The rows that decide it |
 |---|---|---|---|
-| FN10 | no issue yet | `SELECT ppds_key, REPLACE(ppds_name, 'a', 'o') AS v FROM P` | key 22 (`'Ångström'` vs `'ongström'`) |
-| FN11 | no issue yet | `SELECT ppds_key, CHARINDEX('a', ppds_name) AS v FROM P` | key 22 (0 vs 1) |
-| FN12 | no issue yet | `SELECT ppds_key, PATINDEX('%a%', ppds_name) AS v FROM P` | key 22 (0 vs 1) |
-| FN17 | no issue yet | `SELECT ppds_key, STUFF(ppds_name, 2, 1, 'X') AS v FROM P` | keys 17, 28, 29 |
+| FN10 | #1632 | `SELECT ppds_key, REPLACE(ppds_name, 'a', 'o') AS v FROM P` | key 22 (`'Ångström'` vs `'ongström'`) |
+| FN11 | #1632 | `SELECT ppds_key, CHARINDEX('a', ppds_name) AS v FROM P` | key 22 (0 vs 1) |
+| FN12 | #1632 | `SELECT ppds_key, PATINDEX('%a%', ppds_name) AS v FROM P` | key 22 (0 vs 1) |
+| FN68 | #1622 | `SELECT ppds_key, CASE WHEN ppds_name = 'cafe' THEN 1 ELSE 0 END AS v FROM P` | keys 5 and 6 (1, not 0) |
 | FN69 | #1622 | `SELECT ppds_key, CASE WHEN ppds_name = 'trail' THEN 1 ELSE 0 END AS v FROM P` | key 8 |
-| FN86 | #1621 | `SELECT ppds_key, TRY_CAST(ppds_name AS int) AS v FROM P` | keys 26, 27 |
-| FN87 | #1621 | `SELECT ppds_key, TRY_CONVERT(int, ppds_name) AS v FROM P` | keys 26, 27 |
+| FN71 | #1621 | `SELECT ppds_key, IIF(ppds_flag = 1, 'yes', 'no') AS v FROM P` | the rows where `ppds_flag` is 1 |
+| FN86 | #1621 | `SELECT ppds_key, TRY_CAST(ppds_name AS int) AS v FROM P` | keys 26 and 27 |
+| FN87 | #1621 | `SELECT ppds_key, TRY_CONVERT(int, ppds_name) AS v FROM P` | keys 26 and 27 |
 | J16 | #1614 | `SELECT p.ppds_key AS pk, COUNT(c.ppds_key) AS n FROM P p LEFT JOIN C c ON c.ppds_parentid = p.Pid GROUP BY p.ppds_key` | the 27 parents with no child (n = 0, not 1) |
-| O07 | #1628 | `SELECT ppds_key, ppds_colorcode FROM P ORDER BY ppds_colorcode, ppds_key` | the full order after the NULL rows (by value, not label) |
+| O07 | #1628 | `SELECT ppds_key, ppds_colorcode FROM P ORDER BY ppds_colorcode, ppds_key` | the order after the NULL rows (by value, not label) |
 | U02 | #1623 | `SELECT ppds_num FROM P UNION ALL SELECT ppds_qty FROM C` | all 60 rows (18 differ) |
 
 ## 4. Behaviours the record cannot settle
 
-The mutation results that support this section are in the pull request description.
+Each was checked by a mutation of the fake, switched by an environment variable in a scratch copy, against the 1,117
+query tests.
 
-- **Tie order among rows equal on every ORDER BY key.** The fake breaks ties by id (R16); the audit's R6 says "table order". No recorded case tells them apart: a mutation that breaks ties by table order failed no test. So the fake now refuses ties between rows that return different values (see 1a). Owed: the same query as in 1a.
-- **Paging cookie format, and the order Dataverse returns rows in without ORDER BY.** Both are fitted to the replay, not observed. Owed:
+- **The order of rows that tie on every ORDER BY key.** The fake breaks ties by id (R16); the audit's R6 says "table order". A mutation that breaks ties by table order failed no test. So the fake refuses ties between rows that return different values, among the returned rows and at their edges. Owed: `SELECT ppds_key, ppds_num FROM P ORDER BY ppds_num` unbounded. Compare the order of the keys within each tied `ppds_num`.
+- **A `top` lost or changed only in the FetchXML.** The planner applies TOP as its own row limit too, so no replayed case changes when the fake ignores `top` or returns one row too many. Only `R10_TopLimitsTheRows` fails on those mutations. Through the engine the record cannot catch them. `DroppedTop_FailsTheTest` covers an engine that loses TOP altogether. Owed: nothing live; this is a property of the engine.
+- **The paging-cookie format, and Dataverse's order without ORDER BY.** Both are fitted to the replay, not observed. Owed:
   - PG01 and PG02 with the cookie text recorded;
-  - `SELECT ppds_key FROM B` page by page. Compare the order.
+  - `SELECT ppds_n FROM B` page by page, unbounded. Compare the order.
+- **A NULL attribute absent or present.** The replay renders both alike, so only the OBSERVED lines and the R3 and R8 tests catch the difference. Owed: nothing; the OBSERVED lines settle it.
+- **Formatted values (date-time, lookup).** The record holds raw values, so only the OBSERVED date-time line and the R15 tests catch them. Owed: a lookup's formatted value. Run `<fetch><entity name="ppds_sqlc"><attribute name="ppds_parentid" /></entity></fetch>` and compare `FormattedValues["ppds_parentid"]` with the parent's name.
 
 ## 5. Dataset values inferred, not taken from the audit
 
-- **Record ids.** These were generated:
-  - parent key 27 (O05 differs for that reason);
-  - 13 child ids;
-  - all 5,050 bulk ids.
-
-  Owed: `SELECT ppds_key, Pid FROM P ORDER BY ppds_key`, `SELECT ppds_key, Cid FROM C ORDER BY ppds_key`, `SELECT ppds_key, Bid FROM B ORDER BY ppds_key`. Compare with `AuditDataset.LiveParentIds` and `LiveChildIds`.
-- **`createdon`.** The values are invented. Replayed aggregate cases send queries ordered on it, and no recorded result shows a value. Owed: `SELECT ppds_key, createdon FROM P ORDER BY ppds_key` (and C, B). Compare the values and the order they give.
-- **The caller's offset, fixed at UTC−6.** This comes from one January value; there is no daylight-saving evidence. Owed:
+- **Record ids.** Generated: 12 of the 24 child ids and 5,039 of the 5,050 bulk ids. Key 27's id is shown only cut (W35: `84c24e9c-a9af-4bba-83b4-bf2…`); its prefix is kept and the rest is zeros. Owed: `SELECT ppds_key, Pid FROM P ORDER BY ppds_key`, `SELECT ppds_key, Cid FROM C ORDER BY ppds_key`, `SELECT ppds_n, Bid FROM B ORDER BY ppds_n`. Compare with `AuditDataset`'s id tables.
+- **`createdon`.** The values are invented. Replayed aggregate cases send `top="1"` queries ordered on it, and no recorded result shows a value. Owed: `SELECT ppds_key, createdon FROM P ORDER BY ppds_key` (and C, B). Compare the values and the order they give.
+- **The caller's offset, fixed at UTC−6.** It comes from one January value, with no daylight-saving evidence. Owed:
   - `SELECT ppds_key FROM P WHERE ppds_dt = '2024-06-30 06:00'` (key 3 is stored 2024-06-30T12:00Z);
   - the caller's time-zone setting.
 
   Compare which key matches.
 - **`statecode` and `statuscode` option sets.** These are invented; V05 shows only 'Active'. Owed: `SELECT DISTINCT statecode, statecodename, statuscode, statuscodename FROM P`. Compare with the fake's choices.
 - **System columns.** `ownerid`, `modifiedon` and the other columns a live `SELECT *` returns (PRJ02, which the report cut) are absent from the fake. Owed: `SELECT * FROM P`. Compare the full column list.
-- **`RetrieveTotalRecordCount`.** The exact value and the limit flag are not observed; see 1a.
