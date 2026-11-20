@@ -681,8 +681,9 @@ public sealed class DaemonTestFixtureTests
         public TaskCompletionSource CancellationRequested { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public override async ValueTask<int> ReadAsync(Memory<char> buffer, CancellationToken cancellationToken = default)
         {
-            ReadStarted.TrySetResult();
+            // Register first: once a test sees ReadStarted, a later cancellation is certain to be observed.
             using var registration = cancellationToken.Register(() => CancellationRequested.TrySetResult());
+            ReadStarted.TrySetResult();
             return await _read.Task;
         }
         public void Complete() => _read.TrySetResult(0);
