@@ -115,16 +115,34 @@ internal static class AuditCaseReplay
     {
         int? top = Regex.Match(c.SqlSuffix, @"^\(top (\d+)\)$") is { Success: true } t ? int.Parse(t.Groups[1].Value, CultureInfo.InvariantCulture) : null;
         var service = new SqlQueryService(AuditDataset.Dataverse.CreateQueryExecutor(), new InactiveFakeShakedownGuard(), poolCapacity: 4);
+        // PG01, PG02: the audit's PageAllAsync asks for page 1, 2, ... (with or without the cookie) until MoreRecords is false.
+        var paging = Regex.Match(c.Sql, @"^(?<sql>.*) \(--page 1, 2, \.\.\. (?<how>with|without) (--paging-)?cookie\)$");
         try
         {
-            var result = await service.ExecuteAsync(new SqlQueryRequest { Sql = ToOffline(c.Sql), TopOverride = top, DmlSafety = new DmlSafetyOptions() });
-            var columns = result.Result.Columns.Select(col => ToReport(col.Alias ?? col.LogicalName)).ToList();
-            var keys = result.Result.Columns.Select(col => col.Alias ?? col.LogicalName).ToList();
-            var rows = result.Result.Records
+            var sql = ToOffline(paging.Success ? paging.Groups["sql"].Value : c.Sql);
+            var results = new List<QueryResult>();
+            string? cookie = null, transpiled = null;
+            for (var page = 1; page <= (paging.Success ? 20 : 1); page++)
+            {
+                var r = await service.ExecuteAsync(new SqlQueryRequest
+                {
+                    Sql = sql, TopOverride = top, DmlSafety = new DmlSafetyOptions(),
+                    PageNumber = paging.Success ? page : null, PagingCookie = paging.Success && paging.Groups["how"].Value == "with" ? cookie : null
+                });
+                results.Add(r.Result);
+                transpiled ??= r.TranspiledFetchXml;
+                if (!paging.Success || !r.Result.MoreRecords)
+                    break;
+                cookie = r.Result.PagingCookie;
+            }
+            var first = results[0];
+            var columns = first.Columns.Select(col => ToReport(col.Alias ?? col.LogicalName)).ToList();
+            var keys = first.Columns.Select(col => col.Alias ?? col.LogicalName).ToList();
+            var rows = results.SelectMany(res => res.Records)
                 .Select(r => "(" + string.Join(",", keys.Select(k => Canon(r.TryGetValue(k, out var qv) ? qv?.Value : null))) + ")")
                 .ToList();
             var text = $"[{string.Join(", ", columns)}] {rows.Count} row{(rows.Count == 1 ? "" : "s")}" + (rows.Count == 0 ? "" : ": " + Preview(rows));
-            return new Run(text, result.TranspiledFetchXml, null, columns, rows);
+            return new Run(text, transpiled, null, columns, rows);
         }
         catch (Exception ex)
         {
@@ -175,8 +193,6 @@ internal static class AuditCaseReplay
     {
         if (c.Actual.StartsWith("not run in-process", StringComparison.Ordinal))
             return new(ReplayClass.CannotReplay, "crash: the audit did not run it in-process (stack overflow ends the process)", "");
-        if (c.Sql.Contains("(--page", StringComparison.Ordinal))
-            return new(ReplayClass.CannotReplay, "paging runner: the audit paged it with --page and a cookie outside SQL text (PageAllAsync), not ported", "");
         if (Regex.IsMatch(c.Sql, "<[a-z][^>]*>"))
             return new(ReplayClass.CannotReplay, "redacted: the report replaced a value in the SQL", "");
         if (Regex.IsMatch(c.Actual, "<[a-z][^>]*>") && c.Actual.StartsWith('['))
@@ -216,7 +232,7 @@ internal static class AuditCaseReplay
 
         var m = Regex.Match(recorded, @"^\[(?<cols>[^\]]*)\] (?<n>\d+) rows?(: (?<rows>.*))?$", RegexOptions.Singleline);
         if (!m.Success)
-            return new(ReplayClass.CannotReplay, "the recorded outcome cannot be parsed", run.Text);
+            return new(ReplayClass.CannotReplay, "the report cut the recorded column list", run.Text);
         var columns = m.Groups["cols"].Value.Length == 0 ? [] : m.Groups["cols"].Value.Split(", ");
         if (!columns.SequenceEqual(run.Columns))
             return new(ReplayClass.Differs, $"columns: live [{string.Join(", ", columns)}], offline [{string.Join(", ", run.Columns)}]", run.Text);
@@ -287,7 +303,8 @@ internal static class AuditCaseReplay
         if (fetchXml is null || !fetchXml.TrimStart().StartsWith("<fetch", StringComparison.Ordinal))
             return null;
         XElement root;
-        try { root = XElement.Parse(ToReport(fetchXml)); }
+        // The engine names an anti-join link "__antijoin_" + 8 random hex digits, new on every run.
+        try { root = XElement.Parse(Regex.Replace(ToReport(fetchXml), "__antijoin_[0-9a-f]{8}", "__antijoin_*")); }
         catch (System.Xml.XmlException) { return null; }
         static XElement Sort(XElement e) => new(e.Name, e.Attributes().OrderBy(a => a.Name.ToString(), StringComparer.Ordinal), e.Elements().Select(Sort),
             e.HasElements ? null : (string.IsNullOrWhiteSpace(e.Value) ? null : e.Value));

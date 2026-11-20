@@ -217,12 +217,15 @@ public class FetchXmlEvaluatorRuleTests
     public void R6_OrderBy_NullFirstAscendingAndChoiceByLabel(string order, string expected)
         => Assert.Equal(expected, Keys(Fetch(order), ordered: true));
 
-    // Not observed: orders inside a link-entity, and ends-with (only not-end-with is observed).
-    [Theory]
-    [InlineData("<link-entity name=\"contact\" from=\"parentcustomerid\" to=\"accountid\" alias=\"c\"><order attribute=\"lastname\" /></link-entity>")]
-    [InlineData("<filter><condition attribute=\"name\" operator=\"ends-with\" value=\"c\" /></filter>")]
-    public void R6_LinkOrdersAndEndsWith_AreRefused(string inner)
-        => Assert.Throws<NotSupportedException>(() => Fetch(inner));
+    // Not observed: orders inside a link-entity.
+    [Fact]
+    public void R6_LinkOrders_AreRefused()
+        => Assert.Throws<NotSupportedException>(() => Fetch("<link-entity name=\"contact\" from=\"parentcustomerid\" to=\"accountid\" alias=\"c\"><order attribute=\"lastname\" /></link-entity>"));
+
+    // Audit W57 (LIKE '%a', sent as ends-with): ends-with matches the end, and is false for NULL.
+    [Fact]
+    public void R5_EndsWith_MatchesTheEnd()
+        => Assert.Equal("k8,k10", Keys(Fetch(Where(Cond("name", "ends-with", "c")))));
 
     [Theory]
     [InlineData("parentaccountid")]
@@ -280,6 +283,10 @@ public class FetchXmlEvaluatorRuleTests
     // ───────────── R10 (not observed) ─────────────
 
     [Fact]
+    public void R10_TopZero_ReturnsNoRow() // audit T04
+        => Assert.Empty(Fetch("", " top=\"0\"").Entities);
+
+    [Fact]
     public void R10_TopAndCountLimitTheRows()
     {
         Assert.Equal("k8,k10,k2", Keys(Fetch("<order attribute=\"numberofemployees\" descending=\"true\" />", " top=\"3\""), ordered: true));
@@ -298,7 +305,6 @@ public class FetchXmlEvaluatorRuleTests
     [InlineData(" top=\"3\" count=\"3\"")]
     [InlineData(" top=\"5001\"")]
     [InlineData(" count=\"5001\"")]
-    [InlineData(" top=\"0\"")]
     [InlineData(" top=\" 3\"")]
     [InlineData(" top=\"03\"")]
     [InlineData(" page=\"x\"")]
@@ -348,32 +354,33 @@ public class FetchXmlEvaluatorRuleTests
 
     // ───────────── R13 (audit W15: "ppds_num = 5.0" is a FormatException fault; W51, W52, W136, W137: an empty value) ─────────────
 
+    // Audit W15 '5.0', E06 'abc', X02/X03/X12 '@i': text a whole number cannot be read from is the FormatException fault.
     [Theory]
     [InlineData("5.0")]
     [InlineData("-1.5")]
+    [InlineData("abc")]
+    [InlineData("@i")]
+    [InlineData("1e1")]
+    [InlineData("5,0")]
+    [InlineData("5.")]
     public void R13_DecimalPointOnAWholeNumber_IsAFault_EvenWithNoRows(string value)
         => Assert.Throws<FaultException<OrganizationServiceFault>>(() => Fetch(Where(Cond("numberofemployees", "eq", value)), dataverse: Empty()));
 
     [Theory]
-    [InlineData("numberofemployees", "1e1")]
     [InlineData("numberofemployees", " 5")]
     [InlineData("numberofemployees", "5 ")]
-    [InlineData("numberofemployees", "5,0")]
     [InlineData("numberofemployees", "+5")]
     [InlineData("numberofemployees", "05")]
-    [InlineData("numberofemployees", "5.")]
     [InlineData("numberofemployees", "99999999999")]
     [InlineData("revenue", "1e2")]
     [InlineData("revenue", " 100")]
     [InlineData("revenue", "")]
     [InlineData("parentaccountid", "not-a-guid")]
-    [InlineData("parentaccountid", "{133f5e40-0000-0000-0000-000000000001}")]
     [InlineData("name", "")]
     public void R13_UnobservedValueForms_AreRefused_EvenWithNoRows(string attribute, string value)
         => Assert.Throws<NotSupportedException>(() => Fetch(Where(Cond(attribute, "in", value)), dataverse: Empty()));
 
     [Theory]
-    [InlineData("true")]
     [InlineData("false")]
     [InlineData("2")]
     public void R13_TwoOptionValuesOtherThan0And1_AreRefused(string value)
@@ -386,6 +393,8 @@ public class FetchXmlEvaluatorRuleTests
         Assert.Equal("k5", Keys(Fetch(Where(Cond("numberofemployees", "eq", "-3")))));
         Assert.Equal("k3", Keys(Fetch(Where(Cond("revenue", "eq", "250.5")))));
         Assert.Equal("k2,k3,k4,k6,k8,k9", Keys(Fetch(Where(Cond("donotemail", "eq", "0")))));
+        Assert.Equal("k1,k5,k7,k10", Keys(Fetch(Where(Cond("donotemail", "eq", "true"))))); // W118
+        Assert.Equal("k3", Keys(Fetch(Where(Cond("parentaccountid", "eq", "{" + SelectFixture.AccountId(1).ToString("D").ToUpperInvariant() + "}"))))); // W114
     }
 
     // An empty value is unknown: W51 in (5, empty) = the 5 rows; W137 in (empty, 100) = the 100 row; W52 not-in (5, empty)
@@ -398,8 +407,11 @@ public class FetchXmlEvaluatorRuleTests
     public void R13_EmptyValueOnAWholeNumber_IsUnknown(string op, string values, string expected)
         => Assert.Equal(expected, Keys(Fetch(Where($"<condition attribute=\"numberofemployees\" operator=\"{op}\">{values}</condition>"))));
 
+    [Fact]
+    public void R13_EmptyValueOnAWholeNumber_WithEq_MatchesNothing() // W26: "= NULL" is sent as eq ""
+        => Assert.Equal("", Keys(Fetch(Where(Cond("numberofemployees", "eq", "")))));
+
     [Theory]
-    [InlineData("eq")]
     [InlineData("ne")]
     [InlineData("lt")]
     public void R13_EmptyValueOnAWholeNumber_WithOtherOperators_IsRefused(string op)
@@ -443,7 +455,6 @@ public class FetchXmlEvaluatorRuleTests
 
     [Theory]
     [InlineData("<fetch version=\"1.0\"><entity name=\"account\" /></fetch>")]
-    [InlineData("<fetch aggregate=\"true\"><entity name=\"account\"><attribute name=\"accountid\" aggregate=\"count\" alias=\"n\" /></entity></fetch>")]
     [InlineData("<fetch aggregate=\"1\"><entity name=\"account\" /></fetch>")]
     [InlineData("<fetch distinct=\"1\"><entity name=\"account\" /></fetch>")]
     [InlineData("<fetch no-lock=\"True\"><entity name=\"account\" /></fetch>")]
@@ -451,7 +462,6 @@ public class FetchXmlEvaluatorRuleTests
     [InlineData("<fetch><entity name=\"account\" enableprefiltering=\"true\" /></fetch>")]
     [InlineData("<fetch><entity name=\"account\">text</entity></fetch>")]
     [InlineData("<fetch><entity name=\"account\"><foo /></entity></fetch>")]
-    [InlineData("<fetch><entity name=\"account\"><attribute name=\"name\" groupby=\"true\" /></entity></fetch>")]
     [InlineData("<fetch><entity name=\"account\"><all-attributes><x /></all-attributes></entity></fetch>")]
     [InlineData("<fetch><entity name=\"account\"><order attribute=\"name\" alias=\"n\" /></entity></fetch>")]
     [InlineData("<fetch><entity name=\"account\"><order attribute=\"name\" descending=\"1\" /></entity></fetch>")]
@@ -474,7 +484,6 @@ public class FetchXmlEvaluatorRuleTests
 
     // Value checks run before the NULL rule: on an all-NULL column an unobserved value or count is still refused, not "every row".
     [Theory]
-    [InlineData("<condition attribute=\"numberofemployees\" operator=\"ne\" value=\"@n\" />")]
     [InlineData("<condition attribute=\"numberofemployees\" operator=\"ne\" />")]
     [InlineData("<condition attribute=\"numberofemployees\" operator=\"not-in\" />")]
     [InlineData("<condition attribute=\"numberofemployees\" operator=\"between\"><value>1</value></condition>")]
@@ -487,6 +496,13 @@ public class FetchXmlEvaluatorRuleTests
 
         Assert.Throws<NotSupportedException>(() => Fetch(Where(condition), dataverse: allNull));
     }
+    // Observed faults, before any row (audit X02 '@i'; E14/A27 groupby outside an aggregate).
+    [Theory]
+    [InlineData("<filter><condition attribute=\"numberofemployees\" operator=\"ne\" value=\"@n\" /></filter>")]
+    [InlineData("<attribute name=\"name\" groupby=\"true\" />")]
+    public void ObservedFaults_HoldOnAnEmptyTable(string inner)
+        => Assert.Throws<FaultException<OrganizationServiceFault>>(() => Fetch(inner, dataverse: Empty()));
+
 
     // A link with no matching row must not hide an invalid condition inside it or after it.
     [Fact]

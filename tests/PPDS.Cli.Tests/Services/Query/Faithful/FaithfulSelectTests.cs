@@ -115,10 +115,10 @@ public class FaithfulSelectTests
 
     [Theory]
     [InlineData("", "k1:Smith,k1:Jones,k2:Brown,k5:Green")]
-    [InlineData("WHERE c.lastname = 'Smith'", "k1:Smith", KnownDefect.JoinedCondition, "fault: 'account' entity doesn't contain attribute with Name = 'lastname'.")]
+    [InlineData("WHERE c.lastname = 'Smith'", "k1:Smith", KnownDefect.JoinedCondition, "fault: 'account' entity doesn't contain attribute with Name = 'lastname' and NameMapping = 'Logical' (look up attribute by name is case-sensitive).")]
     // description exists on both tables: a condition applied to the wrong one returns other rows, not an error.
     [InlineData("WHERE c.description = 'x'", "k1:Smith", KnownDefect.JoinedCondition, "k5:Green")]
-    [InlineData("WHERE c.lastname <> 'Smith' AND a.numberofemployees > 0", "k1:Jones,k2:Brown", KnownDefect.JoinedCondition, "fault: 'account' entity doesn't contain attribute with Name = 'lastname'.")]
+    [InlineData("WHERE c.lastname <> 'Smith' AND a.numberofemployees > 0", "k1:Jones,k2:Brown", KnownDefect.JoinedCondition, "fault: 'account' entity doesn't contain attribute with Name = 'lastname' and NameMapping = 'Logical' (look up attribute by name is case-sensitive).")]
     public async Task InnerJoin_ReturnsExactlyTheMatchingPairs(string where, string expected, string? defect = null, string? today = null)
     {
         var sql = $"SELECT a.accountnumber, c.lastname FROM account a JOIN contact c ON c.parentcustomerid = a.accountid {where}";
@@ -130,7 +130,7 @@ public class FaithfulSelectTests
     {
         const string sql = "SELECT a.accountnumber, c.lastname FROM account a LEFT JOIN contact c ON c.parentcustomerid = a.accountid WHERE c.lastname IS NULL";
         Verdict(sql, SortPairs("k3:,k4:,k6:,k7:,k8:,k9:,k10:"), await OutcomeAsync(sql, Pairs), KnownDefect.JoinedCondition,
-            "fault: 'account' entity doesn't contain attribute with Name = 'lastname'.");
+            "fault: 'account' entity doesn't contain attribute with Name = 'lastname' and NameMapping = 'Logical' (look up attribute by name is case-sensitive).");
     }
 
     private static string SortPairs(string pairs) => string.Join(",", pairs.Split(',').Order(StringComparer.Ordinal));

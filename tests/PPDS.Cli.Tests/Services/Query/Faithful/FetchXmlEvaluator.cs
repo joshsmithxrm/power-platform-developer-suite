@@ -37,7 +37,7 @@ namespace PPDS.Cli.Tests.Services.Query.Faithful;
 /// <item>R9 (PRJ04, J01-J03 through PPDS): an aliased attribute comes back under its alias; a link-entity attribute as
 /// <c>alias.attribute</c>. A repeated unaliased attribute comes back once (PRJ12); any other repeated key is refused.</item>
 /// <item>R10 (T01, T03, T04, PG01-PG04 through PPDS): <c>top</c>, <c>count</c> and <c>page</c> as the engine writes them
-/// (positive, canonical, at most 5,000); anything else, and <c>top</c> with paging, is refused.</item>
+/// (canonical, at most 5,000; 0 returns no row, T04); anything else, and <c>top</c> with paging, is refused.</item>
 /// <item>R11 (J01-J03, J05-J07 through PPDS): inner and outer link-entities joined on unique-identifier or lookup columns;
 /// <c>entityname</c> on a base condition names a link alias; NULL never joins. A filter inside a link-entity, other keys, other
 /// link types, an inner link under an outer one and <c>entityname</c> anywhere else are refused.</item>
@@ -50,7 +50,18 @@ namespace PPDS.Cli.Tests.Services.Query.Faithful;
 /// in the caller's zone (OBSERVED), lookup name (V11, V12; a fixture lookup without a name is refused). Money, decimal, float,
 /// date-only and whole numbers of 1,000 or more carry <see cref="NotModelledFormattedValue"/>.</item>
 /// </list>
-/// Aggregates, every other operator, <c>valueof</c>, empty filters and every unlisted element, attribute or value are refused.
+/// <item>R16 (from the per-case replay, <c>AuditCaseReplayTests</c>): rows that nothing else orders come back in SQL Server
+/// uniqueidentifier order of the primary key, which also breaks ties (the unordered outputs, for example W54, D01, PRJ01);
+/// <c>distinct</c> keeps the first-created of equal rows and sorts by the returned columns (D05, D06, PG08); whole numbers
+/// format with group separators (PG01, PG03 <c>'4,640'</c>); text a whole number cannot be read from is the FormatException
+/// fault (W15, E06, X02); <c>eq ""</c> on a whole number matches nothing (W26); <c>ends-with</c> (W57), a braced GUID (W114),
+/// <c>'true'</c> on a two-option (W118), a memo line break (W125, W126), <c>top</c>/<c>count</c> 0 (T04), a join on whole
+/// numbers (J12) and an outer link with empty from/to (J08) are as observed; an unknown table (C01, E07), an invalid alias
+/// (PRJ18) and groupby outside an aggregate (E14, A27) are the observed faults; the virtual <c>&lt;column&gt;name</c> of a
+/// choice or two-option comes back empty (V04, V09), matches the label in <c>eq</c> (V08) and orders by label (V09); system
+/// <c>statecode</c>/<c>statuscode</c> are in the dataset (V05). Aggregates: see <see cref="ValidateAggregate"/>.</item>
+/// </list>
+/// Every other operator, <c>valueof</c>, empty filters and every unlisted element, attribute or value are refused.
 /// </summary>
 internal sealed class FetchXmlEvaluator
 {
@@ -112,7 +123,13 @@ internal sealed class FetchXmlEvaluator
 
     private sealed record Order(string Alias, string Attribute, FakeColumnType Type, bool Descending);
 
-    private sealed record Spec(Source Root, Dictionary<string, Source> Sources, bool Distinct, int? Top, int? Count, int? Page, bool ReturnTotal);
+    private sealed record Spec(Source Root, Dictionary<string, Source> Sources, bool Distinct, int? Top, int? Count, int? Page, bool ReturnTotal)
+    {
+        /// <summary>The aggregate attributes in document order (<c>aggregate="true"</c> only).</summary>
+        public List<AggregateAttribute>? Aggregates { get; init; }
+    }
+
+    private sealed record AggregateAttribute(Source Source, string Name, string Alias, FakeColumnType Type, string? Function, bool Distinct);
 
     /// <summary>A base row and, per link-entity alias, the joined row (null for an unmatched outer join).</summary>
     private sealed class JoinedRow
@@ -136,6 +153,8 @@ internal sealed class FetchXmlEvaluator
         foreach (var filter in spec.Root.Filters)
             rows = rows.Where(r => Matches(filter, r)).ToList();
 
+        if (spec.Aggregates != null)
+            return EvaluateAggregate(spec, rows);
         var orders = AllOrders(spec.Root).ToList();
         if (!spec.Distinct)
             return Page(spec, Sort(rows, orders, spec.Sources).Select(r => Project(r, spec)).ToList());
@@ -171,8 +190,7 @@ internal sealed class FetchXmlEvaluator
         AllowAttributes(fetch, "mapping", "distinct", "no-lock", "top", "count", "page", "paging-cookie", "returntotalrecordcount", "aggregate");
         if (fetch.Attribute("mapping") is { } mapping && mapping.Value != "logical")
             throw Unsupported($"mapping=\"{mapping.Value}\"");
-        if (fetch.Attribute("aggregate") is { } aggregate && Bool(aggregate))
-            throw Unsupported("aggregate FetchXML");
+        var isAggregate = fetch.Attribute("aggregate") is { } aggregate && Bool(aggregate);
         _ = fetch.Attribute("no-lock") is { } noLock && Bool(noLock);
         NoText(fetch);
 
@@ -187,6 +205,8 @@ internal sealed class FetchXmlEvaluator
         var root = new Source { Alias = BaseAlias, Table = Table((string?)entity.Attribute("name")), Element = entity };
         sources[BaseAlias] = root;
         RegisterLinks(root, sources);
+        var aggregates = isAggregate ? ValidateAggregate(fetch, root, sources) : null;
+        _aggregateMode = isAggregate;
         ValidateContent(root, sources);
         CheckResultKeys(sources);
 
@@ -197,10 +217,11 @@ internal sealed class FetchXmlEvaluator
         if (top != null && (count != null || page != null))
             throw Unsupported("top together with page or count");
 
-        return new Spec(root, sources,
-            fetch.Attribute("distinct") is { } d && Bool(d),
-            top, count, page,
-            fetch.Attribute("returntotalrecordcount") is { } t && Bool(t));
+        var distinct = fetch.Attribute("distinct") is { } d && Bool(d);
+        if (isAggregate && (distinct || top != null || count != null || page is > 1 || root.Links.Any(l => l.Orders.Count > 0) || root.Orders.Count > 0))
+            throw Unsupported("an aggregate fetch with distinct, top, count, paging or orders");
+        return new Spec(root, sources, distinct, top, count, page,
+            fetch.Attribute("returntotalrecordcount") is { } t && Bool(t)) { Aggregates = aggregates };
     }
 
     private void RegisterLinks(Source parent, Dictionary<string, Source> sources)
@@ -260,6 +281,8 @@ internal sealed class FetchXmlEvaluator
         {
             switch (child.Name.LocalName)
             {
+                case "attribute" when _aggregateMode:
+                    break; // checked by ValidateAggregate
                 case "attribute":
                     AllowAttributes(child, "name", "alias", "groupby");
                     NoChildren(child);
@@ -325,6 +348,170 @@ internal sealed class FetchXmlEvaluator
                 keys[key] = (source.Alias, name);
             }
         }
+    }
+
+    private bool _aggregateMode;
+
+    /// <summary>
+    /// Aggregate FetchXML, as the audit observed it through the engine. Faults, checked over every attribute in document order
+    /// before anything else: an attribute without a name (A17), one that is neither groupby nor aggregate (A15, A21, WF04),
+    /// one without an alias (A08, A09, A23), MIN or MAX of text (A06) or of a choice (A25). Modelled: count, countcolumn
+    /// (also distinct, by the R4 collation: A22, A24), sum, avg, min and max of whole numbers, decimals, money, floats and
+    /// date-times (A02-A05, A07, A20, PG07), groupby on base and link columns (J16, S12). Anything else is refused.
+    /// </summary>
+    private List<AggregateAttribute> ValidateAggregate(XElement fetch, Source root, Dictionary<string, Source> sources)
+    {
+        var bySource = sources.Values.ToDictionary(s => s.Element, s => s);
+        var found = new List<(XElement Element, Source Source)>();
+        foreach (var attribute in fetch.Descendants("attribute"))
+        {
+            if (attribute.Parent is null || !bySource.TryGetValue(attribute.Parent, out var source))
+                throw Unsupported("an <attribute> outside an entity or link-entity");
+            var node = attribute.ToString(SaveOptions.DisableFormatting);
+            if (attribute.Attribute("name") is null)
+                throw Fault($"Attribute: name not found in XNode: {node}");
+            if (attribute.Attribute("aggregate") is null && attribute.Attribute("groupby") is null)
+                throw Fault($"An attribute can not be requested when an aggregate operation has been specified and its neither groupby nor aggregate.  NodeXml : {node}");
+            if (attribute.Attribute("alias") is null)
+                throw Fault($"An alias must be specified for every attribute in an aggregate query. NodeXml: {node}");
+            found.Add((attribute, source));
+        }
+
+        var result = new List<AggregateAttribute>();
+        foreach (var (attribute, source) in found)
+        {
+            AllowAttributes(attribute, "name", "alias", "aggregate", "groupby", "distinct");
+            NoChildren(attribute);
+            var name = (string)attribute.Attribute("name")!;
+            var alias = (string)attribute.Attribute("alias")!;
+            var type = RequireColumn(source.Table, name);
+            var function = (string?)attribute.Attribute("aggregate");
+            var groupby = attribute.Attribute("groupby") is { } g && Bool(g);
+            var distinct = attribute.Attribute("distinct") is { } d && Bool(d);
+            if (groupby == (function != null))
+                throw Unsupported("an attribute that is both groupby and aggregate");
+            if (distinct && function != "countcolumn")
+                throw Unsupported($"distinct on aggregate {function}");
+            if (groupby && type is not (FakeColumnType.Integer or FakeColumnType.String or FakeColumnType.Choice or FakeColumnType.Boolean or FakeColumnType.Uniqueidentifier or FakeColumnType.Lookup))
+                throw Unsupported($"groupby on a {type} column");
+            if (function is "min" or "max" && type is FakeColumnType.String or FakeColumnType.Choice)
+                throw Fault($"Aggregate MAX or MIN is not supported for attribute of type {(type == FakeColumnType.String ? "nvarchar" : "picklist")}.");
+            switch (function)
+            {
+                case null or "count" or "countcolumn":
+                    break;
+                case "sum" or "avg" when type is FakeColumnType.Integer or FakeColumnType.Decimal or FakeColumnType.Money or FakeColumnType.Double:
+                case "min" or "max" when type is FakeColumnType.Integer or FakeColumnType.Decimal or FakeColumnType.Money or FakeColumnType.Double or FakeColumnType.DateTime:
+                    break;
+                default:
+                    throw Unsupported($"aggregate {function} on a {type} column");
+            }
+            if (!Regex.IsMatch(alias, "^[A-Za-z_][A-Za-z0-9_]*$"))
+                throw Unsupported($"the aggregate alias '{alias}'");
+            result.Add(new AggregateAttribute(source, name, alias, type, function, distinct));
+        }
+        if (result.Select(a => a.Alias).Distinct(StringComparer.Ordinal).Count() != result.Count)
+            throw Unsupported("two aggregate attributes with the same alias");
+        return result;
+    }
+
+    private EntityCollection EvaluateAggregate(Spec spec, List<JoinedRow> rows)
+    {
+        var groupBy = spec.Aggregates!.Where(a => a.Function is null).ToList();
+        object? Raw(JoinedRow r, AggregateAttribute a) => r.Rows.GetValueOrDefault(a.Source.Alias)?.GetValueOrDefault(a.Name);
+        object? GroupKey(object? raw) => Normalize(raw) is string s ? StringKey(s) : Normalize(raw);
+
+        var groups = rows.GroupBy(r => string.Join("|", groupBy.Select(a => Convert.ToString(GroupKey(Raw(r, a)), CultureInfo.InvariantCulture) ?? "\u0000")))
+            .Select(g => g.ToList()).ToList();
+        if (groupBy.Count == 0 && groups.Count == 0)
+            groups.Add([]); // no groupby: one row, also over no rows (A10)
+
+        // Groups come back ordered by their groupby values like ORDER BY (choice by label, NULL first): S12, J16.
+        IOrderedEnumerable<List<JoinedRow>>? ordered = null;
+        foreach (var a in groupBy)
+        {
+            object? Key(List<JoinedRow> g)
+            {
+                var value = Normalize(Raw(g[0], a));
+                if (a.Type == FakeColumnType.Choice && value is decimal d)
+                    return a.Source.Table.Label(a.Name, (int)d) is { } label ? StringKey(label, ordered: true) : null;
+                return value is string s ? StringKey(s, ordered: true) : value;
+            }
+            var type = a.Type == FakeColumnType.Choice ? FakeColumnType.String : a.Type;
+            var comparer = Comparer<object?>.Create((x, y) => CompareForOrder(x, y, type));
+            ordered = ordered is null ? groups.OrderBy(Key, comparer) : ordered.ThenBy(Key, comparer);
+        }
+        if (ordered != null)
+            groups = Unwrap(() => ordered.ToList());
+
+        var entities = new List<Entity>();
+        foreach (var group in groups)
+        {
+            var entity = new Entity(spec.Root.Table.LogicalName);
+            foreach (var a in spec.Aggregates!)
+            {
+                var value = a.Function is null ? Raw(group[0], a) : Aggregate(a, group.Select(r => Raw(r, a)).ToList(), group.Count);
+                if (Normalize(value) is null)
+                    continue;
+                entity[a.Alias] = new AliasedValue(a.Source.Table.LogicalName, a.Name, value);
+                var formatted = a.Function switch
+                {
+                    null => Formatted(a.Source.Table, a.Name, value!),
+                    "count" or "countcolumn" => ((int)value!).ToString("#,##0", CultureInfo.InvariantCulture), // S12 '8'
+                    _ => NotModelledFormattedValue
+                };
+                if (formatted != null)
+                    entity.FormattedValues[a.Alias] = formatted;
+            }
+            entities.Add(entity);
+        }
+        return Page(spec, entities);
+    }
+
+    private static object? Aggregate(AggregateAttribute a, List<object?> raw, int rowCount)
+    {
+        var values = raw.Where(v => Normalize(v) is not null).ToList();
+        switch (a.Function)
+        {
+            case "count":
+                return rowCount;
+            case "countcolumn":
+                return a.Distinct
+                    ? values.Select(v => Normalize(v) is string s ? StringKey(s) : Normalize(v)).Distinct().Count() // A22, A24
+                    : values.Count;
+        }
+        if (values.Count == 0)
+        {
+            // Over no rows Dataverse returns 0 for sum and max of a whole number (A10); nothing else is observed.
+            return a.Function is "sum" or "max" && a.Type == FakeColumnType.Integer
+                ? 0
+                : throw Unsupported($"aggregate {a.Function} of a {a.Type} column over no rows");
+        }
+        if (a.Type == FakeColumnType.DateTime)
+        {
+            var dates = values.Cast<DateTime>().ToList();
+            return a.Function == "min" ? dates.Min() : dates.Max();
+        }
+        if (a.Type == FakeColumnType.Double)
+        {
+            var d = values.Select(v => Convert.ToDouble(Normalize(v), CultureInfo.InvariantCulture)).ToList();
+            return a.Function switch { "sum" => d.Sum(), "avg" => d.Average(), "min" => d.Min(), _ => d.Max() };
+        }
+        var n = values.Select(v => (decimal)Normalize(v)!).ToList();
+        var result = a.Function switch
+        {
+            "sum" => n.Sum(),
+            // The average of a whole number is truncated to a whole number (A02: 166 / 30 = 5).
+            "avg" => a.Type == FakeColumnType.Integer ? decimal.Truncate(n.Sum() / n.Count) : n.Sum() / n.Count,
+            "min" => n.Min(),
+            _ => n.Max()
+        };
+        return a.Type switch
+        {
+            FakeColumnType.Integer => (object)(int)result,
+            FakeColumnType.Money => new Money(result),
+            _ => result
+        };
     }
 
     private Filter ReadFilter(XElement filter, string alias, IReadOnlyDictionary<string, Source> sources)

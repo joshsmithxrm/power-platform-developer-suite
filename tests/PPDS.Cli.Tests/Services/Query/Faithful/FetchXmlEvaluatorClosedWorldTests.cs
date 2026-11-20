@@ -75,7 +75,6 @@ public class FetchXmlEvaluatorClosedWorldTests
     [InlineData("<link-entity name=\"contact\" from=\"parentcustomerid\" to=\"name\" alias=\"c\" />")]
     [InlineData("<link-entity name=\"contact\" from=\"parentcustomerid\" to=\"accountid\" alias=\"c\" /><link-entity name=\"contact\" from=\"parentcustomerid\" to=\"accountid\" alias=\"c\" />")]
     [InlineData("<link-entity name=\"contact\" from=\"parentcustomerid\" to=\"accountid\" alias=\"\" />")]
-    [InlineData("<link-entity name=\"lead\" from=\"parentcustomerid\" to=\"accountid\" alias=\"c\" />")]
     public void UnobservedJoins_AreRefused(string inner) => Refused(inner);
 
     // Audit O03 ("look up attribute by name is case-sensitive"): names are matched exactly.
@@ -83,7 +82,9 @@ public class FetchXmlEvaluatorClosedWorldTests
     public void Names_AreCaseSensitive()
     {
         Assert.Throws<FaultException<OrganizationServiceFault>>(() => Fetch("<attribute name=\"Name\" />", dataverse: Empty()));
-        Assert.Throws<NotSupportedException>(() => Empty().RetrieveMultiple("<fetch><entity name=\"Account\" /></fetch>"));
+        // An unknown table is the fault of audit C01 and E07.
+        Assert.Throws<FaultException<OrganizationServiceFault>>(() => Empty().RetrieveMultiple("<fetch><entity name=\"Account\" /></fetch>"));
+        Assert.Throws<FaultException<OrganizationServiceFault>>(() => Fetch("<link-entity name=\"lead\" from=\"parentcustomerid\" to=\"accountid\" alias=\"c\" />", dataverse: Empty()));
     }
 
     [Theory]
@@ -180,13 +181,13 @@ public class FetchXmlEvaluatorClosedWorldTests
     }
 
     [Fact]
-    public void R15_WholeNumbers_1000AndAbove_CarryTheNotModelledMarker()
+    public void R15_WholeNumbers_FormatWithGroupSeparators() // audit PG01/PG03 '4,640', D01 '-100'
     {
         var table = new FakeTable("account").Column("accountnumber", FakeColumnType.String).Column("n", FakeColumnType.Integer)
             .Row(("accountnumber", "k1"), ("n", 999)).Row(("accountnumber", "k2"), ("n", 1000)).Row(("accountnumber", "k3"), ("n", -999));
         var result = new FakeDataverse().Add(table).RetrieveMultiple("<fetch><entity name=\"account\"><attribute name=\"n\" /><order attribute=\"n\" /></entity></fetch>");
 
-        Assert.Equal(new[] { "-999", "999", FetchXmlEvaluator.NotModelledFormattedValue }, result.Entities.Select(e => e.FormattedValues["n"]));
+        Assert.Equal(new[] { "-999", "999", "1,000" }, result.Entities.Select(e => e.FormattedValues["n"]));
     }
 
     // ───────────── Pins for behaviours only an exact row set shows ─────────────
