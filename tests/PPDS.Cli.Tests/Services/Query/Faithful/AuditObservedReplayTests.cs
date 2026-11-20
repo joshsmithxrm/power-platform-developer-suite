@@ -138,8 +138,8 @@ public class AuditObservedReplayTests
         [@"FetchXML order by choice asc (label or value?): NULL NULL NULL NULL NULL NULL NULL NULL 'Blue=374110001' 'Blue=374110001' 'Blue=374110001' 'Blue=374110001' 'Blue=374110001' 'Blue=374110001' 'Blue=374110001' 'Blue=374110001' 'Blue=374110001' 'Green=374110002' 'Green=374110002' 'Green=374110002' 'Green=374110002' 'Green=374110002' 'Green=374110002' 'Green=374110002' 'Green=374110002' 'Green=374110002' 'Red=374110000' 'Red=374110000' 'Red=374110000' 'Red=374110000' 'Red=374110000' 'Red=374110000' 'Red=374110000' 'Red=374110000' 'Red=374110000' 'Red=374110000'", @"<order attribute=""ppds_colorcode"" /><order attribute=""ppds_key"" />", "ppds_colorcode"],
     ];
 
-    private const string StoredStrings = @"stored string values (SDK read-back): key 4 name='Beta' memo=NULL, key 7 name='  lead' memo='line1
-line2', key 8 name='trail  ' memo=NULL, key 30 name='Alpha ' memo='memo 30'";
+    // The audit's line, with its line break written as \n so the value does not depend on the checkout's line endings.
+    private const string StoredStrings = "stored string values (SDK read-back): key 4 name='Beta' memo=NULL, key 7 name='  lead' memo='line1\nline2', key 8 name='trail  ' memo=NULL, key 30 name='Alpha ' memo='memo 30'";
 
     private const string FormattedDt = @"formatted value of ppds_dt stored as 2024-01-15T00:30:00 (UTC): '1/14/2024 6:30 PM' (the caller's time-zone setting decides this)";
 }
