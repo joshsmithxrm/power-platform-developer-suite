@@ -1,7 +1,7 @@
 # Query
 
 **Status:** Implemented
-**Last Updated:** 2026-03-18
+**Last Updated:** 2026-11-20
 **Surfaces:** CLI, TUI, Extension, MCP
 **Code:** [src/PPDS.Dataverse/Query/](../src/PPDS.Dataverse/Query/), [src/PPDS.Dataverse/Sql/](../src/PPDS.Dataverse/Sql/), [src/PPDS.Cli/Services/Query/](../src/PPDS.Cli/Services/Query/), [src/PPDS.Cli/Services/History/](../src/PPDS.Cli/Services/History/), [src/PPDS.Cli/Commands/Serve/Handlers/](../src/PPDS.Cli/Commands/Serve/Handlers/), [src/PPDS.Extension/src/](../src/PPDS.Extension/src/)
 
@@ -20,7 +20,7 @@ The query system enables SQL-like queries against Dataverse through automatic tr
 
 ### Non-Goals
 
-- Full SQL compatibility (subqueries, UNION, CASE, functions not yet supported — see Unsupported SQL Features and Roadmap sections below)
+- Full SQL compatibility (subqueries and UNION not yet supported — see Unsupported SQL Features and Roadmap sections below; which expressions, `CASE` forms and functions are supported is defined by [sql-values.md](./sql-values.md))
 - Query optimization beyond plan-layer routing (FetchXML pushdown is maximized; client-side operators are fallbacks)
 - OData query generation (FetchXML is the target format)
 
@@ -122,8 +122,8 @@ The plan-based pipeline (introduced by the v2 execution plan layer) replaces the
 
 - Subqueries (`SELECT * FROM (SELECT...)`, `WHERE id IN (SELECT ...)`, `EXISTS`) — planned
 - UNION/INTERSECT/EXCEPT — planned
-- Complex expressions (`revenue * 1.1`, `CASE WHEN`) — planned
-- Functions (`CONCAT()`, `UPPER()`) — planned
+- Complex expressions (`revenue * 1.1`, `CASE WHEN`): see [sql-values.md](./sql-values.md), which defines the expressions that are supported
+- Functions (`CONCAT()`, `UPPER()`): see [sql-values.md](./sql-values.md), which defines the functions that are supported
 
 > **Note:** HAVING is now supported via client-side filtering (`ClientFilterNode` after aggregate `FetchXmlScanNode`). Cross-environment queries are supported via `RemoteExecutorFactory` and `[LABEL].entity` syntax.
 
@@ -613,7 +613,7 @@ public void Transpile_SelectWithJoin_GeneratesLinkEntity()
 - **Query builder TUI**: Interactive query construction with autocomplete
 - **Explain plan**: Show how FetchXML will be executed (`ExplainAsync()` infrastructure exists)
 - **Query templates**: Parameterized saved queries
-- **Advanced SQL features**: Subqueries, UNION/INTERSECT/EXCEPT, CASE/IIF, scalar functions (string, date, CAST), window functions, variables
+- **Advanced SQL features**: Subqueries, UNION/INTERSECT/EXCEPT, window functions, variables. `CASE`/`IIF` and scalar functions (string, date, `CAST`) are covered by [sql-values.md](./sql-values.md)
 
 ---
 
@@ -621,5 +621,6 @@ public void Transpile_SelectWithJoin_GeneratesLinkEntity()
 
 | Date | Change |
 |------|--------|
+| 2026-11-20 | Pointers to sql-values.md: Related Specs, and the sentences on expressions, `CASE` and functions |
 | 2026-03-18 | Absorbed query-parity.md (daemon alignment, hints, cross-env, Extension surface) and query-engine-v2.md Phase 0 (plan layer) per SL1/SL2 |
 | 2026-01-23 | Initial spec |
