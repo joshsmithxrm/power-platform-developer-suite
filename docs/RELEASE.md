@@ -44,12 +44,15 @@ Channels:
 - **Extension channel** is chosen by the **odd/even minor** rule, not a suffix:
   an odd minor (0.7, 1.1) publishes to the Marketplace pre-release channel and an
   even minor (0.6, 1.2) to stable. `extension-publish.yml` infers it from the tag
-  version; a manual dispatch can override it.
+  version; a manual dispatch can override it. The rule applies to the extension
+  only ([VERSIONING.md](VERSIONING.md#1-packages-and-versions), rule 1.5).
 
 Lineage:
 
-- **Each package keeps its own version lineage.** A coordinated minor includes
-  every surface, but their major/minor numbers need not match.
+- **Each package keeps its own version lineage.** A coordinated release includes
+  every surface, but their major/minor numbers need not match. What counts as a
+  breaking change, and which release may make one, is in
+  [VERSIONING.md](VERSIONING.md).
 - **PPDS.Plugins has its own lineage.** It was first released as `1.0.0` in
   December 2025, ahead of the other packages, and is now on `3.x`. Never regress
   its major to reconcile it with the others.
