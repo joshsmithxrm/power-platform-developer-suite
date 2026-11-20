@@ -44,6 +44,7 @@ class _Source:
             for m in _CLASS_RE.finditer(text):
                 self.classes.setdefault(m.group(1), []).append((ns.group(1) if ns else "", usings, text))
         self.problems = []
+        self.actions = set()
         self.overloads = []
 
     def texts(self, cls: str, ns: str, usings=frozenset()):
@@ -204,10 +205,12 @@ def _walk(src: _Source, cls: str, body: str, ns: str, usings, prefix: tuple, out
         for name in names:
             path = prefix + (name,)
             out.add(path)
+            if ".SetAction(" in child:
+                src.actions.add(path)
             _walk(src, child_cls, child, child_ns, child_usings, path, out, depth + 1)
 
 
-def command_paths():
+def _derive():
     """``(paths, problems)``: every command path (aliases included)."""
     src = _Source()
     out = set()
@@ -218,9 +221,20 @@ def command_paths():
             if body and _ADD_RE.search(body):
                 root = (body, ns, usings)
     if root is None:
-        return out, ["cannot find the Program.CreateRootCommand that adds the commands"]
+        return out, ["cannot find the Program.CreateRootCommand that adds the commands"], set()
     _walk(src, "Program", root[0], root[1], root[2], (), out, 0)
-    return out, src.problems
+    return out, src.problems, src.actions
+
+
+def command_paths():
+    """``(paths, problems)``: every command path (aliases included)."""
+    paths, problems, _ = _derive()
+    return paths, problems
+
+
+def commands_with_an_action():
+    """Paths whose own method calls ``SetAction`` (the command runs by itself)."""
+    return _derive()[2]
 
 
 if __name__ == "__main__":  # pragma: no cover - a listing for people

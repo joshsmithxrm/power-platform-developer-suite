@@ -245,3 +245,84 @@ def test_sql_that_only_reads_passes(run, tool, command):
 ])
 def test_sql_that_writes_or_is_not_in_the_text_is_blocked(run, tool, command):
     assert run(tool, command)[0] == 2
+
+
+# -- argument orders the CLI parser accepts ---------------------------------------
+
+ACTIONS = cli_command_tree.commands_with_an_action()
+_PARENTS = sorted({_canonical(p[:-1]) for p in PATHS if len(p) > 1})
+
+
+def test_commands_with_an_action_and_children_are_found():
+    both = {_canonical(p) for p in ACTIONS if any(len(q) == len(p) + 1 and q[:len(p)] == p for q in PATHS)}
+    assert {("metadata", "entity"), ("metadata", "optionset")} <= both
+
+
+@pytest.mark.parametrize("parent", _PARENTS, ids=[" ".join(p) for p in _PARENTS])
+def test_a_child_named_after_an_option_or_an_argument_is_refused(parent):
+    """The parser resolves a child command after the parent's own options or
+    arguments (`metadata entity account add-statusreason`)."""
+    children = sorted(p[-1] for p in hook.CLI_COMMANDS if len(p) == len(parent) + 1 and p[:len(parent)] == parent)
+    assert children
+    for child in children:
+        for between in (["--verbose"], ["--environment", "x"], ["account"], ["--", "x"]):
+            argv = ["ppds", *parent, *between, child]
+            assert hook.is_mutation(argv)[0], argv
+
+
+_READ_LEAVES = sorted(p for p, cls in hook.CLI_COMMANDS.items() if cls == "r")
+
+
+@pytest.mark.parametrize("path", _READ_LEAVES, ids=[" ".join(p) for p in _READ_LEAVES])
+def test_a_read_command_with_an_ordinary_option_passes(path):
+    assert not hook.is_mutation(["ppds", *path, "--output", "json", "--verbose"])[0]
+
+
+@pytest.mark.parametrize("text", [
+    "metadata entity @more.rsp", "data export @more.rsp", "plugins deploy --dry-run @more.rsp",
+    "@args.rsp", "query sql @q.rsp", "env config --list @x",
+])
+def test_a_response_file_is_refused_in_every_class(text):
+    assert hook.is_mutation(_argv(text))[0], text
+
+
+@pytest.mark.parametrize("argv,blocked", [
+    (["ppds", "metadata", "entity", "--", "add-statusreason"], True),       # `--`: refused, not resolved
+    (["ppds", "[diagram]", "data", "delete"], True),                         # a directive
+    (["ppds", "[env:X=1]", "data", "export"], True),
+    (["ppds", "plugins", "deploy", "-nv"], True),                            # bundled short options
+    (["ppds", "plugins", "deploy", "--dry-run:false"], True),
+    (["ppds", "plugins", "deploy", "--dry-run=true"], False),
+    (["ppds-mcp-server", "--read-only:false"], True),
+    (["ppds-mcp-server", "--read-only=true"], True),
+    (["ppds", "METADATA", "ENTITY", "ADD-STATUSREASON"], True),              # case
+    (["ppds", "metadata", "entity", "account", "ADD-STATUSREASON"], True),
+    (["ppds", "org", "list"], False),                                        # a top-level alias
+    (["ppds", "metadata", "entity", hook.sp.DYN], True),                     # a run-time child name
+    (["ppds", "plugins", "deploy", "--dry-run", hook.sp.DYN], True),         # a run-time `false`
+    (["ppds", "data", "export", hook.sp.DYN], False),                        # a leaf without children
+])
+def test_parser_features(argv, blocked):
+    assert hook.is_mutation(argv)[0] is blocked, argv
+
+
+_SIX = [
+    "metadata entity --environment x add-statusreason account",
+    "metadata entity account add-statusreason",
+    "metadata optionset --verbose add-option --name x",
+    "metadata entity @more.rsp",
+    "data export @more.rsp",
+    "plugins deploy --dry-run @more.rsp",
+]
+
+
+@pytest.mark.parametrize("tool,command", [
+    p for text in _SIX for p in (
+        pytest.param("Bash", f"ppds {text}", id=f"bash-{text}"),
+        pytest.param("PowerShell", f"& ppds.exe {text.replace('@', '`@')}", id=f"ps-{text}"),
+    )
+])
+def test_argument_orders_the_parser_accepts_are_blocked_during_a_shakedown(run, tool, command):
+    code, err = run(tool, command)
+    assert code == 2, err
+    assert "BLOCKED [shakedown-safety/readonly]" in err

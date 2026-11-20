@@ -233,7 +233,12 @@ with settings, `query history execute`, `api request`, `serve`,
 and a command the hook has never heard of. A group alone (`ppds data`)
 passes, because it only prints help. A test derives the command tree from
 `src/PPDS.Cli` and fails when the CLI has a command the table does not
-classify, so a new command is blocked until someone classifies it.
+classify, so a new command is blocked until someone classifies it. Because
+the CLI's parser also accepts a child command after its parent's options or
+arguments and expands response files, the hook refuses any `@file` argument
+and any child command name placed anywhere after its parent (so reading a
+table or option set whose name equals one of the subcommand names is
+refused too).
 
 **Special cases:**
 

@@ -1382,6 +1382,13 @@ def _parse_cli_commands(text: str) -> dict:
 
 
 CLI_COMMANDS = _parse_cli_commands(_CLI_COMMANDS)
+# Child command names per path. The CLI's parser resolves a child named
+# after the parent's own options or arguments (`metadata entity account
+# add-statusreason`), so such a token anywhere after the path decides.
+_CLI_CHILDREN = {}
+for _path in CLI_COMMANDS:
+    if _path:
+        _CLI_CHILDREN.setdefault(_path[:-1], set()).add(_path[-1])
 
 _HELP_FLAGS = {"--help", "-h", "-?", "/?", "--version"}
 # Words in SQL text that write (or could): any of them makes `query sql` a write.
@@ -1451,7 +1458,8 @@ def is_mutation(argv: list) -> tuple:
     one the hook knows to be read-only (``CLI_COMMANDS``); every other path,
     one the hook has never heard of included, counts as a write. An option
     before the command path, several words in one argument, or run-time text
-    there means the command is not known."""
+    there means the command is not known. So does a response file (``@x``)
+    anywhere, and a child command name anywhere after its parent's path."""
     if not argv:
         return False, ""
 
@@ -1464,10 +1472,15 @@ def is_mutation(argv: list) -> tuple:
     if UNREADABLE in argv:
         return True, "a command the hook could not read in full (treated as a write)"
 
+    # The CLI's parser expands `@file` into the arguments the file holds.
+    response = next((arg for arg in argv[1:] if arg.startswith("@")), None)
+    if response is not None:
+        return True, f"{_shown([response])} (a response file, whose arguments are not known; treated as a write)"
+
     if prog == "ppds-mcp-server":
         # The server honours only the exact token: --read-only=<anything>
         # (false, true, empty) starts it writable.
-        valued = [arg for arg in argv[1:] if arg.lower().startswith("--read-only=")]
+        valued = [arg for arg in argv[1:] if arg.lower().startswith(("--read-only=", "--read-only:"))]
         if valued:
             return True, (f"ppds-mcp-server {valued[0]} (the server only accepts the bare "
                           "--read-only flag; --read-only=<value> starts it writable)")
@@ -1493,6 +1506,13 @@ def is_mutation(argv: list) -> tuple:
                           "(the command is not known; treated as a write)")
         return True, (f"{(shown + ' ') if shown else ''}{_shown([nxt])} "
                       "(not a command the hook knows to be read-only; treated as a write)")
+    child = next((arg for arg in rest if arg.lower() in _CLI_CHILDREN.get(path, ())), None)
+    if (path in _CLI_CHILDREN or cls != "r") and any(sp.DYN in arg for arg in rest):
+        # a run-time value could name a child command or turn a condition off
+        return True, f"{shown} with a value only known when it runs (treated as a write)"
+    if child is not None:
+        return True, (f"{shown} ... {_shown([child])} (the CLI runs the {child} command named after "
+                      f"other arguments; treated as a write)")
     if cls == "r":
         return False, ""
     if cls == "dry-run":
