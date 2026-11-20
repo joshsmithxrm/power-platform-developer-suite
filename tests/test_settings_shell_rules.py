@@ -142,3 +142,160 @@ def test_allow_list_is_bash_only_and_unchanged_in_kind():
     """The allow list is not mirrored (no permission is widened)."""
     allow = _settings()["permissions"]["allow"]
     assert not [r for r in allow if r.startswith("PowerShell(")]
+
+
+# The rule lists as reviewed for #1780. Any change to them (an allow rule
+# added or widened, a deny or ask rule removed in both forms) must change
+# these lists in the same pull request. `git merge` is absent from the ask
+# list by the maintainer's decision of 2026-11-20.
+EXPECTED_DENY_COMMANDS = [
+    "git push --force",
+    "git push -f",
+    "git reset --hard",
+    "git clean",
+    "dotnet nuget push",
+    "npm publish",
+    "npm install -g",
+    "Publish-Module",
+    "curl",
+    "wget",
+    "Invoke-WebRequest",
+    "chmod 777",
+    "sudo",
+    "su",
+    "rm -rf /",
+    "ppds data truncate",
+]
+EXPECTED_ASK_COMMANDS = [
+    "git rebase -i",
+    "git rebase --interactive",
+    "git rebase --onto",
+    "git rebase --root",
+    "git rebase --exec",
+    "git reset",
+    "git apply",
+    "git am",
+    "git tag -d",
+    "git tag -fa",
+    "gh pr merge",
+    "gh pr close",
+    "gh issue close",
+    "gh release create",
+    "gh repo create",
+    "gh repo delete",
+]
+EXPECTED_ALLOW = [
+    "Bash(ls:*)",
+    "Bash(dir:*)",
+    "Bash(cd:*)",
+    "Bash(pwd:*)",
+    "Bash(cat:*)",
+    "Bash(head:*)",
+    "Bash(tail:*)",
+    "Bash(less:*)",
+    "Bash(more:*)",
+    "Bash(echo:*)",
+    "Bash(printf:*)",
+    "Bash(which:*)",
+    "Bash(where:*)",
+    "Bash(grep:*)",
+    "Bash(findstr:*)",
+    "Bash(sort:*)",
+    "Bash(uniq:*)",
+    "Bash(wc:*)",
+    "Bash(test:*)",
+    "Bash([:*)",
+    "Bash(git status:*)",
+    "Bash(git diff:*)",
+    "Bash(git log:*)",
+    "Bash(git show:*)",
+    "Bash(git ls-files:*)",
+    "Bash(git ls-tree:*)",
+    "Bash(git rev-parse:*)",
+    "Bash(git rev-list:*)",
+    "Bash(git describe:*)",
+    "Bash(git fetch:*)",
+    "Bash(git worktree list:*)",
+    "Bash(dotnet build:*)",
+    "Bash(dotnet test:*)",
+    "Bash(dotnet restore:*)",
+    "Bash(dotnet clean:*)",
+    "Bash(npm ci)",
+    "Bash(npm run compile --prefix src/PPDS.Extension)",
+    "Bash(npm run typecheck:all --prefix src/PPDS.Extension)",
+    "Bash(npm run lint --prefix src/PPDS.Extension)",
+    "Bash(npm run lint:css --prefix src/PPDS.Extension)",
+    "Bash(npm run dead-code --prefix src/PPDS.Extension)",
+    "Bash(npm run test --prefix src/PPDS.Extension)",
+    "Bash(npm run compile)",
+    "Bash(npm run typecheck)",
+    "Bash(npm run typecheck:all)",
+    "Bash(npm run lint)",
+    "Bash(npm run lint:css)",
+    "Bash(npm run test)",
+    "Bash(npm run ext:compile)",
+    "Bash(npm run ext:test)",
+    "Bash(npm run ext:test:e2e)",
+    "Bash(npm run tui:test)",
+    "Bash(npm test:*)",
+    "Bash(tsc:*)",
+    "Bash(gh pr list:*)",
+    "Bash(gh pr view:*)",
+    "Bash(gh pr status:*)",
+    "Bash(gh pr diff:*)",
+    "Bash(gh pr checks:*)",
+    "Bash(gh issue list:*)",
+    "Bash(gh issue view:*)",
+    "Bash(gh issue status:*)",
+    "Bash(gh repo view:*)",
+    "Bash(gh run list:*)",
+    "Bash(gh run view:*)",
+    "Bash(gh workflow list:*)",
+    "Bash(gh workflow view:*)",
+    "Bash(gh auth status)",
+    "Bash(gh release list:*)",
+    "Bash(gh release view:*)",
+    "Bash(gh label list:*)",
+    "Bash(actionlint:*)",
+    "Bash(yamllint:*)",
+    "WebSearch",
+]
+
+
+def _both_forms(commands: list) -> list:
+    return [f"{tool}({text}:*)" for text in commands for tool in SHELL_TOOLS]
+
+
+@pytest.mark.parametrize("kind,commands", [("deny", EXPECTED_DENY_COMMANDS), ("ask", EXPECTED_ASK_COMMANDS)])
+def test_deny_and_ask_rules_are_pinned_in_both_forms(kind, commands):
+    assert sorted(_settings()["permissions"][kind]) == sorted(_both_forms(commands))
+
+
+def test_allow_rules_are_pinned():
+    assert sorted(_settings()["permissions"]["allow"]) == sorted(EXPECTED_ALLOW)
+
+
+def test_git_merge_is_not_pinned_as_an_ask_rule():
+    assert "git merge" not in EXPECTED_ASK_COMMANDS
+
+
+@pytest.mark.parametrize("change", [
+    ("allow", "add", "Bash(git push:*)"),
+    ("allow", "widen", None),
+    ("deny", "remove-both", "git push --force"),
+    ("ask", "remove-both", "gh pr merge"),
+])
+def test_the_pins_catch_a_change(change):
+    """Each kind of change makes a pinned comparison fail."""
+    kind, action, item = change
+    perms = json.loads(json.dumps(_settings()["permissions"]))
+    if action == "add":
+        perms[kind].append(item)
+    elif action == "widen":
+        narrow = next(r for r in perms[kind] if r.endswith(":*)") and " " in r)
+        perms[kind][perms[kind].index(narrow)] = narrow.split(" ", 1)[0] + ":*)"
+    else:
+        perms[kind] = [r for r in perms[kind] if f"({item}:" not in r]
+    expected = {"allow": sorted(EXPECTED_ALLOW), "deny": sorted(_both_forms(EXPECTED_DENY_COMMANDS)),
+                "ask": sorted(_both_forms(EXPECTED_ASK_COMMANDS))}
+    assert sorted(perms[kind]) != expected[kind]
