@@ -13,17 +13,66 @@ Two concerns, one hook:
    is gated against that allowlist of dev/test env names. With no allowlist
    configured the gate is off; a misconfigured allowlist blocks (see
    below). The active env is read directly from the PPDS profile
-   store (``profiles.json``). Read-only subcommands (``env list``,
-   ``env who``, ...) are always allowed; switching INTO a safe env is
-   allowed even when currently on an unsafe one.
+   store (``profiles.json``).
 
 2. **Write-block during shakedown.** When ``PPDS_SHAKEDOWN=1`` (or whichever
    name is configured under ``safety.readonly_env_var``), a ppds command
    passes only when its command path is one ``CLI_COMMANDS`` classifies as
-   read-only (``plugins deploy`` only with ``--dry-run``, ``query sql`` only
-   with inline SQL that reads); every other path, one the hook has never
-   heard of included, is refused. This provides a mechanical boundary that
-   the shakedown / verify skills rely on.
+   read-only; every other path, one the hook has never heard of included,
+   is refused. This provides a mechanical boundary that the shakedown /
+   verify skills rely on.
+
+**The principle: a pass is granted only on a shape the hook positively
+recognises, at the statement level and at the argument level.** Everything
+else is refused (exit 2):
+
+* *Cannot tell means refuse*, also inside an invocation. An argument list
+  the hook could not read in full (``UNREADABLE``: a cap, the deadline, an
+  unplaced mention, a program only known at run time with arguments from
+  elsewhere), a response file (``@file``), and an argument only known at
+  run time are refused by both gates, even with a listed active env. A
+  switch with no target the hook can place is refused.
+* *A token that grants a pass must be positively placed.* ``--dry-run``
+  counts only as the exact bare token, before any ``--``, not directly
+  after an option-looking token (it might be that option's value), and not
+  followed by a word the flag might take as its value. ``--read-only`` for
+  the MCP server counts only as its own parser reads it: the exact token,
+  not the value of ``--profile`` / ``--environment`` / ``--allowed-env``. A
+  help flag counts only directly after the command path. ``env config`` /
+  ``env type`` pass only in the exact forms that read.
+* *Both value delimiters.* Wherever an option's value is read, ``--name
+  value``, ``--name=value`` and ``--name:value`` (and the aliases) are read.
+* *Everything that can change which environment is reached is a target.*
+  With an allowlist, an invocation passes only if every environment it
+  names (``--environment`` / ``-env`` / ``-e``, ``--source-env``,
+  ``--target-env``, the MCP server's ``--environment`` / ``--allowed-env``)
+  is listed, literally or as the host of a URL; every profile it names
+  (``--profile`` / ``-p``, ``--source-profile``, ``--target-profile``, and
+  ``auth select``) resolves in the profile store to a listed environment;
+  ``query sql`` / ``query explain`` name no ``environments.json`` label of
+  an unlisted environment (``[LABEL].entity``); and the command names no
+  ``PPDS_`` variable that can move the target (``PPDS_CONFIG_DIR``,
+  ``PPDS_PROFILE``, ``PPDS_ENVIRONMENT_URL`` ...). A single-dash token with
+  an ``e`` or ``p`` that is not one of those options may be a bundle of
+  short options and is refused. ``PPDS_PROFILE`` and ``PPDS_ENVIRONMENT_URL``
+  in the hook's own environment are part of the active env.
+* *Bounded work.* Every loop over the input runs under the deadline, and
+  the work per input is capped (``_MAX_*``, ``_DOTNET_MAX_*`` and the
+  reader's caps); past a cap the command is an unreadable invocation,
+  refused by both gates. A watchdog refuses the command if the hook has
+  not answered ``_WATCHDOG_GRACE_SECONDS`` after its budget.
+
+What passes the environment gate with an unlisted (or unknown) active env:
+``env`` alone, ``env list``, ``env who``, the read forms of ``env config`` /
+``env type``, and ``env select`` / ``auth select`` to a listed target.
+What passes the write-block: the paths ``CLI_COMMANDS`` marks read-only,
+and the conditional ones (``plugins deploy --dry-run``, ``query sql`` with
+inline SQL holding no write word as the T-SQL lexer splits words,
+``version`` alone or with ``--check``, ``env select`` when an allowlist is
+configured, the read forms of ``env config`` / ``env type``,
+``ppds-mcp-server --read-only``), each only in its recognised shape.
+``ppds`` with no arguments starts the TUI and is refused by the
+write-block.
 
 **.NET host forms.** Besides ``ppds`` / ``ppds-mcp-server`` themselves, the
 hook recognises the CLI and MCP server started through ``dotnet``:
@@ -66,10 +115,11 @@ option or several words before the verb make the verb unknown.
 **Time and failures.** Claude Code runs a command whose PreToolUse hook
 exceeds its registered timeout or exits 1. The hook therefore answers
 within ``_BUDGET_SECONDS`` (well inside the registered 10 s); past it the
-command is an invocation. Any exception at the top level refuses a command
-that mentions ``ppds``, ``dotnet`` or ``dnx``, unless the hook had already
-found that no allowlist and no shakedown is in effect (then every command
-passes before it is read). Input is read as UTF-8 bytes.
+command is refused, and a watchdog refuses it if no answer is given
+``_WATCHDOG_GRACE_SECONDS`` later. Any internal error refuses the command,
+whatever it is (exit 2). The only commands passed without being read are
+those of a session with no allowlist and no shakedown: the hook exits 0
+before it reads its input. Input is read as UTF-8 bytes.
 
 **Allowlist sources (checked in order; the first that names an env wins):**
 
@@ -131,6 +181,7 @@ import os
 import re
 import shlex
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Iterable, Optional
@@ -452,7 +503,16 @@ def get_active_env_names() -> list:
     active_idx = data.get("activeProfileIndex")
     active_name = data.get("activeProfile")
     active = None
-    if isinstance(active_idx, int):
+    # `PPDS_PROFILE` in the environment the CLI inherits overrides the
+    # store's active profile (ProfileResolver); it must name one profile.
+    override = os.environ.get("PPDS_PROFILE", "").strip()
+    if override:
+        named = _profiles_named(data, override)
+        if len(named) != 1:
+            return []
+        active_idx, active_name = None, None
+        active = named[0]
+    if active is None and isinstance(active_idx, int):
         active = next(
             (p for p in profiles if isinstance(p, dict) and p.get("index") == active_idx),
             None,
@@ -586,14 +646,36 @@ _RUNNER_PREFIXES = {
 }
 
 
-def _unknown(args) -> list:
+class _Guess(list):
+    """An argv for a program the hook could not identify (read as both PPDS
+    programs). ``origin`` is the text as written, for block messages; None
+    when there is nothing to show (an unread command, a cap)."""
+
+    __slots__ = ("origin",)
+
+    def __init__(self, items, origin=None):
+        super().__init__(items)
+        self.origin = origin
+
+
+def _unknown(args, origin=None) -> list:
     """Readings for a program the hook cannot identify: both PPDS programs."""
-    return [[program] + list(args) for program in _PPDS_PROGRAMS]
+    return [_Guess([program] + list(args), origin) for program in _PPDS_PROGRAMS]
 
 
-def _dedupe(argvs: list) -> list:
+def _tail(texts: list, start: int) -> list:
+    """``texts[start:]`` capped at ``_MAX_ARGS`` words; past the cap the
+    reading ends in ``UNREADABLE``."""
+    tail = texts[start:start + _MAX_ARGS]
+    if len(texts) - start > _MAX_ARGS:
+        tail.append(UNREADABLE)
+    return tail
+
+
+def _dedupe(argvs: list, deadline=None) -> list:
     seen, out = set(), []
     for argv in argvs:
+        _tick(deadline)
         program = argv[0].lower()
         program = program[:-4] if program.endswith(".exe") else program
         key = (program,) + tuple(argv[1:])  # `ppds.exe env list` == `ppds env list`
@@ -605,9 +687,14 @@ def _dedupe(argvs: list) -> list:
 
 def _mentions(text: str) -> list:
     """``(start, end, fuzzy)`` for each mention of a guarded program in
-    ``text``; ``fuzzy`` when quoting characters sit between the letters."""
-    return [(m.start(), m.end(), any(ch in _QUOTING_CHARS for ch in m.group(0)))
-            for m in _MENTION_RE.finditer(text)]
+    ``text``; ``fuzzy`` when quoting characters sit between the letters. At
+    most ``_MAX_MENTIONS + 1`` are returned (more is past the cap)."""
+    out = []
+    for m in _MENTION_RE.finditer(text):
+        out.append((m.start(), m.end(), any(ch in _QUOTING_CHARS for ch in m.group(0))))
+        if len(out) > _MAX_MENTIONS:
+            break
+    return out
 
 
 def _unescape(text: str) -> str:
@@ -654,12 +741,16 @@ def find_ppds_invocations(command: str, tool_name: str = "Bash", cwd=None, deadl
     try:
         out = []
         out.extend(_original_invocations(command, deadline))
+        _tick(deadline)
         mentions = _mentions(command)
         for dialect in ("posix", "ps"):
             out.extend(_read_invocations(command, dialect, cwd, mentions, deadline))
+        _tick(deadline)
         if _escaped_mention(command) or _DYNAMIC_CODE_RE.search(command):
             out.extend(_unknown([UNREADABLE]))
-        return _dedupe(out)
+        if len(out) > _MAX_INVOCATIONS:
+            return _unknown([UNREADABLE])  # past the cap: an invocation, unconditionally
+        return _dedupe(out, deadline)
     except _Deadline:
         return _unknown([UNREADABLE])
 
@@ -695,7 +786,7 @@ def _unplaced(result, text: str, mentions: list, deadline) -> bool:
     else (``src/PPDS.Cli``)."""
     if not mentions:
         return False
-    if not result.complete or result.top is None:
+    if len(mentions) > _MAX_MENTIONS or not result.complete or result.top is None:
         return True
     starts = [m[0] for m in mentions]
     words_by, kids_by, spans = {}, {}, {}
@@ -789,7 +880,8 @@ def _read_invocations(command: str, dialect: str, cwd, mentions: list, deadline)
     )
     trust_cwd = len(_CDLIKE_RE.findall(command)) == cd_statements
     stack = [cwd]  # working directory per subshell level
-    dotnet_words = 0
+    program_words = 0
+    elements = 0  # argv words produced, capped (the work per input is bounded)
     for stmt in statements:
         _tick(deadline)
         level = stmt.level
@@ -799,26 +891,30 @@ def _read_invocations(command: str, dialect: str, cwd, mentions: list, deadline)
         words, texts = stmt.words, stmt.texts
         positions = dict(sp.command_positions(stmt)) if stmt.code else {}
         for i, word in enumerate(words):
+            _tick(deadline)
             prog = sp.program_name(word)
+            if prog not in _GUARDED:
+                continue
+            program_words += 1
+            if program_words > _MAX_PROGRAM_WORDS or elements > _MAX_ARG_ELEMENTS:
+                out.extend(_unknown([UNREADABLE]))  # past a cap: an invocation, unconditionally
+                return out
             if prog in _PPDS_PROGRAMS:
-                argv = [prog] + texts[i + 1:]
+                argv = [prog] + _tail(texts, i + 1)
                 if positions.get(i):
                     argv.append(UNREADABLE)  # arguments from elsewhere (xargs, Start-Process)
-                out.append(argv)
-            elif prog in ("dotnet", "dnx"):
-                dotnet_words += 1
-                if dotnet_words > _DOTNET_MAX_OCCURRENCES:
-                    out.extend(_unknown([UNREADABLE]))
-                    continue
+                hits = [argv]
+            else:
                 if prog == "dnx":
-                    hits = _package_exec(texts[i + 1:])
+                    hits = _package_exec(_tail(texts, i + 1))
                 else:
                     known = (trust_cwd and stmt.code and not stmt.wrapped and i in positions
                              and not positions[i] and stack[level] != _UNKNOWN_CWD)
-                    hits = _dotnet_hits(texts[i + 1:], {stack[level]} if known else {_UNKNOWN_CWD})
+                    hits = _dotnet_hits(_tail(texts, i + 1), {stack[level]} if known else {_UNKNOWN_CWD})
                 if positions.get(i):
                     hits = [hit + [UNREADABLE] for hit in hits] or _unknown([UNREADABLE])
-                out.extend(hits)
+            elements += sum(len(hit) for hit in hits)
+            out.extend(hits)
         if stmt.code:
             for i, opaque in positions.items():
                 word = words[i]
@@ -826,7 +922,8 @@ def _read_invocations(command: str, dialect: str, cwd, mentions: list, deadline)
                 if prog in _GUARDED:
                     continue
                 if word.dynamic or prog is None or (word.glob and word.text != "?"):
-                    out.extend(_unknown(texts[i + 1:] + ([UNREADABLE] if opaque else [])))
+                    origin = _shown(texts[i:i + 12]) + (" ..." if len(texts) > i + 12 else "")
+                    out.extend(_unknown(_tail(texts, i + 1) + ([UNREADABLE] if opaque else []), origin))
                 elif opaque and (prog in sp.SHELLS or prog in sp.CODE_WORDS):
                     out.extend(_unknown([UNREADABLE]))
             if stmt.wrapper and (not stmt.code_arg or stmt.dynamic_code or stmt.stdin_text):
@@ -945,13 +1042,22 @@ def _original_invocations(command: str, deadline=None) -> list:
     return out
 
 
-# PPDS run through the .NET host. Caps keep the work linear: at most 500
-# `dotnet` occurrences per command, and 400 tokens / 4096 characters after
-# each, are examined by the original matcher; past a cap the command counts
-# as an invocation with an unknown verb.
+# Caps that bound the work per input; past any of them the command is an
+# invocation of both programs that the hook could not read (refused by both
+# gates). The original matcher examines at most 500 `ppds` and 500 `dotnet`
+# words, and 400 tokens / 4096 characters after each. Each reading of the
+# reader handles at most 500 words naming a guarded program; an invocation
+# keeps at most 400 arguments; all readings together produce at most
+# 200,000 argument words and 2,000 invocations; at most 1,000 mentions are
+# accounted for.
 _DOTNET_MAX_OCCURRENCES = 500
 _DOTNET_MAX_TOKENS = 400
 _DOTNET_MAX_CHARS = 4096
+_MAX_PROGRAM_WORDS = 500
+_MAX_ARGS = 400
+_MAX_ARG_ELEMENTS = 200_000
+_MAX_INVOCATIONS = 2_000
+_MAX_MENTIONS = 1_000
 _DOTNET_RE = re.compile(
     r"""(?:^|[\s|;&()`'"])(?:[^\s|;&()`'"]*[\\/])?dotnet(?:\.exe)?(?=$|[\s|;&)`'"])""",
     re.IGNORECASE,
@@ -1036,14 +1142,20 @@ def _run_readings(program: str, unknown: list, after: list) -> list:
     does not know (``--tl off``) cannot hide the verb. A reading for each;
     any one can block."""
     if program == "ppds-mcp-server":
-        # Only the flag's presence matters; the full reading comes first so a
-        # block names a --read-only=<value> token when there is one.
-        if _read_only_forwarded(unknown):
-            return [[program] + unknown + after]
-        return _dedupe([[program] + unknown + after, [program] + after])
-    readings = [[program] + after]
+        # The full reading comes first so a block names a --read-only=<value>
+        # token when there is one; both orders of the forwarded tokens and the
+        # tokens after `--`, so neither can take the flag as its value.
+        readings = [[program] + unknown + after, [program] + after + unknown]
+        if not _read_only_forwarded(unknown):
+            readings.append([program] + after)
+        return _dedupe(readings)
+    # The likeliest reading first, so a block names it: the tokens after `--`
+    # when there are any, else every forwarded token.
+    readings = [[program] + after] if after else []
     for k in range(min(len(unknown), _DOTNET_MAX_TOKENS)):
         readings.append([program] + unknown[k:] + after)
+    if not after:
+        readings.append([program])
     if len(unknown) > _DOTNET_MAX_TOKENS:
         readings.append([program, UNREADABLE])
     return _dedupe(readings)
@@ -1193,9 +1305,9 @@ def _dotnet_invocations(command: str, deadline=None) -> list:
             parts = []
         parts = (parts + target.split("/"))[-32:]
         cds.append((m.start(), "/".join(parts)))
-    out, cwd, k = [], None, 0
+    out, cwd, k, elements = [], None, 0, 0
     for count, match in enumerate(_DOTNET_RE.finditer(command)):
-        if count >= _DOTNET_MAX_OCCURRENCES:
+        if count >= _DOTNET_MAX_OCCURRENCES or elements > _MAX_ARG_ELEMENTS:
             out.extend(_unknown([UNREADABLE]))
             break
         _tick(deadline)
@@ -1230,7 +1342,9 @@ def _dotnet_invocations(command: str, deadline=None) -> list:
                 args.append(tok)
         if not stopped and (cut or len(args) >= _DOTNET_MAX_TOKENS):
             out.extend(_unknown([UNREADABLE]))
-        out.extend(_dotnet_argvs(args, cwd))
+        hits = _dotnet_argvs(args, cwd)
+        elements += sum(len(hit) for hit in hits)
+        out.extend(hits)
     return out
 
 
@@ -1239,68 +1353,390 @@ def _dotnet_invocations(command: str, deadline=None) -> list:
 # ---------------------------------------------------------------------------
 
 
-_ENV_READONLY_SUBCOMMANDS = {"list", "current", "who", "config", "type", "show"}
-_ENV_SWITCH_SUBCOMMANDS = {"switch", "select", "use"}
+def _prog(word: str) -> str:
+    prog = os.path.basename(word).lower()
+    return prog[:-4] if prog.endswith(".exe") else prog
 
 
-def decide_env(argv, allowlist, active):
-    """Return (allow, reason). reason is empty on allow, a message on block."""
+# Options that name the environment or the profile a command reaches. Every
+# spelling of each, in any case, with the value after a space, `=` or `:`.
+_ENV_OPTIONS = {"--environment", "-env", "-e", "--env", "--source-env", "-se", "--target-env", "-te"}
+_PROFILE_OPTIONS = {"--profile", "-p", "--source-profile", "-sp", "--target-profile", "-tp"}
+# A single-dash token holding one of these letters may be a bundle of short
+# options (`-ve x`, `-eprod`, `-pdev`) that names an environment or profile.
+_TARGET_LETTERS = set("ep")
+_OPTION_SPLIT_RE = re.compile(r"^(-{1,2}[^=:]*)[=:](.*)$", re.DOTALL)
+# The MCP server's own parser (`McpSessionOptions.Parse`): these exact
+# tokens take the next argument.
+_MCP_VALUE_OPTIONS = ("--profile", "--environment", "--allowed-env")
+
+
+def _split_option(token: str):
+    """``(name, inline value)`` for an option token; the value follows the
+    first ``=`` or ``:`` and is None when there is none."""
+    m = _OPTION_SPLIT_RE.match(token)
+    return (m.group(1), m.group(2)) if m else (token, None)
+
+
+def _option_values(args: list, names: set, letters: set):
+    """``(values, problem)``: ``(token, value)`` for every option in
+    ``names`` (any case, value after a space, ``=`` or ``:``), and a problem
+    when one has no value or a single-dash token may be a bundle holding one
+    of ``letters``."""
+    values = []
+    for i, tok in enumerate(args):
+        if not tok.startswith("-") or tok in ("-", "--"):
+            continue
+        name, inline = _split_option(tok)
+        low = name.lower()
+        if low in names:
+            value = inline if inline is not None else (args[i + 1] if i + 1 < len(args) else None)
+            if value is None:
+                return values, f"{tok} has no value"
+            values.append((tok, value))
+        elif not low.startswith("--") and any(ch in letters for ch in low[1:]):
+            return values, f"{tok} may be a bundle of short options that names one"
+    return values, ""
+
+
+def target_listed(value: str, allowlist) -> bool:
+    """True when a target typed in a command is on the allowlist: the same
+    name (any case), or a URL whose host is an allowlist entry."""
+    allow = {a.lower() for a in allowlist if a}
+    value = value.strip().lower()
+    if not value:
+        return False
+    if value in allow:
+        return True
+    m = re.match(r"https?://([^/\s]+)/?$", value)
+    return bool(m) and m.group(1) in allow
+
+
+def _url_candidates(url) -> list:
+    out = []
+    if isinstance(url, str) and url.strip():
+        m = re.match(r"https?://([^/]+)", url.strip(), re.IGNORECASE)
+        if m:
+            host = m.group(1)
+            out.append(host)
+            label = host.split(".", 1)[0]
+            if label and label != host:
+                out.append(label)
+    return out
+
+
+def _env_candidates(env) -> list:
+    """Names an environment record of the profile store is known by."""
+    if not isinstance(env, dict):
+        return []
+    out = []
+    for key in ("displayName", "uniqueName"):
+        val = env.get(key)
+        if isinstance(val, str) and val.strip():
+            out.append(val.strip())
+    return out + _url_candidates(env.get("url"))
+
+
+def read_profile_store():
+    """The profile store as a dict, or None when missing or unreadable."""
+    data = _read_json(_profile_store_path())
+    return data if isinstance(data, dict) else None
+
+
+def _profiles_named(store, ref: str) -> list:
+    """Profiles ``ref`` may select: by name (any case) or by index."""
+    if not isinstance(store, dict) or not isinstance(store.get("profiles"), list):
+        return []
+    ref = ref.strip()
+    out = []
+    for p in store["profiles"]:
+        if not isinstance(p, dict):
+            continue
+        name = p.get("name")
+        if isinstance(name, str) and name.strip() and name.strip().lower() == ref.lower():
+            out.append(p)
+        elif ref.isdigit() and p.get("index") == int(ref):
+            out.append(p)
+    return out
+
+
+def profile_target_problem(store, ref: str, allowlist) -> str:
+    """Why selecting profile ``ref`` may reach an environment not on the
+    allowlist, or "" when every profile it may name has a listed one. The
+    profile's own name does not count, only its environment's names."""
+    profiles = _profiles_named(store, ref)
+    if not profiles:
+        return f"profile {ref!r} is not in the profile store, so its environment is not known"
+    for p in profiles:
+        if not env_matches_allowlist(_env_candidates(p.get("environment")), allowlist):
+            return f"profile {ref!r} reaches an environment that is not on the allowlist"
+    return ""
+
+
+def _target_problem(args: list, allowlist, store) -> str:
+    """Why the environment and profile options in ``args`` may reach an
+    environment not on the allowlist, or ""."""
+    envs, problem = _option_values(args, _ENV_OPTIONS | _PROFILE_OPTIONS, _TARGET_LETTERS)
+    if problem:
+        return f"{problem} (an environment or profile the hook cannot place)"
+    for tok, value in envs:
+        name = _split_option(tok)[0].lower()
+        if name in _ENV_OPTIONS:
+            if not target_listed(value, allowlist):
+                return f"{tok} {value}: that environment is not on the allowlist"
+        else:
+            why = profile_target_problem(store, value, allowlist)
+            if why:
+                return f"{tok} {value}: {why}"
+    return ""
+
+
+def _mcp_target_problem(args: list, allowlist, store) -> str:
+    """The MCP server's ``--environment``, ``--allowed-env`` and
+    ``--profile`` (also with ``=`` / ``:``): each value must be listed."""
+    for i, tok in enumerate(args):
+        name, inline = _split_option(tok) if tok.startswith("--") else (tok, None)
+        low = name.lower()
+        if low not in _MCP_VALUE_OPTIONS:
+            continue
+        value = inline if inline is not None else (args[i + 1] if i + 1 < len(args) else None)
+        if value is None:
+            continue  # the server ignores a last option with no value
+        if low == "--profile":
+            why = profile_target_problem(store, value, allowlist)
+            if why:
+                return f"{tok} {value}: {why}"
+        elif not target_listed(value, allowlist):
+            return f"{tok} {value}: that environment is not on the allowlist"
+    return ""
+
+
+def _environments_file() -> str:
+    return os.path.join(os.path.dirname(_profile_store_path()), "environments.json")
+
+
+def _url_key(url) -> str:
+    return url.strip().rstrip("/").lower() if isinstance(url, str) else ""
+
+
+def _names_for_url(url, store) -> list:
+    """Names of the environment at ``url``: its host and first label, and the
+    names profile-store records with the same URL give it."""
+    out = _url_candidates(url)
+    key = _url_key(url)
+    profiles = store.get("profiles") if isinstance(store, dict) else None
+    for p in profiles if isinstance(profiles, list) else ():
+        env = p.get("environment") if isinstance(p, dict) else None
+        if key and isinstance(env, dict) and _url_key(env.get("url")) == key:
+            out.extend(_env_candidates(env))
+    return out
+
+
+def unlisted_labels(allowlist, store=None):
+    """``(labels, problem)``: the labels of ``environments.json`` (set with
+    ``env config --label``) whose environment is not on the allowlist. A SQL
+    statement naming one (``[LABEL].entity``) reaches that environment."""
+    data, error = _read_json_checked(_environments_file())
+    if data is _MISSING:
+        return [], ""
+    if error is not None or not isinstance(data, dict):
+        return [], "the environment settings file could not be read"
+    envs = data.get("environments") or []
+    if not isinstance(envs, list):
+        return [], "the environment settings file could not be read"
+    out = []
+    for env in envs:
+        if not isinstance(env, dict):
+            return [], "the environment settings file could not be read"
+        label = env.get("label")
+        if not isinstance(label, str) or not label.strip():
+            continue
+        if not env_matches_allowlist(_names_for_url(env.get("url"), store), allowlist):
+            out.append(label.strip())
+    return out, ""
+
+
+# Commands whose SQL may name an environment label; `query history execute`
+# runs SQL that is not in the command text.
+_SQL_PATHS = {("query", "sql"), ("query", "explain"), ("query", "history", "execute")}
+
+
+def _sql_label_problem(path, rest: list, allowlist, store=None) -> str:
+    labels, problem = unlisted_labels(allowlist, store)
+    if problem:
+        return f"{problem}, so the SQL may name another environment"
+    if not labels:
+        return ""
+    if path == ("query", "history", "execute") or any(
+            arg.lower().startswith(("--file", "--stdin")) for arg in rest):
+        return "the SQL is not in the command text and may name an environment label not on the allowlist"
+    text = " ".join(rest).lower().replace("]]", "]").replace('""', '"')
+    hit = next((label for label in labels if label.lower() in text), None)
+    if hit is not None:
+        return f"the SQL names the environment label {hit!r}, whose environment is not on the allowlist"
+    return ""
+
+
+def _plain(token: str) -> bool:
+    """A literal value: not an option, response file or run-time text."""
+    return bool(token) and not token.startswith(("-", "/", "@")) and sp.DYN not in token
+
+
+def _env_settings_read(path, rest: list) -> bool:
+    """True for the forms of ``env config`` / ``env type`` that only read
+    local settings, each positively recognised: ``env config`` with nothing,
+    ``--list``, ``--show`` / ``-s``, a URL, or a URL then ``--show`` /
+    ``-s``; ``env type`` with nothing or ``--list``."""
+    if path == ("env", "config"):
+        if rest in ([], ["--list"], ["--show"], ["-s"]):
+            return True
+        if len(rest) == 1:
+            return _plain(rest[0])
+        return len(rest) == 2 and _plain(rest[0]) and rest[1] in ("--show", "-s")
+    if path == ("env", "type"):
+        return rest in ([], ["--list"])
+    return False
+
+
+def _env_read_form(path, rest: list) -> bool:
+    """True for the ``env`` forms that pass with an unlisted active env:
+    ``env`` alone or with a help flag, ``env list``, ``env who``, and the
+    read forms of ``env config`` / ``env type``."""
+    if path == ("env",):
+        return not rest or (len(rest) == 1 and rest[0] in _HELP_FLAGS)
+    if path in (("env", "list"), ("env", "who")):
+        return True
+    return _env_settings_read(path, rest)
+
+
+def _switch_targets(rest: list, names: set, letters: set):
+    """``(values, problem)`` for a switch: the option values plus every
+    plain word (the CLI takes only the option; a word is checked too)."""
+    values, problem = _option_values(rest, names, letters)
+    if problem:
+        return [], problem
+    taken = set()
+    for i, tok in enumerate(rest):
+        if tok.startswith("-") and _split_option(tok)[1] is None and _split_option(tok)[0].lower() in names:
+            taken.add(i + 1)
+    words = [tok for i, tok in enumerate(rest) if i not in taken and _plain(tok)]
+    return [v for _, v in values] + words, ""
+
+
+def decide_env(argv, allowlist, active, store=_MISSING, required=None):
+    """Return (allow, reason). reason is empty on allow, a message on block.
+
+    With an allowlist configured, an invocation passes only when the hook
+    can place everything in it that decides which environment it reaches,
+    and all of it is listed: the active env (``active``, and ``required``:
+    further candidate lists that must also match), every environment and
+    profile option, and for ``env select`` / ``auth select`` the target.
+    Everything it cannot place (text it could not read, a response file,
+    run-time text, an option bundle) is refused."""
     if not argv:
         return True, ""
+    prog = _prog(argv[0])
+    if prog not in _PPDS_PROGRAMS:
+        return True, ""
+    if store is _MISSING:
+        store = read_profile_store()
+    args = list(argv[1:])
 
-    prog = os.path.basename(argv[0]).lower()
-    if prog.endswith(".exe"):
-        prog = prog[:-4]
+    def refuse(why):
+        return False, _block_msg_target(why, allowlist, argv)
+
+    def active_check():
+        if env_matches_allowlist(active, allowlist) and all(
+                env_matches_allowlist(c, allowlist) for c in (required or ())):
+            return True, ""
+        return False, _block_msg_active_not_allowed(active, allowlist, argv)
+
+    if UNREADABLE in args:
+        return refuse("the hook could not read this command in full, so it cannot tell which "
+                      "environment it reaches")
+    response = next((arg for arg in args if arg.startswith("@")), None)
+    if response is not None:
+        return refuse(f"{response} is a response file; its arguments may name another environment")
+    if any(sp.DYN in arg for arg in args):
+        return refuse("an argument only known when the command runs may name another environment")
 
     if prog == "ppds-mcp-server":
-        if env_matches_allowlist(active, allowlist):
-            return True, ""
-        return False, _block_msg_active_not_allowed(active, allowlist, argv)
+        why = _mcp_target_problem(args, allowlist, store)
+        return refuse(why) if why else active_check()
 
-    if prog != "ppds":
+    path, rest = _command_path(args)
+    if path == ("env",) and rest and rest[0].lower() in ("switch", "use"):
+        path, rest = ("env", "select"), rest[1:]  # not CLI commands; checked like `select`
+    if path == ("env", "select"):
+        targets, problem = _switch_targets(rest, {"--environment", "-env"}, _TARGET_LETTERS)
+        if problem or not targets:
+            return refuse(problem or "env select with no target the hook can place")
+        bad = next((t for t in targets if not target_listed(t, allowlist)), None)
+        if bad is not None:
+            return False, _block_msg_target_not_allowed(bad, allowlist, argv)
+    why = _target_problem(args, allowlist, store)
+    if why:
+        return refuse(why)
+    if path == ("env", "select"):
         return True, ""
-
-    if len(argv) < 2:
+    if path == ("auth", "select"):
+        targets, problem = _switch_targets(rest, {"--index", "-i", "--name", "-n"}, set("in"))
+        if problem or not targets:
+            return refuse(problem or "auth select with no profile the hook can place")
+        for ref in targets:
+            why = profile_target_problem(store, ref, allowlist)
+            if why:
+                return refuse(f"auth select {ref}: {why}")
         return True, ""
-
-    sub = argv[1].lower()
-
-    if sub == "env" or sub == "org":
-        if len(argv) < 3:
-            return True, ""
-        env_sub = argv[2].lower()
-        if env_sub in _ENV_READONLY_SUBCOMMANDS:
-            return True, ""
-        if env_sub in _ENV_SWITCH_SUBCOMMANDS:
-            target = _extract_switch_target(argv[3:])
-            if not target:
-                return True, ""
-            if env_matches_allowlist([target], allowlist):
-                return True, ""
-            return False, _block_msg_target_not_allowed(target, allowlist, argv)
-        if env_matches_allowlist(active, allowlist):
-            return True, ""
-        return False, _block_msg_active_not_allowed(active, allowlist, argv)
-
-    if env_matches_allowlist(active, allowlist):
+    if path in _SQL_PATHS:
+        why = _sql_label_problem(path, rest, allowlist, store)
+        if why:
+            return refuse(why)
+    if path[:1] == ("env",) and _env_read_form(path, rest):
         return True, ""
-    return False, _block_msg_active_not_allowed(active, allowlist, argv)
+    return active_check()
 
 
 def _extract_switch_target(args):
-    """Pull the target env name from a ``switch``/``select`` argv tail."""
-    for i, tok in enumerate(args):
-        if tok in ("--environment", "-env", "--env", "-e"):
-            if i + 1 < len(args):
-                return args[i + 1]
-            return ""
-        if tok.startswith("--environment="):
-            return tok.split("=", 1)[1]
-        if tok.startswith("-env="):
-            return tok.split("=", 1)[1]
-        if tok.startswith("-"):
-            continue
-        return tok
+    """The first target of a ``switch`` / ``select`` argv tail (the option
+    value with a space, ``=`` or ``:``, else a plain word), or ""."""
+    targets, problem = _switch_targets(list(args), {"--environment", "-env"}, _TARGET_LETTERS)
+    return "" if problem or not targets else targets[0]
+
+
+# Variables of the CLI that decide which environment it reaches.
+_SAFE_PPDS_VARS = {"ppds_shakedown", "ppds_safe_envs", "ppds_hook_budget_seconds", "ppds_internal",
+                   "ppds_mcp_log_level", "ppds_force_tui"}
+_PPDS_VAR_RE = re.compile(r"ppds_([a-z0-9_]*)", re.IGNORECASE)
+_PERSISTENT_SET_RE = re.compile(r"env:\\?ppds_|setenvironmentvariable|\bsetx\b", re.IGNORECASE)
+
+
+def _ppds_vars(command: str) -> list:
+    """Variable names starting ``PPDS_`` in ``command`` (quoting removed,
+    escapes decoded) that are not known to leave the target alone; a name
+    cut short by run-time text counts too."""
+    out = []
+    for text in (command, _unescape(command)):
+        flat = "".join(ch for ch in text if ch not in _QUOTING_CHARS)
+        for m in _PPDS_VAR_RE.finditer(flat):
+            if m.group(0).lower() not in _SAFE_PPDS_VARS:
+                out.append(m.group(0))
+    return out
+
+
+def target_variable_problem(command: str, invocations: list) -> str:
+    """Why ``command`` may change the environment the CLI reaches through
+    a variable (``PPDS_CONFIG_DIR``, ``PPDS_PROFILE``,
+    ``PPDS_ENVIRONMENT_URL`` ...), or "". With an invocation any such name
+    counts; without one, a PowerShell-style assignment that outlives the
+    command (``$env:PPDS_X = ...``, ``SetEnvironmentVariable``, ``setx``)."""
+    names = _ppds_vars(command)
+    if not names:
+        return ""
+    if invocations:
+        return f"the command names {names[0]}, which can change the environment the CLI reaches"
+    if _PERSISTENT_SET_RE.search("".join(ch for ch in command if ch not in _QUOTING_CHARS)):
+        return f"the command sets {names[0]}, which can change the environment later commands reach"
     return ""
 
 
@@ -1314,13 +1750,17 @@ def _extract_switch_target(args):
 #   r        reads only; anything after it is arguments and options.
 #   g        a group: passes only when nothing (or only a help flag) follows.
 #   w        writes, or not known to only read: blocked.
-#   dry-run  `plugins deploy`: passes only with --dry-run / -n.
+#   dry-run  `plugins deploy`: passes only with a positively placed --dry-run.
 #   sql      `query sql`: passes only with inline SQL that only reads.
-#   list     `env config` / `env type`: passes only with --list / --show alone.
+#   list     `env config` / `env type`: passes only in a form that only reads.
+#   ver      `version`: passes only alone or with --check (--update replaces the CLI).
+#   switch   `env select`: passes only when an allowlist is configured (the
+#            environment gate then checks the target).
+# The root itself (`ppds` with no arguments) starts the TUI: a write.
 # A path that is not listed is blocked. tests/hooks/test_shakedown_cli_commands.py
 # derives the command tree from src/PPDS.Cli and fails when a path is missing.
 _CLI_COMMANDS = """
-.: api=g auth=g connection-references=g connections=g custom-apis=g data=g data-providers=g data-sources=g deployment-settings=g docs=r env=g environment-variables=g flows=g forms=g import-jobs=g interactive=w internal=w logs=g metadata=g model-driven-app=g plugin-traces=g plugins=g publish=w query=g roles=g schema=g serve=w service-endpoints=g solutions=g users=g version=r views=g webresources=g
+.: api=g auth=g connection-references=g connections=g custom-apis=g data=g data-providers=g data-sources=g deployment-settings=g docs=r env=g environment-variables=g flows=g forms=g import-jobs=g interactive=w internal=w logs=g metadata=g model-driven-app=g plugin-traces=g plugins=g publish=w query=g roles=g schema=g serve=w service-endpoints=g solutions=g users=g version=ver views=g webresources=g
 api: request=w
 auth: clear=w create=w delete=w list=r name=w select=w update=w who=r
 connection-references: analyze=r connections=r flows=r get=r list=r
@@ -1330,7 +1770,7 @@ data: analyze=r copy=w delete=w export=r import=w load=w schema=r truncate=w upd
 data-providers: get=r list=r register=w unregister=w update=w
 data-sources: get=r list=r register=w unregister=w update=w
 deployment-settings: generate=r sync=w validate=r
-env: config=list list=r select=r type=list who=r
+env: config=list list=r select=switch type=list who=r
 environment-variables: export=r get=r list=r set=w url=r
 flows: disable=w enable=w get=r list=r url=r
 forms: add-field=w add-section=w add-subgrid=w add-tab=w find-section=r find-tab=r get=r list=r move-field=w remove-field=w remove-section=w remove-subgrid=w remove-tab=w reorder-fields=w reorder-fields-strict=w repair-bindings=w set-xml=w update-section=w update-tab=w
@@ -1390,44 +1830,113 @@ for _path in CLI_COMMANDS:
     if _path:
         _CLI_CHILDREN.setdefault(_path[:-1], set()).add(_path[-1])
 
-_HELP_FLAGS = {"--help", "-h", "-?", "/?", "--version"}
+# Help flags, recursive on every command (System.CommandLine's HelpOption),
+# compared exactly (the parser is case-sensitive). `--version` is a root
+# option only.
+_HELP_FLAGS = {"--help", "-h", "-?", "/?", "/h"}
+_ROOT_ONLY_FLAGS = _HELP_FLAGS | {"--version"}
 # Words in SQL text that write (or could): any of them makes `query sql` a write.
-_SQL_WRITE_RE = re.compile(
-    r"\b(insert|update|delete|merge|upsert|truncate|drop|create|alter|exec|execute|into|grant|revoke|"
-    r"deny|bulk|openrowset|declare|set)\b", re.IGNORECASE)
+_SQL_WRITE_WORDS = frozenset(
+    "insert update delete merge upsert truncate drop create alter exec execute into grant revoke "
+    "deny bulk openrowset declare set".split())
+
+
+def sql_words(text: str):
+    """The identifier-like words of ``text`` the way the T-SQL lexer splits
+    them, erring towards more words: a number (``1``, ``1.5e3``, ``0x1F``)
+    ends where its digits end, so ``1DELETE`` and ``0x12UPDATE`` hold a
+    word; a word is ASCII letters, digits, ``_ @ # $`` after a letter, ``_``,
+    ``@`` or ``#``; every other character, a non-ASCII letter included,
+    separates. Strings, comments and bracketed names are read like code."""
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if "0" <= c <= "9":
+            if c == "0" and text[i + 1:i + 2] in ("x", "X"):
+                i += 2
+                while i < n and text[i] in "0123456789abcdefABCDEF":
+                    i += 1
+                continue
+            while i < n and "0" <= text[i] <= "9":
+                i += 1
+            if i < n and text[i] == "." :
+                i += 1
+                while i < n and "0" <= text[i] <= "9":
+                    i += 1
+            if i + 1 < n and text[i] in "eE" and ("0" <= text[i + 1] <= "9" or (
+                    text[i + 1] in "+-" and i + 2 < n and "0" <= text[i + 2] <= "9")):
+                i += 2
+                while i < n and "0" <= text[i] <= "9":
+                    i += 1
+            continue
+        if c.isascii() and (c.isalpha() or c in "_@#"):
+            j = i + 1
+            while j < n and text[j].isascii() and (text[j].isalnum() or text[j] in "_@#$"):
+                j += 1
+            yield text[i:j]
+            i = j
+            continue
+        i += 1
+
+
+def sql_write_word(text: str):
+    """The first word of ``text`` that writes (or could), lower case, or None."""
+    return next((w.lower() for w in sql_words(text) if w.lower() in _SQL_WRITE_WORDS), None)
 
 
 def _plugins_deploy_blocked(args: list) -> bool:
-    """True unless ``--dry-run`` / ``-n`` is given and not set to false."""
+    """True unless ``--dry-run`` is positively placed: the bare token (no
+    ``=`` / ``:`` value, exact spelling), before any ``--``, not directly
+    after an option-looking token (whose value it might be), and not
+    followed by a word the flag might take as its value. Any other token
+    spelled ``--dry-run...`` also blocks."""
     dry = False
     for k, arg in enumerate(args):
-        low = arg.lower()
-        if low in ("--dry-run", "-n"):
-            nxt = args[k + 1].lower() if k + 1 < len(args) else ""
-            if nxt in ("false", "0"):
-                return True
-            dry = True
-        elif low.startswith(("--dry-run=", "--dry-run:", "-n=", "-n:")):
-            if low.split("=", 1)[-1].split(":", 1)[-1] != "true":
-                return True
-            dry = True
+        if arg == "--":
+            break  # after `--` every token is an operand
+        if not arg.lower().startswith("--dry-run"):
+            continue
+        if arg != "--dry-run":
+            return True
+        prev = args[k - 1] if k > 0 else None
+        nxt = args[k + 1] if k + 1 < len(args) else None
+        if prev is not None and prev.startswith(("-", "/")):
+            return True
+        if nxt is not None and not nxt.startswith("-"):
+            return True
+        dry = True
     return not dry
 
 
 def _sql_blocked(args: list) -> str:
-    """Why ``query sql <args>`` counts as a write, or "" when it only reads."""
-    text = [arg for arg in args if not arg.startswith("-")]
-    if any(arg.lower() in ("--file", "-f", "--stdin") or arg.lower().startswith(("--file=", "--file:"))
-           for arg in args):
+    """Why ``query sql <args>`` counts as a write, or "" when it only reads.
+    Every argument is SQL text for this test (an option value as well)."""
+    if any(arg.lower().startswith(("--file", "--stdin")) for arg in args):
         return "SQL read from a file or stdin"
     if any(sp.DYN in arg for arg in args):
         return "SQL only known when the command runs"
-    if not text:
+    if not args:
         return "no SQL text"
-    match = _SQL_WRITE_RE.search(" ".join(text))
-    if match:
-        return f"SQL containing {match.group(1).upper()}"
+    word = sql_write_word("\n".join(args))
+    if word:
+        return f"SQL containing {word.upper()}"
     return ""
+
+
+def mcp_read_only(args: list) -> bool:
+    """True when the MCP server starts read-only: as its parser
+    (``McpSessionOptions.Parse``) reads ``args``, the exact token
+    ``--read-only`` appears and is not taken as the value of ``--profile``,
+    ``--environment`` or ``--allowed-env``."""
+    i, read_only = 0, False
+    while i < len(args):
+        if args[i] in _MCP_VALUE_OPTIONS and i + 1 < len(args):
+            i += 2
+            continue
+        if args[i] == "--read-only":
+            read_only = True
+        i += 1
+    return read_only
 
 
 def _hides_verb(token: str) -> bool:
@@ -1451,7 +1960,7 @@ def _command_path(args: list):
     return path, args[k:]
 
 
-def is_mutation(argv: list) -> tuple:
+def is_mutation(argv: list, allowlist_configured: bool = False) -> tuple:
     """Return (is_mutation, reason). reason is empty when not a mutation.
 
     During a shakedown a ppds command passes only when its command path is
@@ -1459,13 +1968,15 @@ def is_mutation(argv: list) -> tuple:
     one the hook has never heard of included, counts as a write. An option
     before the command path, several words in one argument, or run-time text
     there means the command is not known. So does a response file (``@x``)
-    anywhere, and a child command name anywhere after its parent's path."""
+    anywhere, and a child command name anywhere after its parent's path. A
+    help flag passes only directly after the command path. ``ppds`` with no
+    arguments starts the TUI: a write. ``env select`` passes only when an
+    allowlist is configured (``allowlist_configured``), because then the
+    environment gate checks its target."""
     if not argv:
         return False, ""
 
-    prog = os.path.basename(argv[0]).lower()
-    if prog.endswith(".exe"):
-        prog = prog[:-4]
+    prog = _prog(argv[0])
     if prog not in ("ppds", "ppds-mcp-server"):
         return False, ""
 
@@ -1484,21 +1995,28 @@ def is_mutation(argv: list) -> tuple:
         if valued:
             return True, (f"ppds-mcp-server {valued[0]} (the server only accepts the bare "
                           "--read-only flag; --read-only=<value> starts it writable)")
-        if "--read-only" in argv[1:]:
+        if mcp_read_only(list(argv[1:])):
             return False, ""
+        if "--read-only" in argv[1:]:
+            return True, ("ppds-mcp-server (--read-only is taken as the value of the option before it; "
+                          "the server starts writable)")
         return True, "ppds-mcp-server (missing --read-only flag during shakedown)"
 
     args = argv[1:]
-    if len(args) == 1 and args[0].lower() in _HELP_FLAGS:
+    if not args:
+        return True, "ppds with no arguments (starts the interactive TUI; treated as a write)"
+    if len(args) == 1 and args[0] in _ROOT_ONLY_FLAGS:
         return False, ""
     path, rest = _command_path(args)
     shown = " ".join(path)
     nxt = rest[0] if rest else None
     cls = CLI_COMMANDS[path]
 
+    if nxt is not None and nxt in _HELP_FLAGS:
+        return False, ""  # help, placed directly after the command path: nothing runs
     if cls == "g":
-        if nxt is None or (len(rest) == 1 and nxt.lower() in _HELP_FLAGS):
-            return False, ""
+        if nxt is None:
+            return False, ""  # a group alone prints its help
         if sp.DYN in nxt:
             return True, f"{(shown + ' ') if shown else ''}$... (a command only known when it runs; treated as a write)"
         if _hides_verb(nxt):
@@ -1515,14 +2033,23 @@ def is_mutation(argv: list) -> tuple:
                       f"other arguments; treated as a write)")
     if cls == "r":
         return False, ""
+    if cls == "ver":
+        if rest in ([], ["--check"]):
+            return False, ""
+        return True, f"{shown} (passes only alone or with --check; --update replaces the CLI)"
+    if cls == "switch":
+        if allowlist_configured:
+            return False, ""
+        return True, (f"{shown} (with no safe-env allowlist configured nothing checks the target; "
+                      "treated as a write)")
     if cls == "dry-run":
         if _plugins_deploy_blocked(rest):
-            return True, f"{shown} (no --dry-run flag present)"
+            return True, f"{shown} (no --dry-run flag the hook can place)"
         return False, ""
     if cls == "list":
-        if rest and all(arg.lower() in ("--list", "--show", "-s") for arg in rest):
+        if _env_settings_read(path, rest):
             return False, ""
-        return True, f"{shown} (changes settings unless only --list / --show is given)"
+        return True, f"{shown} (changes settings unless it is one of the forms that only read)"
     if cls == "sql":
         why = _sql_blocked(rest)
         return (True, f"{shown} ({why}; treated as a write)") if why else (False, "")
@@ -1537,6 +2064,17 @@ def is_mutation(argv: list) -> tuple:
 def _shown(argv) -> str:
     """argv as text for a message; run-time-only text shows as ``$...``."""
     return " ".join(argv).replace(sp.DYN, "$...")
+
+
+def _command_line(argv) -> str:
+    """The ``Command:`` line of a block message. A reading the hook made up
+    for a program it could not identify shows the words as written, or
+    nothing when it has none to show."""
+    if isinstance(argv, _Guess):
+        if argv.origin:
+            return f"{argv.origin}  (a program the hook cannot identify; read as ppds)"
+        return "(not shown: the hook could not read the command in full)"
+    return _shown(argv)
 
 
 def _format_active(active):
@@ -1557,13 +2095,27 @@ def _config_help_lines():
 def _block_msg_active_not_allowed(active, allowlist, argv):
     lines = [
         "BLOCKED [shakedown-safety/env]: active env is not in the safe-env allowlist.",
-        f"  Command:    {_shown(argv)}",
+        f"  Command:    {_command_line(argv)}",
         f"  Active env: {_format_active(active)}",
         f"  Allowlist:  {', '.join(allowlist)}",
         "",
         "  To proceed, switch to a safe env:",
-        "    ppds env select <name>           # canonical CLI",
-        "    ppds env switch <name>           # alias accepted by this hook",
+        "    ppds env select --environment <name>",
+        "",
+    ]
+    lines.extend(_config_help_lines())
+    return "\n".join(lines)
+
+
+def _block_msg_target(why, allowlist, argv):
+    lines = [
+        "BLOCKED [shakedown-safety/env]: the command may reach an env that is not in the "
+        "safe-env allowlist.",
+        f"  Command:   {_command_line(argv)}",
+        f"  Problem:   {why}",
+        f"  Allowlist: {', '.join(allowlist)}",
+        "",
+        "  Name only listed environments and profiles, literally, in the command.",
         "",
     ]
     lines.extend(_config_help_lines())
@@ -1573,7 +2125,7 @@ def _block_msg_active_not_allowed(active, allowlist, argv):
 def _block_msg_target_not_allowed(target, allowlist, argv):
     lines = [
         "BLOCKED [shakedown-safety/env]: switch target is not in the safe-env allowlist.",
-        f"  Command:   {_shown(argv)}",
+        f"  Command:   {_command_line(argv)}",
         f"  Target:    {target}",
         f"  Allowlist: {', '.join(allowlist)}",
         "",
@@ -1585,7 +2137,7 @@ def _block_msg_target_not_allowed(target, allowlist, argv):
 def _block_msg_misconfigured(problem, argv):
     lines = [
         "BLOCKED [shakedown-safety/env]: the safe-env allowlist is misconfigured.",
-        f"  Command: {_shown(argv)}",
+        f"  Command: {_command_line(argv)}",
         f"  Problem: {problem}",
         "",
         "  Fix it so it names at least one env, or remove it (unset the env",
@@ -1619,7 +2171,7 @@ def _block_msg_mutation(
     return "\n".join(
         [
             "BLOCKED [shakedown-safety/readonly]: write/mutation command refused.",
-            f"  Command: {_shown(argv)}",
+            f"  Command: {_command_line(argv)}",
             f"  Pattern: {reason}",
             "",
             f"  Active: {activation} -- this session is in read-only mode for",
@@ -1659,12 +2211,34 @@ def _budget() -> float:
     return max(0.0, min(value, _BUDGET_SECONDS))
 
 
+# A watchdog refuses the command when the hook has not answered this long
+# after the budget: the last line of defence against a slow input or a slow
+# machine (Claude Code runs a command whose hook times out).
+_WATCHDOG_GRACE_SECONDS = 1.0
+
+
 def _refuse(message: str) -> None:
     """Print ``message`` and exit 2. A failure to print still exits 2."""
     try:
         print(message, file=sys.stderr)
     finally:
         sys.exit(2)
+
+
+def _start_watchdog(seconds: float):
+    """A daemon timer that prints a refusal and ends the process with exit
+    code 2 after ``seconds``; the caller cancels it when it answers."""
+    def fire():
+        try:
+            sys.stderr.write("BLOCKED [shakedown-safety]: the hook could not check this command "
+                             "in time, so it is refused.\n")
+            sys.stderr.flush()
+        finally:
+            os._exit(2)
+    timer = threading.Timer(seconds, fire)
+    timer.daemon = True
+    timer.start()
+    return timer
 
 
 def _payload_command(raw: str):
@@ -1696,26 +2270,21 @@ def main() -> None:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, ValueError):
         pass
-    state = {"raw": "", "gate_off": False}
+    budget = _budget()
+    watchdog = _start_watchdog(budget + _WATCHDOG_GRACE_SECONDS)
     try:
-        _main(state)
+        _main(time.monotonic() + budget)
     except SystemExit:
         raise
     except BaseException:  # noqa: BLE001 -- a crash (exit 1) would let the command run
-        if state["gate_off"]:
-            sys.exit(0)
-        if mentions_guarded(state["raw"]):
-            _refuse("BLOCKED [shakedown-safety]: the hook could not check this command "
-                    "(internal error); it mentions ppds, dotnet or dnx, so it is refused.")
-        sys.exit(0)
+        # Any internal error refuses, whatever the command (exit 2).
+        _refuse("BLOCKED [shakedown-safety]: the hook could not check this command "
+                "(internal error), so it is refused.")
+    finally:
+        watchdog.cancel()
 
 
-def _main(state: dict) -> None:
-    deadline = time.monotonic() + _budget()
-    stream = getattr(sys.stdin, "buffer", None)
-    raw = stream.read().decode("utf-8", errors="replace") if stream is not None else sys.stdin.read()
-    state["raw"] = raw
-
+def _main(deadline: float) -> None:
     config = load_safety_config()
     env_var_name = config["readonly_env_var"]
     env_active = os.environ.get(env_var_name, "").strip() == "1"
@@ -1728,50 +2297,58 @@ def _main(state: dict) -> None:
         allowlist, misconfigured = [], str(exc)
     if not allowlist and misconfigured is None and not shakedown_active:
         # No allowlist and no shakedown: nothing is gated, for any command.
-        state["gate_off"] = True
         sys.exit(0)
 
+    stream = getattr(sys.stdin, "buffer", None)
+    raw = stream.read().decode("utf-8", errors="replace") if stream is not None else sys.stdin.read()
     parsed = _payload_command(raw)
+    command = ""
     if parsed is None:
         # Not the input shape the hook knows: any mention is an invocation.
         invocations = _unknown([UNREADABLE]) if mentions_guarded(raw) else []
     else:
         command, tool_name, cwd = parsed
         invocations = find_ppds_invocations(command, tool_name, cwd, deadline) if command.strip() else []
-    if not invocations:
-        sys.exit(0)
 
-    # Concern 2: write-block first -- it's the tighter gate when active.
-    if shakedown_active:
+    try:
+        # Concern 2: write-block first -- it's the tighter gate when active.
+        if shakedown_active:
+            for argv in invocations:
+                _tick(deadline)
+                blocked, reason = is_mutation(argv, allowlist_configured=bool(allowlist))
+                if blocked:
+                    _refuse(_block_msg_mutation(argv, reason, env_var_name,
+                                                env_active=env_active, sentinel_active=sentinel_active))
+
+        # Concern 1: env allowlist gating -- opt-in. It is active once an
+        # allowlist names at least one env; with none configured (missing or
+        # empty) the hook does not gate ppds commands, so a fresh clone works
+        # without setup. A source that is present but unusable blocks.
+        if misconfigured is not None and invocations:
+            _refuse(_block_msg_misconfigured(misconfigured, invocations[0]))
+        if not allowlist:
+            sys.exit(0)
+        why = target_variable_problem(command, invocations)
+        if why:
+            _refuse(_block_msg_target(why, allowlist, invocations[0] if invocations else ["(none)"]))
+        if not invocations:
+            sys.exit(0)
+
+        active = get_active_env_names()
+        required = []
+        env_url = os.environ.get("PPDS_ENVIRONMENT_URL", "").strip()
+        if env_url:
+            # The CLI inherits this variable; it may pick that environment.
+            required.append(_url_candidates(env_url) or [env_url])
+        store = read_profile_store()
         for argv in invocations:
-            blocked, reason = is_mutation(argv)
-            if blocked:
-                _refuse(
-                    _block_msg_mutation(
-                        argv,
-                        reason,
-                        env_var_name,
-                        env_active=env_active,
-                        sentinel_active=sentinel_active,
-                    )
-                )
-
-    # Concern 1: env allowlist gating -- opt-in. It is active once an
-    # allowlist names at least one env; with none configured (missing or
-    # empty) the hook does not gate ppds commands, so a fresh clone works
-    # without setup. A source that is present but unusable blocks.
-    if misconfigured is not None:
-        _refuse(_block_msg_misconfigured(misconfigured, invocations[0]))
-    if not allowlist:
-        sys.exit(0)
-
-    active = get_active_env_names()
-
-    for argv in invocations:
-        allow, reason = decide_env(argv, allowlist, active)
-        if not allow:
-            _refuse(reason)
-
+            _tick(deadline)
+            allow, reason = decide_env(argv, allowlist, active, store, required)
+            if not allow:
+                _refuse(reason)
+    except _Deadline:
+        _refuse("BLOCKED [shakedown-safety]: the hook could not check this command within its "
+                "time budget, so it is refused.")
     sys.exit(0)
 
 

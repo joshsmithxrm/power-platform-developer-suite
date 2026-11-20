@@ -3,8 +3,18 @@
 Sessions issue commands through the Bash tool or the PowerShell tool. Every
 deny and ask rule must exist for both, with the same command text, and every
 hook registered for one shell tool must be registered for the other.
-Claude Code's enforcement itself is observed in a real session (see #1780);
-these tests keep the files consistent.
+
+What these tests prove: the text of `.claude/settings.json` -- each deny and
+ask rule exists for both tools with the same command, each tool's rules use
+one suffix form, the environment hook is registered for both tool names as
+a `command` hook, and nothing turns the hooks off (`disableAllHooks`). The
+hook process itself handles both tool names; that is tested in
+tests/hooks/ (every case runs with `tool_name` Bash and PowerShell).
+
+What they do not prove: that Claude Code enforces a rule or runs the hook
+for the PowerShell tool. No automated test here can observe the app's
+enforcement. That rests on an observation in a real session, recorded in
+docs/SAFE-SHAKEDOWN.md ("Enforcement in the PowerShell tool").
 """
 from __future__ import annotations
 
@@ -68,7 +78,8 @@ def test_every_rule_exists_for_both_shell_tools(section):
 
 @pytest.mark.parametrize("section", ["deny", "ask"])
 def test_one_suffix_form_per_tool(section):
-    """Every rule for a tool uses the form observed to be enforced for it."""
+    """Every rule for a tool uses one suffix form (`:*` for Bash, ` *` for
+    PowerShell). Whether Claude Code enforces that form is not tested here."""
     forms = _forms(_settings()["permissions"][section])
     for tool in SHELL_TOOLS:
         assert len(forms.get(tool, set())) == 1, f"{section}: mixed rule forms for {tool}: {forms}"
@@ -113,6 +124,18 @@ def test_the_environment_hook_is_registered_for_both_tools():
         if any("shakedown-safety.py" in h.get("command", "") for h in entry.get("hooks", [])):
             tools |= _matcher_tools(entry.get("matcher", ""))
     assert tools == set(SHELL_TOOLS)
+
+
+def test_the_environment_hook_is_a_command_hook():
+    found = [h for entry in _settings()["hooks"]["PreToolUse"] for h in entry.get("hooks", [])
+             if "shakedown-safety.py" in h.get("command", "")]
+    assert found and all(h.get("type") == "command" for h in found), found
+
+
+def test_nothing_turns_the_hooks_off():
+    settings = _settings()
+    assert "disableAllHooks" not in settings
+    assert "disableAllHooks" not in SETTINGS.read_text(encoding="utf-8")
 
 
 def test_a_hook_registered_for_one_tool_only_is_caught():

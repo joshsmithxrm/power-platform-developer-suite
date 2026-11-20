@@ -177,15 +177,21 @@ def _registered_timeout() -> float:
     raise AssertionError("shakedown-safety.py is not registered")
 
 
-def test_the_budget_is_well_inside_the_registered_timeout():
-    """Interpreter start-up plus the hook's budget must leave at least half
-    of the registered timeout unused."""
+def _load_for_budget():
     import importlib.util
 
     sys.path.insert(0, str(HOOK_PATH.parent))
     spec = importlib.util.spec_from_file_location("shakedown_safety_budget", str(HOOK_PATH))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_budget_is_well_inside_the_registered_timeout():
+    """Interpreter start-up plus the hook's budget and the watchdog's grace
+    (the latest the hook answers) must leave at least half of the registered
+    timeout unused."""
+    mod = _load_for_budget()
     startups = []
     for _ in range(3):
         start = time.monotonic()
@@ -194,7 +200,8 @@ def test_the_budget_is_well_inside_the_registered_timeout():
         startups.append(time.monotonic() - start)
     startup = max(startups)
     timeout = _registered_timeout()
-    assert mod._BUDGET_SECONDS + 2 * startup <= timeout / 2, (mod._BUDGET_SECONDS, startup, timeout)
+    latest = mod._BUDGET_SECONDS + mod._WATCHDOG_GRACE_SECONDS
+    assert latest + 2 * startup <= timeout / 2, (latest, startup, timeout)
 
 
 @pytest.mark.parametrize("mode", ["gate", "shakedown"])
@@ -206,9 +213,11 @@ def test_the_deadline_is_an_invocation(env_for, mode):
         assert r.returncode == 2, (command, r.stderr)
 
 
-def test_the_deadline_with_a_safe_active_env_is_checked_against_the_allowlist(env_for):
+def test_the_deadline_refuses_with_a_safe_active_env_too(env_for):
+    """Out of time the hook cannot tell which environment a command reaches:
+    refused even when the active env is listed."""
     r = _run(_payload("Bash", "ppds env list"), env_for("safe", PPDS_HOOK_BUDGET_SECONDS="0"))
-    assert r.returncode == 0, r.stderr
+    assert r.returncode == 2, r.stderr
 
 
 def test_the_budget_override_cannot_raise_the_budget(env_for):
@@ -227,12 +236,24 @@ def test_the_budget_override_cannot_raise_the_budget(env_for):
     f"ppds {DEL} " + " ".join(f'"f{i}.txt"' for i in range(6000)),
     f"ppds {DEL} --filter {{" + "," * 100_000,
     "echo " + "'a' " * 12000 + f"; ppds {DEL}",
-], ids=["single-quoted-words", "double-quoted-words", "brace-commas", "many-strings"])
-def test_large_inputs_answer_well_inside_the_timeout(env_for, tool, command):
+    # Many words naming the program in one statement (each one an argument
+    # list of the words after it), then many short words (round 2, A1).
+    f"ppds {DEL} ; echo " + "ppds " * 8797 + "a " * 32988,
+    f"ppds {DEL} ; echo " + "ppds " * 13096 + "a," * 32000,
+    "echo " + "ppds " * 40000,
+    "echo " + "dotnet run --project src/PPDS.Cli " * 4000,
+], ids=["single-quoted-words", "double-quoted-words", "brace-commas", "many-strings",
+        "program-words-110k", "program-words-131k", "program-words-200k", "dotnet-words"])
+@pytest.mark.parametrize("mode", ["shakedown", "gate"])
+def test_large_inputs_answer_inside_the_budget(env_for, tool, command, mode):
+    """Every input is answered (exit 2 here) within the budget plus start-up
+    and the watchdog's grace, far inside the registered timeout."""
     start = time.monotonic()
-    r = _run(_payload(tool, command), env_for("shakedown"))
+    r = _run(_payload(tool, command), env_for(mode))
     elapsed = time.monotonic() - start
     assert r.returncode == 2, r.stderr
+    mod = _load_for_budget()
+    assert elapsed < mod._BUDGET_SECONDS + mod._WATCHDOG_GRACE_SECONDS + 1.0, elapsed
     assert elapsed < _registered_timeout() / 2, elapsed
 
 
@@ -255,9 +276,24 @@ def test_an_internal_error_refuses_a_mention(env_for, mode, command):
     assert "internal error" in r.stderr.decode("utf-8")
 
 
-def test_an_internal_error_without_a_mention_passes(env_for):
-    r = _with_failing_reader(_payload("Bash", "git status"), env_for("gate"))
-    assert r.returncode == 0, r.stderr
+def test_an_internal_error_without_a_mention_refuses(env_for):
+    """Any internal error refuses, a command with no mention included."""
+    for command in ("git status", "& $x data delete"):
+        r = _with_failing_reader(_payload("Bash", command), env_for("gate"))
+        assert r.returncode == 2, (command, r.stderr)
+        assert "internal error" in r.stderr.decode("utf-8")
+
+
+@pytest.mark.parametrize("mode", ["gate", "shakedown", "safe"])
+def test_a_failing_stdin_read_refuses(env_for, mode):
+    """The payload cannot be read: refused (exit 2), not a crash or a pass."""
+    code = ("import runpy, sys; sys.path.insert(0, sys.argv[1]);"
+            "sys.stdin = type('S', (), {'buffer': type('B', (), {'read': lambda self: 1 / 0})()})();"
+            "runpy.run_path(sys.argv[2], run_name='__main__')")
+    r = _run(_payload("Bash", f"ppds {DEL}"), env_for(mode),
+             [sys.executable, "-c", code, str(HOOK_PATH.parent), str(HOOK_PATH)])
+    assert r.returncode == 2, r.stderr
+    assert "internal error" in r.stderr.decode("utf-8")
 
 
 def test_an_internal_error_with_the_gate_off_passes(env_for):

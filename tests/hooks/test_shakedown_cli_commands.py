@@ -128,7 +128,7 @@ def test_unknown_commands_are_blocked(text):
     ("query sql --stdin", True),
     ("query sql", True),
     ("plugins deploy --dry-run", False),
-    ("plugins deploy -n", False),
+    ("plugins deploy -n", True),                      # `plugins deploy` has no `-n`
     ("plugins deploy", True),
     ("plugins deploy --dry-run false", True),
     ("plugins deploy --dry-run=false", True),
@@ -138,10 +138,10 @@ def test_unknown_commands_are_blocked(text):
     ("env config --list", False),
     ("env config --show", False),
     ("env config --label x", True),
-    ("env config", True),
+    ("env config", False),                            # shows the active env's settings
     ("env type --list", False),
     ("env type --remove x", True),
-    ("", False),
+    ("", True),                                       # no arguments: starts the TUI
 ])
 def test_conditions(text, blocked):
     assert hook.is_mutation(_argv(text))[0] is blocked, text
@@ -292,7 +292,7 @@ def test_a_response_file_is_refused_in_every_class(text):
     (["ppds", "[env:X=1]", "data", "export"], True),
     (["ppds", "plugins", "deploy", "-nv"], True),                            # bundled short options
     (["ppds", "plugins", "deploy", "--dry-run:false"], True),
-    (["ppds", "plugins", "deploy", "--dry-run=true"], False),
+    (["ppds", "plugins", "deploy", "--dry-run=true"], True),           # a value attached: not placed
     (["ppds-mcp-server", "--read-only:false"], True),
     (["ppds-mcp-server", "--read-only=true"], True),
     (["ppds", "METADATA", "ENTITY", "ADD-STATUSREASON"], True),              # case

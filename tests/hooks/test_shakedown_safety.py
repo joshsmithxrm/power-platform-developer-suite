@@ -464,9 +464,11 @@ class TestEnvSwitchTarget:
 class TestReadOnlyAlwaysAllowed:
     @pytest.mark.parametrize("cmd", [
         "ppds env list",
-        "ppds env current",
         "ppds env who",
+        "ppds env config",
         "ppds env config --list",
+        "ppds env config --show",
+        "ppds env config https://x.example --show",
         "ppds env type --list",
     ])
     def test_readonly_env_subcommands_allowed_even_when_active_unsafe(
@@ -680,8 +682,8 @@ class TestReadOnlyAllowedDuringShakedown:
 class TestDryRunExempt:
     @pytest.mark.parametrize("cmd", [
         "ppds plugins deploy --dry-run",
-        "ppds plugins deploy -n",
-        "ppds plugins deploy --some-other-arg --dry-run",
+        "ppds plugins deploy --config x.json --dry-run",
+        "ppds plugins deploy --dry-run --config x.json",
     ])
     def test_dry_run_allowed(self, fake_profile_dir, cmd):
         config_dir = fake_profile_dir(active_env_name="ppds-dev")
@@ -696,13 +698,23 @@ class TestDryRunExempt:
         )
         assert r.returncode == 2
 
-    def test_dry_run_equals_true_treated_as_dry_run(self, fake_profile_dir):
+    @pytest.mark.parametrize("cmd", [
+        "ppds plugins deploy -n",                              # no such option
+        "ppds plugins deploy --some-other-arg --dry-run",      # may be that option's value
+        "ppds plugins deploy --correlation-id --dry-run",
+        "ppds plugins deploy -env --dry-run",
+        "ppds plugins deploy --solution --dry-run",
+        "ppds plugins deploy --dry-run ' false'",              # the flag takes the word as its value
+        "ppds plugins deploy --dry-run false",
+        "ppds plugins deploy --dry-run=true",                  # a value attached: not placed
+        "ppds plugins deploy --dry-run:true",
+        "ppds plugins deploy -- --dry-run",                    # an operand after `--`
+        "ppds plugins deploy --dry-run --dry-run false",
+    ])
+    def test_dry_run_not_positively_placed_is_blocked(self, fake_profile_dir, cmd):
         config_dir = fake_profile_dir(active_env_name="ppds-dev")
-        r = _run_hook(
-            "ppds plugins deploy --dry-run=true",
-            env_extra=_shakedown_env(config_dir),
-        )
-        assert r.returncode == 0, f"stderr={r.stderr!r}"
+        r = _run_hook(cmd, env_extra=_shakedown_env(config_dir))
+        assert r.returncode == 2, f"cmd={cmd}: stderr={r.stderr!r}"
 
 
 class TestMcpServerReadOnly:
@@ -997,6 +1009,11 @@ class TestDotnetHostForms:
         config_dir = fake_profile_dir(active_env_name="ppds-prod")
         r = _run_hook(cmd, env_extra=self._env(config_dir, project_dir))
         assert r.returncode == 2, r.stderr
+        if "--profile x" in argv:
+            # a profile the store does not have: its environment is not known
+            assert "Problem:   --profile x: profile 'x' is not in the profile store" in r.stderr
+            assert f"Command:   {argv}\n" in r.stderr
+            return
         assert self.ENV_BLOCK in r.stderr
         assert f"Command:    {argv}\n" in r.stderr
 
@@ -1130,9 +1147,9 @@ class TestIsMutation:
         is_mut, _ = hook.is_mutation(["ppds", "plugins", "deploy", "--dry-run"])
         assert not is_mut
 
-    def test_plugins_deploy_with_short_dry_run(self):
+    def test_plugins_deploy_has_no_short_dry_run(self):
         is_mut, _ = hook.is_mutation(["ppds", "plugins", "deploy", "-n"])
-        assert not is_mut
+        assert is_mut
 
     def test_logs_reads_pass_and_unknown_logs_commands_block(self):
         for verb in ("tail", "dump"):
@@ -1140,9 +1157,9 @@ class TestIsMutation:
         for verb in ("show", "stream", "anything"):
             assert hook.is_mutation(["ppds", "logs", verb])[0], verb
 
-    def test_short_argv_not_mutation(self):
-        is_mut, _ = hook.is_mutation(["ppds"])
-        assert not is_mut
+    def test_bare_ppds_starts_the_tui_and_is_a_mutation(self):
+        is_mut, reason = hook.is_mutation(["ppds"])
+        assert is_mut and "TUI" in reason
         is_mut, _ = hook.is_mutation(["ppds", "env"])
         assert not is_mut
 
