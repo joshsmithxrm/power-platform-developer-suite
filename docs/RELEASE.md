@@ -4,11 +4,13 @@ Tool-neutral reference for the release model and policy: tags, channels and
 package lineage, the closeout ledger, release scope analysis, CLI/Extension
 co-release reconciliation, publisher input checks, public artifact verification,
 signing and key custody, strong-name rotation, and the distributed native
-runtime. Automation may advise what should be released, but a maintainer must
-approve every tag and publish.
+runtime. Automation may advise what should be released. The maintainer creates
+and pushes every tag and makes every publication; neither automation nor an agent
+session does ([VERSIONING.md](VERSIONING.md#9-decisions-in-documents), rule 9.2).
 
-The step-by-step release procedure (CHANGELOGs, version bumps, tag pushes, CI
-monitoring, verification, patches, stabilization branches, recovery) is in
+The step-by-step release procedure (CHANGELOGs, version bumps, the tag commands
+the maintainer runs, CI monitoring, verification, patches, stabilization
+branches, recovery) is in
 [docs/runbooks/release.md](runbooks/release.md). The docs-site release is in
 [docs/runbooks/docs-release.md](runbooks/docs-release.md), and the policy for
 when to release is [specs/release-cycle.md](../specs/release-cycle.md).
@@ -119,7 +121,7 @@ Keep source/dependency/signing/vacancy/public-artifact gates and sequential
 publication verification. New source must contain this workflow; retrying an old
 immutable tag still executes its historical secret-based publisher. The offline
 checks do not exercise the token exchange or package/symbol uploads; the first
-real publish needs the maintainer's final publication approval like any other.
+real publish is run by the maintainer, as every publication is, after the maintainer's final publication approval.
 Changes to trust/identity settings are reviewed separately. Do not remove old secrets,
 create trust settings or invoke login as part of local validation.
 
@@ -337,7 +339,7 @@ assuming a branch contains a release.
 **Rule: a release train that ships a `Cli-v*` tag also ships an `Extension-v*`
 bundled-CLI refresh on the same commit.** The Extension bundles the CLI at publish
 time (`extension-publish.yml` runs `npm run bundle:cli`), so Marketplace users get
-new CLI behavior only when a new `Extension-v*` tag is cut. Cut the refresh even
+new CLI behavior only when a new `Extension-v*` tag is cut. Prepare the refresh even
 when the Extension's own source is unchanged: bump the Extension patch version
 to force a fresh VSIX (a minor bump would change the odd/even channel).
 
