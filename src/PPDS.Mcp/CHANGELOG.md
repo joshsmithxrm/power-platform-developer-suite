@@ -3,7 +3,7 @@
 All notable changes to the PPDS.Mcp package will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html), under the rules in [docs/VERSIONING.md](https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/docs/VERSIONING.md).
 
 ## [Unreleased]
 
@@ -23,7 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated to consume CLI 1.5.0 and the coordinated library/runtime dependency refresh, including Microsoft.Extensions.Hosting 10.0.14 (#1501), MSAL 4.92.0 (#1513) and System.Text.Json 10.0.14 (#1565).
 - `ppds_metadata_update_table`, `ppds_metadata_create_table` and `ppds_metadata_add_option_value` share the CLI metadata service's earlier return of pooled connections before cache invalidation, option-colour and publication follow-ups, so these calls can complete with one available pooled connection. Separate requests can still complete partially if a later step fails.
 - `ppds_metadata_update_column` can change the display name and description of State, Status and unique-identifier (GUID) columns, including a table's primary ID; any other setting on these columns is rejected (#1550, #1559).
-- **Compatibility exception for this release only** - Josh approved CLI 1.5.0 and MCP 1.3.0 on 2026-11-01 with explicit protected-write/session migration and custom-embedder signature incompatibilities. This is not a blanket backward-compatibility claim or a permanent version-policy waiver; see the [scoped exception and migration guide](https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/docs/releases/v1.8.0.md#one-release-compatibility-exception).
 
 ### Fixed
 

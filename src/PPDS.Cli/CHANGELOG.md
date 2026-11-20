@@ -3,7 +3,7 @@
 All notable changes to PPDS.Cli will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html), under the rules in [docs/VERSIONING.md](https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/docs/VERSIONING.md).
 
 ## [Unreleased]
 
@@ -48,7 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Refreshed System.CommandLine 2.0.9 to 2.0.14, Nerdbank.Streams 2.13.16 to 2.14.411 and direct Microsoft.Extensions dependencies to 10.0.14; consumed the coordinated Auth/Dataverse/Migration/Query/Plugins releases and their JWT/build-tool servicing (#1499, #1500, #1501, #1502), including MSAL 4.92.0 and System.Text.Json 10.0.14 (#1513, #1565).
 - `schemas/plugin-registration.schema.json`, the `$schema` that `plugins extract` writes, now models registration versions 1.0 and 2.0, `resetFields` and the per-version omission rules, with descriptions and enums for the documented values. Validating existing files against it may now report a `version` other than `1.0` or `2.0` (the CLI also rejects those before connecting) and, for version 2.0 files, any property the schema does not define. Version 1.0 files still allow additional properties.
-- **Compatibility exception for this release only** - Josh approved CLI 1.5.0 and MCP 1.3.0 on 2026-11-01 despite stricter protected-write behavior and incompatible CLI/MCP implementation signatures. Update scripts with required acknowledgements and custom embedders with the documented signature changes. This is not a blanket backward-compatibility claim or a permanent version-policy waiver; see the [scoped exception and migration guide](https://github.com/joshsmithxrm/power-platform-developer-suite/blob/main/docs/releases/v1.8.0.md#one-release-compatibility-exception).
 
 ### Fixed
 
