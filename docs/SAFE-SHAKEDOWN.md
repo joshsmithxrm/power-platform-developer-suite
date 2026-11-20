@@ -60,7 +60,31 @@ level (what one invocation does). Everything else is refused (exit 2).
   hook could not read in full (a cap, the time budget, a mention it could
   not place, arguments from elsewhere such as `xargs`), a response file
   (`@file`), or an argument only known when the command runs (`$X`,
-  `$(...)`) is refused by both gates, even when the active env is listed.
+  `$(...)`) is refused during a shakedown and when the active env is not
+  listed (or not known).
+- **With a listed active env and no shakedown, such an invocation is
+  refused only when the command text names a switch or a target.** A
+  switch is one of `env`, `org` or `auth` together with one of `select`,
+  `switch` or `use` (as separate words, any case, also with quoting
+  characters inside them, and also inside an encoded PowerShell command,
+  `-EncodedCommand`). A target is `--environment`, `-env`, `--env`,
+  `--source-env` / `-se`, `--target-env` / `-te`, `--profile`,
+  `--source-profile` / `-sp`, `--target-profile` / `-tp` or
+  `--allowed-env` anywhere in the text (alone, or with `=` / `:` and a
+  value), or `-p` / `-e` in a text that mentions `ppds`. A `PPDS_`
+  variable that moves the target is refused separately, in every mode
+  (Concern 1, step 5). Otherwise the invocation passes, as the listed
+  active env would let any other command pass, so ordinary work (a script
+  run through a shell, `find -exec`, `eval`, a runner with a variable, a
+  PowerShell pipeline, a commit message that mentions `ppds`) is not
+  refused. An invocation the hook placed in full keeps every exact check
+  below: a switch to an unlisted target, a per-command target that is not
+  listed, and a response file (`ppds @file`) or a possible bundle of short
+  options in the arguments of a word naming `ppds` are refused whatever
+  else the text holds. The limit this
+  sets: with a listed active env, a target hidden where the text does not
+  show it (inside a response file, a variable, a script file, or words
+  built at run time) is not seen.
 - **A token that grants a pass must be positively placed.** `--dry-run`,
   `--read-only`, `--help`, `--list` and `--show` count only as the bare
   token in the place where the CLI's parser binds it as that flag: not as
@@ -205,16 +229,26 @@ or run the search when no gate applies.
 **False blocks to expect while a gate applies** (accepted on #1780; each is
 a refusal where a pass would have been safe):
 
-- With a listed active env as well as an unlisted one: a command whose
-  arguments are only known when it runs (`ppds data export --output "$OUT"`);
-  one that names a `PPDS_` variable other than `PPDS_SHAKEDOWN`,
+- With an unlisted (or unknown) active env, and during a shakedown: every
+  invocation the hook cannot place in full (a script run through a shell,
+  `find -exec`, `eval`, a runner with a variable such as `timeout "$T" npm
+  test`, a PowerShell script block or pipeline such as `... |
+  ForEach-Object { ... }`, `pwsh -File`, a mention the readings cannot
+  place such as `it's ppds's` in a commit message, arguments only known
+  when the command runs, any command past a cap).
+- With a listed active env as well: an invocation the hook cannot place in
+  a command text that names a switch or a target (above), for example a
+  commit message with an unplaced mention of `ppds` and the words `env`
+  and `use`, or `mkdir -p out` in a text with an unplaced mention; one
+  that names a `PPDS_` variable other than `PPDS_SHAKEDOWN`,
   `PPDS_SAFE_ENVS`, `PPDS_FORCE_TUI`, `PPDS_INTERNAL`, `PPDS_MCP_LOG_LEVEL`
-  or `PPDS_HOOK_BUDGET_SECONDS`, also in a commit message; a single-dash
-  option holding an `e` or a `p` that is not one of the environment or
-  profile options (`-cdp`, `-cp`, `-pkg`), because it may be a bundle of
-  short options; an environment given as a URL whose host is not itself an
-  allowlist entry; a mention the readings cannot place (`it's ppds's`);
-  any command past a cap.
+  or `PPDS_HOOK_BUDGET_SECONDS`, also in a commit message; in an argument
+  list read after a word naming `ppds`, a single-dash option holding an
+  `e` or a `p` that is not one of the environment or profile options
+  (`-cdp`, `-cp`, `-pkg`, and a search such as `Select-String -Pattern
+  'ppds' -Path *.md`, read as `ppds -Path *.md`), because it may be a
+  bundle of short options; an environment given as a URL whose host is
+  not itself an allowlist entry.
 - `query sql` (with labels configured): SQL that contains the text of an
   unlisted environment's label anywhere, also inside a longer word.
 - During a shakedown: SQL with a write word in a string, a comment or a
@@ -268,9 +302,15 @@ was started.
    `$PPDS_CONFIG_DIR` (or `%LOCALAPPDATA%\PPDS` / `~/.ppds`). The hook does
    NOT shell out to `ppds env who` — that would be circular for a
    PreToolUse-on-Bash hook and would itself trip the hook.
-4. Refuse what the hook cannot place, whatever the active env: arguments
-   it could not read in full, a response file (`@file`), an argument only
-   known when the command runs.
+4. What the hook cannot place (arguments it could not read in full, an
+   argument only known when the command runs, and, for a program it could
+   not identify, a response file or a possible bundle of short options):
+   refused when the active env is not listed or not known, and
+   during a shakedown. With a listed active env and no shakedown, refused
+   only when the command text names a switch or a target (see "The
+   principle"); otherwise the listed active env decides, as for any other
+   command. A response file (`@file`) after a word naming `ppds` is
+   refused in every mode.
 5. Check every target the invocation names (any case, value after a space,
    `=` or `:`):
    - Environment options (`--environment`, `-env`, `-e`, `--env`,
@@ -321,9 +361,10 @@ was started.
      at startup.
 
 **Match semantics:** the active env's `Environment.DisplayName`,
-`Environment.UniqueName`, the host of `Environment.Url`, the leftmost
-host label, and the active profile's name are all compared
-case-insensitively against the allowlist. A target typed in a command
+`Environment.UniqueName`, the host of `Environment.Url` and the leftmost
+host label are compared case-insensitively against the allowlist. The
+active profile's own name does not count: a profile named like a listed
+environment that holds an unlisted one is refused. A target typed in a command
 is compared as written: equal to an allowlist entry, or a URL whose host
 is one. The CLI itself may resolve a name that is not exactly one
 environment's name by a partial match; list environments by a name that
@@ -425,11 +466,54 @@ automated test can observe whether Claude Code enforces a rule or runs the
 hook for the PowerShell tool; that rests on an observation in a real
 session:
 
-<!-- OBSERVATION: the maintainer records here the session observation of
-the PowerShell tool (a denied rule, an ask rule and a hook block), with the
-Claude Code version and the date. Not recorded yet. -->
+### Observed in a real Claude Code process
 
-*Not recorded yet.*
+Observed manually on 2026-11-19, at commits `a93cefb` and `f91f3af`; not
+covered by an automated test.
+
+**Setup.** Claude Code 2.1.326, run headless, one process per probe, in a checkout of this change (so the process loaded the changed files). Model: haiku. Each probe asked the model to make one call to the named tool with the command verbatim; every recorded call was verbatim. Command line:
+
+```
+claude -p "<one tool call, verbatim command>" --tools Bash,PowerShell --model haiku --no-session-persistence --output-format stream-json --verbose --setting-sources project --permission-prompts none --allowedTools Bash PowerShell
+```
+
+- `--setting-sources project` loads the project's settings file alone.
+- `--permission-prompts none` refuses, without hanging, anything that would prompt.
+- `--allowedTools Bash PowerShell` lets any command run that no rule matches. Ask and deny rules still apply over it.
+
+**How a refusal is attributed.** Without `--allowedTools`, an unlisted harmless command (`git rebase -h`) is refused with the same "requires approval" text that an ask rule gives. In the configuration used, the controls `git rebase -h`, `git merge -h`, `gh label list --help` and `git --version` ran in both tools. So in that configuration a "requires approval" refusal can only come from an ask rule, a "has been denied" refusal from a deny rule, and a `BLOCKED [...]` refusal from a hook.
+
+**When.** The rule rows were observed at `a93cefb`; `.claude/settings.json` is unchanged since (`git diff a93cefb -- .claude/settings.json` is empty at the current head). The environment-hook rows were observed again at `f91f3af`; the later commits change one test (`c59a8cf`) and the write-block's treatment of command paths and argument orders (`49f795b`, `3164e85`), which those rows do not exercise.
+
+Each probe was run once through the Bash tool and once through the PowerShell tool. Refusal texts are quoted with `<tool>` for Bash or PowerShell.
+
+| Probe | Why harmless if it runs | Expected | Observed (Bash / PowerShell) | Refusal text | At |
+|---|---|---|---|---|---|
+| `git rebase -h` (control) | prints usage | runs | ran / ran | — | `a93cefb` |
+| `gh label list --help` (control) | prints help | runs | ran / ran | — | `a93cefb` |
+| `git rebase -h` without `--allowedTools` | prints usage | refused by default | refused / refused | "It requires approval, and this session has no approval surface" | `a93cefb` |
+| `npm install -g --help` | prints help | deny | denied / denied | "Permission to use `<tool>` with command npm install -g --help has been denied." | `a93cefb` |
+| `curl --version` | prints version | deny | denied / denied | "Permission to use `<tool>` with command curl --version has been denied." | `a93cefb` |
+| `wget --version` | prints version | deny | denied / denied | "… with command wget --version has been denied." | `a93cefb` |
+| `Invoke-WebRequest -?` | prints help | deny | denied / denied | "… with command Invoke-WebRequest -? has been denied." | `a93cefb` |
+| `chmod 777 probe-no-such-file` | file does not exist | deny | denied / denied | "… with command chmod 777 probe-no-such-file has been denied." | `a93cefb` |
+| `sudo --help` | prints help | deny | denied / denied | "… with command sudo --help has been denied." | `a93cefb` |
+| `su --help` | prints help | deny | denied / denied | "… with command su --help has been denied." | `a93cefb` |
+| `ppds data truncate --help` (environment allowlist empty) | prints help, touches no environment | deny | denied / denied | "… with command ppds data truncate --help has been denied." | `a93cefb` |
+| `git rebase -i -h`, `git rebase --interactive -h`, `git rebase --onto -h`, `git rebase --root -h`, `git rebase --exec -h` | print usage | ask | asked / asked (each) | "It requires approval, and this session has no approval surface" | `a93cefb` |
+| `git reset -h`, `git apply -h`, `git am -h`, `git tag -fa -h` | print usage | ask | asked / asked (each) | same | `a93cefb` |
+| `gh pr merge --help`, `gh pr close --help`, `gh issue close --help`, `gh repo create --help` | print help | ask | asked / asked (each) | same | `a93cefb` |
+| `git merge -h` (ask rule removed) | prints usage | runs, no prompt | ran / ran | — | `a93cefb` |
+| `git --version` with an allowlist the active env is not on (control) | prints version | runs | ran / ran | — | `f91f3af` |
+| `ppds --version` with an allowlist the active env is not on, empty profile directory | prints version, touches no environment; the profile directory was still empty afterwards | environment hook blocks | blocked / blocked | "PreToolUse:`<tool>` hook error: [python "$CLAUDE_PROJECT_DIR/.claude/hooks/shakedown-safety.py"]: BLOCKED [shakedown-safety/env]: active env is not in the safe-env allowlist." | `f91f3af` |
+
+**Not separately observable in the test setup.** These rules are covered by the static test and by the observed rules of the same form:
+- deny `git push --force`, `git push -f`, `git reset --hard`, `git clean`, `dotnet nuget push`, `npm publish`, `Publish-Module`;
+- ask `git tag -d`, `gh release create`, `gh repo delete`.
+
+**`rm -rf /`.** Claude Code's built-in protection answered before the rule could. For `rm -rf /probe-no-such-path` it reported "Dangerous rm operation detected" (Bash) and "Remove-Item on system path … is blocked" (PowerShell). No harmless command matches the rule exactly, so this rule is not observed.
+
+**Earlier observation (rule form and hook input).** In a scratch project, with rules passed through `--settings`, PowerShell rules in both the colon form (`git var:*`) and the space form (`git count-objects *`) were enforced, with and without arguments after the command. One `Bash|PowerShell` matcher ran the same hook for both tools, and `$CLAUDE_PROJECT_DIR` in the hook command resolved for PowerShell tool calls. Both tools send the same hook input keys; `tool_input` holds `command` and an optional `description`. The fixture records that shape.
 
 ## Configuration
 

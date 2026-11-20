@@ -386,6 +386,15 @@ def test_the_env_gate_refuses_a_response_file_itself():
     for argv in (["ppds", "@args.rsp"], ["ppds", "env", "@args.rsp"], ["ppds", "data", "list", "@x"]):
         allow, reason = hook.decide_env(argv, ["d"], ["d"], store)
         assert not allow and "response file" in reason, argv
+        # a text naming no switch or target: the listed active env decides
+        # also when the text names no switch or target: it is placed text
+        assert not hook.decide_env(argv, ["d"], ["d"], store, names_target=False)[0], argv
+        # after a program the hook could not identify it is a guess: with a
+        # text naming no switch or target, the listed active env decides
+        guess = hook._Guess(argv)
+        assert hook.decide_env(guess, ["d"], ["d"], store, names_target=False)[0], argv
+        assert not hook.decide_env(guess, ["d"], ["x"], store, names_target=False)[0], argv
+        assert not hook.decide_env(guess, ["d"], ["d"], store, names_target=True)[0], argv
     assert hook.decide_env(["ppds", "data", "list"], ["d"], ["d"], store)[0]
 
 
@@ -512,12 +521,23 @@ GATE_CASES = [
     ("listed", f"{P} data delete -pother", 2),
     ("listed", f"{P} data delete -vp other", 2),
     ("listed", f"{P} data delete -ezz-prod", 2),
-    # cannot place: response file, run-time text, unreadable
-    ("listed", f"{P} @args.rsp", 2),
+    # cannot place: response file, run-time text, unreadable. With a listed
+    # active env (no shakedown) refused only when the text names a switch or
+    # a target option; otherwise the listed active env decides.
+    ("listed", f"{P} @args.rsp", 2),  # a response file after `ppds` is placed: refused
     ("listed", f"{P} env @args.rsp", 2),
-    ("listed", f"{P} data list $ARGS", 2),
+    ("listed", f"$X @args.rsp", 0),  # after a program known only at run time: a guess
+    ("listed", f"{P} data list $ARGS", 0),
+    ("listed", f"xargs {P} data list", 0),
+    ("listed", f"{P} @args.rsp --profile other", 2),
+    ("listed", f"{P} env @args.rsp select", 2),
+    ("listed", f"{P} data list $ARGS -p dev2", 2),
     ("listed", f"{P} data list --environment $E", 2),
-    ("listed", f"xargs {P} data list", 2),
+    ("listed", f"xargs {P} env select", 2),
+    ("listed", f"xargs {P} data list --allowed-env zz-dev", 2),
+    ("unlisted", f"{P} @args.rsp", 2),
+    ("unlisted", f"{P} data list $ARGS", 2),
+    ("unlisted", f"xargs {P} data list", 2),
     # variables that move the target
     ("listed", f"PPDS_CONFIG_DIR=/x {P} data list", 2),
     ("listed", f"PPDS_PROFILE=other {P} data list", 2),
