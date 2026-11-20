@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import re
 
+# Code handed to a shell: a here-string or here-document to bash/sh/pwsh, `-c` / `-Command`, or a pipe into one.
+_FEED = re.compile(r"(?:\b(?:bash|sh|pwsh)\b[^\n|;&]*(?:<<|\s-c\b|\s-Command\b))|(?:\|\s*(?:[^|;&\n]*\s)?(?:bash|sh|pwsh)\b)")
 _GLUED = re.compile(r"(?:\d|0x[0-9a-f]+|'|\]|\.)(?:delete|insert|update|merge|truncate)", re.I)
 
 
@@ -47,18 +49,31 @@ def _labels(f: dict) -> list:
     if cause == "switch-to-unlisted" and any(w.startswith("@") for w in argv):
         out.append("r2-response-file-in-env-gate")
     cmd = f.get("command", "")
-    if "<<<" in cmd and re.search(r"\benv\b[^|;&\n]*\b(bash|sh)\b", cmd):
-        out.append("new-env-wrapper-here-string")
+    if f.get("recipe", "").startswith("feed:") or _FEED.search(cmd):
+        out.append("new-shell-feed")
+    if cause == "runs-on-unlisted-active" and len(argv) >= 2 and argv[0] in ("env", "org") \
+            and argv[1] in ("config", "type"):
+        out.append("r2-env-config-write-on-unlisted")
     if f.get("recipe", "").startswith("args-elsewhere") and cause == "switch-to-unlisted":
         out.append("new-switch-args-from-elsewhere")
     if cause == "switch-to-unlisted" and re.search(r"(`echo |\$\(echo |\"\$1\"|\$P\b|& \$P)", cmd):
         out.append("new-switch-behind-runtime-program")
+    if cause.endswith("-not-in-text"):
+        out.append("unplaceable-without-switch-words")
+    if cause == "config-folder-override":
+        out.append("new-config-folder-override")
+    if cause in ("environment-override", "mcp-environment-override", "mcp-allowed-env-unlisted"):
+        out.append("r2-target-override")
+    if cause in ("profile-override", "mcp-profile-override", "profile-switch"):
+        out.append("r2-profile-override")
     if f.get("severity", "").startswith("policy"):
         out.append("policy-" + cause)
     return out
 
 
 def classify(f: dict) -> str:
+    if f.get("label") and f.get("cause") in ("over-timeout", "over-budget", "not-refused"):
+        return f["label"]
     labels = _labels(f)
     return "+".join(labels) if labels else "unlabelled"
 

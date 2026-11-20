@@ -32,7 +32,8 @@ EXTRA_SPELLINGS = ("ppds.exe", "ppds-mcp-server.exe", "dotnet.exe", "dnx.exe", "
 _STANDIN = """#!{python} -I
 import json, os, sys
 with open(os.environ.get("STANDIN_LOG", os.devnull), "a", encoding="utf-8", errors="surrogateescape") as fh:
-    fh.write(json.dumps({{"prog": os.path.basename(sys.argv[0]), "argv": sys.argv[1:], "cwd": os.getcwd()}},
+    fh.write(json.dumps({{"prog": os.path.basename(sys.argv[0]), "argv": sys.argv[1:], "cwd": os.getcwd(),
+                         "config_dir": os.environ.get("PPDS_CONFIG_DIR"), "profile": os.environ.get("PPDS_PROFILE")}},
                         ensure_ascii=False) + "\\n")
 """
 
@@ -53,6 +54,9 @@ class ShellLab:
         self.logs = sandbox.root / "standin-logs"
         self.logs.mkdir(exist_ok=True)
         self.path = f"{self.bin}:{SYSTEM_PATH}"
+        # The configuration folder every shell run starts with. A stand-in that sees another one was
+        # started with a configuration-folder override.
+        self.config_dir = str(sandbox.home / "cfg")
         self.bash = shutil.which("bash", path=SYSTEM_PATH)
         self.pwsh = shutil.which("pwsh", path=SYSTEM_PATH) or shutil.which("pwsh")
         self.assert_real_cli_unreachable()
@@ -71,7 +75,7 @@ class ShellLab:
                 raise RuntimeError(f"refusing to run shells: a real {name!r} is on the system folders: {got!r}")
 
     def env(self, log: Path) -> dict:
-        return {"PATH": self.path, "HOME": str(self.sandbox.home), "PPDS_CONFIG_DIR": str(self.sandbox.home / "cfg"),
+        return {"PATH": self.path, "HOME": str(self.sandbox.home), "PPDS_CONFIG_DIR": self.config_dir,
                 "STANDIN_LOG": str(log), "LANG": "C.UTF-8", "TERM": "dumb", "SB": str(self.sandbox.work),
                 "DOTNET_CLI_TELEMETRY_OPTOUT": "1", "POWERSHELL_TELEMETRY_OPTOUT": "1",
                 "POWERSHELL_UPDATECHECK": "Off", "NO_COLOR": "1"}
@@ -87,6 +91,10 @@ class ShellLab:
             except ValueError:
                 out.append({"prog": "?", "argv": ["<unreadable stand-in record>"], "cwd": ""})
         return out
+
+    def overrides(self, record: dict) -> dict:
+        return {"config_dir_changed": record.get("config_dir") != self.config_dir,
+                "profile": record.get("profile")}
 
     def run_bash(self, text: str, timeout: float = 10.0) -> list:
         log = self.logs / f"b-{uuid.uuid4().hex}.log"
@@ -121,6 +129,7 @@ class ShellLab:
             b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
             lines.append(
                 "try { Set-Location -LiteralPath $__sb; "
+                f"$env:PPDS_CONFIG_DIR = '{self.config_dir}'; $env:PPDS_PROFILE = $null; $env:FOO = $null; "
                 f"$env:STANDIN_LOG = '{log}'; "
                 f"$__t = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{b64}')); "
                 "$null = & ([scriptblock]::Create($__t)) 2>&1 } catch { }")

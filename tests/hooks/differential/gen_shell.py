@@ -31,7 +31,61 @@ CORES = [
     ("read-switch", "ppds", ["env", "select", "--environment", "zz-safe-b"]),
     ("mcp", "ppds-mcp-server", []),
     ("mcp-read", "ppds-mcp-server", ["--read-only"]),
+    ("override", "ppds", ["solutions", "list", "--environment", "zz-prod-x"]),
+    ("override", "ppds", ["solutions", "list", "--profile", "p-zz-prod-x"]),
+    ("profile-switch", "ppds", ["auth", "select", "--name", "p-zz-prod-x"]),
+    ("mcp-override", "ppds-mcp-server", ["--read-only", "--environment", "zz-prod-x"]),
 ]
+
+# Process-environment overrides a text may put in front of a statement (configuration folder, profile).
+OVERRIDE_WRAPS = [
+    lambda s: f"PPDS_CONFIG_DIR=other {s}",
+    lambda s: f"env PPDS_CONFIG_DIR=other {s}",
+    lambda s: f"export PPDS_CONFIG_DIR=other; {s}",
+    lambda s: f"$env:PPDS_CONFIG_DIR = 'other'; {s}",
+    lambda s: f"PPDS_PROFILE=p-zz-prod-x {s}",
+    lambda s: f"$env:PPDS_PROFILE = 'p-zz-prod-x'; {s}",
+    lambda s: f"env PPDS_PROFILE=2 {s}",
+]
+
+# The class behind "env FOO=1 bash <<< '$(echo ppds) ...'": wrappers and assignment prefixes in front of
+# every way of feeding code to a shell, with the program name literal, quoted, from a variable and from
+# a substitution.
+FEED_PREFIXES = ("", "env ", "env FOO=1 ", "FOO=1 ", "timeout 5 ", "nohup ", "command ", "exec ",
+                 "env FOO=1 timeout 5 ", "PPDS_CONFIG_DIR=other ")
+FEED_POSIX_FORMS = ("ppds", '"ppds"', "\\ppds", "P=ppds; $P", "$(echo ppds)", "`echo ppds`")
+FEED_PWSH_FORMS = ("ppds", "& 'ppds'", '& "ppds"', "$P = 'ppds'; & $P", "& (echo ppds)")
+FEED_CORES = (["data", "delete", "--entity", "account"], ["env", "select", "--environment", "zz-prod-x"])
+
+
+def feed_texts(rng: random.Random, limit=None) -> list:
+    out = []
+    for core in FEED_CORES:
+        args = " ".join(core)
+        for pre in FEED_PREFIXES:
+            for sh in ("bash", "sh"):
+                for form in FEED_POSIX_FORMS:
+                    c = f"{form} {args}"
+                    for name, text in (
+                            ("here-string", f"{pre}{sh} <<< {bq(c)}"),
+                            ("here-doc", f"{pre}{sh} <<'EOF'\n{c}\nEOF"),
+                            ("here-doc-unquoted", f"{pre}{sh} <<EOF\n{c}\nEOF"),
+                            ("dash-c", f"{pre}{sh} -c {bq(c)}"),
+                            ("stdin-echo", f"echo {bq(c)} | {pre}{sh}"),
+                            ("stdin-printf", f"printf '%s\\n' {bq(c)} | {pre}{sh}")):
+                        out.append(Text(text, "feed-" + core[0], "ppds", core, f"feed:{name}:{sh}:{pre.strip() or '-'}:{form}"))
+            for form in FEED_PWSH_FORMS:
+                c = f"{form} {args}"
+                for name, text in (
+                        ("dash-c", f"{pre}pwsh -NoProfile -c {bq(c)}"),
+                        ("dash-command", f"{pre}pwsh -NoProfile -Command {bq(c)}"),
+                        ("stdin-echo", f"echo {bq(c)} | {pre}pwsh -NoProfile -Command -"),
+                        ("here-doc", f"{pre}pwsh -NoProfile -Command - <<'EOF'\n{c}\nEOF")):
+                    out.append(Text(text, "feed-" + core[0], "ppds", core, f"feed:{name}:pwsh:{pre.strip() or '-'}:{form}"))
+    if limit is not None and limit < len(out):
+        keep = set(rng.sample(range(len(out)), limit))
+        out = [t for i, t in enumerate(out) if i in keep]
+    return out
 
 _SAFE = re.compile(r"^[A-Za-z0-9_./=-]+$")
 
@@ -206,10 +260,13 @@ def _core_statement(label, program, argv, bindir, rng) -> tuple:
     return f"{pre}{word} {args}".rstrip(), "program-word"
 
 
-def generate(size: int, seed: int, bindir: str) -> list:
+def generate(size: int, seed: int, bindir: str, feed_limit=None) -> list:
+    """``size`` random compositions, after the plain cores and the shell-feed block (all of it, or a
+    seeded sample of ``feed_limit`` texts)."""
     rng = random.Random(seed)
     wrappers = _wrappers(bindir)
-    out = []
+    out = feed_texts(random.Random(seed + 1), feed_limit)
+    size += len(out)
     # Every core in its plain form first, in both quoting styles.
     for label, program, argv in CORES:
         out.append(Text(f"{program} {_args_text(argv, random.Random(0))}".rstrip(), label, program, argv, "plain"))
@@ -221,6 +278,9 @@ def generate(size: int, seed: int, bindir: str) -> list:
             w = rng.randrange(len(wrappers))
             text = wrappers[w](text, rng)
             steps.append(f"w{w}")
+        if rng.random() < 0.12:
+            text = rng.choice(OVERRIDE_WRAPS)(text)
+            steps.append("override")
         if rng.random() < 0.15:
             text = _continuation(text, rng)
             steps.append("continuation")

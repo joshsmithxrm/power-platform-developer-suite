@@ -28,6 +28,7 @@ from _harness import MODES, OracleUnavailable, build_oracle  # noqa: E402
 
 SIZE_ARGS = int(os.environ.get("PPDS_DIFF_SIZE_ARGS", "1500"))
 SIZE_SHELL = int(os.environ.get("PPDS_DIFF_SIZE_SHELL", "700"))
+TIMING_LENGTHS = tuple(int(x) for x in os.environ.get("PPDS_DIFF_TIMING_LENGTHS", "50000").split(","))
 STRICT = os.environ.get("PPDS_DIFF_STRICT") == "1"
 REQUIRE = os.environ.get("PPDS_DIFF_REQUIRE") == "1"
 XFAIL = os.environ.get("PPDS_DIFF_XFAIL") == "1"
@@ -55,6 +56,11 @@ def shell_report():
     if not shutil.which("bash") or not shutil.which("pwsh"):
         _missing("statement oracle needs real bash and pwsh")
     return differential.run_statement_oracle(SIZE_SHELL, 1780, CASES, STRICT)
+
+
+@pytest.fixture(scope="module")
+def timing_report():
+    return differential.run_timing_oracle(TIMING_LENGTHS, ("shakedown",), 110, CASES)
 
 
 def _check(report: dict, mode: str) -> None:
@@ -104,3 +110,15 @@ def test_argument_oracle_covers_every_command_path(args_report):
 def test_statement_oracle_starts_stand_ins_under_both_shells(shell_report):
     started = shell_report["texts_starting_a_standin"]
     assert started.get("bash", 0) > SIZE_SHELL // 5 and started.get("pwsh", 0) > SIZE_SHELL // 5, started
+
+
+def test_timing_long_inputs_are_refused_inside_the_budget(timing_report):
+    """Texts of 50,000 characters and more, valid in both shells: refused inside the documented budget
+    (read from the hook) plus a start-up allowance, and never after the registered timeout (read from
+    .claude/settings.json)."""
+    _check(timing_report, "shakedown")
+
+
+def test_timing_texts_are_valid_in_both_shells(timing_report):
+    bad = [r for r in timing_report["rows"] if r["valid_bash"] is False or r["valid_pwsh"] is False]
+    assert not bad, bad[:3]

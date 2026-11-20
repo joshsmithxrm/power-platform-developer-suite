@@ -13,8 +13,14 @@
   "r2-read-only-swallowed": "round 2 must-fix (B6): --read-only consumed as the value of an MCP server option",
   "r2-response-file-in-env-gate": "round 2 should-fix (A note, B should-fix 4): a response file passes the env gate",
   "new-switch-delimiter-then-space": "found by oracle 1: env select --environment= <unlisted> (delimiter, then the value as the next word)",
-  "new-env-wrapper-here-string": "found by oracle 2: env FOO=1 bash <<< '$(echo ppds) <write>' passes every mode",
   "new-switch-behind-runtime-program": "found by oracle 2: a switch behind a program word known only at run time, after a runner (timeout 5 `echo ppds` env select ...), passes the listed-env gate",
-  "new-switch-args-from-elsewhere": "found by oracle 2: a switch whose words come from xargs passes the listed-env gate"
+  "new-switch-args-from-elsewhere": "found by oracle 2: a switch whose words come from xargs passes the listed-env gate",
+  "r2-late-answer": "round 2 must-fix (A1): a long text valid in both shells is answered after the registered timeout",
+  "r2-over-budget": "round 2 should-fix (A): a long text is answered after the documented budget",
+  "r2-target-override": "round 2 should-fix, made must-fix in round 3: a per-command or MCP --environment / --allowed-env names an unlisted environment",
+  "r2-profile-override": "round 2 should-fix, made must-fix in round 3: --profile, PPDS_PROFILE or auth select picks a profile whose environment is not listed",
+  "new-config-folder-override": "found by oracle 2, must-fix in round 3: PPDS_CONFIG_DIR changed in front of the invocation",
+  "new-shell-feed": "found by oracle 2: code handed to a shell (here-string, here-document, -c / -Command, stdin pipe), with or without a wrapper or assignment prefix, whose program name is from a substitution or variable, passes (e.g. env FOO=1 bash <<< '$(echo ppds) plugins deploy ...')",
+  "r2-env-config-write-on-unlisted": "round 2 should-fix (B5), must-fix in round 3: a writing form of env config / env type passes with an unlisted active environment (e.g. --label swallowing --help)"
  }
 }

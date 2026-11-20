@@ -35,6 +35,33 @@ UNLISTED = ("zz-prod-x", "zz-prod-y")
 ALLOWLIST = ",".join(LISTED)
 ACTIVE = {"gate-unlisted": "zz-prod-x", "gate-listed": "zz-safe-a", "shakedown": "zz-safe-a"}
 
+# Profiles in each mode's made-up store: index 1 is the active one, index 2 the other.
+PROFILES = {"p-zz-safe-a": "zz-safe-a", "p-zz-prod-x": "zz-prod-x"}
+
+
+def store_profiles(mode: str) -> list:
+    active = "p-" + ACTIVE[mode]
+    return [(active, PROFILES[active])] + [(n, e) for n, e in PROFILES.items() if n != active]
+
+
+def profile_environment(value, mode: str):
+    """The environment a ``--profile`` / ``PPDS_PROFILE`` value selects in a mode's store, or None.
+    Mirrors ProfileCollection.GetByNameOrIndex: "[N]", "[N] Name", a plain index, or a name (any case)."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    profiles = store_profiles(mode)
+    v = value.strip()
+    if v.startswith("[") and "]" in v[2:]:
+        inner = v[1:v.index("]")]
+        if inner.isdigit():
+            i = int(inner)
+            return profiles[i - 1][1] if 1 <= i <= len(profiles) else None
+    if v.lstrip("+-").isdigit():
+        i = int(v)
+        return profiles[i - 1][1] if 1 <= i <= len(profiles) else None
+    return next((e for n, e in profiles if n.lower() == v.lower()), None)
+
+
 # Response files the generators may name with an ``@file`` token (created in the sandbox folder
 # that is the working directory of every hook run, shell run and parse).
 RESPONSE_FILES = {
@@ -70,9 +97,9 @@ class Sandbox:
             cfg.mkdir(exist_ok=True)
             (cfg / "profiles.json").write_text(json.dumps({
                 "version": 2, "activeProfileIndex": 1,
-                "profiles": [{"index": 1, "name": "p-" + env_name, "environment": {
-                    "displayName": env_name, "uniqueName": env_name,
-                    "url": f"https://{env_name}.invalid/"}}],
+                "profiles": [{"index": i, "name": name, "environment": {
+                    "displayName": env, "uniqueName": env, "url": f"https://{env}.invalid/"}}
+                    for i, (name, env) in enumerate(store_profiles(mode), start=1)],
             }), encoding="utf-8")
             self.stores[mode] = cfg
         self.project = self.root / "project"

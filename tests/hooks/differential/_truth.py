@@ -13,11 +13,13 @@ Severities:
 """
 from __future__ import annotations
 
+import base64
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from _harness import LISTED
+from _harness import LISTED, profile_environment
 
 _READ = {tuple(p.split()) for p in json.loads((Path(__file__).with_name("read_paths.json")).read_text("utf-8"))["read"]}
 
@@ -86,8 +88,20 @@ def cli_can_write(t: dict) -> tuple:
     return True, "path not classified read-only"
 
 
-def judge(oracle, program: str, argv: list, mode: str) -> tuple:
-    """(truth, harms) for one invocation. ``truth`` is the oracle's answer."""
+def _profile_harm(value, mode: str, cause: str, what: str):
+    env = profile_environment(value, mode)
+    if env is not None and _listed(env):
+        return None
+    return Harm(cause, "requirement", f"{what} {value!r} selects {env!r}")
+
+
+def judge(oracle, program: str, argv: list, mode: str, overrides: dict | None = None) -> tuple:
+    """(truth, harms) for one invocation. ``truth`` is the oracle's answer.
+
+    ``overrides`` (oracle 2 only) describes the process environment the stand-in saw:
+    ``config_dir_changed`` (PPDS_CONFIG_DIR differs from the one the hook read) and ``profile``
+    (a PPDS_PROFILE value)."""
+    overrides = overrides or {}
     harms = []
     if program == "ppds-mcp-server":
         t = oracle.mcp(argv)
@@ -100,12 +114,15 @@ def judge(oracle, program: str, argv: list, mode: str) -> tuple:
             harms.append(Harm("mcp-writable-in-shakedown", "requirement", "McpSessionOptions.ReadOnly is false"))
         env = t.get("environment")
         if env is not None and not _listed(env):
-            harms.append(Harm("mcp-environment-override", "policy", f"--environment {env!r}"))
+            harms.append(Harm("mcp-environment-override", "requirement", f"--environment {env!r}"))
         if t.get("profile") is not None:
-            harms.append(Harm("mcp-profile-override", "policy", f"--profile {t['profile']!r}"))
+            h = _profile_harm(t["profile"], mode, "mcp-profile-override", "--profile")
+            if h:
+                harms.append(h)
         bad = [e for e in t.get("allowed_env", []) if not _listed(e)]
         if bad:
-            harms.append(Harm("mcp-allowed-env-unlisted", "policy", f"--allowed-env {bad!r}"))
+            harms.append(Harm("mcp-allowed-env-unlisted", "requirement", f"--allowed-env {bad!r}"))
+        _process_overrides(overrides, mode, harms)
         return t, harms
 
     t = oracle.cli(argv)
@@ -126,7 +143,8 @@ def judge(oracle, program: str, argv: list, mode: str) -> tuple:
     if mode == "gate-unlisted":
         if is_env and path[1] in ENV_SWITCHES and _listed(_opt_value(opts, "--environment")):
             return t, harms  # switching INTO a listed environment is allowed (R4)
-        if is_env and path[1] in ENV_READ_DIAGNOSTICS:
+        if is_env and path[1] in ENV_READ_DIAGNOSTICS and not (
+                path[1] in ("config", "type") and cli_can_write(t)[0]):
             harms.append(Harm("env-diagnostic-on-unlisted-active", "policy", " ".join(path)))
         else:
             harms.append(Harm("runs-on-unlisted-active", "requirement", " ".join(path) or "<root>"))
@@ -141,15 +159,73 @@ def judge(oracle, program: str, argv: list, mode: str) -> tuple:
     else:
         env = _opt_value(opts, "--environment")
         if env is not None and not _listed(env):
-            harms.append(Harm("environment-override", "policy", f"--environment binds {env!r}"))
+            harms.append(Harm("environment-override", "requirement", f"--environment binds {env!r}"))
     if path == ("auth", "select"):
-        harms.append(Harm("profile-switch", "policy", "auth select changes the active environment"))
+        idx = _opt_value(opts, "--index")
+        name = _opt_value(opts, "--name")
+        chosen = str(idx) if idx is not None else name
+        h = _profile_harm(chosen, mode, "profile-switch", "auth select")
+        if h:
+            harms.append(h)
     prof = _opt_value(opts, "--profile")
     if prof is not None:
-        harms.append(Harm("profile-override", "policy", f"--profile binds {prof!r}"))
+        h = _profile_harm(prof, mode, "profile-override", "--profile")
+        if h:
+            harms.append(h)
+    _process_overrides(overrides, mode, harms)
 
     if mode == "shakedown":
         writes, why = cli_can_write(t)
         if writes:
             harms.append(Harm("write-in-shakedown", "requirement", f"{' '.join(path) or '<root>'}: {why}"))
     return t, harms
+
+
+def _process_overrides(overrides: dict, mode: str, harms: list) -> None:
+    if overrides.get("config_dir_changed"):
+        harms.append(Harm("config-folder-override", "requirement",
+                          "PPDS_CONFIG_DIR differs from the profile store the hook read"))
+    if overrides.get("profile") is not None:
+        h = _profile_harm(overrides["profile"], mode, "profile-override", "PPDS_PROFILE")
+        if h:
+            harms.append(h)
+
+
+# Cause families of the environment gate (listed active environment). For these, R4 asks for a refusal
+# of an invocation the hook cannot fully place only when the command text itself shows switch words or
+# a target option (coordinator decision on round 3); otherwise a pass is acceptable and is reported as
+# policy severity.
+ENV_GATE_CAUSES = {"switch-to-unlisted", "environment-override", "profile-override", "profile-switch",
+                   "mcp-environment-override", "mcp-profile-override", "mcp-allowed-env-unlisted",
+                   "config-folder-override"}
+_SWITCH_GROUP = re.compile(r"(?i)(?<![\w-])(env|org|auth)(?![\w-])")
+_SWITCH_VERB = re.compile(r"(?i)(?<![\w-])(select|switch|use)(?![\w-])")
+_TARGET_OPT = re.compile(r"(?i)(--environment|(?<![\w-])-env|(?<![\w-])-e(?![\w-])|--profile|(?<![\w-])-p(?![\w-])|--allowed-env|"
+                         r"PPDS_CONFIG_DIR|PPDS_PROFILE)")
+
+
+_ENCODED = re.compile(r"(?i)-(?:e|ec|encodedcommand)\s+([A-Za-z0-9+/=]{8,})")
+
+
+def _readable(text: str) -> str:
+    """The text with quoting and escape characters removed and -EncodedCommand payloads decoded, so
+    that a word the shells see (``au""th``, ``--environm''ent``) counts as shown."""
+    extra = []
+    for m in _ENCODED.finditer(text):
+        try:
+            extra.append(base64.b64decode(m.group(1) + "==").decode("utf-16-le", "replace"))
+        except ValueError:
+            pass
+    return re.sub(r"[\'\"`\\]", "", "\n".join([text] + extra))
+
+
+def text_shows_target(text: str) -> bool:
+    t = _readable(text)
+    return bool((_SWITCH_GROUP.search(t) and _SWITCH_VERB.search(t)) or _TARGET_OPT.search(t))
+
+
+def apply_text_rule(harms: list, text: str) -> list:
+    """Downgrade env-gate harms of a text that shows no switch words and no target option."""
+    if text_shows_target(text):
+        return harms
+    return [Harm(h.cause + "-not-in-text", "policy", h.detail) if h.cause in ENV_GATE_CAUSES else h for h in harms]
