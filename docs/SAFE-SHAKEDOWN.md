@@ -30,9 +30,9 @@ without one.
 ## Architecture
 
 ```
-Bash tool invocation -> PreToolUse hooks
-                        |
-                        +-- shakedown-safety.py
+Bash or PowerShell tool invocation -> PreToolUse hooks
+                                      |
+                                      +-- shakedown-safety.py
                             1. Env allowlist gate (ALL ppds *, once an
                                allowlist is configured)
                             2. Write-block (only during a shakedown)
@@ -50,38 +50,77 @@ policy; fewer ways to drift.
 
 ## Hook behavior
 
-**Trigger:** every Bash invocation that mentions `ppds` or `ppds-mcp-server`,
-or runs either through `dotnet` (below).
+**Trigger:** every Bash tool or PowerShell tool invocation that mentions
+`ppds` or `ppds-mcp-server`, or runs either through `dotnet` (below). The
+hook is registered for both shell tools and reads each command with that
+shell's rules: PowerShell text with PowerShell's (backtick escapes and line
+continuations, `''` and `""` inside quotes, the call operator `&`, script
+blocks, sub-expressions, backslash paths), Bash text with POSIX rules.
 
 ### What the hook recognises
 
 - The programs `ppds` and `ppds-mcp-server`, with an optional path and
-  `.exe`, anywhere they appear as a word in the command.
+  `.exe`, anywhere they appear as a word in the command: in each statement
+  (`;`, `&&`, `||`, `|`, a new line), inside substitutions (`$(...)`,
+  backticks), PowerShell script blocks and sub-expressions, and inside
+  every quoted string, so `bash -c '...'`, `pwsh -Command "..."`,
+  `cmd /c "..."` and `pwsh -EncodedCommand` are seen.
 - The same programs started through the .NET host, treated exactly like the
   direct program:
-  - `dotnet run` (or `dotnet watch run`) whose `--project`, `--project=` or
-    `-p` names the `PPDS.Cli` / `PPDS.Mcp` project folder or `.csproj`, or
-    after a `cd` / `pushd` into that folder earlier in the same command.
+  - `dotnet run`, `dotnet watch run` or `dotnet watch` whose `--project`,
+    `--project=` or `-p` names the `PPDS.Cli` / `PPDS.Mcp` project folder
+    or `.csproj`, also when the path is relative to a `cd`, `pushd` or
+    `Set-Location` earlier in the same command (`--project .`) or contains
+    a substitution (`$(git rev-parse --show-toplevel)/src/PPDS.Cli`).
+    Without `--project`, the shell's working directory from the hook input
+    decides.
     Arguments are what follows `--` plus anything `dotnet run` does not
-    recognise; when an unknown option makes that ambiguous, both readings
-    are checked and either can block.
+    recognise; when an unknown option makes that ambiguous, each reading is
+    checked and any can block.
   - `dotnet [exec] <path>/ppds.dll` and `<path>/ppds-mcp-server.dll`.
-  - `dotnet ppds ...` and `dotnet tool run ppds ...`.
+  - `dotnet ppds ...`, `dotnet tool run ppds ...`, and the tool packages
+    run without installing them: `dotnet tool exec PPDS.Cli ...`,
+    `dnx PPDS.Cli ...` (and `PPDS.Mcp`, with or without `@version`).
 
-  Other `dotnet` commands (`build`, `test`, `pack`, `run` for any other
-  project) are not gated.
+  Other `dotnet` commands (`build`, `test`, `pack`, `watch test`, `run` for
+  any other project) are not gated.
 
-Matching is deliberately broad and best-effort. It cannot see through a
-script, an alias, another shell (`pwsh -c`, `cmd /c`) or a working
-directory set in an earlier Bash call. A command that merely mentions
-`ppds` (or one of these `dotnet` forms), for example in a commit message or
-a `grep` pattern, can be blocked when a gate applies; that is existing
-behaviour. The C# guard (`IShakedownGuard`, `specs/shakedown-guard.md`)
-blocks writes during a shakedown however the CLI was started.
+**Put `--` before application arguments with `dotnet run`.** Write
+`dotnet run --project src/PPDS.Cli -- data list`, not
+`dotnet run --project src/PPDS.Cli data list`. Without `--` the hook cannot
+tell which tokens `dotnet run` consumes, so it checks several readings and
+may block a command that is in fact read-only.
+
+**When the hook cannot tell, it counts as an invocation** of both programs,
+gated by the allowlist and, during a shakedown, refused unless its verb is
+known to be read-only: a program only known when the command runs
+(`$x data list`, `& $exe ...`, `Invoke-Expression $c`), a `dotnet run`
+project or working directory only known when it runs, an alias that names
+`ppds`, text the hook could not read to the end (an unterminated quote, an
+encoded command that does not decode), or a command past the caps below.
+
+**Caps.** The hook reads a command of up to 200,000 characters and up to 500
+`dotnet` words; past either cap the command counts as an invocation that
+could not be read. Real commands are far below both.
+
+**Mentions are blocked too.** A command that merely mentions `ppds` (or one
+of these `dotnet` forms), for example in a commit message, a pull request
+body or a search pattern, is treated as an invocation and can be blocked
+when a gate applies, in both shells. The maintainer decided on #1780 to
+accept these false positives rather than parse them away. To avoid one,
+pass long text through a file (`git commit -F`, `gh pr create --body-file`)
+or run the search when no gate applies.
+
+The hook still cannot see into a script file, an alias or function defined
+outside the command, or a working directory changed by an earlier tool call
+that the hook input does not report. The C# guard (`IShakedownGuard`,
+`specs/shakedown-guard.md`) blocks writes during a shakedown however the CLI
+was started.
 
 ### Concern 1: env allowlist gating (opt-in)
 
-1. If the command does not mention `ppds`, the hook is a no-op (exit 0).
+1. If the command neither mentions `ppds` nor runs a program the hook
+   cannot identify (above), the hook is a no-op (exit 0).
 2. Resolve the allowlist. The first source that names an environment wins:
    - `$PPDS_SAFE_ENVS` (comma-separated), when set and non-empty.
    - Else `safety.shakedown_safe_envs` in `.claude/settings.json`, when it
@@ -143,7 +182,10 @@ tool starts a fresh shell per call). Default env var name is
 - Anything under `ppds logs *` is read-only by definition.
 - `ppds-mcp-server` during shakedown MUST be launched with `--read-only` —
   the server can otherwise issue arbitrary writes via its tools, which
-  would defeat the write-block boundary.
+  would defeat the write-block boundary. Through `dotnet run`, a
+  `--read-only` before `--` counts only when no option `dotnet run` does
+  not recognise comes before it (such an option could take it as its
+  value); `dotnet run --project src/PPDS.Mcp -- --read-only` always counts.
 - `ppds env switch/select` is read-only here because the env-allowlist
   concern above already validates the target.
 
@@ -235,3 +277,8 @@ Either:
 - `.claude/skills/shakedown/SKILL.md` — Phase 0 references this doc.
 - `tests/hooks/test_shakedown_safety.py` — behavioral tests covering
   allowlist sources, switch gating, dry-run carve-out, fail-safe paths.
+- `tests/hooks/test_shakedown_safety_shells.py` — each recognised form in
+  Bash and PowerShell syntax, sent in the hook input shape each tool uses.
+- `.claude/hooks/_shellparse.py` — the command reader shared with the
+  command-text guard (`.claude/hooks/command-text-guard.py`, which the
+  checked-in settings do not register).
