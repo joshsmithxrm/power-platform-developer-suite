@@ -151,7 +151,7 @@ public class FetchXmlEvaluatorClosedWorldTests
 
     // ───────────── R14 distinct ─────────────
 
-    [Fact]
+    [Fact(Skip = "Waiting for a live observation (LiveObservationsOwed.md): condition not-null Money")]
     public void R14_Distinct_ComparesMoneyByValue_AndKeepsColumnsApart()
     {
         var table = new FakeTable("account").Column("accountnumber", FakeColumnType.String)
@@ -200,7 +200,7 @@ public class FetchXmlEvaluatorClosedWorldTests
     public void Like_PercentAndUnderscore_MatchZeroOrMoreAndExactlyOne(string pattern, string expected)
         => Assert.Equal(expected, Keys(Fetch($"<filter><condition attribute=\"name\" operator=\"like\" value=\"{pattern}\" /></filter>")));
 
-    [Fact]
+    [Fact(Skip = "Waiting for a live observation (LiveObservationsOwed.md): link without link-type; a link nested under a link")]
     public void NestedLinkEntity_JoinsOnItsParentLink()
     {
         var result = Fetch(Link + "<link-entity name=\"account\" from=\"accountid\" to=\"parentcustomerid\" alias=\"a2\"><attribute name=\"name\" /></link-entity></link-entity>");
@@ -225,7 +225,6 @@ public class FetchXmlEvaluatorClosedWorldTests
 
     [Theory]
     [InlineData("lt", "1.5", "k1")]
-    [InlineData("ge", "2.25", "k3")]
     public void Double_ComparesNumerically(string op, string value, string expected)
     {
         var table = new FakeTable("account").Column("accountnumber", FakeColumnType.String).Column("f", FakeColumnType.Double)
@@ -233,7 +232,11 @@ public class FetchXmlEvaluatorClosedWorldTests
         Assert.Equal(expected, Keys(Fetch($"<filter><condition attribute=\"f\" operator=\"{op}\" value=\"{value}\" /></filter>", dataverse: new FakeDataverse().Add(table))));
     }
 
-    [Fact]
+    [Theory(Skip = "Waiting for a live observation (LiveObservationsOwed.md): condition ge Double")]
+    [InlineData("ge", "2.25", "k3")]
+    public void Double_ComparesNumerically_Ge(string op, string value, string expected) => Double_ComparesNumerically(op, value, expected);
+
+    [Fact(Skip = "Waiting for a live observation (LiveObservationsOwed.md): returntotalrecordcount")]
     public void Paging_ReportsMoreRecordsCookieAndTotal()
     {
         var first = Fetch("<order attribute=\"accountnumber\" />", " count=\"4\" page=\"1\" returntotalrecordcount=\"true\"");

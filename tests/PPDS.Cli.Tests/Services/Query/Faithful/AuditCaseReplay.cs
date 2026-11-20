@@ -134,7 +134,7 @@ internal static class AuditCaseReplay
 
     public sealed record Run(string Text, string? FetchXml, Exception? Error, IReadOnlyList<string> Columns, IReadOnlyList<string> Rows);
 
-    public static async Task<Run> ExecuteAsync(AuditCase c)
+    public static async Task<Run> ExecuteAsync(AuditCase c, IReadOnlySet<string>? dropColumns = null)
     {
         int? top = Regex.Match(c.SqlSuffix, @"^\(top (\d+)\)$") is { Success: true } t ? int.Parse(t.Groups[1].Value, CultureInfo.InvariantCulture) : null;
         var service = new SqlQueryService(AuditDataset.Dataverse.CreateQueryExecutor(), new InactiveFakeShakedownGuard(), poolCapacity: 4);
@@ -159,8 +159,9 @@ internal static class AuditCaseReplay
                 cookie = r.Result.PagingCookie;
             }
             var first = results[0];
-            var columns = first.Columns.Select(col => ToReport(col.Alias ?? col.LogicalName)).ToList();
-            var keys = first.Columns.Select(col => col.Alias ?? col.LogicalName).ToList();
+            var kept = first.Columns.Where(col => dropColumns is null || !dropColumns.Contains(ToReport(col.Alias ?? col.LogicalName))).ToList();
+            var columns = kept.Select(col => ToReport(col.Alias ?? col.LogicalName)).ToList();
+            var keys = kept.Select(col => col.Alias ?? col.LogicalName).ToList();
             var rows = results.SelectMany(res => res.Records)
                 .Select(r => "(" + string.Join(",", keys.Select(k => Canon(r.TryGetValue(k, out var qv) ? qv?.Value : null))) + ")")
                 .ToList();
@@ -268,8 +269,26 @@ internal static class AuditCaseReplay
         var run = await ExecuteAsync(c);
         if (FakeRefusal(run.Error) is { } refusal)
             return new(ReplayClass.CannotReplay, "fake refuses: " + refusal, run.Text);
+        return Compare(c, c.Actual, run);
+    }
 
-        var recorded = c.Actual;
+    /// <summary>
+    /// For a case the audit marks WRONG RESULT: whether the offline (wrong) result also matches what the audit expected,
+    /// with the columns the audit's verdict ignored dropped (auto-added <c>*name</c> columns, the unrequested primary key,
+    /// named in its Detail). Matches means the record cannot tell the wrong result from the right one, so a fix of the
+    /// defect would not be visible to the replay.
+    /// </summary>
+    public static async Task<ReplayResult> CompareWithExpectedAsync(AuditCase c)
+    {
+        var ignored = new HashSet<string>(StringComparer.Ordinal);
+        foreach (Match m in Regex.Matches(c.Detail, @"(?:auto-added \*name columns|unrequested primary-key column) ignored: (?<names>[^;|]+)"))
+            foreach (var name in m.Groups["names"].Value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                ignored.Add(name);
+        return Compare(c, c.Expected, await ExecuteAsync(c, ignored));
+    }
+
+    private static ReplayResult Compare(AuditCase c, string recorded, Run run)
+    {
         if (!recorded.StartsWith('['))
         {
             // An error. Compare the type and the message up to where the report cut or redacted it.

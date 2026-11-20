@@ -151,7 +151,7 @@ public class FetchXmlEvaluatorRuleTests
         Assert.Equal(ObservedNameOrder.Select(Plain), result.Entities.Select(e => Plain(e.GetAttributeValue<string>("name"))));
     }
 
-    [Theory]
+    [Theory(Skip = "Waiting for a live observation (LiveObservationsOwed.md): condition lt String; condition ge String")]
     [InlineData("lt", "b", "k1,k2,k8,k10")]
     [InlineData("ge", "Zeta", "k9")]
     public void R4_StringRange_UsesTheSameOrder(string op, string value, string expected)
@@ -236,10 +236,13 @@ public class FetchXmlEvaluatorRuleTests
     // ───────────── R7 (audit OBSERVED "eq dt '2024-01-15T00:30:00Z': 1 rows", "... (no offset): 0 rows",
     // "ge dt '2024-01-15' and lt dt '2024-01-16' (no offset): keys 2", "eq donly '2024-01-15'"; caller at UTC−6) ─────────────
 
+    [Theory(Skip = "Waiting for a live observation (LiveObservationsOwed.md): date-time literal with a negative offset (only +99:99 and Z offsets are recorded)")]
+    [InlineData("<condition attribute=\"followupby\" operator=\"eq\" value=\"2024-01-14T18:30:00-06:00\" />", "k1")]
+    public void R7_DateTimeWithANegativeOffset_IsHonoured(string conditions, string expected) => R7_DateTimeWithoutOffset_IsReadInTheCallersTimeZone(conditions, expected);
+
     [Theory]
     [InlineData("<condition attribute=\"followupby\" operator=\"eq\" value=\"2024-01-15T00:30:00Z\" />", "k1")]
     [InlineData("<condition attribute=\"followupby\" operator=\"eq\" value=\"2024-01-15T00:30:00\" />", "")]
-    [InlineData("<condition attribute=\"followupby\" operator=\"eq\" value=\"2024-01-14T18:30:00-06:00\" />", "k1")]
     [InlineData("<condition attribute=\"followupby\" operator=\"ge\" value=\"2024-01-15\" /><condition attribute=\"followupby\" operator=\"lt\" value=\"2024-01-16\" />", "k2")]
     [InlineData("<condition attribute=\"ppds_startdate\" operator=\"eq\" value=\"2024-01-15\" />", "k1")]
     public void R7_DateTimeWithoutOffset_IsReadInTheCallersTimeZone(string conditions, string expected)
@@ -270,7 +273,7 @@ public class FetchXmlEvaluatorRuleTests
     {
         var result = SelectFixture.Create().RetrieveMultiple(
             "<fetch><entity name=\"account\"><attribute name=\"name\" alias=\"n\" />" +
-            "<link-entity name=\"contact\" from=\"parentcustomerid\" to=\"accountid\" alias=\"c\"><attribute name=\"lastname\" /><attribute name=\"lastname\" alias=\"ln\" /></link-entity>" +
+            "<link-entity name=\"contact\" from=\"parentcustomerid\" to=\"accountid\" link-type=\"inner\" alias=\"c\"><attribute name=\"lastname\" /><attribute name=\"lastname\" alias=\"ln\" /></link-entity>" +
             "<filter><condition attribute=\"accountnumber\" operator=\"eq\" value=\"k2\" /></filter></entity></fetch>");
 
         var entity = Assert.Single(result.Entities);
@@ -331,7 +334,7 @@ public class FetchXmlEvaluatorRuleTests
             "<link-entity name=\"contact\" from=\"parentcustomerid\" to=\"accountid\" link-type=\"outer\" alias=\"c\" />" +
             Where("<condition entityname=\"c\" attribute=\"lastname\" operator=\"null\" />"))));
 
-    [Fact]
+    [Fact(Skip = "Waiting for a live observation (LiveObservationsOwed.md): link without link-type; link join Lookup=Lookup")]
     public void R11_NullKeys_NeverJoin()
         // Only k3 has a parent account (k1), and k3 is the only account whose parent is k1: one pair, not the NULL ones.
         => Assert.Equal("k3", Keys(Fetch("<link-entity name=\"account\" from=\"parentaccountid\" to=\"parentaccountid\" alias=\"p\" />")));
@@ -348,7 +351,7 @@ public class FetchXmlEvaluatorRuleTests
     [InlineData("<filter><condition attribute=\"lastname\" operator=\"eq\" value=\"x\" /></filter>")]
     [InlineData("<order attribute=\"lastname\" />")]
     [InlineData("<attribute name=\"lastname\" />")]
-    [InlineData("<link-entity name=\"contact\" from=\"parentcustomerid\" to=\"accountid\" alias=\"c\"><attribute name=\"name\" /></link-entity>")]
+    [InlineData("<link-entity name=\"contact\" from=\"parentcustomerid\" to=\"accountid\" link-type=\"inner\" alias=\"c\"><attribute name=\"name\" /></link-entity>")]
     public void R12_UnknownAttribute_IsAFault_EvenWithNoRows(string inner)
         => Assert.Throws<FaultException<OrganizationServiceFault>>(() => Fetch(inner, dataverse: Empty()));
 
@@ -357,12 +360,8 @@ public class FetchXmlEvaluatorRuleTests
     // Audit W15 '5.0', E06 'abc', X02/X03/X12 '@i': text a whole number cannot be read from is the FormatException fault.
     [Theory]
     [InlineData("5.0")]
-    [InlineData("-1.5")]
     [InlineData("abc")]
     [InlineData("@i")]
-    [InlineData("1e1")]
-    [InlineData("5,0")]
-    [InlineData("5.")]
     public void R13_DecimalPointOnAWholeNumber_IsAFault_EvenWithNoRows(string value)
         => Assert.Throws<FaultException<OrganizationServiceFault>>(() => Fetch(Where(Cond("numberofemployees", "eq", value)), dataverse: Empty()));
 
@@ -386,6 +385,17 @@ public class FetchXmlEvaluatorRuleTests
     public void R13_TwoOptionValuesOtherThan0And1_AreRefused(string value)
         => Assert.Throws<NotSupportedException>(() => Fetch(Where(Cond("donotemail", "eq", value))));
 
+    [Theory(Skip = "Waiting for a live observation (LiveObservationsOwed.md): whole-number fault for the value forms -9.9, 9a9, 9,9 and 9. (only 9.9, aaa and @a are recorded)")]
+    [InlineData("-1.5")]
+    [InlineData("1e1")]
+    [InlineData("5,0")]
+    [InlineData("5.")]
+    public void R13_WholeNumberFault_OtherValueForms(string value) => R13_DecimalPointOnAWholeNumber_IsAFault_EvenWithNoRows(value);
+
+    [Fact(Skip = "Waiting for a live observation (LiveObservationsOwed.md): condition eq Lookup (W114 is eq on the primary id, a Uniqueidentifier)")]
+    public void R13_BracedGuidOnALookup_Matches()
+        => Assert.Equal("k3", Keys(Fetch(Where(Cond("parentaccountid", "eq", "{" + SelectFixture.AccountId(1).ToString("D").ToUpperInvariant() + "}"))))); // W114
+
     [Fact]
     public void R13_ValidValues_StillMatch()
     {
@@ -394,7 +404,6 @@ public class FetchXmlEvaluatorRuleTests
         Assert.Equal("k3", Keys(Fetch(Where(Cond("revenue", "eq", "250.5")))));
         Assert.Equal("k2,k3,k4,k6,k8,k9", Keys(Fetch(Where(Cond("donotemail", "eq", "0")))));
         Assert.Equal("k1,k5,k7,k10", Keys(Fetch(Where(Cond("donotemail", "eq", "true"))))); // W118
-        Assert.Equal("k3", Keys(Fetch(Where(Cond("parentaccountid", "eq", "{" + SelectFixture.AccountId(1).ToString("D").ToUpperInvariant() + "}"))))); // W114
     }
 
     // An empty value is unknown: W51 in (5, empty) = the 5 rows; W137 in (empty, 100) = the 100 row; W52 not-in (5, empty)

@@ -145,6 +145,8 @@ internal sealed class FetchXmlEvaluator
     public EntityCollection Evaluate(string fetchXml)
     {
         var spec = Validate(XDocument.Parse(fetchXml));
+        if (spec.Root.Table.Rows.Count == 0)
+            Shape("a query on an empty table");
 
         var rows = spec.Root.Table.Rows
             .Select(r => new JoinedRow { Rows = new(StringComparer.OrdinalIgnoreCase) { [BaseAlias] = r } })
@@ -165,9 +167,12 @@ internal sealed class FetchXmlEvaluator
         var firstCreated = rows.OrderBy(r => created[r.Rows[BaseAlias]!]).ToList();
         var kept = Sort(firstCreated, orders, spec.Sources, tieBreakById: false)
             .Select(r => Project(r, spec)).DistinctBy(Signature).ToList();
+        Shape(orders.Count == 0 ? "distinct without order" : "distinct with order");
         if (orders.Count == 0)
         {
             var columns = spec.Root.AllAttributes ? spec.Root.Table.Columns.Keys.ToList() : spec.Root.Attributes.Select(a => a.Alias ?? a.Name).ToList();
+            foreach (var (name, _) in spec.Root.AllAttributes ? spec.Root.Table.Columns.Keys.Select(k => (k, (string?)null)) : spec.Root.Attributes)
+                Shape($"distinct without order on a {ColumnOrVirtual(spec.Root.Table, name)} column");
             IOrderedEnumerable<Entity>? sorted = null;
             foreach (var column in columns)
             {
@@ -217,6 +222,10 @@ internal sealed class FetchXmlEvaluator
         if (top != null && (count != null || page != null))
             throw Unsupported("top together with page or count");
 
+        if (fetch.Attribute("returntotalrecordcount") is not null)
+            Shape("returntotalrecordcount");
+        if (fetch.Attribute("paging-cookie") is { } cookie)
+            Shape(Regex.IsMatch(cookie.Value, @"^<cookie page=""\d+"" />$") ? "paging-cookie as the fake returns it" : "paging-cookie of another form");
         var distinct = fetch.Attribute("distinct") is { } d && Bool(d);
         if (isAggregate && (distinct || top != null || count != null || page is > 1 || root.Links.Any(l => l.Orders.Count > 0) || root.Orders.Count > 0))
             throw Unsupported("an aggregate fetch with distinct, top, count, paging or orders");
@@ -237,6 +246,9 @@ internal sealed class FetchXmlEvaluator
             var type = (string?)link.Attribute("link-type") ?? "inner";
             if (type is not ("inner" or "outer"))
                 throw Unsupported($"link-type {type}");
+            Shape($"link {type}{(link.Attribute("link-type") is null ? " (no link-type)" : "")} under {(parent.Alias == BaseAlias ? "the entity" : parent.LinkType)}");
+            if (parent.Links.Count > 0)
+                Shape("sibling links");
             if (type == "inner" && IsUnderOuter(parent))
                 throw Unsupported("an inner link-entity nested under an outer one (not observed)");
             if (alias.Length == 0 || sources.ContainsKey(alias))
@@ -246,6 +258,7 @@ internal sealed class FetchXmlEvaluator
                 // Audit J08: an outer link with empty from and to returns every parent row with the link columns NULL.
                 if (type != "outer")
                     throw Unsupported("an inner link-entity with empty from and to");
+                Shape("link with empty from and to");
             }
             else
             {
@@ -255,6 +268,7 @@ internal sealed class FetchXmlEvaluator
                 var wholes = fromType == FakeColumnType.Integer && toType == FakeColumnType.Integer; // audit J12
                 if (!guids && !wholes)
                     throw Unsupported($"a link-entity joined on {fromType} and {toType} columns ({from}, {to})");
+                Shape($"link join {fromType}={toType}");
             }
 
             var source = new Source { Alias = alias, Table = table, Element = link, LinkType = type, From = from, To = to, Parent = parent };
@@ -300,6 +314,7 @@ internal sealed class FetchXmlEvaluator
                 case "all-attributes":
                     AllowAttributes(child);
                     NoChildren(child);
+                    Shape(source.Alias == BaseAlias ? "all-attributes" : "all-attributes in a link");
                     source.AllAttributes = true;
                     break;
                 case "filter":
@@ -309,6 +324,8 @@ internal sealed class FetchXmlEvaluator
                     var scope = source.Alias == BaseAlias
                         ? sources
                         : new Dictionary<string, Source>(StringComparer.Ordinal) { [source.Alias] = source };
+                    if (source.Filters.Count > 0)
+                        Shape("sibling filters");
                     source.Filters.Add(ReadFilter(child, source.Alias, scope));
                     break;
                 case "order":
@@ -408,6 +425,7 @@ internal sealed class FetchXmlEvaluator
             }
             if (!Regex.IsMatch(alias, "^[A-Za-z_][A-Za-z0-9_]*$"))
                 throw Unsupported($"the aggregate alias '{alias}'");
+            Shape(groupby ? $"groupby {type}{Created(name)}" : $"aggregate {function}{(distinct ? " distinct" : "")} {type}{Created(name)}");
             result.Add(new AggregateAttribute(source, name, alias, type, function, distinct));
         }
         if (result.Select(a => a.Alias).Distinct(StringComparer.Ordinal).Count() != result.Count)
@@ -558,6 +576,7 @@ internal sealed class FetchXmlEvaluator
         {
             if (op != "eq" || raw.Length != 1 || source.Table.TypeOf(attribute[..^4]) != FakeColumnType.Choice)
                 throw Unsupported($"operator {op} on the virtual column {attribute} (only eq on a choice name is observed, V08)");
+            Shape($"condition {op} on the virtual column {attribute}");
             return new Condition(source.Alias, attribute[..^4], type, op, [StringKey(raw[0])], source.Table);
         }
         if (type == FakeColumnType.MultiChoice && op is not ("null" or "not-null"))
@@ -575,6 +594,8 @@ internal sealed class FetchXmlEvaluator
         if (raw.Length < expected.Min || raw.Length > expected.Max)
             throw Unsupported($"operator {op} with {raw.Length} values");
 
+        Shape($"condition {op} {type}{Created(attribute)}");
+        Shape($"value form {op} {(raw.Length == 0 ? "none" : c.Attribute("value") is not null ? "value=" : "<value>")}");
         if (LikeOperators.Contains(op))
         {
             if (type != FakeColumnType.String)
@@ -607,12 +628,17 @@ internal sealed class FetchXmlEvaluator
             // Audit V09: ORDER BY a choice's name orders by its label, NULL first, like ORDER BY the choice (OBSERVED).
             if (source.Table.TypeOf(attribute[..^4]) != FakeColumnType.Choice)
                 throw Unsupported($"ORDER BY the virtual column {attribute}");
+            Shape($"order on the virtual column {attribute}");
             attribute = attribute[..^4];
             type = FakeColumnType.Choice;
         }
         if (type is FakeColumnType.Lookup or FakeColumnType.Uniqueidentifier or FakeColumnType.MultiChoice)
             throw Unsupported($"ORDER BY a {type} column");
-        return new Order(source.Alias, attribute, type, order.Attribute("descending") is { } d && Bool(d));
+        var descending = order.Attribute("descending") is { } d && Bool(d);
+        Shape($"order {(descending ? "descending" : "ascending")} {type}{Created(attribute)}");
+        if (order.Attribute("entityname") is not null)
+            Shape("order with entityname");
+        return new Order(source.Alias, attribute, type, descending);
     }
 
     private static Source ResolveSource(string alias, IReadOnlyDictionary<string, Source> sources)
@@ -742,7 +768,10 @@ internal sealed class FetchXmlEvaluator
                 if (value.Length == 0)
                     return op is "in" or "not-in" or "between" or "eq" ? EmptyValue.Instance : throw Unsupported($"an empty value with operator {op} on a whole-number column"); // W26 eq
                 if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _) && !Regex.IsMatch(value.Trim(), @"^[+-]?\d+$"))
-                    throw FormatFault(); // audit W15 '5.0', E06 'abc', X02/X03/X12 '@i'
+                {
+                    Shape($"whole-number fault for a value of the form {Pattern(value)}");
+                    throw FormatFault();
+                } // audit W15 '5.0', E06 'abc', X02/X03/X12 '@i'
                 if (!WholeForm.IsMatch(value))
                     throw Unsupported($"the whole-number value '{value}'");
                 var parsed = decimal.Parse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture);
@@ -787,6 +816,10 @@ internal sealed class FetchXmlEvaluator
     /// </summary>
     private DateTime ParseDateTime(string value)
     {
+        var local = DateForm.Match(value) is { Success: true } form && !form.Groups["offset"].Success && int.TryParse(value.AsSpan(5, 2), out var month)
+            ? month is >= 4 and <= 10 ? " local, in daylight-saving months" : month is 3 or 11 ? " local, in a month with a clock change" : " local, in standard-time months"
+            : "";
+        Shape($"date-time literal {Pattern(value)}{local}");
         if (Regex.IsMatch(value, @"^(\d+|@\w+)$"))
             throw Fault($"The date-time format for {value} is invalid, or value is outside the supported range.");
         var match = DateForm.Match(value);
@@ -799,8 +832,8 @@ internal sealed class FetchXmlEvaluator
                 ? withOffset.UtcDateTime
                 : throw Unsupported($"the date-time value '{value}'");
         }
-        return DateTime.TryParse(normalized, CultureInfo.InvariantCulture, DateTimeStyles.None, out var local)
-            ? DateTime.SpecifyKind(local - _callerUtcOffset, DateTimeKind.Utc)
+        return DateTime.TryParse(normalized, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedLocal)
+            ? DateTime.SpecifyKind(parsedLocal - _callerUtcOffset, DateTimeKind.Utc)
             : throw Unsupported($"the date-time value '{value}'");
     }
 
@@ -1155,6 +1188,31 @@ internal sealed class FetchXmlEvaluator
     }
 
     // ───────────────────────────── errors ─────────────────────────────
+
+    /// <summary>
+    /// The closed world at shape level: an (operator, column type) pair, an (order, column type) pair, a link, value or
+    /// fetch form is evaluated only when it is in <see cref="ObservedShapes.All"/>, the set the audit's replayed cases and
+    /// OBSERVED lines send (<c>ObservedShapesTests</c> derives it again and fails on any difference). Every other shape is
+    /// refused, naming the shape.
+    /// </summary>
+    internal static readonly AsyncLocal<HashSet<string>?> DerivingShapes = new();
+
+    private static void Shape(string shape)
+    {
+        if (DerivingShapes.Value is { } seen)
+        {
+            lock (seen) seen.Add(shape);
+            return;
+        }
+        if (!ObservedShapes.All.Contains(shape))
+            throw Unsupported($"the shape '{shape}' (no replayed audit case or OBSERVED line sends it)");
+    }
+
+    private static string Created(string attribute) => attribute == "createdon" ? " (createdon)" : "";
+
+    /// <summary>The form of a literal: digits as 9, lower-case letters as a, upper-case letters as A.</summary>
+    private static string Pattern(string value)
+        => new(value.Select(ch => char.IsDigit(ch) ? '9' : char.IsLower(ch) ? 'a' : char.IsUpper(ch) ? 'A' : ch).ToArray());
 
     private static NotSupportedException Unsupported(string what)
         => new($"Fake Dataverse refuses this FetchXML: not observed: {what}. Observe it live and add the rule before relying on it.");
