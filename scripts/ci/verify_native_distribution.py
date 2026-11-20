@@ -275,9 +275,10 @@ exit 1
 
 
 WINDOWS_READ_MASK = 0xA01200A9
-# Bound on one powershell.exe security read. A cold start on a slow hosted
-# runner (seen on windows-11-arm) can pass 15 seconds; a timeout still fails
-# the check as an incomplete read, it is never treated as a measurement.
+# Bound on one powershell.exe security read. It exists to catch a hung reader;
+# a timeout fails the check as an incomplete read and is never a measurement.
+# One windows-11-arm failure was consistent with a first start slower than the
+# earlier 15 s bound; that cause was not confirmed (#1749).
 WINDOWS_SECURITY_TIMEOUT_SECONDS = 60
 WINDOWS_ANCESTOR_MASK = WINDOWS_READ_MASK | 0x6
 WINDOWS_SYSTEM_SID = "S-1-5-18"
@@ -482,7 +483,8 @@ def security_failure_details(evidence):
             diagnostics = snapshot.get("readerDiagnostics") or {}
             cause = snapshot.get("errorType") or f"reader did not report a complete read; phase trace {diagnostics.get('status', 'not_observed')}"
             if diagnostics.get("timedOut") is True:
-                cause += f" after {WINDOWS_SECURITY_TIMEOUT_SECONDS} s"
+                cause += (f" after {WINDOWS_SECURITY_TIMEOUT_SECONDS} s; last phase "
+                          f"{diagnostics.get('lastObservedPhase', 'not_observed')}")
             details.append(f"{reason} ({cause})")
         elif reason == "unsafe_security_descriptor":
             rejected = [f"{policy['path']}: {', '.join(policy['reasons'])}"
