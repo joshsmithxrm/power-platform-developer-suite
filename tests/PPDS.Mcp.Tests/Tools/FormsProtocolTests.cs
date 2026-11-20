@@ -18,6 +18,7 @@ using PPDS.Dataverse.Models;
 using PPDS.Mcp.Infrastructure;
 using PPDS.Mcp.Tools;
 using Xunit;
+using PPDS.Tests.Shared;
 
 namespace PPDS.Mcp.Tests.Tools;
 
@@ -117,7 +118,8 @@ public sealed class FormsProtocolTests
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly string _directory = Path.Combine(Path.GetTempPath(), "ppds-forms-protocol-" + Guid.NewGuid().ToString("N"));
-        private readonly CancellationTokenSource _lifetime = new(TimeSpan.FromSeconds(30));
+        // Hang guard for the in-memory server and client, shared with every test project (#1684): not a speed bound.
+        private readonly CancellationTokenSource _lifetime = new(HangBackstop.Bound);
         private ProfileStore _store = null!;
         private McpToolContext _context = null!;
         private IMcpServer _server = null!;
