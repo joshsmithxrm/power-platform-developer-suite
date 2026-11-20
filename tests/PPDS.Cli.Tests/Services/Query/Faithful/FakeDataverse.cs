@@ -72,18 +72,44 @@ internal sealed class FakeDataverse
     /// <summary>The product's <see cref="QueryExecutor"/> over this fake.</summary>
     public IQueryExecutor CreateQueryExecutor() => new RewritingExecutor(new QueryExecutor(CreatePool()), this);
 
+    /// <summary>
+    /// A Moq <see cref="IQueryExecutor"/> whose every member runs <see cref="CreateQueryExecutor"/>, so a test can verify the
+    /// calls the engine made while the rows still come from this fake.
+    /// </summary>
+    public Mock<IQueryExecutor> CreateExecutorMock()
+    {
+        var real = CreateQueryExecutor();
+        var mock = new Mock<IQueryExecutor>(MockBehavior.Strict);
+        mock.Setup(x => x.ExecuteFetchXmlAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns((string f, int? p, string? c, bool i, CancellationToken t) => real.ExecuteFetchXmlAsync(f, p, c, i, t));
+        mock.Setup(x => x.ExecuteFetchXmlAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<QueryExecutionOptions?>(), It.IsAny<CancellationToken>()))
+            .Returns((string f, int? p, string? c, bool i, QueryExecutionOptions? o, CancellationToken t) => real.ExecuteFetchXmlAsync(f, p, c, i, o, t));
+        mock.Setup(x => x.ExecuteFetchXmlAllPagesAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns((string f, int m, CancellationToken t) => real.ExecuteFetchXmlAllPagesAsync(f, m, t));
+        mock.Setup(x => x.GetTotalRecordCountAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string e, CancellationToken t) => real.GetTotalRecordCountAsync(e, t));
+        mock.Setup(x => x.GetMinMaxCreatedOnAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string e, CancellationToken t) => real.GetMinMaxCreatedOnAsync(e, t));
+        return mock;
+    }
+
     /// <summary>A <see cref="SqlQueryService"/> over this fake, as the CLI builds it for a read.</summary>
     public SqlQueryService CreateSqlQueryService() => new(CreateQueryExecutor(), guard: new InactiveFakeShakedownGuard());
 
     private IPooledClient CreateClient()
     {
         var client = new Mock<IPooledClient>(MockBehavior.Strict);
+        // Like the SDK, a cancelled token ends the request (not observed live).
         client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((QueryBase q, CancellationToken _) => RetrieveMultiple(FetchOf(q)));
+            .Returns((QueryBase q, CancellationToken t) => t.IsCancellationRequested
+                ? Task.FromCanceled<EntityCollection>(t)
+                : Task.FromResult(RetrieveMultiple(FetchOf(q))));
         client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>()))
             .ReturnsAsync((QueryBase q) => RetrieveMultiple(FetchOf(q)));
         client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((OrganizationRequest r, CancellationToken _) => Execute(r));
+            .Returns((OrganizationRequest r, CancellationToken t) => t.IsCancellationRequested
+                ? Task.FromCanceled<OrganizationResponse>(t)
+                : Task.FromResult(Execute(r)));
         client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
         client.Setup(c => c.Dispose());
         return client.Object;
