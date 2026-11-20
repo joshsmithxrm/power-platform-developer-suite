@@ -20,7 +20,7 @@ The query system enables SQL-like queries against Dataverse through automatic tr
 
 ### Non-Goals
 
-- Full SQL compatibility (subqueries and UNION not yet supported — see Unsupported SQL Features and Roadmap sections below; which expressions, `CASE` forms and functions are supported is defined by [sql-values.md](./sql-values.md))
+- Full SQL compatibility (subqueries and UNION not yet supported — see Unsupported SQL Features and Roadmap sections below; which expressions, `CASE` forms and functions are supported will be defined by the rule table of [sql-values.md](./sql-values.md), which does not exist yet)
 - Query optimization beyond plan-layer routing (FetchXML pushdown is maximized; client-side operators are fallbacks)
 - OData query generation (FetchXML is the target format)
 
@@ -122,8 +122,8 @@ The plan-based pipeline (introduced by the v2 execution plan layer) replaces the
 
 - Subqueries (`SELECT * FROM (SELECT...)`, `WHERE id IN (SELECT ...)`, `EXISTS`) — planned
 - UNION/INTERSECT/EXCEPT — planned
-- Complex expressions (`revenue * 1.1`, `CASE WHEN`): see [sql-values.md](./sql-values.md), which defines the expressions that are supported
-- Functions (`CONCAT()`, `UPPER()`): see [sql-values.md](./sql-values.md), which defines the functions that are supported
+- Complex expressions (`revenue * 1.1`, `CASE WHEN`): see [sql-values.md](./sql-values.md), whose rule table will define the expressions that are supported; the list generated from it does not exist yet
+- Functions (`CONCAT()`, `UPPER()`): see [sql-values.md](./sql-values.md), whose rule table will define the functions that are supported; the list generated from it does not exist yet
 
 > **Note:** HAVING is now supported via client-side filtering (`ClientFilterNode` after aggregate `FetchXmlScanNode`). Cross-environment queries are supported via `RemoteExecutorFactory` and `[LABEL].entity` syntax.
 
@@ -613,7 +613,7 @@ public void Transpile_SelectWithJoin_GeneratesLinkEntity()
 - **Query builder TUI**: Interactive query construction with autocomplete
 - **Explain plan**: Show how FetchXML will be executed (`ExplainAsync()` infrastructure exists)
 - **Query templates**: Parameterized saved queries
-- **Advanced SQL features**: Subqueries, UNION/INTERSECT/EXCEPT, window functions, variables. `CASE`/`IIF` and scalar functions (string, date, `CAST`) are covered by [sql-values.md](./sql-values.md)
+- **Advanced SQL features**: Subqueries, UNION/INTERSECT/EXCEPT, window functions, variables. `CASE`/`IIF` and scalar functions (string, date, `CAST`) belong to [sql-values.md](./sql-values.md), whose rule table will say which are supported
 
 ---
 
