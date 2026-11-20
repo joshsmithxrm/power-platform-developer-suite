@@ -1,4 +1,5 @@
 using System.IO;
+using Microsoft.Extensions.DependencyInjection;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Services.Settings;
 using PPDS.Cli.Tests.Mocks;
@@ -399,7 +400,7 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
     #region Disposal Tests
 
     [Fact]
-    public async Task DisposeAsync_CompletesWithinTimeout()
+    public async Task DisposeAsync_Completes_WhenProvidersDisposePromptly()
     {
         // Arrange
         var session = new InteractiveSession(null, _tempStore.Store, _envConfigStore, new TuiStateStore(Path.GetTempFileName()), _mockFactory);
@@ -409,6 +410,45 @@ public sealed class InteractiveSessionLifecycleTests : IDisposable
         // DisposeTimeout; this test's providers dispose at once, so a fixed wall-clock budget here would only
         // measure runner load. The hang guard catches a disposal that never completes.
         await HangBackstop.WaitAsync(session.DisposeAsync().AsTask(), "DisposeAsync to complete");
+    }
+
+    [Fact]
+    public async Task DisposeAsync_StopsWaitingForAProviderWhoseDisposalNeverCompletes()
+    {
+        // Arrange - a provider holding a service whose async disposal never completes. Only the product's
+        // own DisposeTimeout lets session disposal finish; the hang guard catches a session that waits forever.
+        var hanging = new NeverCompletingAsyncDisposable();
+        var factory = new MockServiceProviderFactory(services => { services.AddSingleton(_ => hanging.Track()); return services; });
+        var session = new InteractiveSession(null, _tempStore.Store, _envConfigStore, new TuiStateStore(Path.GetTempFileName()), factory);
+        var provider = await session.GetServiceProviderAsync("https://test.crm.dynamics.com");
+        provider.GetRequiredService<NeverCompletingAsyncDisposable>();
+
+        try
+        {
+            // Act
+            await HangBackstop.WaitAsync(session.DisposeAsync().AsTask(), "DisposeAsync to give up on the hanging provider");
+
+            // Assert - disposal of the provider started and is still pending, so the timeout path ran.
+            Assert.True(hanging.DisposeStarted.IsCompleted);
+            Assert.False(hanging.Release.Task.IsCompleted);
+        }
+        finally
+        {
+            hanging.Release.TrySetResult();
+        }
+    }
+
+    private sealed class NeverCompletingAsyncDisposable : IAsyncDisposable
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task DisposeStarted => _started.Task;
+        public NeverCompletingAsyncDisposable Track() => this;
+        public async ValueTask DisposeAsync()
+        {
+            _started.TrySetResult();
+            await Release.Task;
+        }
     }
 
     [Fact]

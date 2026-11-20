@@ -60,25 +60,25 @@ public sealed class FormsProtocolTests
                     FormId = request.FormId, Status = "published", PublicationScope = "entity", EntityPublication = new("succeeded"), PublishedVerification = new("succeeded") });
             });
         await using var fixture = await Fixture.CreateAsync(forms.Object);
-        var tools = await fixture.Client.ListToolsAsync(cancellationToken: fixture.Token);
+        var tools = await fixture.Step("the tool list", t => fixture.Client.ListToolsAsync(cancellationToken: t));
         tools.Select(t => t.Name).Should().BeEquivalentTo("ppds_forms_list", "ppds_forms_get", "ppds_forms_add_field", "ppds_forms_publish");
         tools.Single(t => t.Name == "ppds_forms_add_field").JsonSchema.ToString().Should().NotContain("progress").And.NotContain("formXml");
         var list = await fixture.CallAsync("ppds_forms_list", new() { ["entityLogicalName"] = "fixture_table" });
         list.Should().Contain(formId.ToString()).And.Contain("https://fixture.example.test");
         var get = await fixture.CallAsync("ppds_forms_get", new() { ["entityLogicalName"] = "fixture_table", ["formId"] = formId, ["unpublished"] = true });
         get.Should().Contain(hash).And.Contain("unpublished");
-        var add = await fixture.Client.CallToolAsync("ppds_forms_add_field", new Dictionary<string, object?>
+        var add = await fixture.Step("the MCP response to 'ppds_forms_add_field'", t => fixture.Client.CallToolAsync("ppds_forms_add_field", new Dictionary<string, object?>
         {
             ["entityLogicalName"] = "fixture_table", ["formId"] = formId, ["sectionId"] = sectionId,
             ["fieldLogicalName"] = "fixture_value", ["expectedDraftHash"] = hash, ["confirmEnvironment"] = "https://fixture.example.test"
-        }, progress: new InlineProgress(value => progressReceived.TrySetResult(value)), cancellationToken: fixture.Token);
+        }, progress: new InlineProgress(value => progressReceived.TrySetResult(value)), cancellationToken: t));
         add.IsError.Should().BeFalse();
         JsonSerializer.Serialize(add).Should().Contain("saved-unpublished")
             .And.Contain("controlId").And.Contain("fixture_value1"); // wire name of the assigned control id
         var addJson = JsonSerializer.Serialize(add);
         addJson.LastIndexOf("controlId", StringComparison.Ordinal).Should().BeGreaterThan(
             addJson.LastIndexOf("publishedVerification", StringComparison.Ordinal), "the additive member serialises after the existing ones");
-        (await progressReceived.Task.WaitAsync(fixture.Token)).Message.Should().Contain("Verifying");
+        (await HangBackstop.WaitAsync(progressReceived.Task, "the add-field progress notification")).Message.Should().Contain("Verifying");
         draft.Should().NotBeNull();
         draft!.SectionId.Should().Be(sectionId);
         draft.ConfirmEnvironment.Should().Be("https://fixture.example.test");
@@ -98,14 +98,14 @@ public sealed class FormsProtocolTests
         forms.Setup(f => f.AddFieldDraftAsync(It.IsAny<AddFieldDraftRequest>(), It.IsAny<IProgressReporter>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new PpdsException("Environment.ConfirmationRequired", "Confirm https://fixture.example.test"));
         await using var fixture = await Fixture.CreateAsync(forms.Object);
-        var response = await fixture.Client.CallToolAsync("ppds_forms_add_field", new Dictionary<string, object?>
+        var response = await fixture.Step("the MCP response to 'ppds_forms_add_field'", t => fixture.Client.CallToolAsync("ppds_forms_add_field", new Dictionary<string, object?>
         {
             ["entityLogicalName"] = "fixture_table", ["formId"] = Guid.NewGuid(), ["sectionId"] = Guid.NewGuid(),
             ["fieldLogicalName"] = "fixture_value", ["expectedDraftHash"] = new string('a', 64)
-        }, cancellationToken: fixture.Token);
+        }, cancellationToken: t));
         response.IsError.Should().BeTrue();
         JsonSerializer.Serialize(response).Should().Contain("Environment.ConfirmationRequired");
-        var invalid = await fixture.Client.CallToolAsync("ppds_forms_list", new Dictionary<string, object?> { ["entityLogicalName"] = " " }, cancellationToken: fixture.Token);
+        var invalid = await fixture.Step("the MCP response to the invalid 'ppds_forms_list'", t => fixture.Client.CallToolAsync("ppds_forms_list", new Dictionary<string, object?> { ["entityLogicalName"] = " " }, cancellationToken: t));
         invalid.IsError.Should().BeTrue();
         forms.Verify(f => f.ListAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -118,14 +118,17 @@ public sealed class FormsProtocolTests
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly string _directory = Path.Combine(Path.GetTempPath(), "ppds-forms-protocol-" + Guid.NewGuid().ToString("N"));
-        // Hang guard for the in-memory server and client, shared with every test project (#1684): not a speed bound.
-        private readonly CancellationTokenSource _lifetime = new(HangBackstop.Bound);
+        // The server's lifetime, cancelled on dispose. It has no timer: each awaited protocol step runs under
+        // the shared hang guard (Step), which names the step if it never completes (#1684).
+        private readonly CancellationTokenSource _lifetime = new();
         private ProfileStore _store = null!;
         private McpToolContext _context = null!;
         private IMcpServer _server = null!;
         private Task _serverTask = null!;
         public IMcpClient Client { get; private set; } = null!;
         public CancellationToken Token => _lifetime.Token;
+        public Task<T> Step<T>(string awaiting, Func<CancellationToken, Task<T>> call) => HangBackstop.WaitAsync(call, awaiting);
+        public Task<T> Step<T>(string awaiting, Func<CancellationToken, ValueTask<T>> call) => HangBackstop.WaitAsync(t => call(t).AsTask(), awaiting);
         public static async Task<Fixture> CreateAsync(IFormService forms)
         {
             var f = new Fixture();
@@ -151,12 +154,12 @@ public sealed class FormsProtocolTests
             f._server = McpServerFactory.Create(new StreamServerTransport(requests.Reader.AsStream(), responses.Writer.AsStream()),
                 new() { ServerInfo = new() { Name = "forms-protocol-test", Version = "1" }, Capabilities = new() { Tools = new() { ToolCollection = collection } } });
             f._serverTask = f._server.RunAsync(f.Token);
-            f.Client = await McpClientFactory.CreateAsync(new StreamClientTransport(requests.Writer.AsStream(), responses.Reader.AsStream()), cancellationToken: f.Token);
+            f.Client = await f.Step("the MCP client handshake", t => McpClientFactory.CreateAsync(new StreamClientTransport(requests.Writer.AsStream(), responses.Reader.AsStream()), cancellationToken: t));
             return f;
         }
         public async Task<string> CallAsync(string name, Dictionary<string, object?> arguments)
         {
-            var response = await Client.CallToolAsync(name, arguments, cancellationToken: Token);
+            var response = await Step($"the MCP response to '{name}'", t => Client.CallToolAsync(name, arguments, cancellationToken: t));
             response.IsError.Should().BeFalse();
             return JsonSerializer.Serialize(response);
         }

@@ -44,7 +44,7 @@ public sealed class DaemonTestFixtureTests
         {
             var initialize = fixture.InitializeAsync();
             clock.Fire(0);
-            var error = await Assert.ThrowsAsync<DaemonFixtureException>(() => HangBackstop.WaitAsync(initialize, "initialize to complete"));
+            var error = await Assert.ThrowsAsync<DaemonFixtureException>(() => HangBackstop.WaitAsync(initialize, "the fixture's initialization to fail"));
             Assert.Equal("startup", error.Phase);
             Assert.IsAssignableFrom<OperationCanceledException>(fixture.PrimaryCause);
             Assert.True(fixture.RequiresManualReview);
@@ -100,7 +100,7 @@ public sealed class DaemonTestFixtureTests
             Assert.False(fixture.IsRunning);
             Assert.False(process.WaitToken.IsCancellationRequested);
             clock.Fire(1); // startup deadline was timer0; shared stop is timer1.
-            await Assert.ThrowsAsync<DaemonFixtureException>(() => HangBackstop.WaitAsync(dispose, "dispose to complete"));
+            await Assert.ThrowsAsync<DaemonFixtureException>(() => HangBackstop.WaitAsync(dispose, "the fixture's disposal to fail"));
             Assert.False(fixture.StopEvidence!.ExitConfirmed);
             Assert.Equal(1, process.DisposeCalls);
             Assert.True(Directory.Exists(fixture.IsolatedConfigDir));
@@ -141,9 +141,9 @@ public sealed class DaemonTestFixtureTests
         {
             await fixture.InitializeAsync();
             var dispose = fixture.DisposeAsync();
-            await HangBackstop.WaitAsync(disposalStream!.AsyncDisposeStarted.Task, "disposalStream!.AsyncDisposeStarted.Task to complete");
+            await HangBackstop.WaitAsync(disposalStream!.AsyncDisposeStarted.Task, "the RPC stream's async disposal to start");
             if (neverCompletes) clock.Fire(2);
-            var error = await Assert.ThrowsAsync<DaemonFixtureException>(() => HangBackstop.WaitAsync(dispose, "dispose to complete"));
+            var error = await Assert.ThrowsAsync<DaemonFixtureException>(() => HangBackstop.WaitAsync(dispose, "the fixture's disposal to fail"));
             Assert.Equal("stream-dispose", error.Phase);
             Assert.Equal(1, process.KillCalls);
             Assert.Equal(neverCompletes ? 0 : 1, process.DisposeCalls);
@@ -151,13 +151,13 @@ public sealed class DaemonTestFixtureTests
             Assert.True(Directory.Exists(fixture.IsolatedConfigDir));
             Assert.DoesNotContain(Secret, error.ToString());
             pendingDispose.TrySetResult();
-            await HangBackstop.WaitAsync(fixture.ResourceCleanupCompletion, "fixture.ResourceCleanupCompletion to complete");
+            await HangBackstop.WaitAsync(fixture.ResourceCleanupCompletion, "the fixture's resource cleanup to finish");
             Assert.Equal(1, process.DisposeCalls);
         }
         finally
         {
             pendingDispose.TrySetResult();
-            await HangBackstop.WaitAsync(fixture.ResourceCleanupCompletion, "fixture.ResourceCleanupCompletion to complete");
+            await HangBackstop.WaitAsync(fixture.ResourceCleanupCompletion, "the fixture's resource cleanup to finish");
             disposalStream?.CloseInner();
             RemoveOwnedDirectory(fixture);
         }
@@ -195,9 +195,9 @@ public sealed class DaemonTestFixtureTests
         {
             await fixture.InitializeAsync();
             var dispose = fixture.DisposeAsync();
-            await HangBackstop.WaitAsync(started.Task, "started.Task to complete");
+            await HangBackstop.WaitAsync(started.Task, "the fake disposal to start");
             clock.Fire(2);
-            var error = await Assert.ThrowsAsync<DaemonFixtureException>(() => HangBackstop.WaitAsync(dispose, "dispose to complete"));
+            var error = await Assert.ThrowsAsync<DaemonFixtureException>(() => HangBackstop.WaitAsync(dispose, "the fixture's disposal to fail"));
             Assert.Equal("stream-dispose", error.Phase);
             Assert.IsAssignableFrom<OperationCanceledException>(fixture.PrimaryCause);
             Assert.False(returned.Task.IsCompleted); // The bound works before the synchronous call returns.
@@ -210,8 +210,8 @@ public sealed class DaemonTestFixtureTests
             Assert.DoesNotContain(Secret, evidence.RootElement.GetRawText());
             Assert.Throws<DaemonFixtureException>(() => fixture.Rpc);
             release.Set();
-            await HangBackstop.WaitAsync(returned.Task, "returned.Task to complete");
-            await HangBackstop.WaitAsync(fixture.ResourceCleanupCompletion, "fixture.ResourceCleanupCompletion to complete");
+            await HangBackstop.WaitAsync(returned.Task, "the fake disposal to return");
+            await HangBackstop.WaitAsync(fixture.ResourceCleanupCompletion, "the fixture's resource cleanup to finish");
             Assert.Same(dispose, fixture.DisposeAsync());
             Assert.Same(error, await Assert.ThrowsAsync<DaemonFixtureException>(() => fixture.DisposeAsync()));
             Assert.Equal(1, process.DisposeCalls); // The one worker resumes serial cleanup after the late fault.
@@ -220,8 +220,8 @@ public sealed class DaemonTestFixtureTests
         finally
         {
             release.Set();
-            if (started.Task.IsCompleted) await HangBackstop.WaitAsync(returned.Task, "returned.Task to complete");
-            await HangBackstop.WaitAsync(fixture.ResourceCleanupCompletion, "fixture.ResourceCleanupCompletion to complete");
+            if (started.Task.IsCompleted) await HangBackstop.WaitAsync(returned.Task, "the fake disposal to return");
+            await HangBackstop.WaitAsync(fixture.ResourceCleanupCompletion, "the fixture's resource cleanup to finish");
             process.ClientStream.SyncDispose = null;
             RemoveOwnedDirectory(fixture);
         }
@@ -261,10 +261,10 @@ public sealed class DaemonTestFixtureTests
             await fixture.InitializeAsync();
             var rpcCompletion = fixture.Rpc.Completion;
             var dispose = fixture.DisposeAsync();
-            await HangBackstop.WaitAsync(entered.Task, "entered.Task to complete");
-            await HangBackstop.WaitAsync(rpcCompletion, "rpcCompletion to complete");
+            await HangBackstop.WaitAsync(entered.Task, "the RPC call to be entered");
+            await HangBackstop.WaitAsync(rpcCompletion, "the RPC call to complete");
             clock.Fire(2);
-            var error = await Assert.ThrowsAsync<DaemonFixtureException>(() => HangBackstop.WaitAsync(dispose, "dispose to complete"));
+            var error = await Assert.ThrowsAsync<DaemonFixtureException>(() => HangBackstop.WaitAsync(dispose, "the fixture's disposal to fail"));
             Assert.Equal("stream-dispose", error.Phase);
             Assert.Equal(1, Volatile.Read(ref active));
             Assert.Equal(1, Volatile.Read(ref calls));
@@ -272,7 +272,7 @@ public sealed class DaemonTestFixtureTests
             Assert.Equal(0, process.DisposeCalls);
             Assert.False(fixture.ResourceCleanupCompletion.IsCompleted);
             release.Set();
-            await HangBackstop.WaitAsync(fixture.ResourceCleanupCompletion, "fixture.ResourceCleanupCompletion to complete");
+            await HangBackstop.WaitAsync(fixture.ResourceCleanupCompletion, "the fixture's resource cleanup to finish");
             Assert.Equal(0, Volatile.Read(ref active));
             Assert.Equal(1, Volatile.Read(ref calls));
             Assert.Equal(1, Volatile.Read(ref maximumActive));
@@ -283,7 +283,7 @@ public sealed class DaemonTestFixtureTests
         finally
         {
             release.Set();
-            await HangBackstop.WaitAsync(fixture.ResourceCleanupCompletion, "fixture.ResourceCleanupCompletion to complete");
+            await HangBackstop.WaitAsync(fixture.ResourceCleanupCompletion, "the fixture's resource cleanup to finish");
             process.ClientStream.SyncDispose = null;
             RemoveOwnedDirectory(fixture);
         }
@@ -301,9 +301,9 @@ public sealed class DaemonTestFixtureTests
             await fixture.InitializeAsync();
             var dispose = fixture.DisposeAsync();
             Assert.False(dispose.IsCompleted);
-            await HangBackstop.WaitAsync(reader.CancellationRequested.Task, "reader.CancellationRequested.Task to complete");
+            await HangBackstop.WaitAsync(reader.CancellationRequested.Task, "the stderr reader to observe cancellation");
             clock.Fire(2);
-            var error = await Assert.ThrowsAsync<DaemonFixtureException>(() => HangBackstop.WaitAsync(dispose, "dispose to complete"));
+            var error = await Assert.ThrowsAsync<DaemonFixtureException>(() => HangBackstop.WaitAsync(dispose, "the fixture's disposal to fail"));
             Assert.Equal("stderr-drain", error.Phase);
             Assert.True(fixture.StopEvidence!.ExitConfirmed);
             Assert.True(fixture.RequiresManualReview);
@@ -312,7 +312,7 @@ public sealed class DaemonTestFixtureTests
         finally
         {
             reader.Complete();
-            await HangBackstop.WaitAsync(fixture.ResourceCleanupCompletion, "fixture.ResourceCleanupCompletion to complete");
+            await HangBackstop.WaitAsync(fixture.ResourceCleanupCompletion, "the fixture's resource cleanup to finish");
             RemoveOwnedDirectory(fixture);
         }
     }
@@ -326,10 +326,10 @@ public sealed class DaemonTestFixtureTests
         try
         {
             // Task.Run also bounds this regression against the former synchronous infinite loop.
-            await HangBackstop.WaitAsync(Task.Run(fixture.InitializeAsync), "Task.Run(fixture.InitializeAsync) to complete");
-            await HangBackstop.WaitAsync(reader.BurstObserved.Task, "reader.BurstObserved.Task to complete");
+            await HangBackstop.WaitAsync(Task.Run(fixture.InitializeAsync), "the fixture's initialization to finish");
+            await HangBackstop.WaitAsync(reader.BurstObserved.Task, "the stderr reader to observe the burst");
             Assert.True(fixture.IsRunning);
-            await HangBackstop.WaitAsync(fixture.DisposeAsync(), "fixture.DisposeAsync() to complete");
+            await HangBackstop.WaitAsync(fixture.DisposeAsync(), "the fixture's disposal to finish");
             Assert.True(fixture.StderrCompletion.IsCompletedSuccessfully);
             Assert.True(fixture.StderrCharactersDiscarded >= 128 * Secret.Length);
             Assert.False(fixture.RequiresManualReview);
@@ -338,7 +338,7 @@ public sealed class DaemonTestFixtureTests
         finally
         {
             reader.Stop(); // Only test teardown can end a broken implementation's endless fake.
-            try { await HangBackstop.WaitAsync(fixture.DisposeAsync(), "fixture.DisposeAsync() to complete"); }
+            try { await HangBackstop.WaitAsync(fixture.DisposeAsync(), "the fixture's disposal to finish"); }
             catch (DaemonFixtureException)
             {
                 // Preserve a body failure while verifying teardown recorded its own failure.
@@ -467,7 +467,7 @@ public sealed class DaemonTestFixtureTests
                 Assert.Same(dispose, fixture.DisposeAsync());
                 Assert.False(dispose.IsCompleted);
                 pendingExit.SetResult();
-                var disposalError = await Assert.ThrowsAsync<DaemonFixtureException>(() => HangBackstop.WaitAsync(dispose, "dispose to complete"));
+                var disposalError = await Assert.ThrowsAsync<DaemonFixtureException>(() => HangBackstop.WaitAsync(dispose, "the fixture's disposal to fail"));
                 Assert.Same(disposalError, await Assert.ThrowsAsync<DaemonFixtureException>(() => initialize));
                 Assert.Equal("startup-cancelled", disposalError.Phase);
                 Assert.Equal(1, process.WaitCalls);
@@ -541,7 +541,7 @@ public sealed class DaemonTestFixtureTests
             // load, so it is generous, and a failure names exactly what was being awaited.
             const int expectedLines = 5000;
             var expectedCharacters = expectedLines * Secret.Length;
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+            using var deadline = new CancellationTokenSource(HangBackstop.Bound);
             while (fixture.StderrCharactersDiscarded < expectedCharacters)
             {
                 // Read completion first: the drain adds to the counter before it can complete, so a
@@ -556,7 +556,7 @@ public sealed class DaemonTestFixtureTests
                 try { await Task.Delay(10, deadline.Token); }
                 catch (OperationCanceledException)
                 {
-                    Assert.Fail($"Timed out after 120s waiting for the fixture to drain native child stderr: " +
+                    Assert.Fail($"No completion after {HangBackstop.Bound.TotalSeconds:0}s waiting for the fixture to drain native child stderr: " +
                         $"{fixture.StderrCharactersDiscarded} of at least {expectedCharacters} characters " +
                         $"({expectedLines} lines) were drained.");
                 }
