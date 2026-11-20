@@ -30,18 +30,28 @@ done
 
 If any library has accumulated public API in `Unshipped.txt`, that's expected — the release rollover PR will move those entries to `Shipped.txt`.
 
-### 2. Tag and push
+### 2. Tag and push (the maintainer's step)
+
+The maintainer creates and pushes every tag; a session never does
+([VERSIONING.md](../VERSIONING.md#9-decisions-in-documents), rule 9.2). The
+session prepares the command with the real version and the full hash of the
+commit to tag (`git fetch origin` then `git rev-parse origin/main`), hands it
+over, and waits.
+
+**Maintainer runs:**
 
 ```bash
-git checkout main
-git pull origin main
-git tag v1.1.0   # use the appropriate semver
-git push origin v1.1.0
+git fetch origin
+git rev-parse origin/main      # must print <release-commit-full-sha>
+git tag v<version> <release-commit-full-sha>   # use the appropriate semver, e.g. v1.1.0
+git push origin "refs/tags/v<version>"
 ```
 
 The tag push triggers `.github/workflows/docs-release.yml`.
 
 ### 3. Monitor the workflow
+
+The session watches the run (read-only):
 
 ```bash
 gh run watch --exit-status
@@ -71,10 +81,17 @@ Expected steps (in order):
 
 ## Dry-run
 
-To validate the pipeline without opening real PRs:
+To validate the pipeline without opening real PRs, the maintainer dispatches
+the workflow (a session never does) and the session watches the run.
+**Maintainer runs:**
 
 ```bash
 gh workflow run docs-release.yml -f dry_run=true
+```
+
+Then, read-only:
+
+```bash
 gh run watch --exit-status
 ```
 
@@ -88,6 +105,8 @@ Use this when:
 ## Recovery
 
 ### Release workflow fails mid-run
+
+The maintainer re-runs a workflow; a session does not.
 
 - **Before App-token step:** safe to re-run after fixing the underlying issue. No cross-repo state mutated.
 - **After App-token but before PRs opened:** re-run; tokens are short-lived (auto-rotate).

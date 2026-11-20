@@ -39,7 +39,7 @@ maintainer's yes in chat does not change that:
   release or package
 
 For each of these, prepare the exact command with the real versions and the full
-hash of the commit it applies to, put it in a block headed **Maintainer runs**
+hash of the commit it applies to (every `git tag` command names that hash), put it in a block headed **Maintainer runs**
 (as the runbook does), hand it to the maintainer in chat, and wait for them to
 say it has run. Then verify the result with the read-only probes below.
 

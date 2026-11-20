@@ -67,7 +67,7 @@ All three paths lead to:
 | `milestone-release-check.yml` | Detects milestone completion, opens minor release readiness issue |
 | `release-cadence-check.yml` | Weekly cron, checks days since last release tag, opens check-in issue |
 | [docs/runbooks/release.md](../docs/runbooks/release.md) | Release ceremony — CHANGELOGs, version bumps, tag push, CI monitoring |
-| `/release` skill (optional) | Directs an AI agent to follow the runbook and lists the actions it must confirm with the maintainer |
+| `/release` skill (optional) | Directs an AI agent to follow the runbook, lists the actions it must confirm with the maintainer, and lists the actions it never takes (tags, releases, publish workflows) |
 | `verify_public_release.py` | Read-only post-publish verification through nuget.org, GitHub Releases, and the VS Code Marketplace |
 | `verify_release_inputs.py`, `inspect_release_assemblies.ps1` | Read-only pre-upload identity, dependency, signing, channel, vacancy and workflow-owned draft checks |
 | GitHub Milestones | Group PRs into minor release targets (v1.1.0, v1.2.0, ...) |

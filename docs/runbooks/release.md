@@ -158,7 +158,7 @@ merge, publication or communication authority.
 **NuGet packages (7): no csproj edits.** PPDS.Auth, PPDS.Cli, PPDS.Dataverse,
 PPDS.Mcp, PPDS.Migration, PPDS.Plugins and PPDS.Query are versioned by MinVer
 from git tags. Never edit `<Version>` in a csproj; the version is whatever tag
-you push in Step 8.
+the maintainer pushes in Step 8.
 
 **Extension: bump `package.json` by hand.** The Extension version is the only
 one in a tracked file:
@@ -295,9 +295,9 @@ When CI on the draft is green, mark it ready with `gh pr ready <pr-number>`.
 The tags are created from `main` (or from a `release/X.Y` stabilization branch),
 never from a feature branch, so the published commit is on the mainline. **You do
 not create or push them.** You prepare the exact commands below and hand them to
-the maintainer, one wave at a time, together with the full hash of the commit
-every tag must point at, so the maintainer can confirm `git rev-parse HEAD`
-matches before tagging.
+the maintainer, one wave at a time. Every tag command names the commit it
+points at (`git tag <name> <full-sha>`), so the tag lands on the reviewed release
+commit whatever the maintainer has checked out.
 
 **Co-release rule:** a release train that includes a `Cli-v*` tag also includes
 an `Extension-v*` tag on the same commit, because the Extension bundles the CLI
@@ -305,39 +305,44 @@ from that exact tag. The rule, how the advisory issue reconciles, and how to opt
 out with a durable record are in
 [CLI/Extension Co-release Reconciliation](../RELEASE.md#cli-extension-co-release-reconciliation).
 
-After the PR merges, update `main` in your main worktree (git does not let you
-check out `main` in the release worktree):
+After the PR merges, the session finds the full hash of the merged release
+commit (read-only; this is the `<release-commit-full-sha>` in every block below):
 
 ```bash
 git fetch origin
-git pull --ff-only origin main
+git rev-parse origin/main
 ```
 
 Prepare one tag per released package. Versions are per package; do not assume one
 shared version.
 
-**Maintainer runs** (a session writes this block with the real versions and
-hands it over; it does not run it):
+**Maintainer runs** (a session writes this block with the real versions and the
+full hash filled in and hands it over; it does not run it):
 
 ```bash
-git tag Auth-v<auth-version>
-git tag Cli-v<cli-version>
-git tag Dataverse-v<dataverse-version>
-git tag Mcp-v<mcp-version>
-git tag Migration-v<migration-version>
-git tag Query-v<query-version>
-git tag Plugins-v<plugins-version>
-git tag Extension-v<extension-version>   # same commit as the Cli tag
+git fetch origin
+git rev-parse origin/main      # must print <release-commit-full-sha>; stop if it does not
+git tag Auth-v<auth-version> <release-commit-full-sha>
+git tag Cli-v<cli-version> <release-commit-full-sha>
+git tag Dataverse-v<dataverse-version> <release-commit-full-sha>
+git tag Mcp-v<mcp-version> <release-commit-full-sha>
+git tag Migration-v<migration-version> <release-commit-full-sha>
+git tag Query-v<query-version> <release-commit-full-sha>
+git tag Plugins-v<plugins-version> <release-commit-full-sha>
+git tag Extension-v<extension-version> <release-commit-full-sha>   # same commit as the Cli tag
 ```
 
-Before handing the commands over, check the prefixes with read-only commands;
-they must match each csproj's `<MinVerTagPrefix>`, and no tag with the planned
-version may already exist (a tagged version number is never reused):
+Before handing the commands over, the session checks the prefixes against the
+[Release model](../RELEASE.md#release-model-tags-channels-and-lineage) (they must
+match each csproj's `<MinVerTagPrefix>`) and checks, with read-only commands, that
+no tag with a planned name already exists locally or on `origin` (a tagged version
+number is never reused). Each of these prints nothing when the name is free; any
+output means stop and tell the maintainer:
 
 ```bash
-git tag -l 'Auth-v*' | tail -3
-git tag -l 'Cli-v*' | tail -3
-# ...and so on for each prefix
+git tag -l "Auth-v<auth-version>"
+git ls-remote --tags origin "refs/tags/Auth-v<auth-version>"
+# ...the same two commands for every planned tag name, including the unified tag
 ```
 
 The maintainer pushes **one tag at a time** (see
@@ -411,7 +416,7 @@ After the per-package tags, a coordinated minor or stable release has one
 unified tag, which triggers `docs-release.yml`. **Maintainer runs:**
 
 ```bash
-git tag v<version>   # e.g. v1.1.0
+git tag v<version> <release-commit-full-sha>   # e.g. v1.1.0
 git push origin "refs/tags/v<version>"
 ```
 
@@ -463,7 +468,7 @@ Expected sequence (timings are estimates; advance only after verification):
    must finish and verify before the next wave.
 3. `extension-publish.yml` runs on the `Extension-v*` tag push, about 10-15
    minutes, with the channel inferred from the minor version.
-4. `docs-release.yml` runs on the unified `v*` tag if you pushed one. It opens
+4. `docs-release.yml` runs on the unified `v*` tag if the maintainer pushed one. It opens
    the generated-reference PR in ppds-docs, and opens the core API-baseline
    rollover PR only if baseline files change (`scripts/docs-gen/open-rollover-pr.sh`
    skips the PR when there are no Unshipped entries to roll); otherwise record
@@ -543,7 +548,7 @@ Also download a CLI binary from the GitHub release, run `./ppds --version` and
 confirm it matches the tag.
 
 If a smoke check fails, file a hotfix issue and prepare a patch release. Do not
-alter the existing release; publish a new one.
+alter the existing release; prepare a new one for the maintainer to publish.
 
 ### 11. Create GitHub Releases for the Other Surfaces
 
@@ -571,7 +576,7 @@ contain backticks and command examples that a shell would interpret.
 Then the session checks, read-only, that every pushed tag has a release:
 
 ```bash
-for t in <every tag you pushed>; do
+for t in <every tag the maintainer pushed>; do
   gh release view "$t" >/dev/null 2>&1 && echo "$t OK" || echo "$t MISSING"
 done
 ```
@@ -610,9 +615,11 @@ to the co-release rule in Step 8.
    Query patch can need both a Dataverse prerequisite tag and a Query tag.
    **Maintainer runs:**
    ```bash
-   git tag Dataverse-v<X.Y.Z>
+   git fetch origin
+   git rev-parse origin/main      # must print <release-commit-full-sha>; stop if it does not
+   git tag Dataverse-v<X.Y.Z> <release-commit-full-sha>
    git push origin "refs/tags/Dataverse-v<X.Y.Z>"
-   git tag Query-v<X.Y.Z>
+   git tag Query-v<X.Y.Z> <release-commit-full-sha>
    git push origin "refs/tags/Query-v<X.Y.Z>"
    ```
 5. Monitor every workflow run those tags start. **A `Cli-v*` tag also starts
@@ -670,9 +677,9 @@ checks are path-selected as described in Step 6.
 regardless of branch. **Maintainer runs:**
 
 ```bash
-git checkout release/X.Y
-git pull
-git tag <Prefix>-v<X.Y.Z>
+git fetch origin
+git rev-parse origin/release/X.Y      # must print <release-commit-full-sha>; stop if it does not
+git tag <Prefix>-v<X.Y.Z> <release-commit-full-sha>
 git push origin "refs/tags/<Prefix>-v<X.Y.Z>"
 ```
 
@@ -717,10 +724,11 @@ state. The input guard rejects already-published versions and drafts whose
 source, workflow ownership, notes or assets cannot be verified. A failed read is
 not proof that no release exists.
 
-**Recovery:** preserve the existing tags, assets and failed run. Resume a known
-owned draft only when the guard verifies it; otherwise stop and obtain a deliberate
-recovery decision from the maintainer. Do not delete a draft, move or re-push a tag, or replace assets as a
-routine fix. Let the workflow own the release lifecycle.
+**Recovery:** preserve the existing tags, assets and failed run. The maintainer
+may resume a known owned draft, and only when the guard verifies it; otherwise the
+session stops and obtains a deliberate recovery decision from the maintainer. No
+one deletes a draft, moves or re-pushes a tag, or replaces assets as a routine
+fix. Let the workflow own the release lifecycle.
 
 ### Extension publish: manual dispatch needs `--ref`
 
@@ -741,10 +749,10 @@ and fails the job's `refs/tags/Extension-v*` ref check.
 **Symptom:** a package publishes with the wrong (often stale) version.
 
 **Cause:** MinVer reads `<MinVerTagPrefix>` from the csproj and only considers
-tags with that prefix. If you push `Cli-v1.0.0` but the csproj said `CLI-v`,
+tags with that prefix. If `Cli-v1.0.0` is pushed but the csproj said `CLI-v`,
 MinVer falls back to older tags.
 
-**Fix:** tag with exactly the prefixes in the
+**Fix:** the maintainer tags with exactly the prefixes in the
 [Release model](../RELEASE.md#release-model-tags-channels-and-lineage); they are
 case-sensitive on Linux runners. Do not invent a new prefix without changing the matching csproj. To see recent prefix
 changes: `git log --oneline --grep='MinVerTagPrefix'`.

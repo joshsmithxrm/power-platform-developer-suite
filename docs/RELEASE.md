@@ -121,7 +121,7 @@ Keep source/dependency/signing/vacancy/public-artifact gates and sequential
 publication verification. New source must contain this workflow; retrying an old
 immutable tag still executes its historical secret-based publisher. The offline
 checks do not exercise the token exchange or package/symbol uploads; the first
-real publish needs the maintainer's final publication approval like any other.
+real publish is run by the maintainer, as every publication is.
 Changes to trust/identity settings are reviewed separately. Do not remove old secrets,
 create trust settings or invoke login as part of local validation.
 
@@ -339,7 +339,7 @@ assuming a branch contains a release.
 **Rule: a release train that ships a `Cli-v*` tag also ships an `Extension-v*`
 bundled-CLI refresh on the same commit.** The Extension bundles the CLI at publish
 time (`extension-publish.yml` runs `npm run bundle:cli`), so Marketplace users get
-new CLI behavior only when a new `Extension-v*` tag is cut. Cut the refresh even
+new CLI behavior only when a new `Extension-v*` tag is cut. Prepare the refresh even
 when the Extension's own source is unchanged: bump the Extension patch version
 to force a fresh VSIX (a minor bump would change the odd/even channel).
 
