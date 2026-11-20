@@ -66,7 +66,6 @@ public class FetchXmlEvaluatorRuleTests
     [InlineData("numberofemployees", "ge", "10", "k2,k8,k10")]
     [InlineData("name", "like", "%", "k1,k2,k3,k4,k5,k7,k8,k9,k10")]
     [InlineData("name", "begins-with", "", "k1,k2,k3,k4,k5,k7,k8,k9,k10")]
-    [InlineData("name", "ends-with", "", "k1,k2,k3,k4,k5,k7,k8,k9,k10")]
     public void R2_OtherOperators_DoNotMatchNullRows(string attribute, string op, string value, string expected)
         => Assert.Equal(expected, Keys(Fetch(Where(Cond(attribute, op, value)))));
 
@@ -205,7 +204,6 @@ public class FetchXmlEvaluatorRuleTests
     [InlineData("like", "café", "k4,k5")]
     [InlineData("like", "trail", "")]
     [InlineData("like", "trail%", "k7")]
-    [InlineData("ends-with", "c", "k8,k10")]
     [InlineData("not-end-with", "l", "k1,k2,k3,k4,k5,k6,k7,k8,k9,k10")]
     public void R5_Like_WildcardsClassesAccentsAndTrailingSpaces(string op, string value, string expected)
         => Assert.Equal(expected, Keys(Fetch(Where(Cond("name", op, value)))));
@@ -219,16 +217,12 @@ public class FetchXmlEvaluatorRuleTests
     public void R6_OrderBy_NullFirstAscendingAndChoiceByLabel(string order, string expected)
         => Assert.Equal(expected, Keys(Fetch(order), ordered: true));
 
-    // Not observed: a link-entity's orders apply after the entity's own.
-    [Fact]
-    public void R6_LinkEntityOrders_ApplyAfterTheEntityOrders()
-    {
-        var result = Fetch("<order attribute=\"accountnumber\" descending=\"true\" />" +
-            "<link-entity name=\"contact\" from=\"parentcustomerid\" to=\"accountid\" alias=\"c\"><attribute name=\"lastname\" /><order attribute=\"lastname\" /></link-entity>");
-
-        Assert.Equal(new[] { "k5:Green", "k2:Brown", "k1:Jones", "k1:Smith" },
-            result.Entities.Select(e => $"{e.GetAttributeValue<string>("accountnumber")}:{e.GetAttributeValue<AliasedValue>("c.lastname").Value}"));
-    }
+    // Not observed: orders inside a link-entity, and ends-with (only not-end-with is observed).
+    [Theory]
+    [InlineData("<link-entity name=\"contact\" from=\"parentcustomerid\" to=\"accountid\" alias=\"c\"><order attribute=\"lastname\" /></link-entity>")]
+    [InlineData("<filter><condition attribute=\"name\" operator=\"ends-with\" value=\"c\" /></filter>")]
+    public void R6_LinkOrdersAndEndsWith_AreRefused(string inner)
+        => Assert.Throws<NotSupportedException>(() => Fetch(inner));
 
     [Theory]
     [InlineData("parentaccountid")]
@@ -314,12 +308,16 @@ public class FetchXmlEvaluatorRuleTests
     // ───────────── R11 (not observed) ─────────────
 
     [Theory]
-    [InlineData("inner", "", "k1,k1,k2,k5")]
-    [InlineData("outer", "", "k1,k1,k2,k3,k4,k5,k6,k7,k8,k9,k10")]
-    [InlineData("outer", "<filter><condition attribute=\"lastname\" operator=\"eq\" value=\"Smith\" /></filter>", "k1,k2,k3,k4,k5,k6,k7,k8,k9,k10")]
-    [InlineData("inner", "<filter><condition attribute=\"lastname\" operator=\"eq\" value=\"Smith\" /></filter>", "k1")]
-    public void R11_LinkEntities_JoinLikeSql(string type, string linkFilter, string expected)
-        => Assert.Equal(expected, Keys(Fetch($"<link-entity name=\"contact\" from=\"parentcustomerid\" to=\"accountid\" link-type=\"{type}\" alias=\"c\">{linkFilter}</link-entity>")));
+    [InlineData("inner", "k1,k1,k2,k5")]
+    [InlineData("outer", "k1,k1,k2,k3,k4,k5,k6,k7,k8,k9,k10")]
+    public void R11_LinkEntities_JoinLikeSql(string type, string expected)
+        => Assert.Equal(expected, Keys(Fetch($"<link-entity name=\"contact\" from=\"parentcustomerid\" to=\"accountid\" link-type=\"{type}\" alias=\"c\" />")));
+
+    // Not observed (J08's ON condition came out as an empty join): a filter inside a link-entity.
+    [Fact]
+    public void R11_FilterInsideALinkEntity_IsRefused()
+        => Assert.Throws<NotSupportedException>(() => Fetch(
+            "<link-entity name=\"contact\" from=\"parentcustomerid\" to=\"accountid\" alias=\"c\"><filter><condition attribute=\"lastname\" operator=\"eq\" value=\"Smith\" /></filter></link-entity>", dataverse: Empty()));
 
     [Fact]
     public void R11_ConditionWithEntityName_AppliesToTheJoinedRow()
@@ -344,7 +342,7 @@ public class FetchXmlEvaluatorRuleTests
     [InlineData("<filter><condition attribute=\"lastname\" operator=\"eq\" value=\"x\" /></filter>")]
     [InlineData("<order attribute=\"lastname\" />")]
     [InlineData("<attribute name=\"lastname\" />")]
-    [InlineData("<link-entity name=\"contact\" from=\"parentcustomerid\" to=\"accountid\" alias=\"c\"><filter><condition attribute=\"name\" operator=\"null\" /></filter></link-entity>")]
+    [InlineData("<link-entity name=\"contact\" from=\"parentcustomerid\" to=\"accountid\" alias=\"c\"><attribute name=\"name\" /></link-entity>")]
     public void R12_UnknownAttribute_IsAFault_EvenWithNoRows(string inner)
         => Assert.Throws<FaultException<OrganizationServiceFault>>(() => Fetch(inner, dataverse: Empty()));
 

@@ -8,54 +8,49 @@ using Microsoft.Xrm.Sdk;
 namespace PPDS.Cli.Tests.Services.Query.Faithful;
 
 /// <summary>
-/// Evaluates a FetchXML request over <see cref="FakeTable"/> rows the way Dataverse does. "Audit" means the November 2026
-/// live SELECT audit (docs/qa/select-fidelity-audit-2026-11.md): "OBSERVED" lines are raw FetchXML sent through the SDK;
-/// case ids (W15, D05, ...) are statements run through PPDS whose Dataverse behaviour the audit recorded. A rule marked
-/// "not observed" follows the FetchXML documentation and has no live observation behind it.
+/// Evaluates a FetchXML request over <see cref="FakeTable"/> rows the way Dataverse does, in a closed world: only shapes and
+/// value forms with an observation behind them in the November 2026 live SELECT audit (docs/qa/select-fidelity-audit-2026-11.md
+/// on the test/select-fidelity-live branch) are evaluated. Everything else is refused with "not observed: ..." before any row
+/// is read (<see cref="NotSupportedException"/>), so a test that depends on it fails instead of passing on a guess. "OBSERVED"
+/// cites the audit's raw-FetchXML lines (replayed by <c>AuditObservedReplayTests</c>); a case id (W15, D05, ...) is a statement
+/// run through PPDS whose Dataverse behaviour the audit recorded. A behaviour is either cited here or refused.
 /// <list type="bullet">
-/// <item>R1 (audit OBSERVED): <c>ne</c>, <c>not-in</c>, <c>not-like</c>, <c>not-begin-with</c> and <c>not-end-with</c> are true
-/// when the column is NULL.</item>
-/// <item>R2: <c>not-between</c> is false when the column is NULL (audit OBSERVED). Every other operator except <c>null</c> is
-/// false for NULL too (not observed one by one; consistent with the observed <c>ge</c>/<c>lt</c> date probe).</item>
-/// <item>R3 (audit OBSERVED): <c>eq ""</c> matches nothing: Dataverse stores an empty string as NULL.</item>
-/// <item>R4 (audit OBSERVED): string comparison is case- and accent-insensitive and ignores trailing spaces; leading spaces
-/// count. Strings compare by a fixed key, not by the machine's ICU or NLS data: letters fold to A-Z, and the order is
-/// space &lt; <c>%</c> &lt; <c>[</c> &lt; <c>]</c> &lt; <c>_</c> &lt; digits &lt; letters, a shorter prefix first. Observed
-/// ("order by name asc"): <c>%</c> &lt; <c>[</c> &lt; <c>_</c> &lt; letters, space &lt; <c>[</c> &lt; digits &lt; letters.
-/// Not observed: space against <c>%</c>, <c>]</c> against anything, and <c>%</c> or <c>_</c> against digits. Any other
-/// character in an order or a range comparison is refused (an apostrophe, a letter that does not fold to A-Z, kana, ...);
-/// in an equality or LIKE, other printable ASCII punctuation compares equal only to itself and anything else is refused.</item>
-/// <item>R5: <c>like</c> and <c>begins-with</c> treat <c>%</c>, <c>_</c> and <c>[...]</c> as wildcards, also in a
-/// <c>begins-with</c> value (audit OBSERVED); <c>[^...]</c> and ranges as in W63 and W79 (audit, through PPDS); trailing spaces
-/// count in LIKE (audit W69 and the OBSERVED <c>not-end-with</c> line). <c>ends-with</c> is taken to behave like
-/// <c>begins-with</c> (not observed).</item>
-/// <item>R6 (audit OBSERVED): ORDER BY puts NULL first ascending and last descending; a choice column orders by its label;
-/// strings order by the R4 key. Ties keep table order (not observed). Orders inside a link-entity apply after the entity's
-/// own orders (not observed). ORDER BY a lookup or unique-identifier column is refused (not observed).</item>
-/// <item>R7 (audit OBSERVED): a date-time value without an offset is read in the caller's time zone; a date-only column
-/// compares dates. Only the forms <c>yyyy-MM-dd</c>, <c>yyyy-MM-dd[T| ]HH:mm[:ss[.f…]]</c> with an optional <c>Z</c> or
-/// <c>±HH:mm</c> are read; any other form is refused (not observed).</item>
-/// <item>R8 (audit, cause of #1624): a NULL attribute is absent from the returned record.</item>
-/// <item>R9 (not observed): an attribute with an alias comes back under the alias; a link-entity attribute without one comes
-/// back as <c>linkalias.attribute</c>.</item>
-/// <item>R10 (not observed): <c>top</c> and <c>count</c> limit the rows; a page holds <c>count</c> rows, 5,000 by default;
-/// <c>top</c> with paging is a fault; <c>top</c> or <c>count</c> above 5,000 is refused.</item>
-/// <item>R11 (not observed): link-entity inner and outer joins; a filter inside a link-entity restricts the joined rows (for an
-/// outer join, the ON clause); a condition with <c>entityname</c> applies to the joined row; NULL never joins. An inner
-/// link nested under an outer link is refused.</item>
-/// <item>R12 (audit O03, J21, S06-S08): an attribute the table does not have is a fault.</item>
-/// <item>R13 (audit W15): a value that does not convert to the column's type is a fault, for example <c>5.0</c> on a whole
-/// number column. Exponents, padding and a decimal point on a whole-number column are faults (W15 observed the decimal
-/// point; the others not observed).</item>
-/// <item>R14 (audit D05, PG08): <c>distinct</c> compares strings by the R4 key and returns no record id. Which of several
-/// case variants is returned is not observed (the first row is kept).</item>
-/// <item>R15 formatted values: a choice has its label (audit O07), a whole number its digits (audit PRJ01, values below
-/// 1,000 only), a two-option column "Yes"/"No" (audit O09 observed "No"), a date-time <c>M/d/yyyy h:mm tt</c> in the caller's
-/// time zone (audit OBSERVED formatted-value line), a lookup its name. Money, decimal, float, date-only and whole numbers of
-/// 1,000 or more carry <see cref="NotModelledFormattedValue"/>, so a test that reads them fails.</item>
+/// <item>R1 (OBSERVED): <c>ne</c>, <c>not-in</c>, <c>not-like</c>, <c>not-begin-with</c>, <c>not-end-with</c> are true for a NULL
+/// column.</item>
+/// <item>R2: <c>not-between</c> is false for NULL (OBSERVED); so is every other operator except <c>null</c> (W-cases through
+/// PPDS that the audit marks correct, for example W14 <c>eq</c>; not observed operator by operator in raw FetchXML).</item>
+/// <item>R3 (OBSERVED): <c>eq ""</c> matches nothing; a stored empty string reads back as NULL ("stored string values"); W25:
+/// <c>ne ""</c> matches every row.</item>
+/// <item>R4 (OBSERVED): strings compare case- and accent-insensitive, trailing spaces ignored, leading spaces significant. Order
+/// is a fixed key (no ICU/NLS data) that reproduces "order by name asc"; a comparison first decided at a pair that line does not
+/// order (space/<c>%</c>, <c>_</c>/digit, <c>]</c>, apostrophe) is refused. In an equality, plain ASCII punctuation matches only
+/// itself (X01 <c>@n</c>); any other character is refused.</item>
+/// <item>R5: <c>%</c>, <c>_</c>, <c>[...]</c> wildcards in <c>like</c> and <c>begins-with</c> (OBSERVED); <c>[^...]</c> and ranges
+/// (W63, W79); trailing spaces count (W69). <c>ends-with</c> is refused (only <c>not-end-with</c> is observed).</item>
+/// <item>R6 (OBSERVED): NULL first ascending, last descending; a choice orders by label; a second key (O01, O02, T03). An
+/// order inside a link-entity and ORDER BY a lookup or id are refused. Rows that tie on every key keep table order: not
+/// observed, and listed as an open decision (refusing ties would refuse valid statements).</item>
+/// <item>R7: a date-time without an offset is read in the caller's time zone (OBSERVED, UTC−6); a date-only column compares
+/// dates (OBSERVED). Text of digits only or a variable name is a Dataverse fault (W104 <c>'20240115'</c>, X05 <c>@d</c>). Any
+/// other form, and an ISO form that is not a calendar date, is refused.</item>
+/// <item>R8 (cause of #1624): a NULL attribute is absent from the record.</item>
+/// <item>R9 (PRJ04, J01-J03 through PPDS): an aliased attribute comes back under its alias; a link-entity attribute as
+/// <c>alias.attribute</c>. A repeated unaliased attribute comes back once (PRJ12); any other repeated key is refused.</item>
+/// <item>R10 (T01, T03, T04, PG01-PG04 through PPDS): <c>top</c>, <c>count</c> and <c>page</c> as the engine writes them
+/// (positive, canonical, at most 5,000); anything else, and <c>top</c> with paging, is refused.</item>
+/// <item>R11 (J01-J03, J05-J07 through PPDS): inner and outer link-entities joined on unique-identifier or lookup columns;
+/// <c>entityname</c> on a base condition names a link alias; NULL never joins. A filter inside a link-entity, other keys, other
+/// link types, an inner link under an outer one and <c>entityname</c> anywhere else are refused.</item>
+/// <item>R12 (O03, J21, S06-S08): an attribute the table does not have is a fault; names are case-sensitive (O03).</item>
+/// <item>R13: a decimal point on a whole-number column is a Dataverse fault (W15). An empty value on a whole-number column is
+/// unknown for <c>in</c>, <c>not-in</c> and <c>between</c> (W51, W52, W136, W137). Values in any other form are refused.</item>
+/// <item>R14 (D05, PG08): <c>distinct</c> compares strings by the R4 key and numbers by value, and returns no record id; which
+/// case variant is kept is not observed.</item>
+/// <item>R15: formatted values: choice label (O07), whole number digits below 1,000 (PRJ01), <c>Yes</c>/<c>No</c> (O09), date-time
+/// in the caller's zone (OBSERVED), lookup name (V11, V12; a fixture lookup without a name is refused). Money, decimal, float,
+/// date-only and whole numbers of 1,000 or more carry <see cref="NotModelledFormattedValue"/>.</item>
 /// </list>
-/// The whole document is validated before any row is read: an unknown element, attribute, operator, boolean spelling or
-/// value is refused (<see cref="NotSupportedException"/>) or a fault even when no row would reach it.
+/// Aggregates, every other operator, <c>valueof</c>, empty filters and every unlisted element, attribute or value are refused.
 /// </summary>
 internal sealed class FetchXmlEvaluator
 {
@@ -249,13 +244,17 @@ internal sealed class FetchXmlEvaluator
                     source.AllAttributes = true;
                     break;
                 case "filter":
-                    // A filter inside a link-entity sees only that link's columns.
+                    if (source.Alias != BaseAlias)
+                        throw Unsupported("a <filter> inside a link-entity");
+                    // (Kept for when a link filter is observed: it would see only that link's columns.)
                     var scope = source.Alias == BaseAlias
                         ? sources
                         : new Dictionary<string, Source>(StringComparer.Ordinal) { [source.Alias] = source };
                     source.Filters.Add(ReadFilter(child, source.Alias, scope));
                     break;
                 case "order":
+                    if (source.Alias != BaseAlias)
+                        throw Unsupported("an <order> inside a link-entity");
                     source.Orders.Add(ReadOrder(child, source.Alias, sources));
                     break;
                 case "link-entity":
@@ -345,6 +344,8 @@ internal sealed class FetchXmlEvaluator
         if (raw.Length < expected.Min || raw.Length > expected.Max)
             throw Unsupported($"operator {op} with {raw.Length} values");
 
+        if (op == "ends-with")
+            throw Unsupported("operator ends-with (only not-end-with is observed)");
         if (LikeOperators.Contains(op))
         {
             if (type != FakeColumnType.String)

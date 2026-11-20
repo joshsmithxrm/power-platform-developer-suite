@@ -246,6 +246,8 @@ public class SqlQueryServiceTests
     [Trait("Category", "PlanUnit")]
     public async Task ExecuteAsync_AggregateQuery_FetchesMetadata()
     {
+        // Not on the faithful fake (#1639): COUNT(*) sends aggregate FetchXML, which FakeDataverse refuses as not observed.
+        // This test asserts only the metadata calls, never returned rows.
         // Arrange: mock the metadata methods
         var mockExecutor = new Mock<IQueryExecutor>();
         mockExecutor
@@ -918,6 +920,8 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteAsync_UseTdsHint_RoutesThroughTdsExecutor()
     {
+        // The TDS executor stays a mock (#1639): the TDS endpoint takes SQL, not FetchXML, and FakeDataverse does not model it.
+        // This test asserts routing only; the Dataverse executor is the faithful fake.
         // Arrange: service with a TDS executor that returns a result
         var dataverse = SelectFixture.Create();
         var mockExecutor = dataverse.CreateExecutorMock();
@@ -1059,6 +1063,8 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteAsync_UseTdsHintOverridesCallerFalse_TdsWins()
     {
+        // The TDS executor stays a mock (#1639): the TDS endpoint takes SQL, not FetchXML, and FakeDataverse does not model it.
+        // This test asserts routing only; the Dataverse executor is the faithful fake.
         // Arrange: caller passes UseTdsEndpoint=false, but inline hint says USE_TDS.
         // The hint must win.
         var dataverse = SelectFixture.Create();
@@ -1893,6 +1899,8 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteAsync_TdsRoute_ReturnsExecutionModeTds()
     {
+        // Mocks only (#1639): the TDS endpoint takes SQL, not FetchXML, and FakeDataverse does not model it. This test asserts
+        // the execution mode, never returned rows.
         // Arrange: service with a TDS executor that returns a result
         var mockExecutor = new Mock<IQueryExecutor>();
         var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
@@ -2037,6 +2045,7 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteAsync_TdsConnectionFails_ThrowsTdsConnectionFailed()
     {
+        // The TDS executor stays a mock (#1639): it only throws; FakeDataverse does not model the TDS endpoint.
         // Arrange: TDS executor that throws on execute (simulating connection failure)
         var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
         mockTdsExecutor
@@ -2102,6 +2111,8 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteStreamingAsync_TdsRoute_FinalChunkHasExecutionModeTds()
     {
+        // Mocks only (#1639): the TDS endpoint takes SQL, not FetchXML, and FakeDataverse does not model it. This test asserts
+        // the execution mode of the chunks, not their rows.
         // Arrange: TDS executor returns results
         var mockExecutor = new Mock<IQueryExecutor>();
         var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
@@ -2153,6 +2164,8 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteStreamingAsync_NonFinalChunks_DoNotHaveExecutionMode()
     {
+        // Mocks only (#1639): the TDS endpoint takes SQL, not FetchXML, and FakeDataverse does not model it. This test asserts
+        // chunk metadata, not rows.
         // Arrange: TDS executor returns enough rows to cause multiple chunks
         var mockExecutor = new Mock<IQueryExecutor>();
         var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
