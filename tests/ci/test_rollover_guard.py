@@ -17,6 +17,7 @@ import subprocess
 import threading
 
 import pytest
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/ is on sys.path via tests/conftest.py
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GUARD = REPO_ROOT / "scripts/docs-gen/check-open-rollover.sh"
@@ -141,7 +142,7 @@ def run_guard(tmp_path: Path, cli_tools: tuple[Path, Path]):
                 result = subprocess.run(
                     [str(bash), GUARD.as_posix(), *args], cwd=tmp_path,
                     env=env, stdin=subprocess.DEVNULL, text=True,
-                    capture_output=True, timeout=20, check=False,
+                    capture_output=True, timeout=CHILD_PROCESS_HANG_BOUND_SECONDS, check=False,
                 )
             finally:
                 server.shutdown()

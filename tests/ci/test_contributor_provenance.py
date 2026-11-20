@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import patch
 
 from scripts.ci import check_contributor_provenance as guard
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/ is on sys.path via tests/conftest.py
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/ci/check_contributor_provenance.py"
@@ -296,7 +297,7 @@ class ContributorProvenanceCliTests(unittest.TestCase):
     def run_cli(self, *args):
         # This file-only CLI needs no stdin; pytest's inherited Windows handle may be invalid.
         result = subprocess.run([sys.executable, str(SCRIPT), *map(str, args)],
-                                capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=15)
+                                capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=CHILD_PROCESS_HANG_BOUND_SECONDS)
         self.assertEqual("", result.stderr)
         return result.returncode, json.loads(result.stdout)
 

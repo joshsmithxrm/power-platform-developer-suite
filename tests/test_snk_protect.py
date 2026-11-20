@@ -6,6 +6,7 @@ import subprocess
 import sys
 
 import pytest
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/ is on sys.path via tests/conftest.py
 
 
 def _load_hook():
@@ -48,7 +49,7 @@ def _run_hook(payload: dict) -> tuple[int, str]:
         input=json.dumps(payload),
         capture_output=True,
         text=True,
-        timeout=5,
+        timeout=CHILD_PROCESS_HANG_BOUND_SECONDS,
     )
     return result.returncode, result.stderr
 
@@ -108,7 +109,7 @@ class TestHookSubprocess:
             input="",
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=CHILD_PROCESS_HANG_BOUND_SECONDS,
         )
         assert result.returncode == 0
 
@@ -118,7 +119,7 @@ class TestHookSubprocess:
             input="{not json",
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=CHILD_PROCESS_HANG_BOUND_SECONDS,
         )
         assert result.returncode == 0
 

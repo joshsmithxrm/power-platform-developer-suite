@@ -8,6 +8,7 @@ import subprocess
 import sys
 
 import pytest
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/ is on sys.path via tests/conftest.py
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY = ROOT / "docs/CONTRIBUTOR-LIFECYCLE.md"
@@ -52,7 +53,7 @@ def test_documented_no_contribution_example_runs_without_other_evidence(tmp_path
     result = subprocess.run(
         [sys.executable, str(ROOT / "scripts/ci/check_contributor_provenance.py"),
          "--record", str(path), "--stage", "plan"],
-        cwd=tmp_path, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15, check=False,
+        cwd=tmp_path, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=CHILD_PROCESS_HANG_BOUND_SECONDS, check=False,
     )
     assert result.returncode == 0, result.stderr
     output = json.loads(result.stdout)
