@@ -24,7 +24,7 @@ namespace PPDS.Cli.Tests.Services.Query.Faithful;
 /// </summary>
 internal sealed class FakeDataverse
 {
-    private readonly Dictionary<string, FakeTable> _tables = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, FakeTable> _tables = new(StringComparer.Ordinal); // names are case-sensitive (audit O03 fault text)
     private readonly List<string> _fetchXml = new();
     private readonly object _gate = new();
 

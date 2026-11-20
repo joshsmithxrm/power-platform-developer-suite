@@ -29,8 +29,8 @@ internal enum FakeColumnType
 /// </summary>
 internal sealed class FakeTable
 {
-    private readonly Dictionary<string, FakeColumnType> _columns = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, Dictionary<int, string>> _labels = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, FakeColumnType> _columns = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Dictionary<int, string>> _labels = new(StringComparer.Ordinal);
     private readonly List<Dictionary<string, object?>> _rows = new();
 
     public FakeTable(string logicalName)
@@ -62,7 +62,7 @@ internal sealed class FakeTable
         return this;
     }
 
-    /// <summary>Adds a row. Every key must be a declared column; the primary id is generated when absent.</summary>
+    /// <summary>Adds a row. Every key must be a declared column (names are case-sensitive); the primary id is generated when absent.</summary>
     public FakeTable Row(params (string Column, object? Value)[] values)
     {
         var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
@@ -70,6 +70,12 @@ internal sealed class FakeTable
         {
             if (!_columns.ContainsKey(column))
                 throw new ArgumentException($"Fake table {LogicalName} has no column {column}.");
+            // Not observed: how Dataverse stores a string of spaces only. Observed (audit V11, V12): a lookup carries the
+            // name of the record it points to.
+            if (value is string { Length: > 0 } text && text.Trim(' ').Length == 0)
+                throw new NotSupportedException($"Fake table {LogicalName}: not observed: storing the spaces-only string in {column}.");
+            if (value is EntityReference { Name: null })
+                throw new NotSupportedException($"Fake table {LogicalName}: not observed: a lookup in {column} without the name of its record.");
             row[column] = value;
         }
 

@@ -29,6 +29,9 @@ internal static class SelectFixture
 {
     public static Guid AccountId(int key) => FakeTable.DeterministicId("account", key);
 
+    /// <summary>The name of account k<paramref name="key"/>, as a lookup to it carries it (audit V11, V12).</summary>
+    public static string AccountName(int key) => key switch { 1 => "Alpha", 2 => "alpha", 5 => "cafe", _ => throw new ArgumentOutOfRangeException(nameof(key)) };
+
     public static FakeDataverse Create() => new FakeDataverse().Add(Accounts()).Add(Contacts());
 
     public static FakeTable Accounts()
@@ -60,7 +63,7 @@ internal static class SelectFixture
                 ("followupby", followUp),
                 ("ppds_startdate", start),
                 ("donotemail", doNotEmail),
-                ("parentaccountid", parent is null ? null : new EntityReference("account", AccountId(parent.Value))));
+                ("parentaccountid", parent is null ? null : new EntityReference("account", AccountId(parent.Value)) { Name = AccountName(parent.Value) }));
 
         Add(1, "Alpha", 5, null, 1, 100m, Utc(2024, 1, 15, 0, 30), Date(2024, 1, 15), true);
         Add(2, "alpha", 10, "d2", 2, null, Utc(2024, 1, 15, 12, 0), null, false);
@@ -85,7 +88,7 @@ internal static class SelectFixture
         foreach (var (name, parent) in new (string, int?)[] { ("Smith", 1), ("Jones", 1), ("Brown", 2), ("Green", 5), ("Lee", null) })
         {
             table.Row(("createdon", Utc(2023, 2, table.Rows.Count + 1, 8, 0)), ("lastname", name), ("description", name == "Smith" ? "x" : null),
-                ("parentcustomerid", parent is null ? null : new EntityReference("account", AccountId(parent.Value))));
+                ("parentcustomerid", parent is null ? null : new EntityReference("account", AccountId(parent.Value)) { Name = AccountName(parent.Value) }));
         }
         return table;
     }

@@ -169,17 +169,18 @@ internal sealed class FetchXmlEvaluator
         Expect(entity, "entity");
         AllowAttributes(entity, "name");
 
-        var sources = new Dictionary<string, Source>(StringComparer.OrdinalIgnoreCase);
+        var sources = new Dictionary<string, Source>(StringComparer.Ordinal);
         var root = new Source { Alias = BaseAlias, Table = Table((string?)entity.Attribute("name")), Element = entity };
         sources[BaseAlias] = root;
         RegisterLinks(root, sources);
         ValidateContent(root, sources);
+        CheckResultKeys(sources);
 
         var top = PositiveInt(fetch, "top");
         var count = PositiveInt(fetch, "count");
         var page = PositiveInt(fetch, "page", max: int.MaxValue);
         if (top != null && (count != null || page != null))
-            throw Fault("The top attribute can't be specified with paging attribute page or count.");
+            throw Unsupported("top together with page or count");
 
         return new Spec(root, sources,
             fetch.Attribute("distinct") is { } d && Bool(d),
@@ -203,9 +204,10 @@ internal sealed class FetchXmlEvaluator
             if (type == "inner" && IsUnderOuter(parent))
                 throw Unsupported("an inner link-entity nested under an outer one (not observed)");
             if (alias.Length == 0 || sources.ContainsKey(alias))
-                throw Fault($"Duplicate or empty link-entity alias '{alias}'.");
-            RequireColumn(table, from);
-            RequireColumn(parent.Table, to);
+                throw Unsupported($"a duplicate or empty link-entity alias '{alias}'");
+            if (RequireColumn(table, from) is not (FakeColumnType.Uniqueidentifier or FakeColumnType.Lookup)
+                || RequireColumn(parent.Table, to) is not (FakeColumnType.Uniqueidentifier or FakeColumnType.Lookup))
+                throw Unsupported($"a link-entity joined on a column that is not a unique identifier or lookup ({from}, {to})");
 
             var source = new Source { Alias = alias, Table = table, Element = link, LinkType = type, From = from, To = to, Parent = parent };
             sources[alias] = source;
@@ -234,11 +236,11 @@ internal sealed class FetchXmlEvaluator
                 case "attribute":
                     AllowAttributes(child, "name", "alias");
                     NoChildren(child);
-                    var name = (string?)child.Attribute("name") ?? throw Fault("An attribute has no name.");
+                    var name = (string?)child.Attribute("name") ?? throw Unsupported("an <attribute> without a name");
                     RequireColumn(source.Table, name);
                     var alias = (string?)child.Attribute("alias");
                     if (alias is { Length: 0 })
-                        throw Fault("An attribute alias is empty.");
+                        throw Unsupported("an empty attribute alias");
                     source.Attributes.Add((name, alias));
                     break;
                 case "all-attributes":
@@ -250,7 +252,7 @@ internal sealed class FetchXmlEvaluator
                     // A filter inside a link-entity sees only that link's columns.
                     var scope = source.Alias == BaseAlias
                         ? sources
-                        : new Dictionary<string, Source>(StringComparer.OrdinalIgnoreCase) { [source.Alias] = source };
+                        : new Dictionary<string, Source>(StringComparer.Ordinal) { [source.Alias] = source };
                     source.Filters.Add(ReadFilter(child, source.Alias, scope));
                     break;
                 case "order":
@@ -267,6 +269,29 @@ internal sealed class FetchXmlEvaluator
             ValidateContent(link, sources);
     }
 
+    /// <summary>
+    /// The keys the record will carry must be unique. A repeated unaliased attribute is returned once (audit PRJ12); an
+    /// alias used twice, or equal to another attribute's key, is not observed.
+    /// </summary>
+    private static void CheckResultKeys(Dictionary<string, Source> sources)
+    {
+        var keys = new Dictionary<string, (string Alias, string Name)>(StringComparer.Ordinal);
+        foreach (var source in sources.Values)
+        {
+            foreach (var (name, alias) in source.Attributes)
+            {
+                var key = alias ?? (source.Alias == BaseAlias ? name : $"{source.Alias}.{name}");
+                if (keys.TryGetValue(key, out var seen))
+                {
+                    if (alias != null || seen != (source.Alias, name))
+                        throw Unsupported($"two attributes returned under the same key '{key}'");
+                    continue;
+                }
+                keys[key] = (source.Alias, name);
+            }
+        }
+    }
+
     private Filter ReadFilter(XElement filter, string alias, IReadOnlyDictionary<string, Source> sources)
     {
         AllowAttributes(filter, "type");
@@ -280,6 +305,8 @@ internal sealed class FetchXmlEvaluator
             "condition" => ReadCondition(e, alias, sources),
             var other => throw Unsupported($"<{other}> inside <filter>")
         }).ToList();
+        if (children.Count == 0)
+            throw Unsupported("an empty <filter>");
         return new Filter(type == "or", children);
     }
 
@@ -298,9 +325,11 @@ internal sealed class FetchXmlEvaluator
         if (c.Attribute("value") != null && c.Elements("value").Any())
             throw Unsupported("a condition with both value= and <value> elements");
 
+        if (c.Attribute("entityname") is { } en && (defaultAlias != BaseAlias || en.Value == BaseAlias))
+            throw Unsupported("entityname on a condition inside a link-entity, or an empty entityname");
         var source = ResolveSource((string?)c.Attribute("entityname") ?? defaultAlias, sources);
-        var attribute = (string?)c.Attribute("attribute") ?? throw Fault("A condition has no attribute.");
-        var op = (string?)c.Attribute("operator") ?? throw Fault("A condition has no operator.");
+        var attribute = (string?)c.Attribute("attribute") ?? throw Unsupported("a <condition> without an attribute");
+        var op = (string?)c.Attribute("operator") ?? throw Unsupported("a <condition> without an operator");
         var type = RequireColumn(source.Table, attribute);
         var raw = c.Attribute("value") is { } v ? new[] { v.Value } : c.Elements("value").Select(x => x.Value).ToArray();
 
@@ -314,7 +343,7 @@ internal sealed class FetchXmlEvaluator
             _ => throw Unsupported($"operator {op}")
         };
         if (raw.Length < expected.Min || raw.Length > expected.Max)
-            throw Fault($"Operator {op} on '{attribute}' expects {expected.Min}..{expected.Max} values, got {raw.Length}.");
+            throw Unsupported($"operator {op} with {raw.Length} values");
 
         if (LikeOperators.Contains(op))
         {
@@ -331,16 +360,17 @@ internal sealed class FetchXmlEvaluator
         if (RangeOperators.Contains(op) && type is FakeColumnType.Uniqueidentifier or FakeColumnType.Lookup or FakeColumnType.Boolean)
             throw Unsupported($"operator {op} on a {type} column");
 
-        var ordered = RangeOperators.Contains(op);
-        return new Condition(source.Alias, attribute, type, op, raw.Select(x => Parse(x, type, attribute, ordered)).ToArray());
+        return new Condition(source.Alias, attribute, type, op, raw.Select(x => Parse(x, type, attribute, op)).ToArray());
     }
 
     private static Order ReadOrder(XElement order, string alias, IReadOnlyDictionary<string, Source> sources)
     {
         AllowAttributes(order, "attribute", "descending", "entityname");
         NoChildren(order);
+        if (order.Attribute("entityname") is { } en && (alias != BaseAlias || en.Value == BaseAlias))
+            throw Unsupported("entityname on an order inside a link-entity, or an empty entityname");
         var source = ResolveSource((string?)order.Attribute("entityname") ?? alias, sources);
-        var attribute = (string?)order.Attribute("attribute") ?? throw Fault("An order has no attribute.");
+        var attribute = (string?)order.Attribute("attribute") ?? throw Unsupported("an <order> without an attribute");
         var type = RequireColumn(source.Table, attribute);
         if (type is FakeColumnType.Lookup or FakeColumnType.Uniqueidentifier)
             throw Unsupported($"ORDER BY a {type} column (not observed)");
@@ -348,13 +378,9 @@ internal sealed class FetchXmlEvaluator
     }
 
     private static Source ResolveSource(string alias, IReadOnlyDictionary<string, Source> sources)
-    {
-        if (sources.TryGetValue(alias, out var source))
-            return source;
-        // entityname may name the base entity itself.
-        return sources.Values.FirstOrDefault(s => s.Alias == BaseAlias && string.Equals(s.Table.LogicalName, alias, StringComparison.OrdinalIgnoreCase))
-            ?? throw Fault($"Link entity with name or alias {alias} is not found.");
-    }
+        => sources.TryGetValue(alias, out var source)
+            ? source
+            : throw Unsupported($"entityname=\"{alias}\" that is not the alias of an enclosing link-entity");
 
     private static void Expect(XElement element, string name)
     {
@@ -396,17 +422,18 @@ internal sealed class FetchXmlEvaluator
     {
         if (element.Attribute(name) is not { } a)
             return null;
-        if (!int.TryParse(a.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var n) || n < 1)
-            throw Fault($"Invalid {name} '{a.Value}'.");
+        if (!int.TryParse(a.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var n) || n < 1
+            || a.Value != n.ToString(CultureInfo.InvariantCulture))
+            throw Unsupported($"{name}=\"{a.Value}\"");
         if (n > max)
-            throw Unsupported($"{name} above {max} (not observed)");
+            throw Unsupported($"{name} above {max}");
         return n;
     }
 
     private FakeTable Table(string? name)
     {
         if (name is null || !_tables.TryGetValue(name, out var table))
-            throw Fault($"The entity with a name = '{name}' with namemapping = 'Logical' was not found in the MetadataCache.");
+            throw Unsupported($"the table '{name}', which this fake does not hold");
         return table;
     }
 
@@ -432,44 +459,97 @@ internal sealed class FetchXmlEvaluator
         _ => value
     };
 
-    /// <summary>R13: a value Dataverse cannot convert to the column's type is a fault (W15: "5.0" on a whole number).</summary>
-    private object Parse(string value, FakeColumnType type, string attribute, bool ordered)
+    /// <summary>The empty value Dataverse treats as unknown on a whole-number column (audit W51, W52, W136, W137).</summary>
+    private sealed class EmptyValue
     {
-        const NumberStyles Whole = NumberStyles.AllowLeadingSign;
-        const NumberStyles Fraction = NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint;
-        object? parsed = type switch
-        {
-            FakeColumnType.String => StringKey(value, ordered: ordered),
-            FakeColumnType.Integer or FakeColumnType.Choice
-                => int.TryParse(value, Whole, CultureInfo.InvariantCulture, out var i) ? (decimal)i : null,
-            FakeColumnType.BigInt => long.TryParse(value, Whole, CultureInfo.InvariantCulture, out var l) ? (decimal)l : null,
-            FakeColumnType.Decimal or FakeColumnType.Money
-                => decimal.TryParse(value, Fraction, CultureInfo.InvariantCulture, out var m) ? m : null,
-            FakeColumnType.Double
-                => double.TryParse(value, Fraction | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out var f) ? f : null,
-            FakeColumnType.Boolean => value switch { "1" or "true" => true, "0" or "false" => false, _ => null },
-            FakeColumnType.DateTime => ParseDateTime(value),
-            FakeColumnType.DateOnly => Regex.IsMatch(value, @"^\d{4}-\d{2}-\d{2}$")
-                ? DateTime.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date) ? date : null
-                : throw Unsupported($"date-only value '{value}' that is not yyyy-MM-dd (not observed)"),
-            FakeColumnType.Uniqueidentifier or FakeColumnType.Lookup => Guid.TryParseExact(value, "D", out var g) ? g : null,
-            _ => throw Unsupported($"a condition on a {type} column")
-        };
-        return parsed ?? throw Fault(
-            $"An exception System.FormatException was thrown while trying to convert input value '{value}' to attribute '{attribute}'. Expected type of attribute value: {type}.");
+        public static readonly EmptyValue Instance = new();
     }
 
-    /// <summary>R7: an explicit offset or Z is honoured; otherwise the value is in the caller's time zone.</summary>
-    private DateTime? ParseDateTime(string value)
+    private static readonly Regex WholeForm = new(@"^-?(0|[1-9]\d*)$", RegexOptions.CultureInvariant);
+    private static readonly Regex DecimalForm = new(@"^-?(0|[1-9]\d*)(\.\d+)?$", RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// R13: only value forms with an observation behind them are read. A decimal point on a whole-number column is the
+    /// Dataverse fault of audit W15; an empty value on a whole-number column is unknown for <c>in</c>, <c>not-in</c> and
+    /// <c>between</c> (W51, W52, W136, W137). Every other form (a sign, leading zeros, padding, an exponent, a comma,
+    /// overflow, a braced GUID, <c>true</c>/<c>false</c>) is refused.
+    /// </summary>
+    private object Parse(string value, FakeColumnType type, string attribute, string op)
     {
+        var ordered = RangeOperators.Contains(op);
+        FaultException<OrganizationServiceFault> FormatFault() => Fault(
+            $"An exception System.FormatException was thrown while trying to convert input value '{value}' to attribute '{attribute}'. Expected type of attribute value: {type}.");
+
+        switch (type)
+        {
+            case FakeColumnType.String:
+                if (value.Length == 0 && op is not ("eq" or "ne"))
+                    throw Unsupported($"an empty value with operator {op} on a string column");
+                return StringKey(value, ordered: ordered);
+
+            case FakeColumnType.Integer or FakeColumnType.BigInt or FakeColumnType.Choice:
+                if (value.Length == 0)
+                    return op is "in" or "not-in" or "between" ? EmptyValue.Instance : throw Unsupported($"an empty value with operator {op} on a whole-number column");
+                if (DecimalForm.IsMatch(value) && value.Contains('.'))
+                    throw FormatFault(); // audit W15
+                if (!WholeForm.IsMatch(value))
+                    throw Unsupported($"the whole-number value '{value}'");
+                var parsed = decimal.Parse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture);
+                var (min, max) = type == FakeColumnType.BigInt ? ((decimal)long.MinValue, (decimal)long.MaxValue) : (int.MinValue, int.MaxValue);
+                return parsed >= min && parsed <= max ? parsed : throw Unsupported($"the out-of-range value '{value}'");
+
+            case FakeColumnType.Decimal or FakeColumnType.Money:
+                return DecimalForm.IsMatch(value)
+                    ? decimal.Parse(value, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture)
+                    : throw Unsupported($"the {type} value '{value}'");
+
+            case FakeColumnType.Double:
+                return DecimalForm.IsMatch(value)
+                    ? double.Parse(value, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture)
+                    : throw Unsupported($"the float value '{value}'");
+
+            case FakeColumnType.Boolean:
+                return value switch { "1" => true, "0" => false, _ => throw Unsupported($"the two-option value '{value}'") };
+
+            case FakeColumnType.DateTime:
+                return ParseDateTime(value);
+
+            case FakeColumnType.DateOnly:
+                if (Regex.IsMatch(value, @"^\d{4}-\d{2}-\d{2}$")
+                    && DateTime.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+                    return date;
+                throw Unsupported($"the date-only value '{value}'");
+
+            case FakeColumnType.Uniqueidentifier or FakeColumnType.Lookup:
+                return Guid.TryParseExact(value, "D", out var g) ? g : throw Unsupported($"the unique-identifier value '{value}'");
+
+            default:
+                throw Unsupported($"a condition on a {type} column");
+        }
+    }
+
+    /// <summary>
+    /// R7: an explicit offset or Z is honoured; otherwise the value is in the caller's time zone. Text of digits only or a
+    /// variable name is the Dataverse fault of audit W104 (<c>'20240115'</c>) and X05 (<c>@d</c>); any other form, or an
+    /// ISO form that is not a calendar date, is refused.
+    /// </summary>
+    private DateTime ParseDateTime(string value)
+    {
+        if (Regex.IsMatch(value, @"^(\d+|@\w+)$"))
+            throw Fault($"The date-time format for {value} is invalid, or value is outside the supported range.");
         var match = DateForm.Match(value);
         if (!match.Success)
-            throw Unsupported($"date-time value '{value}' (only ISO yyyy-MM-dd[THH:mm[:ss]] forms are modelled)");
+            throw Unsupported($"the date-time value '{value}'");
         var normalized = value.Replace(' ', 'T');
         if (match.Groups["offset"].Success)
-            return DateTimeOffset.Parse(normalized, CultureInfo.InvariantCulture).UtcDateTime;
-        var local = DateTime.Parse(normalized, CultureInfo.InvariantCulture, DateTimeStyles.None);
-        return DateTime.SpecifyKind(local - _callerUtcOffset, DateTimeKind.Utc);
+        {
+            return DateTimeOffset.TryParse(normalized, CultureInfo.InvariantCulture, DateTimeStyles.None, out var withOffset)
+                ? withOffset.UtcDateTime
+                : throw Unsupported($"the date-time value '{value}'");
+        }
+        return DateTime.TryParse(normalized, CultureInfo.InvariantCulture, DateTimeStyles.None, out var local)
+            ? DateTime.SpecifyKind(local - _callerUtcOffset, DateTimeKind.Utc)
+            : throw Unsupported($"the date-time value '{value}'");
     }
 
     /// <summary>
@@ -503,9 +583,30 @@ internal sealed class FetchXmlEvaluator
         >= '0' and <= '9' => ch,
         >= 'A' and <= 'Z' => ch,
         >= 'a' and <= 'z' => (char)(ch - 'a' + 'A'),
+        '\'' when ordered => '\u0006',
         > ' ' and <= '~' when !ordered => ch,
         _ => throw Unsupported($"{(ordered ? "ordering by" : "comparing")} the character '{ch}' (U+{(int)ch:X4}); its collation is not observed")
     };
+
+    /// <summary>
+    /// R4 order of two keys. Where the first difference is a pair of characters whose order the audit's "order by name
+    /// asc" line does not show (space against <c>%</c>, <c>_</c> against a digit, anything against <c>]</c> or an
+    /// apostrophe), the comparison is refused.
+    /// </summary>
+    private static int CompareOrderKeys(string a, string b)
+    {
+        var n = Math.Min(a.Length, b.Length);
+        for (var i = 0; i < n; i++)
+        {
+            if (a[i] == b[i])
+                continue;
+            var (x, y) = a[i] < b[i] ? (a[i], b[i]) : (b[i], a[i]);
+            if (x is '\u0004' or '\u0006' || y is '\u0004' or '\u0006' || (x, y) == ('\u0001', '\u0002') || (x == '\u0005' && y is >= '0' and <= '9'))
+                throw Unsupported("the order of two strings that first differ at a character pair the audit did not order");
+            return a[i] < b[i] ? -1 : 1;
+        }
+        return a.Length.CompareTo(b.Length);
+    }
 
     /// <summary>R5: <c>%</c>, <c>_</c>, <c>[...]</c> and <c>[^...]</c> over R4 keys; trailing spaces count.</summary>
     private static Regex LikeRegex(string pattern)
@@ -549,7 +650,9 @@ internal sealed class FetchXmlEvaluator
 
     private static int Compare(object actual, object value, FakeColumnType type, bool ordered = false) => type switch
     {
-        FakeColumnType.String => string.CompareOrdinal(StringKey((string)actual, ordered: ordered), (string)value),
+        FakeColumnType.String => ordered
+            ? CompareOrderKeys(StringKey((string)actual, ordered: true), (string)value)
+            : string.CompareOrdinal(StringKey((string)actual), (string)value),
         FakeColumnType.DateOnly => ((DateTime)actual).Date.CompareTo((DateTime)value),
         FakeColumnType.DateTime => DateTime.SpecifyKind((DateTime)actual, DateTimeKind.Utc).CompareTo((DateTime)value),
         FakeColumnType.Double => Convert.ToDouble(actual, CultureInfo.InvariantCulture).CompareTo((double)value),
@@ -623,9 +726,10 @@ internal sealed class FetchXmlEvaluator
             "gt" => Cmp(c.Values[0]) > 0,
             "le" => Cmp(c.Values[0]) <= 0,
             "ge" => Cmp(c.Values[0]) >= 0,
-            "in" => c.Values.Any(x => Cmp(x) == 0),
-            "not-in" => c.Values.All(x => Cmp(x) != 0),
-            "between" => Cmp(c.Values[0]) >= 0 && Cmp(c.Values[1]) <= 0,
+            // An empty value is unknown: it matches nothing, and a not-in that holds one is false (audit W51, W52, W137).
+            "in" => c.Values.Any(x => x is not EmptyValue && Cmp(x) == 0),
+            "not-in" => c.Values.All(x => x is not EmptyValue && Cmp(x) != 0),
+            "between" => c.Values.All(x => x is not EmptyValue) && Cmp(c.Values[0]) >= 0 && Cmp(c.Values[1]) <= 0, // W136
             "not-between" => !(Cmp(c.Values[0]) >= 0 && Cmp(c.Values[1]) <= 0),
             _ => throw Unsupported($"operator {c.Operator}")
         };
@@ -659,7 +763,16 @@ internal sealed class FetchXmlEvaluator
                 ? order.Descending ? rows.OrderByDescending(Key, comparer) : rows.OrderBy(Key, comparer)
                 : order.Descending ? sorted.ThenByDescending(Key, comparer) : sorted.ThenBy(Key, comparer);
         }
-        return sorted!.ToList();
+        try
+        {
+            return sorted!.ToList();
+        }
+        catch (InvalidOperationException ex) when (ex.InnerException is NotSupportedException refused)
+        {
+            // The sort wraps a comparer's exception; surface the refusal itself.
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(refused).Throw();
+            throw;
+        }
     }
 
     /// <summary>R6: NULL sorts lowest, so first ascending and last descending. Strings arrive as R4 keys.</summary>
@@ -668,7 +781,7 @@ internal sealed class FetchXmlEvaluator
         if (a is null || b is null)
             return a is null ? (b is null ? 0 : -1) : 1;
         if (a is string sa && b is string sb)
-            return string.CompareOrdinal(sa, sb);
+            return CompareOrderKeys(sa, sb);
         return Compare(a, b, type);
     }
 
@@ -695,11 +808,7 @@ internal sealed class FetchXmlEvaluator
             {
                 var key = alias ?? (isBase ? name : $"{source.Alias}.{name}");
                 if (entity.Attributes.ContainsKey(key))
-                {
-                    if (alias != null)
-                        throw Fault($"Duplicate alias {alias}.");
-                    continue;
-                }
+                    continue; // a repeated unaliased attribute (audit PRJ12); other duplicates are refused before any row
 
                 var value = data?.GetValueOrDefault(name);
                 if (Normalize(value) is null)
@@ -728,7 +837,13 @@ internal sealed class FetchXmlEvaluator
 
     private static string Signature(Entity e)
         => string.Join("|", e.Attributes.OrderBy(a => a.Key, StringComparer.Ordinal)
-            .Select(a => $"{a.Key}={(Normalize(a.Value) is string s ? StringKey(s) : Normalize(a.Value))}"));
+            .Select(a => $"{a.Key}={Normalize(a.Value) switch
+            {
+                string s => StringKey(s),
+                decimal d => (d / 1.0000000000000000000000000000m).ToString(CultureInfo.InvariantCulture),
+                double f => f.ToString("R", CultureInfo.InvariantCulture),
+                var v => Convert.ToString(v, CultureInfo.InvariantCulture)
+            }}"));
 
     // ───────────────────────────── paging (R10) ─────────────────────────────
 
@@ -763,7 +878,7 @@ internal sealed class FetchXmlEvaluator
     // ───────────────────────────── errors ─────────────────────────────
 
     private static NotSupportedException Unsupported(string what)
-        => new($"Fake Dataverse does not model {what}; add the rule with its live observation before relying on it.");
+        => new($"Fake Dataverse refuses this FetchXML: not observed: {what}. Observe it live and add the rule before relying on it.");
 
     private static FaultException<OrganizationServiceFault> Fault(string message)
         => new(new OrganizationServiceFault { Message = message }, new FaultReason(message));

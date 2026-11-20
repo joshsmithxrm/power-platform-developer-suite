@@ -161,10 +161,24 @@ public class FetchXmlEvaluatorRuleTests
     [Theory]
     [InlineData("eq", "straße")]
     [InlineData("eq", "ｱ")]
-    [InlineData("lt", "O'Brien")]
     [InlineData("ge", "@n")]
     public void R4_CharactersWhoseCollationIsNotObserved_AreRefused(string op, string value)
         => Assert.Throws<NotSupportedException>(() => Fetch(Where(Cond("name", op, value)), dataverse: Empty()));
+
+    // Pairs the observed order does not decide: space against %, _ against a digit, anything against ] or an apostrophe.
+    [Theory]
+    [InlineData("a b", "a%b")]
+    [InlineData("a_1", "a1")]
+    [InlineData("a]b", "a[b")]
+    [InlineData("O'Brien", "OBrien")]
+    public void R4_OrderAtAnUnobservedCharacterPair_IsRefused(string first, string second)
+    {
+        var dataverse = new FakeDataverse().Add(new FakeTable("account")
+            .Column("accountnumber", FakeColumnType.String).Column("name", FakeColumnType.String)
+            .Row(("accountnumber", "k1"), ("name", first)).Row(("accountnumber", "k2"), ("name", second)));
+
+        Assert.Throws<NotSupportedException>(() => Fetch("<order attribute=\"name\" />", dataverse: dataverse));
+    }
 
     [Fact]
     public void R4_AsciiPunctuation_InAnEquality_MatchesOnlyItself()
@@ -174,7 +188,6 @@ public class FetchXmlEvaluatorRuleTests
             .Column("accountnumber", FakeColumnType.String).Column("name", FakeColumnType.String)
             .Row(("accountnumber", "k1"), ("name", "O'Brien")).Row(("accountnumber", "k2"), ("name", "OBrien")));
         Assert.Equal("k1", Keys(Fetch(Where(Cond("name", "eq", "o'brien")), dataverse: dataverse)));
-        Assert.Throws<NotSupportedException>(() => Fetch("<order attribute=\"name\" />", dataverse: dataverse));
     }
 
     // ───────────── R5 (audit OBSERVED "like name '[ab]%'", "begins-with name '[ab]'", "begins-with name 'a_'",
@@ -286,14 +299,16 @@ public class FetchXmlEvaluatorRuleTests
         Assert.False(page3.MoreRecords);
     }
 
-    [Fact]
-    public void R10_TopWithPaging_IsAFault()
-        => Assert.Throws<FaultException<OrganizationServiceFault>>(() => Fetch("", " top=\"3\" page=\"1\"", dataverse: Empty()));
-
     [Theory]
+    [InlineData(" top=\"3\" page=\"1\"")]
+    [InlineData(" top=\"3\" count=\"3\"")]
     [InlineData(" top=\"5001\"")]
     [InlineData(" count=\"5001\"")]
-    public void R10_TopOrCountAbove5000_IsRefused(string attributes)
+    [InlineData(" top=\"0\"")]
+    [InlineData(" top=\" 3\"")]
+    [InlineData(" top=\"03\"")]
+    [InlineData(" page=\"x\"")]
+    public void R10_UnobservedTopCountAndPage_AreRefused(string attributes)
         => Assert.Throws<NotSupportedException>(() => Fetch("", attributes, dataverse: Empty()));
 
     // ───────────── R11 (not observed) ─────────────
@@ -333,20 +348,38 @@ public class FetchXmlEvaluatorRuleTests
     public void R12_UnknownAttribute_IsAFault_EvenWithNoRows(string inner)
         => Assert.Throws<FaultException<OrganizationServiceFault>>(() => Fetch(inner, dataverse: Empty()));
 
-    // ───────────── R13 (audit W15: "ppds_num = 5.0" is a FormatException fault) ─────────────
+    // ───────────── R13 (audit W15: "ppds_num = 5.0" is a FormatException fault; W51, W52, W136, W137: an empty value) ─────────────
 
     [Theory]
-    [InlineData("numberofemployees", "5.0")]
+    [InlineData("5.0")]
+    [InlineData("-1.5")]
+    public void R13_DecimalPointOnAWholeNumber_IsAFault_EvenWithNoRows(string value)
+        => Assert.Throws<FaultException<OrganizationServiceFault>>(() => Fetch(Where(Cond("numberofemployees", "eq", value)), dataverse: Empty()));
+
+    [Theory]
     [InlineData("numberofemployees", "1e1")]
     [InlineData("numberofemployees", " 5")]
     [InlineData("numberofemployees", "5 ")]
     [InlineData("numberofemployees", "5,0")]
+    [InlineData("numberofemployees", "+5")]
+    [InlineData("numberofemployees", "05")]
+    [InlineData("numberofemployees", "5.")]
     [InlineData("numberofemployees", "99999999999")]
     [InlineData("revenue", "1e2")]
     [InlineData("revenue", " 100")]
+    [InlineData("revenue", "")]
     [InlineData("parentaccountid", "not-a-guid")]
-    public void R13_ValueThatDoesNotConvert_IsAFault_EvenWithNoRows(string attribute, string value)
-        => Assert.Throws<FaultException<OrganizationServiceFault>>(() => Fetch(Where(Cond(attribute, "eq", value)), dataverse: Empty()));
+    [InlineData("parentaccountid", "{133f5e40-0000-0000-0000-000000000001}")]
+    [InlineData("name", "")]
+    public void R13_UnobservedValueForms_AreRefused_EvenWithNoRows(string attribute, string value)
+        => Assert.Throws<NotSupportedException>(() => Fetch(Where(Cond(attribute, "in", value)), dataverse: Empty()));
+
+    [Theory]
+    [InlineData("true")]
+    [InlineData("false")]
+    [InlineData("2")]
+    public void R13_TwoOptionValuesOtherThan0And1_AreRefused(string value)
+        => Assert.Throws<NotSupportedException>(() => Fetch(Where(Cond("donotemail", "eq", value))));
 
     [Fact]
     public void R13_ValidValues_StillMatch()
@@ -354,7 +387,25 @@ public class FetchXmlEvaluatorRuleTests
         Assert.Equal("k1,k7", Keys(Fetch(Where(Cond("numberofemployees", "eq", "5")))));
         Assert.Equal("k5", Keys(Fetch(Where(Cond("numberofemployees", "eq", "-3")))));
         Assert.Equal("k3", Keys(Fetch(Where(Cond("revenue", "eq", "250.5")))));
+        Assert.Equal("k2,k3,k4,k6,k8,k9", Keys(Fetch(Where(Cond("donotemail", "eq", "0")))));
     }
+
+    // An empty value is unknown: W51 in (5, empty) = the 5 rows; W137 in (empty, 100) = the 100 row; W52 not-in (5, empty)
+    // = only the NULL rows; W136 between (empty, 10) = no row. Any other operator with an empty number is refused.
+    [Theory]
+    [InlineData("in", "<value>5</value><value></value>", "k1,k7")]
+    [InlineData("in", "<value></value><value>100</value>", "k8")]
+    [InlineData("not-in", "<value>5</value><value></value>", "k3,k9")]
+    [InlineData("between", "<value></value><value>10</value>", "")]
+    public void R13_EmptyValueOnAWholeNumber_IsUnknown(string op, string values, string expected)
+        => Assert.Equal(expected, Keys(Fetch(Where($"<condition attribute=\"numberofemployees\" operator=\"{op}\">{values}</condition>"))));
+
+    [Theory]
+    [InlineData("eq")]
+    [InlineData("ne")]
+    [InlineData("lt")]
+    public void R13_EmptyValueOnAWholeNumber_WithOtherOperators_IsRefused(string op)
+        => Assert.Throws<NotSupportedException>(() => Fetch(Where(Cond("numberofemployees", op, "")), dataverse: Empty()));
 
     // ───────────── R14 (audit D05 "SELECT DISTINCT ppds_name": 28 of 36 rows, column [ppds_name] only; PG08) ─────────────
 
@@ -423,20 +474,20 @@ public class FetchXmlEvaluatorRuleTests
     public void Unmodelled_FetchXml_IsRefused_EvenWithNoRows(string fetchXml)
         => Assert.Throws<NotSupportedException>(() => Empty().RetrieveMultiple(fetchXml));
 
-    // Value checks run before the NULL rule: on an all-NULL column an invalid value is still a fault, not "every row".
+    // Value checks run before the NULL rule: on an all-NULL column an unobserved value or count is still refused, not "every row".
     [Theory]
     [InlineData("<condition attribute=\"numberofemployees\" operator=\"ne\" value=\"@n\" />")]
     [InlineData("<condition attribute=\"numberofemployees\" operator=\"ne\" />")]
     [InlineData("<condition attribute=\"numberofemployees\" operator=\"not-in\" />")]
     [InlineData("<condition attribute=\"numberofemployees\" operator=\"between\"><value>1</value></condition>")]
     [InlineData("<condition attribute=\"numberofemployees\" operator=\"null\" value=\"1\" />")]
-    public void InvalidCondition_OnAnAllNullColumn_IsAFault(string condition)
+    public void InvalidCondition_OnAnAllNullColumn_IsRefused(string condition)
     {
         var allNull = new FakeDataverse().Add(new FakeTable("account")
             .Column("accountnumber", FakeColumnType.String).Column("numberofemployees", FakeColumnType.Integer)
             .Row(("accountnumber", "k1")));
 
-        Assert.Throws<FaultException<OrganizationServiceFault>>(() => Fetch(Where(condition), dataverse: allNull));
+        Assert.Throws<NotSupportedException>(() => Fetch(Where(condition), dataverse: allNull));
     }
 
     // A link with no matching row must not hide an invalid condition inside it or after it.
