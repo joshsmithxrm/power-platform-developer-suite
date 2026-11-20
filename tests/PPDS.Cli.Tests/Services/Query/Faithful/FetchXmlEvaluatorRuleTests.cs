@@ -285,11 +285,11 @@ public class FetchXmlEvaluatorRuleTests
 
     // ───────────── R10 (not observed) ─────────────
 
-    [Fact]
+    [Fact(Skip = "Waiting for a live observation (LiveObservationsOwed.md): top 0 (no replayed case sends top=\"0\"; T04 is answered by the engine without it)")]
     public void R10_TopZero_ReturnsNoRow() // audit T04
         => Assert.Empty(Fetch("", " top=\"0\"").Entities);
 
-    [Fact(Skip = "Waiting for a live observation (LiveObservationsOwed.md): rows that tie on every ORDER BY key but return different values")]
+    [Fact]
     public void R10_TopLimitsTheRows()
         => Assert.Equal("k8,k10,k2", Keys(Fetch("<order attribute=\"numberofemployees\" descending=\"true\" />", " top=\"3\""), ordered: true));
 

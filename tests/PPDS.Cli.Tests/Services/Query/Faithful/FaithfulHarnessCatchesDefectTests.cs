@@ -48,10 +48,11 @@ public class FaithfulHarnessCatchesDefectTests
         await Assert.ThrowsAsync<TrueException>(() => AssertKeysAsync(sql, expected, dataverse: inverted));
     }
 
-    [Fact(Skip = "Waiting for a live observation (LiveObservationsOwed.md): rows that tie on every ORDER BY key but return different values; TOP stays tied to #1619 through the replayed wrong case T02")]
+    [Fact]
     public async Task DroppedTop_FailsTheTest()
     {
-        const string sql = "SELECT TOP 3 accountnumber FROM account ORDER BY numberofemployees DESC";
+        // accountnumber breaks the k1/k7 tie on numberofemployees: the order of tied rows is not observed.
+        const string sql = "SELECT TOP 3 accountnumber FROM account ORDER BY numberofemployees DESC, accountnumber";
         const string expected = "k8,k10,k2";
 
         await AssertKeysAsync(sql, expected, ordered: true);
@@ -59,7 +60,7 @@ public class FaithfulHarnessCatchesDefectTests
         // An engine that loses the TOP runs the statement without it (the shape of #1619, where TOP (n) is ignored):
         // the fake returns every row, so the same expectation fails.
         await Assert.ThrowsAsync<TrueException>(() =>
-            AssertKeysAsync("SELECT accountnumber FROM account ORDER BY numberofemployees DESC", expected, ordered: true));
+            AssertKeysAsync("SELECT accountnumber FROM account ORDER BY numberofemployees DESC, accountnumber", expected, ordered: true));
 
         // The fake honours a TOP in the FetchXML (rule R10). The planner also applies TOP as the scan's own row limit,
         // so a TOP lost only from the FetchXML changes no result, and the test rightly still passes.

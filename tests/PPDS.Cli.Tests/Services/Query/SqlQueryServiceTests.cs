@@ -160,11 +160,16 @@ public class SqlQueryServiceTests
         Assert.Equal(10, result.Result.Records.Count);
     }
 
-    [Fact(Skip = "Waiting for a live observation (LiveObservationsOwed.md): returntotalrecordcount (the fake refuses it: no replayed audit case sends it)")]
+    [Fact]
     public async Task ExecuteAsync_PassesRequestParametersToExecutor()
     {
+        // What this checks is that the service passes the page, cookie and count request to the executor, as on main. The
+        // fake would refuse the FetchXML (returntotalrecordcount and a cookie of another form are not observed), so this one
+        // call returns an empty result, as main's mock did.
         var dataverse = SelectFixture.Create();
         var executor = dataverse.CreateExecutorMock();
+        executor.Setup(x => x.ExecuteFetchXmlAsync(It.IsAny<string>(), 2, "test-cookie", true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueryResult { EntityLogicalName = "account", Columns = [], Records = [], Count = 0 });
         var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard());
 
         var request = new SqlQueryRequest

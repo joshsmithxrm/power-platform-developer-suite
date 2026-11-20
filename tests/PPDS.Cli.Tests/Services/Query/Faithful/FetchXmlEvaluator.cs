@@ -144,9 +144,14 @@ internal sealed class FetchXmlEvaluator
 
     public EntityCollection Evaluate(string fetchXml)
     {
-        var spec = Validate(XDocument.Parse(fetchXml));
+        XDocument document;
+        try { document = XDocument.Parse(fetchXml); }
+        catch (System.Xml.XmlException) { throw Unsupported("input that is not XML"); }
+        var spec = Validate(document);
         if (spec.Root.Table.Rows.Count == 0)
             Shape("a query on an empty table");
+        if (spec.Sources.Values.Any(src => src.Alias != BaseAlias && src.Table.Rows.Count == 0))
+            Shape("a link to an empty table");
 
         var rows = spec.Root.Table.Rows
             .Select(r => new JoinedRow { Rows = new(StringComparer.OrdinalIgnoreCase) { [BaseAlias] = r } })
@@ -173,11 +178,25 @@ internal sealed class FetchXmlEvaluator
         var kept = Sort(firstCreated, orders, spec.Sources, tieBreakById: false)
             .Select(r => Project(r, spec)).DistinctBy(Signature).ToList();
         Shape(orders.Count == 0 ? "distinct without order" : "distinct with order");
+        if (spec.Sources.Values.Any(src => src.Alias != BaseAlias && (src.Attributes.Count > 0 || src.AllAttributes)))
+            Shape("distinct with link attributes");
+        if (!spec.Root.AllAttributes && spec.Root.Attributes.Count == 0)
+            Shape("distinct with no attributes");
+        if (spec.Top is not null || spec.Count is not null || spec.Page is not null)
+            Shape("distinct with top, count or page");
+        if (orders.Count > 0)
+        {
+            var selected = spec.Root.AllAttributes ? spec.Root.Table.Columns.Keys.ToList() : spec.Root.Attributes.Select(a => a.Name).ToList();
+            foreach (var name in selected)
+                Shape($"distinct with order returning a {ColumnOrVirtual(spec.Root.Table, name)}{Created(name)} column");
+            foreach (var o in orders)
+                Shape(selected.Contains(o.Attribute) ? $"distinct ordered by a {o.Type}{Created(o.Attribute)} column" : "distinct ordered by a column it does not return");
+        }
         if (orders.Count == 0)
         {
             var columns = spec.Root.AllAttributes ? spec.Root.Table.Columns.Keys.ToList() : spec.Root.Attributes.Select(a => a.Alias ?? a.Name).ToList();
             foreach (var (name, _) in spec.Root.AllAttributes ? spec.Root.Table.Columns.Keys.Select(k => (k, (string?)null)) : spec.Root.Attributes)
-                Shape($"distinct without order on a {ColumnOrVirtual(spec.Root.Table, name)} column");
+                Shape($"distinct without order on a {ColumnOrVirtual(spec.Root.Table, name)}{Created(name)} column");
             IOrderedEnumerable<Entity>? sorted = null;
             foreach (var column in columns)
             {
@@ -226,11 +245,24 @@ internal sealed class FetchXmlEvaluator
         var page = PositiveInt(fetch, "page", max: int.MaxValue);
         if (top != null && (count != null || page != null))
             throw Unsupported("top together with page or count");
+        if (top is { } t0)
+            Shape(t0 == 0 ? "top 0" : "a positive top");
 
         if (fetch.Attribute("returntotalrecordcount") is not null)
             Shape("returntotalrecordcount");
+        foreach (var name in new[] { "mapping", "distinct", "aggregate", "no-lock" })
+        {
+            if (fetch.Attribute(name) is { } a)
+                Shape($"fetch {name}={a.Value}");
+        }
+        foreach (var order in root.Orders.Where(o => o.Attribute == "createdon"))
+            Shape($"order on createdon, top {top?.ToString(CultureInfo.InvariantCulture) ?? "none"}");
         if (fetch.Attribute("paging-cookie") is { } cookie)
-            Shape(Regex.IsMatch(cookie.Value, @"^<cookie page=""\d+"" />$") ? "paging-cookie as the fake returns it" : "paging-cookie of another form");
+        {
+            var cookiePage = Regex.Match(cookie.Value, @"^<cookie page=""(?<n>[0-9]+)"" />$");
+            Shape(!cookiePage.Success ? "paging-cookie of another form"
+                : int.Parse(cookiePage.Groups["n"].Value, CultureInfo.InvariantCulture) == (page ?? 1) - 1 ? "paging-cookie of the previous page" : "paging-cookie of another page");
+        }
         var distinct = fetch.Attribute("distinct") is { } d && Bool(d);
         if (isAggregate && (distinct || top != null || count != null || page is > 1 || root.Links.Any(l => l.Orders.Count > 0) || root.Orders.Count > 0))
             throw Unsupported("an aggregate fetch with distinct, top, count, paging or orders");
@@ -258,6 +290,8 @@ internal sealed class FetchXmlEvaluator
                 throw Unsupported("an inner link-entity nested under an outer one (not observed)");
             if (alias.Length == 0 || sources.ContainsKey(alias))
                 throw Unsupported($"a duplicate or empty link-entity alias '{alias}'");
+            if ((from.Length == 0) != (to.Length == 0))
+                throw Unsupported("a link-entity with only one of from and to empty");
             if (from.Length == 0 && to.Length == 0)
             {
                 // Audit J08: an outer link with empty from and to returns every parent row with the link columns NULL.
@@ -319,7 +353,7 @@ internal sealed class FetchXmlEvaluator
                 case "all-attributes":
                     AllowAttributes(child);
                     NoChildren(child);
-                    Shape(source.Alias == BaseAlias ? "all-attributes" : "all-attributes in a link");
+                    Shape(_aggregateMode ? "all-attributes in an aggregate fetch" : source.Alias == BaseAlias ? "all-attributes" : "all-attributes in a link");
                     source.AllAttributes = true;
                     break;
                 case "filter":
@@ -443,6 +477,8 @@ internal sealed class FetchXmlEvaluator
     private EntityCollection EvaluateAggregate(Spec spec, List<JoinedRow> rows)
     {
         var groupBy = spec.Aggregates!.Where(a => a.Function is null).ToList();
+        if (rows.Count == 0)
+            Shape(groupBy.Count > 0 ? "group by over no rows" : "an aggregate over no rows");
         object? Raw(JoinedRow r, AggregateAttribute a) => r.Rows.GetValueOrDefault(a.Source.Alias)?.GetValueOrDefault(a.Name);
         object? GroupKey(object? raw) => Normalize(raw) is string s ? StringKey(s) : Normalize(raw);
 
@@ -747,8 +783,8 @@ internal sealed class FetchXmlEvaluator
         public static readonly EmptyValue Instance = new();
     }
 
-    private static readonly Regex WholeForm = new(@"^-?(0|[1-9]\d*)$", RegexOptions.CultureInvariant);
-    private static readonly Regex DecimalForm = new(@"^-?(0|[1-9]\d*)(\.\d+)?$", RegexOptions.CultureInvariant);
+    private static readonly Regex WholeForm = new(@"^-?(0|[1-9][0-9]*)$", RegexOptions.CultureInvariant);
+    private static readonly Regex DecimalForm = new(@"^-?(0|[1-9][0-9]*)(\.[0-9]+)?$", RegexOptions.CultureInvariant);
 
     /// <summary>
     /// R13: only value forms with an observation behind them are read. A decimal point on a whole-number column is the
@@ -764,6 +800,10 @@ internal sealed class FetchXmlEvaluator
             // Exception raised: Input string …"; the report cut the rest, which is the .NET Framework FormatException text.
             $"An exception System.FormatException was thrown while trying to convert input value '{value}' to attribute '{table}.{attribute}'. Expected type of attribute value: System.Int32. Exception raised: Input string was not in a correct format.");
 
+        if (type is FakeColumnType.Integer or FakeColumnType.BigInt or FakeColumnType.Choice or FakeColumnType.Decimal or FakeColumnType.Money or FakeColumnType.Double
+            && value.Count(ch => ch is >= '0' and <= '9') > 15)
+            Shape($"a {type} value of more than 15 digits"); // the replay sends none: a 32-digit value overflowed, a 34-digit one rounded
+
         switch (type)
         {
             case FakeColumnType.String:
@@ -774,7 +814,7 @@ internal sealed class FetchXmlEvaluator
             case FakeColumnType.Integer or FakeColumnType.BigInt or FakeColumnType.Choice:
                 if (value.Length == 0)
                     return op is "in" or "not-in" or "between" or "eq" ? EmptyValue.Instance : throw Unsupported($"an empty value with operator {op} on a whole-number column"); // W26 eq
-                if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _) && !Regex.IsMatch(value.Trim(), @"^[+-]?\d+$"))
+                if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _) && !Regex.IsMatch(value.Trim(), @"^[+-]?[0-9]+$"))
                 {
                     Shape($"whole-number fault for a value of the form {Pattern(value)}");
                     throw FormatFault();
@@ -839,6 +879,9 @@ internal sealed class FetchXmlEvaluator
                 ? withOffset.UtcDateTime
                 : throw Unsupported($"the date-time value '{value}'");
         }
+        if (DateTime.TryParse(normalized, CultureInfo.InvariantCulture, DateTimeStyles.None, out var edge)
+            && (edge - DateTime.MinValue < _callerUtcOffset.Duration() || DateTime.MaxValue - edge < _callerUtcOffset.Duration()))
+            throw Unsupported($"the date-time value '{value}' at the end of the supported range");
         return DateTime.TryParse(normalized, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedLocal)
             ? DateTime.SpecifyKind(parsedLocal - _callerUtcOffset, DateTimeKind.Utc)
             : throw Unsupported($"the date-time value '{value}'");
@@ -860,6 +903,8 @@ internal sealed class FetchXmlEvaluator
     /// </summary>
     private static string StringKey(string s, bool trimEnd = true, bool ordered = false)
     {
+        if (s.Any(char.IsSurrogate))
+            throw Unsupported("a character outside the Basic Multilingual Plane (its collation is not observed)");
         var sb = new StringBuilder(s.Length);
         foreach (var ch in (trimEnd ? s.TrimEnd(' ') : s).Normalize(NormalizationForm.FormD))
         {
@@ -913,6 +958,8 @@ internal sealed class FetchXmlEvaluator
     /// <summary>R5: <c>%</c>, <c>_</c>, <c>[...]</c> and <c>[^...]</c> over R4 keys; trailing spaces count.</summary>
     private static Regex LikeRegex(string pattern)
     {
+        if (pattern.Length == 0)
+            throw Unsupported("an empty LIKE pattern");
         var regex = new StringBuilder("^");
         for (var i = 0; i < pattern.Length; i++)
         {
@@ -930,6 +977,13 @@ internal sealed class FetchXmlEvaluator
                     if (negate) body = body[1..];
                     if (body.Length == 0)
                         throw Unsupported($"an empty [] in LIKE pattern '{pattern}'");
+                    if (body.StartsWith('-') || body.EndsWith('-') || body.Contains('^'))
+                        throw Unsupported($"a '-' at the edge of, or a '^' inside, a [] in LIKE pattern '{pattern}'");
+                    for (var j = 1; j < body.Length - 1; j++)
+                    {
+                        if (body[j] == '-' && string.CompareOrdinal(StringKey(body[j - 1].ToString(), trimEnd: false), StringKey(body[j + 1].ToString(), trimEnd: false)) > 0)
+                            throw Unsupported($"a reversed range in LIKE pattern '{pattern}'");
+                    }
                     regex.Append('[').Append(negate ? "^" : "");
                     for (var j = 0; j < body.Length; j++)
                     {
@@ -1253,11 +1307,12 @@ internal sealed class FetchXmlEvaluator
             throw Unsupported($"the shape '{shape}' (no replayed audit case or OBSERVED line sends it)");
     }
 
-    private static string Created(string attribute) => attribute == "createdon" ? " (createdon)" : "";
+    /// <summary>Columns whose values the dataset invents (createdon, the state and status option sets) are shapes of their own.</summary>
+    private static string Created(string attribute) => attribute is "createdon" or "statecode" or "statuscode" ? $" ({attribute})" : "";
 
     /// <summary>The form of a literal: digits as 9, lower-case letters as a, upper-case letters as A.</summary>
     private static string Pattern(string value)
-        => new(value.Select(ch => char.IsDigit(ch) ? '9' : char.IsLower(ch) ? 'a' : char.IsUpper(ch) ? 'A' : ch).ToArray());
+        => new(value.Select(ch => ch is >= '0' and <= '9' ? '9' : char.IsDigit(ch) ? 'D' : char.IsLower(ch) ? 'a' : char.IsUpper(ch) ? 'A' : ch).ToArray());
 
     private static NotSupportedException Unsupported(string what)
         => new($"Fake Dataverse refuses this FetchXML: not observed: {what}. Observe it live and add the rule before relying on it.");
