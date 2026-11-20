@@ -453,10 +453,20 @@ class _Reader:
                         self._scan(word.text, self.depth + 1, True, ("ps",), wrapped=True, kind="code")
 
     def _at_command_position(self) -> bool:
+        """True when the next word may be run as a program: nothing before
+        it, a prefix just before it, or only assignments and a prefix with
+        its options and values before it (``X=1 bash``, ``env X=1 bash``,
+        ``timeout 5 bash``, ``nice -n 5 sh``, ``sudo -u u pwsh``). Generous
+        on purpose: a shell taken for a wrapper here only adds readings."""
         if not self.words:
             return True
-        prev = self.words[-1].text.lower()
-        return prev in COMMAND_PREFIXES
+        if self.words[-1].text.lower() in COMMAND_PREFIXES:
+            return True
+        lead = next((w for w in self.words if not is_assignment(w)), None)
+        if lead is None:
+            return True
+        name = lead.text.lower() if not lead.dynamic else None
+        return name in COMMAND_PREFIXES or name in OPAQUE_PREFIXES
 
     def _code_dialects(self):
         """The dialect a wrapper's code is read in: the wrapper's own."""
@@ -856,14 +866,20 @@ class _Reader:
                 continue
             delim.append(ch)
             self.i += 1
-        # A here-document fed to a shell or code word is code.
+        # A here-document fed to a shell or code word is code, also when the
+        # shell follows assignments or a prefix (`env X=1 bash <<EOF`).
         first = self.words[0] if self.words else None
-        code = first is not None and not first.dynamic and \
+        first_code = first is not None and not first.dynamic and \
             _basename(first.text.lower()) in SHELLS | CODE_WORDS
+        code = first_code or self.shell is not None
         if code:
             self.code_arg = True
+        else:
+            # Fed to a program the reader does not know as a shell (`$SH`,
+            # `$(which bash)`): the text may still be run as code.
+            self.stdin_text = True
         if delim:
-            self.heredoc_shell = _basename(first.text.lower()) if code else None
+            self.heredoc_shell = (self.shell or _basename(first.text.lower())) if code else None
             self.heredocs.append(("".join(delim), strip, code))
         else:
             self._fail("here-document without a delimiter")

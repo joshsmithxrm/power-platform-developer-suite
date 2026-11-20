@@ -29,9 +29,22 @@ else is refused (exit 2):
 * *Cannot tell means refuse*, also inside an invocation. An argument list
   the hook could not read in full (``UNREADABLE``: a cap, the deadline, an
   unplaced mention, a program only known at run time with arguments from
-  elsewhere), a response file (``@file``), and an argument only known at
-  run time are refused by both gates, even with a listed active env. A
-  switch with no target the hook can place is refused.
+  elsewhere), an argument only known at run time, and, in the argv of a
+  program the hook could not identify, a response file (``@file``) or a
+  single-dash token that may be a bundle naming an environment or profile
+  are refused by the write-block and, with an unlisted or unknown active
+  env, by the environment gate. A response file or a possible bundle after
+  a word naming ``ppds`` is placed text, refused in every mode. With a
+  listed active env and no shakedown, an invocation the hook cannot place
+  is refused **only when** the command
+  text names a switch or a target (``text_names_target``): one of ``env`` /
+  ``org`` / ``auth`` together with one of ``select`` / ``switch`` / ``use``,
+  or a target option (``--environment``, ``-env``, ``--profile``,
+  ``--allowed-env`` and their source/target forms anywhere; ``-p`` / ``-e``
+  in a text that mentions ``ppds``). Otherwise it passes, as the listed active
+  env would. A ``PPDS_`` variable that moves the target is refused
+  separately, in every mode. A switch with no target the hook can place is
+  refused (its text names the switch).
 * *A token that grants a pass must be positively placed.* ``--dry-run``
   counts only as the exact bare token, before any ``--``, not directly
   after an option-looking token (it might be that option's value), and not
@@ -54,8 +67,11 @@ else is refused (exit 2):
   ``PPDS_`` variable that can move the target (``PPDS_CONFIG_DIR``,
   ``PPDS_PROFILE``, ``PPDS_ENVIRONMENT_URL`` ...). A single-dash token with
   an ``e`` or ``p`` that is not one of those options may be a bundle of
-  short options and is refused. ``PPDS_PROFILE`` and ``PPDS_ENVIRONMENT_URL``
-  in the hook's own environment are part of the active env.
+  short options; it cannot be placed (see above). ``PPDS_PROFILE`` and
+  ``PPDS_ENVIRONMENT_URL`` in the hook's own environment are part of the
+  active env. The active env is known only by its environment's own names
+  (display name, unique name, URL host and its first label), never by the
+  name of the profile that holds it.
 * *Bounded work.* Every loop over the input runs under the deadline, and
   the work per input is capped (``_MAX_*``, ``_DOTNET_MAX_*`` and the
   reader's caps); past a cap the command is an unreadable invocation,
@@ -175,6 +191,7 @@ action.
 
 from __future__ import annotations
 
+import base64
 import bisect
 import json
 import os
@@ -549,9 +566,8 @@ def get_active_env_names() -> list:
             label = host.split(".", 1)[0]
             if label and label != host:
                 candidates.append(label)
-    profile_name = active.get("name")
-    if isinstance(profile_name, str) and profile_name.strip():
-        candidates.append(profile_name.strip())
+    # The profile's own name is not a name of its environment: a profile
+    # named like a listed environment may hold an unlisted one.
     return candidates
 
 
@@ -923,7 +939,13 @@ def _read_invocations(command: str, dialect: str, cwd, mentions: list, deadline)
                     continue
                 if word.dynamic or prog is None or (word.glob and word.text != "?"):
                     origin = _shown(texts[i:i + 12]) + (" ..." if len(texts) > i + 12 else "")
-                    out.extend(_unknown(_tail(texts, i + 1) + ([UNREADABLE] if opaque else []), origin))
+                    # Fed by a pipe, a here-string or a here-document, a
+                    # program known only at run time (`$SH`, `$(which bash)`)
+                    # may run that text as code: its arguments are not all
+                    # in the words.
+                    fed = stmt.piped or stmt.stdin_text
+                    out.extend(_unknown(_tail(texts, i + 1) + ([UNREADABLE] if opaque or fed else []),
+                                        origin))
                 elif opaque and (prog in sp.SHELLS or prog in sp.CODE_WORDS):
                     out.extend(_unknown([UNREADABLE]))
             if stmt.wrapper and (not stmt.code_arg or stmt.dynamic_code or stmt.stdin_text):
@@ -1473,22 +1495,25 @@ def profile_target_problem(store, ref: str, allowlist) -> str:
     return ""
 
 
-def _target_problem(args: list, allowlist, store) -> str:
-    """Why the environment and profile options in ``args`` may reach an
-    environment not on the allowlist, or ""."""
+def _target_problem(args: list, allowlist, store):
+    """``(why, unplaced)``: why the environment and profile options in
+    ``args`` may reach an environment not on the allowlist, or "";
+    ``unplaced`` when the reason is an option the hook cannot place (no
+    value, or a possible bundle of short options) rather than a target it
+    placed and found not listed."""
     envs, problem = _option_values(args, _ENV_OPTIONS | _PROFILE_OPTIONS, _TARGET_LETTERS)
     if problem:
-        return f"{problem} (an environment or profile the hook cannot place)"
+        return f"{problem} (an environment or profile the hook cannot place)", True
     for tok, value in envs:
         name = _split_option(tok)[0].lower()
         if name in _ENV_OPTIONS:
             if not target_listed(value, allowlist):
-                return f"{tok} {value}: that environment is not on the allowlist"
+                return f"{tok} {value}: that environment is not on the allowlist", False
         else:
             why = profile_target_problem(store, value, allowlist)
             if why:
-                return f"{tok} {value}: {why}"
-    return ""
+                return f"{tok} {value}: {why}", False
+    return "", False
 
 
 def _mcp_target_problem(args: list, allowlist, store) -> str:
@@ -1623,7 +1648,82 @@ def _switch_targets(rest: list, names: set, letters: set):
     return [v for _, v in values] + words, ""
 
 
-def decide_env(argv, allowlist, active, store=_MISSING, required=None):
+# The words of a switch (`env select`, `org use`, `auth switch` ...) and the
+# options that name a target. A command text holding any of them makes an
+# invocation the hook cannot place a refusal even with a listed active env.
+_SWITCH_NOUNS = frozenset({"env", "org", "auth"})
+_SWITCH_VERBS = frozenset({"select", "switch", "use"})
+_TEXT_TARGET_OPTIONS = frozenset({
+    "--environment", "-env", "--env", "--source-env", "--target-env", "-se", "-te",
+    "--profile", "--source-profile", "--target-profile", "-sp", "-tp", "--allowed-env"})
+# `-p` (profile) and `-e` (environment on some paths): only in a text that
+# mentions `ppds` somewhere (before or after: `echo -p x | xargs ppds`); in a
+# text with no mention they are other programs' options (`mkdir -p`, `sh -e`).
+_TEXT_TARGET_SHORT = frozenset({"-p", "-e"})
+_TEXT_WORD_RE = re.compile(r"[^\s;|&()<>'\"`,{}\[\]^\\‘’‚‛“”„]+")
+_TEXT_PPDS_RE = re.compile(r"ppds", re.IGNORECASE)
+
+
+_B64_WORD_RE = re.compile(r"[A-Za-z0-9+/]{8,}={0,2}")
+
+
+def _encoded_payloads(text: str) -> list:
+    """The words of ``text`` that decode as base64 of UTF-16LE text."""
+    out = []
+    for m in _B64_WORD_RE.finditer(text):
+        word = m.group(0)
+        if len(word) % 4:
+            continue
+        try:
+            out.append(base64.b64decode(word, validate=True).decode("utf-16-le"))
+        except (ValueError, UnicodeDecodeError):
+            continue
+    return out
+
+
+def text_names_target(command: str) -> bool:
+    """True when ``command`` names a switch or a target anywhere: a word of
+    ``_SWITCH_NOUNS`` and a word of ``_SWITCH_VERBS`` (any case), or an
+    option of ``_TEXT_TARGET_OPTIONS`` (any case, alone or with ``=`` / ``:``
+    and a value), or ``-p`` / ``-e`` in a text that mentions ``ppds``. The
+    text is read as written, with escapes decoded, and both again with every quoting
+    character removed, so ``e"n"v`` and ``\\-\\-profile`` count; so is every
+    word that decodes as an encoded PowerShell command (base64 of UTF-16LE,
+    as ``pwsh -EncodedCommand`` takes it), to three levels."""
+    if not command:
+        return False
+    sources, fresh = [command], [command]
+    for _ in range(3):
+        fresh = [p for text in fresh for p in _encoded_payloads(text)]
+        sources.extend(fresh)
+    texts = []
+    for source in sources:
+        decoded = _unescape(source)
+        texts.extend((source, decoded,
+                      "".join(ch for ch in source if ch not in _QUOTING_CHARS),
+                      "".join(ch for ch in decoded if ch not in _QUOTING_CHARS)))
+    mentioned = any(_TEXT_PPDS_RE.search(text) for text in texts)
+    nouns = verbs = False
+    for text in texts:
+        for m in _TEXT_WORD_RE.finditer(text):
+            word = m.group(0).lower()
+            if word in _SWITCH_NOUNS:
+                nouns = True
+            elif word in _SWITCH_VERBS:
+                verbs = True
+            if nouns and verbs:
+                return True
+            if not word.startswith("-"):
+                continue
+            name = _split_option(word)[0]
+            if name in _TEXT_TARGET_OPTIONS:
+                return True
+            if name in _TEXT_TARGET_SHORT and mentioned:
+                return True
+    return False
+
+
+def decide_env(argv, allowlist, active, store=_MISSING, required=None, names_target=True):
     """Return (allow, reason). reason is empty on allow, a message on block.
 
     With an allowlist configured, an invocation passes only when the hook
@@ -1631,8 +1731,14 @@ def decide_env(argv, allowlist, active, store=_MISSING, required=None):
     and all of it is listed: the active env (``active``, and ``required``:
     further candidate lists that must also match), every environment and
     profile option, and for ``env select`` / ``auth select`` the target.
-    Everything it cannot place (text it could not read, a response file,
-    run-time text, an option bundle) is refused."""
+
+    What it cannot place (text it could not read, run-time text, and in the
+    argv of a program it could not identify (a ``_Guess``) a response file,
+    an option bundle or an option with no value) is refused when
+    ``names_target`` (``text_names_target`` of the whole command text: it
+    names a switch or a target option); otherwise only the active env
+    decides, so a listed active env passes it. The default is the strict
+    reading. A target it placed and found not listed is always refused."""
     if not argv:
         return True, ""
     prog = _prog(argv[0])
@@ -1651,14 +1757,22 @@ def decide_env(argv, allowlist, active, store=_MISSING, required=None):
             return True, ""
         return False, _block_msg_active_not_allowed(active, allowlist, argv)
 
+    def unplaced(why):
+        return refuse(why + " (the command text names a switch or a target option)") \
+            if names_target else active_check()
+
     if UNREADABLE in args:
-        return refuse("the hook could not read this command in full, so it cannot tell which "
-                      "environment it reaches")
+        return unplaced("the hook could not read this command in full, so it cannot tell which "
+                        "environment it reaches")
     response = next((arg for arg in args if arg.startswith("@")), None)
     if response is not None:
-        return refuse(f"{response} is a response file; its arguments may name another environment")
+        # A response file written after a word naming `ppds` is placed text:
+        # refused in every mode. In the argv of a program the hook could not
+        # identify it is a guess, judged like the rest of the unplaced text.
+        why = f"{response} is a response file; its arguments may name another environment"
+        return unplaced(why) if isinstance(argv, _Guess) else refuse(why)
     if any(sp.DYN in arg for arg in args):
-        return refuse("an argument only known when the command runs may name another environment")
+        return unplaced("an argument only known when the command runs may name another environment")
 
     if prog == "ppds-mcp-server":
         why = _mcp_target_problem(args, allowlist, store)
@@ -1674,9 +1788,12 @@ def decide_env(argv, allowlist, active, store=_MISSING, required=None):
         bad = next((t for t in targets if not target_listed(t, allowlist)), None)
         if bad is not None:
             return False, _block_msg_target_not_allowed(bad, allowlist, argv)
-    why = _target_problem(args, allowlist, store)
+    why, cannot_place = _target_problem(args, allowlist, store)
     if why:
-        return refuse(why)
+        # An option the hook cannot place (no value, a possible bundle) is
+        # placed text in a ``ppds`` word's argv: refused. In the argv of a
+        # program the hook could not identify (``$x -ne 0``) it is a guess.
+        return unplaced(why) if cannot_place and isinstance(argv, _Guess) else refuse(why)
     if path == ("env", "select"):
         return True, ""
     if path == ("auth", "select"):
@@ -2341,9 +2458,14 @@ def _main(deadline: float) -> None:
             # The CLI inherits this variable; it may pick that environment.
             required.append(_url_candidates(env_url) or [env_url])
         store = read_profile_store()
+        _tick(deadline)
+        # One answer for the whole text: does it name a switch or a target?
+        # The payload itself when its shape is not the known one. During a
+        # shakedown the strict reading stays: what cannot be placed refuses.
+        names_target = shakedown_active or text_names_target(command if parsed is not None else raw)
         for argv in invocations:
             _tick(deadline)
-            allow, reason = decide_env(argv, allowlist, active, store, required)
+            allow, reason = decide_env(argv, allowlist, active, store, required, names_target)
             if not allow:
                 _refuse(reason)
     except _Deadline:
