@@ -94,6 +94,7 @@ internal static class Program
                     ["min"] = a.Arity.MinimumNumberOfValues,
                     ["max"] = a.Arity.MaximumNumberOfValues,
                     ["type"] = a.ValueType.Name,
+                    ["enum"] = EnumNames(a.ValueType),
                 });
             list.Add(new JsonObject
             {
@@ -123,7 +124,14 @@ internal static class Program
         ["recursive"] = o.Recursive,
         ["required"] = o.Required,
         ["has_action"] = o.Action != null,
+        ["enum"] = EnumNames(o.ValueType),
     };
+
+    private static JsonArray? EnumNames(Type t)
+    {
+        var u = Nullable.GetUnderlyingType(t) ?? t;
+        return u.IsEnum ? new JsonArray(Enum.GetNames(u).Select(n => (JsonNode)n).ToArray()) : null;
+    }
 
     // ---- cli --------------------------------------------------------------------------------
 
