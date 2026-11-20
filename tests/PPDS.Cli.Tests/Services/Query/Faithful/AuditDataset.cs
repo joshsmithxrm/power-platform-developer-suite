@@ -11,7 +11,7 @@ namespace PPDS.Cli.Tests.Services.Query.Faithful;
 /// <para>
 /// Read-back facts the audit OBSERVED are applied: an unset two-option reads back 0, a stored empty string reads back NULL
 /// (the fake treats "" as NULL), and the choice values are Red=374110000, Blue=374110001, Green=374110002. A lookup carries
-/// its parent's name (V11, V12). Row ids are generated here and differ from the live run's, so the replay ignores id values.
+/// its parent's name (V11, V12). Ids the report shows are the live ids (<see cref="RecordedIds"/>) and the replay compares them; the other ids are generated and the replay masks them.
 /// <c>createdon</c> is present because every table has it; its values are not the live ones (no replayed case reads them).
 /// </para>
 /// </summary>
@@ -90,6 +90,12 @@ internal static class AuditDataset
         => (table == P ? LiveParentIds : table == C ? LiveChildIds : null)?.GetValueOrDefault(key) is { } live && live != Guid.Empty
             ? live
             : FakeTable.DeterministicId(table, key);
+
+    /// <summary>The ids taken from the report (live ids); every other id here is generated and means nothing live.</summary>
+    public static IReadOnlySet<Guid> RecordedIds => RecordedIdSet.Value;
+
+    private static readonly Lazy<HashSet<Guid>> RecordedIdSet =
+        new(() => [.. LiveParentIds.Values.Concat(LiveChildIds.Values).Where(g => g != Guid.Empty)]);
 
     private static readonly Dictionary<int, Guid> LiveParentIds = new()
     {

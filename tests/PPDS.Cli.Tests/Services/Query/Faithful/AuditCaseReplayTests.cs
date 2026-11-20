@@ -1,4 +1,5 @@
 using Xunit;
+using Xunit.Abstractions;
 
 namespace PPDS.Cli.Tests.Services.Query.Faithful;
 
@@ -10,11 +11,14 @@ namespace PPDS.Cli.Tests.Services.Query.Faithful;
 /// offline in the same way.
 /// <para>
 /// 436 cases: 424 replay and match, 1 replays and differs, 11 cannot be replayed (<see cref="Expected"/> lists each with the
-/// reason). A change to the engine or the fake that moves any case out of its class fails here.
+/// reason). A change to the engine or the fake that moves any case out of its class fails here. The cases that match are
+/// <see cref="Case_ReplaysAndMatchesTheAuditRecord"/>; the 12 that do not are <see cref="Case_DoesNotMatch_ForItsRecordedReason"/>.
+/// Each case writes how much the record let it compare (<see cref="ReplayResult.Coverage"/>), and
+/// <see cref="Coverage_Totals"/> pins the totals.
 /// </para>
 /// </summary>
 [Trait("Category", "Unit")]
-public class AuditCaseReplayTests
+public class AuditCaseReplayTests(ITestOutputHelper output)
 {
     /// <summary>The cases that do not replay and match, with why. Every other case must match.</summary>
     private static readonly Dictionary<string, (ReplayClass Class, string Reason)> Expected = new()
@@ -45,7 +49,9 @@ public class AuditCaseReplayTests
     private static readonly HashSet<string> RecordedPlanText =
         ["X01", "X08", "X11", "J09", "J10", "J11", "C03", "C04", "U01", "U02", "U03", "U04", "U05", "U06", "U07", "U08", "U09"];
 
-    public static IEnumerable<object[]> CaseIds() => AuditCaseReplay.Cases.Select(c => new object[] { c.Id });
+    public static IEnumerable<object[]> MatchingCaseIds() => AuditCaseReplay.Cases.Where(c => !Expected.ContainsKey(c.Id)).Select(c => new object[] { c.Id });
+
+    public static IEnumerable<object[]> NonMatchingCaseIds() => Expected.Keys.Select(id => new object[] { id });
 
     public static IEnumerable<object[]> FetchXmlIds() => AuditCaseReplay.RecordedFetchXml.Keys.Select(id => new object[] { id });
 
@@ -58,15 +64,56 @@ public class AuditCaseReplayTests
     }
 
     [Theory]
-    [MemberData(nameof(CaseIds))]
-    public async Task Case_ReplaysAsTheAuditRecordedIt(string id)
+    [MemberData(nameof(MatchingCaseIds))]
+    public async Task Case_ReplaysAndMatchesTheAuditRecord(string id)
     {
-        var c = AuditCaseReplay.Cases.Single(x => x.Id == id);
-        var result = await AuditCaseReplay.ReplayAsync(c);
-        var (expectedClass, reason) = Expected.TryGetValue(id, out var e) ? e : (ReplayClass.Matches, "");
+        var (c, result) = await ReplayAsync(id);
+
+        Assert.True(result.Class == ReplayClass.Matches,
+            $"{id} [{c.Verdict}] {c.Sql}\n  expected: Matches\n  got:      {result.Class} {result.Reason}\n  live:     {c.Actual}\n  offline:  {result.Offline}");
+    }
+
+    /// <summary>The 12 cases that do not replay and match: each keeps its class and reason, or this fails.</summary>
+    [Theory]
+    [MemberData(nameof(NonMatchingCaseIds))]
+    public async Task Case_DoesNotMatch_ForItsRecordedReason(string id)
+    {
+        var (c, result) = await ReplayAsync(id);
+        var (expectedClass, reason) = Expected[id];
 
         Assert.True(result.Class == expectedClass && result.Reason.StartsWith(reason, StringComparison.Ordinal),
             $"{id} [{c.Verdict}] {c.Sql}\n  expected: {expectedClass} {reason}\n  got:      {result.Class} {result.Reason}\n  live:     {c.Actual}\n  offline:  {result.Offline}");
+    }
+
+    /// <summary>
+    /// How much the record let the replay compare, over every matching case. A partial case is one whose report shows only
+    /// the first rows; the rest of its rows are compared by count alone.
+    /// </summary>
+    [Fact]
+    public async Task Coverage_Totals()
+    {
+        var results = new List<ReplayResult>();
+        foreach (var c in AuditCaseReplay.Cases.Where(c => !Expected.ContainsKey(c.Id)))
+            results.Add((await ReplayAsync(c.Id)).Result);
+        var rows = results.Where(r => r.MessageSegments == 0).ToList();
+        var errors = results.Count - rows.Count;
+        var full = rows.Count(r => r.Full);
+        var totals = $"cases {results.Count}: errors {errors}, row results {rows.Count} (full {full}, partial {rows.Count - full}); " +
+                     $"rows compared {rows.Sum(r => r.RowsCompared)} of {rows.Sum(r => r.RowsTotal)}; " +
+                     $"order compared in {rows.Count(r => r.OrderCompared)}; ids compared {rows.Sum(r => r.IdsCompared)}, masked {rows.Sum(r => r.IdsMasked)}";
+        output.WriteLine(totals);
+        Assert.Equal(CoverageTotals, totals);
+    }
+
+    private const string CoverageTotals =
+        "cases 424: errors 69, row results 355 (full 113, partial 242); rows compared 1099 of 38917; order compared in 36; ids compared 563, masked 19";
+
+    private async Task<(AuditCase Case, ReplayResult Result)> ReplayAsync(string id)
+    {
+        var c = AuditCaseReplay.Cases.Single(x => x.Id == id);
+        var result = await AuditCaseReplay.ReplayAsync(c);
+        output.WriteLine($"{id}: {result.Class} {result.Reason} | {result.Coverage}");
+        return (c, result);
     }
 
     [Theory]

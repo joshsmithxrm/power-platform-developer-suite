@@ -24,7 +24,27 @@ internal enum ReplayClass
     CannotReplay
 }
 
-internal sealed record ReplayResult(ReplayClass Class, string Reason, string Offline);
+/// <summary>
+/// The outcome of one replayed case, and how much of it the record let the replay compare: <see cref="RowsCompared"/> of
+/// <see cref="RowsTotal"/> rows, whether the order of the shown rows was compared, and how many shown ids were compared
+/// (live ids the dataset holds) or masked (ids the dataset generated).
+/// </summary>
+internal sealed record ReplayResult(ReplayClass Class, string Reason, string Offline)
+{
+    public int RowsCompared { get; init; }
+    public int RowsTotal { get; init; }
+    public bool OrderCompared { get; init; }
+    public int IdsCompared { get; init; }
+    public int IdsMasked { get; init; }
+    public int MessageSegments { get; init; }
+
+    /// <summary>Every row the case returned was compared (or it returned none, or it is an error).</summary>
+    public bool Full => RowsCompared == RowsTotal;
+
+    public string Coverage => RowsTotal == 0 && MessageSegments > 0
+        ? $"error: {MessageSegments} recorded message segment(s) compared in order"
+        : $"{(Full ? "full" : "partial")}: {RowsCompared} of {RowsTotal} rows compared; order {(OrderCompared ? "compared" : "not compared (no top-level ORDER BY)")}; ids {IdsCompared} compared, {IdsMasked} masked (generated offline)";
+}
 
 /// <summary>
 /// Replays the audit's recorded cases: SQL → the real <see cref="SqlQueryService"/> → <see cref="FakeDataverse"/> holding
@@ -33,13 +53,16 @@ internal sealed record ReplayResult(ReplayClass Class, string Reason, string Off
 /// <para>
 /// What the record allows to be compared, and nothing looser:
 /// <list type="bullet">
-/// <item>An error: the exception type, and the message up to the first point the report cut or redacted
-/// (<c>…</c>, <c>[REDACTED]</c>, <c>&lt;...&gt;</c>) or where live-organisation detail begins (<c>orgIndex</c>, the metadata
-/// cache's version).</item>
+/// <item>An error: the exception type, and every segment of the recorded message between the points the report cut or
+/// redacted (<c>…</c>, <c>[REDACTED]</c>, <c>&lt;user id&gt;</c>-style placeholders), in order; the first segment is a prefix
+/// unless the record begins with a cut. Text from where live-organisation detail begins (<c>orgIndex</c>, the metadata
+/// cache's version) is not compared.</item>
 /// <item>Rows: the column names exactly, the row count exactly, and every row the report shows. With a top-level ORDER BY
 /// the shown rows are the first rows in order; without one Dataverse's order is its own (it follows the live run's random
 /// record ids), so each shown row must occur in the offline result, and when the report shows all rows the two must be the
-/// same multiset. A row the report cut short is not compared. Record ids differ from the live run and are masked.</item>
+/// same multiset. A row the report cut short is not compared. An id the report shows is compared when the dataset holds it
+/// (<see cref="AuditDataset.RecordedIds"/>); an id the dataset generated is masked on both sides. Each result says how
+/// much was compared (<see cref="ReplayResult.Coverage"/>).</item>
 /// </list>
 /// </para>
 /// </summary>
@@ -187,7 +210,49 @@ internal static class AuditCaseReplay
 
     private static readonly Regex GuidText = new(@"\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}");
 
-    private static string Mask(string s) => GuidText.Replace(s, "{id}");
+    /// <summary>Masks the ids the dataset generated; live ids (taken from the report) stay and are compared.</summary>
+    private static string Mask(string s, ref int compared, ref int masked)
+    {
+        int c = 0, m = 0;
+        var result = GuidText.Replace(s, g =>
+        {
+            if (AuditDataset.RecordedIds.Contains(Guid.Parse(g.Value))) { c++; return g.Value.ToLowerInvariant(); }
+            m++;
+            return "{id}";
+        });
+        compared += c;
+        masked += m;
+        return result;
+    }
+
+    private static string Mask(string s) { int c = 0, m = 0; return Mask(s, ref c, ref m); }
+
+    private static readonly Regex Redaction = new(@"…|\[REDACTED\]|<[a-z]+(?: [a-z]+)*>");
+
+    /// <summary>The recorded message's segments between cuts and redactions, without live-organisation detail.</summary>
+    public static (IReadOnlyList<string> Segments, bool StartsCut) MessageSegments(string message)
+    {
+        var end = new[] { message.IndexOf("orgIndex", StringComparison.Ordinal), message.IndexOf("LazyDynamicMetadataCache", StringComparison.Ordinal) }
+            .Where(i => i >= 0).DefaultIfEmpty(message.Length).Min();
+        message = message[..end];
+        var startsCut = Redaction.Match(message) is { Success: true, Index: 0 };
+        return (Redaction.Split(message).Select(s => s.Trim()).Where(s => s.Length > 0).ToList(), startsCut);
+    }
+
+    /// <summary>Null when the offline message holds every recorded segment in order; otherwise the first one missing.</summary>
+    public static string? MissingSegment(string recorded, string offline)
+    {
+        var (segments, startsCut) = MessageSegments(recorded);
+        var at = 0;
+        for (var i = 0; i < segments.Count; i++)
+        {
+            var found = offline.IndexOf(segments[i], at, StringComparison.Ordinal);
+            if (found < 0 || (i == 0 && !startsCut && found != 0))
+                return segments[i];
+            at = found + segments[i].Length;
+        }
+        return null;
+    }
 
     public static async Task<ReplayResult> ReplayAsync(AuditCase c)
     {
@@ -211,20 +276,16 @@ internal static class AuditCaseReplay
             var colon = recorded.IndexOf(": ", StringComparison.Ordinal);
             var type = colon < 0 ? recorded : recorded[..colon];
             var message = colon < 0 ? "" : recorded[(colon + 2)..];
-            // Cut at the report's ellipsis and redactions, and at details specific to the live organisation (orgIndex,
-            // the metadata cache's version).
-            var cut = new[] { message.IndexOf('…'), message.IndexOf("[REDACTED]", StringComparison.Ordinal), message.IndexOf('<'), message.IndexOf("orgIndex", StringComparison.Ordinal), message.IndexOf("LazyDynamicMetadataCache", StringComparison.Ordinal) }
-                .Where(i => i >= 0).DefaultIfEmpty(message.Length).Min();
-            var prefix = message[..cut];
+            var segments = MessageSegments(message).Segments.Count;
             if (run.Error is null)
                 return new(ReplayClass.Differs, $"live raised {type}; offline returned rows", run.Text);
             var offlineType = run.Text[..run.Text.IndexOf(": ", StringComparison.Ordinal)];
             var offlineMessage = run.Text[(offlineType.Length + 2)..];
             if (offlineType != type)
                 return new(ReplayClass.Differs, $"live raised {type}; offline raised {offlineType}", run.Text);
-            if (!offlineMessage.StartsWith(prefix, StringComparison.Ordinal))
-                return new(ReplayClass.Differs, "same exception type, different message", run.Text);
-            return new(ReplayClass.Matches, "", run.Text);
+            if (MissingSegment(message, offlineMessage) is { } missing)
+                return new(ReplayClass.Differs, $"same exception type; offline message lacks the recorded segment \"{missing}\"", run.Text) { MessageSegments = segments };
+            return new(ReplayClass.Matches, "", run.Text) { MessageSegments = segments };
         }
 
         if (run.Error is not null)
@@ -246,13 +307,20 @@ internal static class AuditCaseReplay
         var shown = shownText.Length == 0 ? new List<string>() : Regex.Split(shownText, @"(?<=\)) (?=\()").ToList();
         if (shown.Count > 0 && (!shown[^1].EndsWith(')') || shownText.EndsWith('…')))
             shown.RemoveAt(shown.Count - 1); // cut short by the report
-        shown = shown.Select(Mask).ToList();
+        int idsCompared = 0, idsMasked = 0;
+        shown = shown.Select(r => Mask(r, ref idsCompared, ref idsMasked)).ToList();
         var offline = run.Rows.Select(Mask).ToList();
+        var ordered = HasTopLevelOrderBy(c.Sql);
+        var coverage = new ReplayResult(ReplayClass.Matches, "", run.Text)
+        {
+            RowsCompared = complete ? count : shown.Count, RowsTotal = count, OrderCompared = ordered && shown.Count > 1,
+            IdsCompared = idsCompared, IdsMasked = idsMasked
+        };
 
-        if (HasTopLevelOrderBy(c.Sql))
+        if (ordered)
         {
             if (!shown.SequenceEqual(offline.Take(shown.Count)))
-                return new(ReplayClass.Differs, "ordered rows differ from the first rows shown", run.Text);
+                return coverage with { Class = ReplayClass.Differs, Reason = "ordered rows differ from the first rows shown" };
         }
         else
         {
@@ -260,13 +328,13 @@ internal static class AuditCaseReplay
             foreach (var row in shown)
             {
                 if (!pool.TryGetValue(row, out var left) || left == 0)
-                    return new(ReplayClass.Differs, $"live row {row} not in the offline result", run.Text);
+                    return coverage with { Class = ReplayClass.Differs, Reason = $"live row {row} not in the offline result" };
                 pool[row] = left - 1;
             }
             if (complete && pool.Values.Any(v => v > 0))
-                return new(ReplayClass.Differs, "offline has rows live did not return", run.Text);
+                return coverage with { Class = ReplayClass.Differs, Reason = "offline has rows live did not return" };
         }
-        return new(ReplayClass.Matches, "", run.Text);
+        return coverage;
     }
 
     private static string? FakeRefusal(Exception? error)

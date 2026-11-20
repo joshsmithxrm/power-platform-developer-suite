@@ -590,7 +590,7 @@ internal sealed class FetchXmlEvaluator
         if (RangeOperators.Contains(op) && type is FakeColumnType.Uniqueidentifier or FakeColumnType.Lookup or FakeColumnType.Boolean)
             throw Unsupported($"operator {op} on a {type} column");
 
-        return new Condition(source.Alias, attribute, type, op, raw.Select(x => Parse(x, type, attribute, op)).ToArray());
+        return new Condition(source.Alias, attribute, type, op, raw.Select(x => Parse(x, type, source.Table.LogicalName, attribute, op)).ToArray());
     }
 
     private static Order ReadOrder(XElement order, string alias, IReadOnlyDictionary<string, Source> sources)
@@ -723,11 +723,13 @@ internal sealed class FetchXmlEvaluator
     /// <c>between</c> (W51, W52, W136, W137). Every other form (a sign, leading zeros, padding, an exponent, a comma,
     /// overflow, a braced GUID, <c>true</c>/<c>false</c>) is refused.
     /// </summary>
-    private object Parse(string value, FakeColumnType type, string attribute, string op)
+    private object Parse(string value, FakeColumnType type, string table, string attribute, string op)
     {
         var ordered = RangeOperators.Contains(op);
         FaultException<OrganizationServiceFault> FormatFault() => Fault(
-            $"An exception System.FormatException was thrown while trying to convert input value '{value}' to attribute '{attribute}'. Expected type of attribute value: System.Int32.");
+            // W15, E06, X02, X03, X12 record "... to attribute 'P.ppds_num'. Expected type of attribute value: System.Int32.
+            // Exception raised: Input string …"; the report cut the rest, which is the .NET Framework FormatException text.
+            $"An exception System.FormatException was thrown while trying to convert input value '{value}' to attribute '{table}.{attribute}'. Expected type of attribute value: System.Int32. Exception raised: Input string was not in a correct format.");
 
         switch (type)
         {
