@@ -76,6 +76,14 @@ public class FetchXmlEvaluatorRuleTests
     public void R2_InAndBetween_DoNotMatchNullRows_AndAreInclusive(string condition, string expected)
         => Assert.Equal(expected, Keys(Fetch(Where(condition))));
 
+    // Filters: or, and, and nesting (FetchXML documentation).
+    [Theory]
+    [InlineData("<filter type=\"or\"><condition attribute=\"name\" operator=\"eq\" value=\"Beta\" /><condition attribute=\"numberofemployees\" operator=\"eq\" value=\"100\" /></filter>", "k3,k8")]
+    [InlineData("<filter type=\"and\"><condition attribute=\"name\" operator=\"like\" value=\"a%\" /><filter type=\"or\"><condition attribute=\"numberofemployees\" operator=\"eq\" value=\"5\" /><condition attribute=\"numberofemployees\" operator=\"eq\" value=\"12\" /></filter></filter>", "k1,k10")]
+    [InlineData("<filter type=\"or\"><filter><condition attribute=\"name\" operator=\"eq\" value=\"Zeta\" /><condition attribute=\"revenue\" operator=\"eq\" value=\"10\" /></filter><condition attribute=\"name\" operator=\"eq\" value=\"abc\" /></filter>", "k9,k10")]
+    public void Filters_OrAndNesting(string filter, string expected)
+        => Assert.Equal(expected, Keys(Fetch(filter)));
+
     // ───────────── R3 (audit OBSERVED "eq name \"\" (what WHERE name = NULL is sent as): 0 rows") ─────────────
 
     [Fact]

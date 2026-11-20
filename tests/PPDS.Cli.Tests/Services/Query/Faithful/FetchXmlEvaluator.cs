@@ -306,7 +306,7 @@ internal sealed class FetchXmlEvaluator
 
         (int Min, int Max) expected = op switch
         {
-            "null" or "not-null" => (Min: 0, Max: 0),
+            "null" or "not-null" => (0, 0),
             "eq" or "ne" or "lt" or "gt" or "le" or "ge" => (1, 1),
             "in" or "not-in" => (1, int.MaxValue),
             "between" or "not-between" => (2, 2),
