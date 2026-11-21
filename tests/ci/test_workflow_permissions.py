@@ -25,6 +25,7 @@ UNPRIVILEGED_WORKFLOWS = (
     "tui-e2e.yml",
     "workflow-tests.yml",
     "reference-cache-trust.yml",
+    "decision-link-check.yml",
 )
 
 # Each entry is a required, bounded exception, not permission to give writes
