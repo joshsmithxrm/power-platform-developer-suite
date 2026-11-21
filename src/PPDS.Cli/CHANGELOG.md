@@ -52,6 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Breaking for users who set `PPDS_CONFIG_DIR`:** query history, the TUI debug log (`tui-debug.log`) and the update-check files (`update-check.json`, `update-status.json`, `update.lock`) now live in the `PPDS_CONFIG_DIR` folder when that variable is set, the same folder as profiles; `logs tail` and `logs dump` read `*.log` from that folder too. Before, these files were always under `~/.ppds` (`%USERPROFILE%\.ppds` on Windows) whatever the variable said: SQL history entered under one configuration was listed under another, `query history clear` under an isolated configuration cleared the shared history, and an isolated TUI run wrote and cleared the shared debug log. Existing history and log files in `~/.ppds` are left where they are and are not read while the variable is set; nothing is moved or copied. Without `PPDS_CONFIG_DIR` nothing changes: every file keeps its path and name, including `%USERPROFILE%\.ppds` on Windows (profiles stay in `%LOCALAPPDATA%\PPDS`) (#1850).
+
 - Direct plugin image updates preserve omitted registration values and use Dataverse row-version checks. Concurrent edits or unavailable capabilities fail without automatic mutation retries; acknowledged updates remain distinguished from connection-cleanup failures. RPC callers receive the service's structured codes and safe outcome warnings without private diagnostics.
 
 - Version 2 image-only cleanup also refuses present-null step/image protection metadata during planning and fresh pre-dispatch checks. Public DTO bool values/signatures remain; the checks do not make deletion atomic.

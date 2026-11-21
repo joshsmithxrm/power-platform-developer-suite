@@ -27,8 +27,8 @@ public class QueryHistoryServiceTests : IDisposable
         _tempBasePath = Path.Combine(Path.GetTempPath(), $"ppds-test-{_testId}");
         Directory.CreateDirectory(_tempBasePath);
 
-        // Use a custom service that allows us to override the base path
-        _service = new QueryHistoryService(_mockLogger.Object);
+        // History files go to the temporary folder, never to the user's real history folder (#1850).
+        _service = new QueryHistoryService(_mockLogger.Object, _tempBasePath);
     }
 
     public void Dispose()
@@ -53,6 +53,23 @@ public class QueryHistoryServiceTests : IDisposable
     public void Constructor_WithNullLogger_ThrowsArgumentNullException()
     {
         Assert.Throws<ArgumentNullException>(() => new QueryHistoryService(null!));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Constructor_WithBlankHistoryDirectory_ThrowsArgumentException(string historyDirectory)
+    {
+        Assert.Throws<ArgumentException>(() => new QueryHistoryService(_mockLogger.Object, historyDirectory));
+    }
+
+    [Fact]
+    public async Task AddQueryAsync_WritesOnlyUnderGivenHistoryDirectory()
+    {
+        await _service.AddQueryAsync(TestEnvironmentUrl, "SELECT name FROM account");
+
+        var files = Directory.GetFiles(_tempBasePath, "*.json");
+        Assert.Single(files);
     }
 
     #endregion

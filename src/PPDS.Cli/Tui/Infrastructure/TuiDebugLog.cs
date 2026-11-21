@@ -1,19 +1,19 @@
 using System.Runtime.CompilerServices;
+using PPDS.Cli.Infrastructure;
 
 namespace PPDS.Cli.Tui.Infrastructure;
 
 /// <summary>
 /// Simple file-based debug logger for TUI troubleshooting.
-/// Writes to ~/.ppds/tui-debug.log
+/// Writes to <c>tui-debug.log</c> under <see cref="CliDataPaths.DataDirectory"/>
+/// (the <c>PPDS_CONFIG_DIR</c> folder when set, otherwise <c>~/.ppds</c>).
 /// </summary>
 internal static class TuiDebugLog
 {
     /// <summary>
-    /// Path to the TUI debug log file.
+    /// Path to the TUI debug log file, resolved on each access.
     /// </summary>
-    public static readonly string LogPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".ppds", "tui-debug.log");
+    public static string LogPath => CliDataPaths.TuiDebugLogFile;
 
     private static readonly object Lock = new();
 
@@ -35,8 +35,9 @@ internal static class TuiDebugLog
 
             lock (Lock)
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
-                File.AppendAllText(LogPath, entry + Environment.NewLine);
+                var logPath = LogPath;
+                Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+                File.AppendAllText(logPath, entry + Environment.NewLine);
             }
         }
         catch
@@ -52,8 +53,9 @@ internal static class TuiDebugLog
     {
         try
         {
-            if (File.Exists(LogPath))
-                File.Delete(LogPath);
+            var logPath = LogPath;
+            if (File.Exists(logPath))
+                File.Delete(logPath);
         }
         catch
         {
