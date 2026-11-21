@@ -46,7 +46,7 @@ an update to the test allowlist and this table.
 | `publish-nuget.yml` / `publish` | `id-token: write` | Proposed trusted publishing for canonical repository component-tag pushes; activation requires the reviewed NuGet policy and confirmed individual creator configuration. |
 | `milestone-release-check.yml` / `check-milestone-completion` | `issues: write` | Maintain release-tracking issues. |
 | `post-merge-release-check.yml` / `patch-release-detection`, `extension-corelease-detection` | `issues: write` | Maintain release-tracking issues. |
-| `release-cadence-check.yml` / `cadence-check` | `issues: write` | Maintain release-tracking issues. |
+| `release-risk-check.yml` / `risk-check` | `issues: write` | Open check-in issues for unreleased data-safety and security fixes. |
 | `release-cli.yml` / `release` | `contents: write` | Publish the CLI GitHub release and its assets. |
 
 NuGet publication exchanges the upload-only publishing job's OIDC identity for a

@@ -47,8 +47,8 @@ WRITE_PERMISSION_REASONS = {
         "Create or update patch release tracking issues.",
     ("post-merge-release-check.yml", "extension-corelease-detection", "issues"):
         "Create or update extension co-release tracking issues.",
-    ("release-cadence-check.yml", "cadence-check", "issues"):
-        "Create or update release cadence tracking issues.",
+    ("release-risk-check.yml", "risk-check", "issues"):
+        "Open check-in issues for unreleased data-safety and security fixes.",
     ("release-cli.yml", "release", "contents"):
         "Publish the CLI GitHub release and assets.",
 }
