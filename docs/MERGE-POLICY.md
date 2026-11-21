@@ -137,3 +137,27 @@ This keeps `main` linear and gives one commit per PR for clean `git log` and `gi
 Dependabot config lives in `.github/dependabot.yml`. Bumps that meet the auto-merge criteria above can be `--auto` enabled in batch. Bumps that don't (auth, crypto, major core libs) get manual review with the verification steps documented in the relevant spec or commit message.
 
 For roll-up branches consolidating many bumps into one PR: avoid unless auto-merge is unavailable. Per-bump squash commits give better `git bisect` granularity and clearer attribution than a single roll-up commit.
+
+## Decision Link Check (not required)
+
+The [`decision-link-check.yml`](../.github/workflows/decision-link-check.yml)
+workflow runs `scripts/ci/check_decision_links.py` on every pull request to
+`main` (#1790). It is **not** a required status check.
+
+It reads the lines a pull request adds or changes in `specs/`,
+`docs/releases/` and `src/<package>/CHANGELOG.md`. A sentence there that
+states an approval, an exception, a removal or a date must link the comment
+where the maintainer made that decision, or say that it is "proposed" (the
+versioning policy, rule 9.1). A decision link is a GitHub URL to a comment:
+`…/issues/N#issuecomment-M`, `…/pull/N#issuecomment-M`, `…/pull/N#discussion_rM`,
+`…/pull/N#pullrequestreview-M`, or an issue body, `…/issues/N#issue-M`. A bare
+`#N` names the issue, not the decision, and does not count.
+
+The phrases that make a sentence decision text are listed once, in
+`DECISION_PHRASES` in the script; change them there, with a test. Headings
+(a changelog's release date), fenced code and HTML comments are not checked.
+Existing text is not checked; `--whole-tree` reports how many existing
+sentences would fail, without failing.
+
+To make it required, the maintainer adds the check `Decision text links its
+decision` to the required status checks of `main`.
