@@ -17,7 +17,7 @@ public class FetchXmlEvaluatorAnchorTests
 {
     private static FakeDataverse Dataverse(params string[] names)
     {
-        var table = new FakeTable("t").Column("k", FakeColumnType.Integer).Column("name", FakeColumnType.String);
+        var table = new FakeTable("t").Column("k", FakeColumnType.Integer).Column("name", FakeColumnType.String).Column("dec", FakeColumnType.Decimal);
         for (var i = 0; i < names.Length; i++)
             table.Row(("k", i + 1), ("name", names[i]));
         return new FakeDataverse().Add(table);
@@ -55,10 +55,11 @@ public class FetchXmlEvaluatorAnchorTests
         Assert.Contains("U+000D", error.Message, StringComparison.Ordinal);
     }
 
-    /// <summary>The value forms are anchored the same way: a trailing line feed is not a whole number, decimal or date.</summary>
+    /// <summary>A whole-number or decimal value ending in a line feed is refused (the decimal one raised a raw FormatException).</summary>
     [Theory]
     [InlineData("k", "5&#10;")]
     [InlineData("k", "-5&#10;")]
+    [InlineData("dec", "5.5&#10;")]
     public void AConditionValueEndingInALineFeed_IsRefused_NotRead(string attribute, string value)
     {
         var dataverse = Dataverse("Beta");
@@ -66,5 +67,14 @@ public class FetchXmlEvaluatorAnchorTests
             $"<fetch><entity name=\"t\"><attribute name=\"k\" /><filter><condition attribute=\"{attribute}\" operator=\"eq\" value=\"{value}\" /></filter></entity></fetch>"));
         Assert.True(error is NotSupportedException { Message: var m } && m.Contains("not observed", StringComparison.Ordinal),
             $"expected a \"not observed\" refusal, got {(error is null ? "rows" : error.GetType().Name + ": " + error.Message)}");
+    }
+
+    /// <summary>An attribute alias ending in a line feed is not a valid alias: the PRJ18 fault, as for "n " and "n\t".</summary>
+    [Fact]
+    public void AnAliasEndingInALineFeed_IsTheInvalidAliasFault()
+    {
+        var error = Assert.Throws<System.ServiceModel.FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault>>(() => Dataverse("Beta").RetrieveMultiple(
+            "<fetch><entity name=\"t\"><attribute name=\"k\" alias=\"n&#10;\" /></entity></fetch>"));
+        Assert.StartsWith("Invalid character specified for alias: n", error.Message, StringComparison.Ordinal);
     }
 }

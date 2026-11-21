@@ -795,13 +795,17 @@ internal sealed class FetchXmlEvaluator
 
     // Anchored with \A and \z: in .NET, $ also matches before a final line feed.
     private static readonly Regex WholeForm = new(@"\A-?(0|[1-9][0-9]*)\z", RegexOptions.CultureInvariant);
+    private static readonly Regex GuidForm = new(
+        @"\A(\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})\z",
+        RegexOptions.CultureInvariant);
     private static readonly Regex DecimalForm = new(@"\A-?(0|[1-9][0-9]*)(\.[0-9]+)?\z", RegexOptions.CultureInvariant);
 
     /// <summary>
     /// R13: only value forms with an observation behind them are read. A decimal point on a whole-number column is the
     /// Dataverse fault of audit W15; an empty value on a whole-number column is unknown for <c>in</c>, <c>not-in</c> and
-    /// <c>between</c> (W51, W52, W136, W137). Every other form (a sign, leading zeros, padding, an exponent, a comma,
-    /// overflow, a braced GUID, <c>true</c>/<c>false</c>) is refused.
+    /// <c>between</c> (W51, W52, W136, W137). A braced GUID is read (W114), and so is <c>true</c> on a two-option (W118).
+    /// Every other form is refused: a sign, leading zeros, padding or a trailing line feed (on numbers, dates and GUIDs alike),
+    /// an exponent, a comma, overflow, <c>false</c>, or any two-option value other than 0, 1 and <c>true</c>.
     /// </summary>
     private object Parse(string value, FakeColumnType type, string table, string attribute, string op)
     {
@@ -859,7 +863,8 @@ internal sealed class FetchXmlEvaluator
                 throw Unsupported($"the date-only value '{value}'");
 
             case FakeColumnType.Uniqueidentifier or FakeColumnType.Lookup:
-                return Guid.TryParseExact(value, "D", out var g) || Guid.TryParseExact(value, "B", out g) // "B": W114
+                // Guid.TryParseExact itself trims white space, so the exact form is checked first (\A...\z).
+                return GuidForm.IsMatch(value) && (Guid.TryParseExact(value, "D", out var g) || Guid.TryParseExact(value, "B", out g)) // "B": W114
                     ? g : throw Unsupported($"the unique-identifier value '{value}'");
 
             default:

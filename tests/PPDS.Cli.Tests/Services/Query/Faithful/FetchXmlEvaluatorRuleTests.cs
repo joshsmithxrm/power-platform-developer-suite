@@ -385,6 +385,23 @@ public class FetchXmlEvaluatorRuleTests
     public void R13_UnobservedValueForms_AreRefused_EvenWithNoRows(string attribute, string value)
         => Assert.Throws<NotSupportedException>(() => Fetch(Where(Cond(attribute, "in", value)), dataverse: Empty()));
 
+    /// <summary>
+    /// A GUID with white space before or after it, or a trailing line feed, is refused by the GUID form itself (eq on the
+    /// primary id is an observed shape, W114, so these reach the value parse). Guid.TryParseExact alone would accept them.
+    /// </summary>
+    [Theory]
+    [InlineData("00000000-0000-0000-0000-000000000001&#10;")]
+    [InlineData("00000000-0000-0000-0000-000000000001&#13;&#10;")]
+    [InlineData(" 00000000-0000-0000-0000-000000000001")]
+    [InlineData("00000000-0000-0000-0000-000000000001 ")]
+    [InlineData("{00000000-0000-0000-0000-000000000001}&#10;")]
+    [InlineData("&#9;00000000-0000-0000-0000-000000000001&#9;")]
+    public void R13_PaddedGuid_IsRefusedByTheGuidForm(string value)
+    {
+        var error = Assert.Throws<NotSupportedException>(() => Fetch(Where(Cond("accountid", "eq", value))));
+        Assert.Contains("the unique-identifier value", error.Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("false")]
     [InlineData("2")]
