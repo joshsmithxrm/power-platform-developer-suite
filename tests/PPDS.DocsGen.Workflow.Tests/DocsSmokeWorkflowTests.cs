@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using FluentAssertions;
 using Xunit;
+using PPDS.Tests.Shared;
 
 namespace PPDS.DocsGen.Workflow.Tests;
 
@@ -102,11 +103,12 @@ public class DocsSmokeWorkflowTests
         // deadlock the child on Windows.
         var stdoutTask = p.StandardOutput.ReadToEndAsync();
         var stderrTask = p.StandardError.ReadToEndAsync();
-        if (!p.WaitForExit(60_000))
+        if (!p.WaitForExit(HangBackstop.Bound))
         {
             try { p.Kill(entireProcessTree: true); }
             catch { /* best effort */ }
-            throw new TimeoutException("smoke subprocess did not exit in 60s");
+            throw new TimeoutException($"No completion after {HangBackstop.Bound.TotalSeconds:0}s waiting for the docs smoke " +
+                "subprocess to exit. This bound only catches a hang (#1684); treat the failure as one.");
         }
 
         var stdout = stdoutTask.GetAwaiter().GetResult();

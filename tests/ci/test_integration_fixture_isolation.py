@@ -7,6 +7,7 @@ import subprocess
 
 import pytest
 import yaml
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/conftest.py puts tests/ on sys.path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REFUSAL_SCRIPT = (
@@ -129,7 +130,7 @@ def test_actual_refusal_bash_fails_and_reports_no_live_tests(workflow, tmp_path)
         [str(bash), "--noprofile", "--norc", "-e", "-o", "pipefail", "-c",
          workflow["jobs"]["integration-tests-hold"]["steps"][0]["run"]],
         env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, timeout=10, check=False,
+        capture_output=True, text=True, timeout=CHILD_PROCESS_HANG_BOUND_SECONDS, check=False,
     )
     assert result.returncode == 1, result.stderr
     assert result.stderr == ""

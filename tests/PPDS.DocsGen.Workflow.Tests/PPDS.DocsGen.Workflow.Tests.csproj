@@ -58,4 +58,9 @@
     <None Include="Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Shared hang guard for tests that wait on a completion signal (#1684). -->
+    <Compile Include="..\Shared\HangBackstop.cs" Link="Shared\HangBackstop.cs" />
+  </ItemGroup>
+
 </Project>

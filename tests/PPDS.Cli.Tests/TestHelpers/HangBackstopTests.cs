@@ -1,3 +1,4 @@
+using PPDS.Tests.Shared;
 using Xunit;
 using Xunit.Sdk;
 
@@ -49,6 +50,38 @@ public sealed class HangBackstopTests
         {
             release.Set();
         }
+    }
+
+    [Fact]
+    public async Task NonGenericHangThatIgnoresTheToken_FailsAtTheBoundNamingWhatWasAwaited()
+    {
+        var never = new TaskCompletionSource();
+
+        var error = await Assert.ThrowsAsync<FailException>(() =>
+            HangBackstop.WaitAsync(_ => never.Task, "the non-generic signal", ShortBound));
+
+        Assert.StartsWith("No completion after 50ms waiting for the non-generic signal.", error.Message);
+    }
+
+    [Fact]
+    public async Task NonGenericHangThatObservesTheToken_FailsAtTheBound()
+    {
+        var error = await Assert.ThrowsAsync<FailException>(() =>
+            HangBackstop.WaitAsync(token => Task.Delay(Timeout.Infinite, token), "the non-generic cooperative signal", ShortBound));
+
+        Assert.StartsWith("No completion after 50ms waiting for the non-generic cooperative signal.", error.Message);
+    }
+
+    [Fact]
+    public async Task NonGenericSignal_CompletesAndSurfacesItsFaultUnchanged()
+    {
+        await HangBackstop.WaitAsync(Task.CompletedTask, "an already completed non-generic signal");
+        var fault = new InvalidOperationException("the signal's own failure");
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            HangBackstop.WaitAsync(Task.FromException(fault), "a faulting non-generic signal"));
+
+        Assert.Same(fault, error);
     }
 
     [Fact]

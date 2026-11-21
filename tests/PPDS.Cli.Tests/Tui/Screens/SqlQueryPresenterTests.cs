@@ -12,6 +12,7 @@ using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Resilience;
 using Xunit;
+using PPDS.Tests.Shared;
 
 namespace PPDS.Cli.Tests.Tui.Screens;
 
@@ -265,15 +266,14 @@ public sealed class SqlQueryPresenterTests : IDisposable
         fakeSqlService.NextResult = CreateResultWithRows(2);
 
         using var presenter = new SqlQueryPresenter(_session, TestEnvironmentUrl);
+        var historyService = await _session.GetQueryHistoryServiceAsync(TestEnvironmentUrl);
+        var saved = Assert.IsType<FakeQueryHistoryService>(historyService).FirstAdded;
 
         // Act
         await presenter.ExecuteAsync("SELECT accountid FROM account", CancellationToken.None);
-
-        // Wait a bit for fire-and-forget to complete
-        await Task.Delay(500);
+        await HangBackstop.WaitAsync(saved, "the fire-and-forget history save");
 
         // Assert - check that history was saved
-        var historyService = await _session.GetQueryHistoryServiceAsync(TestEnvironmentUrl);
         var history = await historyService.GetHistoryAsync(TestEnvironmentUrl);
         Assert.NotEmpty(history);
         Assert.Contains(history, h => h.Sql == "SELECT accountid FROM account");
