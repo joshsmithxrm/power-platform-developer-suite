@@ -103,6 +103,16 @@ If the plan has a **Refused** section (exit 1), stop:
   `--breaking-checked-elsewhere "<how>"` records that it was checked another
   way.
 
+`gh pr list --base main` does not list pull requests merged straight into a
+`release/X.Y` branch. When releasing from a stabilization branch, also run it
+with `--base release/X.Y` and merge the two lists:
+
+```bash
+gh pr list --state merged --base release/X.Y --label breaking-change --limit 1000 \
+  --json number,title,mergeCommit > breaking-prs-release.json
+jq -s 'add' breaking-prs.json breaking-prs-release.json > breaking-prs-all.json
+```
+
 Pull requests in the file whose merge commit is not in the range are listed
 under "Breaking Pull Requests Outside the Range". On a
 [stabilization branch](#stabilization-branch), a fix picked with

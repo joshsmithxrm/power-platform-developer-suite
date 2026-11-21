@@ -161,17 +161,21 @@ package's `## [X.Y.Z] - Unreleased` section.
   message says a maintainer step is missing (release runbook, step 3, "Open
   the next version").
 
-**2. State in the description whether it is breaking**: one line,
-`Breaking: no` or `Breaking: yes`, or the "Breaking changes" section of the
-template.
-- **Not breaking**: only a whole "no" counts: `No`, `None`, `N/A` or
-  `Not breaking`, alone or followed by a separator and a reason
-  (`No: internal refactor`).
-- **Breaking**: a statement that starts with `Yes`.
-- **Any other text** is not read as "no". With the `breaking-change` label it
-  is the description of the break. Without the label it fails as unclear:
-  "No longer accepts `--legacy`", "None of the old flags work",
-  "This is not a breaking change." and "Nothing." all fail this way.
+**2. State in the description whether it is breaking**: the template's
+"Breaking changes" section, or a `Breaking:` line. The statement is the whole
+section, with HTML comments and a trailing "Generated with …" footer removed.
+- **Not breaking**: only exactly `Breaking: no` (or `No`, `None`, `N/A`,
+  `Not breaking`), in any case, with optional emphasis or backticks and a
+  final full stop, and nothing else. A reason for "no" belongs in the other
+  sections of the description.
+- **Breaking**: a statement that starts with `Yes`, followed by what breaks
+  and how to migrate. A `Breaking: yes` line anywhere in the description wins.
+- **Any other text is not a "no"**, whatever the separator: "No, but exit
+  code 3 changes to 12", "None; `plugins diff` now exits 12", "No: internal
+  refactor", "None" followed by a list item, "This is not a breaking change."
+  With the `breaking-change` label it is the description of the break. Without
+  the label it fails as unclear, with a message that says how to write the
+  line.
 - A breaking statement needs the `breaking-change` label, and the label needs
   a breaking statement.
 - The changelog entry of a breaking change must say "breaking" ("non-breaking"

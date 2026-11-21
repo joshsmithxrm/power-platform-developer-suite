@@ -165,12 +165,19 @@ def ensure_graph_revision(repo_root: Path, head: str) -> None:
 
 
 def _title(plan: dict) -> str:
-    if plan["refusals"]:
-        return f"Release plan refused: breaking change in a {plan['release_kind']} release"
+    refusals = plan["refusals"]
+    if refusals:
+        reasons = []
+        if any(r.startswith("Breaking changes were not checked") for r in refusals):
+            reasons.append("breaking changes were not checked")
+        if any(not r.startswith("Breaking changes were not checked") for r in refusals):
+            reasons.append(f"breaking change in a {plan['release_kind']} release")
+        return "Release plan refused: " + " and ".join(reasons)
     targets = plan["release_targets"]
-    if not targets:
-        return "No product release needed"
-    return "Patch release review: " + ", ".join(targets)
+    title = "No product release needed" if not targets else "Patch release review: " + ", ".join(targets)
+    if plan.get("breaking_check", "checked").startswith("checked elsewhere"):
+        title += f" (breaking changes {plan['breaking_check']})"
+    return title
 
 
 def main(argv: Optional[list[str]] = None) -> int:

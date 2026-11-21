@@ -16,14 +16,16 @@ is what the release plan reads (``scripts/ci/release_plan.py
 --breaking-prs-file``) to refuse a non-major version. A breaking pull request's
 changelog entry must say "breaking", so the release notes say it too.
 
-**Reading the statement.** "Not breaking" is never guessed from a prefix. Only
-a whole statement of the form ``No``, ``None``, ``N/A`` or ``Not breaking``
-counts as not breaking, alone, with a full stop, or followed by a separator
-(``:``, ``;``, ``,``, ``.``, a dash) and a reason ("No: internal refactor").
-A statement that starts with ``Yes`` is breaking. Any other text ("No longer
-accepts ``--legacy``", "This is not a breaking change.") is a statement of a
-break when the pull request carries the ``breaking-change`` label, and
-otherwise is rejected as unclear, with a message that says how to write it.
+**Reading the statement.** The statement is the whole "Breaking changes"
+section (HTML comments and a trailing "Generated with …" footer removed), or
+else the rest of a ``Breaking:`` line. It is "not breaking" only if it is
+exactly ``No``, ``None``, ``N/A`` or ``Not breaking``, in any case, with
+optional emphasis marks or backticks and an optional final full stop, and
+nothing else. Any further text, after any separator, makes it not a "no": it
+is a statement of a break if it starts with ``Yes`` or the pull request
+carries the ``breaking-change`` label, and otherwise it is rejected as
+unclear, with a message that says how to write it. A reason for "no" belongs
+in the description's other sections.
 
 Not checked:
 
@@ -97,17 +99,21 @@ SECTION_HEADING_RE = re.compile(r"^## ")
 BREAKING_HEADING_RE = re.compile(r"^#{2,3}\s+Breaking(\s+changes?)?\s*:?\s*$", re.IGNORECASE)
 BREAKING_LINE_RE = re.compile(r"^\s*[-*]?\s*\**Breaking\**\s*:\**\s*(?P<rest>.*)$", re.IGNORECASE)
 HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
-# The whole statement, not a prefix: "No", "None.", "N/A", "Not breaking",
-# or one of those, a separator, and a reason ("No: internal refactor").
-NOT_BREAKING_RE = re.compile(
-    r"^(?:no|none|n/a|not breaking)(?:\s*\.)?(?:\s*(?:[:;,.]|\s-|\s–|\s—)\s*\S.*)?$",
-    re.IGNORECASE,
-)
+# "Not breaking" is only one of these plain forms and nothing else; any more
+# text, after any separator, is not a "no". No pattern judges a reason.
+NOT_BREAKING_RE = re.compile(r"^(?:no|none|n/a|not breaking)\.?$", re.IGNORECASE)
 BREAKING_RE = re.compile(r"^yes\b", re.IGNORECASE)
+# The assisted-pull-request footer that ends a description; it is not part of
+# the last section. Only these exact forms are recognised.
+FOOTER_RES = (
+    re.compile(r"^🤖 Generated with \[Claude Code\]\(https://claude\.com/claude-code\)$"),
+    re.compile(r"^Generated with \[Claude Code\]\(https://claude\.com/claude-code\)$"),
+    re.compile(r"^🤖 Generated with Claude Code$"),
+)
 HOW_TO_STATE = (
-    'Write one line: "Breaking: no" (or "None"), optionally with a reason after '
-    'a colon, or "Breaking: yes" and what breaks, and label the pull request '
-    f"`{BREAKING_LABEL}`."
+    'Write "Breaking: no" alone (a reason belongs in the other sections of the '
+    'description), or "Breaking: yes" followed by what breaks and how to migrate, '
+    f"and label the pull request `{BREAKING_LABEL}`."
 )
 INTERNAL_HINT = (
     "If nothing user-visible changed, the maintainer can exempt the pull request "
@@ -259,43 +265,69 @@ def check_changelog(package: str, change: Optional[FileChange]) -> tuple[Optiona
     )
 
 
+def strip_footer(text: str) -> str:
+    """Drop a recognised "Generated with …" footer from the end of a description."""
+    lines = text.rstrip().split("\n")
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if lines and any(pattern.match(lines[-1].strip()) for pattern in FOOTER_RES):
+        lines.pop()
+    return "\n".join(lines)
+
+
 def breaking_statement(body: Optional[str]) -> Optional[str]:
     """Return ``'yes'``, ``'no'``, ``'unclear'`` or None (no statement).
 
-    Reads a ``Breaking:`` line first, then the "Breaking changes" section of
-    the pull request template. HTML comments (the template's prompts) do not
-    count. Only a whole "no" statement is ``'no'`` (see ``NOT_BREAKING_RE``);
-    text that is neither a "no" nor starts with "yes" is ``'unclear'``.
+    The statement is the whole text of the "Breaking changes" section (HTML
+    comments and a trailing "Generated with …" footer removed, a leading
+    ``Breaking:`` label allowed). Without that section, it is the rest of a
+    ``Breaking:`` line. Only a plain "No", "None", "N/A" or "Not breaking"
+    is ``'no'``; text that starts with "Yes" is ``'yes'``; anything else is
+    ``'unclear'``.
     """
-    text = HTML_COMMENT_RE.sub("", body or "").replace("\r\n", "\n")
+    text = strip_footer(HTML_COMMENT_RE.sub("", body or "").replace("\r\n", "\n"))
     lines = text.split("\n")
-    for line in lines:
-        match = BREAKING_LINE_RE.match(line)
-        if match and not BREAKING_HEADING_RE.match(line):
-            verdict = classify(match.group("rest"))
-            if verdict:
-                return verdict
+    section_verdict: Optional[str] = None
+    in_section: set[int] = set()
     for index, line in enumerate(lines):
         if not BREAKING_HEADING_RE.match(line.strip()):
             continue
         section: list[str] = []
-        for following in lines[index + 1:]:
+        for offset, following in enumerate(lines[index + 1:], start=index + 1):
             if re.match(r"^#{1,6}\s", following):
                 break
+            in_section.add(offset)
             if following.strip():
                 section.append(following.strip())
         if section:
-            return classify(" ".join(section))
-    return None
+            first = BREAKING_LINE_RE.match(section[0])
+            if first:
+                section[0] = first.group("rest")
+            section_verdict = classify(" ".join(section).strip())
+        break
+    line_verdicts = [
+        classify(match.group("rest"))
+        for index, line in enumerate(lines)
+        if index not in in_section
+        and (match := BREAKING_LINE_RE.match(line)) and not BREAKING_HEADING_RE.match(line)
+    ]
+    # A "Breaking: yes" anywhere wins: the safe direction.
+    if "yes" in line_verdicts:
+        return "yes"
+    if section_verdict:
+        return section_verdict
+    return next((verdict for verdict in line_verdicts if verdict), None)
 
 
 def classify(text: str) -> Optional[str]:
-    cleaned = re.sub(r"^[\s\-*>`_]+", "", text).strip().strip("*_`\"'").strip()
-    if not cleaned:
+    """Plain "no" forms, emphasis and backticks allowed; "Yes …"; or unclear."""
+    cleaned = re.sub(r"^[\s\-*>]+", "", text).strip()
+    plain = re.sub(r"[*_`]", "", cleaned).strip()
+    if not plain:
         return None
-    if NOT_BREAKING_RE.match(cleaned):
+    if NOT_BREAKING_RE.match(plain):
         return "no"
-    if BREAKING_RE.match(cleaned):
+    if BREAKING_RE.match(plain):
         return "yes"
     return "unclear"
 

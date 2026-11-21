@@ -293,11 +293,10 @@ class TestKnownTestLocations:
 
 class TestBreakingStatement:
     @pytest.mark.parametrize("text", [
-        "No", "No.", "no", "None", "None.", "N/A", "n/a.", "Not breaking", "Not breaking.",
-        "No: internal refactor", "No; docs only.", "No, only adds a flag.", "None - tests only",
-        "No — the output is unchanged", "No. Internal refactor.", "**None**", "- None",
+        "No", "No.", "no", "NO", "None", "None.", "N/A", "n/a.", "Not breaking", "Not breaking.",
+        "**None**", "**No.**", "`No`", "_none_", "- None", "No ",
     ])
-    def test_whole_no_statement_is_not_breaking(self, text):
+    def test_plain_no_statement_is_not_breaking(self, text):
         assert cce.classify(text) == "no"
         assert cce.breaking_statement(f"## Breaking changes\n\n{text}\n") == "no"
         assert cce.breaking_statement(f"Breaking: {text}\n") == "no"
@@ -305,6 +304,78 @@ class TestBreakingStatement:
     @pytest.mark.parametrize("text", ["Yes", "yes, exit 2 becomes 12", "Yes: removes `--legacy`."])
     def test_yes_statement_is_breaking(self, text):
         assert cce.classify(text) == "yes"
+
+    @pytest.mark.parametrize("text", ["Yesterday's change only.", "Yesno"])
+    def test_yes_must_be_a_word(self, text):
+        assert cce.classify(text) == "unclear"
+
+    # Round-2 review: a "no" with any further text is not a "no".
+    NO_WITH_MORE = [
+        "No, but exit code 3 changes to 12",
+        "Not breaking, except `--legacy` is removed.",
+        "None; `plugins diff` now exits 12 instead of 2.",
+        "No: `--legacy` is removed",
+        "No. Exit code 2 is now 12.",
+        "No - exit code 2 is now 12",
+        "None — removed the `--foo` flag",
+        "No; scripts that parse stdout must switch to --json",
+        "No: internal refactor",
+        "None, tests only",
+    ]
+
+    @pytest.mark.parametrize("text", NO_WITH_MORE)
+    @pytest.mark.parametrize("form", ["line", "section"])
+    def test_no_with_any_further_text_is_never_no(self, text, form):
+        body = f"Breaking: {text}\n" if form == "line" else f"## Breaking changes\n\n{text}\n"
+        assert cce.breaking_statement(body) == "unclear"
+        result = run([CODE, GOOD_ENTRY], body=body)
+        assert not result.passed and "The breaking statement is unclear" in result.failures[0]
+        assert '"Breaking: no" alone' in result.failures[0]
+
+    @pytest.mark.parametrize("text", NO_WITH_MORE)
+    def test_no_with_further_text_and_the_label_is_a_break(self, text):
+        entry = changelog_change("PPDS.Cli", add_under(
+            BASE_CHANGELOG, "## [1.5.0] - Unreleased", "- **Breaking:** exit code 12 (#3)."))
+        result = run([CODE, entry], labels=["breaking-change"], body=f"## Breaking changes\n\n{text}\n")
+        assert result.passed and "Breaking statement: yes." in result.notes
+
+    @pytest.mark.parametrize("section", [
+        "None\n- `plugins diff` exits 12 instead of 2",
+        "No\n\nRemoved `--legacy`.",
+        "Breaking: no\n\n- exit code 2 is now 12",
+    ])
+    def test_the_whole_section_is_the_statement(self, section):
+        assert cce.breaking_statement(f"## Breaking changes\n\n{section}\n") == "unclear"
+
+    def test_the_section_ends_at_any_heading_level(self):
+        assert cce.breaking_statement("## Breaking changes\n\nNone\n\n#### Notes\n\nMore text.\n") == "no"
+        assert cce.breaking_statement("## Breaking changes\n\nNone\n\n###### Notes\n\nMore text.\n") == "no"
+
+    @pytest.mark.parametrize("footer", [
+        "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+        "Generated with [Claude Code](https://claude.com/claude-code)",
+        "🤖 Generated with Claude Code",
+    ])
+    def test_a_trailing_generated_footer_is_not_part_of_the_section(self, footer):
+        for plain in ("None", "None.", "Breaking: no"):
+            assert cce.breaking_statement(f"## Breaking changes\n\n{plain}\n\n{footer}\n") == "no"
+
+    @pytest.mark.parametrize("not_a_footer", [
+        "Generated with Copilot",
+        "🤖 Generated with [Claude Code](https://example.com)",
+        "Generated with [Claude Code](https://claude.com/claude-code) and edited",
+    ])
+    def test_only_the_pinned_footer_forms_are_stripped(self, not_a_footer):
+        assert cce.breaking_statement(f"## Breaking changes\n\nNone\n\n{not_a_footer}\n") == "unclear"
+
+    def test_the_footer_is_only_stripped_at_the_end(self):
+        footer = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+        assert cce.breaking_statement(f"## Breaking changes\n\nNone\n{footer}\nexit 12 now\n") == "unclear"
+        # A footer line that is not the last line stays part of the section.
+        assert cce.breaking_statement(f"## Breaking changes\n\n{footer}\n\nNone\n") == "unclear"
+
+    def test_a_breaking_yes_line_elsewhere_wins(self):
+        assert cce.breaking_statement("Breaking: yes\n\n## Breaking changes\n\nNone\n") == "yes"
 
     REVIEWER_WORDINGS = [
         "No longer accepts `--legacy`; scripts must drop it.",
@@ -331,7 +402,7 @@ class TestBreakingStatement:
         assert not result.passed
         message = result.failures[0]
         assert "The breaking statement is unclear" in message
-        assert '"Breaking: no"' in message and '"Breaking: yes"' in message
+        assert '"Breaking: no" alone' in message and '"Breaking: yes"' in message
         assert "says it is not breaking" not in message
 
     @pytest.mark.parametrize("text", REVIEWER_WORDINGS)
@@ -349,13 +420,14 @@ class TestBreakingStatement:
         ("", None),
         (None, None),
         ("## Breaking changes\n\nNone.\n\n## Notes\n\nmore", "no"),
-        ("Breaking: no, only adds a flag.\n", "no"),
+        ("Breaking: no, only adds a flag.\n", "unclear"),
+        ("Breaking: no\n", "no"),
         ("- **Breaking:** yes, exit code 2 becomes 12.\n", "yes"),
         ("Breaking: yes\n\n## Breaking changes\n\nNone\n", "yes"),
         ("## Breaking changes\r\n\r\nNone\r\n", "no"),
         ("## Breaking\n\nYes: removes `--legacy`.\n", "yes"),
         ("## Breaking changes\n\n## Testing\n\nran it\n", None),
-        ("## Breaking changes\n\n<!-- prompt -->\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n", "unclear"),
+        ("## Breaking changes\n\n<!-- prompt -->\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n", None),
     ])
     def test_statement_is_read_from_the_description(self, body, expected):
         assert cce.breaking_statement(body) == expected
@@ -857,17 +929,65 @@ class TestPullRequestTemplate:
 
     def test_template_asks_for_a_breaking_yes_or_no_line(self):
         section = self.TEMPLATE.read_text(encoding="utf-8").split("## Breaking changes", 1)[1]
-        assert '"Breaking: yes" or "Breaking: no", and why' in section
+        assert '"Breaking: no" and nothing else' in section and '"Breaking: yes" followed by what breaks' in section
         assert "`breaking-change`" in section
 
     def test_unfilled_template_is_no_statement(self):
         assert cce.breaking_statement(self.TEMPLATE.read_text(encoding="utf-8")) is None
 
     @pytest.mark.parametrize("line, expected", [
-        ("Breaking: no, adds an optional flag only.", "no"),
+        ("Breaking: no", "no"),
+        ("Breaking: no, adds an optional flag only.", "unclear"),
         ("Breaking: yes, exit code 2 becomes 12 for incomplete checks.", "yes"),
         ("Breaking: no longer returns exit 2", "unclear"),
     ])
     def test_filled_template_is_read(self, line, expected):
         text = self.TEMPLATE.read_text(encoding="utf-8").rstrip() + "\n" + line + "\n"
         assert cce.breaking_statement(text) == expected
+
+
+class TestReleasePlanReporting:
+    def test_markdown_says_when_breaking_changes_were_not_checked(self, graph):
+        from release_model import render_markdown
+        plan = build_release_plan(graph, RUNTIME, release_kind="minor", breaking_unchecked="no file")
+        text = render_markdown(plan)
+        assert "### Breaking Changes" in text and "- not checked: no file" in text
+
+    def test_markdown_says_when_breaking_changes_were_checked_elsewhere(self, graph):
+        from release_model import render_markdown
+        plan = build_release_plan(graph, RUNTIME, release_kind="minor")
+        plan["breaking_check"] = "checked elsewhere: by hand"
+        assert "- checked elsewhere: by hand" in render_markdown(plan)
+
+    def test_a_major_plan_does_not_refuse_a_breaking_change_with_no_surface(self, graph):
+        docs_only = BreakingChange(number=9, title="docs", paths=("docs/RELEASE.md",))
+        plan = build_release_plan(graph, RUNTIME, release_kind="major", breaking_changes=[docs_only],
+                                  tags=["Cli-v1.4.2"], planned_versions={"PPDS.Cli": "2.0.0"})
+        assert plan["refusals"] == []
+
+    @pytest.mark.parametrize("plan, title", [
+        ({"refusals": ["Breaking changes were not checked (x)."], "release_kind": "minor",
+          "release_targets": ["PPDS.Cli"]}, "Release plan refused: breaking changes were not checked"),
+        ({"refusals": ["PPDS.Cli: #1 is labelled breaking-change; a patch version is refused."],
+          "release_kind": "patch", "release_targets": ["PPDS.Cli"]},
+         "Release plan refused: breaking change in a patch release"),
+        ({"refusals": ["PPDS.Cli: #1 … planned version 1.5.0 is not a new major …"],
+          "release_kind": "major", "release_targets": ["PPDS.Cli"]},
+         "Release plan refused: breaking change in a major release"),
+        ({"refusals": ["Breaking changes were not checked (x).", "PPDS.Cli: #1 …"], "release_kind": "minor",
+          "release_targets": ["PPDS.Cli"]},
+         "Release plan refused: breaking changes were not checked and breaking change in a minor release"),
+        ({"refusals": [], "release_kind": "patch", "release_targets": ["PPDS.Cli"],
+          "breaking_check": "checked elsewhere: by hand"},
+         "Patch release review: PPDS.Cli (breaking changes checked elsewhere: by hand)"),
+        ({"refusals": [], "release_kind": "patch", "release_targets": [], "breaking_check": "checked"},
+         "No product release needed"),
+    ])
+    def test_title_names_the_refusal_kind_and_checked_elsewhere(self, plan, title):
+        assert rp._title(plan) == title
+
+
+def test_runbook_says_release_branch_pull_requests_need_their_own_list():
+    text = " ".join((REPO_ROOT / "docs" / "runbooks" / "release.md").read_text(encoding="utf-8").split())
+    assert "--base release/X.Y" in text
+    assert "merged straight into a `release/X.Y` branch" in text
