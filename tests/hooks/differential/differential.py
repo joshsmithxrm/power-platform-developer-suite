@@ -324,6 +324,9 @@ def run_statement_oracle(size: int = CI_SIZE_SHELL, seed: int = 1780, cases_dir=
             if starts["pwsh"]:
                 started["pwsh"] += 1 if mode == MODES[0] else 0
             passed = [tool for tool, r in res.items() if not _blocked(r)]
+            for r in res.values():
+                if r.code not in (0, 2):
+                    s[f"hook_exit_{r.code}"] += 1  # a crash or timeout lets the command run
             if any(r.seconds > 3.5 for r in res.values()):
                 s["slower_than_budget"] += 1
             if not harms:
@@ -341,6 +344,7 @@ def run_statement_oracle(size: int = CI_SIZE_SHELL, seed: int = 1780, cases_dir=
                 failures.append({"tool": tool, "mode": mode, "command": t.text, "recipe": t.recipe, "core": t.core,
                                  "cause": h.cause, "severity": sev, "detail": h.detail, "started_under": shell,
                                  "program": program, "argv": argv, "hook_exit": res[tool].code,
+                                 "hook_stderr": res[tool].stderr[-2000:] if res[tool].code not in (0, 2) else "",
                                  "starts": {k: [[p, a] for p, a, _, _ in v] for k, v in starts.items()}})
                 s["fail_" + sev] += 1
         failures, unconfirmed = _confirm_shell(lab, failures)

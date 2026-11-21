@@ -148,7 +148,8 @@ class Sandbox:
     def hook_env(self, mode: str) -> dict:
         spec = MODE_SPEC[mode]
         env = _scrubbed_env()
-        env.update({"CLAUDE_PROJECT_DIR": str(self.projects[mode]), "HOME": str(self.mode_homes[mode])})
+        env.update({"CLAUDE_PROJECT_DIR": str(self.projects[mode]), "HOME": str(self.mode_homes[mode]),
+                    "PYTHONFAULTHANDLER": "1"})  # a crashing hook prints where it crashed (no effect otherwise)
         if spec["allow"] == "env":
             env["PPDS_SAFE_ENVS"] = ALLOWLIST
         if spec["shakedown"] == "env":
@@ -236,19 +237,33 @@ def oracle_is_stale() -> bool:
     return not ORACLE_DLL.exists() or _newest_source_mtime() > ORACLE_DLL.stat().st_mtime
 
 
+_FORCED_BUILD_DONE = False
+
+
 def build_oracle(force: bool = False) -> None:
     """Build the helper (and so src/PPDS.Cli) when it is missing, when any product source is newer than
-    it, or when forced. Raises OracleUnavailable when it cannot."""
+    it, or when forced (once per process). Builds from parallel runs take a file lock, so they run one
+    after the other. Raises OracleUnavailable when it cannot."""
+    global _FORCED_BUILD_DONE
+    force = force and not _FORCED_BUILD_DONE
     if not force and not oracle_is_stale():
         return
     if shutil.which("dotnet") is None:
         raise OracleUnavailable("dotnet is not on PATH")
-    r = subprocess.run(["dotnet", "build", str(ORACLE_DIR / "ParseOracle.csproj"), "-v", "q", "-nologo"],
-                       capture_output=True, text=True, timeout=1800, cwd=str(REPO))
+    ORACLE_DIR.joinpath("obj").mkdir(exist_ok=True)
+    with open(ORACLE_DIR / "obj" / "build.lock", "w") as lock:
+        try:
+            import fcntl
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        except ImportError:  # Windows: no parallel runs expected
+            pass
+        r = subprocess.run(["dotnet", "build", str(ORACLE_DIR / "ParseOracle.csproj"), "-v", "q", "-nologo"],
+                           capture_output=True, text=True, timeout=1800, cwd=str(REPO))
     if r.returncode != 0 or not ORACLE_DLL.exists():
         tail = "\n".join((r.stdout + r.stderr).splitlines()[-15:])
         raise OracleUnavailable("building ParseOracle failed:\n" + tail)
     ORACLE_DLL.touch()  # an up-to-date build may not rewrite the file
+    _FORCED_BUILD_DONE = _FORCED_BUILD_DONE or force
 
 
 class ParseOracle:

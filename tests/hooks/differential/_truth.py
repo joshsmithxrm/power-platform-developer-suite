@@ -31,7 +31,8 @@ READ_SQL_KINDS = {"SelectStatement", "PrintStatement", "DeclareVariableStatement
 
 ENV_GROUPS = {"env", "org"}
 # Pure local or discovery reads on an unlisted active environment (policy severity). `env who` is not one:
-# it sends WhoAmI to the active environment (EnvCommandGroup.ExecuteWhoAsync), so it is a requirement harm.
+# it sends WhoAmI to the active environment (EnvCommandGroup.ExecuteWhoAsync), so it is a requirement harm,
+# unless --environment names another environment (then WhoAmI goes there; judged in judge()).
 # `env list` asks Global Discovery, not the active environment; `env config` / `env type` in their --list /
 # --show forms only read local settings.
 ENV_READ_DIAGNOSTICS = {"list", "config", "type"}
@@ -163,6 +164,16 @@ def judge(oracle, program: str, argv: list, mode: str, overrides: dict | None = 
             return t, harms  # switching INTO a listed environment is allowed (R4)
         if path == ("auth", "select") and _listed(profile_environment(chosen_profile, mode)) and not _any_override(overrides):
             return t, harms  # selecting a profile whose environment is listed is a switch into a listed one
+        if is_env and path[1] == "who":
+            # ExecuteWhoAsync sends WhoAmI to the --environment value when one is given (resolved by
+            # EnvironmentResolutionService: a direct connection to that URL or Global Discovery, never the
+            # active environment), else to the active environment.
+            override = _opt_value(opts, "--environment")
+            if isinstance(override, str) and override.strip():
+                if _listed(override) and not _any_override(overrides):
+                    return t, harms
+                harms.append(Harm("environment-override", "requirement", f"--environment binds {override!r}"))
+                return t, harms
         if is_env and path[1] in ENV_READ_DIAGNOSTICS and not (
                 path[1] in ("config", "type") and cli_can_write(t)[0]):
             harms.append(Harm("env-diagnostic-on-unlisted-active", "policy", " ".join(path)))

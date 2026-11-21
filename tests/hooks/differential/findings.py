@@ -115,6 +115,13 @@ def _labels(f: dict) -> list:
 
 
 def classify(f: dict) -> str:
+    # A hook that crashes (a signal, exit 1) or outlives its timeout lets the command run: its own finding,
+    # never folded into the class of the text (so no expected-failure label can cover it).
+    code = f.get("hook_exit")
+    if code == "TIMEOUT":
+        return "hook-timeout"
+    if isinstance(code, int) and code not in (0, 2):
+        return "hook-crash"
     if f.get("label") and f.get("cause") in ("over-timeout", "over-budget", "not-refused", "cost-rule"):
         return f["label"]
     labels = _labels(f)
