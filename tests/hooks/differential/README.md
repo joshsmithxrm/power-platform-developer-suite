@@ -4,6 +4,33 @@
 To do that it imitates two real things: how `bash` and PowerShell turn a text into programs and arguments, and how the CLI's own parsers bind those arguments.
 These tests check the hook against those real things, on generated inputs, instead of against hand-picked examples.
 
+## What "the suite is green" proves, and what it does not
+
+**Green means:** `python -m pytest tests/hooks/differential` ends with no failure and no skip (in CI the job sets `PPDS_DIFF_REQUIRE=1`, so a missing SDK, `bash` or `pwsh` is a failure, not a skip), with `PPDS_DIFF_XFAIL` unset. Then, at the seeds and sizes that ran:
+
+- For every generated argument vector (every runnable command path of the real CLI tree, crossed with the shapes listed below) and every generated command text, in all eight modes and for both tool names, the hook refused everything the product's own parsers and real `bash` / `pwsh` say would run harmfully in that mode (requirement severity, including the `-approx` host and wrapper forms).
+- Every write path of the CLI was judged as a write at least once in the shakedown.
+- The shells provably recorded: every text has a recorded outcome under `bash` and under `pwsh`, known-good canary texts recorded their start at the beginning, middle and end of every batch, and timeouts, unreproduced PowerShell-only failures, parse-oracle errors and unverified or dropped renderings stayed within the limits under "Integrity" (most of them zero).
+- Ordinary searches and process queries that only mention a program name were not refused with a listed environment and no shakedown (the cost rule).
+- Long texts (to 110,000 characters by default) and raw text far above the caps (200,000 characters by default) were answered inside the documented budget plus start-up allowance, and inside the registered timeout.
+
+For the exit rule of #1814 run the long size on fresh seeds as well; each must also be green:
+
+```bash
+python tests/hooks/differential/differential.py all --long --seeds 7,20261120,314159
+```
+
+(`PPDS_DIFF_SEED=<n> python -m pytest tests/hooks/differential` runs the default size at another seed.)
+
+**Green does not prove:**
+
+- Anything about inputs the generators do not make: see "What is not covered" (Windows shells, script files, aliases, `[LABEL].entity`, PATH changes and others). The generators are broad but finite; a generated corpus samples the input space.
+- That a command path in `read_paths.json` really only reads: that list is frozen and was checked by review, not by these tests.
+- What a handler does beyond its parse (for example whether `--dry-run` keeps an implicit `EXEC` from executing): ground truth stops at the parsers and the stand-ins.
+- Enforcement by Claude Code itself (that a refusal stops the command, that the hook is called for both tools): only the hook's own decision is tested.
+- The policy-severity results (`env list` and the read forms of `env config` / `env type` with an unlisted active environment, and environment-gate harms in a listed-environment text that names no target): they are reported, not failed, unless `PPDS_DIFF_STRICT=1`.
+- Timing on another machine: the measured times depend on the machine's load.
+
 ## The two oracles
 
 | | Oracle 1: argument level | Oracle 2: statement level |

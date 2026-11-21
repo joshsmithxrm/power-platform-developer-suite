@@ -541,9 +541,29 @@ def run_ordinary_oracle(limit=None, seed: int = 7, cases_dir=None) -> dict:
         sandbox.cleanup()
 
 
+def _run_all(a) -> int:
+    """Every check, for each seed: the exit rule's instrument. Exit 1 when any check fails."""
+    seeds = [int(x) for x in (a.seeds or str(a.seed if a.seed is not None else 1814)).split(",")]
+    summary, bad = [], 0
+    for seed in seeds:
+        for name in ("args", "shell", "timing", "raw", "ordinary"):
+            argv = [name, "--seed", str(seed)] + (["--long"] if a.long else []) + (["--strict"] if a.strict else [])
+            if a.cases:
+                argv += ["--cases", str(Path(a.cases) / f"seed{seed}-{name}")]
+            if a.json:
+                argv += ["--json", str(Path(a.json).with_suffix(f".seed{seed}.{name}.json"))]
+            rc = main(argv)
+            summary.append((seed, name, rc))
+            bad += rc != 0
+    for seed, name, rc in summary:
+        print(f"seed {seed} {name}: {'FAILED' if rc else 'ok'}", file=sys.stderr)
+    return 1 if bad else 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("oracle", choices=("args", "shell", "timing", "raw", "ordinary"))
+    ap.add_argument("oracle", choices=("args", "shell", "timing", "raw", "ordinary", "all"))
+    ap.add_argument("--seeds", help="all: comma-separated seeds; each runs every check (fresh seeds)")
     ap.add_argument("--size", type=int)
     ap.add_argument("--long", action="store_true", help="the larger corpus for a long run")
     ap.add_argument("--seed", type=int)
@@ -554,6 +574,8 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     if a.long:
         os.environ["PPDS_DIFF_REBUILD"] = "1"  # the long run always rebuilds the parse helper
+    if a.oracle == "all":
+        return _run_all(a)
     if a.oracle == "args":
         size = a.size or (LONG_SIZE_ARGS if a.long else CI_SIZE_ARGS)
         rep = run_argument_oracle(size, a.seed if a.seed is not None else 1814, a.cases, a.strict)

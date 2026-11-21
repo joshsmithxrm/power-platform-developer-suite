@@ -33,6 +33,8 @@ STRICT = os.environ.get("PPDS_DIFF_STRICT") == "1"
 REQUIRE = os.environ.get("PPDS_DIFF_REQUIRE") == "1"
 XFAIL = os.environ.get("PPDS_DIFF_XFAIL") == "1"
 CASES = os.environ.get("PPDS_DIFF_CASES") or None
+# A fresh seed for every generator (default: the fixed seeds the expected-failure labels were taken at).
+SEED = int(os.environ["PPDS_DIFF_SEED"]) if os.environ.get("PPDS_DIFF_SEED") else None
 EXPECTED = json.loads((HERE / "expected_failures.json").read_text(encoding="utf-8"))
 
 
@@ -48,19 +50,19 @@ def args_report():
         build_oracle()
     except OracleUnavailable as exc:
         _missing(f"argument oracle unavailable: {exc}")
-    return differential.run_argument_oracle(SIZE_ARGS, 1814, CASES, STRICT)
+    return differential.run_argument_oracle(SIZE_ARGS, 1814 if SEED is None else SEED, CASES, STRICT)
 
 
 @pytest.fixture(scope="module")
 def shell_report():
     if not shutil.which("bash") or not shutil.which("pwsh"):
         _missing("statement oracle needs real bash and pwsh")
-    return differential.run_statement_oracle(SIZE_SHELL, 1780, CASES, STRICT)
+    return differential.run_statement_oracle(SIZE_SHELL, 1780 if SEED is None else SEED, CASES, STRICT)
 
 
 @pytest.fixture(scope="module")
 def timing_report():
-    return differential.run_timing_oracle(TIMING_LENGTHS, ("shakedown",), 110, CASES)
+    return differential.run_timing_oracle(TIMING_LENGTHS, ("shakedown",), 110 if SEED is None else SEED, CASES)
 
 
 def _check(report: dict, mode: str) -> None:
@@ -145,7 +147,7 @@ RAW_LENGTHS = tuple(int(x) for x in os.environ.get("PPDS_DIFF_RAW_LENGTHS", "200
 def ordinary_report():
     if not shutil.which("bash") or not shutil.which("pwsh"):
         _missing("the ordinary-mention check needs real bash and pwsh")
-    return differential.run_ordinary_oracle(ORDINARY_LIMIT, 7, CASES)
+    return differential.run_ordinary_oracle(ORDINARY_LIMIT, 7 if SEED is None else SEED, CASES)
 
 
 @pytest.fixture(scope="module")
