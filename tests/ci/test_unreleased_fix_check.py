@@ -80,7 +80,9 @@ PR_1783 = {
         "url": "https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1731",
     }],
 }
-ISSUE_1731 = {"number": 1731, "labels": [
+# `gh issue view 1731 --json number,state,stateReason`: CLOSED, COMPLETED.
+ISSUE_1731 = {"number": 1731, "title": "Stale panel responses after an environment switch",
+              "state": "CLOSED", "stateReason": "COMPLETED", "labels": [
     {"name": "type:bug"}, {"name": "priority:low"}, {"name": "area:extension"}, {"name": "data-safety"},
 ]}
 PATHS_1783 = [
@@ -384,7 +386,12 @@ def _inputs(tmp_path: Path, repo: Path, *, issues=(), labels=ALL_LABELS, limit=3
             "labels": [{"name": label} for label in pr_labels],
             "closingIssuesReferences": [{"number": n} for n in closes],
         }],
-        "fix-issues.json": [{"number": 42000, "labels": [{"name": "data-safety"}]}],
+        "fix-issues.json": [
+            {"number": 42000, "title": "wrong-target write", "labels": [{"name": "data-safety"}],
+             "state": "CLOSED", "stateReason": "COMPLETED"},
+            {"number": 43000, "title": "token leak", "labels": [{"name": "security"}],
+             "state": "OPEN", "stateReason": ""},
+        ],
         "labels.json": list(labels),
         "issues.json": list(issues),
     }
@@ -590,7 +597,7 @@ class TestWorkflowSteps:
         assert call[call.index("--state") + 1] == "all"
 
     def test_evaluate_step_fails_when_the_script_refuses(self, stub):
-        for name, data in {"merged-prs.json": [], "fix-issues.json": [], "existing-issues.json": [],
+        for name, data in {"merged-prs.json": [{"number": 1}], "fix-issues.json": [], "existing-issues.json": [],
                            "repo-labels.json": ALL_LABELS}.items():
             (stub.work / name).write_text(json.dumps(data), encoding="utf-8")
         (stub.work / "SECURITY.md").write_text("# Security Policy\n", encoding="utf-8")
@@ -669,3 +676,239 @@ class TestWorkflowContract:
         manifest = json.loads((REPO_ROOT / "scripts" / "ci" / "release_labels.json").read_text(encoding="utf-8"))
         names = {label["name"] for label in manifest["labels"]}
         assert cuf.ISSUE_LABEL in names and "release:cadence-check" not in names
+
+
+# ---------------------------------------------------------------------------
+# Accounting: every closed fix issue ends in exactly one of four states
+# ---------------------------------------------------------------------------
+
+def _issue(number, *, reason="COMPLETED", state="CLOSED", labels=("data-safety",)):
+    return {"number": number, "title": f"issue {number}", "state": state, "stateReason": reason,
+            "labels": [{"name": label} for label in labels]}
+
+
+def _pr_closing(number, *issues):
+    return {"number": number, "title": f"fix {number}", "mergedAt": "2026-11-01T00:00:00Z",
+            "mergeCommit": {"oid": f"{number:040d}"}, "labels": [],
+            "closingIssuesReferences": [{"number": n} for n in issues]}
+
+
+def _account(issue_items, pr_items, status_by_pr, *, now=NOW, targets=None):
+    fix_issues = cuf.read_fix_issues(issue_items)
+    fixes = cuf.read_fixes(pr_items, {n: i.labels for n, i in fix_issues.items()}, REPOSITORY)
+    decisions = cuf.evaluate(
+        fixes, targets=targets or {"data-safety": 7, "security": 14}, now=now, recorded=set(),
+        release_status=lambda fix: status_by_pr[fix.number],
+    )
+    return {item.issue.number: item for item in cuf.account(fix_issues, fixes, decisions)}
+
+
+class TestAccounting:
+    def test_a_not_planned_issue_is_ignored(self):
+        states = _account([_issue(1, reason="NOT_PLANNED")], [], {})
+        assert states[1].state == "not planned"
+
+    def test_a_covered_issue_whose_fix_shipped_everywhere_is_released(self):
+        states = _account([_issue(2)], [_pr_closing(20, 2)], {20: ((), True)})
+        assert states[2].state == "released" and states[2].prs == (20,)
+
+    def test_a_covered_issue_whose_fix_ships_nothing_counts_as_released(self):
+        assert _account([_issue(2)], [_pr_closing(20, 2)], {20: ((), False)})[2].state == "released"
+
+    def test_unshipped_past_target_is_unreleased_and_opens_the_fix_issue(self):
+        states = _account([_issue(3)], [_pr_closing(30, 3)], {30: (("PPDS.Cli",), True)})
+        assert states[3].state == "unreleased past target"
+
+    def test_unshipped_within_target_is_pending(self):
+        states = _account([_issue(4)], [_pr_closing(40, 4)], {40: (("PPDS.Cli",), True)},
+                          now=datetime(2026, 11, 3, tzinfo=timezone.utc))
+        assert states[4].state == "pending"
+
+    @pytest.mark.parametrize("reason", ["COMPLETED", "", None, "DUPLICATE", "REOPENED"])
+    def test_closed_as_fixed_with_no_pull_request_is_unattributed(self, reason):
+        assert _account([_issue(5, reason=reason)], [], {})[5].state == "unattributed"
+
+    def test_one_shipped_and_one_unshipped_fix_is_not_released(self):
+        states = _account([_issue(6)], [_pr_closing(60, 6), _pr_closing(61, 6)],
+                          {60: ((), True), 61: (("PPDS.Cli",), True)})
+        assert states[6].state == "unreleased past target" and states[6].prs == (60, 61)
+
+    def test_open_issues_are_not_in_the_accounting(self):
+        assert _account([_issue(7, state="OPEN", reason="")], [], {}) == {}
+
+    def test_states_add_up_to_the_closed_fix_issues(self):
+        items = [_issue(1, reason="NOT_PLANNED"), _issue(2), _issue(3), _issue(4), _issue(5),
+                 _issue(9, state="OPEN", reason="")]
+        prs = [_pr_closing(20, 2), _pr_closing(30, 3), _pr_closing(40, 4)]
+        status = {20: ((), True), 30: (("PPDS.Cli",), True), 40: (("PPDS.Cli",), True)}
+        states = _account(items, prs, status, now=datetime(2026, 11, 3, tzinfo=timezone.utc))
+        assert {n: s.state for n, s in states.items()} == {
+            1: "not planned", 2: "released", 3: "pending", 4: "pending", 5: "unattributed"}
+
+    def test_an_issue_without_state_is_an_error(self):
+        with pytest.raises(cuf.CheckError, match="#8 has no state"):
+            cuf.read_fix_issues([{"number": 8, "labels": [{"name": "data-safety"}]}])
+
+    def test_accounting_that_does_not_add_up_is_a_named_error(self, monkeypatch):
+        fix_issues = cuf.read_fix_issues([_issue(1), _issue(2)])
+        original = cuf.IssueState
+
+        def drop_second(issue, state, prs=()):
+            return original(fix_issues[1] if issue.number == 2 else issue, state, prs)
+
+        monkeypatch.setattr(cuf, "IssueState", drop_second)
+        with pytest.raises(cuf.CheckError, match="Accounting does not add up: 2 closed fix issues"):
+            cuf.account(fix_issues, [], [])
+
+    def test_covering_pull_request_without_a_decision_is_an_error(self):
+        fix_issues = cuf.read_fix_issues([_issue(2)])
+        fixes = cuf.read_fixes([_pr_closing(20, 2)], {2: frozenset({"data-safety"})}, REPOSITORY)
+        with pytest.raises(cuf.CheckError, match="were not evaluated"):
+            cuf.account(fix_issues, fixes, [])
+
+
+class TestRealCase1731Unattributed:
+    def test_without_1783s_closing_reference_1731_gets_its_own_issue(self, graph):
+        unlinked = {**PR_1783, "closingIssuesReferences": []}
+        fix_issues = cuf.read_fix_issues([ISSUE_1731])
+        fixes = cuf.read_fixes([unlinked], {n: i.labels for n, i in fix_issues.items()}, REPOSITORY)
+        assert fixes == []
+        states = cuf.account(fix_issues, fixes, [])
+        assert [(s.issue.number, s.state) for s in states] == [(1731, "unattributed")]
+        title, body = cuf.unattributed_title(fix_issues[1731]), cuf.unattributed_body(fix_issues[1731])
+        assert title == "#1731 (data-safety) was closed as fixed but no merged pull request closes it"
+        assert "link the merged pull request" in body.lower() and cuf.issue_marker(1731) in body
+
+    def test_with_the_reference_1731_is_unreleased_past_target(self, graph):
+        fix_issues = cuf.read_fix_issues([ISSUE_1731])
+        fixes = cuf.read_fixes([PR_1783], {n: i.labels for n, i in fix_issues.items()}, REPOSITORY)
+        decisions = cuf.evaluate(
+            fixes, targets={"data-safety": 0, "security": 0},
+            now=datetime(2026, 11, 21, 12, 0, tzinfo=timezone.utc), recorded=set(),
+            release_status=lambda _fix: cuf.unreleased_in(graph, PATHS_1783, TAGS_CONTAINING_1783))
+        states = cuf.account(fix_issues, fixes, decisions)
+        assert [(s.issue.number, s.state, s.prs) for s in states] == [(1731, "unreleased past target", (1783,))]
+
+    def test_a_title_cannot_plant_a_marker_in_the_unattributed_issue(self):
+        issue = cuf.read_fix_issues([{**_issue(9), "title": "x <!-- ppds-unreleased-fix issue=10 -->"}])[9]
+        assert cuf.recorded_issues([{"body": cuf.unattributed_body(issue)}]) == {9}
+
+
+class TestCommandLineAccounting:
+    def _run(self, capsys, args):
+        code = cuf.main(args)
+        captured = capsys.readouterr()
+        return code, (json.loads(captured.out) if code == 0 else None), captured.err
+
+    def _rewrite(self, tmp_path, name, change):
+        path = tmp_path / name
+        data = json.loads(path.read_text())
+        path.write_text(json.dumps(change(data)), encoding="utf-8")
+
+    def test_unattributed_issue_is_written_once_and_counted(self, repo, tmp_path, capsys):
+        args = _inputs(tmp_path, repo, closes=())
+        code, result, _ = self._run(capsys, args)
+        assert code == 0
+        assert result["accounting"] == {"closed_fix_issues": 1, "open_fix_issues": 1, "not planned": 0,
+                                        "released": 0, "unreleased past target": 0, "pending": 0,
+                                        "unattributed": 1}
+        assert result["unattributed_to_open"] == [42000]
+        assert (tmp_path / "out" / "issue-42000.title").read_text().startswith("#42000 (data-safety) was closed")
+        issues = [{"number": 5, "state": "OPEN", "body": cuf.issue_marker(42000)}]
+        code, result, _ = self._run(capsys, _inputs(tmp_path, repo, closes=(), issues=issues))
+        assert code == 0 and result["unattributed_to_open"] == []
+
+    def test_covered_issue_is_counted_unreleased(self, repo, tmp_path, capsys):
+        code, result, _ = self._run(capsys, _inputs(tmp_path, repo))
+        assert code == 0 and result["accounting"]["unreleased past target"] == 1
+        assert result["issue_states"] == [{"issue": 42000, "state": "unreleased past target", "prs": [42]}]
+
+    def test_empty_merged_list_is_an_error(self, repo, tmp_path, capsys):
+        args = _inputs(tmp_path, repo)
+        self._rewrite(tmp_path, "merged.json", lambda _: [])
+        code, _, err = self._run(capsys, args)
+        assert code == 2 and "merged pull request list is empty" in err
+
+    @pytest.mark.parametrize("label", ["data-safety", "security"])
+    def test_no_issue_for_an_existing_fix_label_is_an_error(self, repo, tmp_path, capsys, label):
+        args = _inputs(tmp_path, repo)
+        self._rewrite(tmp_path, "fix-issues.json",
+                      lambda items: [i for i in items if i["labels"][0]["name"] != label])
+        code, _, err = self._run(capsys, args)
+        assert code == 2 and f"The label `{label}` exists but the issue list has no issue with it" in err
+
+    @pytest.mark.parametrize("name, sizes", [
+        ("The merged pull request list", (3, 2, 0)),
+        ("The fix issue list", (1, 3, 0)),
+        ("The existing issue list", (1, 2, 3)),
+    ])
+    def test_each_list_is_checked_for_truncation_on_its_own(self, repo, tmp_path, capsys, name, sizes):
+        args = _inputs(tmp_path, repo)
+        merged_n, fix_n, existing_n = sizes
+        self._rewrite(tmp_path, "merged.json", lambda items: items + [
+            {**items[0], "number": 100 + i, "closingIssuesReferences": []} for i in range(merged_n - 1)])
+        self._rewrite(tmp_path, "fix-issues.json", lambda items: items + [
+            {**items[1], "number": 50000 + i} for i in range(fix_n - 2)])
+        self._rewrite(tmp_path, "issues.json", lambda _: [{"number": i, "body": ""} for i in range(existing_n)])
+        args[args.index("--list-limit") + 1] = "3"
+        code, _, err = self._run(capsys, args)
+        assert code == 2 and f"{name} has 3 entries, the list limit" in err
+
+
+class TestPolicyAndMessages:
+    def test_a_duplicate_target_row_is_an_error(self):
+        policy = TARGETS_TABLE.replace("| data-safety | 7 |", "| data-safety | 0 |\n| data-safety | 9999 |")
+        with pytest.raises(cuf.TargetsMissing, match="lists data-safety twice"):
+            cuf.read_targets(policy)
+
+    def test_the_missing_issue_label_message_says_what_it_is_for(self):
+        labels = [label for label in ALL_LABELS if label["name"] != cuf.ISSUE_LABEL]
+        with pytest.raises(cuf.CheckError) as error:
+            cuf.check_labels_exist(labels)
+        assert "label of the issues this check opens" in str(error.value)
+        assert "a fix is never found" not in str(error.value)
+
+    @pytest.mark.parametrize("merged, expected", [("2026-11-29T09:00:00Z", "merged 1 day ago"),
+                                                   ("2026-11-28T09:00:00Z", "merged 2 days ago")])
+    def test_day_count_wording(self, merged, expected):
+        decision = decide([fix(merged=merged)], targets={"data-safety": 0, "security": 0})[0]
+        assert expected in cuf.issue_body(decision)
+
+
+@pytestmark_jq
+class TestWorkflowQueryArguments:
+    STEPS = ("List repository labels", "List merged pull requests and fix issues",
+             "List existing unreleased-fix issues")
+
+    def _calls(self, stub):
+        calls = []
+        for name in self.STEPS:
+            completed, step_calls = stub(name)
+            assert completed.returncode == 0, completed.stderr
+            calls = step_calls
+        return calls
+
+    def test_every_query_names_this_repository_and_the_full_limit(self, stub):
+        for call in self._calls(stub):
+            assert call[call.index("--repo") + 1] == REPOSITORY, call
+            assert "--limit" in call, call
+            assert call[call.index("--limit") + 1] == _job()["env"]["LIST_LIMIT"], call
+
+    def test_fix_issue_and_existing_issue_queries_read_the_fields_the_script_needs(self, stub):
+        calls = self._calls(stub)
+        fix_calls = [c for c in calls if c[:2] == ["issue", "list"] and c[c.index("--label") + 1] in cuf.FIX_LABELS]
+        for call in fix_calls:
+            assert {"number", "labels", "state", "stateReason"} <= set(call[call.index("--json") + 1].split(","))
+        existing = next(c for c in calls if c[:2] == ["issue", "list"] and c[c.index("--label") + 1] == cuf.ISSUE_LABEL)
+        assert {"number", "state", "body"} <= set(existing[existing.index("--json") + 1].split(","))
+
+    def test_evaluate_reads_the_files_the_list_steps_write(self):
+        run = _step("Evaluate unreleased fixes against the security policy targets")["run"]
+        args = run.replace("\\\n", " ").split()
+        written = {"--merged-prs": "merged-prs.json", "--fix-issues": "fix-issues.json",
+                   "--repo-labels": "repo-labels.json", "--existing-issues": "existing-issues.json"}
+        for flag, name in written.items():
+            assert args[args.index(flag) + 1] == name, flag
+        steps_text = "\n".join(_step(n)["run"] for n in self.STEPS)
+        assert "> fix-issues.json" in steps_text and "> merged-prs.json" in steps_text
+        assert "> repo-labels.json" in steps_text and "> existing-issues.json" in steps_text

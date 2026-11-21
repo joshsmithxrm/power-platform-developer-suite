@@ -391,8 +391,11 @@ deliverables are the release plan's own patch targets for the merge commit's
 diff, so a library fix stays unreleased until the CLI, MCP server and Extension
 that carry it have shipped. Tags are parsed with the shared strict SemVer
 implementation; a prerelease or odd-minor Extension tag does not count. A
-missing label, missing targets or a possibly truncated list stop the run with a
-named error. See [specs/release-cycle.md](../specs/release-cycle.md) (Flow 3).
+missing label, missing targets, or a list that may be truncated or is empty
+when it cannot be, stops the run with a named error. Every closed fix issue is
+accounted for: not planned, released, unreleased past target or pending, or
+unattributed (closed as fixed, but no merged pull request closes it; that gets
+its own once-only issue asking for the link). See [specs/release-cycle.md](../specs/release-cycle.md) (Flow 3).
 
 ## Automated Public Artifact Verification
 

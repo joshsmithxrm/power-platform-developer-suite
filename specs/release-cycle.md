@@ -205,15 +205,20 @@ or reopened; a different merged PR receives a different marker and record.
 1. **Weekly cron** (`release-risk-check.yml`) runs on Monday
 2. **Lists** the repository's labels, the pull requests merged into `main`
    with their labels and closing-issue references, the issues labelled
-   `data-safety` or `security`, and the existing `release:unreleased-fix`
-   issues. A **fix** is a merged pull request that carries `data-safety` or
-   `security`, or closes an issue in this repository that carries one (the
-   label is usually on the issue)
-3. **Stops with an error and opens nothing** when a label it relies on
-   (`data-safety`, `security`, `release:unreleased-fix`) does not exist, when
-   a list reaches its fetch limit and may be truncated, or when `SECURITY.md`
-   states no targets. The targets (days after merge, one per label) are the
-   table between the `RELEASE_TARGETS` markers in `SECURITY.md`
+   `data-safety` or `security` with their state and state reason, and the
+   existing `release:unreleased-fix` issues. A **fix** is a merged pull
+   request that carries `data-safety` or `security`, or closes an issue in
+   this repository that carries one (the label is usually on the issue)
+3. **Stops with an error and opens nothing** when:
+   - a label it relies on (`data-safety`, `security`, `release:unreleased-fix`)
+     does not exist;
+   - a list reaches its fetch limit and may be truncated;
+   - a list is empty that cannot be (no merged pull requests at all, or no
+     issue for a fix label that exists);
+   - `SECURITY.md` states no targets, or a target twice.
+
+   The targets (days after merge, one per label) are the table between the
+   `RELEASE_TARGETS` markers in `SECURITY.md`
 4. **Maps** each fix's merge-commit diff to the release plan's own patch
    targets (`build_release_plan`): the changed packages plus every downstream
    deliverable that consumes or bundles them. A fix is released only when
@@ -221,15 +226,29 @@ or reopened; a different merged PR receives a different marker and record.
    library tag alone does not release a fix the CLI, MCP server or Extension
    still carries unshipped. A prerelease, or an odd-minor Extension tag, does
    not count
-5. **If a fix is unreleased somewhere and older than its target**: opens one
-   issue titled "Unreleased {label} fix #{N}: {title}" (cut to 256
-   characters) that names the fix, the issues it closes, the unreleased
-   deliverables, the days since merge and the target. The issue is created
-   with the `release:unreleased-fix` label and carries a marker for the pull
-   request, so a fix gets one issue, open or closed; the pull request title is
-   escaped so it cannot plant a marker
-6. **Maintainer triages**: release the affected packages, or record why not and
-   close the issue
+5. **Accounts for every closed fix issue** in exactly one of four states and
+   prints the count per state. If the counts do not add up to the number of
+   closed fix issues, it stops with a named error:
+   - (a) **not planned**: closed as not planned; ignored;
+   - (b) **released**: closed as fixed, covered by at least one merged pull
+     request's closing reference, every covering fix shipped in every
+     deliverable (or ships nothing);
+   - (c) **unreleased past target** or **pending**: covered, not all shipped;
+     past the target an issue is opened (step 6), within it the fix is
+     reported as pending;
+   - (d) **unattributed**: closed with any reason other than not planned, and
+     covered by no merged pull request (closed by hand, by a commit, or named
+     without a closing keyword)
+6. **Opens issues**, each created with the `release:unreleased-fix` label and
+   a marker, so each one opens once, open or closed:
+   - for an unreleased fix past its target: "Unreleased {label} fix #{N}:
+     {title}" (cut to 256 characters), naming the fix, the issues it closes,
+     the unreleased deliverables, the days since merge and the target. The
+     pull request title is escaped, so it cannot plant a marker;
+   - for an unattributed issue: "#{N} ({label}) was closed as fixed but no
+     merged pull request closes it", asking for the pull request to be linked
+7. **Maintainer triages**: release the affected packages, link the missing
+   pull request, or record why not and close the issue
 
 **Flow 4 — CLI/Extension co-release reconciliation (tag-driven):**
 
@@ -336,10 +355,11 @@ lookup failures stop for review; there is no automated rollback or repair.
 | AC-05 | No issue is opened because of elapsed time alone: only fixes are evaluated, a fix within its target or released in every deliverable opens nothing, and the workflow has no time-since-last-release input | `tests/ci/test_unreleased_fix_check.py::TestDecision`, `TestReadFixes::test_elapsed_time_alone_is_not_a_fix`, `TestWorkflowContract::test_no_elapsed_time_trigger` | ✅ |
 | AC-06 | The release runbook (`docs/runbooks/release.md`) contains a "Patch Release Procedure" section documenting the single-package abbreviated flow | `tests/test_release_runbook_content.py::test_patch_procedure_documented` | ✅ |
 | AC-07 | The release runbook contains a "Stabilization Branch" section documenting when to create one and how to merge back | `tests/test_release_runbook_content.py::test_stabilization_branch_documented` | ✅ |
+| AC-69 | Every closed `data-safety` or `security` issue ends in exactly one state, counted in the output: not planned (ignored), released, unreleased past target (issue opened) or pending, or unattributed (closed as fixed with no merged pull request closing it: its own once-only issue asking for the link). The counts must add up to the closed fix issues, or the check stops with a named error. Recorded case: #1731 without #1783's closing reference is unattributed | `tests/ci/test_unreleased_fix_check.py::TestAccounting`, `TestRealCase1731Unattributed`, `TestCommandLineAccounting::test_unattributed_issue_is_written_once_and_counted` | ✅ |
 | AC-08 | `release-risk-check.yml` does NOT open a second issue for a fix that already has one, open or closed: the issue is created with the `release:unreleased-fix` label, carries a per-PR marker, and the PR title is escaped so it cannot plant one | `tests/ci/test_unreleased_fix_check.py::TestDecision::test_fix_with_an_issue_gets_no_second_one`, `TestDecision::test_title_cannot_plant_a_marker_or_break_the_table`, `TestWorkflowSteps::test_each_issue_is_created_labelled_with_its_title_verbatim` | ✅ |
 | AC-09 | `milestone-release-check.yml` does NOT open a release issue when a milestone is closed with 0 merged PRs | `tests/ci/test_milestone_release_check.py::test_no_issue_on_empty_milestone` | ✅ |
 | AC-10 | `post-merge-release-check.yml` does not open a release issue when the explained advisory finds only deterministic non-product changes | `tests/ci/test_post_merge_release_check.py::TestUnknownPackageWarning::test_workflow_skips_issue_when_model_finds_no_product_impact` | ✅ |
-| AC-11 | `release-risk-check.yml` stops with a named error and opens nothing when `SECURITY.md` has no release targets, when a label it relies on does not exist, when a list may be truncated, or when a query fails; no step can swallow the failure | `tests/ci/test_unreleased_fix_check.py::TestTargets`, `TestFailsLoudly`, `TestCommandLine::test_missing_targets_exit_2_and_open_nothing`, `TestCommandLine::test_missing_label_exit_2_and_open_nothing`, `TestWorkflowSteps`, `TestWorkflowContract::test_no_step_can_swallow_a_failure` | ✅ |
+| AC-11 | `release-risk-check.yml` stops with a named error and opens nothing when `SECURITY.md` has no release targets (or one twice), when a label it relies on does not exist, when a list may be truncated (each list on its own), when a list is empty that cannot be, or when a query fails; no step can swallow the failure, and every query names this repository and the full limit | `tests/ci/test_unreleased_fix_check.py::TestTargets`, `TestFailsLoudly`, `TestPolicyAndMessages`, `TestCommandLine::test_missing_targets_exit_2_and_open_nothing`, `TestCommandLine::test_missing_label_exit_2_and_open_nothing`, `TestCommandLineAccounting`, `TestWorkflowSteps`, `TestWorkflowQueryArguments`, `TestWorkflowContract::test_no_step_can_swallow_a_failure` | ✅ |
 | AC-12 | The release model identifies and explains multiple direct/downstream surfaces when a patch spans the product graph | `tests/ci/test_release_model.py::TestImpactAnalysis::test_pr_1402_fixture_yields_seven_surfaces_excluding_plugins` | ✅ |
 | AC-13 | The release runbook enforces security review gate for stable releases — `docs/qa/security-review-*.md` must exist before tagging `vX.Y.0`; patches and prereleases are exempt | `tests/test_release_runbook_content.py::test_security_review_gate_documented` | ✅ |
 | AC-14 | `extension-publish.yml` auto-dispatches on `Extension-v*` tag push with channel inferred from odd/even minor convention | `tests/ci/test_extension_publish_workflow.py::test_tag_push_trigger` | ✅ |
@@ -401,6 +421,8 @@ lookup failures stop for review; there is no automated rollback or repair.
 | A fix is released only in a prerelease (or an odd-minor Extension) | Still unreleased: users on the stable channel remain exposed |
 | A fix is labelled `data-safety` but changes no release surface | No issue: there is nothing to release (logged as "changes no release surface") |
 | The `data-safety` label is on the issue, not the pull request | The pull request is a fix through its closing-issue reference |
+| A fix issue is closed by hand, by a commit, or named without a closing keyword | Unattributed: its own once-only issue asks for the pull request to be linked |
+| A fix issue is closed as not planned | Ignored, and counted as not planned |
 | A library fix is tagged in the library but not in the CLI, MCP server or Extension that carry it | Still unreleased in those deliverables |
 | A label the check relies on does not exist | The check stops with a named error; it never reports "nothing found" |
 | `SECURITY.md` has no release targets | The check stops with an error and opens nothing; the targets are the maintainer's to set |
@@ -689,7 +711,7 @@ claim. This change does not certify every installed component against all adviso
 
 | Date | Change |
 |------|--------|
-| 2026-11-21 | Replace the 8-week cadence floor with the risk rule for unreleased `data-safety` and `security` fixes (#1791): `release-risk-check.yml` replaces `release-cadence-check.yml`; a fix is a merged PR labelled `data-safety`/`security` or closing an issue so labelled; released means every deliverable in the release plan's patch targets has a stable tag containing the merge; missing labels, targets or a possibly truncated list are named errors; the `release:unreleased-fix` label replaces `release:cadence-check`, AC-04, AC-05, AC-08, AC-11 and AC-31 describe the new rule. Targets come from `SECURITY.md` |
+| 2026-11-21 | Replace the 8-week cadence floor with the risk rule for unreleased `data-safety` and `security` fixes (#1791): `release-risk-check.yml` replaces `release-cadence-check.yml`; a fix is a merged PR labelled `data-safety`/`security` or closing an issue so labelled; released means every deliverable in the release plan's patch targets has a stable tag containing the merge; every closed fix issue is accounted for in one of four states (AC-69); missing labels, targets, a possibly truncated or impossibly empty list are named errors; the `release:unreleased-fix` label replaces `release:cadence-check`, AC-04, AC-05, AC-08, AC-11 and AC-31 describe the new rule. Targets come from `SECURITY.md` |
 | 2026-11-19 | Version progression no longer states the Plugins package version; it points at the newest `Plugins-v*` tag. No release policy change |
 | 2026-11-19 | Move the release procedure from the `/release` skill into `docs/runbooks/release.md`; the skill now only directs an agent to the runbook. AC-06, AC-07, AC-13 and AC-16 are verified against the runbook by `tests/test_release_runbook_content.py`. No release policy change |
 | 2026-11-10 | Add source-bound closeout ledger, explicit required/optional gates, scoped evidence reuse and review contracts; preserve active pre-merge evaluation on ready-for-review events (AC-49 through AC-53) |

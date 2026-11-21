@@ -4,7 +4,9 @@ name: Release Risk Check
 # issue per merged `data-safety` or `security` fix (the label on the pull
 # request, or on an issue it closes) that is still not in a stable release of
 # every deliverable that ships it, past its target in the security policy
-# (SECURITY.md). Elapsed time alone opens nothing.
+# (SECURITY.md), and one per fix issue closed as fixed that no merged pull
+# request closes. Every closed fix issue is accounted for in one of four
+# states. Elapsed time alone opens nothing.
 # Rule logic: scripts/ci/check_unreleased_fixes.py.
 #
 # The script exits 2, and this run fails without opening an issue, while
@@ -60,10 +62,10 @@ jobs:
             --json number,title,mergedAt,mergeCommit,labels,closingIssuesReferences > merged-prs.json
           gh issue list --repo "$GITHUB_REPOSITORY" --state all \
             --label data-safety --limit "$LIST_LIMIT" \
-            --json number,labels > data-safety-issues.json
+            --json number,title,labels,state,stateReason > data-safety-issues.json
           gh issue list --repo "$GITHUB_REPOSITORY" --state all \
             --label security --limit "$LIST_LIMIT" \
-            --json number,labels > security-issues.json
+            --json number,title,labels,state,stateReason > security-issues.json
           jq -s 'add | unique_by(.number)' data-safety-issues.json security-issues.json > fix-issues.json
           echo "Merged pull requests: $(jq 'length' merged-prs.json); fix issues: $(jq 'length' fix-issues.json)"
 

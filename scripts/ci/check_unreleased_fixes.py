@@ -23,6 +23,24 @@ the stable channel are still exposed.
 An unreleased fix older than its target opens one issue that names the fix.
 Nothing opens an issue because of elapsed time alone.
 
+**Accounting from the issues.** Every closed issue that carries a fix label
+ends in exactly one state, and the output counts them:
+
+- (a) ``not planned``: closed as not planned; ignored.
+- (b) ``released``: closed as completed, covered by at least one merged pull
+  request's closing reference, and every covering fix shipped in every
+  deliverable (or changes nothing that ships).
+- (c) ``unreleased past target`` (an issue is opened, once) or ``pending``
+  (still within the target): covered, but not all shipped.
+- (d) ``unattributed``: closed as completed (or any reason other than not
+  planned) and covered by no merged pull request, for example closed by hand,
+  by a commit, or named without a closing keyword. It gets its own once-only
+  issue asking for the pull request to be linked.
+
+The script checks that the states add up to the number of closed labelled
+issues and fails with a named error if they do not. A pull request that
+carries a fix label itself is a fix whether or not an issue is labelled.
+
 **Targets** come from the security policy (``SECURITY.md``), from a table
 between ``<!-- RELEASE_TARGETS:BEGIN -->`` and ``<!-- RELEASE_TARGETS:END -->``
 with one row per label and the number of days after merge::
@@ -33,8 +51,10 @@ with one row per label and the number of days after merge::
     | security | <days> |
 
 **Fails loudly, never silently.** The check exits 2 and opens nothing when the
-policy states no targets, when a label it relies on does not exist in the
-repository, or when a list it was given may be truncated. Each error is named.
+policy states no targets (or a target twice), when a label it relies on does
+not exist in the repository, when a list it was given may be truncated, or
+when a list is empty that cannot be: no merged pull requests at all, or no
+issue for a fix label that exists. Each error is named.
 
 Each opened issue carries a marker for its pull request number. A fix with an
 issue, open or closed, does not get another.
@@ -52,7 +72,7 @@ Inputs (all ``gh ... --json`` output):
 - ``--merged-prs``: ``gh pr list --state merged --base main --json
   number,title,mergedAt,mergeCommit,labels,closingIssuesReferences``
 - ``--fix-issues``: ``gh issue list --state all --label <label> --json
-  number,labels`` for each fix label, merged
+  number,title,labels,state,stateReason`` for each fix label, merged
 - ``--repo-labels``: ``gh label list --json name``
 - ``--existing-issues``: ``gh issue list --label release:unreleased-fix
   --state all --json number,state,body``
@@ -73,7 +93,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable, Optional, Sequence
+from typing import Callable, Iterable, Mapping, Optional, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from release_model import FileChange, ReleaseGraph, SemVer, build_release_plan  # noqa: E402
@@ -160,6 +180,8 @@ def read_targets(policy_text: str) -> dict[str, int]:
         if len(cells) >= 2 and cells[0] in FIX_LABELS:
             if not re.fullmatch(r"\d+", cells[1]):
                 raise TargetsMissing(f"Release target for {cells[0]} is not a whole number of days: {cells[1]!r}")
+            if cells[0] in targets:
+                raise TargetsMissing(f"The security policy's release-target table lists {cells[0]} twice.")
             targets[cells[0]] = int(cells[1])
     missing = [label for label in FIX_LABELS if label not in targets]
     if missing:
@@ -169,15 +191,42 @@ def read_targets(policy_text: str) -> dict[str, int]:
     return targets
 
 
+LABEL_PURPOSE = {
+    "data-safety": "it marks a fix for wrong or lost data; without it no data-safety fix is found",
+    "security": "it marks a security fix; without it no security fix is found",
+    ISSUE_LABEL: ("it is the label of the issues this check opens, and how it finds them again "
+                  "next week; without it the check would open the same issue every week"),
+}
+
+
 def check_labels_exist(repo_labels: Iterable[dict]) -> None:
     names = {str(label.get("name", "")) for label in repo_labels}
     missing = [label for label in REQUIRED_LABELS if label not in names]
     if missing:
         raise CheckError(
-            "The repository has no label " + ", ".join(f"`{label}`" for label in missing)
-            + ". The check relies on it; without it a fix is never found and the run "
-            "would report nothing. The maintainer creates the label."
+            "The repository has no label "
+            + "; ".join(f"`{label}` ({LABEL_PURPOSE[label]})" for label in missing)
+            + ". The maintainer creates it."
         )
+
+
+def check_not_empty(merged: Sequence, fix_issues: Sequence, repo_labels: Iterable[dict]) -> None:
+    """A successful query that returns nothing where the repository has something."""
+    if not merged:
+        raise CheckError(
+            "The merged pull request list is empty, but this repository has merged pull "
+            "requests; the query returned nothing it should have."
+        )
+    existing = {str(label.get("name", "")) for label in repo_labels}
+    for label in FIX_LABELS:
+        if label in existing and not any(
+            label in {entry.get("name") for entry in issue.get("labels") or []} for issue in fix_issues
+        ):
+            raise CheckError(
+                f"The label `{label}` exists but the issue list has no issue with it; the query "
+                "returned nothing. If no issue carries the label yet, that is the cause: label "
+                "the first such issue, or remove the label until it is used."
+            )
 
 
 def check_complete(name: str, items: Sequence, limit: int) -> None:
@@ -239,16 +288,129 @@ def read_fixes(
     return [fixes[number] for number in sorted(fixes)]
 
 
+@dataclass(frozen=True)
+class FixIssue:
+    number: int
+    title: str
+    labels: frozenset[str]
+    state: str
+    reason: str
+
+
+def read_fix_issues(items: Iterable[dict]) -> dict[int, FixIssue]:
+    issues: dict[int, FixIssue] = {}
+    for item in items:
+        labels = frozenset(label.get("name", "") for label in item.get("labels") or []) & set(FIX_LABELS)
+        if not labels:
+            continue
+        number = int(item["number"])
+        state = str(item.get("state") or "").upper()
+        if state not in {"OPEN", "CLOSED"}:
+            raise CheckError(f"Issue #{number} has no state; the issue query must ask for state,stateReason")
+        previous = issues.get(number)
+        issues[number] = FixIssue(
+            number=number, title=str(item.get("title") or ""),
+            labels=labels | (previous.labels if previous else frozenset()),
+            state=state, reason=str(item.get("stateReason") or "").upper(),
+        )
+    return issues
+
+
+STATES = ("not planned", "released", "unreleased past target", "pending", "unattributed")
+
+
+@dataclass(frozen=True)
+class IssueState:
+    issue: FixIssue
+    state: str
+    prs: tuple[int, ...] = ()
+
+
+def account(
+    fix_issues: Mapping[int, FixIssue], fixes: Sequence[Fix], decisions: Sequence[Decision],
+) -> list[IssueState]:
+    """Put every closed fix issue in exactly one state (see the module docstring)."""
+    by_pr = {decision.fix.number: decision for decision in decisions}
+    covering: dict[int, list[int]] = {}
+    for fix in fixes:
+        for number in fix.via_issues:
+            covering.setdefault(number, []).append(fix.number)
+    closed = sorted(number for number, issue in fix_issues.items() if issue.state == "CLOSED")
+    states: list[IssueState] = []
+    for number in closed:
+        issue = fix_issues[number]
+        prs = tuple(sorted(covering.get(number, ())))
+        if issue.reason == "NOT_PLANNED":
+            states.append(IssueState(issue, "not planned", prs))
+            continue
+        if not prs:
+            states.append(IssueState(issue, "unattributed"))
+            continue
+        missing = [pr for pr in prs if pr not in by_pr]
+        if missing:
+            raise CheckError(f"Issue #{number}: covering pull request(s) {missing} were not evaluated")
+        reasons = {by_pr[pr].reason for pr in prs}
+        if reasons <= {"released", "changes no release surface"}:
+            state = "released"
+        elif reasons & {"unreleased past target", "already recorded"}:
+            state = "unreleased past target"
+        else:
+            state = "pending"
+        states.append(IssueState(issue, state, prs))
+    counts = {name: sum(1 for item in states if item.state == name) for name in STATES}
+    if sum(counts.values()) != len(closed) or {item.issue.number for item in states} != set(closed):
+        raise CheckError(
+            f"Accounting does not add up: {len(closed)} closed fix issues, states {counts}"
+        )
+    return states
+
+
 def record_marker(pr_number: int) -> str:
     return f"<!-- ppds-unreleased-fix pr={pr_number} -->"
 
 
-def recorded_prs(issues: Iterable[dict]) -> set[int]:
+def issue_marker(issue_number: int) -> str:
+    return f"<!-- ppds-unreleased-fix issue={issue_number} -->"
+
+
+def _markers(issues: Iterable[dict], kind: str) -> set[int]:
     found: set[int] = set()
     for issue in issues:
-        for match in re.finditer(r"<!-- ppds-unreleased-fix pr=(\d+) -->", str(issue.get("body") or "")):
+        for match in re.finditer(rf"<!-- ppds-unreleased-fix {kind}=(\d+) -->", str(issue.get("body") or "")):
             found.add(int(match.group(1)))
     return found
+
+
+def recorded_prs(issues: Iterable[dict]) -> set[int]:
+    return _markers(issues, "pr")
+
+
+def recorded_issues(issues: Iterable[dict]) -> set[int]:
+    return _markers(issues, "issue")
+
+
+def unattributed_title(issue: FixIssue) -> str:
+    labels = " and ".join(sorted(issue.labels))
+    title = f"#{issue.number} ({labels}) was closed as fixed but no merged pull request closes it"
+    return title[:MAX_ISSUE_TITLE]
+
+
+def unattributed_body(issue: FixIssue) -> str:
+    labels = ", ".join(f"`{label}`" for label in sorted(issue.labels))
+    return f"""\
+## Fix issue closed without a linked pull request
+
+#{issue.number} ({labels}, "{_plain(issue.title)}") was closed as fixed, but no merged pull request closes it. The release risk check cannot tell whether the fix has shipped, so users may still be exposed without any alarm.
+
+## Options for the maintainer
+
+- **Link the pull request**: in #{issue.number}'s Development section, link the merged pull request that fixed it (or add `Closes #{issue.number}` to that pull request's description). The check then follows that pull request to its release.
+- **If it was not fixed**: reopen #{issue.number}, or close it as not planned.
+
+Close this issue once that is done. No further issue opens for #{issue.number}.
+
+{issue_marker(issue.number)}
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -342,6 +504,10 @@ def _plain(text: str) -> str:
     return html.escape(" ".join(text.split()), quote=False).replace("|", "\\|")
 
 
+def _days(count: Optional[int]) -> str:
+    return "1 day" if count == 1 else f"{count} days"
+
+
 def issue_title(decision: Decision) -> str:
     labels = " and ".join(sorted(decision.fix.labels))
     prefix = f"Unreleased {labels} fix #{decision.fix.number}: "
@@ -364,7 +530,7 @@ def issue_body(decision: Decision) -> str:
     return f"""\
 ## Unreleased fix past its release target
 
-#{fix.number} ({labels}){via} was merged {decision.age_days} days ago and is still not in a stable release of {surfaces}. The security policy's target for this kind of fix is {decision.target_days} days after merge.
+#{fix.number} ({labels}){via} was merged {_days(decision.age_days)} ago and is still not in a stable release of {surfaces}. The security policy's target for this kind of fix is {_days(decision.target_days)} after merge.
 
 | Field | Value |
 |-------|-------|
@@ -432,7 +598,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                         help="the --limit the lists were fetched with; a list that reaches it is an error")
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
     parser.add_argument("--current-date", help="ISO-8601 date/time to treat as now (default: now, UTC)")
-    parser.add_argument("--issue-dir", type=Path, help="write <pr>.title and <pr>.md for each issue to open")
+    parser.add_argument("--issue-dir", type=Path,
+                        help="write <pr>.title/.md and issue-<n>.title/.md for each issue to open")
     args = parser.parse_args(argv)
 
     errors: list[str] = []
@@ -451,34 +618,53 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
 
     try:
+        repo_labels = _load(args.repo_labels)
         merged = _load(args.merged_prs)
-        fix_issues = _load(args.fix_issues)
+        fix_issue_items = _load(args.fix_issues)
         existing = _load(args.existing_issues)
         check_complete("The merged pull request list", merged, args.list_limit)
-        check_complete("The fix issue list", fix_issues, args.list_limit)
+        check_complete("The fix issue list", fix_issue_items, args.list_limit)
         check_complete("The existing issue list", existing, args.list_limit)
-        fixes = read_fixes(merged, issue_fix_labels(fix_issues), args.repository)
-        recorded = recorded_prs(existing)
+        check_not_empty(merged, fix_issue_items, repo_labels)
+        fix_issues = read_fix_issues(fix_issue_items)
+        fixes = read_fixes(merged, {n: issue.labels for n, issue in fix_issues.items()}, args.repository)
         now = parse_utc(args.current_date) if args.current_date else datetime.now(timezone.utc)
         repo_root = args.repo_root.resolve()
         decisions = evaluate(
-            fixes, targets=targets, now=now, recorded=recorded,
+            fixes, targets=targets, now=now, recorded=recorded_prs(existing),
             release_status=git_release_status(repo_root, ReleaseGraph.discover(repo_root)),
         )
+        states = account(fix_issues, fixes, decisions)
     except (CheckError, OSError, ValueError, KeyError, TypeError, RuntimeError) as error:
         print(f"::error title=Unreleased-fix check::could not evaluate: {error}", file=sys.stderr)
         return 2
 
+    recorded_unattributed = recorded_issues(existing)
+    unattributed = [item.issue for item in states
+                    if item.state == "unattributed" and item.issue.number not in recorded_unattributed]
     if args.issue_dir:
         args.issue_dir.mkdir(parents=True, exist_ok=True)
         for decision in decisions:
             if decision.open_issue:
                 (args.issue_dir / f"{decision.fix.number}.title").write_text(issue_title(decision), encoding="utf-8")
                 (args.issue_dir / f"{decision.fix.number}.md").write_text(issue_body(decision), encoding="utf-8")
+        for issue in unattributed:
+            (args.issue_dir / f"issue-{issue.number}.title").write_text(unattributed_title(issue), encoding="utf-8")
+            (args.issue_dir / f"issue-{issue.number}.md").write_text(unattributed_body(issue), encoding="utf-8")
+    counts = {name: sum(1 for item in states if item.state == name) for name in STATES}
     print(json.dumps({
         "targets": targets,
+        "accounting": {
+            "closed_fix_issues": len(states),
+            "open_fix_issues": sum(1 for issue in fix_issues.values() if issue.state == "OPEN"),
+            **counts,
+        },
+        "issue_states": [
+            {"issue": item.issue.number, "state": item.state, "prs": list(item.prs)} for item in states
+        ],
         "decisions": [decision.as_dict() for decision in decisions],
         "issues_to_open": [decision.fix.number for decision in decisions if decision.open_issue],
+        "unattributed_to_open": [issue.number for issue in unattributed],
     }, indent=2, sort_keys=True))
     return 0
 
