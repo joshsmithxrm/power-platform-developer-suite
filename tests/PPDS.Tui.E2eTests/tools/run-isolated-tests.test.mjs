@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { appendFileSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import {
-    LAUNCH_RETRY_PRELOAD, evaluateRun, isolatedEnvironment, parseTuiTestSummary, runIsolatedTests,
+    LAUNCH_RETRY_PRELOAD, evaluateRun, findOrphanSnapshotFiles, isNonTestInvocation, isolatedEnvironment,
+    parseTuiTestSummary, runIsolatedTests,
 } from './run-isolated-tests.mjs';
 
 const PASSING_OUTPUT = '\n  tests: 36 passed, 36 total\n  snapshots: 14 passed, 14 total \n\n';
@@ -14,6 +15,10 @@ const PASSING_OUTPUT = '\n  tests: 36 passed, 36 total\n  snapshots: 14 passed, 
 const ISSUE_OUTPUT = '\n  tests: \x1b[31m1 failed\x1b[39m, \x1b[32m35 passed\x1b[39m, 36 total\n'
     + '  snapshots: \x1b[32m13 passed\x1b[39m, \x1b[33m1 obsolete\x1b[39m, 14 total '
     + '\x1b[2m(Inspect your code changes or use the `-u` flag to update them.)\x1b[22m\n\n';
+// tui-test's summary with a skipped snapshot test (as in review: `test.skip`, filter `import-jobs`).
+const SKIPPED_OUTPUT = '\n  tests: 32 did not run, 1 skipped, 3 passed, 36 total\n'
+    + '  snapshots: 1 passed, 1 obsolete, 2 total \n\n';
+const NOTHING_RAN_OUTPUT = '\n  tests: 36 did not run, 36 total\n\n';
 const OBSOLETE_OUTPUT = '\n  tests: 36 passed, 36 total\n  snapshots: 14 passed, 1 obsolete, 15 total \n\n';
 
 /** A child-process stand-in: writes `output` to its stdout, then closes with `status`. */
@@ -127,12 +132,15 @@ test('tui-test output is passed through as it arrives', async () => {
 });
 
 test('the summary is read with or without colour', () => {
+    const none = { testsFailed: 0, testsSkipped: 0, testsDidNotRun: 0 };
     assert.deepEqual(parseTuiTestSummary(PASSING_OUTPUT),
-        { found: true, testsFailed: 0, testsTotal: 36, snapshotsObsolete: 0 });
+        { ...none, found: true, testsTotal: 36, snapshotsObsolete: 0 });
     assert.deepEqual(parseTuiTestSummary(ISSUE_OUTPUT),
-        { found: true, testsFailed: 1, testsTotal: 36, snapshotsObsolete: 1 });
+        { ...none, found: true, testsFailed: 1, testsTotal: 36, snapshotsObsolete: 1 });
     assert.deepEqual(parseTuiTestSummary('no summary\n'),
-        { found: false, testsFailed: 0, testsTotal: 0, snapshotsObsolete: 0 });
+        { ...none, found: false, testsTotal: 0, snapshotsObsolete: 0 });
+    assert.deepEqual(parseTuiTestSummary(SKIPPED_OUTPUT),
+        { ...none, found: true, testsSkipped: 1, testsDidNotRun: 32, testsTotal: 36, snapshotsObsolete: 1 });
     // A suite without snapshots prints no snapshots line.
     assert.equal(parseTuiTestSummary('  tests: 3 passed, 3 total\n').snapshotsObsolete, 0);
 });
@@ -141,7 +149,7 @@ test('an obsolete snapshot fails a run that tui-test passed', async () => {
     const err = sink();
     const { spawn } = fakeChild({ status: 0, output: OBSOLETE_OUTPUT });
     assert.equal(await runIsolatedTests([], { spawn, stdout: sink(), stderr: err }), 1);
-    assert.match(err.text(), /^Obsolete snapshots: 1 stored snapshot\(s\) under tests\/__snapshots__ were not used by any test, and every test passed\./m);
+    assert.match(err.text(), /^Obsolete snapshots: 1 stored snapshot\(s\) under tests\/__snapshots__ were not used by any test, and every test ran and passed\./m);
     assert.match(err.text(), /npm run tui:test:update/);
 });
 
@@ -189,4 +197,94 @@ test('a retried launch that then started does not change a passing result', () =
     assert.equal(code, 0);
     assert.equal(lines.length, 1);
     assert.match(lines[0], /^TUI launch: 1 failed launch attempt\(s\) were retried/);
+});
+
+test('a skipped or unrun test makes unused snapshots undecidable, and the update command is not advised', () => {
+    for (const output of [SKIPPED_OUTPUT,
+        '\n  tests: 1 skipped, 35 passed, 36 total\n  snapshots: 13 passed, 1 obsolete, 14 total \n']) {
+        const { code, lines } = evaluateRun(0, parseTuiTestSummary(output));
+        assert.equal(code, 1);
+        assert.equal(lines.length, 1);
+        assert.match(lines[0], /^Unused snapshots: 1 stored snapshot\(s\) were not used by this run, and 1 test\(s\) were skipped/);
+        assert.match(lines[0], /this run cannot tell which are obsolete/);
+        assert.match(lines[0], /Do not run `npm run tui:test:update` for this/);
+        assert.doesNotMatch(lines[0], /every test (ran|passed)|Remove them/);
+    }
+});
+
+test('a run in which no test ran fails', () => {
+    const { code, lines } = evaluateRun(0, parseTuiTestSummary(NOTHING_RAN_OUTPUT));
+    assert.equal(code, 1);
+    assert.deepEqual(lines, ['No test ran (36 did not run): the filter matched no test file. Failing.']);
+    // A run in which only skipped tests ran is not "no test ran".
+    assert.equal(evaluateRun(0, parseTuiTestSummary('  tests: 2 skipped, 2 total\n')).code, 0);
+});
+
+test('help, version and the trace viewer are passed through without a summary check', async () => {
+    for (const args of [['--version'], ['-v'], ['--help'], ['-h'], ['help'], ['show-trace', 'trace-file'],
+        ['import-jobs', '--help']]) {
+        assert.equal(isNonTestInvocation(args), true, args.join(' '));
+        const err = sink();
+        const { spawn } = fakeChild({ status: 0, output: '0.0.1-rc.5\n' });
+        assert.equal(await runIsolatedTests(args, { spawn, stdout: sink(), stderr: err }), 0, args.join(' '));
+        assert.equal(err.text(), '');
+    }
+    for (const args of [[], ['import-jobs'], ['-u'], ['--updateSnapshot'], ['-t'], ['--', '--help'],
+        ['help-screen']]) {
+        assert.equal(isNonTestInvocation(args), false, args.join(' '));
+    }
+    // A real run without a summary still fails closed.
+    const { spawn } = fakeChild({ status: 0, output: 'no summary\n' });
+    assert.equal(await runIsolatedTests(['import-jobs'], { spawn, stdout: sink(), stderr: sink() }), 1);
+});
+
+function snapshotTree(files) {
+    const root = mkdtempSync(join(tmpdir(), 'ppds-tui-snapshots-test-'));
+    const tests = join(root, 'tests');
+    for (const file of files) {
+        mkdirSync(join(tests, file, '..'), { recursive: true });
+        writeFileSync(join(tests, file), '');
+    }
+    return { root, tests };
+}
+
+test('a snapshot file whose spec is gone is found; a file with its spec is not', () => {
+    const { root, tests } = snapshotTree([
+        'import-jobs.spec.ts', '__snapshots__/import-jobs.spec.ts.snap',
+        '__snapshots__/ghost-screen.spec.ts.snap',
+        'nested/inner.spec.ts', 'nested/__snapshots__/inner.spec.ts.snap',
+        'nested/__snapshots__/gone.spec.ts.snap',
+        '__snapshots__/notes.txt', 'loose.spec.ts.snap',
+    ]);
+    try {
+        assert.deepEqual(findOrphanSnapshotFiles(tests), [
+            'tests/__snapshots__/ghost-screen.spec.ts.snap',
+            'tests/nested/__snapshots__/gone.spec.ts.snap',
+        ]);
+        assert.deepEqual(findOrphanSnapshotFiles(join(root, 'missing')), []);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test('the committed snapshot files all have their spec', () => {
+    assert.deepEqual(findOrphanSnapshotFiles(new URL('../tests', import.meta.url).pathname
+        .replace(/^\/([A-Za-z]:)/, '$1')), []);
+});
+
+test('a snapshot file without a spec fails a passing run, and is reported in a failed one', async () => {
+    const { root, tests } = snapshotTree(['__snapshots__/ghost-screen.spec.ts.snap']);
+    try {
+        for (const status of [0, 3]) {
+            const err = sink();
+            const { spawn } = fakeChild({ status, output: PASSING_OUTPUT });
+            assert.equal(await runIsolatedTests([], { spawn, stdout: sink(), stderr: err, testsRoot: tests }),
+                status === 0 ? 1 : status);
+            assert.equal(err.text(), 'Obsolete snapshot files: 1 snapshot file(s) have no spec file: '
+                + 'tests/__snapshots__/ghost-screen.spec.ts.snap. The spec was removed or renamed; delete '
+                + 'the file with `git rm` and commit (`npm run tui:test:update` does not remove it).\n');
+        }
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
 });

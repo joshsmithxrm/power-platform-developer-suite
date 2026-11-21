@@ -1,6 +1,6 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { spawn as spawnChild } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { LAUNCH_ATTEMPTS, LAUNCH_FAILURE_LABEL, summarizeLaunchLog } from './launch-retry.mjs';
@@ -67,17 +67,56 @@ export function parseTuiTestSummary(output) {
     return {
         found: tests !== null,
         testsFailed: count(tests?.[1], 'failed'),
+        testsSkipped: count(tests?.[1], 'skipped'),
+        testsDidNotRun: count(tests?.[1], 'did not run'),
         testsTotal: tests ? Number(tests[2]) : 0,
         snapshotsObsolete: count(snapshots?.[1], 'obsolete'),
     };
 }
 
+// tui-test's commands and flags that run no test: commander's help and
+// version output, and the trace viewer. They print no test summary.
+const NON_TEST_FLAGS = new Set(['-h', '--help', '-v', '--version']);
+const NON_TEST_COMMANDS = new Set(['help', 'show-trace']);
+
+/** True for a tui-test invocation that runs no test, so it has no summary to check. */
+export function isNonTestInvocation(args) {
+    const options = args.includes('--') ? args.slice(0, args.indexOf('--')) : args;
+    return NON_TEST_COMMANDS.has(options[0]) || options.some((arg) => NON_TEST_FLAGS.has(arg));
+}
+
+/**
+ * Snapshot files with no spec. tui-test stores the snapshots of
+ * `<dir>/<name>.spec.ts` in `<dir>/__snapshots__/<name>.spec.ts.snap` and only
+ * counts the entries of files whose spec ran, so a file left behind by a
+ * removed or renamed spec is never reported. Returns paths relative to `root`'s
+ * parent, with forward slashes, sorted.
+ */
+export function findOrphanSnapshotFiles(root) {
+    if (!existsSync(root)) return [];
+    const base = dirname(root);
+    const orphans = [];
+    for (const entry of readdirSync(root, { recursive: true, withFileTypes: true })) {
+        const directory = entry.parentPath ?? entry.path;
+        if (!entry.isFile() || !entry.name.endsWith('.snap') || basename(directory) !== '__snapshots__') {
+            continue;
+        }
+        const spec = join(dirname(directory), entry.name.slice(0, -'.snap'.length));
+        if (!existsSync(spec)) {
+            orphans.push(relative(base, join(directory, entry.name)).split(sep).join('/'));
+        }
+    }
+    return orphans.sort();
+}
+
 /**
  * Decides the exit code from tui-test's own status and its summary, and
  * returns the lines to print. A run tui-test passed still fails when it
- * reports an obsolete snapshot, or when its summary cannot be read.
+ * reports an obsolete snapshot, when a snapshot file has no spec, when no test
+ * ran, or when its summary cannot be read.
  */
-export function evaluateRun(status, summary, launches = { retried: 0, failed: 0, errors: [] }) {
+export function evaluateRun(status, summary, launches = { retried: 0, failed: 0, errors: [] },
+    orphanSnapshotFiles = []) {
     const lines = [];
     if (launches.retried > 0) {
         lines.push(`TUI launch: ${launches.retried} failed launch attempt(s) were retried `
@@ -87,6 +126,11 @@ export function evaluateRun(status, summary, launches = { retried: 0, failed: 0,
         lines.push(`${LAUNCH_FAILURE_LABEL}: ${launches.failed} test(s) failed because the `
             + `application under test did not start after ${LAUNCH_ATTEMPTS} attempts. `
             + 'These are launch failures, not assertion failures.');
+    }
+    if (orphanSnapshotFiles.length > 0) {
+        lines.push(`Obsolete snapshot files: ${orphanSnapshotFiles.length} snapshot file(s) have no spec `
+            + `file: ${orphanSnapshotFiles.join(', ')}. The spec was removed or renamed; delete the `
+            + 'file with `git rm` and commit (`npm run tui:test:update` does not remove it).');
     }
     if (status !== 0) {
         if (summary.snapshotsObsolete > 0) {
@@ -101,10 +145,28 @@ export function evaluateRun(status, summary, launches = { retried: 0, failed: 0,
             + 'found, so obsolete snapshots could not be checked. Failing closed.');
         return { code: 1, lines };
     }
+    if (summary.testsTotal - summary.testsDidNotRun <= 0) {
+        lines.push(`No test ran (${summary.testsDidNotRun} did not run): the filter matched no test file. `
+            + 'Failing.');
+        return { code: 1, lines };
+    }
     if (summary.snapshotsObsolete > 0) {
-        lines.push(`Obsolete snapshots: ${summary.snapshotsObsolete} stored snapshot(s) under `
-            + 'tests/__snapshots__ were not used by any test, and every test passed. Remove them with '
-            + '`npm run tui:test:update` and commit the result.');
+        const notRun = summary.testsSkipped + summary.testsDidNotRun;
+        if (notRun > 0) {
+            lines.push(`Unused snapshots: ${summary.snapshotsObsolete} stored snapshot(s) were not used by `
+                + `this run, and ${summary.testsSkipped} test(s) were skipped and `
+                + `${summary.testsDidNotRun} did not run (test.skip, test.only or a filter). The unused `
+                + 'snapshots may belong to those tests, so this run cannot tell which are obsolete. Run '
+                + 'every test, with no skip, only or filter, to decide. Do not run '
+                + '`npm run tui:test:update` for this: it would delete the snapshots of tests that did not run.');
+        } else {
+            lines.push(`Obsolete snapshots: ${summary.snapshotsObsolete} stored snapshot(s) under `
+                + 'tests/__snapshots__ were not used by any test, and every test ran and passed. Remove '
+                + 'them with `npm run tui:test:update` and commit the result.');
+        }
+        return { code: 1, lines };
+    }
+    if (orphanSnapshotFiles.length > 0) {
         return { code: 1, lines };
     }
     return { code: 0, lines };
@@ -144,6 +206,7 @@ export async function runIsolatedTests(args, {
     preloads = [LAUNCH_RETRY_PRELOAD],
     stdout = process.stdout,
     stderr = process.stderr,
+    testsRoot = join(TUI_ROOT, 'tests'),
 } = {}) {
     const root = resolve(temporaryRoot);
     const profileDirectory = mkdtempSync(join(root, 'ppds-tui-fixture-'));
@@ -155,8 +218,11 @@ export async function runIsolatedTests(args, {
         if (stdout.isTTY && env.FORCE_COLOR === undefined) env.FORCE_COLOR = '1';
         const { status, output } = await runChild(spawn, process.execPath, [TUI_TEST_ENTRY, ...args],
             { cwd: TUI_ROOT, env, stdio: ['inherit', 'pipe', 'inherit'] }, stdout);
+        // Help, version and the trace viewer run no test: tui-test's status stands.
+        if (isNonTestInvocation(args)) return status;
         const launches = summarizeLaunchLog(existsSync(launchLog) ? readFileSync(launchLog, 'utf8') : '');
-        const { code, lines } = evaluateRun(status, parseTuiTestSummary(output), launches);
+        const { code, lines } = evaluateRun(status, parseTuiTestSummary(output), launches,
+            findOrphanSnapshotFiles(testsRoot));
         for (const line of lines) stderr.write(line + '\n');
         return code;
     } finally {

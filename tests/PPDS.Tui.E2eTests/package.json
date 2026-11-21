@@ -8,7 +8,7 @@
     "test": "node tools/run-isolated-tests.mjs",
     "test:update": "node tools/run-isolated-tests.mjs --updateSnapshot",
     "test:headed": "node tools/run-isolated-tests.mjs",
-    "test:tools": "node --test tools/launch-retry.test.mjs tools/run-isolated-tests.test.mjs tools/tui-verify.test.mjs tools/launch-retry.tui.test.mjs"
+    "test:tools": "node --test --test-timeout=120000 tools/launch-retry.test.mjs tools/run-isolated-tests.test.mjs tools/tui-verify.test.mjs tools/launch-retry.tui.test.mjs"
   },
   "devDependencies": {
     "@microsoft/tui-test": "^0.0.1-rc.5",

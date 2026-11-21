@@ -102,5 +102,5 @@ jobs:
       if: failure()
       with:
         name: tui-e2e-snapshot-diff
-        path: tests/PPDS.Tui.E2eTests/__snapshots__/
+        path: tests/PPDS.Tui.E2eTests/tests/__snapshots__/
         retention-days: 7

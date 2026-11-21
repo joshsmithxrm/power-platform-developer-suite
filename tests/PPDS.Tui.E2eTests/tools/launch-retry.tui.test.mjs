@@ -29,11 +29,11 @@ function sink() {
     return { write: (text) => { chunks.push(String(text)); return true; }, text: () => chunks.join('') };
 }
 
-async function run(failures) {
+async function run(failures, mode = 'throw') {
     const stdout = sink();
     const stderr = sink();
     const code = await runIsolatedTests([SPEC_FILTER], {
-        preloads: [`${FAULT}?failures=${failures}`, LAUNCH_RETRY_PRELOAD],
+        preloads: [`${FAULT}?failures=${failures}&mode=${mode}`, LAUNCH_RETRY_PRELOAD],
         stdout, stderr,
     });
     return { code, out: stdout.text().replace(/\x1b\[[0-9;]*[A-Za-z]/g, ''), err: stderr.text() };
@@ -60,4 +60,28 @@ test('a launch that never succeeds fails each test once, as a launch failure', {
     // tui-test runs each test once: no test-level retry.
     assert.doesNotMatch(out, /Retry #/);
     assert.match(err, /^TUI launch failure: 3 test\(s\) failed because the application under test did not start after 3 attempts\./m);
+});
+
+// Windows only: the first launch in each worker is a real call to node-pty with
+// a working directory that does not exist, so CreateProcess itself fails in the
+// native code (not an error made up by the fixture); the second is a normal
+// launch in the same worker process. Proves that a real process-creation
+// failure is retried and that the next attempt in that worker starts the TUI.
+// On Linux a missing working directory does not fail spawn (the child process
+// fails later), so there is nothing to prove there.
+const onWindows = platform() === 'win32';
+test('a real process-creation failure on Windows is retried and the next launch starts the TUI', {
+    skip: (!onWindows && 'Windows only: on Linux a missing working directory does not fail spawn')
+        || (!built && 'CLI not built'),
+    timeout: 300_000,
+}, async () => {
+    const { code, out, err } = await run(1, 'missing-cwd');
+    assert.equal(code, 0, out + err);
+    assert.match(out, /^\s*tests: \d+ did not run, 3 passed, \d+ total$/m);
+    const summary = err.match(/^TUI launch: (\d+) failed launch attempt\(s\) were retried .*errors: (.*)\)\.$/m);
+    assert.ok(summary, err);
+    assert.ok(Number(summary[1]) >= 1, err);
+    // The retried error came from node-pty, not from the fixture.
+    assert.doesNotMatch(summary[2], /fault fixture|injected/, err);
+    assert.doesNotMatch(err, /TUI launch failure/);
 });
