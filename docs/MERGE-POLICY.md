@@ -142,32 +142,63 @@ For roll-up branches consolidating many bumps into one PR: avoid unless auto-mer
 
 The [`changelog-check.yml`](../.github/workflows/changelog-check.yml) workflow
 runs `scripts/ci/check_changelog_entry.py` on every pull request to `main`,
-again when the description or labels change (#1789). It is **not** a required
-status check.
+and again when the description or labels change (#1789). It is **not** a
+required status check.
 
 A pull request that changes a package under `src/<package>/` must, in the same
-pull request:
+pull request, do two things.
 
-- add an entry to `src/<package>/CHANGELOG.md` under that package's
-  `## [X.Y.Z] - Unreleased` section. An entry under the empty `## [Unreleased]`
-  section or under a released version fails. A pull request that changes two
-  packages needs an entry in each.
-- say in the "Breaking changes" section of the description `None`, or what
-  breaks and how to migrate (a `Breaking: yes/no` line also counts). A breaking
-  statement needs the `breaking-change` label, the label needs a breaking
-  statement, and the changelog entry of a breaking change must say "breaking".
-  The label is what makes the release plan refuse a non-major version for that
+**1. Add a changelog entry** to `src/<package>/CHANGELOG.md`, under that
+package's `## [X.Y.Z] - Unreleased` section.
+- An entry under the empty `## [Unreleased]` section fails, and so does an
+  entry under a released version.
+- A line that is only a list marker, only a heading or only an HTML comment
+  is not an entry.
+- A pull request that changes two packages needs an entry in each. A file
+  moved from one package to another counts for both.
+- Deleting a package's CHANGELOG does not take the package out of the check.
+- If the CHANGELOG has no `## [X.Y.Z] - Unreleased` section at all, the
+  message says a maintainer step is missing (release runbook, step 3, "Open
+  the next version").
+
+**2. State in the description whether it is breaking**: one line,
+`Breaking: no` or `Breaking: yes`, or the "Breaking changes" section of the
+template.
+- **Not breaking**: only a whole "no" counts: `No`, `None`, `N/A` or
+  `Not breaking`, alone or followed by a separator and a reason
+  (`No: internal refactor`).
+- **Breaking**: a statement that starts with `Yes`.
+- **Any other text** is not read as "no". With the `breaking-change` label it
+  is the description of the break. Without the label it fails as unclear:
+  "No longer accepts `--legacy`", "None of the old flags work",
+  "This is not a breaking change." and "Nothing." all fail this way.
+- A breaking statement needs the `breaking-change` label, and the label needs
+  a breaking statement.
+- The changelog entry of a breaking change must say "breaking" ("non-breaking"
+  does not count).
+- The label is what makes the release plan refuse a non-major version for that
   package ([Release Scope Analysis](RELEASE.md#breaking-changes-refuse-a-non-major-plan)).
 
-Not checked: pull requests labelled `internal` (nothing user-visible changed;
-`internal` together with `breaking-change` fails), Dependabot pull requests
-(major updates are covered by Rule 3), and files the release plan already
-treats as non-product: tests and fixtures (`__tests__/`, `e2e/`, `*.test.*`,
-`*.spec.*`), `*.md` documentation, and the CHANGELOG itself. Generated code
-such as `src/PPDS.Dataverse/Generated/` ships in the package and is checked.
-`src/PPDS.Analyzers` has no CHANGELOG and is not checked.
+**Not checked:**
+- Pull requests labelled `internal` (nothing user-visible changed). The
+  label does not exist yet; the maintainer creates it. `internal` together
+  with `breaking-change` fails.
+- Dependabot pull requests, by author; major updates are covered by Rule 3.
+- These files under `src/`, which the check knows by location:
+  - `src/PPDS.Extension/src/**/__tests__/`;
+  - `src/PPDS.Extension/e2e/`;
+  - `src/PPDS.Extension/tools/*.test.mjs`;
+  - `src/PPDS.Extension/tsconfig.test.json` and `vitest.config.ts`;
+  - `*.md` and `*.mdx` documentation;
+  - the package's own CHANGELOG.
+- `src/PPDS.Analyzers`, which has no CHANGELOG.
 
-To make it required, the maintainer adds the check `Changelog entry and
+A product folder named `Test`, `tests` or `fixtures` is checked. Generated code
+such as `src/PPDS.Dataverse/Generated/` ships in the package and is checked. A
+revert that only removes its own unreleased entry fails, with a message that
+says so; it needs the `internal` exemption.
+
+To make the check required, the maintainer adds the check `Changelog entry and
 breaking statement` to the required status checks of `main`. Before that, the
 `internal` label must exist, and the check should have run on open pull
 requests long enough to show it does not fail correct ones.

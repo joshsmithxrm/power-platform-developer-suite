@@ -7,28 +7,40 @@ request:
 1. add an entry to that package's ``src/<package>/CHANGELOG.md`` under the
    package's ``## [X.Y.Z] - Unreleased`` section (not the empty
    ``## [Unreleased]`` section; see AGENTS.md), and
-2. say in its description whether it is breaking, in the "Breaking changes"
-   section of the pull request template (or a ``Breaking: yes/no`` line).
+2. say in its description whether it is breaking: a ``Breaking: yes`` or
+   ``Breaking: no`` line, or the "Breaking changes" section of the pull
+   request template.
 
 The statement must agree with the ``breaking-change`` label, because the label
 is what the release plan reads (``scripts/ci/release_plan.py
 --breaking-prs-file``) to refuse a non-major version. A breaking pull request's
 changelog entry must say "breaking", so the release notes say it too.
 
+**Reading the statement.** "Not breaking" is never guessed from a prefix. Only
+a whole statement of the form ``No``, ``None``, ``N/A`` or ``Not breaking``
+counts as not breaking, alone, with a full stop, or followed by a separator
+(``:``, ``;``, ``,``, ``.``, a dash) and a reason ("No: internal refactor").
+A statement that starts with ``Yes`` is breaking. Any other text ("No longer
+accepts ``--legacy``", "This is not a breaking change.") is a statement of a
+break when the pull request carries the ``breaking-change`` label, and
+otherwise is rejected as unclear, with a message that says how to write it.
+
 Not checked:
 
-- pull requests labelled ``internal`` (no user-visible change);
+- pull requests labelled ``internal`` (no user-visible change). The label is
+  the maintainer's to create and apply; the failure messages do not assume it
+  exists;
 - Dependabot pull requests (a bot cannot write the entry or the statement;
   major updates are covered by Rule 3 of the Pre-Merge Gate);
-- changed files under ``src/`` that the release plan also treats as
-  non-product (tests, fixtures, ``*.md`` documentation; see
-  ``release_model._is_deterministic_non_product``) and the package's own
-  CHANGELOG;
+- files at the known test locations under ``src/`` (``NON_BEHAVIOUR_PATHS``),
+  ``*.md``/``*.mdx`` documentation, and the package's own CHANGELOG;
 - paths under ``src/`` that belong to no package with a CHANGELOG
   (``src/PPDS.Analyzers`` is a build-time analyzer, never shipped).
 
 Generated code (for example ``src/PPDS.Dataverse/Generated/``) ships in the
-package, so it is checked like hand-written code.
+package, so it is checked like hand-written code. A package whose CHANGELOG the
+pull request deletes is still checked. A revert that only removes its own
+entry fails and needs the ``internal`` exemption; the message says so.
 
 The check is not a required status check. It reads only its inputs; it never
 calls GitHub.
@@ -61,14 +73,22 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from release_model import _is_deterministic_non_product  # noqa: E402
-
 INTERNAL_LABEL = "internal"
 BREAKING_LABEL = "breaking-change"
 DEPENDABOT_AUTHORS = frozenset({"dependabot[bot]", "app/dependabot", "dependabot"})
 
+# Files under src/ that are not a behaviour change. Tied to where tests live
+# today, so a product folder named "Test" or "fixtures" is still checked.
+NON_BEHAVIOUR_PATHS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"^src/PPDS\.Extension/src/(?:.+/)?__tests__/"), "test file"),
+    (re.compile(r"^src/PPDS\.Extension/e2e/"), "end-to-end test file"),
+    (re.compile(r"^src/PPDS\.Extension/tools/[^/]+\.test\.mjs$"), "test file"),
+    (re.compile(r"^src/PPDS\.Extension/(?:tsconfig\.test\.json|vitest\.config\.ts)$"), "test configuration"),
+    (re.compile(r"\.mdx?$", re.IGNORECASE), "documentation"),
+)
+
 SRC_PACKAGE_RE = re.compile(r"^src/(?P<package>[^/]+)/")
+CHANGELOG_RE = re.compile(r"^src/(?P<package>[^/]+)/CHANGELOG\.md$")
 VERSION_UNRELEASED_RE = re.compile(
     r"^## \[(?P<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\] - Unreleased\s*$"
 )
@@ -77,8 +97,22 @@ SECTION_HEADING_RE = re.compile(r"^## ")
 BREAKING_HEADING_RE = re.compile(r"^#{2,3}\s+Breaking(\s+changes?)?\s*:?\s*$", re.IGNORECASE)
 BREAKING_LINE_RE = re.compile(r"^\s*[-*]?\s*\**Breaking\**\s*:\**\s*(?P<rest>.*)$", re.IGNORECASE)
 HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
-NOT_BREAKING_RE = re.compile(r"^(none|no|n/a|not breaking)\b", re.IGNORECASE)
+# The whole statement, not a prefix: "No", "None.", "N/A", "Not breaking",
+# or one of those, a separator, and a reason ("No: internal refactor").
+NOT_BREAKING_RE = re.compile(
+    r"^(?:no|none|n/a|not breaking)(?:\s*\.)?(?:\s*(?:[:;,.]|\s-|\s–|\s—)\s*\S.*)?$",
+    re.IGNORECASE,
+)
 BREAKING_RE = re.compile(r"^yes\b", re.IGNORECASE)
+HOW_TO_STATE = (
+    'Write one line: "Breaking: no" (or "None"), optionally with a reason after '
+    'a colon, or "Breaking: yes" and what breaks, and label the pull request '
+    f"`{BREAKING_LABEL}`."
+)
+INTERNAL_HINT = (
+    "If nothing user-visible changed, the maintainer can exempt the pull request "
+    f"with the `{INTERNAL_LABEL}` label (see docs/MERGE-POLICY.md)."
+)
 
 
 @dataclass(frozen=True)
@@ -103,14 +137,13 @@ def changelog_path(package: str) -> str:
 
 
 def non_behaviour_reason(path: str, package: str) -> Optional[str]:
-    """Return why ``path`` is not a behaviour change, or None if it is one.
-
-    Uses the release plan's own list of deterministic non-product changes, so
-    the two checks agree on what needs a release and what needs an entry.
-    """
+    """Return why ``path`` is not a behaviour change, or None if it is one."""
     if path == changelog_path(package):
         return "package changelog"
-    return _is_deterministic_non_product(path)
+    for pattern, reason in NON_BEHAVIOUR_PATHS:
+        if pattern.search(path):
+            return reason
+    return None
 
 
 def behaviour_packages(
@@ -147,21 +180,31 @@ def _section_of(lines: Sequence[str], index: int) -> str:
     return ""
 
 
-def added_entries(before: Optional[str], after: Optional[str]) -> list[tuple[str, str]]:
-    """Return ``(section heading, line)`` for each added non-blank, non-heading line."""
+def is_entry_text(line: str) -> bool:
+    """A changelog line with content: not blank, a heading, a bare marker or a comment."""
+    text = HTML_COMMENT_RE.sub("", line).strip()
+    if not text or text.startswith("#"):
+        return False
+    return bool(re.sub(r"^(?:[-*+]|\d+[.)])\s*", "", text).strip(" -*+"))
+
+
+def changed_lines(before: Optional[str], after: Optional[str]) -> tuple[list[tuple[str, str]], list[str]]:
+    """Return (added entry lines with their section heading, removed entry lines)."""
     old = (before or "").splitlines()
     new = (after or "").splitlines()
     added: list[tuple[str, str]] = []
+    removed: list[str] = []
     matcher = difflib.SequenceMatcher(a=old, b=new, autojunk=False)
-    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
-        if tag not in {"insert", "replace"}:
-            continue
-        for j in range(j1, j2):
-            line = new[j]
-            if not line.strip() or line.lstrip().startswith("#"):
-                continue
-            added.append((_section_of(new, j), line))
-    return added
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag in {"delete", "replace"}:
+            removed.extend(line for line in old[i1:i2] if is_entry_text(line))
+        if tag in {"insert", "replace"}:
+            added.extend((_section_of(new, j), new[j]) for j in range(j1, j2) if is_entry_text(new[j]))
+    return added, removed
+
+
+def added_entries(before: Optional[str], after: Optional[str]) -> list[tuple[str, str]]:
+    return changed_lines(before, after)[0]
 
 
 def check_changelog(package: str, change: Optional[FileChange]) -> tuple[Optional[str], list[str]]:
@@ -170,14 +213,24 @@ def check_changelog(package: str, change: Optional[FileChange]) -> tuple[Optiona
     if change is None:
         return (
             f"{package}: behaviour changed but {path} was not changed. Add an entry "
-            "under the package's `## [X.Y.Z] - Unreleased` section, or label the "
-            f"pull request `{INTERNAL_LABEL}` if nothing user-visible changed.",
+            f"under the package's `## [X.Y.Z] - Unreleased` section. {INTERNAL_HINT}",
             [],
         )
-    entries = added_entries(change.before, change.after)
+    if change.after is None:
+        return (f"{package}: the pull request deletes {path}; the package's changes still need an entry.", [])
+    entries, removed = changed_lines(change.before, change.after)
     in_version = [line for heading, line in entries if VERSION_UNRELEASED_RE.match(heading)]
     if in_version:
         return None, in_version
+    has_version_section = any(VERSION_UNRELEASED_RE.match(line) for line in change.after.splitlines())
+    if not has_version_section:
+        return (
+            f"{package}: {path} has no `## [X.Y.Z] - Unreleased` section yet, so there is "
+            "nowhere correct for the entry. A maintainer step is missing: the maintainer "
+            "adds the package's next `## [X.Y.Z] - Unreleased` section (release runbook, "
+            "\"Open the next version\"). Ask for it; do not invent a version.",
+            [],
+        )
     if any(EMPTY_UNRELEASED_RE.match(heading) for heading, _ in entries):
         return (
             f"{package}: the entry in {path} is under the empty `## [Unreleased]` "
@@ -192,6 +245,13 @@ def check_changelog(package: str, change: Optional[FileChange]) -> tuple[Optiona
             f"`## [X.Y.Z] - Unreleased` section (added under: {', '.join(elsewhere)}).",
             [],
         )
+    if removed:
+        return (
+            f"{package}: {path} only removes entries. If this reverts a change that was "
+            f"never released, no entry is needed: {INTERNAL_HINT} Otherwise add an entry "
+            "that says what the revert changes for users.",
+            [],
+        )
     return (
         f"{package}: {path} changed, but no entry line was added. Add an entry "
         "under the package's `## [X.Y.Z] - Unreleased` section.",
@@ -200,19 +260,19 @@ def check_changelog(package: str, change: Optional[FileChange]) -> tuple[Optiona
 
 
 def breaking_statement(body: Optional[str]) -> Optional[str]:
-    """Return ``'yes'``, ``'no'`` or None (no statement) from a PR description.
+    """Return ``'yes'``, ``'no'``, ``'unclear'`` or None (no statement).
 
     Reads a ``Breaking:`` line first, then the "Breaking changes" section of
     the pull request template. HTML comments (the template's prompts) do not
-    count. Text in the section other than "None"/"No" lists breaking changes,
-    so it reads as ``'yes'``.
+    count. Only a whole "no" statement is ``'no'`` (see ``NOT_BREAKING_RE``);
+    text that is neither a "no" nor starts with "yes" is ``'unclear'``.
     """
     text = HTML_COMMENT_RE.sub("", body or "").replace("\r\n", "\n")
     lines = text.split("\n")
     for line in lines:
         match = BREAKING_LINE_RE.match(line)
         if match and not BREAKING_HEADING_RE.match(line):
-            verdict = _classify(match.group("rest"))
+            verdict = classify(match.group("rest"))
             if verdict:
                 return verdict
     for index, line in enumerate(lines):
@@ -220,16 +280,16 @@ def breaking_statement(body: Optional[str]) -> Optional[str]:
             continue
         section: list[str] = []
         for following in lines[index + 1:]:
-            if re.match(r"^#{1,3}\s", following):
+            if re.match(r"^#{1,6}\s", following):
                 break
             if following.strip():
                 section.append(following.strip())
         if section:
-            return _classify(" ".join(section)) or "yes"
+            return classify(" ".join(section))
     return None
 
 
-def _classify(text: str) -> Optional[str]:
+def classify(text: str) -> Optional[str]:
     cleaned = re.sub(r"^[\s\-*>`_]+", "", text).strip().strip("*_`\"'").strip()
     if not cleaned:
         return None
@@ -237,7 +297,7 @@ def _classify(text: str) -> Optional[str]:
         return "no"
     if BREAKING_RE.match(cleaned):
         return "yes"
-    return None
+    return "unclear"
 
 
 def evaluate(
@@ -269,7 +329,8 @@ def evaluate(
             result.notes.append(f"Labelled `{INTERNAL_LABEL}`: not checked.")
         return result
 
-    if not packages and BREAKING_LABEL not in label_set:
+    labelled = BREAKING_LABEL in label_set
+    if not packages and not labelled:
         result.notes.append("No behaviour change under src/: not checked.")
         return result
 
@@ -283,11 +344,16 @@ def evaluate(
         entry_lines.extend(lines)
 
     statement = breaking_statement(body)
-    labelled = BREAKING_LABEL in label_set
+    if statement == "unclear" and labelled:
+        # Free text with the label is a description of the break.
+        statement = "yes"
     if statement is None:
+        result.failures.append(f"The description has no breaking statement. {HOW_TO_STATE}")
+    elif statement == "unclear":
         result.failures.append(
-            "The description has no breaking statement. Fill in the \"Breaking "
-            "changes\" section: \"None\", or the breaking change and how to migrate."
+            "The breaking statement is unclear: it is neither a plain \"No\"/\"None\" nor "
+            f"starts with \"Yes\", and the pull request has no `{BREAKING_LABEL}` label. "
+            + HOW_TO_STATE
         )
     elif statement == "yes" and not labelled:
         result.failures.append(
@@ -304,7 +370,7 @@ def evaluate(
         result.notes.append(f"Breaking statement: {statement}.")
 
     if statement == "yes" and packages and entry_lines and not any(
-        "breaking" in line.lower() for line in entry_lines
+        re.search(r"(?<!non-)(?<!non )\bbreaking\b", line, re.IGNORECASE) for line in entry_lines
     ):
         result.failures.append(
             "The change is breaking but no changelog entry says so. Start the entry "
@@ -333,10 +399,26 @@ def _git(repo_root: Path, *args: str, allow_missing: bool = False) -> Optional[s
     raise RuntimeError(f"git {' '.join(args)} failed: {completed.stderr.strip()}")
 
 
-def changes_from_git(repo_root: Path, base: str, head: str) -> list[FileChange]:
-    """Changed files of ``head`` since its merge base with ``base``."""
+def packages_at(repo_root: Path, *revisions: str) -> list[str]:
+    """Packages with a CHANGELOG at any of ``revisions``."""
+    found: set[str] = set()
+    for revision in revisions:
+        listing = _git(repo_root, "ls-tree", "-r", "--name-only", revision, "--", "src") or ""
+        for line in listing.splitlines():
+            match = CHANGELOG_RE.match(line.strip())
+            if match:
+                found.add(match.group("package"))
+    return sorted(found)
+
+
+def changes_from_git(repo_root: Path, base: str, head: str) -> tuple[list[FileChange], list[str]]:
+    """Changed files of ``head`` since its merge base with ``base``, and the packages.
+
+    ``--no-renames``: a file moved between packages counts for both.
+    """
     merge_base = (_git(repo_root, "merge-base", base, head) or "").strip()
-    names = _git(repo_root, "diff", "--name-only", "--no-renames", merge_base, head) or ""
+    names = _git(repo_root, "-c", "core.quotepath=off", "diff", "--name-only", "--no-renames",
+                 merge_base, head) or ""
     changes = []
     for path in (line.strip() for line in names.splitlines() if line.strip()):
         if path.endswith("CHANGELOG.md"):
@@ -347,7 +429,7 @@ def changes_from_git(repo_root: Path, base: str, head: str) -> list[FileChange]:
             ))
         else:
             changes.append(FileChange(path=path))
-    return changes
+    return changes, packages_at(repo_root, merge_base, head)
 
 
 def read_event(path: Path) -> dict:
@@ -401,7 +483,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         if args.event:
             event = read_event(args.event)
-            changes = changes_from_git(repo_root, event["base"], event["head"])
+            if not event["base"] or not event["head"]:
+                raise ValueError("event payload has no base or head sha")
+            changes, packages = changes_from_git(repo_root, event["base"], event["head"])
             labels, body, author = event["labels"], event["body"], event["author"]
         else:
             data = json.loads(args.input_json.read_text(encoding="utf-8"))
@@ -410,7 +494,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                 for item in data.get("files", [])
             ]
             labels, body, author = data.get("labels", []), data.get("body", ""), data.get("author", "")
-        packages = discover_packages(repo_root)
+            packages = sorted(set(discover_packages(repo_root)) | {
+                match.group("package") for change in changes
+                if (match := CHANGELOG_RE.match(change.path))
+            })
     except (OSError, ValueError, KeyError, TypeError, RuntimeError) as error:
         print(f"::error title=Changelog check::could not read the input: {error}", file=sys.stderr)
         return 2

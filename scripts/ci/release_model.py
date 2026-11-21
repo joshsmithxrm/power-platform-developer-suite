@@ -16,7 +16,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from functools import total_ordering
 from pathlib import Path, PurePosixPath
-from typing import Iterable, Optional, Sequence
+from typing import Iterable, Mapping, Optional, Sequence
 
 
 _SEMVER_RE = re.compile(
@@ -767,6 +767,9 @@ def build_release_plan(
     channel: str = "stable",
     tags: Iterable[str] = (),
     breaking_changes: Sequence[BreakingChange] = (),
+    breaking_unchecked: Optional[str] = None,
+    breaking_outside_range: Sequence[int] = (),
+    planned_versions: Optional[Mapping[str, str]] = None,
 ) -> dict:
     """Build an explained, read-only release plan.
 
@@ -778,10 +781,20 @@ def build_release_plan(
 
     ``breaking_changes`` are the merged pull requests labelled
     ``breaking-change`` in the analysed range (#1789). Each is mapped to the
-    release surfaces its files change directly. A ``patch`` or ``minor`` plan
-    that would release such a surface is refused: ``refusals`` is non-empty.
-    A breaking pull request whose files map to no surface is also refused in a
-    non-major plan, because the plan cannot show it is safe to leave out.
+    release surfaces its files change directly. ``refusals`` is non-empty when:
+
+    - a ``patch`` or ``minor`` plan would release such a surface;
+    - a ``major`` plan would release such a surface at a planned version
+      (``planned_versions``, from the package's ``## [X.Y.Z] - Unreleased``
+      CHANGELOG section) that is not a new major over its latest stable tag,
+      or has no planned version;
+    - a breaking pull request maps to no surface, in a non-major plan, because
+      the plan cannot show it is safe to leave out;
+    - ``breaking_unchecked`` says the breaking data was not supplied and the
+      plan releases something.
+
+    ``breaking_outside_range`` lists pull requests that were supplied but are
+    not in the range; they are reported, never silently dropped.
     """
 
     if release_kind not in {"patch", "minor", "major"}:
@@ -880,6 +893,13 @@ def build_release_plan(
 
     breaking_entries: list[dict[str, object]] = []
     refusals: list[str] = []
+    if breaking_unchecked and release_targets:
+        refusals.append(
+            f"Breaking changes were not checked ({breaking_unchecked}). Pass "
+            "--breaking-prs-file (release runbook step 2), or "
+            "--breaking-checked-elsewhere '<how>' if they were checked another way."
+        )
+    planned = dict(planned_versions or {})
     for change in sorted(breaking_changes, key=lambda item: item.number):
         surfaces = sorted(
             _detect_direct_changes(
@@ -889,22 +909,28 @@ def build_release_plan(
         breaking_entries.append(
             {"pr": change.number, "title": change.title, "surfaces": surfaces}
         )
-        if release_kind == "major":
-            continue
         if not surfaces:
-            refusals.append(
-                f"#{change.number} is labelled breaking-change but changes no "
-                f"release surface the plan can name; a {release_kind} release "
-                "cannot include it until the label or the range is corrected."
-            )
+            if release_kind != "major":
+                refusals.append(
+                    f"#{change.number} is labelled breaking-change but changes no "
+                    f"release surface the plan can name; a {release_kind} release "
+                    "cannot include it until the label or the range is corrected."
+                )
             continue
         for surface in surfaces:
-            if surface in release_targets:
+            if surface not in release_targets:
+                continue
+            if release_kind != "major":
                 refusals.append(
                     f"{surface}: #{change.number} is labelled breaking-change; "
                     f"a {release_kind} version is refused. Release {surface} "
                     f"as a major version, or leave #{change.number} out of the range."
                 )
+                continue
+            refusal = _major_version_refusal(surface, change.number, planned.get(surface),
+                                             graph.surfaces[surface].tag_prefix, tag_list)
+            if refusal:
+                refusals.append(refusal)
 
     return {
         "mode": "advisory",
@@ -923,9 +949,62 @@ def build_release_plan(
         "ignored_changes": sorted(impact.ignored, key=lambda item: item["path"]),
         "diagnostics": sorted(set(diagnostics)),
         "breaking_changes": breaking_entries,
+        "breaking_outside_range": sorted(breaking_outside_range),
+        "breaking_check": breaking_unchecked and f"not checked: {breaking_unchecked}" or "checked",
         "refusals": refusals,
         "safety": "This plan is advisory only; it does not tag, publish, or dispatch workflows.",
     }
+
+
+def _major_version_refusal(
+    surface: str, pr: int, planned: Optional[str], tag_prefix: str, tags: Sequence[str],
+) -> Optional[str]:
+    """Refuse a major plan whose planned version of ``surface`` is not a new major."""
+    if not planned:
+        return (
+            f"{surface}: #{pr} is labelled breaking-change, but the package has no planned "
+            "version (`## [X.Y.Z] - Unreleased` CHANGELOG section); the plan cannot show it "
+            "ships as a major."
+        )
+    try:
+        version = SemVer.parse(planned)
+    except ValueError:
+        return f"{surface}: planned version {planned!r} is not a valid SemVer version."
+    stable = [
+        parsed for parsed in (
+            _parse_tag_version(tag, tag_prefix) for tag in tags
+        ) if parsed is not None and not parsed.is_prerelease
+    ]
+    latest = max(stable, default=None)
+    if latest is not None and version.major <= latest.major:
+        return (
+            f"{surface}: #{pr} is labelled breaking-change; its planned version {planned} "
+            f"is not a new major over {tag_prefix}{latest}. Plan {surface} as "
+            f"{latest.major + 1}.0.0, or leave #{pr} out of the range."
+        )
+    return None
+
+
+def _parse_tag_version(tag: str, tag_prefix: str) -> Optional[SemVer]:
+    if not tag.startswith(tag_prefix):
+        return None
+    try:
+        return SemVer.parse(tag[len(tag_prefix):])
+    except ValueError:
+        return None
+
+
+def planned_versions_from_changelogs(repo_root: Path, graph: "ReleaseGraph") -> dict[str, str]:
+    """Each surface's planned version: its CHANGELOG's ``## [X.Y.Z] - Unreleased``."""
+    heading = re.compile(r"^## \[(?P<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\] - Unreleased\s*$", re.MULTILINE)
+    planned: dict[str, str] = {}
+    for name, surface in graph.surfaces.items():
+        path = repo_root / surface.root / "CHANGELOG.md"
+        if path.is_file():
+            match = heading.search(path.read_text(encoding="utf-8"))
+            if match:
+                planned[name] = match.group("version")
+    return planned
 
 
 def collect_git_tags(repo_root: Path) -> list[str]:
@@ -1019,6 +1098,13 @@ def render_markdown(plan: dict) -> str:
         for entry in plan["breaking_changes"]:
             surfaces = ", ".join(entry["surfaces"]) or "(no release surface)"
             lines.append(f"- #{entry['pr']} {entry['title']} — {surfaces}")
+
+    if plan.get("breaking_outside_range"):
+        lines.extend(["", "### Breaking Pull Requests Outside the Range", ""])
+        lines.append("- " + ", ".join(f"#{n}" for n in plan["breaking_outside_range"]))
+
+    if plan.get("breaking_check", "checked") != "checked":
+        lines.extend(["", "### Breaking Changes", "", f"- {plan['breaking_check']}"])
 
     if plan.get("refusals"):
         lines.extend(["", "### Refused", ""])

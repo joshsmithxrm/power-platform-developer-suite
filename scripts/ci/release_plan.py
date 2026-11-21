@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -26,6 +27,7 @@ from release_model import (
     ReleaseGraph,
     build_release_plan,
     collect_git_tags,
+    planned_versions_from_changelogs,
     render_markdown,
 )
 
@@ -60,38 +62,94 @@ def changes_from_git(repo_root: Path, base: str, head: str) -> list[FileChange]:
     return changes
 
 
+CHERRY_PICK_RE = re.compile(r"\(cherry picked from commit (?P<oid>[0-9a-f]{7,40})\)")
+OID_RE = re.compile(r"[0-9a-fA-F]{7,40}")
+
+
+def _resolve_commit(repo_root: Path, number: int, oid: str) -> str:
+    """Return the full lower-case id of ``oid``; an unknown or malformed id is an error."""
+    if not OID_RE.fullmatch(oid):
+        raise ValueError(f"#{number}: merge commit {oid!r} is not a commit id")
+    resolved = _git(repo_root, "rev-parse", "--verify", "--quiet", f"{oid.lower()}^{{commit}}",
+                    allow_missing=True)
+    if not resolved or not resolved.strip():
+        raise ValueError(f"#{number}: merge commit {oid} is not in this repository")
+    return resolved.strip()
+
+
+def _picked_commits(repo_root: Path, base: str, head: str) -> dict[str, str]:
+    """Map an original commit to the commit in ``base..head`` that cherry-picked it (-x)."""
+    log = _git(repo_root, "log", "--format=%H%n%B%x00", f"{base}..{head}") or ""
+    picked: dict[str, str] = {}
+    for record in log.split("\0"):
+        record = record.strip()
+        if not record:
+            continue
+        commit, _, message = record.partition("\n")
+        for match in CHERRY_PICK_RE.finditer(message):
+            original = _git(repo_root, "rev-parse", "--verify", "--quiet", f"{match.group('oid')}^{{commit}}",
+                            allow_missing=True)
+            picked[(original or match.group("oid")).strip()] = commit.strip()
+    return picked
+
+
 def breaking_changes_from_file(
     path: Path,
     repo_root: Path,
     base: Optional[str],
     head: Optional[str],
-) -> list[BreakingChange]:
-    """Read merged ``breaking-change`` pull requests, keeping those in range."""
+) -> tuple[list[BreakingChange], list[int]]:
+    """Read merged ``breaking-change`` pull requests: (in range, numbers outside it).
+
+    With a range, every item needs a merge commit that resolves in this
+    repository; short and upper-case ids are resolved. A pull request whose
+    merge commit is in ``base..head``, or was cherry-picked into it with
+    ``git cherry-pick -x``, counts. Every other item is reported as outside the
+    range, never dropped. Without a range every item counts and needs
+    ``files`` or a merge commit.
+    """
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, list):
         raise ValueError(f"{path}: expected a JSON list of pull requests")
     in_range: Optional[set[str]] = None
+    picked: dict[str, str] = {}
     if base and head:
         listed = _git(repo_root, "rev-list", f"{base}..{head}") or ""
         in_range = {line.strip() for line in listed.splitlines() if line.strip()}
+        picked = _picked_commits(repo_root, base, head)
     changes: list[BreakingChange] = []
+    outside: list[int] = []
     for item in data:
+        if not isinstance(item, dict) or "number" not in item:
+            raise ValueError(f"{path}: every item needs a pull request number")
         number = int(item["number"])
-        oid = str((item.get("mergeCommit") or {}).get("oid") or "")
-        if in_range is not None and oid not in in_range:
-            continue
+        raw_oid = str((item.get("mergeCommit") or {}).get("oid") or "")
+        commit = ""
+        if in_range is not None:
+            if not raw_oid:
+                raise ValueError(f"#{number}: no merge commit; cannot tell whether it is in the range")
+            oid = _resolve_commit(repo_root, number, raw_oid)
+            if oid in in_range:
+                commit = oid
+            elif oid in picked:
+                commit = picked[oid]
+            else:
+                outside.append(number)
+                continue
+        elif raw_oid:
+            commit = _resolve_commit(repo_root, number, raw_oid)
         files = item.get("files")
         if files:
             paths = [str(entry["path"]) for entry in files]
-        elif oid:
-            diff = _git(repo_root, "diff", "--name-only", "--no-renames", f"{oid}^", oid) or ""
+        elif commit:
+            diff = _git(repo_root, "diff", "--name-only", "--no-renames", f"{commit}^", commit) or ""
             paths = [line.strip() for line in diff.splitlines() if line.strip()]
         else:
             raise ValueError(
                 f"#{number}: neither files nor a merge commit; cannot map it to a surface"
             )
         changes.append(BreakingChange(number=number, title=str(item.get("title") or ""), paths=tuple(paths)))
-    return changes
+    return changes, outside
 
 
 def ensure_graph_revision(repo_root: Path, head: str) -> None:
@@ -153,7 +211,17 @@ def main(argv: Optional[list[str]] = None) -> int:
             "minor plan that releases a surface they change is refused (exit 1)"
         ),
     )
+    parser.add_argument(
+        "--breaking-checked-elsewhere",
+        metavar="HOW",
+        help=(
+            "breaking changes were checked another way (say how); without this "
+            "or --breaking-prs-file a plan that releases something is refused"
+        ),
+    )
     args = parser.parse_args(argv)
+    if args.breaking_prs_file and args.breaking_checked_elsewhere:
+        parser.error("--breaking-prs-file and --breaking-checked-elsewhere are exclusive")
 
     repo_root = args.repo_root.resolve()
     if bool(args.base) != bool(args.head):
@@ -178,23 +246,37 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.fallback_delivery_manifest
         else None
     )
-    breaking = (
-        breaking_changes_from_file(args.breaking_prs_file, repo_root, args.base, args.head)
-        if args.breaking_prs_file
-        else []
+    breaking: list[BreakingChange] = []
+    outside: list[int] = []
+    unchecked: Optional[str] = None
+    if args.breaking_prs_file:
+        try:
+            breaking, outside = breaking_changes_from_file(
+                args.breaking_prs_file, repo_root, args.base, args.head,
+            )
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError) as error:
+            print(f"::error title=Release plan::could not read --breaking-prs-file: {error}", file=sys.stderr)
+            return 2
+    elif not args.breaking_checked_elsewhere:
+        unchecked = "no --breaking-prs-file was given"
+    graph = ReleaseGraph.discover(
+        repo_root,
+        delivery_manifest_path=delivery_manifest,
+        fallback_delivery_manifest_path=fallback_delivery_manifest,
     )
     plan = build_release_plan(
-        ReleaseGraph.discover(
-            repo_root,
-            delivery_manifest_path=delivery_manifest,
-            fallback_delivery_manifest_path=fallback_delivery_manifest,
-        ),
+        graph,
         changes,
         release_kind=args.release_kind,
         channel=args.channel,
         tags=collect_git_tags(repo_root),
         breaking_changes=breaking,
+        breaking_unchecked=unchecked,
+        breaking_outside_range=outside,
+        planned_versions=planned_versions_from_changelogs(repo_root, graph),
     )
+    if args.breaking_checked_elsewhere:
+        plan["breaking_check"] = f"checked elsewhere: {args.breaking_checked_elsewhere}"
     if args.format == "markdown":
         print(render_markdown(plan), end="")
     elif args.format == "title":

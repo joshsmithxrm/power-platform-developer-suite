@@ -286,20 +286,39 @@ is in the [release runbook](runbooks/release.md).
 
 ### Breaking changes refuse a non-major plan
 
-A pull request that is breaking carries the `breaking-change` label; the
-Changelog Check fails when the label and the description's breaking statement
-disagree (see [Merge Policy](MERGE-POLICY.md#changelog-check-not-required)).
-The label reaches the release plan as a file: `--breaking-prs-file` takes the
+A breaking pull request carries the `breaking-change` label. The Changelog
+Check fails when the label and the description's breaking statement disagree
+(see [Merge Policy](MERGE-POLICY.md#changelog-check-not-required)).
+
+The label reaches the release plan as a file. `--breaking-prs-file` takes the
 JSON that `gh pr list --state merged --label breaking-change --json
-number,title,mergeCommit` prints. Only pull requests whose merge commit is in
-`--base..--head` count, and each is mapped to surfaces from its merge commit's
-diff (or from a `files` list when the JSON has one). If a `patch` or `minor` plan would release a
-surface that such a pull request changed, the plan lists it under "Refused" and
-the command exits 1; release that package as a major version or take the pull
-request out of the range. A breaking pull request that maps to no surface is
-refused too. `post-merge-release-check.yml` passes the merged pull request's
-own label the same way, so a pull request labelled both `release:patch` and
-`breaking-change` fails that job instead of opening a patch record.
+number,title,mergeCommit` prints.
+- Short and upper-case commit ids are resolved.
+- An item without a merge commit, or one this repository does not have, is an
+  error (exit 2).
+- A pull request counts when its merge commit is in `--base..--head`, or a
+  commit in that range carries its `(cherry picked from commit …)` line from
+  `git cherry-pick -x`.
+- Every other listed pull request is reported under "Breaking Pull Requests
+  Outside the Range", never dropped.
+- Each counted pull request is mapped to the surfaces its diff changes, or to
+  its `files` list.
+
+The plan lists the refusals under "Refused" and exits 1 when:
+- a `patch` or `minor` plan releases a surface such a pull request changed;
+- a `major` plan releases such a surface at a planned version that is not a
+  new major over the surface's latest stable tag, or with no planned version.
+  The planned version is the package CHANGELOG's `## [X.Y.Z] - Unreleased`
+  section, so a package planned as a patch inside a major release is still
+  refused;
+- a breaking pull request maps to no surface, in a non-major plan;
+- the plan releases something and no breaking data was given.
+  `--breaking-checked-elsewhere "<how>"` records that it was checked another
+  way instead.
+
+`post-merge-release-check.yml` passes the merged pull request's own label in
+the same way. A pull request labelled both `release:patch` and
+`breaking-change` therefore fails that job instead of opening a patch record.
 
 ### Patch release records
 
