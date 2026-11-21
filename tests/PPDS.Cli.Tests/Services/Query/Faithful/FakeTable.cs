@@ -83,7 +83,7 @@ internal sealed class FakeTable
             row[column] = value;
         }
 
-        if (!row.ContainsKey(PrimaryIdAttribute) || row[PrimaryIdAttribute] is null)
+        if (!row.TryGetValue(PrimaryIdAttribute, out var id) || id is null)
             row[PrimaryIdAttribute] = DeterministicId(LogicalName, _rows.Count + 1);
         _rows.Add(row);
         return this;

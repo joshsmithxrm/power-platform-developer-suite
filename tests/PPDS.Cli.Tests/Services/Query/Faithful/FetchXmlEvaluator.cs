@@ -87,7 +87,7 @@ internal sealed class FetchXmlEvaluator
     };
 
     private static readonly Regex DateForm = new(
-        @"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d{1,7})?)?)?(?<offset>Z|[+-]\d{2}:\d{2})?$",
+        @"\A\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d{1,7})?)?)?(?<offset>Z|[+-]\d{2}:\d{2})?\z",
         RegexOptions.CultureInvariant);
 
     private readonly IReadOnlyDictionary<string, FakeTable> _tables;
@@ -173,7 +173,7 @@ internal sealed class FetchXmlEvaluator
 
         // R14 distinct (audit D05, D06, PG08): of rows that are the same, the first created is kept (D06 returns 'A', not
         // 'a'); with no ORDER BY the result is sorted by the returned columns in order, NULL first (D05, D06).
-        var created = spec.Root.Table.Rows.Select((r, i) => (Row: (object)r, Index: i)).ToDictionary(x => x.Row, x => x.Index, ReferenceEqualityComparer.Instance);
+        var created = spec.Root.Table.Rows.Select((r, i) => (Row: r, Index: i)).ToDictionary(x => x.Row, x => x.Index, ReferenceEqualityComparer.Instance);
         var firstCreated = rows.OrderBy(r => created[r.Rows[BaseAlias]!]).ToList();
         var kept = Sort(firstCreated, orders, spec.Sources, tieBreakById: false)
             .Select(r => Project(r, spec)).DistinctBy(Signature).ToList();
@@ -197,7 +197,7 @@ internal sealed class FetchXmlEvaluator
         if (orders.Count == 0)
         {
             var columns = spec.Root.AllAttributes ? spec.Root.Table.Columns.Keys.ToList() : spec.Root.Attributes.Select(a => a.Alias ?? a.Name).ToList();
-            foreach (var (name, _) in spec.Root.AllAttributes ? spec.Root.Table.Columns.Keys.Select(k => (k, (string?)null)) : spec.Root.Attributes)
+            foreach (var name in spec.Root.AllAttributes ? spec.Root.Table.Columns.Keys : spec.Root.Attributes.Select(a => a.Name))
                 Shape($"distinct without order on a {ColumnOrVirtual(spec.Root.Table, name)}{Created(name)} column");
             IOrderedEnumerable<Entity>? sorted = null;
             foreach (var column in columns)
@@ -257,7 +257,7 @@ internal sealed class FetchXmlEvaluator
             if (fetch.Attribute(name) is { } a)
                 Shape($"fetch {name}={a.Value}");
         }
-        foreach (var order in root.Orders.Where(o => o.Attribute == "createdon"))
+        if (root.Orders.Any(o => o.Attribute == "createdon"))
             Shape($"order on createdon, top {top?.ToString(CultureInfo.InvariantCulture) ?? "none"}");
         if (fetch.Attribute("paging-cookie") is { } cookie)
         {
@@ -350,7 +350,7 @@ internal sealed class FetchXmlEvaluator
                     var alias = (string?)child.Attribute("alias");
                     if (alias is { Length: 0 })
                         throw Unsupported("an empty attribute alias");
-                    if (alias is not null && !Regex.IsMatch(alias, "^[A-Za-z_][A-Za-z0-9_]*$"))
+                    if (alias is not null && !Regex.IsMatch(alias, @"\A[A-Za-z_][A-Za-z0-9_]*\z"))
                         throw Fault($"Invalid character specified for alias: {alias}. Only characters within the ranges [A-Z], [a-z] or [0-9] or _ are allowed.  The first character may only be in the ranges [A-Z], [a-z] or _."); // audit PRJ18 (observed up to "[A-Z], [")
                     source.Attributes.Add((name, alias));
                     break;
@@ -468,7 +468,7 @@ internal sealed class FetchXmlEvaluator
                 default:
                     throw Unsupported($"aggregate {function} on a {type} column");
             }
-            if (!Regex.IsMatch(alias, "^[A-Za-z_][A-Za-z0-9_]*$"))
+            if (!Regex.IsMatch(alias, @"\A[A-Za-z_][A-Za-z0-9_]*\z"))
                 throw Unsupported($"the aggregate alias '{alias}'");
             Shape(groupby ? $"groupby {type}{Created(name)}" : $"aggregate {function}{(distinct ? " distinct" : "")} {type}{Created(name)}");
             result.Add(new AggregateAttribute(source, name, alias, type, function, distinct));
@@ -588,9 +588,9 @@ internal sealed class FetchXmlEvaluator
         var type = (string?)filter.Attribute("type") ?? "and";
         if (type is not ("and" or "or"))
             throw Unsupported($"filter type {type}");
-        var children = filter.Elements().Select(e => e.Name.LocalName switch
+        var children = filter.Elements().Select<XElement, object>(e => e.Name.LocalName switch
         {
-            "filter" => (object)ReadFilter(e, alias, sources),
+            "filter" => ReadFilter(e, alias, sources),
             "condition" => ReadCondition(e, alias, sources),
             var other => throw Unsupported($"<{other}> inside <filter>")
         }).ToList();
@@ -793,8 +793,9 @@ internal sealed class FetchXmlEvaluator
         public static readonly EmptyValue Instance = new();
     }
 
-    private static readonly Regex WholeForm = new(@"^-?(0|[1-9][0-9]*)$", RegexOptions.CultureInvariant);
-    private static readonly Regex DecimalForm = new(@"^-?(0|[1-9][0-9]*)(\.[0-9]+)?$", RegexOptions.CultureInvariant);
+    // Anchored with \A and \z: in .NET, $ also matches before a final line feed.
+    private static readonly Regex WholeForm = new(@"\A-?(0|[1-9][0-9]*)\z", RegexOptions.CultureInvariant);
+    private static readonly Regex DecimalForm = new(@"\A-?(0|[1-9][0-9]*)(\.[0-9]+)?\z", RegexOptions.CultureInvariant);
 
     /// <summary>
     /// R13: only value forms with an observation behind them are read. A decimal point on a whole-number column is the
@@ -824,7 +825,7 @@ internal sealed class FetchXmlEvaluator
             case FakeColumnType.Integer or FakeColumnType.BigInt or FakeColumnType.Choice:
                 if (value.Length == 0)
                     return op is "in" or "not-in" or "between" or "eq" ? EmptyValue.Instance : throw Unsupported($"an empty value with operator {op} on a whole-number column"); // W26 eq
-                if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _) && !Regex.IsMatch(value.Trim(), @"^[+-]?[0-9]+$"))
+                if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _) && !Regex.IsMatch(value.Trim(), @"\A[+-]?[0-9]+\z"))
                 {
                     Shape($"whole-number fault for a value of the form {Pattern(value)}");
                     throw FormatFault();
@@ -852,7 +853,7 @@ internal sealed class FetchXmlEvaluator
                 return ParseDateTime(value);
 
             case FakeColumnType.DateOnly:
-                if (Regex.IsMatch(value, @"^\d{4}-\d{2}-\d{2}$")
+                if (Regex.IsMatch(value, @"\A\d{4}-\d{2}-\d{2}\z")
                     && DateTime.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
                     return date;
                 throw Unsupported($"the date-only value '{value}'");
@@ -877,7 +878,7 @@ internal sealed class FetchXmlEvaluator
             ? month is >= 4 and <= 10 ? " local, in daylight-saving months" : month is 3 or 11 ? " local, in a month with a clock change" : " local, in standard-time months"
             : "";
         Shape($"date-time literal {Pattern(value)}{local}");
-        if (Regex.IsMatch(value, @"^(\d+|@\w+)$"))
+        if (Regex.IsMatch(value, @"\A(\d+|@\w+)\z"))
             throw Fault($"The date-time format for {value} is invalid, or value is outside the supported range.");
         var match = DateForm.Match(value);
         if (!match.Success)
@@ -969,7 +970,8 @@ internal sealed class FetchXmlEvaluator
     /// <summary>R5: <c>%</c>, <c>_</c>, <c>[...]</c> and <c>[^...]</c> over R4 keys; trailing spaces count.</summary>
     private static Regex LikeRegex(string pattern)
     {
-        var regex = new StringBuilder("^");
+        // A LIKE pattern matches the whole value: \A and \z, since $ also matches before a final line feed.
+        var regex = new StringBuilder(@"\A");
         for (var i = 0; i < pattern.Length; i++)
         {
             var ch = pattern[i];
@@ -1009,7 +1011,7 @@ internal sealed class FetchXmlEvaluator
                     break;
             }
         }
-        regex.Append('$');
+        regex.Append(@"\z");
         return new Regex(regex.ToString(), RegexOptions.Singleline | RegexOptions.CultureInvariant);
     }
 
@@ -1207,7 +1209,7 @@ internal sealed class FetchXmlEvaluator
             var data = row.Rows.GetValueOrDefault(source.Alias);
             var isBase = source.Alias == BaseAlias;
             var requested = source.AllAttributes
-                ? source.Table.Columns.Keys.Select(name => (Name: name, Alias: (string?)null))
+                ? source.Table.Columns.Keys.Select<string, (string Name, string? Alias)>(name => (name, null))
                 : source.Attributes;
 
             foreach (var (name, alias) in requested)

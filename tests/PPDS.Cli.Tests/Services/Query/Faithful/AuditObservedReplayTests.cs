@@ -65,7 +65,7 @@ public class AuditObservedReplayTests
     public void ObservedOrder(string observed, string order, string attribute)
     {
         var tokens = Regex.Matches(observed[(observed.IndexOf("): ", StringComparison.Ordinal) is var i and >= 0 ? i + 3 : observed.IndexOf(": ", StringComparison.Ordinal) + 2)..],
-                @"NULL|'(?:[^']|'(?! |$))*'|-?\d+")
+                @"NULL|'(?:[^']|'(?! |\z))*'|-?\d+")
             .Select(m => m.Value).ToList();
         var result = Raw("", order, $"<attribute name=\"{attribute}\" />");
 
@@ -85,7 +85,7 @@ public class AuditObservedReplayTests
     public void ObservedStoredStrings()
     {
         var result = Raw("", "", "<attribute name=\"ppds_name\" /><attribute name=\"ppds_memo\" />").Entities.ToDictionary(Key);
-        foreach (Match m in Regex.Matches(StoredStrings, @"key (\d+) name=(NULL|'.*?') memo=(NULL|'.*?')(?=, key|$)", RegexOptions.Singleline))
+        foreach (Match m in Regex.Matches(StoredStrings, @"key (\d+) name=(NULL|'.*?') memo=(NULL|'.*?')(?=, key|\z)", RegexOptions.Singleline))
         {
             var row = result[int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture)];
             string Show(string column) => row.Attributes.TryGetValue(column, out var v) ? $"'{v}'" : "NULL";

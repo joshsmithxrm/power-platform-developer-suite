@@ -90,10 +90,10 @@ internal static class AuditCaseReplay
                 var cells = line[2..^2].Split(" | ");
                 if (cells.Length != 7)
                     throw new InvalidDataException($"audit row with {cells.Length} cells: {line[..40]}");
-                var m = Regex.Match(cells[2], @"^`(?<sql>.*)`(?<suffix>.*)$", RegexOptions.Singleline);
+                var m = Regex.Match(cells[2], @"\A`(?<sql>.*)`(?<suffix>.*)\z", RegexOptions.Singleline);
                 cases.Add(new AuditCase(cells[0], cells[1], m.Groups["sql"].Value, m.Groups["suffix"].Value.Trim(), cells[3], cells[4], cells[5].Trim('*'), cells[6]));
             }
-            else if (Regex.Match(line, @"^- (?<id>[A-Z]+\d+): `(?<fx>.*)`$") is { Success: true } f)
+            else if (Regex.Match(line, @"\A- (?<id>[A-Z]+\d+): `(?<fx>.*)`\z") is { Success: true } f)
             {
                 fetch[f.Groups["id"].Value] = f.Groups["fx"].Value;
             }
@@ -137,10 +137,10 @@ internal static class AuditCaseReplay
 
     public static async Task<Run> ExecuteAsync(AuditCase c, IReadOnlySet<string>? dropColumns = null)
     {
-        int? top = Regex.Match(c.SqlSuffix, @"^\(top (\d+)\)$") is { Success: true } t ? int.Parse(t.Groups[1].Value, CultureInfo.InvariantCulture) : null;
+        int? top = Regex.Match(c.SqlSuffix, @"\A\(top (\d+)\)\z") is { Success: true } t ? int.Parse(t.Groups[1].Value, CultureInfo.InvariantCulture) : null;
         var service = new SqlQueryService(AuditDataset.Dataverse.CreateQueryExecutor(), new InactiveFakeShakedownGuard(), poolCapacity: 4);
         // PG01, PG02: the audit's PageAllAsync asks for page 1, 2, ... (with or without the cookie) until MoreRecords is false.
-        var paging = Regex.Match(c.Sql, @"^(?<sql>.*) \(--page 1, 2, \.\.\. (?<how>with|without) (--paging-)?cookie\)$");
+        var paging = Regex.Match(c.Sql, @"\A(?<sql>.*) \(--page 1, 2, \.\.\. (?<how>with|without) (--paging-)?cookie\)\z");
         try
         {
             var sql = ToOffline(paging.Success ? paging.Groups["sql"].Value : c.Sql);
@@ -274,7 +274,7 @@ internal static class AuditCaseReplay
             return new(ReplayClass.CannotReplay, "redacted: the report replaced a value in the SQL", "");
         if (Regex.IsMatch(c.Actual, "<[a-z][^>]*>") && c.Actual.StartsWith('['))
             return new(ReplayClass.CannotReplay, "redacted: the report replaced values in the recorded rows", "");
-        if (c.SqlSuffix.Length > 0 && !Regex.IsMatch(c.SqlSuffix, @"^\(top \d+\)$"))
+        if (c.SqlSuffix.Length > 0 && !Regex.IsMatch(c.SqlSuffix, @"\A\(top \d+\)\z"))
             return new(ReplayClass.CannotReplay, $"runner option '{c.SqlSuffix}' not ported", "");
 
         var run = await ExecuteAsync(c);
@@ -289,13 +289,13 @@ internal static class AuditCaseReplay
     /// <summary>Null when the text is not a row result, or the report cut its column list.</summary>
     public static RecordedRows? ParseRows(string recorded)
     {
-        var m = Regex.Match(recorded, @"^\[(?<cols>[^\]]*)\] (?<n>\d+) rows?(: (?<rows>.*))?$", RegexOptions.Singleline);
+        var m = Regex.Match(recorded, @"\A\[(?<cols>[^\]]*)\] (?<n>\d+) rows?(: (?<rows>.*))?\z", RegexOptions.Singleline);
         if (!m.Success)
             return null;
         var columns = m.Groups["cols"].Value.Length == 0 ? [] : m.Groups["cols"].Value.Split(", ");
         var shownText = m.Groups["rows"].Value;
         var complete = !shownText.EndsWith('…') && !shownText.Contains("…(+", StringComparison.Ordinal);
-        shownText = Regex.Replace(shownText, @" …\(\+\d+\)$", "");
+        shownText = Regex.Replace(shownText, @" …\(\+\d+\)\z", "");
         var shown = shownText.Length == 0 ? new List<string>() : Regex.Split(shownText, @"(?<=\)) (?=\()").ToList();
         if (shown.Count > 0 && (!shown[^1].EndsWith(')') || shownText.EndsWith('…')))
             shown.RemoveAt(shown.Count - 1); // cut short by the report
@@ -393,7 +393,7 @@ internal static class AuditCaseReplay
 
     private static List<string> DetailRows(string detail, string label)
     {
-        var m = Regex.Match(detail, label + @" \d+: (?<rows>.*?)(?:;|$)");
+        var m = Regex.Match(detail, label + @" \d+: (?<rows>.*?)(?:;|\z)");
         return m.Success ? Regex.Matches(m.Groups["rows"].Value, @"\((?:[^()']|'[^']*')*\)").Select(x => x.Value).ToList() : [];
     }
 
