@@ -383,12 +383,16 @@ valid tag. This automation only manages advisory issues. It never creates a tag,
 publishes an artifact, or invokes a release workflow.
 
 The weekly release risk check (`release-risk-check.yml`) replaces the former
-8-week cadence timer. It opens one issue per merged `data-safety` or `security`
-fix that no stable release tag of an affected package contains yet, once the fix
-is older than its target in `SECURITY.md`. Affected packages come from the same
-release model; tags are parsed with the shared strict SemVer implementation,
-and a prerelease or odd-minor Extension tag does not count as released. See
-[specs/release-cycle.md](../specs/release-cycle.md) (Flow 3).
+8-week cadence timer. A fix is a pull request merged into `main` that carries
+`data-safety` or `security`, or closes an issue that does. The check opens one
+issue per fix that is not yet in a stable release of every deliverable that
+ships it, once the fix is older than its target in `SECURITY.md`. The
+deliverables are the release plan's own patch targets for the merge commit's
+diff, so a library fix stays unreleased until the CLI, MCP server and Extension
+that carry it have shipped. Tags are parsed with the shared strict SemVer
+implementation; a prerelease or odd-minor Extension tag does not count. A
+missing label, missing targets or a possibly truncated list stop the run with a
+named error. See [specs/release-cycle.md](../specs/release-cycle.md) (Flow 3).
 
 ## Automated Public Artifact Verification
 
