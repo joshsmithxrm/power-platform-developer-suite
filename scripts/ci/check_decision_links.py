@@ -10,36 +10,80 @@ proposed as 9.1 (and 4.3 for removal dates) in the versioning policy of #1831.
 Only sentences that a pull request adds or changes are checked, so existing
 text does not fail every pull request. A pure rename is not a change.
 
-The phrases
------------
-``DECISION_PHRASES`` is the one list. Each entry has a category, a regex and an
-example sentence that only that entry catches. Alternation is written only as
-a named fragment (``<<NAME>>``, listed in ``FRAGMENTS``), and every fragment
-alternative has its own example sentence. A test generated from these lists
-removes each entry and each alternative in turn and checks that its example
-is no longer caught, so an entry or alternative cannot be added without a
-sentence that proves it.
+What it is: a net that catches the classes of decision text listed below. It
+is not a proof that no decision text is unlinked; reviewers still read.
 
-A **date** counts only if it is after the day of the change (the head
-commit's date in git mode). A past date, or the day itself, records what
-happened; a later date commits to something. Month names are validated in code, so a capitalised
-word that is not a month is not a date.
+Classes, not phrases
+--------------------
+``DECISION_PHRASES`` is the one list of what counts. Its entries describe
+classes of wording:
+
+- **approval**: "approved" used as a verb, with any subject and object (not
+  "the approved tool"); "approval" or "sign-off" given or held; "decided",
+  "chose", "agreed", "accepted", "confirmed", "authorised" and the like;
+  "Decision: …"; "per <name>,".
+- **exception**: "exception" in its policy sense (not a thrown exception),
+  "exempt", "excepted", "waived", a rule "suspended/relaxed/lifted", "by
+  agreement", "this once".
+- **removal**: a removal verb in the future or as a schedule ("will be
+  removed", "we'll drop", "<version> will remove", "is retired in 2.0", "will
+  stop working", "no longer supported", "support … ends", "goes away", "end of
+  life", "scheduled for removal", "Removal of …: 3.0").
+- **date**: a future date in any ordinary written form, with or without a
+  preposition; a version committed to ("until the 3.0 release", "takes effect
+  in 2.1", "from 2.1 onwards", "planned for 2.2"); a duration counted in days,
+  months or releases ("for two more minors", "at least 90 days", "six months
+  after 2.0", "deprecation period").
+- **table columns**: a future date under a "When"/"Date"/"Target" column, a
+  version under a "Removal"/"Removed in" column (``DECISION_COLUMNS``).
+
+Each entry has an example sentence that only it catches. Alternation inside an
+entry is written only as a named fragment (``<<NAME>>`` in ``FRAGMENTS``), and
+every fragment alternative has its own example.
+
+Product commitment or technical fact
+------------------------------------
+``GUARDS`` lists, per class, what makes a matching sentence a technical fact
+rather than a product commitment. Each guard has blockers and, where useful,
+markers that override them:
+
+- ``TECH`` (removal, date): runtime and data words (rows, records, columns,
+  temporary, cache, lock file, certificate, token, log, valid, expiry, created,
+  modified, sample, fixture) block, unless the sentence also names a product
+  commitment (a version number, a ``--flag``, an alias, "support for", the
+  next major or minor, a deprecation).
+- ``THIRD_PARTY`` (removal, date): a sentence about Microsoft, Dataverse,
+  Azure or GitHub states their plans, not ours.
+- ``CODE_EXCEPTION`` (exception): a thrown, raised, caught or unhandled
+  exception, an exception handler or message.
+- ``TECH_EXEMPT`` (exempt): an exemption from a check, a warning or an
+  analyzer is build configuration.
+- ``TECH_ACTOR`` (decided, chose, agreed, accepted): a client, server,
+  handshake, planner, optimizer, request, connection or runtime decides
+  things technically.
+- ``REQUIREMENT`` (approval or sign-off nouns): "needs", "requires", "only
+  with", "without", "subject to", "pending" name a requirement, not a record.
+- ``CONDITIONAL`` ("approved"): "once/when/until/if … approved" is a process.
+- ``HABITUAL`` ("approves"): "approves every release" is a process.
+
+Past wording is not matched: removal entries use the future or present ("will
+be removed", "is removed in"), never "was removed", and a date counts only if
+it is after the day of the change (the head commit's date in git mode).
+
+A test pins the whole expanded set, so an entry, alternative, guard or column
+cannot be deleted without a test failing.
 
 What counts as a decision link (``decision_link_re``): a URL to a comment in
-this repository, i.e. ``…/issues/<n>#issuecomment-<id>``,
-``…/pull/<n>#issuecomment-<id>``, ``…/pull/<n>#discussion_r<id>``,
-``…/pull/<n>#pullrequestreview-<id>``, or the issue body itself,
-``…/issues/<n>#issue-<id>``. A bare ``#123``, an issue URL without a comment
-anchor, another repository's URL, or a URL embedded in another URL does not
-count.
+this repository (``…/issues/<n>#issuecomment-<id>``, ``…/pull/<n>#issuecomment-<id>``,
+``…/pull/<n>#discussion_r<id>``, ``…/pull/<n>#pullrequestreview-<id>``) or the
+issue body (``…/issues/<n>#issue-<id>``), anywhere in the sentence.
 
-"Proposed" exempts a sentence only where it qualifies the decision
-(``PROPOSED_RES``): a leading "Proposed:", "(proposed)", "is/are proposed", or
-"proposed removal/date/exception/…". "The proposed flag was approved" is not
-exempt.
+"Proposed" exempts a decision only where it qualifies it (``PROPOSED_RES``): a
+leading "Proposed:", or "(proposed)", "is/are proposed" or "proposed
+removal/date/…" in the same clause (clauses are separated by ";").
 
-Skipped: headings, fenced code blocks and HTML comments. A table row is one
-unit; abbreviations such as "e.g." and "i.e." do not end a sentence.
+Limits: headings, fenced code and HTML comments are not checked. A table row
+is one unit; abbreviations such as "e.g." do not end a sentence.
 
 The check is not a required status check. It reads only its inputs; it never
 calls GitHub.
@@ -75,7 +119,7 @@ DEFAULT_REPOSITORY = "joshsmithxrm/power-platform-developer-suite"
 
 @dataclass(frozen=True)
 class Alt:
-    """One alternative of a fragment, with a sentence only it catches."""
+    """One alternative of a fragment or guard, with a sentence that proves it."""
 
     pattern: str
     example: str
@@ -83,259 +127,557 @@ class Alt:
 
 @dataclass(frozen=True)
 class Phrase:
-    """One decision phrase, with a sentence only it catches."""
+    """One class of decision wording, with a sentence only it catches."""
 
     category: str
     pattern: str
     example: str
+    guards: tuple[str, ...] = ()
+    case_sensitive: bool = False
+
+
+@dataclass(frozen=True)
+class Guard:
+    """What makes a match a technical fact: blockers, unless a marker is present."""
+
+    blockers: tuple[Alt, ...]
+    markers: tuple[Alt, ...] = ()
 
 
 # ---------------------------------------------------------------------------
-# Data: the one list of decision phrases and their fragments.
-# Patterns are matched case-insensitively against one sentence. A pattern may
-# not contain "|": every alternative is listed here, with its example.
+# Data: the one list. Patterns match case-insensitively unless an entry says
+# otherwise. No pattern may contain "|": every alternative is listed here.
 # ---------------------------------------------------------------------------
 
 FRAGMENTS: dict[str, tuple[Alt, ...]] = {
-    # Who decides.
     "HOLDER": (
-        Alt(r"maintainer", "The maintainer has confirmed the plan."),
-        Alt(r"owner", "The owner has confirmed the plan."),
+        Alt(r"maintainer", "The maintainer confirmed the plan."),
+        Alt(r"owner", "The owner confirmed the plan."),
     ),
-    # Passive "was approved" and its tenses. "is approved" is left out: it
-    # describes a process ("dates are set when the release is approved").
     "BEEN": (
-        Alt(r"was", "The flag change was approved last week."),
-        Alt(r"were", "Both changes were approved last week."),
-        Alt(r"has been", "The flag change has been approved."),
-        Alt(r"have been", "Both changes have been approved."),
-        Alt(r"had been", "The flag change had been approved earlier."),
+        Alt(r"was", "The proposal was accepted."),
+        Alt(r"were", "Both proposals were accepted."),
+        Alt(r"has been", "The proposal has been accepted."),
+        Alt(r"have been", "Both proposals have been accepted."),
+        Alt(r"had been", "The proposal had been accepted earlier."),
     ),
-    # What follows an active "approved". "approved list", "approved tool"
-    # and "approved run" are left out: they name a thing, not a decision.
-    "APPROVED_OBJECT": (
-        Alt(r"the", "Josh approved the plan."),
-        Alt(r"this", "Josh approved this."),
-        Alt(r"shipping", "Josh approved shipping it."),
-        Alt(r"it", "Josh approved it."),
+    # Giving or holding an approval or a sign-off.
+    "HAVE": (
+        Alt(r"gave", "Josh gave approval for it."),
+        Alt(r"give", "Josh did give approval for it."),
+        Alt(r"gives", "This gives approval for it."),
+        Alt(r"has", "The rename has approval."),
+        Alt(r"have", "Both renames have approval."),
+        Alt(r"had", "The rename had approval."),
+        Alt(r"received", "The rename received approval."),
+        Alt(r"got", "The rename got approval."),
+        Alt(r"granted", "Josh granted approval for it."),
+        Alt(r"obtained", "The rename obtained approval."),
+        Alt(r"with", "It merged with approval."),
     ),
-    "AGREED_LINK": (
-        Alt(r"to", "The maintainer agreed to keep the old flag."),
-        Alt(r"that", "Everyone agreed that the old flag stays."),
-        Alt(r"with", "This is the order agreed with the owner."),
+    "GIVEN": (
+        Alt(r"given", "Approval was given."),
+        Alt(r"granted", "Approval was granted."),
+        Alt(r"received", "Approval was received."),
     ),
-    # "we decided", "the owner has decided", "it was decided".
-    "DECIDER": (
-        Alt(r"we", "We decided not to rename it."),
-        Alt(r"it was", "It was decided not to rename it."),
-        Alt(r"has been", "It has been decided not to rename it."),
-        Alt(r"maintainer", "The maintainer decided not to rename it."),
-        Alt(r"owner", "The owner decided not to rename it."),
-        Alt(r"maintainer has", "The maintainer has decided not to rename it."),
-        Alt(r"owner has", "The owner has decided not to rename it."),
+    "APPROVAL_VERB": (
+        Alt(r"authori[sz]es", "The approval authorizes the release."),
+        Alt(r"covers", "The approval covers the release."),
+        Alt(r"applies", "The approval applies to the release."),
+        Alt(r"allows", "The approval allows the release."),
+        Alt(r"extends", "The approval extends to the release."),
     ),
-    # Removal verbs that always mean a decision ("will be retired").
-    "RETIRED": (
-        Alt(r"retired", "The flag will be retired."),
-        Alt(r"sunset", "The flag will be sunset."),
-        Alt(r"discontinued", "The flag will be discontinued."),
-        Alt(r"phased out", "The flag will be phased out."),
+    "ACCEPT_OBJECT": (
+        Alt(r"risk", "The maintainer accepted the risk."),
+        Alt(r"trade-off", "The maintainer accepted the trade-off."),
+        Alt(r"proposal", "The maintainer accepted the proposal."),
+        Alt(r"plan", "The maintainer accepted the plan."),
+        Alt(r"cost", "The maintainer accepted the cost."),
     ),
-    # Removal verbs that also describe cleanup ("the temporary file will be
-    # deleted"); they count only with a version or release after them.
+    "DECISION_TAIL": (
+        Alt(r"is to", "The decision is to keep the port."),
+        Alt(r"is that", "The decision is that the port stays."),
+        Alt(r"was to", "The decision was to keep the port."),
+        Alt(r"was made", "A decision was made to keep the port."),
+        Alt(r"was taken", "A decision was taken to keep the port."),
+    ),
+    # "exception" counts only in a policy frame (an exception to a rule, made,
+    # granted, covering something), never on its own: specs and changelogs
+    # use the word for thrown exceptions far more often.
+    "DET": (
+        Alt(r"an", "The server is an exception."),
+        Alt(r"the", "The server is the exception."),
+        Alt(r"one", "The server is one exception."),
+        Alt(r"its", "This is its exception."),
+    ),
+    "GRANT": (
+        Alt(r"make", "We make an exception here."),
+        Alt(r"makes", "The policy makes an exception here."),
+        Alt(r"made", "Josh made an exception here."),
+        Alt(r"grant", "We grant an exception here."),
+        Alt(r"grants", "The policy grants an exception here."),
+        Alt(r"granted", "Josh granted an exception here."),
+        Alt(r"get", "Hotfixes get an exception here."),
+        Alt(r"gets", "The hotfix gets an exception here."),
+    ),
+    "EXC_VERB": (
+        Alt(r"covers", "The exception covers 1.8 only."),
+        Alt(r"applies", "The exception applies here only."),
+        Alt(r"does not cover", "The exception does not cover libraries."),
+        Alt(r"does not apply", "The exception does not apply here."),
+        Alt(r"is made", "An exception is made here."),
+        Alt(r"was made", "An exception was made here."),
+        Alt(r"is granted", "An exception is granted here."),
+        Alt(r"granted", "Exception granted here."),
+        Alt(r"ends", "The exception ends with 2.0."),
+    ),
+    "EXC_KIND": (
+        Alt(r"one-release", "It keeps a one-release exception."),
+        Alt(r"one-time", "It keeps a one-time exception."),
+        Alt(r"compatibility", "It keeps a compatibility exception."),
+        Alt(r"policy", "It keeps a policy exception."),
+        Alt(r"scoped", "It keeps a scoped exception."),
+    ),
+    "SUSPENDED": (
+        Alt(r"suspended", "The freeze is suspended for hotfixes."),
+        Alt(r"relaxed", "The freeze is relaxed for hotfixes."),
+        Alt(r"lifted", "The freeze is lifted for hotfixes."),
+    ),
+    "RULE_NOUN": (
+        Alt(r"rule", "The two-reviewer rule is relaxed for docs."),
+        Alt(r"freeze", "The stable freeze is relaxed for docs."),
+        Alt(r"gate", "The release gate is relaxed for docs."),
+        Alt(r"policy", "The versioning policy is relaxed for docs."),
+        Alt(r"requirement", "The soak requirement is relaxed for docs."),
+        Alt(r"limit", "The size limit is relaxed for docs."),
+    ),
+    # Removal verbs, passive: "will be removed".
     "REMOVED": (
-        Alt(r"removed", "The flag will be removed by 3.0."),
-        Alt(r"dropped", "The flag will be dropped in 3.0."),
-        Alt(r"deleted", "The flag will be deleted in 3.0."),
+        Alt(r"removed", "The setting will be removed."),
+        Alt(r"dropped", "The setting will be dropped."),
+        Alt(r"deleted", "The setting will be deleted."),
+        Alt(r"retired", "The setting will be retired."),
+        Alt(r"sunset", "The setting will be sunset."),
+        Alt(r"discontinued", "The setting will be discontinued."),
+        Alt(r"phased out", "The setting will be phased out."),
+        Alt(r"deprecated", "The setting will be deprecated."),
     ),
-    "WHEN": (
-        Alt(r"in v?\d", "The alias will be dropped in v3."),
-        Alt(r"from v?\d", "The alias will be dropped from 3.0 on."),
-        Alt(r"with v?\d", "The alias will be dropped with 3.0."),
-        Alt(r"after v?\d", "The alias will be dropped after 3.0."),
-        Alt(r"by v?\d", "The alias will be dropped by 3.0."),
-        Alt(r"in (?:the )?next", "The alias will be dropped in the next major."),
-        Alt(r"in a future", "The alias will be dropped in a future release."),
-        Alt(r"next release", "The alias will be deleted next release."),
-        Alt(r"next major", "The alias will be deleted next major."),
+    # Future, intent or plan before an active removal verb.
+    "WILL": (
+        Alt(r"\bwill", "We will remove the setting."),
+        Alt(r"'ll", "We'll remove the setting."),
+        Alt(r"\bshall", "We shall remove the setting."),
+        Alt(r"\bplan to", "We plan to remove the setting."),
+        Alt(r"\bplans to", "PPDS plans to remove the setting."),
+        Alt(r"\bplanned to", "We planned to remove the setting next."),
+        Alt(r"\bare going to", "We are going to remove the setting."),
+        Alt(r"\bis going to", "PPDS is going to remove the setting."),
+        Alt(r"\bintend to", "We intend to remove the setting."),
+        Alt(r"\bintends to", "PPDS intends to remove the setting."),
     ),
-    # Removal verbs, active ("we will remove", "plans to drop").
     "REMOVE": (
-        Alt(r"remove", "We will remove the flag."),
-        Alt(r"drop", "We will drop the flag."),
-        Alt(r"delete", "We will delete the flag."),
-        Alt(r"retire", "We will retire the flag."),
-        Alt(r"sunset", "We will sunset the flag."),
-        Alt(r"discontinue", "We will discontinue the flag."),
+        Alt(r"remove", "We will remove the switch."),
+        Alt(r"drop", "We will drop the switch."),
+        Alt(r"delete", "We will delete the switch."),
+        Alt(r"retire", "We will retire the switch."),
+        Alt(r"sunset", "We will sunset the switch."),
+        Alt(r"discontinue", "We will discontinue the switch."),
+        Alt(r"deprecate", "We will deprecate the switch."),
+        Alt(r"stop supporting", "We will stop supporting the switch."),
+    ),
+    "REMOVING": (
+        Alt(r"removing", "We are removing the switch."),
+        Alt(r"dropping", "We are dropping the switch."),
+        Alt(r"retiring", "We are retiring the switch."),
+        Alt(r"deprecating", "We are deprecating the switch."),
+    ),
+    "BEING": (
+        Alt(r"are", "We are dropping the theme."),
+        Alt(r"is", "PPDS is dropping the theme."),
+        Alt(r"'re", "We're dropping the theme."),
+    ),
+    "ISARE": (
+        Alt(r"is", "The verb is retired in 2.0."),
+        Alt(r"are", "The verbs are retired in 2.0."),
     ),
     "REMOVES": (
-        Alt(r"removes", "Version 3.0 removes the flag."),
-        Alt(r"drops", "Version 3.0 drops the flag."),
-        Alt(r"deletes", "Version 3.0 deletes the flag."),
-        Alt(r"retires", "Version 3.0 retires the flag."),
+        Alt(r"removes", "Version 3.0 removes the switch."),
+        Alt(r"drops", "Version 3.0 drops the switch."),
+        Alt(r"retires", "Version 3.0 retires the switch."),
     ),
     "REMOVAL": (
-        Alt(r"removal", "The flag is slated for removal."),
-        Alt(r"deletion", "The flag is slated for deletion."),
-        Alt(r"retirement", "The flag is slated for retirement."),
-        Alt(r"deprecation", "The flag is slated for deprecation."),
+        Alt(r"removal", "The switch is slated for removal."),
+        Alt(r"deletion", "The switch is slated for deletion."),
+        Alt(r"retirement", "The switch is slated for retirement."),
+        Alt(r"deprecation", "The switch is slated for deprecation."),
     ),
     "SCHEDULED": (
-        Alt(r"scheduled", "Profile migration is scheduled for 3.1."),
-        Alt(r"planned", "Profile migration is planned for 3.1."),
-        Alt(r"slated", "Profile migration is slated for 3.1."),
-        Alt(r"targeted", "Profile migration is targeted for 3.1."),
+        Alt(r"scheduled", "The switch is scheduled for removal."),
+        Alt(r"planned", "The switch is planned for removal."),
+        Alt(r"slated", "The switch is slated for removal."),
+        Alt(r"targeted", "The switch is targeted for removal."),
+        Alt(r"marked", "The switch is marked for removal."),
     ),
     # A version a decision points at.
     "VERSION": (
-        Alt(r"(?:[a-z][\w.]* )?v?\d+\.\d+(?:\.\d+)?", "Profile migration is planned for CLI 2.1."),
-        Alt(r"v\d+", "Profile migration is planned for v4."),
-        Alt(r"(?:the )?next major(?: version)?(?: release)?", "Profile migration is planned for the next major."),
-        Alt(r"(?:the )?next minor(?: version)?(?: release)?", "Profile migration is planned for the next minor."),
-        Alt(r"a future major", "Profile migration is planned for a future major."),
-        Alt(r"a future release", "Profile migration is planned for a future release."),
+        Alt(r"(?:[a-z][\w.]* )?v?\d+\.\d+(?:\.\d+)?", "The new layout takes effect in CLI 2.1."),
+        Alt(r"v\d+", "The new layout takes effect in v4."),
+        Alt(r"(?:the )?next major(?: version)?(?: release)?", "The new layout takes effect in the next major."),
+        Alt(r"(?:the )?next minor(?: version)?(?: release)?", "The new layout takes effect in the next minor."),
+        Alt(r"a future major", "The new layout takes effect in a future major."),
+        Alt(r"a future release", "The new layout takes effect in a future release."),
     ),
-    # Units a waiting period is counted in.
+    # Words before a version that commit to it.
+    "VSCHED": (
+        Alt(r"until", "The old layout stays until 3.0."),
+        Alt(r"takes effect in", "The new layout takes effect in 3.0."),
+        Alt(r"takes effect with", "The new layout takes effect with 3.0."),
+        Alt(r"lands in", "The new layout lands in 3.0."),
+        Alt(r"ships in", "The new layout ships in 3.0."),
+        Alt(r"arrives in", "The new layout arrives in 3.0."),
+        Alt(r"follows in", "The new layout follows in 3.0."),
+        Alt(r"planned for", "The new layout is planned for 3.0."),
+        Alt(r"scheduled for", "The new layout is scheduled for 3.0."),
+        Alt(r"slated for", "The new layout is slated for 3.0."),
+        Alt(r"targeted for", "The new layout is targeted for 3.0."),
+        Alt(r"expected in", "The new layout is expected in 3.0."),
+        Alt(r"due in", "The new layout is due in 3.0."),
+        Alt(r"starting with", "The new layout is the default starting with 3.0."),
+        Alt(r"as of", "The new layout is the default as of 3.0."),
+        Alt(r"becomes the default in", "The new layout becomes the default in 3.0."),
+        Alt(r"becomes an error in", "The old flag becomes an error in 3.0."),
+        Alt(r"becomes required in", "The new flag becomes required in 3.0."),
+        Alt(r"continues through", "The old layout continues through 3.0."),
+        Alt(r"to ship in", "The new layout is planned to ship in 3.0."),
+    ),
+    # A label before a version: "Ships in: 2.1", "Due: 2.1".
+    "LABEL": (
+        Alt(r"ships in", "Ships in: 2.1"),
+        Alt(r"due", "Due: 2.1"),
+        Alt(r"target", "Target: 2.1"),
+        Alt(r"planned", "Planned: 2.1"),
+        Alt(r"release", "Release: 2.1"),
+        Alt(r"eta", "ETA: 2.1"),
+    ),
+    # A count: a number or a number word, not any word ("for stable releases").
+    "COUNT": (
+        Alt(r"\d+", "The switch stays for 3 more minors."),
+        Alt(r"one", "The switch stays for one more minor release."),
+        Alt(r"two", "The switch stays for two more minors."),
+        Alt(r"three", "The switch stays for three more minors."),
+        Alt(r"four", "The switch stays for four more minors."),
+        Alt(r"five", "The switch stays for five more minors."),
+        Alt(r"six", "The switch stays for six more minors."),
+        Alt(r"twelve", "The switch stays for twelve more minors."),
+    ),
+    # Units a commitment is counted in.
     "UNIT": (
-        Alt(r"days", "Keep the alias for at least 90 days."),
-        Alt(r"weeks", "Keep the alias for at least six weeks."),
-        Alt(r"months", "Keep the alias for at least six months."),
-        Alt(r"years", "Keep the alias for at least two years."),
-        Alt(r"releases", "Keep the alias for at least two releases."),
-        Alt(r"minor releases", "Keep the alias for at least two minor releases."),
-        Alt(r"minor release", "Keep the alias for at least one minor release."),
-        Alt(r"major release", "Keep the alias for at least one major release."),
-        Alt(r"versions", "Keep the alias for at least two versions."),
+        Alt(r"days", "Keep the switch for at least 90 days."),
+        Alt(r"weeks", "Keep the switch for at least six weeks."),
+        Alt(r"months", "Keep the switch for at least six months."),
+        Alt(r"years", "Keep the switch for at least two years."),
+        Alt(r"releases", "The switch stays at least two releases."),
+        Alt(r"major release", "The switch stays at least one major release."),
+        Alt(r"minors", "The switch stays at least two minors."),
+        Alt(r"minor", "Keep the switch for at least one minor."),
+        Alt(r"versions", "The switch stays at least two versions."),
+        Alt(r"prereleases", "Keep the switch for at least two prereleases."),
+    ),
+    "RELUNIT": (
+        Alt(r"minors", "The switch stays for two more minors."),
+        Alt(r"minor releases", "The switch stays for two more minor releases."),
+        Alt(r"minor release", "The switch stays for one more minor release."),
+        Alt(r"majors", "The switch stays for two more majors."),
+        Alt(r"major releases", "The switch stays for two more major releases."),
+        Alt(r"major release", "The switch stays for one more major release."),
+        Alt(r"releases", "The switch stays for two more releases."),
+        Alt(r"versions", "The switch stays for two more versions."),
+        Alt(r"minor versions", "The switch stays for two more minor versions."),
+        Alt(r"major versions", "The switch stays for two more major versions."),
+    ),
+    "UNIT_TIME": (
+        Alt(r"days", "The switch stays 90 days after 2.0."),
+        Alt(r"weeks", "The switch stays six weeks after 2.0."),
+        Alt(r"months", "The switch stays six months after 2.0."),
+        Alt(r"years", "The switch stays two years after 2.0."),
     ),
     "AFTER_EVENT": (
-        Alt(r"stable", "The alias goes two weeks after the stable."),
-        Alt(r"prerelease", "The alias goes two weeks after the prerelease."),
-        Alt(r"release", "The alias goes two weeks after the release."),
-        Alt(r"deprecation", "The alias goes two weeks after the deprecation."),
-        Alt(r"tag", "The alias goes two weeks after the tag."),
+        Alt(r"\d", "The shim goes two weeks after 2.0."),
+        Alt(r"stable", "The shim goes two weeks after the stable."),
+        Alt(r"next", "The shim goes two weeks after the next minor."),
+        Alt(r"prerelease", "The shim goes two weeks after the prerelease."),
+        Alt(r"release", "The shim goes two weeks after the release."),
+        Alt(r"deprecation", "The shim goes two weeks after the deprecation."),
+        Alt(r"tag", "The shim goes two weeks after the tag."),
     ),
-    # Prepositions before a (future) date.
-    "DATE_PREP": (
-        Alt(r"on", "Version 3 ships on 2027-01-15."),
-        Alt(r"in", "Version 3 ships in 2027-01."),
-        Alt(r"from", "Version 3 is the default from 2027-01-15."),
-        Alt(r"through", "Version 2 is supported through 2027-06-30."),
-        Alt(r"as of", "As of 2027-03-01 version 3 is the default."),
-        Alt(r"by", "Version 3 lands by 2027-03-01."),
-        Alt(r"until", "Version 2 stays until 2027-03-01."),
-        Alt(r"till", "Version 2 stays till 2027-03-01."),
-        Alt(r"after", "Version 3 lands after 2027-03-01."),
-        Alt(r"before", "Version 3 lands before 2027-03-01."),
-        Alt(r"starting", "Version 3 is the default starting 2027-03-01."),
-        Alt(r"at", "Version 2 support stops at the end of March 2027."),
-        Alt(r"for", "Version 3 is pencilled in for 2027-03-01."),
+    "PERIOD": (
+        Alt(r"deprecation", "There is a deprecation period."),
+        Alt(r"waiting", "There is a waiting period."),
+        Alt(r"support", "There is a support period."),
+        Alt(r"notice", "There is a notice period."),
+        Alt(r"soak", "There is a soak period."),
     ),
-    # Date forms. Groups are named y, m (number), mn (name), d, q, suffix;
-    # month names and ordinal suffixes are validated in code.
+    "YEAR_PREP": (
+        Alt(r"in", "The CLI moves to the new runtime in 2027."),
+        Alt(r"by", "The CLI moves to the new runtime by 2027."),
+        Alt(r"until", "The CLI keeps the old runtime until 2027."),
+        Alt(r"till", "The CLI keeps the old runtime till 2027."),
+        Alt(r"through", "The CLI keeps the old runtime through 2027."),
+        Alt(r"after", "The CLI moves to the new runtime after 2027."),
+        Alt(r"before", "The CLI moves to the new runtime before 2027."),
+        Alt(r"during", "The CLI moves to the new runtime during 2027."),
+        Alt(r"from", "The CLI uses the new runtime from 2027."),
+    ),
+    # Date forms, anywhere in a sentence. Groups are named y, m (number), mn
+    # (name), d, q, suffix; names and ordinal suffixes are validated in code.
     "DATE": (
-        Alt(r"(?P<y>\d{4})-(?P<m>\d{2})-(?P<d>\d{2})", "Version 2 stays until 2027-03-01."),
-        Alt(r"(?P<y>\d{4})-(?P<m>\d{2})(?!-)(?!\d)", "Version 2 stays until 2027-03."),
+        Alt(r"(?P<y>\d{4})-(?P<m>\d{2})-(?P<d>\d{2})", "Stable ships 2027-01-15."),
+        Alt(r"(?P<y>\d{4})-(?P<m>\d{2})(?!-)(?!\d)", "Stable ships 2027-01."),
         Alt(r"(?P<d>\d{1,2})(?P<suffix>[a-z]{2})? (?P<mn>[a-z]{3,9}\.?),? (?P<y>\d{4})",
-            "Version 2 stays until 1 March 2027."),
+            "Stable ships 15 January 2027."),
         Alt(r"(?P<mn>[a-z]{3,9}\.?) (?P<d>\d{1,2})(?P<suffix>[a-z]{2})?,? (?P<y>\d{4})",
-            "Version 2 stays until March 1st, 2027."),
-        Alt(r"(?P<mn>[a-z]{3,9}) (?P<y>\d{4})", "Version 2 stays until March 2027."),
-        Alt(r"(?P<m>\d{1,2})/(?P<d>\d{1,2})/(?P<y>\d{4})", "Version 2 stays until 3/1/2027."),
-        Alt(r"(?P<d>\d{1,2})\.(?P<m>\d{1,2})\.(?P<y>\d{4})", "Version 2 stays until 01.03.2027."),
-        Alt(r"q(?P<q>[1-4]) (?P<y>\d{4})", "Version 2 stays until Q1 2027."),
-        Alt(r"(?:the )?end of (?:(?P<mn>[a-z]{3,9}) )?(?P<y>\d{4})", "Version 2 stays until the end of March 2027."),
-        Alt(r"(?P<y>20\d{2})(?!-)(?!/)(?!\d)(?!\.\d)", "Version 2 stays until 2027."),
+            "Stable ships January 15th, 2027."),
+        Alt(r"(?<!\d )(?P<mn>[a-z]{3,9}) (?P<y>\d{4})", "Stable ships in January 2027."),
+        Alt(r"(?P<m>\d{1,2})/(?P<d>\d{1,2})/(?P<y>\d{4})", "Stable ships 1/15/2027."),
+        Alt(r"(?P<d>\d{1,2})\.(?P<m>\d{1,2})\.(?P<y>\d{4})", "Stable ships 15.01.2027."),
+        Alt(r"q(?P<q>[1-4]) (?P<y>\d{4})", "Stable ships Q1 2027."),
+        Alt(r"(?:the )?end of (?:(?P<mn>[a-z]{3,9}) )?(?P<y>\d{4})", "Stable ships at the end of 2027."),
     ),
 }
 
 DECISION_PHRASES: tuple[Phrase, ...] = (
     # --- approval -----------------------------------------------------------
-    Phrase("approval", r"\b<<BEEN>> approved\b", "The rename had been approved before the freeze."),
-    Phrase("approval", r"\bapproved by\b", "Merged once approved by Josh."),
-    Phrase("approval", r"\bapproved <<APPROVED_OBJECT>>\b", "Josh approved the rename."),
-    Phrase("approval", r"\bstatus:?\**:?\s*approved\b", "**Status:** Approved"),
-    # The noun alone names a requirement ("needs maintainer approval"); only
-    # a record that it was given counts.
-    Phrase("approval", r"\bapproval was given\b", "Approval was given in the review."),
-    Phrase("approval", r"\bapproval was granted\b", "Approval was granted in the review."),
-    Phrase("approval", r"\bwith the <<HOLDER>>'s approval\b", "Merged with the maintainer's approval."),
-    Phrase("approval", r"\bsigned[ -]off\b", "Josh signed off on the rename."),
-    Phrase("approval", r"\bgave (?:\w+ )?sign-?off\b", "Josh gave his signoff for the rename."),
-    Phrase("approval", r"\bsign-?off was given\b", "Maintainer sign-off was given."),
-    Phrase("approval", r"\bgo-ahead\b", "Josh gave the go-ahead for the rename."),
-    Phrase("approval", r"\bgreen-?lit\b", "The rename was greenlit."),
-    Phrase("approval", r"\bgreen-?lighted\b", "The rename was greenlighted."),
-    Phrase("approval", r"\bokayed\b", "Josh okayed the rename."),
-    Phrase("approval", r"\bagreed <<AGREED_LINK>>\b", "The owner agreed to the rename."),
-    Phrase("approval", r"\bas agreed\b", "As agreed, the rename goes ahead."),
-    Phrase("approval", r"\b<<DECIDER>> decided\b", "We decided to keep the old name."),
-    Phrase("approval", r"\bdecision was made\b", "The decision was made to keep the alias."),
-    Phrase("approval", r"\bdecision was taken\b", "The decision was taken to keep the alias."),
-    Phrase("approval", r"\bper (?:the )?(?:maintainer'?s )?decision\b", "Per the maintainer's decision the alias stays."),
+    # "approved" as a verb or label; not "the/an/a/its/X's approved <thing>".
+    Phrase("approval", r"(?<!the )(?<!an )(?<!a )(?<!'s )(?<!its )(?<!pre-)\bapproved\b",
+           "Josh approved a second prerelease.", ("CONDITIONAL", "ADJECTIVE")),
+    Phrase("approval", r"\bapproves\b", "The maintainer approves the rename.", ("HABITUAL", "CONDITIONAL")),
+    # The noun counts only when an approval is given or held ("gave approval",
+    # "has maintainer approval", "the maintainer's approval", "approval was
+    # given"), not as a name for a step ("approval scope", "for approval").
+    Phrase("approval", r"\b<<HAVE>> (?:[\w'-]+ ){0,2}approval\b", "The maintainer gave approval for a hotfix branch.",
+           ("REQUIREMENT",)),
+    Phrase("approval", r"\bapproval (?:[\w'-]+ ){0,4}<<BEEN>> <<GIVEN>>\b", "Approval was given in the review."),
+    Phrase("approval", r"\b\w+'s approval\b", "It ships on the owner's approval."),
+    Phrase("approval", r"\bthe approval <<APPROVAL_VERB>>\b", "The approval authorizes release preparation."),
+    Phrase("approval", r"\bsigned[ -]off\b", "The owner signed off on the plan."),
+    Phrase("approval", r"\b<<HAVE>> (?:[\w'-]+ ){0,2}sign-?off\b", "The split received sign-off from the owner.",
+           ("REQUIREMENT",)),
+    Phrase("approval", r"\bsign-?off (?:[\w'-]+ ){0,4}<<BEEN>> <<GIVEN>>\b", "Sign-off was given in the review."),
+    Phrase("approval", r"^\W*sign-?off\s*:", "Sign-off: Josh, 2026-11-20"),
+    Phrase("approval", r"\bdecided\b", "We decided against a separate package.", ("TECH_ACTOR",)),
+    Phrase("approval", r"^\W*decision\s*:", "Decision: the port stays.", ("DESIGN_RECORD",)),
+    Phrase("approval", r"\bdecision <<DECISION_TAIL>>\b", "The maintainer's decision is to keep the port."),
+    Phrase("approval", r"\bper (?:the )?(?:\w+'s )?decision\b", "Per the owner's decision, notebooks stay."),
     Phrase("approval", r"\bmaintainer decision\b", "This follows a maintainer decision."),
-    # "authorized by the token" and "authorized for the scope" are auth terms.
-    Phrase("approval", r"\bauthori[sz]ed by the <<HOLDER>>\b", "The rename is authorised by the owner."),
+    Phrase("approval", r"\bPer [A-Z][a-z]+,", "Per Josh, the server ships with the CLI.", case_sensitive=True),
+    Phrase("approval", r"\bchose\b", "The maintainer chose option C.", ("TECH_ACTOR",)),
+    Phrase("approval", r"\bwas chosen\b", "Option B was chosen by the owner.", ("TECH_ACTOR",)),
+    Phrase("approval", r"\bagreed\b", "The team agreed on monthly prereleases.", ("TECH_ACTOR",)),
+    Phrase("approval", r"\b<<BEEN>> accepted\b", "The roadmap was accepted.", ("TECH_ACTOR",)),
+    Phrase("approval", r"\baccepted the <<ACCEPT_OBJECT>>\b", "Josh accepted the risk."),
+    Phrase("approval", r"\bgreen[- ]?light\w*", "Josh gave the green light for 1.9."),
+    Phrase("approval", r"\bgreen-?lit\b", "The split was greenlit."),
+    Phrase("approval", r"\bgo-ahead\b", "Josh gave the go-ahead to publish."),
+    Phrase("approval", r"\bokayed\b", "Josh okayed the alias."),
+    Phrase("approval", r"\bok'd\b", "Josh OK'd the alias."),
+    Phrase("approval", r"\b<<HOLDER>> (?:has )?confirmed\b", "The owner has confirmed the versioning."),
+    Phrase("approval", r"\bconfirmed by the <<HOLDER>>\b", "The versioning was confirmed by the maintainer."),
+    Phrase("approval", r"\bauthori[sz]ed by the <<HOLDER>>\b", "The route is authorised by the owner."),
+    Phrase("approval", r"\bhas authori[sz]ed\b", "The maintainer has authorized a second key."),
     Phrase("approval", r"\bauthori[sz]ed for <<VERSION>>", "The rename is authorized for 2.0."),
-    Phrase("approval", r"\bhas authori[sz]ed\b", "Josh has authorised the rename."),
-    Phrase("approval", r"\b<<HOLDER>> (?:has )?confirmed\b", "The maintainer confirmed the rename."),
-    Phrase("approval", r"\bconfirmed by the <<HOLDER>>\b", "The rename was confirmed by the owner."),
-    Phrase("approval", r"\baccepted by the <<HOLDER>>\b", "The rename was accepted by the maintainer."),
-    Phrase("approval", r"\b<<HOLDER>> (?:has )?accepted\b", "The owner has accepted the rename."),
     Phrase("approval", r"\bratified\b", "The owner ratified option A."),
     Phrase("approval", r"\bendorsed\b", "The rename is endorsed."),
     # --- exception ----------------------------------------------------------
-    Phrase("exception", r"\bexception is made\b", "An exception is made for the MCP server."),
-    Phrase("exception", r"\bexception was made\b", "An exception was made for the MCP server."),
-    Phrase("exception", r"\bexception granted\b", "Exception granted for the MCP server."),
-    Phrase("exception", r"\bexception to (?:\w+ )?rule\b", "This is an exception to the rule."),
-    Phrase("exception", r"\bexception to (?:\w+ )?policy\b", "This is an exception to this policy."),
-    Phrase("exception", r"\bas an exception\b", "As an exception, the MCP server keeps the old code."),
-    Phrase("exception", r"\bone-release exception\b", "It keeps its one-release exception."),
-    Phrase("exception", r"\bone-time exception\b", "It keeps its one-time exception."),
-    Phrase("exception", r"\bcompatibility exception\b", "This is a compatibility exception for 1.8."),
-    # "Generated/ is exempt" describes build configuration; an exemption
-    # from a rule says "exempt from".
-    Phrase("exception", r"\bexempt(?:ed)? from\b", "The MCP package is exempted from the freeze."),
+    Phrase("exception", r"\b<<ISARE>> (?:<<DET>> )(?:\w+ ){0,2}exception\b", "The Plugins package is an exception.",
+           ("CODE_EXCEPTION",)),
+    Phrase("exception", r"\bexceptions? to\b", "Hotfixes get exceptions to the freeze rule.", ("CODE_EXCEPTION",)),
+    Phrase("exception", r"\bexceptions? for\b", "There are exceptions for hotfixes.", ("CODE_EXCEPTION",)),
+    Phrase("exception", r"\b<<GRANT>> an exception\b", "The maintainer made an exception.", ("CODE_EXCEPTION",)),
+    Phrase("exception", r"\bexception <<EXC_VERB>>\b", "The exception covers only 1.9.", ("CODE_EXCEPTION",)),
+    Phrase("exception", r"\b<<EXC_KIND>> exceptions?\b", "The CLI keeps its one-release exception.", ("CODE_EXCEPTION",)),
+    Phrase("exception", r"\bas an exception\b", "As an exception, the CLI keeps `-e`.", ("CODE_EXCEPTION",)),
+    Phrase("exception", r"\bby exception\b", "Docs skip the soak by exception."),
+    Phrase("exception", r"^\W*exception\W*:", "- **Exception:** the CLI keeps `-e`."),
+    Phrase("exception", r"\bexempt\w*", "The server is exempt from the two-reviewer rule.", ("TECH_EXEMPT",)),
+    Phrase("exception", r"\bexcepted\b", "Test-only packages are excepted from the changelog rule."),
     Phrase("exception", r"\bwaived\b", "The size rule is waived here."),
-    Phrase("exception", r"\bwaiver\b", "This change has a waiver."),
-    Phrase("exception", r"\bby agreement\b", "Rule 3 does not apply to Plugins by agreement."),
+    Phrase("exception", r"\bwaivers?\b", "A waiver covers the missing build."),
+    Phrase("exception", r"\b<<RULE_NOUN>> (?:\w+ ){0,2}<<SUSPENDED>>\b", "The freeze is suspended for security fixes."),
+    # Scope rules: "the rule does not apply to X", "excluded from the freeze".
+    Phrase("exception", r"\b<<RULE_NOUN>> (?:\w+ ){0,2}does not apply to\b", "The freeze does not apply to the docs site."),
+    Phrase("exception", r"\bexcluded from (?:the )?(?:\w+ )?<<RULE_NOUN>>\b", "Docs are excluded from the stable freeze."),
+    Phrase("exception", r"\bnot subject to (?:the )?(?:\w+ )?<<RULE_NOUN>>\b", "Hotfixes are not subject to the size limit."),
+    Phrase("exception", r"\bby agreement\b", "The server keeps exit 2 by agreement."),
+    Phrase("exception", r"\bthis once\b", "The CLI may skip the soak this once."),
     # --- removal ------------------------------------------------------------
-    Phrase("removal", r"\bwill be <<RETIRED>>\b", "The setting will be sunset."),
-    Phrase("removal", r"\bwill be <<REMOVED>> <<WHEN>>", "The setting will be deleted next release."),
-    Phrase("removal", r"\bto be <<RETIRED>>\b", "The setting is to be retired."),
-    Phrase("removal", r"\bwe will <<REMOVE>>\b", "We will remove the flag."),
-    Phrase("removal", r"\bplan\w{0,3} to <<REMOVE>>\b", "PPDS plans to retire the setting."),
-    Phrase("removal", r"\b<<VERSION>> <<REMOVES>>\b", "Version 3.0 removes the flag."),
-    Phrase("removal", r"\b<<SCHEDULED>> for <<REMOVAL>>\b", "The flag is slated for removal."),
-    Phrase("removal", r"\b<<REMOVAL>> (?:is )?<<SCHEDULED>> for\b", "Removal is planned for later."),
-    Phrase("removal", r"\b<<REMOVAL>> in <<VERSION>>\b", "Removal in 3.0."),
-    Phrase("removal", r"\bremoved in <<VERSION>>\b", "It is removed in v3."),
-    Phrase("removal", r"\bgoing away\b", "The setting is going away."),
-    Phrase("removal", r"\bgoes away\b", "The setting goes away."),
-    Phrase("removal", r"\bgoes in <<VERSION>>\b", "It is deprecated and goes in the next minor."),
-    Phrase("removal", r"\bno longer (?:be )?supported\b", "Windows 8 is no longer supported."),
-    Phrase("removal", r"\bwill no longer accept\b", "The CLI will no longer accept the short form."),
-    Phrase("removal", r"\bwill no longer support\b", "The CLI will no longer support the short form."),
-    Phrase("removal", r"\bend[ -]of[ -]life\b", "Version 1 reaches end of life with 3.0."),
-    Phrase("removal", r"\bremoval date\b", "The removal date is not set yet."),
+    Phrase("removal", r"\bwill be <<REMOVED>>\b", "The setting will be removed.", ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"<<WILL>> <<REMOVE>>\b", "We will remove the switch.", ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"\bto be <<REMOVED>>\b", "The setting is to be retired.", ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"\b<<BEING>> <<REMOVING>>\b", "We are dropping the classic theme.", ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"\b<<ISARE>> <<REMOVED>> (?:\w+ ){0,2}<<VERSION>>", "The verb is retired in 2.0.",
+           ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"\bwill stop working\b", "The v1 protocol will stop working.", ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"\bwill no longer\b", "The old key will no longer be read.", ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"\bno longer (?:be )?supported\b", "Windows 8 is no longer supported.", ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"\bsupport (?:\w+ ){0,4}ends\b", "Support for Server 2016 ends with 2.0.", ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"\bgoes away\b", "The switch goes away.", ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"\bgoing away\b", "The switch is going away.", ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"\bend[ -]of[ -]life\b", "Version 1 reaches end of life with 3.0.", ("THIRD_PARTY",)),
+    Phrase("removal", r"\b<<SCHEDULED>> for <<REMOVAL>>\b", "The fallback is scheduled for removal.", ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"\b<<REMOVAL>> (?:is )?<<SCHEDULED>>\b", "Removal is planned.", ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"\bremoval\b[^.;:]{0,60}:\s*v?\d+\.\d+", "Removal of the alias: 3.0."),
+    Phrase("removal", r"\b<<REMOVAL>> in <<VERSION>>", "Removal in 3.0."),
+    Phrase("removal", r"\bremoval date\b", "The removal date is open."),
+    Phrase("removal", r"\b<<VERSION>> <<REMOVES>>\b", "Version 3.0 removes the switch.", ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"\bgoes in <<VERSION>>", "It is deprecated and goes in the next minor."),
     # --- date and schedule --------------------------------------------------
+    Phrase("date", r"<<DATE>>", "Stable ships 2027-01-15.", ("TECH", "THIRD_PARTY")),
+    Phrase("date", r"\b<<YEAR_PREP>> (?P<y>20\d{2})(?!-)(?!/)(?!\d)(?!\.\d)", "The CLI moves to the new runtime in 2027.",
+           ("TECH", "THIRD_PARTY")),
+    Phrase("date", r"\b<<VSCHED>> (?:the )?<<VERSION>>", "The new layout takes effect in 3.0.", ("TECH", "THIRD_PARTY")),
+    Phrase("date", r"^\W*<<LABEL>>\s*:\s*<<VERSION>>", "Ships in: 2.1"),
+    Phrase("date", r"\bfrom <<VERSION>> onwards\b", "The fallback is available from 2.1 onwards.", ("TECH", "THIRD_PARTY")),
+    Phrase("date", r"\bfrom <<VERSION>> on\b", "The fallback is available from 2.1 on.", ("TECH", "THIRD_PARTY")),
+    Phrase("date", r"\bfor (?:at least )?<<COUNT>> (?:more )?<<RELUNIT>>\b", "The switch stays for two more minors.",
+           ("TECH", "THIRD_PARTY")),
+    Phrase("date", r"\bat least <<COUNT>> <<UNIT>>\b", "Keep the switch for at least 90 days.", ("TECH", "THIRD_PARTY")),
+    Phrase("date", r"\ba minimum of <<COUNT>> <<UNIT>>\b", "Keep it for a minimum of two releases.", ("TECH", "THIRD_PARTY")),
+    Phrase("date", r"\b<<COUNT>> <<UNIT_TIME>> after (?:the )?<<AFTER_EVENT>>", "The shim goes two weeks after the prerelease.",
+           ("TECH", "THIRD_PARTY")),
+    Phrase("date", r"\b<<PERIOD>> period\b", "There is a waiting period.", ("TECH",)),
     Phrase("date", r"\bno earlier than\b", "Ship it no earlier than six months out."),
     Phrase("date", r"\bnot earlier than\b", "Ship it not earlier than six months out."),
     Phrase("date", r"\bno sooner than\b", "Ship it no sooner than six months out."),
-    # "no later than the timeout" is a bound, not a date: only a date, a
-    # duration or "the next" release counts.
     Phrase("date", r"\bno later than (?:the )?next\b", "Fixes ship no later than the next patch."),
-    Phrase("date", r"\bno later than <<DATE>>", "Fixes ship no later than 2027-03-01."),
-    Phrase("date", r"\bno later than \w+ <<UNIT>>\b", "Fixes ship no later than six months out."),
-    Phrase("date", r"\bat least \w+ <<UNIT>>\b", "Keep the alias for at least 90 days."),
-    Phrase("date", r"\ba minimum of \w+ <<UNIT>>\b", "Keep it for a minimum of two releases."),
-    Phrase("date", r"\bwaiting period\b", "There is a waiting period."),
-    Phrase("date", r"\b<<SCHEDULED>> for <<VERSION>>", "Profile migration is scheduled for 3.1."),
-    Phrase("date", r"\b\w+ <<UNIT>> after (?:the )?<<AFTER_EVENT>>\b", "The alias goes two weeks after the prerelease."),
-    Phrase("date", r"\b<<DATE_PREP>> <<DATE>>", "The cut-over happens after 2027-02-01."),
-    Phrase("date", r"\btarget(?: date)?: <<DATE>>", "Target: 2027-01-15"),
-    Phrase("date", r"\bdate is <<DATE>>", "The release date is 2027-01-15."),
-    Phrase("date", r"\bend of (?P<y>20\d{2})\b", "Support stops end of 2027."),
+    Phrase("date", r"\bno later than <<COUNT>> <<UNIT>>\b", "Fixes ship no later than six months out."),
+)
+
+GUARDS: dict[str, Guard] = {
+    "TECH": Guard(
+        blockers=(
+            Alt(r"\btemporary\b", "The temporary directory will be deleted when the process exits."),
+            Alt(r"\block file\b", "The lock file will be removed after the run."),
+            Alt(r"\bcache\b", "Stale entries will be dropped from the cache."),
+            Alt(r"\brows?\b", "The command will delete the selected rows after confirmation."),
+            Alt(r"\brecords?\b", "The filter selects records due 2027-01-01."),
+            Alt(r"\bcolumns?\b", "`column delete` will remove the column from the table."),
+            Alt(r"\bcertificates?\b", "The certificate rotates on 2027-04-01."),
+            Alt(r"\btokens?\b", "A token stays usable for at least 90 days."),
+            Alt(r"\blogs?\b", "The service retains audit logs for at least 30 days."),
+            Alt(r"\bvalid\b", "The key is valid for at least 90 days."),
+            Alt(r"\bexpir\w*", "The signing key expires on 2027-04-01."),
+            Alt(r"\bcreated\b", "Items created on or after 2027-01-01 are exported."),
+            Alt(r"\bmodified\b", "Items modified on or after 2027-01-01 are exported."),
+            Alt(r"\bsample\b", "The sample order is due 2027-02-01."),
+            Alt(r"\bfixture\b", "The fixture uses 2027-12-31 as its date."),
+        ),
+        markers=(
+            Alt(r"\bv?\d+\.\d+\b", "The cache layout will be removed in 3.0."),
+            Alt(r"\bv\d+\b", "The old cache will be dropped in v3."),
+            Alt(r"`--[a-z]", "The `--cache-dir` switch will be removed."),
+            Alt(r"\balias\b", "The rows alias will be removed."),
+            Alt(r"\bflag\b", "The cache flag will be removed."),
+            Alt(r"\bsupport for\b", "Support for the token cache will be dropped."),
+            Alt(r"\bnext major\b", "The token cache goes away in the next major."),
+            Alt(r"\bnext minor\b", "The token cache goes away in the next minor."),
+            Alt(r"\bnext release\b", "The token cache goes away in the next release."),
+            Alt(r"\bdeprecat\w*", "The cache is deprecated and will be removed."),
+        ),
+    ),
+    "THIRD_PARTY": Guard(blockers=(
+        Alt(r"^\W*(?:the )?microsoft\b", "Microsoft's legacy endpoint will be removed in 2027."),
+        Alt(r"^\W*(?:the )?dataverse\b", "Dataverse will retire the old Web API version in 2027."),
+        Alt(r"^\W*(?:the )?azure\b", "Azure will stop issuing classic keys in 2027."),
+        Alt(r"^\W*(?:the )?github\b", "GitHub will remove the old runner image in 2027."),
+    )),
+    # A policy frame that is really about a thrown exception.
+    "CODE_EXCEPTION": Guard(blockers=(
+        Alt(r"\bthrow\w*", "The command throws an exception for a missing profile."),
+        Alt(r"\brais\w*", "The parser raises exceptions for unknown verbs."),
+        Alt(r"\bcatch\w*", "The CLI catches exceptions for missing profiles."),
+        Alt(r"\bcaught\b", "Exceptions for timeouts are caught by the CLI."),
+        Alt(r"\bunhandled\b", "Unhandled exceptions for bad input go to stderr."),
+        Alt(r"\bhandler\b", "The handler takes exceptions for bad input."),
+        Alt(r"\bwrap\w*", "The service wraps exceptions for bad input."),
+        Alt(r"\binner exception", "The cause is the inner exception."),
+        Alt(r"\bmaps?\b", "The mapper maps exceptions to exit codes."),
+        Alt(r"\bconverts?\b", "The mapper converts exceptions to exit codes."),
+        # An exception to a data shape or schema is a technical statement.
+        Alt(r"\bshape\b", "The new key is the one exception to the JSON shape."),
+        Alt(r"\bschema\b", "The new key is the one exception to the schema."),
+    )),
+    "TECH_EXEMPT": Guard(blockers=(
+        Alt(r"\bcheck\b", "`id` is exempt from the brace-GUID check."),
+        Alt(r"\bwarnings?\b", "Generated files are exempt from warnings."),
+        Alt(r"\banaly[sz]ers?\b", "Generated files are exempt from the analyzer."),
+        Alt(r"\bvalidation\b", "The name field is exempt from validation."),
+        # An exemption whose subject is a code path is build configuration.
+        Alt(r"`[^`\s]*/[^`\s]*`", "Files under `Generated/` are exempt."),
+        # Compiler and analyzer rule ids.
+        Alt(r"\b[A-Z]{2,4}\d{3,4}\b", "CS1591 has no `[GeneratedCode]` exemption."),
+    )),
+    "TECH_ACTOR": Guard(blockers=(
+        Alt(r"\bclient\b", "The client agreed to use gzip."),
+        Alt(r"\bserver\b", "The server accepted the upload and agreed to compress it."),
+        Alt(r"\bhandshake\b", "Both peers agreed on a version during the handshake."),
+        Alt(r"\bplanner\b", "The planner decided to use a hash join."),
+        Alt(r"\boptimi[sz]er\b", "The optimizer chose a nested loop."),
+        Alt(r"\brequest\b", "The request was accepted."),
+        Alt(r"\bconnection\b", "The connection was accepted."),
+        Alt(r"\bruntime\b", "Each tool is decided at runtime."),
+        Alt(r"\boperator\b", "The operator chose shakedown mode."),
+        # A sentence about a command or input in a code span: Dataverse or
+        # the CLI accepted it, technically.
+        Alt(r"^\W*`", "`forms set-xml` with two controls was accepted."),
+    )),
+    # A requirement word that governs a held approval or sign-off ("must
+    # have maintainer approval"): a requirement, not a record that it was given.
+    "REQUIREMENT": Guard(blockers=(
+        Alt(r"\bonly with (?:[\w'-]+ ){0,3}approval\b", "Pull requests merge only with maintainer approval."),
+        Alt(r"\bmust (?:[\w'-]+ ){0,3}approval\b", "A release must have maintainer approval."),
+        Alt(r"\bneeds? (?:[\w'-]+ ){0,3}approval\b", "A release needs to have approval."),
+        Alt(r"\brequir\w* (?:[\w'-]+ ){0,4}approval\b", "Tagging requires that the release has approval."),
+        Alt(r"\bmust (?:[\w'-]+ ){0,3}sign-?off\b", "A stable tag must have sign-off."),
+        Alt(r"\bneeds? (?:[\w'-]+ ){0,3}sign-?off\b", "A stable tag needs to have sign-off."),
+        Alt(r"\brequir\w* (?:[\w'-]+ ){0,4}sign-?off\b", "Tagging requires that the tag has sign-off."),
+    )),
+    "CONDITIONAL": Guard(blockers=(
+        Alt(r"\bonce\b", "Dates are set once the release is approved."),
+        Alt(r"\bwhen\b", "Dates are set when the release is approved."),
+        Alt(r"\buntil\b", "Nothing ships until the release is approved."),
+        Alt(r"\bif\b", "The tag is pushed if the release is approved."),
+        Alt(r"\bunless\b", "Nothing ships unless the release is approved."),
+    )),
+    # "approved" opening a clause and followed by neither "by" nor ":" is an
+    # adjective ("Approved runs are listed", "On 2026-11-01, approved run X").
+    "ADJECTIVE": Guard(blockers=(
+        Alt(r"^\W*approved (?!by\b)", "Approved runs are listed in the ledger."),
+        Alt(r"[,;]\s*approved (?!by\b)", "On Monday, approved run 6d83 passed."),
+        Alt(r"\bseparately approved\b", "A separately approved setup was used."),
+        Alt(r"\bseparate approved\b", "The separate approved setup passed."),
+        Alt(r"\bapproved (?:[\w-]+ ){0,3}fixtures?\b", "Josh used a newly approved live fixture."),
+    )),
+    # A spec's "**Decision:**" heading line records design rationale.
+    "DESIGN_RECORD": Guard(blockers=(
+        Alt(r"^\W*\*\*decision:?\*\*", "**Decision:** Keep the rules in one document."),
+    )),
+    "HABITUAL": Guard(blockers=(
+        Alt(r"\bevery\b", "The maintainer approves every release."),
+        Alt(r"\beach\b", "The maintainer approves each release."),
+        Alt(r"\ball\b", "The maintainer approves all releases."),
+    )),
+}
+# Table columns whose cells are decisions: a future date under a date-like
+# header, a version under a removal-like header.
+DECISION_COLUMNS: tuple[tuple[str, str, Alt], ...] = (
+    ("date", "date", Alt(r"^when$", "| Item | When |\n|---|---|\n| Stable | 2027-01-15 |\n")),
+    ("date", "date", Alt(r"^(?:target )?date$", "| Item | Date |\n|---|---|\n| Stable | 2027-01-15 |\n")),
+    ("date", "date", Alt(r"^target$", "| Item | Target |\n|---|---|\n| Stable | 2027-01-15 |\n")),
+    ("date", "date", Alt(r"^deadline$", "| Item | Deadline |\n|---|---|\n| Stable | 2027-01-15 |\n")),
+    ("date", "date", Alt(r"^due$", "| Item | Due |\n|---|---|\n| Stable | 2027-01-15 |\n")),
+    ("removal", "version", Alt(r"^removal$", "| Flag | Removal |\n|---|---|\n| `-e` | 3.0 |\n")),
+    ("removal", "version", Alt(r"^removed in$", "| Flag | Removed in |\n|---|---|\n| `-e` | 3.0 |\n")),
+    ("removal", "version", Alt(r"^removal version$", "| Flag | Removal version |\n|---|---|\n| `-e` | 3.0 |\n")),
 )
 
 MONTHS = {
@@ -346,9 +688,10 @@ MONTHS = {
 MONTHS["sept"] = 9
 ORDINAL_SUFFIXES = {"st", "nd", "rd", "th"}
 MACRO_RE = re.compile(r"<<([A-Z_]+)>>")
+VERSION_IN_CELL_RE = re.compile(r"\bv?\d+\.\d+(?:\.\d+)?\b")
 
+PROPOSED_PREFIX_RE = re.compile(r"^\W*proposed\W*[:—–-]", re.IGNORECASE)
 PROPOSED_RES = (
-    re.compile(r"^\W*proposed\W*[:—–-]", re.IGNORECASE),
     re.compile(r"\(proposed\)", re.IGNORECASE),
     re.compile(r"\b(?:is|are) proposed\b", re.IGNORECASE),
     re.compile(r"\bproposed (?:removal|date|deadline|schedule|exception|timeline|approval)\b", re.IGNORECASE),
@@ -358,6 +701,7 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 HEADING_RE = re.compile(r"^\s*#{1,6}\s")
 LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
 TABLE_ROW_RE = re.compile(r"^\s*\|")
+TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{3,}")
 HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=\S)")
 ABBREVIATIONS = ("e.g.", "i.e.", "etc.", "vs.", "cf.", "approx.", "incl.", "no.", "resp.", "fig.", "al.")
@@ -372,6 +716,7 @@ class Matcher:
     category: str
     regex: re.Pattern[str]
     has_date: bool
+    guards: tuple[str, ...]
 
 
 def build_matchers(
@@ -383,16 +728,26 @@ def build_matchers(
     for phrase in phrases:
         names = MACRO_RE.findall(phrase.pattern)
         choices = [[alt.pattern for alt in fragments[name]] for name in names]
+        flags = 0 if phrase.case_sensitive else re.IGNORECASE
         for combo in itertools.product(*choices):
             pattern = phrase.pattern
             for name, alternative in zip(names, combo):
                 pattern = pattern.replace(f"<<{name}>>", f"(?:{alternative})", 1)
             has_date = "DATE" in names or "(?P<y>" in phrase.pattern
-            matchers.append(Matcher(phrase.category, re.compile(pattern, re.IGNORECASE), has_date))
+            matchers.append(Matcher(phrase.category, re.compile(pattern, flags), has_date, phrase.guards))
     return matchers
 
 
+def build_guards(guards: Mapping[str, Guard] = GUARDS) -> dict[str, tuple[list[re.Pattern[str]], list[re.Pattern[str]]]]:
+    return {
+        name: ([re.compile(a.pattern, re.IGNORECASE) for a in guard.blockers],
+               [re.compile(a.pattern, re.IGNORECASE) for a in guard.markers])
+        for name, guard in guards.items()
+    }
+
+
 _MATCHERS = build_matchers()
+_GUARDS = build_guards()
 
 
 def period_end(groups: Mapping[str, Optional[str]]) -> Optional[date]:
@@ -425,15 +780,63 @@ def period_end(groups: Mapping[str, Optional[str]]) -> Optional[date]:
     return date(year, month, calendar.monthrange(year, month)[1])
 
 
-def decision_category(sentence: str, today: date, matchers: Optional[Sequence[Matcher]] = None) -> Optional[str]:
+# A date or removal inside a link target, a URL, a code span or quoted text
+# (a file name such as "review-2026-11.md", a sample value, a UI string such as
+# "Will delete: 3 steps") is not one the sentence commits to. They are blanked
+# out, keeping positions, before dates and removals are read.
+NOT_PROSE_RES = (
+    re.compile(r"\]\([^)]*\)"),
+    re.compile(r"https?://\S+"),
+    re.compile(r"`[^`]*`"),
+    re.compile(r'"[^"]*"'),
+)
+
+
+def prose_only(sentence: str) -> str:
+    for pattern in NOT_PROSE_RES:
+        sentence = pattern.sub(lambda m: " " * len(m.group(0)), sentence)
+    return sentence
+
+
+def _blocked(sentence: str, names: Sequence[str], guards) -> bool:
+    for name in names:
+        blockers, markers = guards[name]
+        if any(b.search(sentence) for b in blockers) and not any(m.search(sentence) for m in markers):
+            return True
+    return False
+
+
+def decision_match(
+    sentence: str, today: date, matchers: Optional[Sequence[Matcher]] = None, guards=None,
+) -> Optional[tuple[str, int]]:
+    """Return (category, match position) of the first decision wording, or None."""
+    guards = guards if guards is not None else _GUARDS
+    prose = prose_only(sentence)
     for matcher in matchers if matchers is not None else _MATCHERS:
-        for match in matcher.regex.finditer(sentence):
-            if not matcher.has_date:
-                return matcher.category
+        text = prose if matcher.has_date or matcher.category == "removal" else sentence
+        for match in matcher.regex.finditer(text):
+            if matcher.has_date:
+                end = period_end(match.groupdict())
+                if end is None or end <= today:
+                    continue
+            if _blocked(sentence, matcher.guards, guards):
+                break
+            return matcher.category, match.start()
+    return None
+
+
+def decision_category(sentence: str, today: date, matchers=None, guards=None) -> Optional[str]:
+    found = decision_match(sentence, today, matchers, guards)
+    return found[0] if found else None
+
+
+def future_date_in(text: str, today: date) -> bool:
+    for alt in FRAGMENTS["DATE"]:
+        for match in re.finditer(alt.pattern, text, re.IGNORECASE):
             end = period_end(match.groupdict())
             if end is not None and end > today:
-                return matcher.category
-    return None
+                return True
+    return False
 
 
 def decision_link_re(repository: str) -> re.Pattern[str]:
@@ -446,8 +849,14 @@ def decision_link_re(repository: str) -> re.Pattern[str]:
     )
 
 
-def is_proposed(sentence: str) -> bool:
-    return any(pattern.search(sentence) for pattern in PROPOSED_RES)
+def is_proposed(sentence: str, position: int = 0) -> bool:
+    """A leading "Proposed:", or a qualifier in the clause that holds the decision."""
+    if PROPOSED_PREFIX_RE.search(sentence):
+        return True
+    start = sentence.rfind(";", 0, position) + 1
+    end = sentence.find(";", position)
+    clause = sentence[start:] if end < 0 else sentence[start:end]
+    return any(pattern.search(clause) for pattern in PROPOSED_RES)
 
 
 # ---------------------------------------------------------------------------
@@ -490,16 +899,25 @@ def in_scope(path: str) -> bool:
     return len(parts) == 3 and parts[0] == "src" and parts[2] == "CHANGELOG.md"
 
 
-def _blocks(lines: Sequence[str]) -> list[tuple[bool, list[tuple[int, str]]]]:
-    """Group prose lines into blocks: (is a table row, [(line index, text)])."""
-    blocks: list[tuple[bool, list[tuple[int, str]]]] = []
+def _cells(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _blocks(lines: Sequence[str]) -> list[tuple[Optional[list[str]], list[tuple[int, str]]]]:
+    """Group prose lines into blocks: (table header or None, [(line index, text)]).
+
+    A table row is its own block and carries its table's header cells (None
+    for prose and for the header row itself).
+    """
+    blocks: list[tuple[Optional[list[str]], list[tuple[int, str]]]] = []
     current: list[tuple[int, str]] = []
     in_fence = False
+    header: Optional[list[str]] = None
 
     def flush() -> None:
         nonlocal current
         if current:
-            blocks.append((False, current))
+            blocks.append((None, current))
         current = []
 
     for index, line in enumerate(lines):
@@ -511,16 +929,41 @@ def _blocks(lines: Sequence[str]) -> list[tuple[bool, list[tuple[int, str]]]]:
             continue
         if not line.strip() or HEADING_RE.match(line):
             flush()
+            header = None
             continue
         if TABLE_ROW_RE.match(line):
             flush()
-            blocks.append((True, [(index, line)]))
+            if TABLE_SEPARATOR_RE.match(line):
+                continue
+            following = lines[index + 1] if index + 1 < len(lines) else ""
+            if TABLE_SEPARATOR_RE.match(following):
+                header = [cell.lower() for cell in _cells(line)]
+                blocks.append(([], [(index, line)]))
+            else:
+                blocks.append((header or [], [(index, line)]))
             continue
+        header = None
         if LIST_ITEM_RE.match(line):
             flush()
         current.append((index, line))
     flush()
     return blocks
+
+
+def column_decision(header: Sequence[str], row: str, today: date,
+                    columns=DECISION_COLUMNS) -> Optional[str]:
+    """A decision stated by a table cell under a decision column, or None."""
+    for position, cell in enumerate(_cells(row)):
+        if position >= len(header) or not cell:
+            continue
+        for category, kind, alt in columns:
+            if not re.search(alt.pattern, header[position], re.IGNORECASE):
+                continue
+            if kind == "date" and future_date_in(cell, today):
+                return category
+            if kind == "version" and VERSION_IN_CELL_RE.search(cell):
+                return category
+    return None
 
 
 def _strip_comments(lines: Sequence[str]) -> list[str]:
@@ -566,7 +1009,7 @@ def findings_for(
     link_re = decision_link_re(repository)
     lines = _strip_comments(after.splitlines())
     found: list[Finding] = []
-    for is_table_row, block in _blocks(lines):
+    for header, block in _blocks(lines):
         text_parts: list[str] = []
         owners: list[int] = []
         for index, line in block:
@@ -577,7 +1020,7 @@ def findings_for(
             text_parts.append(piece)
             owners.extend([index] * len(piece))
         text = "".join(text_parts)
-        sentences = [text] if is_table_row else split_sentences(text)
+        sentences = [text] if header is not None else split_sentences(text)
         position = 0
         for sentence in sentences:
             start = text.index(sentence, position)
@@ -586,8 +1029,12 @@ def findings_for(
             sentence_lines = set(owners[start:end]) if sentence else set()
             if changed is not None and not (sentence_lines & changed):
                 continue
-            category = decision_category(sentence, today)
-            if category and not link_re.search(sentence) and not is_proposed(sentence):
+            found_match = decision_match(sentence, today)
+            category = found_match[0] if found_match else None
+            where = found_match[1] if found_match else 0
+            if category is None and header:
+                category = column_decision(header, sentence, today)
+            if category and not link_re.search(sentence) and not is_proposed(sentence, where):
                 found.append(Finding(
                     path=path, line=min(sentence_lines) + 1,
                     category=category, sentence=sentence.strip(),

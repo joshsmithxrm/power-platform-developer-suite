@@ -1,73 +1,101 @@
-# Ordinary sentences from specs, changelogs and release notes that state no
-# decision and must not fail. Written for this check (#1790); "today" in the
-# test is 2026-11-21, so the dates here are past records.
-The command throws an exception when the table is missing.
-An exception is thrown for an unknown option.
-The handler catches the exception and returns exit 2.
-Human approval gates the merge.
-Merging requires maintainer approval.
-Release dates are set only when the release is approved.
-A release needs explicit approval before tagging.
-Maintainer sign-off is required before a stable tag.
+# Ordinary sentences that state no decision, written for this check in
+# round 2: technical facts, past records, code exceptions, processes and
+# third-party plans. "today" in the test is 2026-11-21.
+The command throws an exception when the profile is missing.
+An exception is raised for an unknown verb.
+The handler logs the exception and exits with code 2.
+Unhandled exceptions are written to the error log.
+The exception message names the missing column.
+`id` is exempt from the brace-GUID check.
+Generated files are exempt from analyzer warnings.
+The digest can waive only unresolved ancestry.
+Merging needs maintainer approval.
+A release requires approval from the maintainer.
+Pull requests merge only with maintainer approval.
+Dates are set once the release is approved.
 The approved pinned tool signs the assembly.
-Microsoft's approved list contains the connector.
-The approved live run produced 12 rows.
-Approved runs are listed in the ledger.
-The token is authorized for the Dataverse scope.
-Requests authorized by the token go through the pool.
-The user is authorised to read the table.
-The planner chose a hash join for the query.
-The query planner selects the cheapest plan.
+Microsoft's approved connector list includes it.
+The approved run produced 12 rows.
+The planner decided to use a hash join.
+The optimizer chose a nested loop for small tables.
+The client and server agreed to use gzip.
+Both sides agreed on protocol version 3 during the handshake.
+The request was accepted by the server.
+The connection is accepted once the token validates.
 The temporary directory will be deleted when the process exits.
 The lock file will be removed after the run.
 Stale entries will be dropped from the cache.
+The command will delete the selected rows after confirmation.
+`column delete` will remove the column from the table.
+The import will remove rows that fail validation from the batch.
+Temporary profiles will be cleaned up on exit.
 Rows to be deleted are listed first.
-Remove the temporary profile after the test.
-Removed the `--legacy` flag (#123).
-Deleted rows are reported in the summary.
-The command drops the connection on timeout.
+The `--legacy` flag was removed in 1.6.
+The old verbs were dropped in 1.4.
+Version 1.2 removed the XML output.
+Removed the `--raw` switch (#123).
 The daemon removes stale sockets on start.
-Observed live on 2026-11-10 in the English-base test environment.
+The certificate is valid for at least 90 days.
+The service retains audit logs for at least 30 days.
+The certificate expires on 2027-04-01.
+The test certificate is valid until 2027-04-01.
+Rows created on or after 2027-01-01 are exported.
+The filter selects records modified before 2027-01-01.
+The token lifetime is at least 60 minutes.
+Tokens are cached for at least one hour.
+Microsoft's legacy endpoint will be removed in 2027.
+Dataverse will retire the old Web API version in 2027.
+Azure will stop issuing classic certificates in 2027.
+The timeout is 60 seconds.
+The job is scheduled for 09:00 UTC on Mondays.
+Retry at least three times before failing.
+Each batch holds at least one record.
+Observed on 2026-11-10 in the English-base test environment.
 The 2026-10-30 release fixed the export bug.
 Released on 2026-09-12.
-Introduced in March 2026.
 The run on 2026-11-01 passed.
-From 2026-01-01 to 2026-06-30 the cache was disabled.
-The timeout is 60 seconds.
-The timeout is set for 2.5 seconds.
-Retry at least three times.
-Each batch holds at least one record.
-The job is scheduled for 09:00 UTC on Mondays.
-The workflow is scheduled for every Monday.
-The weekly run is planned for the morning.
-The client and server agreed on a protocol version.
-The token refresh has a grace period of five minutes.
-The page is not before the first record.
-Version 3 of the API returns JSON.
+Version 3 of the Web API returns JSON.
 The CLI 2.0 output keeps the same keys.
 This release adds `--dry-run` to `plugins deploy`.
-The export command now writes UTF-8.
 Exit code 12 means the check could not be completed.
-Profiles are stored in the user's config directory.
-The extension checks the daemon's protocol version when it connects.
 A stable extension never bundles a prerelease CLI.
-The import retries throttled requests with backoff.
+The extension checks the daemon's protocol version when it connects.
 The model maps each project to a release surface.
 Tests run on Windows and Linux.
-The digest can waive only unresolved ancestry.
-The default endpoint is going to the global cloud.
-The rule does not apply to test projects.
-The filter excludes hidden steps.
-Only stable tags count for the comparison.
-A deprecated option prints a notice on stderr.
 The number of releases is shown in the summary.
-Each surface has its own CHANGELOG.
 The maintainer reviews every pull request.
 The owner of the table is shown in the output.
 Dates are shown in UTC.
-The year 2027 is not special for the parser.
 The export ends at the end of the page.
-Generated code under `Generated/` is exempt.
-CS1591 has no `[GeneratedCode]` exemption.
-The focused cases passed on 2026-11-21.
-The command must finish no later than the timeout.
+The year 2027 has no special meaning for the parser.
+The sample record has a due date of 2027-02-01.
+The fixture sets the expiry to 2027-12-31.
+The trace keeps the last 1000 entries.
+The cache entry expires after 10 minutes.
+The command waits for at least 5 seconds.
+The session ends after 30 minutes of inactivity.
+The release plan lists the affected packages.
+The command accepts a solution name or id.
+The parser accepts both forms.
+The query is approved for execution once the plan is safe.
+Each tool is decided at runtime from the manifest.
+The panel shows the decision tree for the plugin step.
+The confirmation prompt asks before deleting.
+Option sets are removed with `optionset delete`.
+Deleted rows are reported in the summary.
+The command drops the connection on timeout.
+The release window in the table below is from the 1.8 cycle.
+Support for proxies was added in 1.5.
+The `--env` flag replaced `--url` in 1.2.
+The server is kept alive for two minutes after the last request.
+A deprecated option prints a notice on stderr.
+Each surface has its own CHANGELOG.
+The import resumes from the last committed batch.
+The minimum VS Code version is 1.90.
+Node 20 is required to build the extension.
+The schedule field holds a cron expression.
+The step runs after the release job.
+Logs older than 30 days are deleted by the cleanup task.
+The spec lists the exceptions the parser can raise.
+The validator rejects an empty name.
+The plugin step is retired when its assembly is unregistered.

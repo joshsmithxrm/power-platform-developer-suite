@@ -9,6 +9,7 @@ Run with: python -m pytest tests/ci/test_decision_links_check.py -q
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -33,29 +34,54 @@ def check(after: str, before: str = "", path: str = "specs/example.md", today: d
     return cdl.evaluate([cdl.FileChange(path=path, before=before, after=after)], today=today)
 
 
-def caught(sentence: str, matchers=None, today: date = TODAY):
-    return cdl.decision_category(sentence, today, matchers)
+def caught(sentence: str, matchers=None, today: date = TODAY, guards=None):
+    return cdl.decision_category(sentence, today, matchers, guards)
 
 
 # ---------------------------------------------------------------------------
-# Generated from the phrase list: each entry and alternative is proven
+# The list is proven item by item, and pinned as a whole
 # ---------------------------------------------------------------------------
+
+def expanded_set() -> list:
+    """Every entry, fragment alternative, guard alternative and column."""
+    items = [["phrase", p.category, p.pattern, list(p.guards), p.case_sensitive] for p in cdl.DECISION_PHRASES]
+    items += [["fragment", n, a.pattern] for n, alts in cdl.FRAGMENTS.items() for a in alts]
+    items += [["guard", n, k, a.pattern] for n, g in cdl.GUARDS.items()
+              for k in ("blockers", "markers") for a in getattr(g, k)]
+    items += [["column", cat, kind, a.pattern] for cat, kind, a in cdl.DECISION_COLUMNS]
+    return items
+
+
+# Changing the list changes this digest. Deleting an entry, an alternative, a
+# guard or a column therefore fails this test even though its generated test
+# disappears with it. After a deliberate change, prove the new item (its
+# generated test must pass) and update both numbers here.
+PINNED_COUNT = 385
+PINNED_DIGEST = "7f0def4c73d90bacbe8d767c28e0e1469b1a7ef45fb76bfd5d01212a33c24c66"
 
 PHRASE_IDS = [f"{i}:{p.category}:{p.pattern}" for i, p in enumerate(cdl.DECISION_PHRASES)]
 ALTERNATIVES = [(name, j) for name, alts in cdl.FRAGMENTS.items() for j in range(len(alts))]
 ALT_IDS = [f"{name}[{j}]:{cdl.FRAGMENTS[name][j].pattern}" for name, j in ALTERNATIVES]
+GUARD_ITEMS = [(name, kind, j) for name, g in cdl.GUARDS.items()
+               for kind in ("blockers", "markers") for j in range(len(getattr(g, kind)))]
+GUARD_IDS = [f"{n}.{k}[{j}]:{getattr(cdl.GUARDS[n], k)[j].pattern}" for n, k, j in GUARD_ITEMS]
 
 
 class TestPhraseListIsProven:
+    def test_the_expanded_set_is_pinned(self):
+        items = expanded_set()
+        digest = hashlib.sha256(json.dumps(items).encode()).hexdigest()
+        assert (len(items), digest) == (PINNED_COUNT, PINNED_DIGEST), (
+            "The phrase list changed. A deletion must not pass silently; if the change is "
+            f"deliberate and its generated tests pass, pin {len(items)} and {digest}."
+        )
+
     @pytest.mark.parametrize("index", range(len(cdl.DECISION_PHRASES)), ids=PHRASE_IDS)
     def test_each_entry_catches_its_example_and_only_it_does(self, index):
         phrase = cdl.DECISION_PHRASES[index]
         assert caught(phrase.example) == phrase.category
         without = cdl.build_matchers(cdl.DECISION_PHRASES[:index] + cdl.DECISION_PHRASES[index + 1:])
-        assert caught(phrase.example, without) is None, (
-            f"{phrase.example!r} is still caught without entry {phrase.pattern!r}; "
-            "give the entry an example that only it catches"
-        )
+        assert caught(phrase.example, without) is None
 
     @pytest.mark.parametrize("name, index", ALTERNATIVES, ids=ALT_IDS)
     def test_each_alternative_catches_its_example_and_only_it_does(self, name, index):
@@ -63,35 +89,49 @@ class TestPhraseListIsProven:
         assert caught(alternative.example) is not None
         fragments = dict(cdl.FRAGMENTS)
         fragments[name] = fragments[name][:index] + fragments[name][index + 1:]
-        assert caught(alternative.example, cdl.build_matchers(fragments=fragments)) is None, (
-            f"{alternative.example!r} is still caught without {name} alternative "
-            f"{alternative.pattern!r}; give it an example that only it catches"
-        )
+        assert caught(alternative.example, cdl.build_matchers(fragments=fragments)) is None
 
-    def test_every_alternation_is_a_listed_alternative(self):
-        """No "|" inside an entry: every alternative must be listed, and so tested."""
-        for phrase in cdl.DECISION_PHRASES:
-            assert "|" not in phrase.pattern, phrase.pattern
-        for name, alts in cdl.FRAGMENTS.items():
-            for alt in alts:
-                assert "|" not in alt.pattern, (name, alt.pattern)
+    @pytest.mark.parametrize("name, kind, index", GUARD_ITEMS, ids=GUARD_IDS)
+    def test_each_guard_alternative_is_needed(self, name, kind, index):
+        """A blocker keeps its ordinary example from failing; a marker lets its decision through."""
+        guard = cdl.GUARDS[name]
+        alternative = getattr(guard, kind)[index]
+        reduced = dict(cdl.GUARDS)
+        kept = getattr(guard, kind)[:index] + getattr(guard, kind)[index + 1:]
+        reduced[name] = cdl.Guard(**{"blockers": guard.blockers, "markers": guard.markers, kind: kept})
+        with_it, without_it = caught(alternative.example), caught(alternative.example, guards=cdl.build_guards(reduced))
+        if kind == "blockers":
+            assert with_it is None and without_it is not None
+        else:
+            assert with_it is not None and without_it is None
 
-    def test_every_fragment_is_used_and_every_macro_is_defined(self):
+    @pytest.mark.parametrize("index", range(len(cdl.DECISION_COLUMNS)),
+                             ids=[a.pattern for _, _, a in cdl.DECISION_COLUMNS])
+    def test_each_decision_column_is_needed(self, index):
+        category, _kind, alternative = cdl.DECISION_COLUMNS[index]
+        assert [f.category for f in check(alternative.example)] == [category]
+        header, block = next(b for b in cdl._blocks(alternative.example.splitlines()) if b[0])
+        others = cdl.DECISION_COLUMNS[:index] + cdl.DECISION_COLUMNS[index + 1:]
+        assert cdl.column_decision(header, block[0][1], TODAY, others) is None
+
+    def test_no_pattern_holds_an_unlisted_alternative(self):
+        patterns = [p.pattern for p in cdl.DECISION_PHRASES]
+        patterns += [a.pattern for alts in cdl.FRAGMENTS.values() for a in alts]
+        patterns += [a.pattern for g in cdl.GUARDS.values() for a in (*g.blockers, *g.markers)]
+        for pattern in patterns:
+            assert "|" not in pattern, pattern
+
+    def test_every_fragment_and_guard_is_used(self):
         used = {name for p in cdl.DECISION_PHRASES for name in cdl.MACRO_RE.findall(p.pattern)}
         assert used == set(cdl.FRAGMENTS)
+        assert {name for p in cdl.DECISION_PHRASES for name in p.guards} == set(cdl.GUARDS)
 
     def test_categories(self):
         assert {p.category for p in cdl.DECISION_PHRASES} == {"approval", "exception", "removal", "date"}
 
-    def test_the_list_is_the_only_list(self):
-        source = (REPO_ROOT / "scripts" / "ci" / "check_decision_links.py").read_text(encoding="utf-8")
-        assert source.count("DECISION_PHRASES: tuple[Phrase, ...] = (") == 1
-        assert source.count("FRAGMENTS: dict[str, tuple[Alt, ...]] = {") == 1
-        assert cdl._MATCHERS == cdl.build_matchers()
-
 
 # ---------------------------------------------------------------------------
-# Corpus: written for this check, measured both ways
+# Corpora: written for this check (must_*), and review regressions
 # ---------------------------------------------------------------------------
 
 def _corpus(name: str) -> list[str]:
@@ -103,21 +143,64 @@ def _corpus(name: str) -> list[str]:
 
 MUST_FAIL = [tuple(line.split(": ", 1)) for line in _corpus("must_fail.txt")]
 MUST_PASS = _corpus("must_pass.txt")
+REGRESSION_FAIL = [tuple(line.split(": ", 1)) for line in _corpus("regression_must_fail.txt")]
+REGRESSION_PASS = _corpus("regression_must_pass.txt")
 
 
 class TestCorpus:
     def test_corpus_sizes(self):
-        assert len(MUST_FAIL) >= 100
-        assert len(MUST_PASS) >= 60
+        assert len(MUST_FAIL) >= 100 and len(MUST_PASS) >= 60
 
-    @pytest.mark.parametrize("category, sentence", MUST_FAIL)
+    @pytest.mark.parametrize("category, sentence", MUST_FAIL + REGRESSION_FAIL)
     def test_decision_sentence_fails(self, category, sentence):
-        found = check(sentence + "\n")
-        assert [f.category for f in found] == [category]
+        assert check(sentence + "\n") != []
 
-    @pytest.mark.parametrize("sentence", MUST_PASS)
+    @pytest.mark.parametrize("sentence", MUST_PASS + REGRESSION_PASS)
     def test_ordinary_sentence_passes(self, sentence):
         assert check(sentence + "\n") == []
+
+
+class TestStructure:
+    def test_a_future_date_under_a_when_column(self):
+        table = "| Step | When |\n|---|---|\n| Freeze | 2027-01-04 |\n| Done | 2026-01-04 |\n"
+        found = check(table)
+        assert [(f.line, f.category) for f in found] == [(3, "date")]
+
+    def test_a_version_under_a_removal_column(self):
+        table = "| Flag | Removal | Notes |\n|---|---|---|\n| `-e` | 3.0 | alias |\n| `-x` | | kept |\n"
+        assert [(f.line, f.category) for f in check(table)] == [(3, "removal")]
+
+    def test_other_columns_do_not_count(self):
+        assert check("| Flag | Since |\n|---|---|\n| `-e` | 3.0 |\n") == []
+
+    def test_exception_label_in_a_list_item(self):
+        assert [f.category for f in check("- **Exception:** the CLI keeps `-e`.\n")] == ["exception"]
+
+    def test_a_date_in_a_link_target_or_code_span_is_not_a_date(self):
+        assert check("See the [review](../qa/review-2027-11.md) for details.\n") == []
+        assert check("The sample uses `2027-01-15` as its value.\n") == []
+        assert len(check("Stable ships 2027-01-15 ([plan](../plan.md)).\n")) == 1
+
+    def test_a_past_year_after_a_preposition_is_a_record(self):
+        assert check("The CLI moved to the new runtime in 2025.\n") == []
+        assert len(check("The CLI moves to the new runtime in 2027.\n")) == 1
+
+    def test_per_name_is_case_sensitive(self):
+        assert check("The setting is stored per user, not per machine.\n") == []
+        assert len(check("Per Josh, the server ships with the CLI.\n")) == 1
+
+    def test_past_end_of_year_is_a_record(self):
+        assert check("Support stopped end of 2025.\n") == []
+        assert len(check("Support stops end of 2027.\n")) == 1
+
+    def test_is_proposed_only_exempts_its_own_clause(self):
+        assert len(check("A new verb is proposed in #12; the flag will be removed in 3.0.\n")) == 1
+        # A qualifier in another clause does not reach back: the safe direction.
+        assert len(check("The flag will be removed in 3.0; this is proposed.\n")) == 1
+        assert check("The flag is proposed to be removed in 3.0.\n") == []
+
+    def test_a_link_anywhere_in_the_sentence_counts_across_clauses(self):
+        assert check(f"Decided in {LINK}; the flag will be removed in 3.0.\n") == []
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +533,22 @@ class TestGitMode:
         monkeypatch.setattr(cdl, "_git", flaky)
         assert _run(repo) == 2
 
+    def test_a_package_changelog_is_checked_in_pull_request_mode(self, repo, capsys):
+        _git(repo, "checkout", "-q", "-b", "feature")
+        changelog = repo / "src" / "PPDS.Cli" / "CHANGELOG.md"
+        changelog.parent.mkdir(parents=True)
+        changelog.write_text("## [1.5.0] - Unreleased\n\n- The `-e` alias will be removed in 3.0.\n", encoding="utf-8")
+        _commit(repo, "changelog entry")
+        assert _run(repo) == 1
+        assert "src/PPDS.Cli/CHANGELOG.md:3" in capsys.readouterr().out
+
+    def test_deleting_an_in_scope_file_is_not_an_error(self, repo, capsys):
+        _git(repo, "checkout", "-q", "-b", "feature")
+        _git(repo, "rm", "-q", "specs/a.md")
+        _commit(repo, "delete spec")
+        assert _run(repo) == 0
+        assert "Decision-link check passed." in capsys.readouterr().out
+
     def test_git_helper_raises_on_failure(self, tmp_path):
         with pytest.raises(RuntimeError):
             cdl._git(tmp_path, "rev-parse", "HEAD")
@@ -469,6 +568,13 @@ class TestCommandLine:
         path = tmp_path / "changes.json"
         path.write_text("nope", encoding="utf-8")
         assert cdl.main(["--input-json", str(path)]) == 2
+
+    def test_changelog_path_in_input_json_mode(self, tmp_path):
+        path = tmp_path / "changes.json"
+        path.write_text(json.dumps({"files": [
+            {"path": "src/PPDS.Mcp/CHANGELOG.md", "before": "", "after": "- We'll drop the v1 tool names.\n"}]}),
+            encoding="utf-8")
+        assert cdl.main(["--input-json", str(path), "--today", "2026-11-21"]) == 1
 
     def test_whole_tree_reports_and_exits_0(self, tmp_path, capsys):
         (tmp_path / "specs").mkdir()

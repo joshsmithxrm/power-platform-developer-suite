@@ -1,0 +1,109 @@
+# Regression cases from the review rounds of #1846 (sentences the reviewers
+# found failing wrongly). They state no decision and must pass.
+The `--legacy` flag was removed in 1.6.
+The certificate is valid for at least 90 days.
+The service retains audit logs for at least 30 days.
+The certificate expires on 2027-04-01.
+The test certificate is valid until 2027-04-01.
+The client and server agreed to use gzip.
+Microsoft's legacy endpoint will be removed in 2027.
+Rows created on or after 2027-01-01 are exported.
+`id` is exempt from the brace-GUID check.
+Release dates are set only when the release is approved.
+Generated code under `Generated/` is exempt.
+The command must finish no later than the timeout.
+The command throws an exception when the table is missing.
+Human approval gates the merge.
+The approved pinned tool signs the assembly.
+Microsoft's approved list contains the connector.
+The token is authorized for the Dataverse scope.
+The temporary directory will be deleted when the process exits.
+The token refresh has a grace period of five minutes.
+The timeout is set for 2.5 seconds.
+Observed live on 2026-11-10 in the English-base test environment.
+The digest can waive only unresolved ancestry.
+The focused cases passed on 2026-11-21.
+
+# Round-1 ordinary corpus, kept as regression.
+The command throws an exception when the table is missing.
+An exception is thrown for an unknown option.
+The handler catches the exception and returns exit 2.
+Human approval gates the merge.
+Merging requires maintainer approval.
+Release dates are set only when the release is approved.
+A release needs explicit approval before tagging.
+Maintainer sign-off is required before a stable tag.
+The approved pinned tool signs the assembly.
+Microsoft's approved list contains the connector.
+The approved live run produced 12 rows.
+Approved runs are listed in the ledger.
+The token is authorized for the Dataverse scope.
+Requests authorized by the token go through the pool.
+The user is authorised to read the table.
+The planner chose a hash join for the query.
+The query planner selects the cheapest plan.
+The temporary directory will be deleted when the process exits.
+The lock file will be removed after the run.
+Stale entries will be dropped from the cache.
+Rows to be deleted are listed first.
+Remove the temporary profile after the test.
+Removed the `--legacy` flag (#123).
+Deleted rows are reported in the summary.
+The command drops the connection on timeout.
+The daemon removes stale sockets on start.
+Observed live on 2026-11-10 in the English-base test environment.
+The 2026-10-30 release fixed the export bug.
+Released on 2026-09-12.
+Introduced in March 2026.
+The run on 2026-11-01 passed.
+From 2026-01-01 to 2026-06-30 the cache was disabled.
+The timeout is 60 seconds.
+The timeout is set for 2.5 seconds.
+Retry at least three times.
+Each batch holds at least one record.
+The job is scheduled for 09:00 UTC on Mondays.
+The workflow is scheduled for every Monday.
+The weekly run is planned for the morning.
+The client and server agreed on a protocol version.
+The token refresh has a grace period of five minutes.
+The page is not before the first record.
+Version 3 of the API returns JSON.
+The CLI 2.0 output keeps the same keys.
+This release adds `--dry-run` to `plugins deploy`.
+The export command now writes UTF-8.
+Exit code 12 means the check could not be completed.
+Profiles are stored in the user's config directory.
+The extension checks the daemon's protocol version when it connects.
+A stable extension never bundles a prerelease CLI.
+The import retries throttled requests with backoff.
+The model maps each project to a release surface.
+Tests run on Windows and Linux.
+The digest can waive only unresolved ancestry.
+The default endpoint is going to the global cloud.
+The filter excludes hidden steps.
+Only stable tags count for the comparison.
+A deprecated option prints a notice on stderr.
+The number of releases is shown in the summary.
+Each surface has its own CHANGELOG.
+The maintainer reviews every pull request.
+The owner of the table is shown in the output.
+Dates are shown in UTC.
+The year 2027 is not special for the parser.
+The export ends at the end of the page.
+Generated code under `Generated/` is exempt.
+CS1591 has no `[GeneratedCode]` exemption.
+The focused cases passed on 2026-11-21.
+The command must finish no later than the timeout.
+
+# Ordinary sentences from the whole-tree run in round 2 that an earlier draft of the classes failed.
+The ledger records exact approval scope and its source.
+Present all proposed changes to the user for approval before writing.
+This transition does not implement a trusted issuer or approval protocol.
+Metadata cannot grant approval, and this acknowledgement never enables DML confirmation.
+The separate approved live form fixture roundtrip passed on 2026-10-31.
+A separately approved unbound-reference fixture was used for the check.
+`ExceptionMapper` converts exceptions to exit codes.
+| `ExceptionMapper` | Maps exceptions to structured errors and exit codes |
+The dialog accepts an `impactSummary` string (e.g., "Will delete: 3 types, 8 steps, 4 images").
+The operator deliberately chose to be in shakedown mode.
+Every stage requires `--execute-candidate` and an owner approval reference.

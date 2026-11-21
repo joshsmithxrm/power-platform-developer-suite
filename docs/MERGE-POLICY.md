@@ -144,36 +144,98 @@ The [`decision-link-check.yml`](../.github/workflows/decision-link-check.yml)
 workflow runs `scripts/ci/check_decision_links.py` on every pull request to
 `main` (#1790). It is **not** a required status check.
 
+**What it is: a net, not a proof.** It catches the classes of decision text
+listed below. It does not prove that no decision text is unlinked, so
+reviewers still read specs, changelogs and release notes for decisions.
+
 It reads the lines a pull request adds or changes in `specs/`,
 `docs/releases/` and `src/<package>/CHANGELOG.md`. A pure rename is not a
-change, and a file moved in from outside those paths is read whole. A sentence
-there that states an approval, an exception, a removal or a date must link the
-comment in this repository where the maintainer made that decision, or be
-marked as proposed. This is rule 9.1 of the versioning policy proposed in
-#1831.
+change; a file moved in from outside those paths, or a new file, is read
+whole; a deleted file is not read. A sentence there that states an approval,
+an exception, a removal or a date must link the comment in this repository
+where the maintainer made that decision, or be marked as proposed. This is
+rule 9.1 of the versioning policy proposed in #1831.
 
-- **Decision link**: a URL to a comment in this repository, such as
+**The classes** (`DECISION_PHRASES`, `FRAGMENTS` and `DECISION_COLUMNS` in
+the script):
+- **Approval:**
+  - "approved" as a verb, with any subject and object;
+  - "approval" or "sign-off" given, received or held;
+  - "decided", "chose", "agreed", "accepted the risk", "was accepted",
+    "confirmed by the maintainer", "authorised";
+  - "Decision: …" and "per <name>,".
+- **Exception:**
+  - "exception" in a policy frame: "is an exception", "exception to/for",
+    "made an exception", "the exception covers/applies", "one-release
+    exception", "by exception", "Exception:";
+  - "exempt from", "excepted", "waived" or a waiver;
+  - a rule suspended, relaxed or lifted;
+  - "by agreement", "this once".
+- **Removal:**
+  - a removal verb in the future or as a schedule: "will be removed", "we'll
+    drop", "<version> will remove", "is retired in 2.0", "will stop
+    working", "will no longer";
+  - "no longer supported", "support … ends", "goes away", "end of life";
+  - "scheduled for removal", "Removal of …: 3.0".
+- **Date:**
+  - a future date in any ordinary written form, with or without a
+    preposition before it;
+  - a version committed to: "until the 3.0 release", "takes effect in 2.1",
+    "from 2.1 onwards", "planned for 2.2";
+  - a duration counted in days, months or releases: "for two more minors",
+    "at least 90 days", "six months after 2.0", "deprecation period".
+- **Tables:** a future date under a `When`, `Date`, `Target`, `Deadline` or
+  `Due` column, and a version under a `Removal` or `Removed in` column.
+
+**Product commitment or technical fact** (`GUARDS` in the script). A match
+does not count:
+- when the sentence is a runtime or data fact: rows, records, columns,
+  temporary files, cache, lock files, certificates, tokens, logs, validity,
+  expiry, created or modified dates, samples, fixtures. It counts anyway when
+  the sentence also names a product commitment: a version, a `--flag`, an
+  alias, "support for", the next major or minor, a deprecation;
+- when it states Microsoft's, Dataverse's, Azure's or GitHub's plans;
+- when the exception is a thrown, raised, caught, wrapped, inner or
+  unhandled exception, or an exception to a data shape or schema;
+- when the exemption is from a check, a warning, an analyzer, a validation, a
+  compiler rule such as `CS1591`, or for a code path such as `Generated/`;
+- when a client, server, handshake, planner, optimizer, request, connection,
+  runtime, or a command in a code span "decides", "agrees" or "accepts";
+- when "approval" or "sign-off" is named as a requirement ("needs maintainer
+  approval", "approval gates the merge");
+- when "approved" is conditional ("once the release is approved") or an
+  adjective ("the approved tool", "Approved runs are listed");
+- when "approves" is habitual ("approves every release");
+- when it is a spec's `**Decision:**` design-record line.
+
+Past wording does not count: removals are matched in the future or present,
+never "was removed in 1.6", and a date counts only if it is after the day of
+the change (the pull request's head commit). A date inside a link target, a
+URL or a code span is not read.
+
+**Links and "proposed":**
+- A decision link is a URL to a comment in this repository:
   `…/issues/N#issuecomment-M`, `…/pull/N#issuecomment-M`,
   `…/pull/N#discussion_rM` or `…/pull/N#pullrequestreview-M`, or an issue
   body, `…/issues/N#issue-M`. These do not count: a bare `#N`, an issue URL
   without a comment anchor, another repository's URL, or a URL inside another
   URL.
-- **Proposed**: only where the word qualifies the decision: a leading
-  "Proposed:", "(proposed)", "is proposed", or "proposed removal/date/…".
-  "The proposed flag was approved" still needs a link.
-- **Dates**: a date counts only when it is after the day of the change (the
-  pull request's head commit). A past date records what happened.
-- **Not checked**: headings, fenced code and HTML comments. A table row is
-  one unit, and "e.g." or "i.e." do not end a sentence.
+- "Proposed" exempts a decision only where it qualifies that decision: a
+  leading "Proposed:", or "(proposed)", "is proposed" or "proposed removal"
+  in the same clause (clauses are separated by `;`). A qualifier in another
+  clause does not reach back.
 
-The phrases are listed once, in `DECISION_PHRASES` and `FRAGMENTS` in the
-script. Each entry, and each alternative inside one, carries an example
-sentence that only it catches. The tests are generated from that list:
-removing an entry or an alternative must make its example pass, and a pattern
-may not contain `|`, so every alternative is listed and tested. To add a
-phrase, add an entry with its example. Ordinary sentences that must not fail
-are in `tests/ci/fixtures/decision_links/must_pass.txt`; add one when a
-phrase fails ordinary text, and narrow the phrase.
+**Limits:** headings, fenced code and HTML comments are not checked. A table
+row is one unit, and "e.g." or "i.e." do not end a sentence.
+
+**Changing the list:** each entry, alternative, guard and column has an
+example sentence, and a test generated from the list proves that each one is
+needed. The whole list is pinned by a digest, so deleting anything fails a
+test. To add a class, add the entry with its example, check that its
+generated test passes, and update the pin. Add the sentence that showed the
+gap to `tests/ci/fixtures/decision_links/regression_must_fail.txt` or
+`regression_must_pass.txt`; the `must_fail.txt`/`must_pass.txt` corpus is
+for measurement.
 
 `--whole-tree` reports how many existing sentences would fail, without
 failing.
