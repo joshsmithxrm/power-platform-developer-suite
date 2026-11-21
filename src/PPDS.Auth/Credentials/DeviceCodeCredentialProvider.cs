@@ -205,6 +205,7 @@ public sealed class DeviceCodeCredentialProvider : ICredentialProvider
         }
 
         // Fall back to device code flow
+        InteractiveSignInGuard.ThrowIfBlocked("device code");
         AuthDebugLog.WriteLine("  Starting device code authentication...");
         _cachedResult = await _msalClient!
             .AcquireTokenWithDeviceCode(scopes, deviceCodeResult =>

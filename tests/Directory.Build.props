@@ -1,0 +1,16 @@
+<Project>
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <!--
+    Unit test processes may never start an interactive sign-in (system browser or device code).
+    This switch goes into each unit test project's runtimeconfig.json; PPDS.Auth checks it before every
+    interactive token acquisition (InteractiveSignInGuard) and throws, so a test that reaches a real
+    sign-in fails at once instead of opening a browser or waiting for a person.
+    The integration and live projects are left out: their behaviour against a real environment is unchanged.
+  -->
+  <ItemGroup Condition="'$(IsTestProject)' == 'true'
+                        and !$(MSBuildProjectName.EndsWith('.IntegrationTests'))
+                        and '$(MSBuildProjectName)' != 'PPDS.LiveTests'">
+    <RuntimeHostConfigurationOption Include="PPDS.Auth.BlockInteractiveSignIn" Value="true" />
+  </ItemGroup>
+</Project>

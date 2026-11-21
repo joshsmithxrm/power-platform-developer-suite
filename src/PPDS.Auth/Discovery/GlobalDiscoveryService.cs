@@ -212,6 +212,7 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
             if (_preferredAuthMethod == AuthMethod.DeviceCode)
             {
                 // Device code flow - user explicitly requested this
+                InteractiveSignInGuard.ThrowIfBlocked("device code");
                 AuthDebugLog.WriteLine("  Starting device code authentication...");
                 result = await _msalClient!
                     .AcquireTokenWithDeviceCode(scopes, deviceCodeResult =>
@@ -251,6 +252,7 @@ public sealed class GlobalDiscoveryService : IGlobalDiscoveryService, IDisposabl
                         "Create a profile with device code authentication using 'ppds auth create --deviceCode'.");
                 }
 
+                InteractiveSignInGuard.ThrowIfBlocked("browser");
                 if (_deviceCodeCallback == null)
                 {
                     AuthenticationOutput.WriteLine("Opening browser for authentication...");
