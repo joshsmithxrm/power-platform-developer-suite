@@ -3,15 +3,17 @@ name: Decision Link Check
 # Issue #1790: a sentence that a pull request adds or changes in specs/,
 # docs/releases/ or a package CHANGELOG, and that states an approval, an
 # exception, a removal or a date, links the maintainer's decision or is marked
-# "proposed" (docs/VERSIONING.md rule 9.1). The phrases are listed once, in
-# scripts/ci/check_decision_links.py. See docs/MERGE-POLICY.md.
+# "proposed" (rule 9.1 of the versioning policy proposed in #1831). The phrases
+# are listed once, in scripts/ci/check_decision_links.py. See
+# docs/MERGE-POLICY.md.
 #
 # NOT a required status check. The script reads git only; it calls no GitHub
 # API, so the job needs only `contents: read`.
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    # edited: a change of base branch changes the range.
+    types: [opened, synchronize, reopened, edited, ready_for_review]
     # No paths filter: a required check must report on every pull request.
     # With nothing in scope the script passes in a second.
     branches: [main]
@@ -45,4 +47,4 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python scripts/ci/check_decision_links.py --base "$BASE_SHA" --head "$HEAD_SHA"
+        run: python scripts/ci/check_decision_links.py --base "$BASE_SHA" --head "$HEAD_SHA" --repository "$GITHUB_REPOSITORY"

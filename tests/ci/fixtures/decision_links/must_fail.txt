@@ -1,0 +1,138 @@
+# Sentences that state an approval, an exception, a removal or a date and so
+# must carry a decision link. Written for this check (#1790); "today" in the
+# test is 2026-11-21, so every date here is still to come.
+# Format: <category>: <sentence>
+approval: The new exit code was approved in the November review.
+approval: Both renames were approved before the freeze.
+approval: The plugin rename has been approved.
+approval: The two migrations have been approved for 2.0.
+approval: The cut-over had been approved before the incident.
+approval: The schema change was approved by the maintainer.
+approval: The maintainer approved the switch to per-package majors.
+approval: Josh approved this as part of Phase 0.
+approval: The owner approved shipping the MCP server separately.
+approval: **Status:** Approved
+approval: Status: approved
+approval: Approval was given on the pull request.
+approval: Approval was granted for the stable channel.
+approval: The rename merged with the maintainer's approval.
+approval: The owner signed off on the stable channel plan.
+approval: The release plan was signed-off in the review.
+approval: The maintainer gave his signoff for the template change.
+approval: Maintainer sign-off was given for the hotfix.
+approval: The maintainer gave the go-ahead for the 1.8 release.
+approval: The extension split was greenlit.
+approval: The hosted signing route was green-lighted.
+approval: Josh okayed the temporary alias.
+approval: The maintainer agreed to keep `-e` for one more minor.
+approval: The maintainer has agreed that the CLI keeps exit 2.
+approval: This is the order agreed with the maintainer.
+approval: As agreed, the Plugins package keeps its own lineage.
+approval: We decided not to backport the fix.
+approval: It was decided to ship the daemon protocol check first.
+approval: It has been decided that the extension bundles one CLI.
+approval: The maintainer decided against a 1.9 line.
+approval: The owner decided to keep the old profile format.
+approval: The maintainer has decided to drop the odd minor rule for libraries.
+approval: The decision was made to keep both flags.
+approval: The decision was taken to stop publishing nightly builds.
+approval: Per the maintainer's decision, the MCP server keeps exit 12.
+approval: Per decision, the old cache path is kept.
+approval: This follows a maintainer decision on version numbering.
+approval: The breaking rename is authorised by the maintainer.
+approval: The schema change is authorized for 2.0.
+approval: The maintainer has authorised a second prerelease.
+approval: The maintainer confirmed the extension version.
+approval: The owner has confirmed the stable date.
+approval: The channel plan was confirmed by the maintainer.
+approval: The MSI was accepted by the owner.
+approval: The maintainer has accepted the risk.
+approval: The owner ratified the per-package version rule.
+approval: The plan is endorsed for the 2.0 release.
+exception: An exception is made for the MCP server.
+exception: An exception was made for the signing route.
+exception: Exception granted for the Plugins package.
+exception: The Plugins lineage is an exception to the rule.
+exception: This is an exception to this policy for one release.
+exception: The CLI keeps exit 2 as an exception.
+exception: The extension keeps its one-release exception.
+exception: Version 1.8 has a one-time exception for the bundled CLI.
+exception: The compatibility exception covers only 1.8.
+exception: The MCP package is exempted from the per-package rule.
+exception: Test projects are exempt from the size rule.
+exception: The ninety-day wait is waived for security fixes.
+exception: The docs site has a waiver for this release.
+exception: Rule 3 does not apply to PPDS.Plugins by agreement.
+removal: `--legacy` will be retired.
+removal: The old profile format will be sunset.
+removal: The short option will be discontinued.
+removal: The v1 protocol will be phased out.
+removal: The `-e` alias will be removed in 3.0.
+removal: The old cache will be dropped in v3.
+removal: The flag will be deleted next release.
+removal: The legacy command will be removed in the next major.
+removal: The fallback will be dropped in a future release.
+removal: The bundled CLI path will be removed after 2.1.
+removal: The setting is to be retired.
+removal: We will remove the `--force` alias in 3.0.
+removal: We will drop the net6 target.
+removal: We will retire the old installer.
+removal: PPDS plans to remove the legacy daemon.
+removal: The team planned to delete the shim.
+removal: Version 3.0 removes the flag.
+removal: CLI 3.0 drops the deprecated verbs.
+removal: The option is slated for removal.
+removal: The installer is scheduled for retirement.
+removal: The endpoint is marked as planned for deletion.
+removal: Removal is planned for 3.0.
+removal: Deprecation is scheduled for the next minor.
+removal: Removal in 3.0.
+removal: The alias is removed in the next major version.
+removal: The profile v1 format is going away.
+removal: The short flag goes away.
+removal: The old verb is deprecated and goes in the next major.
+removal: Windows 8 is no longer supported.
+removal: Profiles without a name will no longer be supported.
+removal: The CLI will no longer accept `--env` without a value.
+removal: The daemon will no longer support protocol 1.
+removal: Version 1 reaches end of life with 3.0.
+removal: The removal date for `-e` is still open.
+date: The alias stays no earlier than 1 March 2027.
+date: Removal comes not earlier than six months after 2.0.
+date: The flag goes no sooner than 2027-03-01.
+date: Fixes ship no later than the next patch.
+date: The alias stays for at least six months.
+date: Keep the old flag for at least two minor releases.
+date: Support lasts at least 90 days after the stable release.
+date: The shim stays for a minimum of one minor release.
+date: Removal follows a waiting period.
+date: Profile migration is scheduled for CLI 2.1.
+date: The new format is planned for the next major.
+date: The stable channel is slated for v2.
+date: The alias goes two weeks after the prerelease.
+date: The flag is removed three months after the deprecation.
+date: Version 3 ships on 2027-01-15.
+date: The 2.0 line starts in March 2027.
+date: The new default applies from 2027-01-15.
+date: Version 1 is supported through 2027-06-30.
+date: As of 2027-03-01 the old protocol is refused.
+date: The flag goes by 2027.
+date: The old format is read until 1 March 2027.
+date: The old format is read until March 1 2027.
+date: The old format is read until Mar 1, 2027.
+date: The old format is read until 3/1/2027.
+date: The new installer is planned for Q1 2027.
+date: The switch is scheduled for 15 January 2027.
+date: The old daemon is kept till 2027-02-01.
+date: The cut-over lands after 2027-02-01.
+date: Nothing ships before 2027-02-01.
+date: Version 3 is the default starting 2027-03-01.
+date: Support stops at the end of March 2027.
+date: Support stops by the end of March 2027.
+date: The old format is read until March 1st, 2027.
+date: Fixes are batched by 01.03.2027.
+date: Target: 2027-01-15
+date: Target date: 2027-01-15
+date: The release date is 2027-01-15.
+date: Support stops end of 2027.
+approval: The proposed flag was approved by the maintainer.

@@ -145,19 +145,38 @@ workflow runs `scripts/ci/check_decision_links.py` on every pull request to
 `main` (#1790). It is **not** a required status check.
 
 It reads the lines a pull request adds or changes in `specs/`,
-`docs/releases/` and `src/<package>/CHANGELOG.md`. A sentence there that
-states an approval, an exception, a removal or a date must link the comment
-where the maintainer made that decision, or say that it is "proposed" (the
-versioning policy, rule 9.1). A decision link is a GitHub URL to a comment:
-`…/issues/N#issuecomment-M`, `…/pull/N#issuecomment-M`, `…/pull/N#discussion_rM`,
-`…/pull/N#pullrequestreview-M`, or an issue body, `…/issues/N#issue-M`. A bare
-`#N` names the issue, not the decision, and does not count.
+`docs/releases/` and `src/<package>/CHANGELOG.md`. A pure rename is not a
+change, and a file moved in from outside those paths is read whole. A sentence
+there that states an approval, an exception, a removal or a date must link the
+comment in this repository where the maintainer made that decision, or be
+marked as proposed. This is rule 9.1 of the versioning policy proposed in
+#1831.
 
-The phrases that make a sentence decision text are listed once, in
-`DECISION_PHRASES` in the script; change them there, with a test. Headings
-(a changelog's release date), fenced code and HTML comments are not checked.
-Existing text is not checked; `--whole-tree` reports how many existing
-sentences would fail, without failing.
+- **Decision link**: a URL to a comment in this repository, such as
+  `…/issues/N#issuecomment-M`, `…/pull/N#issuecomment-M`,
+  `…/pull/N#discussion_rM` or `…/pull/N#pullrequestreview-M`, or an issue
+  body, `…/issues/N#issue-M`. These do not count: a bare `#N`, an issue URL
+  without a comment anchor, another repository's URL, or a URL inside another
+  URL.
+- **Proposed**: only where the word qualifies the decision: a leading
+  "Proposed:", "(proposed)", "is proposed", or "proposed removal/date/…".
+  "The proposed flag was approved" still needs a link.
+- **Dates**: a date counts only when it is after the day of the change (the
+  pull request's head commit). A past date records what happened.
+- **Not checked**: headings, fenced code and HTML comments. A table row is
+  one unit, and "e.g." or "i.e." do not end a sentence.
+
+The phrases are listed once, in `DECISION_PHRASES` and `FRAGMENTS` in the
+script. Each entry, and each alternative inside one, carries an example
+sentence that only it catches. The tests are generated from that list:
+removing an entry or an alternative must make its example pass, and a pattern
+may not contain `|`, so every alternative is listed and tested. To add a
+phrase, add an entry with its example. Ordinary sentences that must not fail
+are in `tests/ci/fixtures/decision_links/must_pass.txt`; add one when a
+phrase fails ordinary text, and narrow the phrase.
+
+`--whole-tree` reports how many existing sentences would fail, without
+failing.
 
 To make it required, the maintainer adds the check `Decision text links its
 decision` to the required status checks of `main`.
