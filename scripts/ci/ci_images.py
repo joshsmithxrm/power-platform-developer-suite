@@ -1,26 +1,28 @@
-"""The one definition of each outside container image that a CI check runs.
+"""The one definition of each container image listed in IMAGES: today the UBI 8 image (glibc 2.28)
+that the Single-file extraction (linux-x64) job and the Reference Cache Trust workflow run.
 
 Every workflow step and script that runs one of these images reads it from
-here, so the image a check runs changes only with a commit to this file.
-tests/ci/test_ci_images.py fails if a second definition appears.
+here, so the image they run changes only with a commit to this file.
+tests/ci/test_ci_images.py fails if a second definition appears. Other images
+CI runs are not defined here yet (the Reference Cache Trust cross-user step
+still names an SDK image by tag).
 
-Each image is referenced by digest, never by a moving tag. To update a digest,
-read it from the registry's own record, for example on a machine with Docker:
+Each image is referenced by digest, never by a moving tag. The UBI 8 digest
+below is the top-level (multi-platform manifest list) digest of
+registry.access.redhat.com/ubi8/dotnet-80-runtime:latest, read on 2026-11-20.
 
-    docker buildx imagetools inspect registry.access.redhat.com/ubi8/dotnet-80-runtime:latest
+Inspect the recorded digest (on a machine with Docker):
 
-and copy the top-level "Digest:" line (the multi-platform index digest), or:
+    docker buildx imagetools inspect registry.access.redhat.com/ubi8/dotnet-80-runtime@sha256:<digest>
 
-    docker pull registry.access.redhat.com/ubi8/dotnet-80-runtime:latest
-    docker image inspect --format '{{json .RepoDigests}}' registry.access.redhat.com/ubi8/dotnet-80-runtime:latest
-
-Then replace the digest below in a pull request. The Single-file extraction
-(linux-x64) job and the Reference Cache Trust workflow run the new image.
-
-The UBI 8 digest below was read on 2026-11-20: the top-level (multi-platform manifest list) digest of
-registry.access.redhat.com/ubi8/dotnet-80-runtime:latest. To read it again:
+Read the current digest of the tag:
 
     docker buildx imagetools inspect registry.access.redhat.com/ubi8/dotnet-80-runtime:latest
+
+Before changing the digest, check that the new one is a manifest list or OCI
+index with a linux/amd64 entry. Change it in a pull request, and see both jobs
+that run it pass there: Single-file extraction (linux-x64) and Cache trust
+(linux-x64).
 
 Usage from a workflow step: python scripts/ci/ci_images.py <name>
 """

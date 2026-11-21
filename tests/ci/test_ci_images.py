@@ -116,7 +116,7 @@ def test_failed_pull_is_an_infrastructure_failure_naming_the_registry(monkeypatc
         gate.pull_image(gate.IMAGE, {}, tmp_path)
     assert calls == [(["docker", "pull", gate.IMAGE], "image-pull", 180)]
     message = str(raised.value)
-    assert "registry.access.redhat.com" in message and gate.IMAGE in message
+    assert f"could not pull {gate.IMAGE} from registry.access.redhat.com (" in message
     assert "The product was not tested" in message and "\n" not in message
     assert not isinstance(raised.value, ValueError)
 
@@ -126,3 +126,81 @@ def test_glibc_mode_pulls_through_the_infrastructure_classifier():
     assert source.count("pull_image(IMAGE, env, evidence)") == 1
     assert '["docker", "pull", IMAGE]' not in source
     assert '"::error title=Infrastructure failure::' in source
+
+
+def test_an_infrastructure_failure_still_fails_the_job(monkeypatch, tmp_path, capsys):
+    """glibc mode through main(): a failed pull raises (the job's exit code is 1), records failure.json and annotates once."""
+    binary = tmp_path / "ppds"
+    binary.write_bytes(b"not-executed")
+    for key, value in {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted", "RUNNER_TEMP": str(tmp_path)}.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(gate.sys, "platform", "linux")
+    monkeypatch.setattr(gate, "identity", lambda source, rid: {"rid": rid})
+    monkeypatch.setattr(gate, "retain_compiled_metadata", lambda value, evidence: {})
+    monkeypatch.setattr(gate, "private_environment", lambda root: {"PPDS_CONFIG_DIR": str(tmp_path / "config")})
+    commands = []
+
+    def run(command, env, evidence, label, timeout=120, cwd=None):
+        commands.append(label)
+        if label == "selected-sdk":
+            return "10.0.115\n"
+        raise ValueError(f"{label} failed (exit 1); retained raw logs")
+
+    monkeypatch.setattr(gate, "run", run)
+    evidence = tmp_path / "evidence"
+    monkeypatch.setattr(gate.sys, "argv", ["verify", "glibc", "--rid", "linux-x64", "--source", "a" * 40,
+                                          "--binary", str(binary), "--evidence", str(evidence)])
+
+    with pytest.raises(gate.InfrastructureFailure):
+        gate.main()
+
+    assert commands == ["selected-sdk", "image-pull"]
+    failure = __import__("json").loads((evidence / "failure.json").read_text())
+    assert failure["passed"] is False and failure["type"] == "InfrastructureFailure"
+    annotations = [line for line in capsys.readouterr().out.splitlines() if line.startswith("::error")]
+    assert annotations == [f"::error title=Infrastructure failure::could not pull {gate.IMAGE} from registry.access.redhat.com "
+                           "(image-pull failed (exit 1); retained raw logs). The product was not tested; this is not a product failure."]
+
+
+def _glibc_step_script():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/reference-cache-trust.yml").read_text())
+    step = next(s for s in workflow["jobs"]["native"]["steps"] if s.get("name", "").startswith("Older supported glibc ABI"))
+    assert step["shell"] == "bash"
+    return step["run"]
+
+
+@pytest.mark.skipif(sys.platform == "win32" or __import__("shutil").which("bash") is None, reason="runs the step under bash")
+@pytest.mark.parametrize("docker", ["pull fails", "missing", "pull succeeds"])
+def test_the_workflow_step_pulls_by_digest_and_reports_a_failed_pull(tmp_path, docker):
+    """The Reference Cache Trust UBI 8 step's own script, under bash -eo pipefail as GitHub runs it, with a stub docker."""
+    import shutil
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    log = tmp_path / "docker.log"
+    (stubs / "python").write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    if docker != "missing":
+        (stubs / "docker").write_text(
+            # One record per call, marked, since the run call's script argument spans lines.
+            '#!/bin/sh\nprintf "CALL %s\\n" "$*" >> "$DOCKER_LOG"\n'
+            + ('[ "$1" = pull ] && exit 1\n' if docker == "pull fails" else "") + "exit 0\n")
+    for stub in stubs.iterdir():
+        stub.chmod(0o755)
+    script = tmp_path / "step.sh"
+    script.write_text(_glibc_step_script())
+
+    result = subprocess.run([shutil.which("bash"), "--noprofile", "--norc", "-eo", "pipefail", str(script)], cwd=ROOT,
+                            env={"PATH": str(stubs), "DOCKER_LOG": str(log)}, capture_output=True, text=True, timeout=60)
+
+    calls = [call.strip() for call in log.read_text().split("CALL ")[1:]] if log.exists() else []
+    annotation = (f"::error title=Infrastructure failure::Could not pull {ci_images.UBI8_DOTNET8_RUNTIME} from "
+                  "registry.access.redhat.com. The product was not tested; this is not a product failure.")
+    if docker == "pull succeeds":
+        assert result.returncode == 0, result.stderr
+        assert calls[0] == f"pull {ci_images.UBI8_DOTNET8_RUNTIME}"
+        assert len(calls) == 2 and calls[1].startswith("run --rm --pull=never --entrypoint /bin/bash ")
+        assert f" {ci_images.UBI8_DOTNET8_RUNTIME} -euc " in calls[1]
+        assert annotation not in result.stdout
+    else:
+        assert result.returncode == 1
+        assert annotation in result.stdout.splitlines()
+        assert not any(call.startswith("run") for call in calls)

@@ -763,7 +763,7 @@ def main():
     except Exception as error:
         save(evidence / "failure.json", {"passed": False, "type": type(error).__name__, "message": str(error)})
         if isinstance(error, InfrastructureFailure):
-            print(f"::error title=Infrastructure failure::{error}", flush=True)
+            print(f"::error title=Infrastructure failure::{str(error).removeprefix('Infrastructure failure: ')}", flush=True)
         raise
 
 
