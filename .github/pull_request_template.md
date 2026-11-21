@@ -14,4 +14,4 @@
 
 ## Breaking changes
 
-<!-- List any breaking changes and migration steps, or write "None". -->
+<!-- Required: one line "Breaking: yes" or "Breaking: no", and why. For "yes", list what breaks and how to migrate, label the pull request `breaking-change`, and start the changelog entry with "**Breaking:**". The Changelog Check reads this line (docs/MERGE-POLICY.md). -->

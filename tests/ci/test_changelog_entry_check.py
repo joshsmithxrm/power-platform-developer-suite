@@ -522,3 +522,26 @@ def test_breaking_pull_request_is_mapped_from_its_merge_commit(repo, tmp_path):
         BreakingChange(number=7, title="t", paths=("src/PPDS.Cli/Program.cs",))
     ]
     assert rp.breaking_changes_from_file(path, repo, merge, merge) == []
+
+
+class TestPullRequestTemplate:
+    """The template asks for the line the check reads (#1789)."""
+
+    TEMPLATE = REPO_ROOT / ".github" / "pull_request_template.md"
+
+    def test_template_asks_for_a_breaking_yes_or_no_line(self):
+        text = self.TEMPLATE.read_text(encoding="utf-8")
+        section = text.split("## Breaking changes", 1)[1]
+        assert '"Breaking: yes" or "Breaking: no", and why' in section
+        assert "`breaking-change`" in section
+
+    def test_unfilled_template_is_no_statement(self):
+        assert cce.breaking_statement(self.TEMPLATE.read_text(encoding="utf-8")) is None
+
+    @pytest.mark.parametrize("line, expected", [
+        ("Breaking: no, adds an optional flag only.", "no"),
+        ("Breaking: yes, exit code 2 becomes 12 for incomplete checks.", "yes"),
+    ])
+    def test_filled_template_is_read(self, line, expected):
+        text = self.TEMPLATE.read_text(encoding="utf-8").rstrip() + "\n" + line + "\n"
+        assert cce.breaking_statement(text) == expected
