@@ -382,10 +382,13 @@ CLI or Extension release tags are reported as diagnostics and cannot outrank a
 valid tag. This automation only manages advisory issues. It never creates a tag,
 publishes an artifact, or invokes a release workflow.
 
-The weekly cadence check similarly validates release-looking tags through the
-shared strict SemVer implementation, discovers valid package tag prefixes from
-the release graph, and normalizes git's ISO-strict timestamps and the current
-time to UTC before calculating elapsed weeks.
+The weekly release risk check (`release-risk-check.yml`) replaces the former
+8-week cadence timer. It opens one issue per merged `data-safety` or `security`
+fix that no stable release tag of an affected package contains yet, once the fix
+is older than its target in `SECURITY.md`. Affected packages come from the same
+release model; tags are parsed with the shared strict SemVer implementation,
+and a prerelease or odd-minor Extension tag does not count as released. See
+[specs/release-cycle.md](../specs/release-cycle.md) (Flow 3).
 
 ## Automated Public Artifact Verification
 

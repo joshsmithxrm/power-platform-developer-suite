@@ -12,7 +12,8 @@ Related documents:
   CLI/Extension co-release, publisher checks, public artifact verification,
   signing and keys, and the native runtime.
 - [specs/release-cycle.md](../../specs/release-cycle.md) decides when a release
-  is warranted (patch labels, milestones, cadence floor) and the branching policy.
+  is warranted (patch labels, milestones, unreleased data-safety and security
+  fixes) and the branching policy.
 - [docs/runbooks/docs-release.md](docs-release.md) covers the docs-site release
   that a unified `v*` tag triggers.
 
@@ -26,7 +27,7 @@ approval for the next step.
 - Shipping a focused patch after a `release:patch` fix has merged (see
   [Patch Release Procedure](#patch-release-procedure))
 - Acting on a release issue opened by `post-merge-release-check.yml`,
-  `milestone-release-check.yml` or `release-cadence-check.yml`
+  `milestone-release-check.yml` or `release-risk-check.yml`
 
 Not for:
 

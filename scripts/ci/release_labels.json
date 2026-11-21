@@ -11,9 +11,9 @@
       "description": "Milestone is ready for a coordinated minor release"
     },
     {
-      "name": "release:cadence-check",
-      "color": "0E8A16",
-      "description": "Scheduled release cadence review is required"
+      "name": "release:unreleased-fix",
+      "color": "B60205",
+      "description": "A merged data-safety or security fix is unreleased past its target"
     },
     {
       "name": "release:extension-corelease",

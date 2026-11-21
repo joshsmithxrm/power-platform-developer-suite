@@ -1,0 +1,81 @@
+name: Release Risk Check
+
+# Issue #1791: replaces the 8-week release-cadence timer. Opens one check-in
+# issue per merged `data-safety` or `security` fix that is still not in a stable
+# release past its target in the security policy (SECURITY.md). Elapsed time
+# alone opens nothing. Rule logic: scripts/ci/check_unreleased_fixes.py.
+#
+# While SECURITY.md states no release targets the script exits 2 and this run
+# fails without opening an issue.
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # Monday 09:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: release-risk-check
+  cancel-in-progress: false
+
+jobs:
+  risk-check:
+    name: Check unreleased data-safety and security fixes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout main (full history and tags)
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Ensure workflow-owned release labels
+        run: python scripts/ci/sync_release_labels.py --repo "$GITHUB_REPOSITORY"
+
+      - name: List merged data-safety and security fixes
+        run: |
+          gh pr list --repo "$GITHUB_REPOSITORY" --base main --state merged \
+            --label data-safety --limit 1000 \
+            --json number,title,mergedAt,mergeCommit,labels > data-safety-prs.json
+          gh pr list --repo "$GITHUB_REPOSITORY" --base main --state merged \
+            --label security --limit 1000 \
+            --json number,title,mergedAt,mergeCommit,labels > security-prs.json
+          jq -s 'add | unique_by(.number)' data-safety-prs.json security-prs.json > merged-fixes.json
+          echo "Merged fixes: $(jq 'length' merged-fixes.json)"
+
+      - name: List existing unreleased-fix issues
+        run: |
+          gh issue list --repo "$GITHUB_REPOSITORY" \
+            --label "release:unreleased-fix" --state all --limit 10000 \
+            --json number,state,body > existing-issues.json
+
+      - name: Evaluate unreleased fixes against the security policy targets
+        run: |
+          python scripts/ci/check_unreleased_fixes.py \
+            --merged-prs merged-fixes.json \
+            --existing-issues existing-issues.json \
+            --security-policy SECURITY.md \
+            --issue-dir issues-to-open
+
+      - name: Open one issue per overdue fix
+        run: |
+          shopt -s nullglob
+          for body in issues-to-open/*.md; do
+            title_file="${body%.md}.title"
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "$(cat "$title_file")" \
+              --label "release:unreleased-fix" \
+              --body-file "$body"
+          done
