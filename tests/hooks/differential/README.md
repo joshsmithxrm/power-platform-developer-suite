@@ -148,13 +148,15 @@ Each oracle run carries an `integrity` record, and a run whose record is not `ok
 | Problem | Limit |
 |---|---|
 | A text without a recorded outcome (finished or timed out) under bash or under pwsh | 0 |
-| Shell runs that hit their per-text timeout (40 s) | 1% of the texts, per shell |
+| Texts that hit their per-text timeout twice: a first run of 60 s, then one retry of 180 s, 4 at a time | 1% of the texts, per shell |
 | PowerShell-only failures a fresh `pwsh -Command` did not reproduce | 2 |
 | Parse-oracle errors | 0 |
 | Oracle-1 failures whose shell rendering did not hold, or a skipped rendering check | 0 |
 | A write path with no vector judged a write in the shakedown | 0 |
 
 `requirement-approx` failures fail the `differential.py` exit code as well as pytest.
+
+Timeouts are harness faults, not hook decisions, and on a busy machine most of them are slow starts: a cold `pwsh` start in a fresh `HOME` takes 1 to 6 s at load average 17 and 19 to 29 s at load 40 to 160, and a text that sends work to the background (`&`) under PowerShell starts a second `pwsh` for the job. So the lab runs at most 16 texts at a time (`ShellLab.workers`, the CPU count when lower), retries every run that timed out once with a longer limit and only 4 at a time, and counts as a timeout only a text that timed out on the retry as well. The record carries both counts (`*_retried`, `*_timeouts`). The limit still catches a PowerShell that records nothing: one that exits at once fails the self-test and the canaries, and one that hangs times out on every retry (`test_shell_lab_integrity_fails_when_pwsh_does_not_record`).
 The parse helper is rebuilt when any file under `src/` (or the helper, or `global.json` and the shared props) is newer than its DLL, and always with `--long` or `PPDS_DIFF_REBUILD=1`.
 
 ## Switches that make the suite pass without checking

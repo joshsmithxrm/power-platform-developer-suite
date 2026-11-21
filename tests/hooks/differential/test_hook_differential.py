@@ -122,6 +122,37 @@ def test_statement_oracle_harness_integrity(shell_report):
     assert shell_report["integrity"]["ok"], shell_report["integrity"]["problems"]
 
 
+@pytest.mark.parametrize("fake", ["records-nothing", "hangs"])
+def test_shell_lab_integrity_fails_when_pwsh_does_not_record(tmp_path, fake):
+    """The integrity check must not go green on a PowerShell that runs nothing: a pwsh that exits at
+    once fails the self-test and the canaries; one that hangs fails the timeout limit after its retry."""
+    if not shutil.which("bash") or not shutil.which("pwsh"):
+        _missing("the shell lab needs real bash and pwsh")
+    from _harness import Sandbox
+    from _shells import HarnessError, ShellLab
+    script = tmp_path / "pwsh"
+    script.write_text("#!/bin/sh\n" + ("exit 0\n" if fake == "records-nothing" else "exec sleep 60\n"), encoding="utf-8")
+    script.chmod(0o755)
+    sandbox = Sandbox()
+    try:
+        lab = ShellLab(sandbox)
+        lab.pwsh = str(script)
+        lab.first_timeout, lab.retry_timeout = 1.0, 2.0
+        if fake == "records-nothing":
+            with pytest.raises(HarnessError):
+                lab.self_test()
+        texts = ["ppds env list", "echo a ; ppds data delete --entity account"] * 4
+        lab.run_all(texts)
+        problems, info = differential._shell_integrity(lab, len(texts))
+        assert problems, info
+        if fake == "hangs":
+            assert info["pwsh_timeouts"] == len(texts) and info["pwsh_retried"] == len(texts), info
+        else:
+            assert info["canary_failures"], info
+    finally:
+        sandbox.cleanup()
+
+
 def test_statement_oracle_starts_stand_ins_under_both_shells(shell_report):
     started = shell_report["texts_starting_a_standin"]
     assert started.get("bash", 0) > SIZE_SHELL // 5 and started.get("pwsh", 0) > SIZE_SHELL // 5, started

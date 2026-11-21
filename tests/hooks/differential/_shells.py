@@ -110,6 +110,10 @@ elif name == "parallel":
 """
 
 
+FIRST_TIMEOUT = 60.0
+RETRY_TIMEOUT = 180.0
+
+
 class HarnessError(RuntimeError):
     """The shells do not record what they run: ground truth would be empty."""
 
@@ -151,6 +155,13 @@ class ShellLab:
         self.pwsh = shutil.which("pwsh", path=SYSTEM_PATH) or shutil.which("pwsh")
         self.canary_checks = 0
         self.canary_failures = []
+        # Per-text timeouts and concurrency (README, "Integrity"). A first run past first_timeout is
+        # retried once, retry_workers at a time, with retry_timeout: a slow start under load is not a
+        # hang. Only a text that times out on the retry too counts as a timeout.
+        self.first_timeout = FIRST_TIMEOUT
+        self.retry_timeout = RETRY_TIMEOUT
+        self.workers = max(4, min(16, os.cpu_count() or 4))
+        self.retry_workers = 4
         self.assert_real_cli_unreachable()
         self.self_test()
 
@@ -235,11 +246,15 @@ class ShellLab:
                 lock.release()
 
     def integrity(self, submitted: int) -> dict:
-        """Every submitted text must have a recorded outcome under both shells."""
+        """Every submitted text must have a recorded outcome under both shells. ``*_timeouts`` counts the
+        texts that timed out on the retry as well; ``*_retried`` the first runs that timed out."""
         done = {sh: self.outcomes[f"{sh}-finished"] + self.outcomes[f"{sh}-timeout"] for sh in ("bash", "pwsh")}
         return {"submitted": submitted, "bash_outcomes": done["bash"], "pwsh_outcomes": done["pwsh"],
                 "canary_checks": self.canary_checks, "canary_failures": self.canary_failures[:10],
                 "bash_timeouts": self.outcomes["bash-timeout"], "pwsh_timeouts": self.outcomes["pwsh-timeout"],
+                "bash_retried": self.outcomes["bash-retried"], "pwsh_retried": self.outcomes["pwsh-retried"],
+                "first_timeout_s": self.first_timeout, "retry_timeout_s": self.retry_timeout,
+                "workers": self.workers, "retry_workers": self.retry_workers,
                 "timed_out_examples": self.timed_out[:10]}
 
     def run_bash_ex(self, text: str, timeout: float = 60.0, count: bool = True) -> tuple:
@@ -319,22 +334,39 @@ class ShellLab:
             pass
         return [self._read(log) for log in logs]
 
-    def run_all(self, texts: list, workers: int = 16, chunk: int = 20) -> tuple:
+    def _run_pass(self, go, name: str, batch: list, skip: set) -> list:
+        """Run every text of ``batch`` under one shell; retry each run that timed out once, with a longer
+        timeout and fewer runs at a time, and count the final outcome of every position not in ``skip``."""
+        with cf.ThreadPoolExecutor(max_workers=self.workers) as pool:
+            res = list(pool.map(lambda t: go(t, self.first_timeout, count=False), batch))
+        again = [i for i, (_, outcome) in enumerate(res) if outcome == "timeout"]
+        with cf.ThreadPoolExecutor(max_workers=self.retry_workers) as pool:
+            for i, r in zip(again, pool.map(lambda i: go(batch[i], self.retry_timeout, count=False), again)):
+                res[i] = r
+        again = set(again)
+        with self._count_lock:
+            for i, (_, outcome) in enumerate(res):
+                if i in skip:
+                    continue
+                self.outcomes[f"{name}-{outcome}"] += 1
+                if i in again:
+                    self.outcomes[f"{name}-retried"] += 1
+                if outcome == "timeout":
+                    self.timed_out.append((name, batch[i][:200]))
+        return [records for records, _ in res]
+
+    def run_all(self, texts: list) -> tuple:
         """(bash_records, pwsh_records) for every text, in order."""
         # One fresh process per text and shell, each with its own timeout (a batch would let one
         # hanging text stall all the others).
-        n = max(4, (os.cpu_count() or 4))
         canaries = [c for c, _ in self.CANARIES]
         # canaries first, in the middle and last, so a lab that stops recording midway is noticed
         mid = len(texts) // 2
         k = len(canaries)
         batch = canaries + list(texts[:mid]) + canaries + list(texts[mid:]) + canaries
         canary_pos = set(range(k)) | set(range(k + mid, 2 * k + mid)) | set(range(2 * k + len(texts), 3 * k + len(texts)))
-        jobs = list(enumerate(batch))
-        with cf.ThreadPoolExecutor(max_workers=n) as pool:
-            bash = list(pool.map(lambda j: self.run_bash_ex(j[1], count=j[0] not in canary_pos)[0], jobs))
-        with cf.ThreadPoolExecutor(max_workers=n) as pool:
-            pwsh = list(pool.map(lambda j: self.run_pwsh_ex(j[1], count=j[0] not in canary_pos)[0], jobs))
+        bash = self._run_pass(self.run_bash_ex, "bash", batch, canary_pos)
+        pwsh = self._run_pass(self.run_pwsh_ex, "pwsh", batch, canary_pos)
         for shell, records in (("bash", bash), ("pwsh", pwsh)):
             for pos in (0, k + mid, 2 * k + len(texts)):
                 for (text, want), got in zip(self.CANARIES, records[pos:pos + k]):

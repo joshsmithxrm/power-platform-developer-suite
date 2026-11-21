@@ -385,7 +385,11 @@ def _confirm_shell(lab, failures: list) -> list:
             out.append(f)
             continue
         if f["command"] not in cache:
-            cache[f["command"]] = lab.run_pwsh(f["command"])
+            # not counted as a corpus outcome (integrity compares outcomes with submitted texts)
+            records, outcome = lab.run_pwsh_ex(f["command"], lab.first_timeout, count=False)
+            if outcome == "timeout" and not records:
+                records, _ = lab.run_pwsh_ex(f["command"], lab.retry_timeout, count=False)
+            cache[f["command"]] = records
         if cache[f["command"]]:
             out.append(f)
     unconfirmed = sum(1 for c, r in cache.items() if not r)
