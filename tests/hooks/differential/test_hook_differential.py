@@ -167,3 +167,16 @@ def test_raw_text_far_above_the_caps_is_answered_in_time(raw_report):
     """Raw text of one repeated character (or short unit), with and without a mention: an answer
     inside the timeout registered in .claude/settings.json."""
     _check(raw_report, "shakedown")
+
+
+def test_ci_cannot_skip_the_differential_oracles():
+    """The Python tests job sets up the pinned SDK and PPDS_DIFF_REQUIRE=1, so the argument oracle and
+    the listed and shakedown modes of the statement oracle cannot skip there."""
+    import yaml
+    wf = yaml.safe_load((HERE.parents[2] / ".github" / "workflows" / "workflow-tests.yml").read_text(encoding="utf-8"))
+    steps = wf["jobs"]["workflow-tests"]["steps"]
+    dotnet = [st for st in steps if str(st.get("uses", "")).startswith("actions/setup-dotnet@")]
+    assert dotnet and dotnet[0].get("with") == {"global-json-file": "global.json"}, steps
+    run = next(st for st in steps if st.get("run") == "python -m pytest tests/ -q")
+    assert str((run.get("env") or {}).get("PPDS_DIFF_REQUIRE")) == "1", run
+    assert steps.index(dotnet[0]) < steps.index(run)
