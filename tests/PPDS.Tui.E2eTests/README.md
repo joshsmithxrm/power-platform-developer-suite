@@ -102,7 +102,8 @@ review every changed snapshot and rerun `npm test` before committing.
   with unused entries fails the run; a failed run keeps its own status and
   prints the count as a note.
 
-A run in which no test ran (a filter that matches no spec) also fails. The
+A run in which no test ran (a filter that matches no spec, or every selected
+test skipped) also fails. The
 commands that run no test, `--help`, `--version`, `help` and `show-trace`,
 pass through with tui-test's own exit code.
 

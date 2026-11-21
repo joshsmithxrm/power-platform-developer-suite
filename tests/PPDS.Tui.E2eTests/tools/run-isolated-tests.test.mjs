@@ -216,8 +216,20 @@ test('a run in which no test ran fails', () => {
     const { code, lines } = evaluateRun(0, parseTuiTestSummary(NOTHING_RAN_OUTPUT));
     assert.equal(code, 1);
     assert.deepEqual(lines, ['No test ran (36 did not run): the filter matched no test file. Failing.']);
-    // A run in which only skipped tests ran is not "no test ran".
-    assert.equal(evaluateRun(0, parseTuiTestSummary('  tests: 2 skipped, 2 total\n')).code, 0);
+});
+
+test('a run in which every selected test was skipped fails', () => {
+    for (const [output, counts] of [
+        ['  tests: 2 skipped, 2 total\n', '2 skipped, 0 did not run'],
+        ['  tests: 33 did not run, 3 skipped, 36 total\n', '3 skipped, 33 did not run'],
+    ]) {
+        const { code, lines } = evaluateRun(0, parseTuiTestSummary(output));
+        assert.equal(code, 1, output);
+        assert.deepEqual(lines, [`No test ran: every selected test was skipped (${counts}). Failing.`]);
+    }
+    // A run in which some tests were skipped and the others ran is a real run.
+    assert.deepEqual(evaluateRun(0, parseTuiTestSummary('  tests: 1 skipped, 2 passed, 3 total\n')),
+        { code: 0, lines: [] });
 });
 
 test('help, version and the trace viewer are passed through without a summary check', async () => {
@@ -230,7 +242,8 @@ test('help, version and the trace viewer are passed through without a summary ch
         assert.equal(err.text(), '');
     }
     for (const args of [[], ['import-jobs'], ['-u'], ['--updateSnapshot'], ['-t'], ['--', '--help'],
-        ['help-screen']]) {
+        ['help-screen'], ['import-jobs', 'help'], ['import-jobs', 'show-trace'],
+        ['import-jobs', 'show-trace', 'trace-file']]) {
         assert.equal(isNonTestInvocation(args), false, args.join(' '));
     }
     // A real run without a summary still fails closed.

@@ -145,9 +145,13 @@ export function evaluateRun(status, summary, launches = { retried: 0, failed: 0,
             + 'found, so obsolete snapshots could not be checked. Failing closed.');
         return { code: 1, lines };
     }
-    if (summary.testsTotal - summary.testsDidNotRun <= 0) {
-        lines.push(`No test ran (${summary.testsDidNotRun} did not run): the filter matched no test file. `
-            + 'Failing.');
+    // A skipped test did not run either: a run of skipped tests only checked nothing.
+    if (summary.testsTotal - summary.testsDidNotRun - summary.testsSkipped <= 0) {
+        lines.push(summary.testsSkipped > 0
+            ? `No test ran: every selected test was skipped (${summary.testsSkipped} skipped, `
+                + `${summary.testsDidNotRun} did not run). Failing.`
+            : `No test ran (${summary.testsDidNotRun} did not run): the filter matched no test file. `
+                + 'Failing.');
         return { code: 1, lines };
     }
     if (summary.snapshotsObsolete > 0) {
