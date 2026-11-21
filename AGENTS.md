@@ -41,3 +41,4 @@ CI is the gate: the required checks are `build-status` and `test-status`. A spec
 
 - Architecture principles: [specs/CONSTITUTION.md](specs/CONSTITUTION.md)
 - Extension internals: [src/PPDS.Extension/DEVELOPMENT.md](src/PPDS.Extension/DEVELOPMENT.md)
+- Rules for agent sessions working for the maintainer: [docs/MAINTAINER-SESSION-RULES.md](docs/MAINTAINER-SESSION-RULES.md)
