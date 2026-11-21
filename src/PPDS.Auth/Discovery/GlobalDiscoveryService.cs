@@ -9,6 +9,7 @@ using Microsoft.PowerPlatform.Dataverse.Client;
 using PPDS.Auth.Cloud;
 using PPDS.Auth.Credentials;
 using PPDS.Auth.Profiles;
+using PPDS.Internal;
 
 namespace PPDS.Auth.Discovery;
 

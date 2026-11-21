@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
+using PPDS.Internal;
 
 namespace PPDS.Dataverse.Client
 {
@@ -39,6 +40,7 @@ namespace PPDS.Dataverse.Client
                 throw new ArgumentException("Connection string cannot be null or empty.", nameof(connectionString));
             }
 
+            InteractiveSignInGuard.ThrowIfInteractiveConnectionString(connectionString);
             _serviceClient = new ServiceClient(connectionString);
         }
 

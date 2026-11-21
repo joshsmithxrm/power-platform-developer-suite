@@ -4,7 +4,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Moq;
 using PPDS.Auth;
+using PPDS.Auth.Credentials;
 using PPDS.Auth.Discovery;
 using PPDS.Auth.Profiles;
 using Xunit;
@@ -115,6 +117,48 @@ public class EnvironmentResolutionTests
         globalDiscovery.Disposed.Should().BeTrue(because: "the resolver disposes the discovery service it created");
         profileGivenToGlobalDiscovery.Should().BeSameAs(profile);
         bapFactoryCalls.Should().Be(0, because: "interactive auth must not fall through to BAP discovery");
+    }
+
+    [Theory]
+    [InlineData(AuthMethod.ClientSecret)]
+    [InlineData(AuthMethod.CertificateFile)]
+    [InlineData(AuthMethod.CertificateStore)]
+    public async Task SpnAuth_NameIdentifier_ResolvesThroughBapDiscovery_AndDisposesIt(AuthMethod authMethod)
+    {
+        var profile = new AuthProfile { AuthMethod = authMethod };
+        var store = new Mock<ISecureCredentialStore>().Object;
+        var bap = new FakeDiscoveryService(new DiscoveredEnvironment
+        {
+            FriendlyName = "MyEnvironment",
+            ApiUrl = "https://myenvironment.crm.dynamics.com",
+        });
+        ISecureCredentialStore? storeGivenToBap = null;
+        var globalDiscoveryCalls = 0;
+        using var service = new EnvironmentResolutionService(
+            profile,
+            deviceCodeCallback: null,
+            credentialStore: store,
+            createGlobalDiscovery: _ =>
+            {
+                Interlocked.Increment(ref globalDiscoveryCalls);
+                throw new InvalidOperationException("service principals must not route to Global Discovery");
+            },
+            createBapDiscovery: (p, s, _) =>
+            {
+                p.Should().BeSameAs(profile);
+                storeGivenToBap = s;
+                return Task.FromResult<IEnvironmentDiscoveryService>(bap);
+            });
+
+        var result = await service.ResolveAsync("MyEnvironment");
+
+        result.Success.Should().BeTrue(because: result.ErrorMessage);
+        result.Method.Should().Be(ResolutionMethod.BapDiscovery);
+        result.Environment!.Url.Should().Be("https://myenvironment.crm.dynamics.com");
+        bap.Calls.Should().Be(1);
+        bap.Disposed.Should().BeTrue(because: "the resolver disposes the BAP discovery service it created");
+        storeGivenToBap.Should().BeSameAs(store);
+        globalDiscoveryCalls.Should().Be(0);
     }
 
     [Theory]

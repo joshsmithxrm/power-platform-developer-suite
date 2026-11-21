@@ -268,6 +268,18 @@ Console.WriteLine(connection); // "DataverseConnection { Name = Primary, Url = h
 2. **Use Azure Key Vault** - For production, use `ClientSecretKeyVaultUri` to fetch automatically
 3. **Never log connection details directly**
 
+### Blocking Interactive Sign-In (Test Hosts)
+
+The AppContext switch `PPDS.BlockInteractiveSignIn` is meant for test hosts. It is off by default, and nothing in PPDS sets it outside the repository's test projects. When a host turns it on, PPDS.Auth and PPDS.Dataverse refuse every interactive sign-in in that process before it starts: the system browser, device code, and an `AuthType=OAuth` connection string handed to the Dataverse SDK. Each refusal throws `InvalidOperationException`. Silent sign-in from the token cache and service-principal sign-in are unaffected.
+
+```xml
+<ItemGroup>
+  <RuntimeHostConfigurationOption Include="PPDS.BlockInteractiveSignIn" Value="true" />
+</ItemGroup>
+```
+
+A host that also stores a `ConcurrentQueue<string>` with `AppContext.SetData("PPDS.BlockedInteractiveSignIns", queue)` receives the message of every refused attempt, including attempts that calling code caught. The repository's tests use it to fail any test that reaches a real sign-in.
+
 ## Target Frameworks
 
 - `net8.0`

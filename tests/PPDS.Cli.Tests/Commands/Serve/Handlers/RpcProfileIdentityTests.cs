@@ -118,16 +118,19 @@ public sealed class RpcProfileIdentityTests
     {
         var loads = 0;
         var poolsBuilt = new List<(string? ObjectId, string Url)>();
-        // The pool is a fake: a real one would authenticate the profile and connect to the URL.
+        // Only the pool is a fake (a real one would authenticate and connect). Profile resolution,
+        // the connection sources and the service provider are the production code, so this records
+        // which profile each source was really built from.
         await using var manager = new DaemonConnectionPoolManager(loadProfilesAsync: _ =>
         {
             loads++;
             throw new InvalidOperationException("Captured profiles must not be looked up again.");
         })
         {
-            CapturedPoolFactory = (captured, url) =>
+            PoolFactory = sources =>
             {
-                lock (poolsBuilt) poolsBuilt.Add((captured.ObjectId, url));
+                var source = Assert.IsType<ProfileConnectionSourceAdapter>(Assert.Single(sources)).Source;
+                lock (poolsBuilt) poolsBuilt.Add((source.Profile.ObjectId, source.EnvironmentUrl));
                 return Mock.Of<IDataverseConnectionPool>();
             }
         };
