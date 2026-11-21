@@ -284,6 +284,23 @@ tag prerequisites. A coordinated minor or major intentionally plans all release
 surfaces, even when some have no user-facing change. How to act on the advisory
 is in the [release runbook](runbooks/release.md).
 
+### Breaking changes refuse a non-major plan
+
+A pull request that is breaking carries the `breaking-change` label; the
+Changelog Check fails when the label and the description's breaking statement
+disagree (see [Merge Policy](MERGE-POLICY.md#changelog-check-not-required)).
+The label reaches the release plan as a file: `--breaking-prs-file` takes the
+JSON that `gh pr list --state merged --label breaking-change --json
+number,title,mergeCommit` prints. Only pull requests whose merge commit is in
+`--base..--head` count, and each is mapped to surfaces from its merge commit's
+diff (or from a `files` list when the JSON has one). If a `patch` or `minor` plan would release a
+surface that such a pull request changed, the plan lists it under "Refused" and
+the command exits 1; release that package as a major version or take the pull
+request out of the range. A breaking pull request that maps to no surface is
+refused too. `post-merge-release-check.yml` passes the merged pull request's
+own label the same way, so a pull request labelled both `release:patch` and
+`breaking-change` fails that job instead of opening a patch record.
+
 ### Patch release records
 
 `post-merge-release-check.yml` evaluates a merged PR when `release:patch` is

@@ -536,6 +536,15 @@ class FileChange:
     after: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class BreakingChange:
+    """A merged pull request labelled ``breaking-change`` inside the release range."""
+
+    number: int
+    title: str
+    paths: tuple[str, ...]
+
+
 @dataclass
 class _ImpactAccumulator:
     direct_reasons: dict[str, list[str]] = field(default_factory=dict)
@@ -757,6 +766,7 @@ def build_release_plan(
     release_kind: str = "patch",
     channel: str = "stable",
     tags: Iterable[str] = (),
+    breaking_changes: Sequence[BreakingChange] = (),
 ) -> dict:
     """Build an explained, read-only release plan.
 
@@ -765,6 +775,13 @@ def build_release_plan(
     Stable library releases also list missing upstream ProjectReferences as
     same-commit MinVer tag prerequisites; tool packages bundle their project
     outputs and do not expose those references as NuGet dependencies.
+
+    ``breaking_changes`` are the merged pull requests labelled
+    ``breaking-change`` in the analysed range (#1789). Each is mapped to the
+    release surfaces its files change directly. A ``patch`` or ``minor`` plan
+    that would release such a surface is refused: ``refusals`` is non-empty.
+    A breaking pull request whose files map to no surface is also refused in a
+    non-major plan, because the plan cannot show it is safe to leave out.
     """
 
     if release_kind not in {"patch", "minor", "major"}:
@@ -861,6 +878,34 @@ def build_release_plan(
         for surface, required_by in sorted(delivery_prerequisites.items())
     ]
 
+    breaking_entries: list[dict[str, object]] = []
+    refusals: list[str] = []
+    for change in sorted(breaking_changes, key=lambda item: item.number):
+        surfaces = sorted(
+            _detect_direct_changes(
+                graph, [FileChange(path=path) for path in change.paths]
+            ).direct_reasons
+        )
+        breaking_entries.append(
+            {"pr": change.number, "title": change.title, "surfaces": surfaces}
+        )
+        if release_kind == "major":
+            continue
+        if not surfaces:
+            refusals.append(
+                f"#{change.number} is labelled breaking-change but changes no "
+                f"release surface the plan can name; a {release_kind} release "
+                "cannot include it until the label or the range is corrected."
+            )
+            continue
+        for surface in surfaces:
+            if surface in release_targets:
+                refusals.append(
+                    f"{surface}: #{change.number} is labelled breaking-change; "
+                    f"a {release_kind} version is refused. Release {surface} "
+                    f"as a major version, or leave #{change.number} out of the range."
+                )
+
     return {
         "mode": "advisory",
         "release_kind": release_kind,
@@ -877,6 +922,8 @@ def build_release_plan(
         "latest_tags": latest_tags,
         "ignored_changes": sorted(impact.ignored, key=lambda item: item["path"]),
         "diagnostics": sorted(set(diagnostics)),
+        "breaking_changes": breaking_entries,
+        "refusals": refusals,
         "safety": "This plan is advisory only; it does not tag, publish, or dispatch workflows.",
     }
 
@@ -966,6 +1013,16 @@ def render_markdown(plan: dict) -> str:
         lines.extend(["", "### Ignored Non-Product Changes", ""])
         for item in plan["ignored_changes"]:
             lines.append(f"- `{item['path']}` — {item['reason']}")
+
+    if plan.get("breaking_changes"):
+        lines.extend(["", "### Breaking Changes in Range", ""])
+        for entry in plan["breaking_changes"]:
+            surfaces = ", ".join(entry["surfaces"]) or "(no release surface)"
+            lines.append(f"- #{entry['pr']} {entry['title']} — {surfaces}")
+
+    if plan.get("refusals"):
+        lines.extend(["", "### Refused", ""])
+        lines.extend(f"- {refusal}" for refusal in plan["refusals"])
 
     if plan["diagnostics"]:
         lines.extend(["", "### Diagnostics Requiring Review", ""])

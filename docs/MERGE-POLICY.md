@@ -137,3 +137,37 @@ This keeps `main` linear and gives one commit per PR for clean `git log` and `gi
 Dependabot config lives in `.github/dependabot.yml`. Bumps that meet the auto-merge criteria above can be `--auto` enabled in batch. Bumps that don't (auth, crypto, major core libs) get manual review with the verification steps documented in the relevant spec or commit message.
 
 For roll-up branches consolidating many bumps into one PR: avoid unless auto-merge is unavailable. Per-bump squash commits give better `git bisect` granularity and clearer attribution than a single roll-up commit.
+
+## Changelog Check (not required)
+
+The [`changelog-check.yml`](../.github/workflows/changelog-check.yml) workflow
+runs `scripts/ci/check_changelog_entry.py` on every pull request to `main`,
+again when the description or labels change (#1789). It is **not** a required
+status check.
+
+A pull request that changes a package under `src/<package>/` must, in the same
+pull request:
+
+- add an entry to `src/<package>/CHANGELOG.md` under that package's
+  `## [X.Y.Z] - Unreleased` section. An entry under the empty `## [Unreleased]`
+  section or under a released version fails. A pull request that changes two
+  packages needs an entry in each.
+- say in the "Breaking changes" section of the description `None`, or what
+  breaks and how to migrate (a `Breaking: yes/no` line also counts). A breaking
+  statement needs the `breaking-change` label, the label needs a breaking
+  statement, and the changelog entry of a breaking change must say "breaking".
+  The label is what makes the release plan refuse a non-major version for that
+  package ([Release Scope Analysis](RELEASE.md#breaking-changes-refuse-a-non-major-plan)).
+
+Not checked: pull requests labelled `internal` (nothing user-visible changed;
+`internal` together with `breaking-change` fails), Dependabot pull requests
+(major updates are covered by Rule 3), and files the release plan already
+treats as non-product: tests and fixtures (`__tests__/`, `e2e/`, `*.test.*`,
+`*.spec.*`), `*.md` documentation, and the CHANGELOG itself. Generated code
+such as `src/PPDS.Dataverse/Generated/` ships in the package and is checked.
+`src/PPDS.Analyzers` has no CHANGELOG and is not checked.
+
+To make it required, the maintainer adds the check `Changelog entry and
+breaking statement` to the required status checks of `main`. Before that, the
+`internal` label must exist, and the check should have run on open pull
+requests long enough to show it does not fail correct ones.

@@ -79,13 +79,23 @@ after the release PR merges.
 Run the read-only release model against the exact release range:
 
 ```bash
+gh pr list --state merged --base main --label breaking-change --limit 1000 \
+  --json number,title,mergeCommit > breaking-prs.json
+```
+
+```bash
 python scripts/ci/release_plan.py \
   --base <base-commit> \
   --head HEAD \
   --release-kind <patch|minor|major> \
   --channel <stable|prerelease> \
+  --breaking-prs-file breaking-prs.json \
   --format markdown
 ```
+
+If the plan has a **Refused** section (exit 1), a `breaking-change` pull request
+is in the range and the release kind is not major: stop and choose a major
+version for that package, or take the pull request out of the range.
 
 Review all five lists before drafting CHANGELOGs: **direct product changes**,
 **internal build changes**, **downstream deliverables**, **same-commit delivery
