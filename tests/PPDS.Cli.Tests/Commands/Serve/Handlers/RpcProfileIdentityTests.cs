@@ -219,6 +219,8 @@ public sealed class RpcProfileIdentityTests
         {
             _directory = directory;
             Collection = collection;
+            // Not on the faithful fake (#1639): these tests assert that a request is refused before any pool access, so no
+            // query reaches this executor (Pools.Invocations stays empty); it only satisfies the service registration.
             var executor = new Mock<IQueryExecutor>();
             executor.Setup(e => e.ExecuteFetchXmlAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new QueryResult { EntityLogicalName = "account", Columns = Array.Empty<QueryColumn>(), Records = Array.Empty<IReadOnlyDictionary<string, QueryValue>>(), Count = 0 });

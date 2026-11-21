@@ -43,6 +43,7 @@ NATIVE_INPUT_PROBES = {
     "tests/fixtures/ReferenceCacheProbe/**": "tests/fixtures/ReferenceCacheProbe/ReferenceCacheProbe.csproj",
     "scripts/ci/smoke_single_file_extraction.py": "scripts/ci/smoke_single_file_extraction.py",
     "scripts/ci/verify_native_distribution.py": "scripts/ci/verify_native_distribution.py",
+    "scripts/ci/ci_images.py": "scripts/ci/ci_images.py",
     "scripts/ci/check_native_glibc.sh": "scripts/ci/check_native_glibc.sh",
     ".github/workflows/extension-publish.yml": ".github/workflows/extension-publish.yml",
     "Directory.*.props": "Directory.Packages.props",
