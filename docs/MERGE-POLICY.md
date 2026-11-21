@@ -167,3 +167,72 @@ This keeps `main` linear and gives one commit per PR for clean `git log` and `gi
 Dependabot config lives in `.github/dependabot.yml`. Bumps that meet the auto-merge criteria above can be `--auto` enabled in batch. Bumps that don't (auth, crypto, major core libs) get manual review with the verification steps documented in the relevant spec or commit message.
 
 For roll-up branches consolidating many bumps into one PR: avoid unless auto-merge is unavailable. Per-bump squash commits give better `git bisect` granularity and clearer attribution than a single roll-up commit.
+
+## Changelog Check (not required)
+
+The [`changelog-check.yml`](../.github/workflows/changelog-check.yml) workflow
+runs `scripts/ci/check_changelog_entry.py` on every pull request to `main`,
+and again when the description or labels change (#1789). It is **not** a
+required status check.
+
+A pull request that changes a package under `src/<package>/` must, in the same
+pull request, do two things.
+
+**1. Add a changelog entry** to `src/<package>/CHANGELOG.md`, under that
+package's `## [X.Y.Z] - Unreleased` section.
+- An entry under the empty `## [Unreleased]` section fails, and so does an
+  entry under a released version.
+- A line that is only a list marker, only a heading or only an HTML comment
+  is not an entry.
+- A pull request that changes two packages needs an entry in each. A file
+  moved from one package to another counts for both.
+- Deleting a package's CHANGELOG does not take the package out of the check.
+- If the CHANGELOG has no `## [X.Y.Z] - Unreleased` section at all, the
+  message says a maintainer step is missing (release runbook, step 3, "Open
+  the next version").
+
+**2. State in the description whether it is breaking**: the template's
+"Breaking changes" section, or a `Breaking:` line. The statement is the whole
+section, with HTML comments and a trailing "Generated with …" footer removed.
+- **Not breaking**: only exactly `Breaking: no` (or `No`, `None`, `N/A`,
+  `Not breaking`), in any case, with optional emphasis or backticks and a
+  final full stop, and nothing else. A reason for "no" belongs in the other
+  sections of the description.
+- **Breaking**: a statement that starts with `Yes`, followed by what breaks
+  and how to migrate. A `Breaking: yes` line anywhere in the description wins.
+- **Any other text is not a "no"**, whatever the separator: "No, but exit
+  code 3 changes to 12", "None; `plugins diff` now exits 12", "No: internal
+  refactor", "None" followed by a list item, "This is not a breaking change."
+  With the `breaking-change` label it is the description of the break. Without
+  the label it fails as unclear, with a message that says how to write the
+  line.
+- A breaking statement needs the `breaking-change` label, and the label needs
+  a breaking statement.
+- The changelog entry of a breaking change must say "breaking" ("non-breaking"
+  does not count).
+- The label is what makes the release plan refuse a non-major version for that
+  package ([Release Scope Analysis](RELEASE.md#breaking-changes-refuse-a-non-major-plan)).
+
+**Not checked:**
+- Pull requests labelled `internal` (nothing user-visible changed). The
+  label does not exist yet; the maintainer creates it. `internal` together
+  with `breaking-change` fails.
+- Dependabot pull requests, by author; major updates are covered by Rule 3.
+- These files under `src/`, which the check knows by location:
+  - `src/PPDS.Extension/src/**/__tests__/`;
+  - `src/PPDS.Extension/e2e/`;
+  - `src/PPDS.Extension/tools/*.test.mjs`;
+  - `src/PPDS.Extension/tsconfig.test.json` and `vitest.config.ts`;
+  - `*.md` and `*.mdx` documentation;
+  - the package's own CHANGELOG.
+- `src/PPDS.Analyzers`, which has no CHANGELOG.
+
+A product folder named `Test`, `tests` or `fixtures` is checked. Generated code
+such as `src/PPDS.Dataverse/Generated/` ships in the package and is checked. A
+revert that only removes its own unreleased entry fails, with a message that
+says so; it needs the `internal` exemption.
+
+To make the check required, the maintainer adds the check `Changelog entry and
+breaking statement` to the required status checks of `main`. Before that, the
+`internal` label must exist, and the check should have run on open pull
+requests long enough to show it does not fail correct ones.
