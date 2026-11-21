@@ -11,7 +11,7 @@
 
 Every value PPDS computes from SQL text (an `UPDATE ... SET` value, an `INSERT` value, a computed column, a client-side comparison) has a SQL type that is known before anything runs, and is computed in that type the way SQL Server computes it. One type model decides both what is refused and how each value is computed. The model is checked against a real SQL Server.
 
-There is one exception, for reading only. A `SELECT` that uses a construct with no proven type rule is not refused: that expression is computed by the earlier untyped evaluator, as a labelled fallback, and every surface says so. The fallback is never used for a value that is written.
+There is one exception, for reading only. A `SELECT` that uses a construct with no proven type rule is not refused: that expression is computed by the earlier untyped evaluator, as a labelled fallback, and every surface says so. The fallback is never used for a value that is written. A `SELECT` that stores its result for a later statement, or that sits inside a condition, is not a plain `SELECT` for this purpose and is refused (see [Scope](#scope)).
 
 Some choices in this spec are not made yet. Each is marked **Decision pending** where it applies and listed in [Decisions pending](#decisions-pending). Until one is decided, the sentence it is attached to is not a basis for implementation.
 
@@ -27,7 +27,7 @@ Some choices in this spec are not made yet. Each is marked **Decision pending** 
 
 - Supporting every T-SQL function. A function without a proven rule is refused in a statement that writes, and computed by the labelled fallback in a `SELECT`.
 - Reproducing SQL Server query plans or performance.
-- Collation-exact behaviour for every language. Text rules state which collation they are proven for and refuse outside it (core requirement 10).
+- Collation-exact behaviour for every language. Text rules state which collation they are proven for and do not apply outside it; core requirement 10 says what happens then.
 - Deciding which statement shapes are allowed (joins, `TOP`, `OUTPUT`, `MERGE`, hints) and which rows a statement selects. The rule table in this spec admits value expressions only; statements are governed by [query.md](./query.md).
 - A runtime cross-check through the Dataverse SQL (TDS) endpoint (computing the same values with Dataverse's own SQL and refusing on a difference). Not in 2.0; see [Roadmap](#roadmap).
 
@@ -109,9 +109,15 @@ The engine also evaluates expressions in places no sub-issue of the typed value 
 | `OPENJSON` and `STRING_SPLIT` arguments, in a `SELECT` | Labelled fallback |
 | Join conditions evaluated in PPDS, in a `SELECT` | Labelled fallback; the result as a whole is marked, because the condition decides which rows are returned |
 | Filters on the metadata virtual tables, in a `SELECT` | Labelled fallback; the result as a whole is marked |
+| `GROUP BY` expressions and `HAVING` conditions evaluated in PPDS, in a `SELECT` | Labelled fallback; the result as a whole is marked, because they decide which rows and groups are returned |
 | Any of the above inside the `SELECT` of an `INSERT ... SELECT`, or in any other statement that writes | Refused. The fallback is never used for a write |
+| A filter of an `UPDATE` or a `DELETE` that PPDS evaluates | Refused. The filter decides which rows are written or deleted |
 | `MERGE` clauses | Refused. `MERGE` writes |
-| `IF` and `WHILE` conditions, and the value of `SET @v = ...` | Refused. They are not part of a `SELECT`, and they can decide whether or what a later statement writes |
+| `SET @v = ...`, `SELECT @v = ...` and `DECLARE @v = ...` | Refused. An assignment stores a value where a later statement can read it, and that statement may write it; for this purpose it is not a plain `SELECT` |
+| `SELECT ... INTO #t` | Refused, for the same reason: a later `INSERT ... SELECT` can read the temporary table |
+| `IF` and `WHILE` conditions, including a `SELECT` inside one (`IF EXISTS (SELECT ...)`) | Refused. The condition decides whether a later statement runs, and that statement may write |
+
+No mark travels with a value from one statement to the next. Refusal is the rule wherever a value computed by the fallback could reach a later statement.
 
 Consequence for #1811 ("remove the untyped compiler"): the untyped compiler is not removed. It stays as the fallback, reachable only from a `SELECT` and only for an expression with no proven rule; no statement that writes can reach it. The rest of #1811 (ADO.NET parameters bound as typed values) is unchanged.
 
@@ -155,17 +161,23 @@ The "Needed for" column says why a kind is on the list. It is not the column typ
 
 ### Core Requirements
 
-1. A statement that writes (`INSERT`, `UPDATE`, `DELETE`, and the `SELECT` inside an `INSERT ... SELECT`) is refused when any value expression contains a construct, or a combination of operand types, that is not in the rule table. Nothing is read or written. The message names the unsupported part by its kind and, for a function, by its name (for example "the function DATEADD", "a CONVERT style", "arithmetic between a decimal and a floating-point value"), and says where it is in the statement (line and column). It does not repeat literal values from the statement.
+1. A statement that writes (`INSERT`, `UPDATE`, `DELETE`, `MERGE`, and the `SELECT` inside an `INSERT ... SELECT`) is refused when any value expression, or any filter of the statement that PPDS evaluates, contains a construct, or a combination of operand types, that is not in the rule table. The same holds for a statement that stores a value where a later statement can read it (`SET @v = ...`, `SELECT @v = ...`, `DECLARE @v = ...`, `SELECT ... INTO #t`) and for an `IF` or `WHILE` condition, including a `SELECT` inside the condition: none of these is a plain `SELECT`, and none gets the fallback. Nothing is read or written. The message names the unsupported part by its kind and, for a function, by its name (for example "the function DATEADD", "a CONVERT style", "arithmetic between a decimal and a floating-point value"), and says where it is in the statement (line and column). It does not repeat literal values from the statement.
 2. A value is computed in the SQL type the binder gave its node. Overflow, divide by zero and a conversion that fails are errors for the whole statement wherever SQL Server raises an error for them under the reference server's session settings (fixed by #1798, see [Reference server](#reference-server)), unless the construct's own rule says otherwise (`TRY_CAST` and `TRY_CONVERT`). In a statement that writes, such an error means nothing is written. In a `SELECT`, the error is raised when it is reached: rows already returned stay returned, and every surface marks the result incomplete.
-3. Before the first write, every value for every row the statement would write is converted to the target column's SQL type, as SQL Server converts to that type, and then checked against the column's length and range (defined in [Limits the assignment check covers](#limits-the-assignment-check-covers)). A value with more decimal places than the target column is not refused for that: the conversion gives it the column's scale, as it does in SQL Server. Any failure of a check refuses the whole statement. The values written are the values that were checked. The DML row cap ([query.md](./query.md)) bounds this pass: a statement over the cap is refused before the pass starts.
-4. Where Dataverse would store something other than the value sent, the statement is refused with a message that says what to write instead. The known case is the empty string, which Dataverse stores as `NULL`: a write whose value evaluates to an empty string is refused, and the message says to write `NULL`. This is checked on each row's computed value in the pass before the first write, so an expression that yields an empty string for any row (for example `LTRIM('  ')`) refuses the whole statement. A further case is added only by a change to this spec. For a date and time column, "the value sent" is the value after the conversion Dataverse documents for the column's behaviour (user local, date only, time zone independent): a date write is stored unchanged when the value read back equals that converted value. The rule for each behaviour names the documentation page that states its conversion and has its own live case (#1806); a behaviour without both is refused.
-5. `SELECT` computed values use the same typed path wherever every part of the expression has a proven type rule. An expression with a part that has no proven rule is computed, as a whole, by the untyped fallback, and labelled: the result says which computed columns came from the fallback, and says so for the result as a whole when a filter, join condition or sort evaluated in PPDS used it. Every surface shows that label. The fallback is never used by a statement that writes. No query that returned the right result before returns a different result; each change is a correction with proof or a new clear error.
+3. Before the first write, every value for every row the statement would write is converted to the target column's SQL type, as SQL Server converts to that type, and then checked against the column's length and range (defined in [Limits the assignment check covers](#limits-the-assignment-check-covers)). A value with more decimal places than the target column is not refused for that: the conversion gives it the column's scale, as it does in SQL Server. That holds for decimal places only. Conversion to a text column never shortens a value: a text value longer than the column's maximum length is refused, not cut to fit. Any failure of a check refuses the whole statement. The computed values are held until every row has passed, and the held values are what is written; nothing is computed again for the write. The DML row cap ([query.md](./query.md)) bounds this pass: a statement over the cap is refused before the pass starts.
+4. Where Dataverse would store something other than the value sent, the statement is refused with a message that says what to write instead. The known case is the empty string, which Dataverse stores as `NULL`: a write whose value evaluates to an empty string is refused, and the message says to write `NULL`. This is checked on each row's computed value in the pass before the first write, so an expression that yields an empty string for any row (for example `LTRIM('  ')`) refuses the whole statement. A further case is added only by a change to this spec. For a date and time column, "the value sent" is the value after the conversion Dataverse documents for the column's behaviour (user local, date only, time zone independent): a date write is stored unchanged when the value read back equals that converted value. The rule for each behaviour names the documentation page that states its conversion and has its own live case (#1806); a behaviour without both is refused. The literal must leave no room for interpretation: for a user-local column it carries `Z` or an explicit offset, and a literal without one is refused, because the stored value would otherwise depend on the calling user's time zone. This binds #1806 and every later rule: whatever further literal forms are admitted, a user-local literal without an offset is not one of them.
+5. `SELECT` computed values use the same typed path wherever every part of the expression has a proven type rule. An expression with a part that has no proven rule is computed, as a whole, by the untyped fallback, and labelled: the result says which computed columns came from the fallback, and says so for the result as a whole when a filter, join condition, grouping, `HAVING` condition or sort evaluated in PPDS used it. Every surface shows that label. The fallback is never used by a statement that writes, nor by any statement core requirement 1 names. No query that returned the right result before returns a different result; each change is a correction with proof or a new clear error.
 6. The rule table is the only list. The admission tests, the differential generator and the documented list of supported constructs are generated from it. The documented list is a reference page for users, generated from the rule table by the documentation generators under `scripts/docs-gen/` ([docs-generation.md](./docs-generation.md)); its path is recorded here when the generator for it exists.
 7. No other code decides whether a value expression is allowed or what type it has. No construct is admitted by one component and typed differently by another.
 8. At the 2.0 release the rule table covers, for DML, every construct in [Constructs required for 2.0](#constructs-required-for-20), for the operand type combinations and the column kinds listed there.
 9. A column, a conversion target or a literal whose SQL type is not on the closed list in [SQL types](#sql-types) is treated as a construct outside the rule table is: refused in a statement that writes, computed by the labelled fallback in a `SELECT`.
-10. The rule table records, for each text rule whose result depends on collation, the collation it was proven under. When a statement runs, such a rule applies only if the organisation's collation has been established and is one the rule was proven under. When the collation cannot be established, or is another one, the rule counts as not proven: the statement is refused if it writes, and the expression goes to the labelled fallback in a `SELECT`. How the collation is established when a statement runs is identified by #1799 and #1804 and recorded here; until a means is recorded, it cannot be established.
+10. The rule table records, for each text rule whose result depends on collation, the collation it was proven under. When a statement runs, such a rule applies only if the organisation's collation has been established and is one the rule was proven under. When the collation cannot be established, or is another one, the rule counts as not proven: the statement is refused if it writes, and the expression goes to the labelled fallback in a `SELECT`. How the collation is established when a statement runs is identified by #1799 and #1804 and recorded here; until a means is recorded, it cannot be established. `UPPER` and `LOWER` are in the 2.0 floor (core requirement 8), so a means of establishing the collation when a statement runs is itself required for 2.0: without one, those two constructs could not be admitted in a write.
 
+> **Decision pending (J):** requirement 5, "as a whole". Either the whole expression goes to the fallback when any part of it has no proven rule (as drafted), or only the unproven part does and the rest is computed on the typed path. As drafted, a known wrong value from the Edge Cases table that is nested with an unproven function stays wrong in a `SELECT`, labelled. With only the part, that nested value becomes the SQL Server value, but one result mixes proven and unproven computation.
+>
+> **Decision pending (K):** requirement 10 for a `SELECT`. When the collation cannot be established, or is not one the rule was proven under, a `SELECT` expression that needs the rule either goes to the labelled fallback (as drafted) or is refused. The write half is not in question: it is refused.
+>
+> **Decision pending (L):** requirement 3 when the row cap is lifted. The CLI's `--no-limit` removes the DML row cap, and the pass before the first write then holds values for an unbounded number of rows. Either a ceiling stays for statements with computed values, or the pass is allowed to grow and its memory cost is stated.
+>
 > **Decision pending (I):** requirement 4 for text that is only spaces. "Evaluates to an empty string" is exact for a value of length zero. Whether a value made only of spaces is also refused depends on what Dataverse stores for it, which has not been run.
 
 What the check before the first write does not cover: Dataverse can still reject a row or a later batch for a reason that is not a value's type or limits (a plug-in, a required column, a privilege, a duplicate rule). Earlier batches are then already written. This spec removes the failures that can be known from the statement and the column metadata; it does not make a multi-batch write atomic.
@@ -180,12 +192,12 @@ The assignment check works from the target column's metadata. What it covers, by
 
 | Target column kind | Checked before the first write |
 |--------------------|--------------------------------|
-| Text (String, Memo) | The value's length against the column's maximum length |
+| Text (String, Memo) | The value's length against the column's maximum length. A longer value is refused; it is never shortened to fit |
 | Whole number, decimal, currency, floating point | The value against the column's minimum and maximum, and against the range of the column's SQL type. Decimal places are not a check: the conversion to the column's SQL type sets them, as SQL Server does |
 | Yes/no (Boolean) | The value is 0 or 1 |
 | Choice, status, status reason (Picklist, State, Status) | The value is one of the column's option values. The DML safety work observed live that Dataverse stores a whole number that is not an option without an error, so this cannot be left to Dataverse. Status and status reason are not set to `NULL` |
 | Lookup | The value is a GUID, and the lookup has exactly one target table, so the id says which table it refers to |
-| Date and time | The literal has a form admitted for the column's behaviour, and the behaviour has a rule (core requirement 4) |
+| Date and time | The literal has a form admitted for the column's behaviour, and the behaviour has a rule (core requirement 4). A user-local literal without `Z` or an offset is refused |
 
 Left to Dataverse, and therefore able to fail after the first write: whether the row a lookup refers to exists; whether a status and status reason pair is valid beyond what the metadata states; required columns; plug-ins and business rules; privileges; duplicate detection.
 
@@ -211,7 +223,7 @@ Not fixed by a recorded decision, and therefore not stated here: the server vers
 
 ### Constructs required for 2.0
 
-Requirement 8 names this section. It is what the DML grammar on the branch of pull request #1698 admits in a value today, read from two files on that branch at commit `28d113d7`: `src/PPDS.Query/Planning/DmlStatementSupport.cs`, which admits constructs and their forms, and `src/PPDS.Cli/Services/Query/DmlColumnValidator.cs`, which narrows them by operand type and by column kind. The 2.0 floor is each construct below, with at least the forms given, for the operand type combinations and the column kinds given. Each must be in the rule table and proven. The typed path may admit more; it may not admit less.
+Requirement 8 names this section. It is what the DML grammar on the branch of pull request #1698 admits in a value today, read from two files on that branch at commit `28d113d7`: `src/PPDS.Query/Planning/DmlStatementSupport.cs`, which admits constructs and their forms, and `src/PPDS.Cli/Services/Query/DmlColumnValidator.cs`, which narrows them by operand type and by column kind. The 2.0 floor is each construct below, with at least the forms given, for the operand type combinations and the column kinds given. Each must be in the rule table and proven. The typed path may admit more, within the core requirements (a user-local date literal without an offset stays refused, core requirement 4); it may not admit less.
 
 Forms:
 
@@ -318,7 +330,7 @@ N/A. Refusals are listed under [Error Handling](#error-handling).
 | AC-02 | Every construct in the rule table has a differential case set that passes against the reference server for value, error and result type | TBD | 🔲 |
 | AC-03 | The differential generator, the admission test and the documented list read the rule table; adding a rule without cases fails the build | TBD | 🔲 |
 | AC-04 | Each known wrong-value case in the [Edge Cases](#edge-cases) table produces the SQL Server value or a refusal, with a test that fails if it regresses | TBD | 🔲 |
-| AC-05 | A statement whose computed value, after conversion to the target column's SQL type, exceeds the column's length or range for any row it would write writes nothing | TBD | 🔲 |
+| AC-05 | A statement in which, for any row it would write, a text value is longer than the target column's maximum length, or a number, after conversion to the target column's SQL type, is outside the column's range, writes nothing. A text value is never shortened to fit: an over-long text value fails this criterion if it is written in any form | TBD | 🔲 |
 | AC-06 | The column type map has an entry for every Dataverse column kind in [Column kinds](#column-kinds): its SQL type with the evidence for it, or "refused" with the reason | TBD | 🔲 |
 | AC-07 | An `INSERT ... SELECT` whose projection uses a construct outside the rule table is refused before any read or write, and each known wrong-value case of the Edge Cases table, written as an `INSERT ... SELECT` projection, stores the SQL Server value or is refused | TBD | 🔲 |
 | AC-08 | Before `SELECT` moves to the typed path, the live SELECT suite's results are recorded as a baseline with each case marked right or wrong against the reference server. After the move, every case marked right returns the same result, whether it is computed on the typed path or by the fallback, and every case that differs is listed with its proof or its error | TBD | 🔲 |
@@ -334,19 +346,19 @@ N/A. Refusals are listed under [Error Handling](#error-handling).
 | AC-18 | The differential suite is a required CI check, and a nightly run executes it at a greater depth | TBD | 🔲 |
 | AC-19 | Each error class in the Error Handling table raises its own error code, and no message contains a GUID | TBD | 🔲 |
 | AC-20 | A statement that writes and uses a column, a conversion target or a literal whose SQL type is not on the closed list is refused before any read or write | TBD | 🔲 |
-| AC-21 | The values a statement writes equal the values its check before the first write computed: when the source rows change between the check and the write, the statement writes the checked values or writes nothing | TBD | 🔲 |
+| AC-21 | The values a statement writes are the held values its check before the first write computed: when the source rows change between the check and the write, the statement still writes the checked values, and no value is computed a second time | TBD | 🔲 |
 | AC-22 | The differential suite runs on a developer machine against a local SQL Server, on Windows and on Linux, and passes the same cases as the CI run | TBD | 🔲 |
 | AC-23 | While the interim rule is in force, a DML statement with a value that is not a literal, a column or `NULL` is refused before any read or write | TBD | 🔲 |
-| AC-24 | A `SELECT` with an expression that has no proven type rule returns the value the untyped fallback computes, and the result marks that column as computed by the fallback; when a filter, join condition or sort evaluated in PPDS used the fallback, the result as a whole is marked. The CLI, the TUI, the extension, the MCP query tool and the ADO.NET provider each show the mark | TBD | 🔲 |
-| AC-25 | No statement that writes reaches the fallback: an `INSERT ... SELECT`, an `UPDATE` or a `MERGE` clause with an expression that has no proven type rule is refused before any read or write, as is an `IF` or `WHILE` condition or a `SET @v` value with one | TBD | 🔲 |
-| AC-26 | For each date column behaviour that has a rule, a live Dataverse case writes a literal and reads back the value after the documented conversion for that behaviour; a write to a behaviour without a rule is refused | TBD | 🔲 |
+| AC-24 | A plain `SELECT` with an expression that has no proven type rule returns the value the untyped fallback computes, and the result marks that column as computed by the fallback; when a filter, join condition, grouping, `HAVING` condition or sort evaluated in PPDS used the fallback, the result as a whole is marked. The CLI, the TUI, the extension, the MCP query tool and the ADO.NET provider each show the mark | TBD | 🔲 |
+| AC-25 | No value computed by the fallback can reach a write. With an expression that has no proven type rule, each of these is refused before any read or write, and the criterion fails if any one of them runs: an `INSERT ... VALUES` item; an `INSERT ... SELECT` projection; an `UPDATE ... SET` value; a filter of an `UPDATE` or of a `DELETE` that PPDS evaluates; a `MERGE` clause; `SET @v = ...`; `SELECT @v = ...`; `DECLARE @v = ...`; `SELECT ... INTO #t`; an `IF` or `WHILE` condition, including `IF EXISTS (SELECT ...)` | TBD | 🔲 |
+| AC-26 | For each date column behaviour that has a rule, a live Dataverse case writes a literal and reads back the value after the documented conversion for that behaviour. A write to a behaviour without a rule and a live case is refused. A write of a literal without `Z` or an offset to a user-local column is refused; the criterion fails if such a literal is admitted by any rule | TBD | 🔲 |
 | AC-27 | A value with more decimal places than the target column is written as the value SQL Server's conversion to the column's SQL type gives (a differential case), and a live Dataverse case reads that value back unchanged | TBD | 🔲 |
 | AC-28 | A `SELECT` in which an evaluation error occurs after rows have been returned raises the error when it is reached, keeps the rows already returned, and is marked incomplete on the CLI, the TUI, the extension, the MCP query tool and the ADO.NET provider | TBD | 🔲 |
-| AC-29 | A DML statement that would write more rows than the DML row cap is refused before any value is computed | TBD | 🔲 |
+| AC-29 | A DML statement that would write more rows than the DML row cap is refused before any value is computed. What happens when the cap is lifted waits on decision L | TBD | 🔲 |
 
 Status key: ✅ covered by passing test · ⚠️ test exists but failing · ❌ no test yet · 🔲 not yet implemented
 
-Criteria that wait on a pending decision: AC-19 (G), AC-23 (H), AC-10 (I, for values made only of spaces).
+Criteria that wait on a pending decision: AC-19 (G), AC-23 (H), AC-10 (I, for values made only of spaces), AC-24 (J, for an expression that is only partly unproven), AC-15 (K, for its `SELECT` half), AC-29 (L, for a lifted cap).
 
 ### Test Examples
 
@@ -489,6 +501,9 @@ Each is the maintainer's to make. The sentence it is attached to stands as draft
 | G | Whether DML refusals keep the code `Query.DmlBlocked` or get a code per error class, and then which surfaces must learn the new codes |
 | H | Whether the interim rule's "literals" include a negative number and `CAST('<guid>' AS uniqueidentifier)`, and whether the DML safety work is cut down to the interim rule before it lands |
 | I | Whether a value made only of spaces counts as an empty string under core requirement 4 |
+| J | Whether an expression with an unproven part goes to the fallback as a whole, or only the unproven part does |
+| K | Whether a `SELECT` that needs a collation-dependent rule, when the collation cannot be established, goes to the labelled fallback or is refused |
+| L | Whether a ceiling stays on the pass before the first write when `--no-limit` lifts the DML row cap, or the pass may grow and its memory cost is stated |
 
 ### Prior art
 
@@ -512,6 +527,7 @@ SQL 4 CDS (MIT licence) takes a typed approach of this kind and is acknowledged 
 
 | Date | Change |
 |------|--------|
+| 2026-11-21 | The maintainer's decisions of 2026-11-21 written into the requirements; refusals added for values stored for a later statement and for conditions; pending decisions cut to G to L |
 | 2026-11-20 | Initial spec |
 
 ---
