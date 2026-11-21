@@ -8,6 +8,7 @@ on:
       - 'tests/PPDS.Cli.Tests/Plugins/Extraction/**'
       - 'tests/fixtures/ReferenceCacheProbe/**'
       - 'scripts/ci/test_reference_cache*'
+      - 'scripts/ci/ci_images.py'
       - '.github/workflows/reference-cache-trust.yml'
   workflow_dispatch:
 
@@ -65,9 +66,14 @@ jobs:
         if: matrix.rid == 'linux-x64'
         shell: bash
         run: |
-          docker run --rm --entrypoint /bin/bash \
+          image=$(python scripts/ci/ci_images.py ubi8-dotnet8-runtime)
+          if ! docker pull "$image"; then
+            echo "::error title=Infrastructure failure::Could not pull $image from ${image%%/*}. The product was not tested; this is not a product failure."
+            exit 1
+          fi
+          docker run --rm --pull=never --entrypoint /bin/bash \
             --mount "type=bind,source=$PWD/artifacts/cache-probe,target=/probe,readonly" \
-            registry.access.redhat.com/ubi8/dotnet-80-runtime:latest -euc '
+            "$image" -euc '
               getconf GNU_LIBC_VERSION
               test "$(getconf GNU_LIBC_VERSION)" = "glibc 2.28"
               test "$(id -u)" != 0

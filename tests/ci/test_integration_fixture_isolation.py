@@ -25,9 +25,12 @@ REFUSAL_SCRIPT = (
 # No Git calls or mutable refs are used by these tests.
 # 2026-11-19: '.editorconfig' added to the build.yml code filter and the
 # test.yml code and python filters (it sets CS1591 to error in the libraries).
+# 2026-11-20: 'scripts/ci/ci_images.py' (the one container image definition,
+# #1794) added to the test.yml extraction filter; no job, permission or secret
+# reference changed.
 REVIEWED_WORKFLOW_HASHES = {
     "build.yml": "5b58e3dce7cb80ca1f4f828761a77f68fb17b6a03f7ab77f33863de80de6b0d5",
-    "test.yml": "0146164e1fcd9d9f719b0a18ebe26d31b580c9b217867cd9ab80174eb8df65d0",
+    "test.yml": "5bdca6aee2121a20fe69ab8eb4aeb50539065685e52683922f5eb757692ac96e",
 }
 
 
