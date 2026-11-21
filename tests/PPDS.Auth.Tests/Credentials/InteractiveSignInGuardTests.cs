@@ -51,6 +51,11 @@ public class InteractiveSignInGuardTests
     [InlineData("AuthType=OAuth;Url=https://org.example.test;ClientId=c;RedirectUri=http://localhost;LoginPrompt=Auto")]
     [InlineData("authtype = oauth ; url=https://org.example.test")]
     [InlineData("AuthenticationType=OAuth;Url=https://org.example.test")]
+    [InlineData("AuthType=5;Url=https://org.example.test;ClientId=c;RedirectUri=http://localhost")]
+    [InlineData("AuthType= 05;Url=https://org.example.test")]
+    [InlineData("AuthType=+5;Url=https://org.example.test")]
+    [InlineData("AuthenticationType=5;Url=https://org.example.test")]
+    [InlineData("AuthType=\"OAuth\";Url=https://org.example.test")]
     public void ThrowIfInteractiveConnectionString_BlocksOAuth(string connectionString)
     {
         var act = () => InteractiveSignInGuard.ThrowIfInteractiveConnectionString(connectionString);
@@ -62,6 +67,11 @@ public class InteractiveSignInGuardTests
     [Theory]
     [InlineData("AuthType=ClientSecret;Url=https://org.example.test;ClientId=c;ClientSecret=s")]
     [InlineData("AuthType=Certificate;Url=https://org.example.test;ClientId=c;Thumbprint=t")]
+    [InlineData("AuthType=ClientSecret;AuthenticationType=OAuth;Url=https://org.example.test")]
+    [InlineData("AuthType=7;Url=https://org.example.test")]
+    [InlineData("AuthType=6;Url=https://org.example.test")]
+    [InlineData("AuthType=OAuth,ClientSecret;Url=https://org.example.test")]
+    [InlineData("AuthType=ClientSecret;Url=https://oauth.example.test;ClientId=c;ClientSecret=OAuth")]
     [InlineData("")]
     [InlineData(null)]
     public void ThrowIfInteractiveConnectionString_AllowsNonInteractiveAuth(string? connectionString)
@@ -70,6 +80,119 @@ public class InteractiveSignInGuardTests
 
         act.Should().NotThrow();
         TakeRecordedAttempts().Should().BeEmpty();
+    }
+
+    [Fact]
+    public void WithTheSwitchOff_NeitherGuardRefusesAnything()
+    {
+        // What every user gets: the switch is absent from the product's runtime configuration.
+        // This collection runs alone, so turning the switch off here affects no other test.
+        AppContext.SetSwitch(InteractiveSignInGuard.SwitchName, false);
+        try
+        {
+            InteractiveSignInGuard.IsBlocked.Should().BeFalse();
+            var calls = new Action[]
+            {
+                () => InteractiveSignInGuard.ThrowIfBlocked("browser"),
+                () => InteractiveSignInGuard.ThrowIfBlocked("device code"),
+                () => InteractiveSignInGuard.ThrowIfInteractiveConnectionString(
+                    "AuthType=OAuth;Url=https://org.example.test;ClientId=c;RedirectUri=http://localhost;LoginPrompt=Auto"),
+                () => InteractiveSignInGuard.ThrowIfInteractiveConnectionString("AuthType=5;Url=https://org.example.test"),
+                () => InteractiveSignInGuard.ThrowIfInteractiveConnectionString("not=a;;valid==oauth string'"),
+                () => InteractiveSignInGuard.ThrowIfInteractiveConnectionString(null),
+            };
+
+            foreach (var call in calls)
+            {
+                call.Should().NotThrow();
+            }
+
+            TakeRecordedAttempts().Should().BeEmpty();
+        }
+        finally
+        {
+            AppContext.SetSwitch(InteractiveSignInGuard.SwitchName, true);
+        }
+
+        InteractiveSignInGuard.IsBlocked.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("AuthType=OAuth")]
+    [InlineData("AuthType=5")]
+    [InlineData("AuthType= 5")]
+    [InlineData("AuthType=05")]
+    [InlineData("AuthType=+5")]
+    [InlineData("AuthType = OAuth")]
+    [InlineData("AuthType=\"OAuth\"")]
+    [InlineData("AuthType='OAuth'")]
+    [InlineData("AuthenticationType=OAuth")]
+    [InlineData("AuthenticationType=5")]
+    [InlineData("AuthType=ClientSecret;AuthenticationType=OAuth")]
+    [InlineData("AuthenticationType=OAuth;AuthType=ClientSecret")]
+    [InlineData("AuthType=;AuthenticationType=OAuth")]
+    [InlineData("AuthType=OAuth,ClientSecret")]
+    [InlineData("AuthType=ClientSecret")]
+    [InlineData("AuthType=7")]
+    [InlineData("AuthType=Certificate")]
+    [InlineData("AuthType=6")]
+    [InlineData("AuthType=AD")]
+    [InlineData("AuthType=0")]
+    [InlineData("AuthType=99")]
+    [InlineData("AuthType=5.0")]
+    [InlineData("AuthType=0x5")]
+    [InlineData("AuthType=-1")]
+    public void UsesOAuth_AgreesWithTheDataverseSdk(string authPart)
+    {
+        // Ask the SDK's own connection-string parser (internal, so by reflection) how it reads the string.
+        var connectionString = authPart + ";Url=https://org.example.test;ClientId=c;RedirectUri=http://localhost";
+        var sdk = SdkAuthenticationType(connectionString);
+
+        if (sdk == Microsoft.PowerPlatform.Dataverse.Client.AuthenticationType.OAuth)
+        {
+            InteractiveSignInGuard.UsesOAuth(connectionString).Should().BeTrue(because: "the SDK reads it as OAuth");
+        }
+        else if (sdk != Microsoft.PowerPlatform.Dataverse.Client.AuthenticationType.InvalidConnection)
+        {
+            InteractiveSignInGuard.UsesOAuth(connectionString).Should().BeFalse(because: $"the SDK reads it as {sdk}");
+        }
+    }
+
+    [Fact]
+    public void TheTripwire_FailsTheTest_WhenAnAttemptIsQueued()
+    {
+        var method = typeof(InteractiveSignInGuardTests).GetMethod(nameof(TheTripwire_FailsTheTest_WhenAnAttemptIsQueued))!;
+        InteractiveSignInTripwireAttribute.BlockedAttempts.Enqueue("probe: a blocked attempt");
+
+        var act = () => new InteractiveSignInTripwireAttribute().After(method);
+
+        act.Should().Throw<Xunit.Sdk.XunitException>()
+            .Which.Message.Should().Contain("probe: a blocked attempt")
+            .And.Contain(nameof(TheTripwire_FailsTheTest_WhenAnAttemptIsQueued));
+        TakeRecordedAttempts().Should().BeEmpty(because: "the tripwire reports each attempt once");
+    }
+
+    [Fact]
+    public void TheTripwire_PassesTheTest_WhenNothingIsQueued()
+    {
+        var method = typeof(InteractiveSignInGuardTests).GetMethod(nameof(TheTripwire_PassesTheTest_WhenNothingIsQueued))!;
+        TakeRecordedAttempts().Should().BeEmpty();
+
+        var act = () => new InteractiveSignInTripwireAttribute().After(method);
+
+        act.Should().NotThrow();
+    }
+
+    private static Microsoft.PowerPlatform.Dataverse.Client.AuthenticationType SdkAuthenticationType(string connectionString)
+    {
+        var processor = typeof(Microsoft.PowerPlatform.Dataverse.Client.ServiceClient).Assembly.GetTypes()
+            .Single(t => t.Name == "DataverseConnectionStringProcessor");
+        var parse = processor.GetMethod("Parse", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            ?? throw new InvalidOperationException("The Dataverse SDK's DataverseConnectionStringProcessor.Parse was not found; update this test for the SDK version.");
+        var parsed = parse.Invoke(null, new object?[] { connectionString, null });
+        return (Microsoft.PowerPlatform.Dataverse.Client.AuthenticationType)processor
+            .GetProperty("AuthenticationType", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .GetValue(parsed)!;
     }
 
     [Fact]
@@ -212,6 +335,10 @@ public class InteractiveSignInGuardCoverageTests
     [InlineData("var options = new ConnectionOptions { ServiceUri = u, LoginPrompt = p, AccessTokenProviderFunctionAsync = _ => t }; var c = new ServiceClient(options);", false)]
     [InlineData("var options = new ConnectionOptions { ServiceUri = u }; var c = new ServiceClient(options);", false)]
     [InlineData("var c = new ServiceClient(new Uri(u), _ => Task.FromResult(t), useUniqueInstance: true);", true)]
+    [InlineData("ServiceClient c = new(cs);", false)]
+    [InlineData("InteractiveSignInGuard.ThrowIfInteractiveConnectionString(cs); ServiceClient c = new(cs);", true)]
+    [InlineData("ServiceClient? c = new(cs + \";LoginPrompt=Always\");", false)]
+    [InlineData("ServiceClient c; c = new(cs);", false)]
     public void TheScan_AcceptsOnlyGuardedOrTokenFunctionServiceClients(string body, bool accepted)
     {
         var root = CSharpSyntaxTree.ParseText($"class C {{ void M() {{ {body} }} }}").GetRoot();
@@ -221,14 +348,87 @@ public class InteractiveSignInGuardCoverageTests
         IsAcceptedServiceClientCreation(creation).Should().Be(accepted);
     }
 
+    [Theory]
+    [InlineData("class C { ServiceClient _c; void M() { _c = new(cs); } }")]
+    [InlineData("class C { ServiceClient M() { return new(cs); } }")]
+    [InlineData("class C { Task<ServiceClient> M() => new(cs); }")]
+    [InlineData("class C { ServiceClient P { get; } = new(cs); }")]
+    public void TheScan_SeesTargetTypedServiceClients(string source)
+    {
+        var root = CSharpSyntaxTree.ParseText(source).GetRoot();
+
+        var creation = ServiceClientCreations(root).Single();
+
+        IsAcceptedServiceClientCreation(creation).Should().BeFalse(because: "it has no connection-string guard");
+    }
+
     private static IEnumerable<InvocationExpressionSyntax> InteractiveAcquisitions(SyntaxNode root) =>
         root.DescendantNodes().OfType<InvocationExpressionSyntax>().Where(i =>
             i.Expression is MemberAccessExpressionSyntax { Name.Identifier.Text: "AcquireTokenInteractive" or "AcquireTokenWithDeviceCode" });
 
-    private static IEnumerable<ObjectCreationExpressionSyntax> ServiceClientCreations(SyntaxNode root) =>
-        root.DescendantNodes().OfType<ObjectCreationExpressionSyntax>().Where(c => TypeName(c.Type) == "ServiceClient");
+    private static IEnumerable<BaseObjectCreationExpressionSyntax> ServiceClientCreations(SyntaxNode root) =>
+        root.DescendantNodes().OfType<BaseObjectCreationExpressionSyntax>().Where(c => c switch
+        {
+            ObjectCreationExpressionSyntax explicitNew => TypeName(explicitNew.Type) == "ServiceClient",
+            ImplicitObjectCreationExpressionSyntax targetTyped => TypeName(TargetType(targetTyped)) == "ServiceClient",
+            _ => false,
+        });
 
-    private static bool IsAcceptedServiceClientCreation(ObjectCreationExpressionSyntax creation)
+    /// <summary>
+    /// The type a target-typed <c>new(...)</c> creates, when the syntax shows it: a declaration, an
+    /// assignment to a local, parameter, field or property declared with a type, or a return value of a
+    /// method returning T, Task&lt;T&gt; or ValueTask&lt;T&gt;. Null when only a semantic model could tell
+    /// (for example an argument position).
+    /// </summary>
+    private static TypeSyntax? TargetType(ImplicitObjectCreationExpressionSyntax creation)
+    {
+        switch (creation.Parent)
+        {
+            case EqualsValueClauseSyntax { Parent: VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax declaration } }:
+                return declaration.Type;
+            case EqualsValueClauseSyntax { Parent: PropertyDeclarationSyntax property }:
+                return property.Type;
+            case AssignmentExpressionSyntax assignment when assignment.Right == creation:
+                var name = assignment.Left switch
+                {
+                    IdentifierNameSyntax identifier => identifier.Identifier.Text,
+                    MemberAccessExpressionSyntax access => access.Name.Identifier.Text,
+                    _ => null,
+                };
+                return name is null ? null : DeclaredType(creation, name);
+            case ReturnStatementSyntax:
+            case ArrowExpressionClauseSyntax:
+                var method = creation.Ancestors().FirstOrDefault(a => a is MethodDeclarationSyntax or LocalFunctionStatementSyntax or AnonymousFunctionExpressionSyntax);
+                var returnType = method switch
+                {
+                    MethodDeclarationSyntax m => m.ReturnType,
+                    LocalFunctionStatementSyntax f => f.ReturnType,
+                    _ => null,
+                };
+                return returnType is GenericNameSyntax { Identifier.Text: "Task" or "ValueTask", TypeArgumentList.Arguments.Count: 1 } task
+                    ? task.TypeArgumentList.Arguments[0]
+                    : returnType;
+            default:
+                return null;
+        }
+    }
+
+    private static TypeSyntax? DeclaredType(SyntaxNode from, string name)
+    {
+        var member = from.Ancestors().OfType<MemberDeclarationSyntax>().FirstOrDefault(m => m is not TypeDeclarationSyntax);
+        var type = from.Ancestors().OfType<TypeDeclarationSyntax>().FirstOrDefault();
+        var local = member?.DescendantNodes().OfType<VariableDeclarationSyntax>()
+            .FirstOrDefault(d => d.Variables.Any(v => v.Identifier.Text == name))?.Type;
+        var parameter = member?.DescendantNodes().OfType<ParameterSyntax>()
+            .FirstOrDefault(p => p.Identifier.Text == name)?.Type;
+        var field = type?.Members.OfType<FieldDeclarationSyntax>()
+            .FirstOrDefault(f => f.Declaration.Variables.Any(v => v.Identifier.Text == name))?.Declaration.Type;
+        var property = type?.Members.OfType<PropertyDeclarationSyntax>()
+            .FirstOrDefault(p => p.Identifier.Text == name)?.Type;
+        return local ?? parameter ?? field ?? property;
+    }
+
+    private static bool IsAcceptedServiceClientCreation(BaseObjectCreationExpressionSyntax creation)
     {
         var arguments = creation.ArgumentList?.Arguments ?? default;
 
@@ -314,10 +514,11 @@ public class InteractiveSignInGuardCoverageTests
         && access.Name.Identifier.Text == guard
         && (argument is null || invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression.ToString() == argument);
 
-    private static string? TypeName(TypeSyntax type) => type switch
+    private static string? TypeName(TypeSyntax? type) => type switch
     {
         IdentifierNameSyntax name => name.Identifier.Text,
         QualifiedNameSyntax qualified => qualified.Right.Identifier.Text,
+        NullableTypeSyntax nullable => TypeName(nullable.ElementType),
         _ => null,
     };
 

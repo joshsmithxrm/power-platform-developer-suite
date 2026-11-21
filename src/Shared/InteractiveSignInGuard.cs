@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Data.Common;
+using Microsoft.PowerPlatform.Dataverse.Client;
 
 namespace PPDS.Internal;
 
@@ -69,9 +70,14 @@ internal static class InteractiveSignInGuard
         }
     }
 
-    /// <summary>Gets whether a Dataverse SDK connection string selects OAuth authentication.</summary>
+    /// <summary>Gets whether the Dataverse SDK would read a connection string as OAuth authentication.</summary>
     /// <param name="connectionString">The connection string.</param>
-    /// <returns><see langword="true"/> when the AuthType (or AuthenticationType) is OAuth, or when the string cannot be parsed and mentions OAuth.</returns>
+    /// <returns>
+    /// <see langword="true"/> when the SDK's rule selects <see cref="AuthenticationType.OAuth"/>: the value of
+    /// <c>AuthType</c>, or of <c>AuthenticationType</c> when there is no <c>AuthType</c>, parsed as an
+    /// <see cref="AuthenticationType"/> name or number (so <c>AuthType=5</c> is OAuth). Also
+    /// <see langword="true"/> when the string cannot be parsed and mentions OAuth.
+    /// </returns>
     internal static bool UsesOAuth(string? connectionString)
     {
         if (string.IsNullOrWhiteSpace(connectionString))
@@ -82,16 +88,15 @@ internal static class InteractiveSignInGuard
         try
         {
             var builder = new DbConnectionStringBuilder { ConnectionString = connectionString };
-            foreach (var key in new[] { "AuthType", "AuthenticationType" })
+            object? value = null;
+            if (!builder.TryGetValue("AuthType", out value))
             {
-                if (builder.TryGetValue(key, out var value) &&
-                    string.Equals(value?.ToString()?.Trim(), "OAuth", StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
+                builder.TryGetValue("AuthenticationType", out value);
             }
 
-            return false;
+            // Case-insensitive, so it also refuses "oauth", which the SDK itself rejects as invalid.
+            return Enum.TryParse<AuthenticationType>(value?.ToString()?.Trim(), ignoreCase: true, out var authType)
+                && authType == AuthenticationType.OAuth;
         }
         catch (ArgumentException)
         {

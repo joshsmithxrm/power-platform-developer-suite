@@ -13,7 +13,7 @@ Will be the first published 1.2.x version. 1.2.0 was tagged but never published 
 
 ### Added
 
-- The AppContext switch `PPDS.BlockInteractiveSignIn`, for test hosts: when a host turns it on, browser and device-code sign-in throw `InvalidOperationException` before they start. It is off by default and changes nothing unless set; see "Blocking Interactive Sign-In (Test Hosts)" in the README (#1757).
+- The AppContext switch `PPDS.BlockInteractiveSignIn`, for test hosts: when a host turns it on, browser and device-code sign-in are refused before they start (an `InvalidOperationException` where the refusal is raised; environment resolution reports it as a failed result). It is off by default and changes nothing unless set; see "Blocking Interactive Sign-In (Test Hosts)" in the package README (#1757).
 
 ### Changed
 
