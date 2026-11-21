@@ -156,36 +156,60 @@ an exception, a removal or a date must link the comment in this repository
 where the maintainer made that decision, or be marked as proposed. This is
 rule 9.1 of the versioning policy proposed in #1831.
 
-**The classes** (`DECISION_PHRASES`, `FRAGMENTS` and `DECISION_COLUMNS` in
-the script):
+**The classes** (`DECISION_PHRASES`, `FRAGMENTS`, `DECISION_COLUMNS` and
+`STATE_CELLS` in the script):
 - **Approval:**
   - "approved" as a verb, with any subject and object;
-  - "approval" or "sign-off" given, received or held;
-  - "decided", "chose", "agreed", "accepted the risk", "was accepted",
-    "confirmed by the maintainer", "authorised";
-  - "Decision: …" and "per <name>,".
+  - "approval" or "sign-off" given, received or held ("has maintainer
+    approval", "sign-off … was given"), or as a label ("Approval: <name>,
+    <date>", "Sign-off: …");
+  - "decided", "chose", "have chosen", "opted to/for/against", "agreed",
+    "authorised the/a …", "accepted the proposal/recommendation/split", "was
+    accepted", "the release review accepted";
+  - "Decision: …", "Decision (<date>): …", "the decision to … was taken",
+    "per <name>,";
+  - a table cell "Accepted" or "Ratified".
 - **Exception:**
   - "exception" in a policy frame: "is an exception", "exception to/for",
-    "made an exception", "the exception covers/applies", "one-release
-    exception", "by exception", "Exception:";
-  - "exempt from", "excepted", "waived" or a waiver;
-  - a rule suspended, relaxed or lifted;
-  - "by agreement", "this once".
+    "made an exception", "an exception has been made", "the exception
+    covers", "by exception", "Exception:" (also in a table cell);
+  - "exempt" or "exemption", "excepted", "waived" or a waiver;
+  - a rule, requirement, check, policy or guarantee that "does not apply
+    to", "does not cover", "does not extend to" or "is not enforced for" X;
+  - "excluded from", "not subject to", "not bound by" or "not covered by"
+    it; it is "suspended/relaxed/lifted/disabled for";
+  - "is not required to", "Except for X, …", "Not applicable to X: …", "by
+    agreement", "this once".
 - **Removal:**
-  - a removal verb in the future or as a schedule: "will be removed", "we'll
-    drop", "<version> will remove", "is retired in 2.0", "will stop
-    working", "will no longer";
-  - "no longer supported", "support … ends", "goes away", "end of life";
-  - "scheduled for removal", "Removal of …: 3.0".
+  - a removal verb in the future or as a schedule: "will be removed,
+    unlisted or withdrawn", "we'll drop", "we intend to drop", "<version>
+    will remove", "is retired in 2.0", "will stop <verb>ing", "will no
+    longer", "will go away";
+  - two-step forms: "first ignored and then removed", "marked obsolete in
+    2.1";
+  - end of support: "end of support", "end of life", "support … ends/will
+    end", "no further fixes/updates", "no longer supported";
+  - "scheduled for removal", "Removal of …: 3.0", and labels "Removed in
+    3.0: …", "Dropping in 2.2: …", "Sunset: …", also as a table cell. In a
+    changelog, a removal label under a section for a released (dated) version
+    is history and is not read.
 - **Date:**
   - a future date in any ordinary written form, with or without a
-    preposition before it;
+    preposition before it, and "by mid-January", "next Monday", "the second
+    half of 2027";
   - a version committed to: "until the 3.0 release", "takes effect in 2.1",
-    "from 2.1 onwards", "planned for 2.2";
-  - a duration counted in days, months or releases: "for two more minors",
-    "at least 90 days", "six months after 2.0", "deprecation period".
+    "from 2.1 onwards", "From 2.1, …", "planned for 2.2", "continues through
+    2.4", "becomes an error in 2.4", "planned to ship in 2.3", "will reach
+    general availability";
+  - labels "Ships in: 2.1", "Due: 2.1";
+  - a duration counted in days, months or releases: "for one more release",
+    "for two more minor versions", "for the lifetime of 2.x", "at least 90
+    days", "within 30 days", "six months after 2.0", "deprecation period";
+  - an event: "until Microsoft ends its support", "on the same day as", "no
+    later than the day of".
 - **Tables:** a future date under a `When`, `Date`, `Target`, `Deadline` or
-  `Due` column, and a version under a `Removal` or `Removed in` column.
+  `Due` column; a version under a `Removal` or `Removed in` column; a state
+  cell as above.
 
 **Product commitment or technical fact** (`GUARDS` in the script). A match
 does not count:
@@ -203,8 +227,15 @@ does not count:
   runtime, or a command in a code span "decides", "agrees" or "accepts";
 - when "approval" or "sign-off" is named as a requirement ("needs maintainer
   approval", "approval gates the merge");
-- when "approved" is conditional ("once the release is approved") or an
-  adjective ("the approved tool", "Approved runs are listed");
+- when "approved" is conditional ("once the release is approved", "approved
+  … once the plan is safe") or an adjective ("the approved tool", "Approved
+  runs are listed", "a separately approved setup");
+- when "approved" or "exempt" is a value in sample, demo, fixture, test or
+  seed data, or a code value;
+- when "is not required to" is about a caller, a parameter, a field, a value,
+  or a person's duty in a process (a contributor, author, user or reviewer);
+- when the wording is in the past ("was marked obsolete", "reached general
+  availability");
 - when "approves" is habitual ("approves every release");
 - when it is a spec's `**Decision:**` design-record line.
 

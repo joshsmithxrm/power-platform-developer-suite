@@ -134,6 +134,9 @@ class Phrase:
     example: str
     guards: tuple[str, ...] = ()
     case_sensitive: bool = False
+    # A label such as "Removed in 3.0:" under a changelog section for a
+    # released version is history, not a plan.
+    skip_in_released: bool = False
 
 
 @dataclass(frozen=True)
@@ -193,6 +196,42 @@ FRAGMENTS: dict[str, tuple[Alt, ...]] = {
         Alt(r"proposal", "The maintainer accepted the proposal."),
         Alt(r"plan", "The maintainer accepted the plan."),
         Alt(r"cost", "The maintainer accepted the cost."),
+        Alt(r"recommendation", "The maintainer accepted the recommendation."),
+        Alt(r"split", "The maintainer accepted the split."),
+        Alt(r"change", "The maintainer accepted the change."),
+        Alt(r"approach", "The maintainer accepted the approach."),
+        Alt(r"option", "The maintainer accepted the option."),
+    ),
+    # What an approver authorises.
+    "OBJECT": (
+        Alt(r"the", "Josh authorised the split."),
+        Alt(r"this", "Josh authorised this."),
+        Alt(r"a", "Josh authorised a split."),
+        Alt(r"an", "Josh authorised an exception."),
+        Alt(r"\w+ing", "Josh authorised moving the samples."),
+    ),
+    "HAS": (
+        Alt(r"has", "The maintainer has chosen the format."),
+        Alt(r"have", "We have chosen the format."),
+        Alt(r"had", "We had chosen the format."),
+    ),
+    "OPTED": (
+        Alt(r"opted to", "The maintainer opted to keep the path."),
+        Alt(r"opted for", "The maintainer opted for the old path."),
+        Alt(r"opted against", "The maintainer opted against a new path."),
+    ),
+    # Forums that accept or approve.
+    "FORUM": (
+        Alt(r"review", "The release review accepted it."),
+        Alt(r"meeting", "The planning meeting accepted it."),
+        Alt(r"board", "The release board accepted it."),
+        Alt(r"committee", "The steering committee accepted it."),
+        Alt(r"triage", "Weekly triage accepted it."),
+    ),
+    "TAKEN": (
+        Alt(r"taken", "The decision to keep it was taken."),
+        Alt(r"made", "The decision to keep it was made."),
+        Alt(r"reached", "The decision to keep it was reached."),
     ),
     "DECISION_TAIL": (
         Alt(r"is to", "The decision is to keep the port."),
@@ -228,6 +267,8 @@ FRAGMENTS: dict[str, tuple[Alt, ...]] = {
         Alt(r"is made", "An exception is made here."),
         Alt(r"was made", "An exception was made here."),
         Alt(r"is granted", "An exception is granted here."),
+        Alt(r"has been made", "An exception has been made here."),
+        Alt(r"has been granted", "An exception has been granted here."),
         Alt(r"granted", "Exception granted here."),
         Alt(r"ends", "The exception ends with 2.0."),
     ),
@@ -242,8 +283,26 @@ FRAGMENTS: dict[str, tuple[Alt, ...]] = {
         Alt(r"suspended", "The freeze is suspended for hotfixes."),
         Alt(r"relaxed", "The freeze is relaxed for hotfixes."),
         Alt(r"lifted", "The freeze is lifted for hotfixes."),
+        Alt(r"disabled", "The freeze is disabled for hotfixes."),
+    ),
+    # A rule's scope: what it does not reach.
+    "SCOPE_VERB": (
+        Alt(r"does not apply to", "The soak rule does not apply to docs."),
+        Alt(r"do not apply to", "The soak rules do not apply to docs."),
+        Alt(r"does not cover", "The soak rule does not cover docs."),
+        Alt(r"does not extend to", "The soak rule does not extend to docs."),
+        Alt(r"is not enforced for", "The soak rule is not enforced for docs."),
+        Alt(r"is not applied to", "The soak rule is not applied to docs."),
+    ),
+    "NOT_BOUND": (
+        Alt(r"not subject to", "Docs are not subject to the soak rule."),
+        Alt(r"not bound by", "Docs are not bound by the soak rule."),
+        Alt(r"not covered by", "Docs are not covered by the soak rule."),
+        Alt(r"excluded from", "Docs are excluded from the soak rule."),
     ),
     "RULE_NOUN": (
+        Alt(r"guarantee", "The stability guarantee is relaxed for docs."),
+        Alt(r"check", "The soak check is relaxed for docs."),
         Alt(r"rule", "The two-reviewer rule is relaxed for docs."),
         Alt(r"freeze", "The stable freeze is relaxed for docs."),
         Alt(r"gate", "The release gate is relaxed for docs."),
@@ -261,6 +320,8 @@ FRAGMENTS: dict[str, tuple[Alt, ...]] = {
         Alt(r"discontinued", "The setting will be discontinued."),
         Alt(r"phased out", "The setting will be phased out."),
         Alt(r"deprecated", "The setting will be deprecated."),
+        Alt(r"unlisted", "The setting will be unlisted."),
+        Alt(r"withdrawn", "The setting will be withdrawn."),
     ),
     # Future, intent or plan before an active removal verb.
     "WILL": (
@@ -283,7 +344,6 @@ FRAGMENTS: dict[str, tuple[Alt, ...]] = {
         Alt(r"sunset", "We will sunset the switch."),
         Alt(r"discontinue", "We will discontinue the switch."),
         Alt(r"deprecate", "We will deprecate the switch."),
-        Alt(r"stop supporting", "We will stop supporting the switch."),
     ),
     "REMOVING": (
         Alt(r"removing", "We are removing the switch."),
@@ -350,6 +410,44 @@ FRAGMENTS: dict[str, tuple[Alt, ...]] = {
         Alt(r"continues through", "The old layout continues through 3.0."),
         Alt(r"to ship in", "The new layout is planned to ship in 3.0."),
     ),
+    "FURTHER": (
+        Alt(r"further", "The 1.x line gets no further fixes."),
+        Alt(r"more", "The 1.x line gets no more fixes."),
+    ),
+    "FIXES": (
+        Alt(r"fixes", "The 1.x line gets no further fixes."),
+        Alt(r"updates", "The 1.x line gets no further updates."),
+        Alt(r"releases", "The 1.x line gets no further releases."),
+        Alt(r"patches", "The 1.x line gets no further patches."),
+        Alt(r"security fixes", "The 1.x line gets no further security fixes."),
+    ),
+    # A label that names a future removal: "Removed in 3.0: …".
+    "RMLABEL": (
+        Alt(r"removed", "Removed in 3.0: the flag."),
+        Alt(r"dropped", "Dropped in 3.0: the flag."),
+        Alt(r"dropping", "Dropping in 3.0: the flag."),
+        Alt(r"retired", "Retired in 3.0: the flag."),
+        Alt(r"removing", "Removing in 3.0: the flag."),
+    ),
+    "ENDS": (
+        Alt(r"ends", "We keep Node 20 until Microsoft ends its support."),
+        Alt(r"drops", "We keep Node 20 until Microsoft drops its support."),
+        Alt(r"stops", "We keep Node 20 until Microsoft stops its support."),
+        Alt(r"retires", "We keep Node 20 until Microsoft retires its support."),
+    ),
+    "WEEKDAY": (
+        Alt(r"monday", "The prerelease goes out next Monday."),
+        Alt(r"tuesday", "The prerelease goes out next Tuesday."),
+        Alt(r"wednesday", "The prerelease goes out next Wednesday."),
+        Alt(r"thursday", "The prerelease goes out next Thursday."),
+        Alt(r"friday", "The prerelease goes out next Friday."),
+        Alt(r"saturday", "The prerelease goes out next Saturday."),
+        Alt(r"sunday", "The prerelease goes out next Sunday."),
+    ),
+    "HALF": (
+        Alt(r"first", "The stable line opens in the first half of 2027."),
+        Alt(r"second", "The stable line opens in the second half of 2027."),
+    ),
     # A label before a version: "Ships in: 2.1", "Due: 2.1".
     "LABEL": (
         Alt(r"ships in", "Ships in: 2.1"),
@@ -379,21 +477,18 @@ FRAGMENTS: dict[str, tuple[Alt, ...]] = {
         Alt(r"releases", "The switch stays at least two releases."),
         Alt(r"major release", "The switch stays at least one major release."),
         Alt(r"minors", "The switch stays at least two minors."),
-        Alt(r"minor", "Keep the switch for at least one minor."),
+        Alt(r"minor", "The switch stays at least one minor."),
         Alt(r"versions", "The switch stays at least two versions."),
         Alt(r"prereleases", "Keep the switch for at least two prereleases."),
     ),
     "RELUNIT": (
         Alt(r"minors", "The switch stays for two more minors."),
-        Alt(r"minor releases", "The switch stays for two more minor releases."),
-        Alt(r"minor release", "The switch stays for one more minor release."),
         Alt(r"majors", "The switch stays for two more majors."),
-        Alt(r"major releases", "The switch stays for two more major releases."),
-        Alt(r"major release", "The switch stays for one more major release."),
         Alt(r"releases", "The switch stays for two more releases."),
         Alt(r"versions", "The switch stays for two more versions."),
-        Alt(r"minor versions", "The switch stays for two more minor versions."),
-        Alt(r"major versions", "The switch stays for two more major versions."),
+        Alt(r"release", "The switch stays for one more release."),
+        Alt(r"minor", "The switch stays for one more minor."),
+        Alt(r"major", "The switch stays for one more major."),
     ),
     "UNIT_TIME": (
         Alt(r"days", "The switch stays 90 days after 2.0."),
@@ -449,8 +544,8 @@ DECISION_PHRASES: tuple[Phrase, ...] = (
     # --- approval -----------------------------------------------------------
     # "approved" as a verb or label; not "the/an/a/its/X's approved <thing>".
     Phrase("approval", r"(?<!the )(?<!an )(?<!a )(?<!'s )(?<!its )(?<!pre-)\bapproved\b",
-           "Josh approved a second prerelease.", ("CONDITIONAL", "ADJECTIVE")),
-    Phrase("approval", r"\bapproves\b", "The maintainer approves the rename.", ("HABITUAL", "CONDITIONAL")),
+           "Josh approved a second prerelease.", ("CONDITIONAL", "ADJECTIVE", "SAMPLE_DATA")),
+    Phrase("approval", r"\bapproves\b", "The maintainer approves the rename.", ("HABITUAL", "CONDITIONAL", "SAMPLE_DATA")),
     # The noun counts only when an approval is given or held ("gave approval",
     # "has maintainer approval", "the maintainer's approval", "approval was
     # given"), not as a name for a step ("approval scope", "for approval").
@@ -465,7 +560,9 @@ DECISION_PHRASES: tuple[Phrase, ...] = (
     Phrase("approval", r"\bsign-?off (?:[\w'-]+ ){0,4}<<BEEN>> <<GIVEN>>\b", "Sign-off was given in the review."),
     Phrase("approval", r"^\W*sign-?off\s*:", "Sign-off: Josh, 2026-11-20"),
     Phrase("approval", r"\bdecided\b", "We decided against a separate package.", ("TECH_ACTOR",)),
-    Phrase("approval", r"^\W*decision\s*:", "Decision: the port stays.", ("DESIGN_RECORD",)),
+    Phrase("approval", r"^\W*decision(?: \w+)?\s*(?:\([^)]*\))?\s*:", "Decision (2026-11-18): the port stays.",
+           ("DESIGN_RECORD",)),
+    Phrase("approval", r"^\W*approval\s*(?:\([^)]*\))?\s*:", "Approval: Josh, 2026-11-19."),
     Phrase("approval", r"\bdecision <<DECISION_TAIL>>\b", "The maintainer's decision is to keep the port."),
     Phrase("approval", r"\bper (?:the )?(?:\w+'s )?decision\b", "Per the owner's decision, notebooks stay."),
     Phrase("approval", r"\bmaintainer decision\b", "This follows a maintainer decision."),
@@ -474,6 +571,11 @@ DECISION_PHRASES: tuple[Phrase, ...] = (
     Phrase("approval", r"\bwas chosen\b", "Option B was chosen by the owner.", ("TECH_ACTOR",)),
     Phrase("approval", r"\bagreed\b", "The team agreed on monthly prereleases.", ("TECH_ACTOR",)),
     Phrase("approval", r"\b<<BEEN>> accepted\b", "The roadmap was accepted.", ("TECH_ACTOR",)),
+    Phrase("approval", r"\b<<FORUM>> (?:has )?accepted\b", "The release review accepted the MSI change."),
+    Phrase("approval", r"\bauthori[sz]ed <<OBJECT>>\b", "Josh authorised the docs split.", ("TECH_ACTOR",)),
+    Phrase("approval", r"\b<<HAS>> chosen\b", "We have chosen per-package versions.", ("TECH_ACTOR",)),
+    Phrase("approval", r"\b<<OPTED>>\b", "The maintainer opted to keep the cache path.", ("TECH_ACTOR",)),
+    Phrase("approval", r"\bdecision to (?:[\w'-]+ ){0,6}<<BEEN>> <<TAKEN>>\b", "The decision to keep exit 2 was taken."),
     Phrase("approval", r"\baccepted the <<ACCEPT_OBJECT>>\b", "Josh accepted the risk."),
     Phrase("approval", r"\bgreen[- ]?light\w*", "Josh gave the green light for 1.9."),
     Phrase("approval", r"\bgreen-?lit\b", "The split was greenlit."),
@@ -483,7 +585,6 @@ DECISION_PHRASES: tuple[Phrase, ...] = (
     Phrase("approval", r"\b<<HOLDER>> (?:has )?confirmed\b", "The owner has confirmed the versioning."),
     Phrase("approval", r"\bconfirmed by the <<HOLDER>>\b", "The versioning was confirmed by the maintainer."),
     Phrase("approval", r"\bauthori[sz]ed by the <<HOLDER>>\b", "The route is authorised by the owner."),
-    Phrase("approval", r"\bhas authori[sz]ed\b", "The maintainer has authorized a second key."),
     Phrase("approval", r"\bauthori[sz]ed for <<VERSION>>", "The rename is authorized for 2.0."),
     Phrase("approval", r"\bratified\b", "The owner ratified option A."),
     Phrase("approval", r"\bendorsed\b", "The rename is endorsed."),
@@ -498,15 +599,18 @@ DECISION_PHRASES: tuple[Phrase, ...] = (
     Phrase("exception", r"\bas an exception\b", "As an exception, the CLI keeps `-e`.", ("CODE_EXCEPTION",)),
     Phrase("exception", r"\bby exception\b", "Docs skip the soak by exception."),
     Phrase("exception", r"^\W*exception\W*:", "- **Exception:** the CLI keeps `-e`."),
-    Phrase("exception", r"\bexempt\w*", "The server is exempt from the two-reviewer rule.", ("TECH_EXEMPT",)),
+    Phrase("exception", r"\bexempt\w*", "The server is exempt from the two-reviewer rule.", ("TECH_EXEMPT", "SAMPLE_DATA")),
     Phrase("exception", r"\bexcepted\b", "Test-only packages are excepted from the changelog rule."),
     Phrase("exception", r"\bwaived\b", "The size rule is waived here."),
     Phrase("exception", r"\bwaivers?\b", "A waiver covers the missing build."),
-    Phrase("exception", r"\b<<RULE_NOUN>> (?:\w+ ){0,2}<<SUSPENDED>>\b", "The freeze is suspended for security fixes."),
+    Phrase("exception", r"\b<<RULE_NOUN>> (?:\w+ ){0,2}<<SUSPENDED>>\b", "The freeze is suspended for security fixes.",
+           ("TECH_EXEMPT",)),
     # Scope rules: "the rule does not apply to X", "excluded from the freeze".
-    Phrase("exception", r"\b<<RULE_NOUN>> (?:\w+ ){0,2}does not apply to\b", "The freeze does not apply to the docs site."),
-    Phrase("exception", r"\bexcluded from (?:the )?(?:\w+ )?<<RULE_NOUN>>\b", "Docs are excluded from the stable freeze."),
-    Phrase("exception", r"\bnot subject to (?:the )?(?:\w+ )?<<RULE_NOUN>>\b", "Hotfixes are not subject to the size limit."),
+    Phrase("exception", r"\b<<RULE_NOUN>>s? (?:[\w-]+ ){0,2}<<SCOPE_VERB>>\b", "The freeze does not apply to the docs site."),
+    Phrase("exception", r"\b<<NOT_BOUND>> (?:the )?(?:[\w-]+ ){0,2}<<RULE_NOUN>>\b", "Hotfixes are not subject to the size limit."),
+    Phrase("exception", r"\b<<ISARE>> not required to\b", "Hotfix pull requests are not required to soak.", ("TECH_SCOPE",)),
+    Phrase("exception", r"^\W*except for\b", "Except for hotfixes, every release soaks a week.", ("TECH",)),
+    Phrase("exception", r"^\W*not applicable to\b[^:]{0,60}:", "Not applicable to the MCP server: the major rule."),
     Phrase("exception", r"\bby agreement\b", "The server keeps exit 2 by agreement."),
     Phrase("exception", r"\bthis once\b", "The CLI may skip the soak this once."),
     # --- removal ------------------------------------------------------------
@@ -516,13 +620,21 @@ DECISION_PHRASES: tuple[Phrase, ...] = (
     Phrase("removal", r"\b<<BEING>> <<REMOVING>>\b", "We are dropping the classic theme.", ("TECH", "THIRD_PARTY")),
     Phrase("removal", r"\b<<ISARE>> <<REMOVED>> (?:\w+ ){0,2}<<VERSION>>", "The verb is retired in 2.0.",
            ("TECH", "THIRD_PARTY")),
-    Phrase("removal", r"\bwill stop working\b", "The v1 protocol will stop working.", ("TECH", "THIRD_PARTY")),
     Phrase("removal", r"\bwill no longer\b", "The old key will no longer be read.", ("TECH", "THIRD_PARTY")),
     Phrase("removal", r"\bno longer (?:be )?supported\b", "Windows 8 is no longer supported.", ("TECH", "THIRD_PARTY")),
     Phrase("removal", r"\bsupport (?:\w+ ){0,4}ends\b", "Support for Server 2016 ends with 2.0.", ("TECH", "THIRD_PARTY")),
     Phrase("removal", r"\bgoes away\b", "The switch goes away.", ("TECH", "THIRD_PARTY")),
     Phrase("removal", r"\bgoing away\b", "The switch is going away.", ("TECH", "THIRD_PARTY")),
     Phrase("removal", r"\bend[ -]of[ -]life\b", "Version 1 reaches end of life with 3.0.", ("THIRD_PARTY",)),
+    Phrase("removal", r"\bend of support\b", "Version 1 reaches end of support with 3.0.", ("THIRD_PARTY",)),
+    Phrase("removal", r"\bsupport (?:\w+ ){0,4}will end\b", "Support for Node 18 will end in 2.2.", ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"\bno <<FURTHER>> <<FIXES>>\b", "The 1.x line receives no further fixes after 2.0.", ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"\bwill go away\b", "The short form will go away in 3.0.", ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"\bwill stop \w+ing\b", "The CLI will stop reading the old file.", ("TECH", "THIRD_PARTY")),
+    Phrase("removal", r"\bthen <<REMOVED>>\b", "The flag is first ignored and then removed.", ("TECH", "THIRD_PARTY", "PAST")),
+    Phrase("removal", r"\bobsolete in <<VERSION>>", "The verb is marked obsolete in 2.1.", ("TECH", "THIRD_PARTY", "PAST")),
+    Phrase("removal", r"^\W*<<RMLABEL>> in <<VERSION>>\s*:", "Removed in 3.0: the `--legacy` flag.", skip_in_released=True),
+    Phrase("removal", r"^\W*sunset\s*:", "Sunset: the XML store, after 2.4."),
     Phrase("removal", r"\b<<SCHEDULED>> for <<REMOVAL>>\b", "The fallback is scheduled for removal.", ("TECH", "THIRD_PARTY")),
     Phrase("removal", r"\b<<REMOVAL>> (?:is )?<<SCHEDULED>>\b", "Removal is planned.", ("TECH", "THIRD_PARTY")),
     Phrase("removal", r"\bremoval\b[^.;:]{0,60}:\s*v?\d+\.\d+", "Removal of the alias: 3.0."),
@@ -545,6 +657,16 @@ DECISION_PHRASES: tuple[Phrase, ...] = (
     Phrase("date", r"\b<<COUNT>> <<UNIT_TIME>> after (?:the )?<<AFTER_EVENT>>", "The shim goes two weeks after the prerelease.",
            ("TECH", "THIRD_PARTY")),
     Phrase("date", r"\b<<PERIOD>> period\b", "There is a waiting period.", ("TECH",)),
+    Phrase("date", r"\buntil (?:[\w.'-]+ ){1,4}<<ENDS>> (?:\w+ )?support\b", "Node 20 stays until Microsoft ends its support."),
+    Phrase("date", r"\bon the same day as\b", "The CLI ships on the same day as the extension."),
+    Phrase("date", r"\bno later than the day of\b", "The notice ships no later than the day of the release."),
+    Phrase("date", r"\bwithin <<COUNT>> <<UNIT>>", "Security fixes ship within 30 days.", ("TECH",)),
+    Phrase("date", r"\bby mid-[a-z]{3,9}\b", "The freeze lifts by mid-January."),
+    Phrase("date", r"\bnext <<WEEKDAY>>\b", "The prerelease goes out next Monday."),
+    Phrase("date", r"\b<<HALF>> half of (?P<y>20\d{2})\b", "The line opens in the second half of 2027.", ("TECH",)),
+    Phrase("date", r"\blifetime of v?\d+\.\w+\b", "The old format is read for the lifetime of 2.x."),
+    Phrase("date", r"^\W*from <<VERSION>>\s*,", "From 2.1, the CLI refuses unsigned plugins."),
+    Phrase("date", r"\bgeneral availability\b", "The MCP server reaches general availability in 2.0.", ("THIRD_PARTY", "PAST")),
     Phrase("date", r"\bno earlier than\b", "Ship it no earlier than six months out."),
     Phrase("date", r"\bnot earlier than\b", "Ship it not earlier than six months out."),
     Phrase("date", r"\bno sooner than\b", "Ship it no sooner than six months out."),
@@ -570,6 +692,8 @@ GUARDS: dict[str, Guard] = {
             Alt(r"\bmodified\b", "Items modified on or after 2027-01-01 are exported."),
             Alt(r"\bsample\b", "The sample order is due 2027-02-01."),
             Alt(r"\bfixture\b", "The fixture uses 2027-12-31 as its date."),
+            Alt(r"\bconnections?\b", "The daemon will stop accepting connections."),
+            Alt(r"\bshutdown\b", "The daemon will stop listening at shutdown."),
         ),
         markers=(
             Alt(r"\bv?\d+\.\d+\b", "The cache layout will be removed in 3.0."),
@@ -584,6 +708,23 @@ GUARDS: dict[str, Guard] = {
             Alt(r"\bdeprecat\w*", "The cache is deprecated and will be removed."),
         ),
     ),
+    # Something that has already happened.
+    "PAST": Guard(blockers=(
+        Alt(r"\breached\b", "The feature reached general availability in 2024."),
+        Alt(r"\bbecame\b", "The feature became general availability last year."),
+        Alt(r"\bwas\b", "The verb was marked obsolete in 1.4."),
+        Alt(r"\bwere\b", "The verbs were marked obsolete in 1.4."),
+    )),
+    # "approved" or "exempt" as a value in sample, demo or test data.
+    "SAMPLE_DATA": Guard(blockers=(
+        Alt(r"\bsamples?\b", "The sample plugin sets the status to approved."),
+        Alt(r"\bdemo\b", "The demo flow marks each expense as approved."),
+        Alt(r"\bfixtures?\b", "The fixture holds one exempt customer."),
+        Alt(r"\btest data\b", "The test data has two approved orders."),
+        Alt(r"\bseed data\b", "The seed data marks the first record as exempt."),
+        Alt(r"`[^`]*approv[^`]*`", "`approved` is an option value of the status column."),
+        Alt(r"`[^`]*exempt[^`]*`", "The plugin copies the `exempt` attribute to the child."),
+    )),
     "THIRD_PARTY": Guard(blockers=(
         Alt(r"^\W*(?:the )?microsoft\b", "Microsoft's legacy endpoint will be removed in 2027."),
         Alt(r"^\W*(?:the )?dataverse\b", "Dataverse will retire the old Web API version in 2027."),
@@ -607,7 +748,11 @@ GUARDS: dict[str, Guard] = {
         Alt(r"\bschema\b", "The new key is the one exception to the schema."),
     )),
     "TECH_EXEMPT": Guard(blockers=(
-        Alt(r"\bcheck\b", "`id` is exempt from the brace-GUID check."),
+        # A code identifier exempt from a check is validation logic.
+        Alt(r"^\W*`[^`]+`[^.;]{0,40}\bexempt", "`id` is exempt from the brace-GUID check."),
+        Alt(r"\blint\w*", "The lint rule is disabled for generated files."),
+        # An exemption about markup elements is validation logic.
+        Alt(r"`<[^`]*`", "Its exemption covered only `<control>.id`."),
         Alt(r"\bwarnings?\b", "Generated files are exempt from warnings."),
         Alt(r"\banaly[sz]ers?\b", "Generated files are exempt from the analyzer."),
         Alt(r"\bvalidation\b", "The name field is exempt from validation."),
@@ -632,6 +777,19 @@ GUARDS: dict[str, Guard] = {
     )),
     # A requirement word that governs a held approval or sign-off ("must
     # have maintainer approval"): a requirement, not a record that it was given.
+    # "not required to" about an API's caller or inputs is documentation.
+    "TECH_SCOPE": Guard(blockers=(
+        Alt(r"\bcaller\b", "The caller is not required to pass a timeout."),
+        Alt(r"\bparameters?\b", "The parameter is not required to be set."),
+        Alt(r"\barguments?\b", "The argument is not required to be set."),
+        Alt(r"\bfields?\b", "The field is not required to be set."),
+        Alt(r"\bvalues?\b", "The value is not required to be set."),
+        # A person's duty in a process ("the contributor is not required to").
+        Alt(r"\bcontributors?\b", "The contributor is not required to edit the spec."),
+        Alt(r"\bauthors?\b", "The author is not required to edit the spec."),
+        Alt(r"\busers?\b", "The user is not required to sign in again."),
+        Alt(r"\breviewers?\b", "The reviewer is not required to rerun the tests."),
+    )),
     "REQUIREMENT": Guard(blockers=(
         Alt(r"\bonly with (?:[\w'-]+ ){0,3}approval\b", "Pull requests merge only with maintainer approval."),
         Alt(r"\bmust (?:[\w'-]+ ){0,3}approval\b", "A release must have maintainer approval."),
@@ -641,21 +799,25 @@ GUARDS: dict[str, Guard] = {
         Alt(r"\bneeds? (?:[\w'-]+ ){0,3}sign-?off\b", "A stable tag needs to have sign-off."),
         Alt(r"\brequir\w* (?:[\w'-]+ ){0,4}sign-?off\b", "Tagging requires that the tag has sign-off."),
     )),
+    # A condition before "approved"/"approves" ("once the release is approved").
     "CONDITIONAL": Guard(blockers=(
-        Alt(r"\bonce\b", "Dates are set once the release is approved."),
-        Alt(r"\bwhen\b", "Dates are set when the release is approved."),
-        Alt(r"\buntil\b", "Nothing ships until the release is approved."),
-        Alt(r"\bif\b", "The tag is pushed if the release is approved."),
-        Alt(r"\bunless\b", "Nothing ships unless the release is approved."),
+        Alt(r"\bonce\b[^.;]{0,60}\bapprov", "Dates are set once the release is approved."),
+        Alt(r"\bwhen\b[^.;]{0,60}\bapprov", "Dates are set when the release is approved."),
+        Alt(r"\buntil\b[^.;]{0,60}\bapprov", "Nothing ships until the release is approved."),
+        Alt(r"\bif\b[^.;]{0,60}\bapprov", "The tag is pushed if the release is approved."),
+        Alt(r"\bunless\b[^.;]{0,60}\bapprov", "Nothing ships unless the release is approved."),
+        # A condition after it, as a conjunction opening a clause.
+        Alt(r"\bapprov\w*\b[^.;]{0,60}\bonce (?:the\b)", "The query is approved for execution once the plan is safe."),
+        Alt(r"\bapprov\w*\b[^.;]{0,60}\bwhen (?:the\b)", "The query is approved for execution when the plan is safe."),
+        Alt(r"\bapprov\w*\b[^.;]{0,60}\bif (?:the\b)", "The query is approved for execution if the plan is safe."),
     )),
     # "approved" opening a clause and followed by neither "by" nor ":" is an
     # adjective ("Approved runs are listed", "On 2026-11-01, approved run X").
     "ADJECTIVE": Guard(blockers=(
-        Alt(r"^\W*approved (?!by\b)", "Approved runs are listed in the ledger."),
+        Alt(r"^\W*approved (?!by\b)(?!in\b)(?!at\b)(?!on\b)(?!for\b)", "Approved runs are listed in the ledger."),
         Alt(r"[,;]\s*approved (?!by\b)", "On Monday, approved run 6d83 passed."),
         Alt(r"\bseparately approved\b", "A separately approved setup was used."),
         Alt(r"\bseparate approved\b", "The separate approved setup passed."),
-        Alt(r"\bapproved (?:[\w-]+ ){0,3}fixtures?\b", "Josh used a newly approved live fixture."),
     )),
     # A spec's "**Decision:**" heading line records design rationale.
     "DESIGN_RECORD": Guard(blockers=(
@@ -678,6 +840,16 @@ DECISION_COLUMNS: tuple[tuple[str, str, Alt], ...] = (
     ("removal", "version", Alt(r"^removal$", "| Flag | Removal |\n|---|---|\n| `-e` | 3.0 |\n")),
     ("removal", "version", Alt(r"^removed in$", "| Flag | Removed in |\n|---|---|\n| `-e` | 3.0 |\n")),
     ("removal", "version", Alt(r"^removal version$", "| Flag | Removal version |\n|---|---|\n| `-e` | 3.0 |\n")),
+)
+
+# Table cells that state a decision in any column.
+STATE_CELLS: tuple[tuple[str, Alt], ...] = (
+    ("approval", Alt(r"^\**accepted\**$", "| ADR-12 | Per-package versions | Accepted |\n")),
+    ("approval", Alt(r"^\**ratified\**$", "| ADR-12 | Per-package versions | Ratified |\n")),
+    ("exception", Alt(r"^\**exception\**\s*:", "| Plugins | Exception: keeps its key |\n")),
+    ("removal", Alt(r"^\**removed in v?\d+\.\d+", "| `--legacy` | Removed in 3.0 |\n")),
+    ("removal", Alt(r"^\**dropped in v?\d+\.\d+", "| `--legacy` | Dropped in 3.0 |\n")),
+    ("removal", Alt(r"^\**retired in v?\d+\.\d+", "| `--legacy` | Retired in 3.0 |\n")),
 )
 
 MONTHS = {
@@ -717,6 +889,7 @@ class Matcher:
     regex: re.Pattern[str]
     has_date: bool
     guards: tuple[str, ...]
+    skip_in_released: bool = False
 
 
 def build_matchers(
@@ -727,14 +900,23 @@ def build_matchers(
     matchers: list[Matcher] = []
     for phrase in phrases:
         names = MACRO_RE.findall(phrase.pattern)
-        choices = [[alt.pattern for alt in fragments[name]] for name in names]
+        # A fragment's alternatives are joined into one group at run time; a
+        # fragment with named groups (dates) is expanded one alternative at a
+        # time, because a regex cannot repeat a group name.
+        choices = [
+            [alt.pattern for alt in fragments[name]]
+            if any("(?P<" in alt.pattern for alt in fragments[name])
+            else ["|".join(f"(?:{alt.pattern})" for alt in fragments[name])]
+            for name in names
+        ]
         flags = 0 if phrase.case_sensitive else re.IGNORECASE
         for combo in itertools.product(*choices):
             pattern = phrase.pattern
             for name, alternative in zip(names, combo):
                 pattern = pattern.replace(f"<<{name}>>", f"(?:{alternative})", 1)
             has_date = "DATE" in names or "(?P<y>" in phrase.pattern
-            matchers.append(Matcher(phrase.category, re.compile(pattern, flags), has_date, phrase.guards))
+            matchers.append(Matcher(phrase.category, re.compile(pattern, flags), has_date, phrase.guards,
+                                    phrase.skip_in_released))
     return matchers
 
 
@@ -808,11 +990,18 @@ def _blocked(sentence: str, names: Sequence[str], guards) -> bool:
 
 def decision_match(
     sentence: str, today: date, matchers: Optional[Sequence[Matcher]] = None, guards=None,
+    released: bool = False,
 ) -> Optional[tuple[str, int]]:
-    """Return (category, match position) of the first decision wording, or None."""
+    """Return (category, match position) of the first decision wording, or None.
+
+    ``released`` is true for a sentence under a changelog section of a
+    released version; entries marked ``skip_in_released`` do not apply there.
+    """
     guards = guards if guards is not None else _GUARDS
     prose = prose_only(sentence)
     for matcher in matchers if matchers is not None else _MATCHERS:
+        if released and matcher.skip_in_released:
+            continue
         text = prose if matcher.has_date or matcher.category == "removal" else sentence
         for match in matcher.regex.finditer(text):
             if matcher.has_date:
@@ -966,6 +1155,35 @@ def column_decision(header: Sequence[str], row: str, today: date,
     return None
 
 
+RELEASED_HEADING_RE = re.compile(r"^##\s+\[[^\]]+\]\s*-\s*(?!unreleased\b)\S", re.IGNORECASE)
+SECTION_RE = re.compile(r"^##\s")
+
+
+def released_section_lines(path: str, lines: Sequence[str]) -> set[int]:
+    """Line indexes under a changelog section of a released (dated) version."""
+    if not path.endswith("CHANGELOG.md"):
+        return set()
+    released: set[int] = set()
+    inside = False
+    for index, line in enumerate(lines):
+        if SECTION_RE.match(line):
+            inside = bool(RELEASED_HEADING_RE.match(line))
+        elif inside:
+            released.add(index)
+    return released
+
+
+def state_cell_decision(row: str, *, released: bool = False, cells=STATE_CELLS) -> Optional[str]:
+    """A decision stated by a table cell in any column ("Accepted", "Exception: …")."""
+    for cell in _cells(row):
+        for category, alt in cells:
+            if released and category == "removal":
+                continue
+            if re.search(alt.pattern, cell, re.IGNORECASE):
+                return category
+    return None
+
+
 def _strip_comments(lines: Sequence[str]) -> list[str]:
     """Blank out HTML comments, keeping line numbers."""
     text = "\n".join(lines)
@@ -1008,6 +1226,7 @@ def findings_for(
         return []
     link_re = decision_link_re(repository)
     lines = _strip_comments(after.splitlines())
+    released_lines = released_section_lines(path, lines)
     found: list[Finding] = []
     for header, block in _blocks(lines):
         text_parts: list[str] = []
@@ -1029,9 +1248,12 @@ def findings_for(
             sentence_lines = set(owners[start:end]) if sentence else set()
             if changed is not None and not (sentence_lines & changed):
                 continue
-            found_match = decision_match(sentence, today)
+            released = min(sentence_lines, default=-1) in released_lines
+            found_match = decision_match(sentence, today, released=released)
             category = found_match[0] if found_match else None
             where = found_match[1] if found_match else 0
+            if category is None and header is not None:
+                category = state_cell_decision(sentence, released=released)
             if category is None and header:
                 category = column_decision(header, sentence, today)
             if category and not link_re.search(sentence) and not is_proposed(sentence, where):

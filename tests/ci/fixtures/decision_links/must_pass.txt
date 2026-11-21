@@ -99,3 +99,31 @@ Logs older than 30 days are deleted by the cleanup task.
 The spec lists the exceptions the parser can raise.
 The validator rejects an empty name.
 The plugin step is retired when its assembly is unregistered.
+
+# Round 3: sample data, API documentation, runtime facts and past records,
+# written before the round-3 classes were added.
+The sample plugin sets the approval status to approved.
+The sample account has an exempt flag set to true.
+The demo flow marks each expense as approved.
+The fixture contains an exempt customer and a taxed customer.
+The sample component approves the request when the amount is small.
+The test data includes two approved orders and one rejected order.
+The seed data marks the first record as exempt.
+`approved` is one of the option values of the sample status column.
+The plugin copies the `exempt` attribute to the child record.
+The query returns the approved rows only.
+The caller is not required to pass a timeout.
+The parameter is not required for read-only commands.
+The server will stop accepting connections after shutdown.
+The import will stop processing rows on the first error.
+The token expires within 30 days.
+The cache is refreshed within 5 minutes.
+The job runs next to the export step.
+The report covers the second half of the table.
+The lint check is disabled for generated files.
+The analyzer is disabled for test projects.
+Except for the header row, every row is parsed.
+The value was removed in 1.6 and is no longer read.
+The client stays connected until the server ends its session.
+The flag was marked obsolete in 1.4 and removed in 1.6.
+The feature reached general availability in Dataverse in 2024.

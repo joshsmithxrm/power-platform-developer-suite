@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from datetime import date
@@ -49,6 +50,8 @@ def expanded_set() -> list:
     items += [["guard", n, k, a.pattern] for n, g in cdl.GUARDS.items()
               for k in ("blockers", "markers") for a in getattr(g, k)]
     items += [["column", cat, kind, a.pattern] for cat, kind, a in cdl.DECISION_COLUMNS]
+    items += [["cell", cat, a.pattern] for cat, a in cdl.STATE_CELLS]
+    items += [["released", p.pattern] for p in cdl.DECISION_PHRASES if p.skip_in_released]
     return items
 
 
@@ -56,8 +59,8 @@ def expanded_set() -> list:
 # guard or a column therefore fails this test even though its generated test
 # disappears with it. After a deliberate change, prove the new item (its
 # generated test must pass) and update both numbers here.
-PINNED_COUNT = 385
-PINNED_DIGEST = "7f0def4c73d90bacbe8d767c28e0e1469b1a7ef45fb76bfd5d01212a33c24c66"
+PINNED_COUNT = 505
+PINNED_DIGEST = "589b2a967299fc2ce315ebe89b94faaa632a68ab18ee68545571afd6bd132ba8"
 
 PHRASE_IDS = [f"{i}:{p.category}:{p.pattern}" for i, p in enumerate(cdl.DECISION_PHRASES)]
 ALTERNATIVES = [(name, j) for name, alts in cdl.FRAGMENTS.items() for j in range(len(alts))]
@@ -113,6 +116,13 @@ class TestPhraseListIsProven:
         header, block = next(b for b in cdl._blocks(alternative.example.splitlines()) if b[0])
         others = cdl.DECISION_COLUMNS[:index] + cdl.DECISION_COLUMNS[index + 1:]
         assert cdl.column_decision(header, block[0][1], TODAY, others) is None
+
+    @pytest.mark.parametrize("index", range(len(cdl.STATE_CELLS)), ids=[a.pattern for _, a in cdl.STATE_CELLS])
+    def test_each_state_cell_is_needed(self, index):
+        category, alternative = cdl.STATE_CELLS[index]
+        assert [f.category for f in check(alternative.example)] == [category]
+        others = cdl.STATE_CELLS[:index] + cdl.STATE_CELLS[index + 1:]
+        assert cdl.state_cell_decision(alternative.example.strip(), cells=others) is None
 
     def test_no_pattern_holds_an_unlisted_alternative(self):
         patterns = [p.pattern for p in cdl.DECISION_PHRASES]
@@ -198,6 +208,39 @@ class TestStructure:
         # A qualifier in another clause does not reach back: the safe direction.
         assert len(check("The flag will be removed in 3.0; this is proposed.\n")) == 1
         assert check("The flag is proposed to be removed in 3.0.\n") == []
+
+    def test_a_removal_label_under_a_released_changelog_section_is_history(self):
+        changelog = ("## [Unreleased]\n\n## [2.0.0] - Unreleased\n\n- Removed in 3.0: the `-e` alias.\n\n"
+                     "## [1.4.2] - 2026-10-30\n\n- Removed in 1.4: the XML output.\n\n| `-x` | Removed in 1.4 |\n")
+        found = check(changelog, path="src/PPDS.Cli/CHANGELOG.md")
+        assert [(f.line, f.category) for f in found] == [(5, "removal")]
+        assert len(check("- Removed in 3.0: the `-e` alias.\n", path="specs/cli.md")) == 1
+
+    def test_released_sections_are_found_in_changelogs_only(self):
+        lines = ["## [1.4.2] - 2026-10-30", "- a", "## [2.0.0] - Unreleased", "- b"]
+        assert cdl.released_section_lines("src/PPDS.Cli/CHANGELOG.md", lines) == {1}
+        assert cdl.released_section_lines("specs/cli.md", lines) == set()
+
+    def test_a_state_cell_counts_in_any_column(self):
+        assert [f.category for f in check("| ADR-3 | Accepted |\n")] == ["approval"]
+        assert check("| ADR-3 | Accepted by the parser |\n") == []
+
+    def test_joined_fragments_match_like_their_alternatives(self):
+        """Run-time joining must not change what the expanded alternatives catch."""
+        expanded = []
+        for phrase in cdl.DECISION_PHRASES:
+            names = cdl.MACRO_RE.findall(phrase.pattern)
+            import itertools
+            for combo in itertools.product(*[[a.pattern for a in cdl.FRAGMENTS[n]] for n in names]):
+                pattern = phrase.pattern
+                for name, alternative in zip(names, combo):
+                    pattern = pattern.replace(f"<<{name}>>", f"(?:{alternative})", 1)
+                expanded.append(cdl.Matcher(phrase.category, re.compile(pattern, 0 if phrase.case_sensitive else re.IGNORECASE),
+                                            "DATE" in names or "(?P<y>" in phrase.pattern, phrase.guards, phrase.skip_in_released))
+        for category, sentence in MUST_FAIL + REGRESSION_FAIL:
+            assert (caught(sentence) is None) == (caught(sentence, expanded) is None), sentence
+        for sentence in MUST_PASS + REGRESSION_PASS:
+            assert caught(sentence) == caught(sentence, expanded), sentence
 
     def test_a_link_anywhere_in_the_sentence_counts_across_clauses(self):
         assert check(f"Decided in {LINK}; the flag will be removed in 3.0.\n") == []
