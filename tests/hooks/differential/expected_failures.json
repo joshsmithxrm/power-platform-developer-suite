@@ -5,18 +5,6 @@
   "A failure with any other label, or 'unlabelled', still fails. Remove a label when its fix lands."
  ],
  "labels": {
-  "new-xargs-options": "round 4: xargs / parallel with their own options in front of the program, the words of a switch, target or write on stdin (e.g. echo select --environment <unlisted> | xargs -n 9 ppds env passes even with an unlisted active environment)",
-  "new-hidden-words": "round 4: switch or target words in the text but not as whole words (printf escapes feeding xargs, an exported assignment used in bash -c)",
-  "new-unknown-wrapper": "round 4: a wrapper the reader does not know in front of a shell given code (setsid, busybox sh, ...), program from a substitution",
-  "new-home-override": "round 4: HOME changed in front of the CLI, so it reads another profile store (~/.ppds)",
-  "new-sql-exponent-glue": "round 4: a SQL write word glued to a numeric literal with an exponent marker (SELECT 1.5eDELETE ...)",
-  "cost-rule-false-block": "round 4: an ordinary command that only mentions a program next to option-looking words is refused with a listed environment (grep ppds -rE docs, Get-Process ppds -ErrorAction SilentlyContinue)",
-  "r2-target-override": "reappears only together with a round-4 label (an override reached through xargs or hidden words)",
-  "r2-profile-override": "reappears only together with a round-4 label",
-  "r2-version-update": "reappears only together with a round-4 label (echo --update | xargs -n 1 ppds version)",
-  "new-shell-feed": "reappears only together with a round-4 label (wrapper or HOME in front of a shell given code)",
-  "new-switch-behind-runtime-program": "reappears only together with a round-4 label (unknown wrapper)",
-  "r5-sql-implicit-exec": "round 5 (review of the oracles): SQL the product parses as an EXEC statement (a bare message name, or a word a flag leaves as the SQL: query sql --dry-run=no) passes the write-block",
   "r5-env-who-on-unlisted": "round 5: env who passes with an unlisted active environment, but it sends WhoAmI there",
   "r5-switch-without-allowlist": "round 5: env select / auth select pass the write-block when no allowlist is configured",
   "r5-environment-url": "round 5: PPDS_ENVIRONMENT_URL naming an unlisted environment in front of the CLI",
@@ -26,7 +14,6 @@
   "r5-mode-gate-settings": "round 5: a failure in the mode whose allowlist comes from .claude/settings.json",
   "r5-mode-shakedown-sentinel": "round 5: a failure in the mode whose shakedown is switched on by the sentinel file",
   "r5-mode-shakedown-noal": "round 5: a failure in the mode with a shakedown and no allowlist",
-  "r2-sql-leading-comment": "reappears with the new SQL shapes (implicit EXEC after a leading comment)",
   "r2-switch-colon": "reappears only in the new modes"
  }
 }
