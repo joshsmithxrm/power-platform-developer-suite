@@ -23,6 +23,8 @@ public sealed class EnvironmentResolutionService : IDisposable
     private readonly AuthProfile _profile;
     private readonly Action<DeviceCodeInfo>? _deviceCodeCallback;
     private readonly ISecureCredentialStore? _credentialStore;
+    private readonly Func<AuthProfile, IEnvironmentDiscoveryService> _createGlobalDiscovery;
+    private readonly Func<AuthProfile, ISecureCredentialStore?, CancellationToken, Task<IEnvironmentDiscoveryService>> _createBapDiscovery;
     private ICredentialProvider? _credentialProvider;
     private bool _disposed;
 
@@ -36,10 +38,33 @@ public sealed class EnvironmentResolutionService : IDisposable
         AuthProfile profile,
         Action<DeviceCodeInfo>? deviceCodeCallback = null,
         ISecureCredentialStore? credentialStore = null)
+        : this(
+            profile,
+            deviceCodeCallback,
+            credentialStore,
+            static p => GlobalDiscoveryService.FromProfile(p),
+            static async (p, store, ct) =>
+                await BapEnvironmentService.FromProfileAsync(p, store, ct).ConfigureAwait(false))
+    {
+    }
+
+    /// <summary>
+    /// Creates a resolution service whose discovery services come from the given factories.
+    /// Tests use this to replace Global Discovery and BAP discovery, which sign in and call
+    /// real endpoints, with fakes.
+    /// </summary>
+    internal EnvironmentResolutionService(
+        AuthProfile profile,
+        Action<DeviceCodeInfo>? deviceCodeCallback,
+        ISecureCredentialStore? credentialStore,
+        Func<AuthProfile, IEnvironmentDiscoveryService> createGlobalDiscovery,
+        Func<AuthProfile, ISecureCredentialStore?, CancellationToken, Task<IEnvironmentDiscoveryService>> createBapDiscovery)
     {
         _profile = profile ?? throw new ArgumentNullException(nameof(profile));
         _deviceCodeCallback = deviceCodeCallback;
         _credentialStore = credentialStore;
+        _createGlobalDiscovery = createGlobalDiscovery ?? throw new ArgumentNullException(nameof(createGlobalDiscovery));
+        _createBapDiscovery = createBapDiscovery ?? throw new ArgumentNullException(nameof(createBapDiscovery));
     }
 
     /// <summary>
@@ -155,7 +180,8 @@ public sealed class EnvironmentResolutionService : IDisposable
     {
         try
         {
-            using var gds = GlobalDiscoveryService.FromProfile(_profile);
+            var gds = _createGlobalDiscovery(_profile);
+            using var gdsLifetime = gds as IDisposable;
             var environments = await gds.DiscoverEnvironmentsAsync(cancellationToken);
 
             DiscoveredEnvironment? resolved;
@@ -211,8 +237,9 @@ public sealed class EnvironmentResolutionService : IDisposable
     {
         try
         {
-            using var service = await BapEnvironmentService.FromProfileAsync(_profile, _credentialStore, cancellationToken)
+            var service = await _createBapDiscovery(_profile, _credentialStore, cancellationToken)
                 .ConfigureAwait(false);
+            using var serviceLifetime = service as IDisposable;
             var environments = await service.DiscoverEnvironmentsAsync(cancellationToken);
 
             DiscoveredEnvironment? resolved;

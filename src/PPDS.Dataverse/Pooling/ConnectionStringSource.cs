@@ -2,6 +2,7 @@ using System;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using PPDS.Dataverse.Configuration;
 using PPDS.Dataverse.Security;
+using PPDS.Internal;
 
 namespace PPDS.Dataverse.Pooling;
 
@@ -60,6 +61,7 @@ public sealed class ConnectionStringSource : IConnectionSource
                     _config.ClientSecret);
 
                 var connectionString = ConnectionStringBuilder.Build(_config, secret);
+                InteractiveSignInGuard.ThrowIfInteractiveConnectionString(connectionString);
                 client = new ServiceClient(connectionString);
             }
             catch (Exception ex)

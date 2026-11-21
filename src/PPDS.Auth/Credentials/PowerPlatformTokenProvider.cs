@@ -7,6 +7,7 @@ using Microsoft.Identity.Client;
 using Microsoft.Identity.Client.Extensions.Msal;
 using PPDS.Auth.Cloud;
 using PPDS.Auth.Profiles;
+using PPDS.Internal;
 
 namespace PPDS.Auth.Credentials;
 
@@ -263,6 +264,7 @@ public sealed class PowerPlatformTokenProvider : IPowerPlatformTokenProvider
         // Try interactive browser if available
         if (InteractiveBrowserCredentialProvider.IsAvailable())
         {
+            InteractiveSignInGuard.ThrowIfBlocked("browser");
             AuthDebugLog.WriteLine("  Starting interactive browser authentication...");
             AuthenticationOutput.WriteLine();
             AuthenticationOutput.WriteLine($"Opening browser for authentication to {resource}...");
@@ -294,6 +296,7 @@ public sealed class PowerPlatformTokenProvider : IPowerPlatformTokenProvider
         }
 
         // Fall back to device code
+        InteractiveSignInGuard.ThrowIfBlocked("device code");
         AuthDebugLog.WriteLine("  Starting device code authentication...");
         AuthenticationOutput.WriteLine();
         AuthenticationOutput.WriteLine($"Authentication required for {resource}");
