@@ -211,9 +211,8 @@ public class TuiErrorServiceTests
 
         var path = service.GetLogFilePath();
 
-        Assert.NotNull(path);
-        Assert.EndsWith("tui-debug.log", path);
-        Assert.Contains(".ppds", path);
+        // The test run sets PPDS_CONFIG_DIR (ConfigDirTestInit), so the log is in that folder (#1850).
+        Assert.Equal(Path.Combine(PPDS.Cli.Tests.Infrastructure.ConfigDirTestInit.ConfigDirectory, "tui-debug.log"), path);
     }
 
     #endregion

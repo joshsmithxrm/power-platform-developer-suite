@@ -1,5 +1,6 @@
 using System.CommandLine;
 using PPDS.Cli.Commands;
+using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Cli.Commands.Logs;
@@ -179,14 +180,10 @@ public static class LogsTailCommand
     }
 
     /// <summary>
-    /// <c>%USERPROFILE%\.ppds</c> on Windows, <c>~/.ppds</c> on macOS/Linux.
-    /// Mirrors the path used by <c>TuiDebugLog</c> so this command always looks in
-    /// the same place other PPDS components write to.
+    /// The folder PPDS writes its log files to: <see cref="CliDataPaths.DataDirectory"/>
+    /// (the <c>PPDS_CONFIG_DIR</c> folder when set, otherwise <c>%USERPROFILE%\.ppds</c> on
+    /// Windows and <c>~/.ppds</c> on macOS/Linux). The same resolver <c>TuiDebugLog</c> uses,
+    /// so this command always looks where other PPDS components write.
     /// </summary>
-    internal static string GetPpdsDirectory()
-    {
-        return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".ppds");
-    }
+    internal static string GetPpdsDirectory() => CliDataPaths.DataDirectory;
 }

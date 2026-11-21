@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using PPDS.Cli.Commands;
+using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 
 namespace PPDS.Cli.Services.UpdateCheck;
@@ -10,7 +11,8 @@ namespace PPDS.Cli.Services.UpdateCheck;
 /// Application service for checking available updates to the PPDS CLI via the NuGet flat-container API.
 /// </summary>
 /// <remarks>
-/// <para>Results are cached for 24 hours at <c>~/.ppds/update-check.json</c>.</para>
+/// <para>Results are cached for 24 hours in <c>update-check.json</c> under <see cref="CliDataPaths.DataDirectory"/>
+/// (the <c>PPDS_CONFIG_DIR</c> folder when set, otherwise <c>~/.ppds</c>).</para>
 /// <para>
 /// The constructor accepts optional <paramref name="handler"/> and <paramref name="cachePath"/>
 /// parameters to facilitate testing without live network or filesystem side-effects.
@@ -61,11 +63,11 @@ public sealed class UpdateCheckService : IUpdateCheckService
     /// </param>
     /// <param name="cachePath">
     /// Optional full path to the cache JSON file.
-    /// Pass <see langword="null"/> to use the default <c>~/.ppds/update-check.json</c>.
+    /// Pass <see langword="null"/> to use <see cref="CliDataPaths.UpdateCheckFile"/>.
     /// </param>
     /// <param name="statusPath">
     /// Optional full path to the update status JSON file.
-    /// Pass <see langword="null"/> to use the default <c>~/.ppds/update-status.json</c>.
+    /// Pass <see langword="null"/> to use <see cref="CliDataPaths.UpdateStatusFile"/>.
     /// </param>
     public UpdateCheckService(
         HttpMessageHandler? handler = null,
@@ -73,11 +75,9 @@ public sealed class UpdateCheckService : IUpdateCheckService
         string? statusPath = null)
     {
         _handler = handler;
-        var ppdsDir = Path.Combine(
-            System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile), ".ppds");
-        _cachePath = cachePath ?? Path.Combine(ppdsDir, "update-check.json");
-        _statusPath = statusPath ?? Path.Combine(ppdsDir, "update-status.json");
-        _lockPath = Path.Combine(ppdsDir, "update.lock");
+        _cachePath = cachePath ?? CliDataPaths.UpdateCheckFile;
+        _statusPath = statusPath ?? CliDataPaths.UpdateStatusFile;
+        _lockPath = CliDataPaths.UpdateLockFile;
     }
 
     /// <inheritdoc/>

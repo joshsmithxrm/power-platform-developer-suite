@@ -1107,6 +1107,10 @@ Profiles are stored locally:
 
 Secrets are encrypted using platform-native encryption (DPAPI on Windows).
 
+Query history (`history/`), log files (`*.log`) and update-check state are kept in `~/.ppds` (`%USERPROFILE%\.ppds` on Windows).
+
+Set `PPDS_CONFIG_DIR` to a folder to keep profiles, query history, logs and update-check state there instead, for example to isolate a second configuration or a test run.
+
 ---
 
 ## Related
