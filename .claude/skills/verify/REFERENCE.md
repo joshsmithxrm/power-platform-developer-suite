@@ -11,9 +11,50 @@ slashes.
 
 Applies to every flow that reaches live Dataverse (CLI, TUI, extension, MCP).
 The `.claude/hooks/shakedown-safety.py` PreToolUse hook inspects each Bash
-command that invokes `ppds` or `ppds-mcp-server` by program name (a path
-ending in `ppds` counts) or through `dotnet` (`dotnet run --project
-src/PPDS.Cli`, `dotnet .../ppds.dll`). Full model: `docs/SAFE-SHAKEDOWN.md`.
+tool and PowerShell tool command that invokes `ppds` or `ppds-mcp-server`
+by program name (a path ending in `ppds` counts) or through `dotnet`
+(`dotnet run --project src/PPDS.Cli`, `dotnet .../ppds.dll`,
+`dotnet tool exec PPDS.Cli`), also inside `bash -c`, `pwsh -Command` and
+`cmd /c`. Full model: `docs/SAFE-SHAKEDOWN.md`.
+
+- **`--` before application arguments.** Write
+  `dotnet run --project src/PPDS.Cli -- data list`. Without `--` the hook
+  checks several readings of the arguments and may block a read.
+- **Both readings, every mention.** Each command is read with PowerShell
+  rules and with POSIX rules whatever the tool, and every mention of
+  `ppds`, `dotnet` or `dnx` the readings cannot place in a word counts as
+  an invocation with an unknown verb.
+- **Caps.** A command longer than 200,000 characters is not read: it is
+  refused when it names a guarded program, a shell or a code word, or holds
+  an escape that can spell one (and, during a shakedown or with an unlisted
+  active env, run-time text such as `$X`); otherwise it passes. Past any
+  other cap (nesting 8 levels deep, 4,000,000 characters of reading work,
+  3.5 seconds with a watchdog at 4.5, 500 words naming a guarded program
+  per reading, 400 arguments per invocation, and in the original matcher
+  500 `ppds` or `dotnet` words with 400 tokens / 4,096 characters after
+  each) a command is an unreadable invocation, mention or not: refused
+  during a shakedown and with an unlisted active env; with a listed active
+  env only when the text names a switch or a target. The full list is in
+  `docs/SAFE-SHAKEDOWN.md`.
+- **What the hook cannot place.** A response file, an argument only known
+  at run time, an option bundle that may hold `-e` / `-p`, a mention it
+  cannot place: refused during a shakedown and with an unlisted active env.
+  With a listed active env and no shakedown, refused only when the text
+  names a switch (`env` / `org` / `auth` with `select` / `switch` / `use`)
+  or a target option (`--environment`, `--profile` and kin) anywhere;
+  `ppds @file` is refused in every mode. Every `--environment` /
+  `--profile` value the hook places (any delimiter), every `PPDS_` variable
+  that can move the target and a home-folder override (`HOME=`) are
+  checked, not only the active env.
+- **A guard against mistakes, not containment.** The hook reads text. With
+  a listed active env it does not see a target in a script file, in a
+  response file given to a program it could not identify, or in words
+  built at run time.
+- **Mentions count.** A commit message, pull request body or search pattern
+  that mentions `ppds` is a guessed invocation: refused during a shakedown
+  and with an unlisted active env, and with a listed one when the text also
+  names a switch or a target; pass long text through a file
+  (`git commit -F`, `gh pr create --body-file`).
 
 - **Env allowlist (opt-in).** Off until a list names an env. The hook reads,
   first match wins: `$PPDS_SAFE_ENVS` (comma-separated, read from the
@@ -21,25 +62,30 @@ src/PPDS.Cli`, `dotnet .../ppds.dll`). Full model: `docs/SAFE-SHAKEDOWN.md`.
   in the tracked `.claude/settings.json` (checked in as `[]`), then the
   legacy `.claude/state/safe-envs.json` (`safe_envs`). Once on, `ppds *` is allowed
   only when the active env is in the list, and an unidentifiable active env
-  blocks. A misconfigured source (unparseable settings, wrong type, a value
+  blocks; `env select` / `auth select` to a listed target and the read forms
+  of `env` pass with an unlisted one. A misconfigured source (unparseable settings, wrong type, a value
   naming no env) blocks every `ppds` command until it is fixed or removed.
 - **Write-block.** Armed by the sentinel `.claude/state/shakedown-active.json`
   (what `/shakedown` Phase 0 writes; under 24h old) or by `PPDS_SHAKEDOWN=1`
   in the environment Claude Code was started in. An inline
   `PPDS_SHAKEDOWN=1 ppds ...` in the Bash tool does not reach the hook.
-  Blocks write verbs (`create`, `update`, `delete`, `import`, `publish`,
-  `set`, ...), `plugins deploy` without `--dry-run`, and `ppds-mcp-server`
-  without `--read-only`.
+  Passes only command paths the hook's table classifies as read-only, and
+  the conditional ones in their recognised shape (`plugins deploy --dry-run`,
+  `query sql` with inline SQL holding no write word, `version` alone or with
+  `--check`, `ppds-mcp-server --read-only`); everything else, `ppds` with no
+  arguments (the TUI) and any command the table does not know included, is
+  refused. A help flag passes only directly after the command path.
 
 Before running anything below:
 
-1. `ppds env who` (always allowed) and confirm the env is a dev/test env you
+1. `ppds env who` (allowed whatever the active env) and confirm the env is a dev/test env you
    mean to touch, and in the allowlist if one is configured.
 2. When invoked from `/shakedown`, confirm `.claude/state/shakedown-active.json`
    exists so writes fail closed.
 3. Invoke the CLI as `ppds`, `src/PPDS.Cli/bin/Debug/net10.0/ppds` or
    `dotnet run --project src/PPDS.Cli -- ...`, not through
-   `scripts/ppds-dev.ps1`: the hook does not see that script.
+   `scripts/ppds-dev.ps1`: the hook does not see that script (nor the CLI or
+   TUI that a script such as `tui-verify.mjs` starts).
 
 ---
 
@@ -484,8 +530,8 @@ is descriptive, not a raw exception.
 
 How to test changes to `.claude/` infrastructure: hooks, skills, settings.
 The hooks are `.claude/hooks/snk-protect.py` (Edit|Write) and
-`.claude/hooks/shakedown-safety.py` (Bash); `_pathfix.py` is a shared
-helper, not a hook.
+`.claude/hooks/shakedown-safety.py` (Bash and PowerShell); `_pathfix.py`
+and `_shellparse.py` are shared helpers, not hooks.
 
 ### Hook testing
 

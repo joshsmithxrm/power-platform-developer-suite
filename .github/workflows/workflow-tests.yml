@@ -52,10 +52,20 @@ jobs:
         with:
           python-version: '3.11'
 
+      # The differential tests of the environment hook (tests/hooks/differential) build a parse-only
+      # helper against src/PPDS.Cli, so they need the pinned SDK. PPDS_DIFF_REQUIRE makes a missing
+      # SDK, bash or pwsh fail those tests instead of skipping them.
+      - name: Setup .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          global-json-file: global.json
+
       - name: Install pytest + pyyaml
         run: pip install pytest pyyaml
 
       - name: Run Python regression suite
+        env:
+          PPDS_DIFF_REQUIRE: '1'
         run: python -m pytest tests/ -q
 
   # The inspector and PATHEXT tests drive real PowerShell 7 and the Windows SDK sn.exe, so the

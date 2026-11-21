@@ -1,0 +1,19 @@
+{
+ "_comment": [
+  "Failure labels (findings.py) the requirement-severity tests are known to fail with at the head they were last run against.",
+  "Used only with PPDS_DIFF_XFAIL=1: a test whose failures all carry these labels is reported as xfail.",
+  "A failure with any other label, or 'unlabelled', still fails. Remove a label when its fix lands."
+ ],
+ "labels": {
+  "r5-env-who-on-unlisted": "round 5: env who passes with an unlisted active environment, but it sends WhoAmI there",
+  "r5-switch-without-allowlist": "round 5: env select / auth select pass the write-block when no allowlist is configured",
+  "r5-environment-url": "round 5: PPDS_ENVIRONMENT_URL naming an unlisted environment in front of the CLI",
+  "r5-auth-select": "round 5: auth select forms",
+  "r5-mode-gate-unknown": "round 5: a failure in the mode with no profile store (it also carries the label of its class)",
+  "r5-mode-gate-profile-named": "round 5: a failure in the mode whose active profile is named like a listed environment",
+  "r5-mode-gate-settings": "round 5: a failure in the mode whose allowlist comes from .claude/settings.json",
+  "r5-mode-shakedown-sentinel": "round 5: a failure in the mode whose shakedown is switched on by the sentinel file",
+  "r5-mode-shakedown-noal": "round 5: a failure in the mode with a shakedown and no allowlist",
+  "r2-switch-colon": "reappears only in the new modes"
+ }
+}
