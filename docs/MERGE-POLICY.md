@@ -92,6 +92,36 @@ Before merging a PR that may incorporate outside work, apply the shared [contrib
 
 No-contribution work needs no invented source or identity and no extra approval. The offline validator (`scripts/ci/check_contributor_provenance.py`) checks supplied records, not semantic overlap or live state.
 
+The rules below bind agent sessions that work for the maintainer (the coordinating session and its worker sessions). The merge routes above and the contributor process in [CONTRIBUTING.md](../CONTRIBUTING.md) are unchanged for everyone else. The rules are numbered so the pull request template and other documents can cite them. The rules for proof before merge are in [specs/test-gates.md](../specs/test-gates.md); the rules for decisions, triage and sessions are in [MAINTAINER-SESSION-RULES.md](MAINTAINER-SESSION-RULES.md).
+
+### Review
+
+| # | Rule |
+|---|---|
+| R1 | The reviewer is a fresh agent that did not write the change. It gets the diff and the requirement, never the author's description. Its working directory does not contain the coordinating session's drafts. The brief names the model. |
+| R2 | Before review, every acceptance criterion and spec sentence that mentions a changed behaviour is listed and reconciled. |
+| R3 | A fix round changes only what the findings name. New scope is a new pull request. |
+| R4 | Two rounds at most by the same method. If the second round still has a must-fix finding, stop and change the method (live proof, a smaller change, a design note) and tell the maintainer. |
+| R5 | "Converged" means: a round returned no must-fix finding, and the commit that applied the previous round's fixes was part of what that round reviewed. A pull request that has not converged does not merge. |
+| R6 | Reviewer transcripts are kept for the life of the release. |
+
+### Pull requests and merging
+
+| # | Rule |
+|---|---|
+| M1 | One concern per pull request. Size is not a gate; the aim is a change one reviewer can hold, about 600 changed lines of product code. A larger one says why it cannot be split. |
+| M2 | The changelog entry is in the same pull request as the behaviour change, and the template's "Breaking" line is filled in and checked by the reviewer. |
+| M3 | A pull request may be merged by an agent only as the standing authorisations allow: reviewed and converged, required checks green on the final commit, no open thread, no new code-scanning alert, squash, pinned to the reviewed commit. |
+| M4 | Two open pull requests do not change the same file group. The tracking issue's workstreams define the groups. |
+
+### CI
+
+| # | Rule |
+|---|---|
+| C1 | A test that fails on timing is not re-run. The first time, it gets an issue and is fixed at the cause or quarantined with that issue's number. |
+| C2 | An infrastructure failure (runner hang, package feed, image pull) may be re-run once without asking, and the report quotes the log line that shows the cause; a second failure is investigated. Every other re-run asks the maintainer. A session never runs a publish or signing workflow. |
+| C3 | A failure in one of the product's own release or security checks is always investigated. |
+
 ## Pre-Merge Gate Rules
 
 The [`pre-merge-gate.yml`](../.github/workflows/pre-merge-gate.yml) workflow runs on every PR. It evaluates one rule (Rule 3, below) and reports PR size for information. Each check is its own job in the PR Checks tab; the aggregate `Pre-Merge Gate` check succeeds iff Rule 3 passes. The aggregate is not a required status check, so GitHub does not block a merge on it: a maintainer must not merge, or enable auto-merge on, a PR whose `Pre-Merge Gate` has failed.
