@@ -79,6 +79,14 @@ public sealed class CliDataPathsTests : IDisposable
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ppds");
 
     [Fact]
+    public void TestRun_ConfigDirPointsAtTemporaryFolder()
+    {
+        // Set by ConfigDirTestInit before any test runs, so tests never use a real configuration folder.
+        Assert.Equal(ConfigDirTestInit.ConfigDirectory, _originalConfigDir);
+        Assert.StartsWith(Path.GetTempPath(), _originalConfigDir!, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void VariableUnset_PathsAreUnchangedFromEarlierReleases()
     {
         if (!OperatingSystem.IsWindows())
