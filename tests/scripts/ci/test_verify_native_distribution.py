@@ -464,7 +464,7 @@ def test_windows_reader_diagnostic_timeout_preserves_only_observed_phases(monkey
     assert "readerDiagnostics" in metadata
     saved = metadata["readerDiagnostics"]
     assert saved["eventCount"] == prefix and saved["lastObservedPhase"] == (trace[prefix - 1].decode().strip().split(":", 1)[1] if prefix else "not_observed")
-    assert saved["timeoutSeconds"] == 15 and saved["stdoutBytes"] > 0
+    assert saved["timeoutSeconds"] == gate.WINDOWS_SECURITY_TIMEOUT_SECONDS and saved["stdoutBytes"] > 0
 
 
 @pytest.mark.parametrize("variant", ["complete", "truncated", "unknown", "reordered", "duplicate", "wrong-index", "boolean-index", "oversize", "sensitive"])
@@ -549,7 +549,7 @@ def test_windows_reader_uses_fixed_noprofile_literal_json_and_scrubbed_environme
     assert PureWindowsPath(command[0]) == PureWindowsPath("C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
     assert command[1:5] == ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"]
     assert json.loads(kwargs["input"]) == {"paths": [str(path) for path in paths]}
-    assert not kwargs.get("shell", False) and kwargs["timeout"] == 15
+    assert not kwargs.get("shell", False) and kwargs["timeout"] == gate.WINDOWS_SECURITY_TIMEOUT_SECONDS
     assert all(name not in kwargs["env"] for name in ["GH_TOKEN", "PPDS_CLIENT_SECRET", "PPDS_PROFILE", "PPDS_FORMS_LIVE_CONFIRM", "PSModulePath"])
     assert "Get-Acl -LiteralPath" in command[-1]
     assert "[BitConverter]::ToUInt32" in command[-1]
@@ -687,7 +687,7 @@ def test_windows_request_milestone_timeout_is_precise_and_never_a_security_measu
 
     result = reader([fixture.path("C:/Users/runneradmin/AppData/Local")])
 
-    assert len(calls) == 1 and calls[0][1]["timeout"] == 15
+    assert len(calls) == 1 and calls[0][1]["timeout"] == gate.WINDOWS_SECURITY_TIMEOUT_SECONDS
     assert result["complete"] is False and result["currentUserSid"] is None and result["rows"] == []
     saved = gate.security_evidence_metadata(result)
     assert saved["readerDiagnostics"]["lastObservedPhase"] == milestone
@@ -817,7 +817,7 @@ def test_windows_reader_searches_only_engine_modules_inside_its_child(monkeypatc
     assert "PSModuleAutoLoadingPreference" not in script
     assert "SetEnvironmentVariable" not in script and "Set-Item" not in script and "Import-Module" not in script
     assert not any(name.upper() == "PSMODULEPATH" for name in kwargs["env"])
-    assert kwargs["timeout"] == 15 and command[1:5] == ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"]
+    assert kwargs["timeout"] == gate.WINDOWS_SECURITY_TIMEOUT_SECONDS and command[1:5] == ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"]
 
 
 def test_windows_reader_module_isolation_does_not_mutate_parent_environment(monkeypatch):
@@ -832,3 +832,153 @@ def test_windows_reader_module_isolation_does_not_mutate_parent_environment(monk
     assert dict(gate.os.environ) == before
     assert calls[0][1]["env"] == {key: value for key, value in before.items() if key.upper() in gate.OS_KEYS}
     assert all(name not in calls[0][1]["env"] for name in ["PSModulePath", "PSModuleAnalysisCachePath"])
+
+
+# #1749: a slow runner must not fail the check through the reader bound, and a
+# failure must name its reason in the log. The descriptor policy is unchanged.
+LOCAL = "C:/Users/runneradmin/AppData/Local"
+
+
+@pytest.mark.parametrize("seconds,complete", [(20, True), (59, True), (61, False)])
+def test_windows_reader_completes_a_read_slower_than_15_s_but_not_past_its_bound(monkeypatch, seconds, complete):
+    reader, fixture, calls, _ = reader_process_fixture(monkeypatch)
+    finish = gate.subprocess.run
+
+    def slow(command, **kwargs):
+        if seconds > kwargs["timeout"]:
+            raise gate.subprocess.TimeoutExpired(command, kwargs["timeout"])
+        return finish(command, **kwargs)
+
+    monkeypatch.setattr(gate.subprocess, "run", slow)
+    assert reader([fixture.path(LOCAL)])["complete"] is complete
+
+
+def test_windows_reader_diagnostics_bound_follows_the_reader_timeout():
+    snapshot = gate.security_reader_failure([LOCAL], "TimeoutExpired", gate.security_reader_diagnostics(b"", b"", 1, timed_out=True))
+    saved = gate.security_evidence_metadata(snapshot)["readerDiagnostics"]
+    assert saved["timeoutSeconds"] == gate.WINDOWS_SECURITY_TIMEOUT_SECONDS and saved["timedOut"] is True
+    snapshot["readerDiagnostics"]["timeoutSeconds"] = gate.WINDOWS_SECURITY_TIMEOUT_SECONDS + 1
+    assert gate.security_evidence_metadata(snapshot)["readerDiagnostics"]["timeoutSeconds"] is None
+
+
+@pytest.mark.parametrize("failure,cause", [("timeout", "TimeoutExpired after 60 s; last phase not_observed"), ("oserror", "OSError"),
+                                           ("malformed", "InvalidSecurityMetadataJson"), ("nonzero", "reader did not report a complete read; phase trace complete"),
+                                           ("stderr", "reader did not report a complete read; phase trace invalid")])
+def test_incomplete_security_read_fails_once_and_names_its_cause(monkeypatch, failure, cause):
+    reader, fixture, calls, behavior = reader_process_fixture(monkeypatch)
+    behavior["failure"] = failure
+    monkeypatch.setattr(gate, "read_windows_security", reader)
+
+    with pytest.raises(ValueError) as raised:
+        gate.inspect_windows_paths([fixture.path(LOCAL)], "D:\\a\\_temp\\evidence\\windows-security-parent.json", ancestor=True)
+
+    assert len(calls) == 1, "one read only: no retry"
+    assert str(raised.value) == ("Windows runtime security metadata is unsafe or incomplete: "
+                                 f"incomplete_security_read ({cause}); retained diagnostics in windows-security-parent.json")
+    assert "synthetic-unreported-reader-message" not in str(raised.value)
+    assert fixture.saved[-1][1]["accepted"] is False and fixture.saved[-1][1]["reasons"] == ["incomplete_security_read"]
+
+
+def test_invalid_security_snapshot_is_named(monkeypatch):
+    reader, fixture, calls, _ = reader_process_fixture(monkeypatch)
+
+    def wrong_count(paths):
+        value = reader(paths)
+        value["observedCount"] = 2
+        return value
+
+    monkeypatch.setattr(gate, "read_windows_security", wrong_count)
+    with pytest.raises(ValueError) as raised:
+        gate.inspect_windows_paths([fixture.path(LOCAL)], "evidence/windows-security-runtime.json", ancestor=False)
+
+    assert len(calls) == 1
+    assert str(raised.value) == ("Windows runtime security metadata is unsafe or incomplete: "
+                                 "invalid_security_snapshot; retained diagnostics in windows-security-runtime.json")
+
+
+def test_unsafe_security_descriptor_still_fails_immediately_and_names_path_and_policy(monkeypatch):
+    reader, fixture, calls, _ = reader_process_fixture(monkeypatch)
+
+    def owner_rights(paths):
+        value = reader(paths)
+        value["rows"][0]["aces"][0]["sid"] = "S-1-3-4"
+        return value
+
+    monkeypatch.setattr(gate, "read_windows_security", owner_rights)
+    with pytest.raises(ValueError) as raised:
+        gate.inspect_windows_paths([fixture.path(LOCAL)], "evidence/windows-security-runtime.json", ancestor=False)
+
+    assert len(calls) == 1, "an unsafe descriptor is never re-read"
+    path = str(PureWindowsPath(LOCAL))
+    assert str(raised.value) == ("Windows runtime security metadata is unsafe or incomplete: "
+                                 f"unsafe_security_descriptor ({path}: untrusted_mutation_grant); "
+                                 "retained diagnostics in windows-security-runtime.json")
+    assert fixture.saved[-1][1]["reasons"] == ["unsafe_security_descriptor"]
+
+
+def test_accepted_descriptors_still_pass_without_a_message(monkeypatch):
+    reader, fixture, calls, _ = reader_process_fixture(monkeypatch)
+    monkeypatch.setattr(gate, "read_windows_security", reader)
+
+    gate.inspect_windows_paths([fixture.path(LOCAL)], "evidence/windows-security-runtime.json", ancestor=False)
+
+    assert len(calls) == 1 and fixture.saved[-1][1]["accepted"] is True and fixture.saved[-1][1]["reasons"] == []
+
+
+def test_timeout_message_names_the_last_phase_the_reader_reached(monkeypatch):
+    reader, fixture, calls, _ = reader_process_fixture(monkeypatch)
+    trace = diagnostic_trace(1)
+
+    def stalled(command, **kwargs):
+        raise gate.subprocess.TimeoutExpired(command, kwargs["timeout"], output=b"", stderr=b"".join(trace[:12]))
+
+    monkeypatch.setattr(gate.subprocess, "run", stalled)
+    monkeypatch.setattr(gate, "read_windows_security", reader)
+    with pytest.raises(ValueError) as raised:
+        gate.inspect_windows_paths([fixture.path(LOCAL)], "evidence/windows-security-parent.json", ancestor=True)
+
+    assert "incomplete_security_read (TimeoutExpired after 60 s; last phase acl_started:0)" in str(raised.value)
+
+
+def snapshot_for(paths, unsafe=(), aces=1):
+    rows = []
+    for index, path in enumerate(paths):
+        row = dict(synthetic_descriptor(owner_rights=index in unsafe), path=path)
+        row["aces"] = row["aces"] * aces
+        rows.append(row)
+    return {"complete": True, "currentUserSid": SYNTHETIC_USER, "requestedCount": len(paths),
+            "observedCount": len(paths), "errorType": None, "rows": rows}
+
+
+def test_unsafe_message_lists_every_rejected_path_and_no_accepted_one(monkeypatch):
+    paths = [LOCAL.replace("/", "\\")] + [LOCAL.replace("/", "\\") + "\\ppds-native-ci-x\\" + name
+                                          for name in ["home", "appdata", "config", "data", "temp"]]
+    saved = []
+    monkeypatch.setattr(gate, "read_windows_security", lambda requested: snapshot_for(requested, unsafe={1, 4}))
+    monkeypatch.setattr(gate, "save", lambda path, value: saved.append(value))
+
+    with pytest.raises(ValueError) as raised:
+        gate.inspect_windows_paths(paths, "evidence/windows-security-runtime.json", ancestor=False)
+
+    message = str(raised.value)
+    assert (f"unsafe_security_descriptor ({paths[1]}: untrusted_mutation_grant; "
+            f"{paths[4]}: untrusted_mutation_grant); retained diagnostics") in message
+    assert all(f"{path}:" not in message for index, path in enumerate(paths) if index not in {1, 4})
+    assert saved[-1]["reasons"] == ["unsafe_security_descriptor"]
+
+
+@pytest.mark.parametrize("unsafe,expected", [((), "security_evidence_bound"),
+                                             ((3,), "unsafe_security_descriptor (")])
+def test_oversized_evidence_names_the_bound(monkeypatch, unsafe, expected):
+    paths = [LOCAL.replace("/", "\\") + f"\\p{index}" for index in range(16)]
+    saved = []
+    monkeypatch.setattr(gate, "read_windows_security", lambda requested: snapshot_for(requested, unsafe=set(unsafe), aces=128))
+    monkeypatch.setattr(gate, "save", lambda path, value: saved.append(value))
+
+    with pytest.raises(ValueError) as raised:
+        gate.inspect_windows_paths(paths, "evidence/windows-security-runtime.json", ancestor=False)
+
+    message = str(raised.value)
+    assert message.startswith("Windows runtime security metadata is unsafe or incomplete: " + expected)
+    assert message.endswith("security_evidence_bound; retained diagnostics in windows-security-runtime.json")
+    assert saved[-1]["reasons"] == ["security_evidence_bound"] and saved[-1]["accepted"] is False
