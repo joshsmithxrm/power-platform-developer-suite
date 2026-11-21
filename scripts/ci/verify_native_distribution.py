@@ -275,6 +275,11 @@ exit 1
 
 
 WINDOWS_READ_MASK = 0xA01200A9
+# Bound on one powershell.exe security read. It exists to catch a hung reader;
+# a timeout fails the check as an incomplete read and is never a measurement.
+# One windows-11-arm failure was consistent with a first start slower than the
+# earlier 15 s bound; that cause was not confirmed (#1749).
+WINDOWS_SECURITY_TIMEOUT_SECONDS = 60
 WINDOWS_ANCESTOR_MASK = WINDOWS_READ_MASK | 0x6
 WINDOWS_SYSTEM_SID = "S-1-5-18"
 WINDOWS_ADMIN_SID = "S-1-5-32-544"
@@ -330,7 +335,7 @@ def security_reader_diagnostics(stderr, stdout, count, *, timed_out=False):
               "complete" if success_count == len(phases) and not failure_count and not tail else
               "partial" if observed or tail else "not_observed")
     return {"status": status, "eventCount": len(observed), "lastObservedPhase": observed[-1] if observed else "not_observed",
-            "failureCaught": bool(failure_count), "incompleteTail": tail, "timedOut": timed_out, "timeoutSeconds": 15,
+            "failureCaught": bool(failure_count), "incompleteTail": tail, "timedOut": timed_out, "timeoutSeconds": WINDOWS_SECURITY_TIMEOUT_SECONDS,
             "stderrBytes": min(len(data), 16385), "stdoutBytes": min(len(stdout), 131073) if isinstance(stdout, bytes) else 0}
 
 
@@ -351,7 +356,7 @@ def read_windows_security(paths):
     env = {k: v for k, v in os.environ.items() if k.upper() in OS_KEYS}
     try:
         result = subprocess.run(command, input=json.dumps({"paths": names}, ensure_ascii=True).encode("ascii"),
-                                env=env, stdin=None, capture_output=True, timeout=15, check=False,
+                                env=env, stdin=None, capture_output=True, timeout=WINDOWS_SECURITY_TIMEOUT_SECONDS, check=False,
                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired as error:
         return security_reader_failure(paths, "TimeoutExpired", security_reader_diagnostics(error.stderr, error.output, len(paths), timed_out=True))
@@ -429,7 +434,7 @@ def security_evidence_metadata(snapshot):
     diagnostics = snapshot.get("readerDiagnostics")
     if isinstance(diagnostics, dict):
         safe = {key: diagnostics.get(key) if type(diagnostics.get(key)) is bool else None for key in ["incompleteTail", "timedOut", "failureCaught"]}
-        for key, maximum in [("eventCount", 47), ("timeoutSeconds", 15), ("stderrBytes", 16385), ("stdoutBytes", 131073)]:
+        for key, maximum in [("eventCount", 47), ("timeoutSeconds", WINDOWS_SECURITY_TIMEOUT_SECONDS), ("stderrBytes", 16385), ("stdoutBytes", 131073)]:
             value = diagnostics.get(key)
             safe[key] = value if type(value) is int and 0 <= value <= maximum else None
         status, phase = diagnostics.get("status"), diagnostics.get("lastObservedPhase")
@@ -469,6 +474,27 @@ def security_evidence_metadata(snapshot):
     return result
 
 
+def security_failure_details(evidence):
+    """Name each failure reason from the retained evidence, so the log says which applied."""
+    details = []
+    for reason in evidence["reasons"]:
+        if reason == "incomplete_security_read":
+            snapshot = evidence["snapshot"]
+            diagnostics = snapshot.get("readerDiagnostics") or {}
+            cause = snapshot.get("errorType") or f"reader did not report a complete read; phase trace {diagnostics.get('status', 'not_observed')}"
+            if diagnostics.get("timedOut") is True:
+                cause += (f" after {WINDOWS_SECURITY_TIMEOUT_SECONDS} s; last phase "
+                          f"{diagnostics.get('lastObservedPhase', 'not_observed')}")
+            details.append(f"{reason} ({cause})")
+        elif reason == "unsafe_security_descriptor":
+            rejected = [f"{policy['path']}: {', '.join(policy['reasons'])}"
+                        for policy in evidence["policies"] if not policy["accepted"]]
+            details.append(f"{reason} ({'; '.join(rejected)})")
+        else:
+            details.append(reason)
+    return details
+
+
 def inspect_windows_paths(paths, destination, *, ancestor):
     snapshot = read_windows_security(paths)
     evidence = {"ancestor": ancestor, "snapshot": security_evidence_metadata(snapshot), "policies": []}
@@ -493,11 +519,15 @@ def inspect_windows_paths(paths, destination, *, ancestor):
                 if not policy["accepted"]:
                     reasons.append("unsafe_security_descriptor")
     evidence.update({"accepted": not reasons, "reasons": sorted(set(reasons))})
+    details = security_failure_details(evidence) if reasons else []
     if len(json.dumps(evidence, ensure_ascii=True).encode("ascii")) > 131072:
         evidence = {"accepted": False, "reasons": ["security_evidence_bound"], "metadataIncomplete": True,
                     "requestedCount": len(names), "observedCount": len(evidence["snapshot"].get("rows", []))}
+        details.append("security_evidence_bound")
     save(destination, evidence)
-    require(evidence["accepted"], "Windows runtime security metadata is unsafe or incomplete; retained diagnostics")
+    retained = re.split(r"[\\/]", str(destination))[-1]
+    require(evidence["accepted"], "Windows runtime security metadata is unsafe or incomplete: "
+            f"{'; '.join(details)}; retained diagnostics in {retained}")
 
 
 def private_environment(root):
