@@ -86,3 +86,29 @@ are not passed to the test process. The goldens describe the signed-out state.
 CI runs `npm test` to compare committed goldens; it does not regenerate them.
 Use `npm run test:update` only after reviewing an intentional UI change, then
 review every changed snapshot and rerun `npm test` before committing.
+
+An obsolete snapshot (a stored snapshot no test used) fails `npm test` when
+every test passed; remove it with `npm run test:update`. When a test failed,
+the run already fails and the count is only a note: a test that fails before
+its `toMatchSnapshot` leaves its own snapshot unused, so do not remove
+snapshots on the evidence of a failed run (and do not run `test:update` then:
+tui-test would delete that snapshot).
+
+## Launch failures
+
+A test can fail before the application starts: on a Windows runner the
+pseudo-terminal launch has failed with `Cannot create process, error code: 87`.
+`npm test` preloads `tools/launch-retry-preload.mjs` into tui-test and its
+workers, which retries only that launch call, at most 3 attempts per test
+(pauses of 250 ms and 1 s). A launch that still fails fails the test with
+`TUI launch failure: the application under test did not start after 3 attempts`.
+No assertion is retried and tui-test's own test retry stays at 0. At the end
+of the run, `npm test` prints how many launch attempts were retried and how
+many tests failed to launch.
+
+## Tool tests
+
+`npm run test:tools` runs the `node:test` tests of `tools/`, including an end
+to end check that injects launch failures into a real run of
+`tests/startup.spec.ts` (it needs the CLI built; CI runs it before the
+snapshot suite).
