@@ -1,14 +1,30 @@
-"""Preserve required-rule evaluation when a draft PR becomes ready.
+"""Pre-merge gate workflow contract: which events cancel a running gate.
 
 These are workflow contract checks. GitHub owns the single-pending-slot
 scheduling behavior; local tests do not simulate or certify hosted scheduling.
 """
+import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 
 WORKFLOW = Path(__file__).resolve().parents[2] / ".github/workflows/pre-merge-gate.yml"
+
+# Events that keep the PR's head commit. They must not cancel a gate that is
+# evaluating that same head (#1685); their run waits in the pending slot.
+SAME_HEAD_ACTIONS = {"ready_for_review", "edited"}
+# Events that can bring a new head commit. They must cancel the obsolete run.
+NEW_HEAD_ACTIONS = {"opened", "synchronize", "reopened"}
+
+# The only accepted shape of `cancel-in-progress`: a conjunction of
+# `github.event.action != '<action>'` terms. Anything else fails the test, so
+# the evaluation below cannot drift from what GitHub evaluates.
+_NOT_EQUAL_TERM = r"github\.event\.action != '([a-z_]+)'"
+_CANCEL_EXPRESSION = re.compile(
+    r"^\$\{\{ " + _NOT_EQUAL_TERM + r"(?: && " + _NOT_EQUAL_TERM + r")* \}\}$"
+)
 
 
 def _workflow():
@@ -17,15 +33,57 @@ def _workflow():
     return yaml.load(WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
 
 
-def test_ready_for_review_preserves_running_gate():
+def _non_cancelling_actions(expression: str) -> set[str]:
+    """Return the actions for which the expression evaluates to false."""
+    assert _CANCEL_EXPRESSION.match(expression), (
+        f"cancel-in-progress has an unexpected shape: {expression!r}"
+    )
+    return set(re.findall(_NOT_EQUAL_TERM, expression))
+
+
+def _cancels(action: str) -> bool:
+    expression = _workflow()["concurrency"]["cancel-in-progress"]
+    return action not in _non_cancelling_actions(expression)
+
+
+def test_one_concurrency_group_per_pull_request():
     concurrency = _workflow()["concurrency"]
+    # Keyed by PR number only (not by head SHA): a run for a new head commit
+    # must share the group with the older run so it can cancel it.
     assert concurrency["group"] == (
         "pre-merge-gate-${{ github.event.pull_request.number }}"
     )
-    assert concurrency["cancel-in-progress"] == (
-        "${{ github.event.action != 'ready_for_review' }}"
-    )
     assert concurrency.get("queue", "single") == "single"
+
+
+def test_every_trigger_type_is_classified():
+    types = set(_workflow()["on"]["pull_request"]["types"])
+    assert types == SAME_HEAD_ACTIONS | NEW_HEAD_ACTIONS
+
+
+@pytest.mark.parametrize("action", sorted(SAME_HEAD_ACTIONS))
+def test_same_head_event_does_not_cancel_running_gate(action):
+    # An edit of the title, body or base while the gate runs must not leave a
+    # cancelled Rule 3 job or a failed aggregate on the PR (#1685).
+    assert not _cancels(action)
+
+
+@pytest.mark.parametrize("action", sorted(NEW_HEAD_ACTIONS))
+def test_new_head_event_cancels_obsolete_gate(action):
+    # A real new commit still replaces the older run.
+    assert _cancels(action)
+
+
+def test_expression_shape_is_enforced():
+    with pytest.raises(AssertionError):
+        _non_cancelling_actions("${{ github.event.action == 'synchronize' }}")
+    with pytest.raises(AssertionError):
+        _non_cancelling_actions(
+            "${{ github.event.action != 'edited' || github.event.action != 'x' }}"
+        )
+    assert _non_cancelling_actions(
+        "${{ github.event.action != 'a' && github.event.action != 'b_c' }}"
+    ) == {"a", "b_c"}
 
 
 def test_required_events_and_rules_remain_enforced():

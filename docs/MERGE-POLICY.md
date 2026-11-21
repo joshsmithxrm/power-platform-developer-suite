@@ -96,6 +96,8 @@ No-contribution work needs no invented source or identity and no extra approval.
 
 The [`pre-merge-gate.yml`](../.github/workflows/pre-merge-gate.yml) workflow runs on every PR. It evaluates one rule (Rule 3, below) and reports PR size for information. Each check is its own job in the PR Checks tab; the aggregate `Pre-Merge Gate` check succeeds iff Rule 3 passes. The aggregate is not a required status check, so GitHub does not block a merge on it: a maintainer must not merge, or enable auto-merge on, a PR whose `Pre-Merge Gate` has failed.
 
+The gate runs again when a PR is opened, reopened, pushed to, marked ready for review, or edited (title, description or base branch: Rule 3 reads the title and description). Only one run per PR is active. A new commit cancels the run in progress, because that run evaluates a superseded head. Marking ready and editing do not cancel: the new run waits until the run in progress ends, then evaluates the PR as it is at that time, so its result is the newest. A later event replaces a run that is still waiting. Read the result of the newest run: while a run is waiting, the result shown can be from before the latest edit.
+
 Rule logic lives in `scripts/ci/`.
 
 ### PR size (informational, `scripts/ci/check_pr_size.py`)
