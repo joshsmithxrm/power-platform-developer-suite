@@ -252,11 +252,11 @@ description so a maintainer can, and say in the PR what changed and why.
 Branch protection requires two checks: `build-status` (the .NET build and the
 extension's typecheck, lint, build, unit and end-to-end tests) and `test-status`
 (the .NET unit tests on Windows and on Linux, single-file extraction, VSIX and
-Python checks). Everything
-else is advisory: Codecov, CodeQL, the Pre-Merge Gate (PR size reporting and a
-rule for Dependabot major updates), the TUI end-to-end workflow, and any
-automated review comments. No approving review is required by branch protection,
-but a maintainer reviews every outside contribution before merging.
+Python checks). Everything else is advisory: Codecov, CodeQL, the Pre-Merge Gate
+(PR size reporting and a rule for Dependabot major updates), the TUI end-to-end
+workflow, and any automated review comments. No approving review is required by
+branch protection, but a maintainer reviews every outside contribution before
+merging.
 
 ### Process
 

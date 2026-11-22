@@ -194,13 +194,7 @@ jobs:
       run: dotnet build --configuration Release --no-restore
 
     - name: Test
-      run: dotnet test --configuration Release --no-build --verbosity normal --filter "Category!=Integration" --logger trx --results-directory ./test-results
-
-    # Failed tests become annotations, so the names can be read without the job log.
-    # The first annotation gives the total; the full list goes to the job summary.
-    - name: Name the failed tests
-      if: failure()
-      run: python3 scripts/ci/name_failed_tests.py ./test-results
+      run: dotnet test --configuration Release --no-build --verbosity normal --filter "Category!=Integration"
 
   single-file-extraction:
     name: Single-file extraction (${{ matrix.rid }})
