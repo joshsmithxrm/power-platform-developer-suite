@@ -80,7 +80,8 @@ def test_linux_dotnet_suite_runs_the_same_tests_and_feeds_the_gate():
         " --logger trx --results-directory ./test-results")
     # A failure names its tests as annotations; naming them never changes the job's result.
     naming = step(linux, "Name the failed tests")
-    assert naming["if"] == "failure()" and "::error title=Failed test::" in naming["run"]
+    assert naming["if"] == "failure()" and "continue-on-error" not in naming
+    assert naming["run"] == "python3 scripts/ci/name_failed_tests.py ./test-results"
     assert linux["steps"].index(naming) == linux["steps"].index(step(linux, "Test")) + 1
     assert "continue-on-error" not in linux and all("continue-on-error" not in item for item in linux["steps"])
     assert "secrets." not in yaml.safe_dump(linux)

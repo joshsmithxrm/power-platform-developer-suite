@@ -28,9 +28,13 @@ REFUSAL_SCRIPT = (
 # 2026-11-20: 'scripts/ci/ci_images.py' (the one container image definition,
 # #1794) added to the test.yml extraction filter; no job, permission or secret
 # reference changed.
+# 2026-11-22: test.yml: a test-linux job runs the same unit suite on
+# ubuntu-latest and is needed by test-status under the "code" classification;
+# on failure it names the failed tests as annotations. It reads no secret and
+# has no write permission; no trigger or existing job changed.
 REVIEWED_WORKFLOW_HASHES = {
     "build.yml": "5b58e3dce7cb80ca1f4f828761a77f68fb17b6a03f7ab77f33863de80de6b0d5",
-    "test.yml": "4a553da48aaeddec610c02fc965d309887d3b2783bd2238156642d95b63e0f38",
+    "test.yml": "13ebf1b99b3ffa9ce2c1c409c630725e5160e62266fa65f21eb1379dec4adfd1",
 }
 
 
