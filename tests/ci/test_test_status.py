@@ -16,6 +16,7 @@ def needs(selected="true", result="success"):
     return {
         "changes": {"result": "success", "outputs": {"code": "false", "extraction": "false", "python": selected}},
         "test": {"result": "skipped"},
+        "test-linux": {"result": "skipped"},
         "single-file-extraction": {"result": "skipped"},
         "vsix-artifacts": {"result": "skipped"},
         "python-tests": {"result": result},
@@ -45,6 +46,38 @@ def test_needed_dotnet_cannot_unexpectedly_skip():
     payload = needs()
     payload["changes"]["outputs"]["code"] = "true"
     assert gate.failures(payload)
+
+
+@pytest.mark.parametrize("job", ["test", "test-linux"])
+@pytest.mark.parametrize("result", ["failure", "cancelled", "skipped", "missing"])
+def test_selected_dotnet_suite_must_succeed_on_each_platform(job, result):
+    payload = needs()
+    payload["changes"]["outputs"]["code"] = "true"
+    payload["test"]["result"] = payload["test-linux"]["result"] = "success"
+    assert gate.failures(payload) == []
+    payload[job]["result"] = result
+    assert any(error.startswith(f"{job}:") for error in gate.failures(payload))
+
+
+def test_linux_dotnet_suite_runs_the_same_tests_and_feeds_the_gate():
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    windows, linux = jobs["test"], jobs["test-linux"]
+    assert windows["runs-on"] == "windows-latest" and linux["runs-on"] == "ubuntu-latest"
+    assert linux["needs"] == "changes" and linux["if"] == windows["if"] == "needs.changes.outputs.code == 'true'"
+    assert linux["timeout-minutes"] <= 30
+    assert "test-linux" in jobs["test-status"]["needs"]
+    assert ("code", "test-linux") in gate.SUITES
+
+    def step(job, name):
+        return next(item for item in job["steps"] if item.get("name") == name)
+
+    # Same SDKs and the same selection of tests; only coverage collection differs.
+    assert step(linux, "Setup .NET")["with"] == step(windows, "Setup .NET")["with"]
+    selection = '--filter "Category!=Integration"'
+    assert selection in step(windows, "Test with Coverage")["run"]
+    assert step(linux, "Test")["run"] == f"dotnet test --configuration Release --no-build --verbosity normal {selection}"
+    assert "continue-on-error" not in linux and all("continue-on-error" not in item for item in linux["steps"])
+    assert "secrets." not in yaml.safe_dump(linux)
 
 
 @pytest.mark.parametrize("result", ["failure", "cancelled", "skipped", "missing"])

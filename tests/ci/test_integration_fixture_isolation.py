@@ -30,7 +30,7 @@ REFUSAL_SCRIPT = (
 # reference changed.
 REVIEWED_WORKFLOW_HASHES = {
     "build.yml": "5b58e3dce7cb80ca1f4f828761a77f68fb17b6a03f7ab77f33863de80de6b0d5",
-    "test.yml": "5bdca6aee2121a20fe69ab8eb4aeb50539065685e52683922f5eb757692ac96e",
+    "test.yml": "118ec514ab73e1d4621edf4a7f692212f0fc680df49e6d17942356d08554b0e4",
 }
 
 
