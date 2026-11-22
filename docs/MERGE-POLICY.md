@@ -111,8 +111,10 @@ The rules below bind agent sessions that work for the maintainer (the coordinati
 |---|---|
 | M1 | One concern per pull request. Size is not a gate; the aim is a change one reviewer can hold, about 600 changed lines of product code. A larger one says why it cannot be split. |
 | M2 | The changelog entry is in the same pull request as the behaviour change, and the template's "Breaking" line is filled in and checked by the reviewer. |
-| M3 | A pull request may be merged by an agent only as the standing authorisations allow: reviewed and converged, required checks green on the final commit, no open thread, no new code-scanning alert, squash, pinned to the reviewed commit. |
+| M3 | A pull request may be merged by an agent only when all of these hold: its review converged (R5), required checks are green on the final commit, no thread is open, there is no new code-scanning alert, and the merge is a squash pinned to the reviewed commit. M5 names the changes an agent does not merge even then. |
 | M4 | Two open pull requests do not change the same file group. The tracking issue's workstreams define the groups. |
+| M5 | The maintainer goes first, whatever M3 allows, on a pull request that touches any of: workflows and other files under `.github/`; agent rules, settings and hooks (`.claude/`, `AGENTS.md`, `CLAUDE.md`, this document, [MAINTAINER-SESSION-RULES.md](MAINTAINER-SESSION-RULES.md)); CI scripts under `scripts/ci/`; signing; sign-in and crypto code (`src/PPDS.Auth/`); or data safety and write paths (a change labelled `data-safety`, code that creates, changes or deletes records or metadata in an environment, the environment-safety checks). The agent asks through the list of decisions waiting and does not merge until the maintainer has answered. |
+| M6 | The maintainer gets a daily list of what agents merged: the pull request, the reviewer's verdict and how to revert it. |
 
 ### CI
 
