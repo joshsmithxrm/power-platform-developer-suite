@@ -194,7 +194,24 @@ jobs:
       run: dotnet build --configuration Release --no-restore
 
     - name: Test
-      run: dotnet test --configuration Release --no-build --verbosity normal --filter "Category!=Integration"
+      run: dotnet test --configuration Release --no-build --verbosity normal --filter "Category!=Integration" --logger trx --results-directory ./test-results
+
+    # Failed tests become annotations, so the names can be read without the job log.
+    - name: Name the failed tests
+      if: failure()
+      run: |
+        python3 - <<'PY'
+        import glob
+        import re
+
+        failed = re.compile(r'<UnitTestResult\b[^>]*\btestName="([^"]*)"[^>]*\boutcome="Failed"')
+        names = sorted({match.group(1)
+                        for path in glob.glob("test-results/**/*.trx", recursive=True)
+                        for match in failed.finditer(open(path, encoding="utf-8", errors="replace").read())})
+        for name in names[:50]:
+            print(f"::error title=Failed test::{name}")
+        print(f"{len(names)} failed test(s) named." if names else "No failed test found in the result files.")
+        PY
 
   single-file-extraction:
     name: Single-file extraction (${{ matrix.rid }})
