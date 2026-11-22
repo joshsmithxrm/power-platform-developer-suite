@@ -57,7 +57,7 @@ review, pull requests, merging and CI are in the
 | Needs the maintainer | How |
 |---|---|
 | Any decision (D1) | The list of decisions waiting (D5); the answer is quoted on the issue. |
-| A merge the maintainer goes first on (M5 in [MERGE-POLICY.md](MERGE-POLICY.md)) | The list of decisions waiting (D5). The repository's settings do not ask before `gh pr merge`, so nothing prompts in an unattended session; the agent does not merge until the maintainer has answered. |
+| A merge outside the standing authorisations | The list of decisions waiting (D5). The repository's settings do not ask before `gh pr merge`; the agent does not merge until the maintainer has answered. |
 | Anything posted under the maintainer's account that the authorisations mark "ask" | The list of decisions waiting (D5), before posting. The repository's settings also ask before closing a pull request or an issue. |
 | A change that persists in an environment or on the maintainer's machine | Asked before, with what cannot be undone (P7 in [specs/test-gates.md](../specs/test-gates.md)). |
 | Tags, publication, release creation, signing policy, production keys, advisories, NuGet deprecation | Never done by an agent. The agent prepares the text and the checklist. |
