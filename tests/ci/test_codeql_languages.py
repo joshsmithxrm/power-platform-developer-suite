@@ -18,9 +18,16 @@ def test_both_languages_are_analysed_with_their_own_configuration():
     legs = {leg["language"]: leg for leg in job["strategy"]["matrix"]["include"]}
     assert set(legs) == {"csharp", "javascript-typescript"}
     assert job["strategy"]["fail-fast"] is False  # One language failing must not hide the other's result.
-    assert job["name"] == "Analyze ${{ matrix.name }}" and legs["csharp"]["name"] == "C#"
+    # The check names are "Analyze C#" and "Analyze TypeScript", and each leg has its own configuration.
+    assert job["name"] == "Analyze ${{ matrix.name }}"
+    assert legs["csharp"] == {
+        "language": "csharp", "name": "C#", "config": "./.github/codeql/codeql-config.yml"}
+    assert legs["javascript-typescript"] == {
+        "language": "javascript-typescript", "name": "TypeScript",
+        "config": "./.github/codeql/codeql-typescript-config.yml"}
     for leg in legs.values():
         assert (ROOT / leg["config"]).is_file(), leg["config"]
+    assert load(legs["csharp"]["config"])["queries"] == [{"uses": "security-and-quality"}]
 
     steps = {step["name"]: step for step in job["steps"]}
     assert steps["Initialize CodeQL"]["with"] == {
@@ -40,6 +47,9 @@ def test_a_change_to_the_extension_or_to_the_scan_itself_triggers_the_scan():
         paths = triggers[event]["paths"]
         for required in ("src/**/*.cs", "src/PPDS.Extension/**", ".github/codeql/**", ".github/workflows/codeql.yml"):
             assert required in paths, (event, required)
+    # The weekly and the manual run have no path filter, so both legs always run there.
+    assert triggers["schedule"] == [{"cron": "0 9 * * 1"}]
+    assert "workflow_dispatch" in triggers
 
 
 def test_typescript_scan_covers_the_extension_source_with_security_queries():
@@ -48,3 +58,6 @@ def test_typescript_scan_covers_the_extension_source_with_security_queries():
     assert config["queries"] == [{"uses": "security-extended"}]
     # Source directories must not be excluded; only tests, build output and dependencies are.
     assert not any(entry.startswith("src/PPDS.Extension/src") for entry in config["paths-ignore"])
+    assert config["paths-ignore"] == [
+        "src/PPDS.Extension/e2e/**", "**/__tests__/**", "**/*.test.ts", "**/*.test.mjs",
+        "src/PPDS.Extension/dist/**", "**/node_modules/**"]

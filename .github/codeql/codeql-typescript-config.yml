@@ -4,8 +4,11 @@
 
 name: "PPDS CodeQL Config (TypeScript)"
 
-# Only the code that ships in the extension. Build and test tooling elsewhere in
-# the repository (scripts/, tools/, the TUI end-to-end harness) is not scanned.
+# Everything under the extension's folder except its tests: the source that
+# ships, and the build and development tooling beside it (esbuild.js, tools/,
+# dev/, the test-runner configuration files), which does not ship but handles
+# downloads and bundling. JavaScript elsewhere in the repository (scripts/, the
+# root tools/, the TUI end-to-end harness) is not scanned.
 paths:
   - src/PPDS.Extension
 

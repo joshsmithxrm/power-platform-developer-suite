@@ -16,9 +16,10 @@ This document explains how code scanning tools are configured for the PPDS repos
 
 For C#, CodeQL runs the `security-and-quality` query suite with style rules disabled.
 
-For the VS Code extension's TypeScript (`src/PPDS.Extension`, tests excluded), CodeQL runs the
-`security-extended` suite: security queries only, because ESLint and the type checker already
-cover code quality there. No build is needed for that analysis.
+For the VS Code extension (`src/PPDS.Extension`: the TypeScript source and the build and
+development tooling beside it; the `e2e/`, `__tests__/` and `*.test.*` files are excluded), CodeQL
+runs the `security-extended` suite: security queries only, because ESLint and the type checker
+already cover code quality there. No build is needed for that analysis.
 
 ### Disabled Rules
 
