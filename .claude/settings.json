@@ -99,6 +99,7 @@
       "Bash(ppds data truncate:*)"
     ],
     "ask": [
+      "Bash(git rebase --exec:*)",
       "Bash(git tag -d:*)",
       "Bash(git tag -fa:*)",
       "Bash(gh pr merge:*)",
