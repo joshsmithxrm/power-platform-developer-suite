@@ -106,7 +106,6 @@
       "Bash(git rebase --exec:*)",
       "Bash(git tag -d:*)",
       "Bash(git tag -fa:*)",
-      "Bash(gh pr merge:*)",
       "Bash(gh pr close:*)",
       "Bash(gh issue close:*)",
       "Bash(gh release create:*)",
