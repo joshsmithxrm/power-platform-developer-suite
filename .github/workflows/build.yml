@@ -61,8 +61,10 @@ jobs:
       - name: Dependency Review
         uses: actions/dependency-review-action@v5
         with:
+          # The action looks only at dependencies the pull request adds or changes;
+          # vulnerable packages already on the base branch do not fail it.
           fail-on-severity: high
-          # Allow existing vulnerabilities, only fail on new ones
+          # No licence is denied.
           deny-licenses: ''
 
   build:
@@ -295,14 +297,20 @@ jobs:
             exit 1
           fi
           # Dependency review runs on pull requests only. There it must succeed; a skip,
-          # a cancellation or a failure blocks. On a push it is skipped by design.
+          # a cancellation or a failure blocks. On a push it is skipped by design. Any
+          # other event fails: a new trigger must decide what it requires here.
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             if [[ "${{ needs.dependency-review.result }}" != "success" ]]; then
               echo "Dependency review did not succeed on a pull request: ${{ needs.dependency-review.result }}"
               exit 1
             fi
-          elif [[ "${{ needs.dependency-review.result }}" != "skipped" ]]; then
-            echo "Dependency review reported an unexpected result outside a pull request: ${{ needs.dependency-review.result }}"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            if [[ "${{ needs.dependency-review.result }}" != "skipped" ]]; then
+              echo "Dependency review reported an unexpected result on a push: ${{ needs.dependency-review.result }}"
+              exit 1
+            fi
+          else
+            echo "No dependency review rule for event '${{ github.event_name }}'; add one before using this trigger"
             exit 1
           fi
           if [[ "${{ needs.build.result }}" == "success" || "${{ needs.build.result }}" == "skipped" ]] && \

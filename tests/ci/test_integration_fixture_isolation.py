@@ -28,8 +28,12 @@ REFUSAL_SCRIPT = (
 # 2026-11-20: 'scripts/ci/ci_images.py' (the one container image definition,
 # #1794) added to the test.yml extraction filter; no job, permission or secret
 # reference changed.
+# 2026-11-22: build.yml: build-status needs dependency-review and requires it to
+# have succeeded on a pull request (skipped on a push; any other event fails).
+# The review job's comments were corrected. No job, permission, trigger or
+# secret reference changed.
 REVIEWED_WORKFLOW_HASHES = {
-    "build.yml": "827a62770f7d8a4879321783287d0513e19d48fe13e5b9e406440daf6d3e1ebd",
+    "build.yml": "1db7195c6d60974fc5c32f40fe01fe450ee164725cb380f1df9fc6658ef5e72a",
     "test.yml": "5bdca6aee2121a20fe69ab8eb4aeb50539065685e52683922f5eb757692ac96e",
 }
 

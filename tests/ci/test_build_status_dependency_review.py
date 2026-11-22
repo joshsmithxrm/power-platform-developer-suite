@@ -58,7 +58,15 @@ def test_push_passes_with_dependency_review_skipped_by_design():
 def test_push_rejects_any_other_dependency_review_result(review):
     result = run_gate("push", review)
     assert result.returncode == 1
-    assert "unexpected result outside a pull request" in result.stdout
+    assert "unexpected result on a push" in result.stdout
+
+
+@pytest.mark.parametrize("event", ["workflow_dispatch", "pull_request_target", "merge_group", "schedule", ""])
+@pytest.mark.parametrize("review", ["success", "skipped", "failure"])
+def test_an_event_without_a_rule_fails_closed(event, review):
+    result = run_gate(event, review)
+    assert result.returncode == 1
+    assert "No dependency review rule for event" in result.stdout
 
 
 @pytest.mark.parametrize("event,review", [("pull_request", "success"), ("push", "skipped")])

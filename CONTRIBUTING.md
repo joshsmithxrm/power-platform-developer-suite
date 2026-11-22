@@ -249,7 +249,7 @@ description so a maintainer can, and say in the PR what changed and why.
 
 ### Checks
 
-Branch protection requires two checks: `build-status` (dependency review, the .NET build and the
+Branch protection requires two checks: `build-status` (dependency review on pull requests, the .NET build and the
 extension's typecheck, lint, build, unit and end-to-end tests) and `test-status`
 (the .NET unit tests, single-file extraction, VSIX and Python checks). Everything
 else is advisory: Codecov, CodeQL, the Pre-Merge Gate (PR size reporting and a
