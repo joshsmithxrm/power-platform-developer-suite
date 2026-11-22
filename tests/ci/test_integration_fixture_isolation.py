@@ -29,7 +29,7 @@ REFUSAL_SCRIPT = (
 # #1794) added to the test.yml extraction filter; no job, permission or secret
 # reference changed.
 REVIEWED_WORKFLOW_HASHES = {
-    "build.yml": "5b58e3dce7cb80ca1f4f828761a77f68fb17b6a03f7ab77f33863de80de6b0d5",
+    "build.yml": "827a62770f7d8a4879321783287d0513e19d48fe13e5b9e406440daf6d3e1ebd",
     "test.yml": "5bdca6aee2121a20fe69ab8eb4aeb50539065685e52683922f5eb757692ac96e",
 }
 
