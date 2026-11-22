@@ -106,13 +106,7 @@ public sealed class ServiceEndpointService : IServiceEndpointService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("serviceendpoints.webhook.register");
-        // Validate URL
-        if (!Uri.TryCreate(registration.Url, UriKind.Absolute, out _))
-        {
-            throw new PpdsException(
-                ErrorCodes.ServiceEndpoint.ValidationFailed,
-                $"Webhook URL '{registration.Url}' is not a valid absolute URI.");
-        }
+        EnsureWebhookUrl(registration.Url);
 
         // Check name uniqueness
         await EnsureNameAvailableAsync(registration.Name, cancellationToken);
@@ -204,6 +198,24 @@ public sealed class ServiceEndpointService : IServiceEndpointService
 
     #endregion
 
+    /// <summary>
+    /// Rejects a webhook URL that is not an absolute http:// or https:// address.
+    /// </summary>
+    /// <remarks>
+    /// "Absolute" alone is not enough: on Unix, <see cref="Uri.TryCreate(string, UriKind, out Uri)"/> parses a
+    /// rooted path such as <c>/relative/path</c> as an absolute <c>file://</c> address, so the scheme is checked too.
+    /// </remarks>
+    private static void EnsureWebhookUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new PpdsException(
+                ErrorCodes.ServiceEndpoint.ValidationFailed,
+                $"Webhook URL '{url}' is not a valid absolute http:// or https:// URI.");
+        }
+    }
+
     #region Update Operations
 
     /// <inheritdoc />
@@ -213,6 +225,11 @@ public sealed class ServiceEndpointService : IServiceEndpointService
         CancellationToken cancellationToken = default)
     {
         _guard.EnsureCanMutate("serviceendpoints.update");
+        if (request.Url is not null)
+        {
+            EnsureWebhookUrl(request.Url);
+        }
+
         // Fetch the existing endpoint to verify it exists and check managed state
         var existing = await GetByIdAsync(id, cancellationToken);
         if (existing is null)
