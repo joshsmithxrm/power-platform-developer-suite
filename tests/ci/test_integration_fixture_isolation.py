@@ -32,8 +32,12 @@ REFUSAL_SCRIPT = (
 # ubuntu-latest, and test-status now needs it under the "code" classification.
 # The new job reads no secret and has no write permission. No trigger changed
 # and no other job changed.
+# 2026-11-22: build.yml: build-status needs dependency-review and requires it to
+# have succeeded on a pull request (skipped on a push; any other event fails).
+# The review job's comments were corrected. No job, permission, trigger or
+# secret reference changed.
 REVIEWED_WORKFLOW_HASHES = {
-    "build.yml": "5b58e3dce7cb80ca1f4f828761a77f68fb17b6a03f7ab77f33863de80de6b0d5",
+    "build.yml": "1db7195c6d60974fc5c32f40fe01fe450ee164725cb380f1df9fc6658ef5e72a",
     "test.yml": "118ec514ab73e1d4621edf4a7f692212f0fc680df49e6d17942356d08554b0e4",
 }
 
