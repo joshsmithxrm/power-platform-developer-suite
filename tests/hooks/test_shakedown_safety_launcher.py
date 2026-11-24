@@ -152,15 +152,16 @@ def test_a_hook_killed_mid_run_refuses(tmp_path):
             "sys.stdin.buffer.read()\n"
             "time.sleep(30)\n")
     launcher = _stand_in(tmp_path, body)
-    proc = subprocess.Popen([sys.executable, str(launcher)], stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    proc.stdin.write(BLOCK_PAYLOAD.encode("utf-8"))
-    proc.stdin.close()
-    deadline = time.monotonic() + 30
-    while not (pid_file.exists() and pid_file.read_text()) and time.monotonic() < deadline:
-        time.sleep(0.02)
-    os.kill(int(pid_file.read_text()), signal.SIGKILL if POSIX else signal.SIGTERM)
-    out, err = proc.communicate(timeout=30)
+    payload = tmp_path / "payload.json"
+    payload.write_text(BLOCK_PAYLOAD, encoding="utf-8")
+    with open(payload, "rb") as stdin:
+        proc = subprocess.Popen([sys.executable, str(launcher)], stdin=stdin,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        deadline = time.monotonic() + 30
+        while not (pid_file.exists() and pid_file.read_text()) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        os.kill(int(pid_file.read_text()), signal.SIGKILL if POSIX else signal.SIGTERM)
+        _, err = proc.communicate(timeout=30)
     assert proc.returncode == 2, err
     assert b"ended abnormally" in err, err
 
@@ -294,11 +295,15 @@ def test_the_hook_files_import_no_thread_module(path):
 @pytest.mark.parametrize("payload, expected", [(BLOCK_PAYLOAD, 2), (PASS_PAYLOAD, 0)], ids=["refuse", "pass"])
 def test_only_the_main_thread_is_alive_when_the_hook_ends(tmp_path, payload, expected):
     """The real hook, run as __main__: at its exit only the main thread is alive, and no thread
-    module was imported by it (``threading`` is imported here only after the hook has ended)."""
-    code = ("import runpy, sys\n"
+    module was imported by it (``threading`` is imported here only after the hook has ended; the
+    hook is run with ``exec``, since ``runpy`` itself imports ``threading`` on older Pythons)."""
+    code = ("import sys\n"
             "sys.argv = [sys.argv[1]]\n"
+            "g = {'__name__': '__main__', '__file__': sys.argv[0], '__builtins__': __builtins__}\n"
             "try:\n"
-            "    runpy.run_path(sys.argv[0], run_name='__main__')\n"
+            "    with open(sys.argv[0], encoding='utf-8') as f:\n"
+            "        source = f.read()\n"
+            "    exec(compile(source, sys.argv[0], 'exec'), g)\n"
             "except SystemExit as e:\n"
             "    loaded = sorted(m for m in ('threading', 'concurrent.futures', 'multiprocessing')\n"
             "                    if m in sys.modules)\n"
