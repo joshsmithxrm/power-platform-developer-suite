@@ -31,6 +31,8 @@ public class DataverseMetadataQueryServiceTests
         services.AddLogging();
         services.AddDataverseConnectionPool(options =>
         {
+            // No seed or warm-up: an enabled pool would authenticate and connect to the URL below.
+            options.Pool.Enabled = false;
             options.Connections.Add(new DataverseConnection("Primary")
             {
                 Url = "https://test.crm.dynamics.com",
@@ -71,6 +73,8 @@ public class DataverseMetadataQueryServiceTests
         services.AddLogging();
         services.AddDataverseConnectionPool(options =>
         {
+            // No seed or warm-up: an enabled pool would authenticate and connect to the URL below.
+            options.Pool.Enabled = false;
             options.Connections.Add(new DataverseConnection("Primary")
             {
                 Url = "https://test.crm.dynamics.com",

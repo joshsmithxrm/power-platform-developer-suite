@@ -7,6 +7,7 @@ using PPDS.Cli.Commands.Serve.Handlers;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.History;
+using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Query;
 using Xunit;
 using PPDS.Tests.Shared;
@@ -117,11 +118,23 @@ public sealed class RpcProfileIdentityTests
     public async Task CapturedProvider_DoesNotReloadMutableProfileName_AndSeparatesIdentities()
     {
         var loads = 0;
+        var poolsBuilt = new List<(string? ObjectId, string Url)>();
+        // Only the pool is a fake (a real one would authenticate and connect). Profile resolution,
+        // the connection sources and the service provider are the production code, so this records
+        // which profile each source was really built from.
         await using var manager = new DaemonConnectionPoolManager(loadProfilesAsync: _ =>
         {
             loads++;
             throw new InvalidOperationException("Captured profiles must not be looked up again.");
-        });
+        })
+        {
+            PoolFactory = sources =>
+            {
+                var source = Assert.IsType<ProfileConnectionSourceAdapter>(Assert.Single(sources)).Source;
+                lock (poolsBuilt) poolsBuilt.Add((source.Profile.ObjectId, source.EnvironmentUrl));
+                return Mock.Of<IDataverseConnectionPool>();
+            }
+        };
         var profile = Profile();
         var first = await manager.GetOrCreateCapturedServiceProviderAsync(profile, "https://target.crm.dynamics.com");
         var again = await manager.GetOrCreateCapturedServiceProviderAsync(profile.Clone(), "https://target.crm.dynamics.com/");
@@ -133,6 +146,12 @@ public sealed class RpcProfileIdentityTests
         manager.InvalidateProfile("first");
         var invalidated = await manager.GetOrCreateCapturedServiceProviderAsync(profile, "https://target.crm.dynamics.com");
         Assert.NotSame(different, invalidated);
+        Assert.Equal(new (string?, string)[]
+        {
+            ("principal", "https://target.crm.dynamics.com"),
+            ("different-principal", "https://target.crm.dynamics.com"),
+            ("different-principal", "https://target.crm.dynamics.com"),
+        }, poolsBuilt);
     }
 
     [Fact]

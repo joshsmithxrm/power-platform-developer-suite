@@ -9,6 +9,7 @@ using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.PowerPlatform.Dataverse.Client.Model;
 using PPDS.Auth.Cloud;
 using PPDS.Auth.Profiles;
+using PPDS.Internal;
 
 namespace PPDS.Auth.Credentials;
 
@@ -205,6 +206,7 @@ public sealed class DeviceCodeCredentialProvider : ICredentialProvider
         }
 
         // Fall back to device code flow
+        InteractiveSignInGuard.ThrowIfBlocked("device code");
         AuthDebugLog.WriteLine("  Starting device code authentication...");
         _cachedResult = await _msalClient!
             .AcquireTokenWithDeviceCode(scopes, deviceCodeResult =>
