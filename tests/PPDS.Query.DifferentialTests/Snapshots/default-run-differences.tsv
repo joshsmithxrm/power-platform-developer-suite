@@ -1,5 +1,5 @@
 # Every evaluation of the default differential run that differs from SQL Server, exactly. Regenerate with the command in tests/PPDS.Query.DifferentialTests/README.md.
-# Run: seeds 1,2,3, 300 expressions per seed, depth up to 3. Rows: 1111.
+# Run: seeds 1,2,3, 300 expressions per seed, depth up to 3. Rows: 1109.
 # Evaluations: 3162. Evaluation list SHA-256: 1143688cc90e6704141f6136f6b47ff686d8173a3f7f1be4fc37d2e4e7c7b40b.
 expression	row	sql_server	ppds	first_seen	note
 (((c_dec / 748.58) + RTRIM(c_text)) * c_dec)	2	error Conversion (8114)	0.000000000000000000 : ~decimal	seed 2 expression 17	
@@ -29,7 +29,7 @@ expression	row	sql_server	ppds	first_seen	note
 ((2.5 / 1E-1) % CASE WHEN 7 IS NULL THEN (c_dec2 % c_money) ELSE (2147483647 - 2147483647) END)	7	error TypeClash (402)	error DivideByZero (DivideByZeroException)	seed 3 expression 125	
 ((2.5 / 748.58) / 3000000000)	1	0.000000000001113200 : decimal(21,18)	0.0000000000011132188053826356 : ~decimal	seed 3 expression 239	
 ((2147483647 + '2.5') * 748.58)	1	error Conversion (245)	16075633086584.050 : ~decimal	seed 1 expression 238	
-((2147483648 / 2147483648) / CAST(0.0001 AS decimal(38,6)))	1	10000.0000000000000000000000 : decimal(38,22)	error Refused (NotSupportedException)	seed 1 expression 26	
+((2147483648 / 2147483648) / CAST(0.0001 AS decimal(38,6)))	1	10000.0000000000000000000000 : decimal(38,22)	10000 : ~decimal	seed 1 expression 26	
 ((7 - 7) + (c_money - 2147483647))	5	error Overflow (8115)	-922339351169124.5808 : ~decimal	seed 1 expression 275	
 ((9.99 * 2147483648) / CAST(1.005 AS decimal(10,2)))	1	21240952122.2970297029702 : decimal(27,13)	21240952122.29702970297029703 : ~decimal	seed 2 expression 136	
 ((CAST(3000000000 AS money) % c_int) / 9.99)	1	0.40040040 : decimal(25,8)	0.4004004004004004004004004004 : ~decimal	seed 2 expression 70	
@@ -459,15 +459,15 @@ CAST((2.5 - c_float) AS nvarchar(30))	4	'-1.79769e+308' : nvarchar(30)	'-1.79769
 CAST((2.5 - c_float) AS nvarchar(30))	5	'1.79769e+308' : nvarchar(30)	'1.7976931348623157E+308' : ~text	seed 3 expression 290	
 CAST((9.99 / c_money) AS money)	3	-99900.0000 : money	-99900 : ~decimal	seed 1 expression 254	
 CAST((9.99 / c_money) AS money)	7	99900.0000 : money	99900 : ~decimal	seed 1 expression 254	
-CAST((c_money - 1E-1) AS decimal(38,6))	1	12.245600 : decimal(38,6)	error Refused (NotSupportedException)	seed 2 expression 72	
-CAST((c_money - 1E-1) AS decimal(38,6))	2	-0.100000 : decimal(38,6)	error Refused (NotSupportedException)	seed 2 expression 72	
-CAST((c_money - 1E-1) AS decimal(38,6))	3	-0.100100 : decimal(38,6)	error Refused (NotSupportedException)	seed 2 expression 72	
-CAST((c_money - 1E-1) AS decimal(38,6))	4	922337203685477.500000 : decimal(38,6)	error Refused (NotSupportedException)	seed 2 expression 72	
-CAST((c_money - 1E-1) AS decimal(38,6))	5	-922337203685477.750000 : decimal(38,6)	error Refused (NotSupportedException)	seed 2 expression 72	
-CAST((c_money - 1E-1) AS decimal(38,6))	7	-0.099900 : decimal(38,6)	error Refused (NotSupportedException)	seed 2 expression 72	
-CAST(0 AS decimal(38,6))	1	0.000000 : decimal(38,6)	error Refused (NotSupportedException)	seed 1 expression 19	
+CAST((c_money - 1E-1) AS decimal(38,6))	1	12.245600 : decimal(38,6)	12.2456 : ~decimal	seed 2 expression 72	
+CAST((c_money - 1E-1) AS decimal(38,6))	2	-0.100000 : decimal(38,6)	-0.1 : ~decimal	seed 2 expression 72	
+CAST((c_money - 1E-1) AS decimal(38,6))	3	-0.100100 : decimal(38,6)	-0.1001 : ~decimal	seed 2 expression 72	
+CAST((c_money - 1E-1) AS decimal(38,6))	4	922337203685477.500000 : decimal(38,6)	922337203685478 : ~decimal	seed 2 expression 72	
+CAST((c_money - 1E-1) AS decimal(38,6))	5	-922337203685477.750000 : decimal(38,6)	-922337203685478 : ~decimal	seed 2 expression 72	
+CAST((c_money - 1E-1) AS decimal(38,6))	7	-0.099900 : decimal(38,6)	-0.0999 : ~decimal	seed 2 expression 72	
+CAST(0 AS decimal(38,6))	1	0.000000 : decimal(38,6)	0 : ~decimal	seed 1 expression 19	
 CAST(1 AS money)	1	1.0000 : money	1 : ~decimal	seed 1 expression 279	
-CAST(1.005 AS decimal(38,6))	1	1.005000 : decimal(38,6)	error Refused (NotSupportedException)	seed 1 expression 163	
+CAST(1.005 AS decimal(38,6))	1	1.005000 : decimal(38,6)	1.005 : ~decimal	seed 1 expression 163	
 CAST(1.005 AS money)	1	1.0050 : money	1.005 : ~decimal	seed 3 expression 80	
 CAST(1.5E0 AS decimal(10,2))	1	1.50 : decimal(10,2)	1.5 : ~decimal	seed 2 expression 10	
 CAST(1E-1 AS money)	1	0.1000 : money	0.1 : ~decimal	seed 3 expression 51	
@@ -490,13 +490,13 @@ CAST(IIF(c_text IS NULL, 2147483647, ABS(0)) AS money)	7	0.0000 : money	0 : ~dec
 CAST(LEFT('ā', 2) AS int)	1	error Conversion (245)	error Refused (NotSupportedException)	seed 2 expression 141	
 CAST(LEFT(N' x ', 2) AS int)	1	error Conversion (245)	error Refused (NotSupportedException)	seed 1 expression 128	
 CAST(LEN('2.5') AS money)	1	3.0000 : money	3 : ~decimal	seed 3 expression 39	
-CAST(LEN(LTRIM(N'5')) AS decimal(38,6))	1	1.000000 : decimal(38,6)	error Refused (NotSupportedException)	seed 1 expression 132	
+CAST(LEN(LTRIM(N'5')) AS decimal(38,6))	1	1.000000 : decimal(38,6)	1 : ~decimal	seed 1 expression 132	
 CAST(LOWER(c_text) AS int)	2	0 : int	error Conversion (FormatException)	seed 2 expression 212	
 CAST(N'' AS int)	1	0 : int	error Conversion (FormatException)	seed 2 expression 59	
 CAST(N'5' AS decimal(10,2))	1	5.00 : decimal(10,2)	5 : ~decimal	seed 1 expression 292	
-CAST(PATINDEX('%[^a-z]%', UPPER(N'')) AS decimal(38,6))	1	0.000000 : decimal(38,6)	error Refused (NotSupportedException)	seed 2 expression 252	
-CAST(PATINDEX('%b%', 'ā') AS decimal(38,6))	1	0.000000 : decimal(38,6)	error Refused (NotSupportedException)	seed 3 expression 280	
-CAST(PATINDEX('%b%', N' x ') AS decimal(38,6))	1	0.000000 : decimal(38,6)	error Refused (NotSupportedException)	seed 2 expression 286	
+CAST(PATINDEX('%[^a-z]%', UPPER(N'')) AS decimal(38,6))	1	0.000000 : decimal(38,6)	0 : ~decimal	seed 2 expression 252	
+CAST(PATINDEX('%b%', 'ā') AS decimal(38,6))	1	0.000000 : decimal(38,6)	0 : ~decimal	seed 3 expression 280	
+CAST(PATINDEX('%b%', N' x ') AS decimal(38,6))	1	0.000000 : decimal(38,6)	0 : ~decimal	seed 2 expression 286	
 CAST(PATINDEX('_b%', RTRIM('ā')) AS decimal(10,2))	1	0.00 : decimal(10,2)	0 : ~decimal	seed 1 expression 219	
 CAST(ROUND((-7), 2) AS money)	1	-7.0000 : money	-7 : ~decimal	seed 2 expression 205	
 CAST(ROUND(0, -3) AS nvarchar(30))	1	'0' : nvarchar(30)	error Other (ArgumentOutOfRangeException)	seed 3 expression 233	
@@ -518,18 +518,16 @@ CAST(ROUND(c_bigint, 2) AS money)	3	-9000000000.0000 : money	-9000000000 : ~deci
 CAST(ROUND(c_bigint, 2) AS money)	4	error Overflow (8115)	9223372036854780000 : ~decimal	seed 3 expression 114	
 CAST(ROUND(c_bigint, 2) AS money)	5	error Overflow (8115)	-9223372036854780000 : ~decimal	seed 3 expression 114	
 CAST(ROUND(c_bigint, 2) AS money)	7	2147483648.0000 : money	2147483648 : ~decimal	seed 3 expression 114	
-CAST(c_bigint AS decimal(38,6))	1	3000000000.000000 : decimal(38,6)	error Refused (NotSupportedException)	seed 1 expression 27	
-CAST(c_bigint AS decimal(38,6))	2	0.000000 : decimal(38,6)	error Refused (NotSupportedException)	seed 1 expression 27	
-CAST(c_bigint AS decimal(38,6))	3	-9000000000.000000 : decimal(38,6)	error Refused (NotSupportedException)	seed 1 expression 27	
-CAST(c_bigint AS decimal(38,6))	4	9223372036854775807.000000 : decimal(38,6)	error Refused (NotSupportedException)	seed 1 expression 27	
-CAST(c_bigint AS decimal(38,6))	5	-9223372036854775808.000000 : decimal(38,6)	error Refused (NotSupportedException)	seed 1 expression 27	
-CAST(c_bigint AS decimal(38,6))	7	2147483648.000000 : decimal(38,6)	error Refused (NotSupportedException)	seed 1 expression 27	
-CAST(c_float AS decimal(38,6))	1	0.100000 : decimal(38,6)	error Refused (NotSupportedException)	seed 1 expression 209	
-CAST(c_float AS decimal(38,6))	2	0.000000 : decimal(38,6)	error Refused (NotSupportedException)	seed 1 expression 209	
-CAST(c_float AS decimal(38,6))	3	-2.500000 : decimal(38,6)	error Refused (NotSupportedException)	seed 1 expression 209	
-CAST(c_float AS decimal(38,6))	4	error Overflow (8115)	error Refused (NotSupportedException)	seed 1 expression 209	
-CAST(c_float AS decimal(38,6))	5	error Overflow (8115)	error Refused (NotSupportedException)	seed 1 expression 209	
-CAST(c_float AS decimal(38,6))	7	0.000000 : decimal(38,6)	error Refused (NotSupportedException)	seed 1 expression 209	
+CAST(c_bigint AS decimal(38,6))	1	3000000000.000000 : decimal(38,6)	3000000000 : ~decimal	seed 1 expression 27	
+CAST(c_bigint AS decimal(38,6))	2	0.000000 : decimal(38,6)	0 : ~decimal	seed 1 expression 27	
+CAST(c_bigint AS decimal(38,6))	3	-9000000000.000000 : decimal(38,6)	-9000000000 : ~decimal	seed 1 expression 27	
+CAST(c_bigint AS decimal(38,6))	4	9223372036854775807.000000 : decimal(38,6)	9223372036854775807 : ~decimal	seed 1 expression 27	
+CAST(c_bigint AS decimal(38,6))	5	-9223372036854775808.000000 : decimal(38,6)	-9223372036854775808 : ~decimal	seed 1 expression 27	
+CAST(c_bigint AS decimal(38,6))	7	2147483648.000000 : decimal(38,6)	2147483648 : ~decimal	seed 1 expression 27	
+CAST(c_float AS decimal(38,6))	1	0.100000 : decimal(38,6)	0.1 : ~decimal	seed 1 expression 209	
+CAST(c_float AS decimal(38,6))	2	0.000000 : decimal(38,6)	0 : ~decimal	seed 1 expression 209	
+CAST(c_float AS decimal(38,6))	3	-2.500000 : decimal(38,6)	-2.5 : ~decimal	seed 1 expression 209	
+CAST(c_float AS decimal(38,6))	7	0.000000 : decimal(38,6)	0 : ~decimal	seed 1 expression 209	
 CAST(c_int AS decimal(10,2))	1	7.00 : decimal(10,2)	7 : ~decimal	seed 1 expression 231	
 CAST(c_int AS decimal(10,2))	2	0.00 : decimal(10,2)	0 : ~decimal	seed 1 expression 231	
 CAST(c_int AS decimal(10,2))	3	-7.00 : decimal(10,2)	-7 : ~decimal	seed 1 expression 231	
@@ -706,13 +704,13 @@ IIF(7 > 2.5, CASE WHEN NULL = 1E-1 THEN 1E-1 ELSE c_bigint END, ISNULL(0.0001, 9
 IIF(7 > 2.5, CASE WHEN NULL = 1E-1 THEN 1E-1 ELSE c_bigint END, ISNULL(0.0001, 9.99))	4	9.223372036854776E+18 : float	9223372036854775807 : ~bigint	seed 3 expression 286	
 IIF(7 > 2.5, CASE WHEN NULL = 1E-1 THEN 1E-1 ELSE c_bigint END, ISNULL(0.0001, 9.99))	5	-9.223372036854776E+18 : float	-9223372036854775808 : ~bigint	seed 3 expression 286	
 IIF(7 > 2.5, CASE WHEN NULL = 1E-1 THEN 1E-1 ELSE c_bigint END, ISNULL(0.0001, 9.99))	7	2147483648 : float	2147483648 : ~bigint	seed 3 expression 286	
-IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	1	2 : bigint	error Refused (NotSupportedException)	seed 3 expression 89	
-IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	2	0 : bigint	error Refused (NotSupportedException)	seed 3 expression 89	
-IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	3	0 : bigint	error Refused (NotSupportedException)	seed 3 expression 89	
-IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	4	0 : bigint	error Refused (NotSupportedException)	seed 3 expression 89	
-IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	5	-9999999999 : bigint	error Refused (NotSupportedException)	seed 3 expression 89	
-IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	6	748 : bigint	error Refused (NotSupportedException)	seed 3 expression 89	
-IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	7	0 : bigint	error Refused (NotSupportedException)	seed 3 expression 89	
+IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	1	2 : bigint	error Other (ArgumentOutOfRangeException)	seed 3 expression 89	
+IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	2	0 : bigint	error Other (ArgumentOutOfRangeException)	seed 3 expression 89	
+IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	3	0 : bigint	error Other (ArgumentOutOfRangeException)	seed 3 expression 89	
+IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	4	0 : bigint	error Other (ArgumentOutOfRangeException)	seed 3 expression 89	
+IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	5	-9999999999 : bigint	error Other (ArgumentOutOfRangeException)	seed 3 expression 89	
+IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	6	748 : bigint	748.58 : ~decimal	seed 3 expression 89	
+IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	7	0 : bigint	error Other (ArgumentOutOfRangeException)	seed 3 expression 89	
 IIF(CAST(N'ꞔ' AS varchar(3)) = TRIM('ā'), 9.99, ROUND(ROUND(3000000000, -3), 0))	1	3000000000.00 : decimal(12,2)	error Other (ArgumentOutOfRangeException)	seed 3 expression 248	
 IIF(CONCAT('2.5', N'') < CONCAT('abc ', c_text), COALESCE(c_int, ISNULL(c_bigint, 7)), CHARINDEX(N'b', N' x '))	1	7 : bigint	7 : ~int	seed 3 expression 272	
 IIF(CONCAT('2.5', N'') < CONCAT('abc ', c_text), COALESCE(c_int, ISNULL(c_bigint, 7)), CHARINDEX(N'b', N' x '))	2	0 : bigint	0 : ~int	seed 3 expression 272	
@@ -831,7 +829,7 @@ ISNULL(CASE WHEN c_dec = 9.99 THEN 3000000000 ELSE 0 END, c_dec2)	4	0 : decimal(
 ISNULL(CASE WHEN c_dec = 9.99 THEN 3000000000 ELSE 0 END, c_dec2)	5	0 : decimal(10,0)	0 : ~int	seed 2 expression 99	
 ISNULL(CASE WHEN c_dec = 9.99 THEN 3000000000 ELSE 0 END, c_dec2)	6	0 : decimal(10,0)	0 : ~int	seed 2 expression 99	
 ISNULL(CASE WHEN c_dec = 9.99 THEN 3000000000 ELSE 0 END, c_dec2)	7	0 : decimal(10,0)	0 : ~int	seed 2 expression 99	
-ISNULL(CAST(CAST(2 AS decimal(10,2)) AS decimal(38,6)), NULLIF(CAST(0 AS bigint), 9.99))	1	2.000000 : decimal(38,6)	error Refused (NotSupportedException)	seed 3 expression 211	
+ISNULL(CAST(CAST(2 AS decimal(10,2)) AS decimal(38,6)), NULLIF(CAST(0 AS bigint), 9.99))	1	2.000000 : decimal(38,6)	2 : ~decimal	seed 3 expression 211	
 ISNULL(CAST(ROUND(1.5E0, -1) AS int), CAST((2147483647 - 3000000000) AS money))	1	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 284	
 ISNULL(CAST(c_bigint AS money), CAST(LTRIM(N'') AS decimal(10,2)))	1	3000000000.0000 : money	error Conversion (FormatException)	seed 1 expression 174	
 ISNULL(CAST(c_bigint AS money), CAST(LTRIM(N'') AS decimal(10,2)))	2	0.0000 : money	error Conversion (FormatException)	seed 1 expression 174	

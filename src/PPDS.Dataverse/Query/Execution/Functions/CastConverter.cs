@@ -145,14 +145,6 @@ public static class CastConverter
 
     private static decimal ConvertToDecimal(object value, int? precision, int? scale)
     {
-        // Beyond 28 digits the result would not be what T-SQL computes. That is a limitation of the engine, not a value
-        // that does not fit, so it is not an error TRY_CAST / TRY_CONVERT may turn into NULL.
-        if (precision > MaxExactDecimalPrecision || scale > MaxExactDecimalPrecision)
-        {
-            throw new NotSupportedException(
-                $"decimal({precision}, {scale ?? 0}) is not supported: at most {MaxExactDecimalPrecision} digits of precision are computed exactly.");
-        }
-
         decimal result = value switch
         {
             int i => i,
@@ -166,6 +158,12 @@ public static class CastConverter
             Guid => throw new InvalidCastException("Cannot convert uniqueidentifier to decimal."),
             _ => System.Convert.ToDecimal(value, CultureInfo.InvariantCulture)
         };
+
+        // A scale above 28 cannot be held at all (System.Decimal keeps at most 28 places), so the value as SQL Server
+        // types it does not fit. That is a limitation of the engine, not a value that does not fit decimal(p, s), so it
+        // is not an error TRY_CAST / TRY_CONVERT may turn into NULL.
+        if (scale > MaxExactDecimalPrecision)
+            throw NotExact(result, precision, scale);
 
         // Apply scale if specified
         if (scale.HasValue)
@@ -181,8 +179,32 @@ public static class CastConverter
                 $"Arithmetic overflow error converting {result.ToString(CultureInfo.InvariantCulture)} to data type decimal({precision}, {scale ?? 0}).");
         }
 
+        // decimal(p, s) wider than 28 digits (maintainer decision, 2026-11-24, "Value when it fits"): the value is
+        // returned when its digits before the point plus the s places fit in 28 digits, which System.Decimal holds
+        // exactly; otherwise the engine cannot hold it as SQL Server does and refuses.
+        if (precision > MaxExactDecimalPrecision && IntegerDigits(result) + (scale ?? 0) > MaxExactDecimalPrecision)
+            throw NotExact(result, precision, scale);
+
         return result;
     }
+
+    /// <summary>The number of digits before the decimal point (0 for a value below 1).</summary>
+    private static int IntegerDigits(decimal value)
+    {
+        var whole = decimal.Truncate(Math.Abs(value));
+        var digits = 0;
+        while (whole >= 1m)
+        {
+            whole = decimal.Truncate(whole / 10m);
+            digits++;
+        }
+        return digits;
+    }
+
+    private static NotSupportedException NotExact(decimal value, int? precision, int? scale)
+        => new($"The value {value.ToString(CultureInfo.InvariantCulture)} as decimal({precision}, {scale ?? 0}) needs more than " +
+               $"{MaxExactDecimalPrecision} digits, which the query engine cannot hold exactly, so it is refused. " +
+               $"Use a precision of at most {MaxExactDecimalPrecision}, or a smaller scale.");
 
     private static decimal Pow10(int exponent)
     {

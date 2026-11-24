@@ -67,16 +67,68 @@ public class TsqlValueSemanticsTests
     public void TryConvert_GivesNull_WhereTsqlOverflows(string value, string type)
         => CastConverter.TryConvert(decimal.Parse(value, System.Globalization.CultureInfo.InvariantCulture), type).Should().BeNull();
 
-    // B-F1 (round 2): a precision the engine cannot compute exactly is an engine limitation, which must never become NULL.
+    // B-F1 (round 2): a value the engine cannot hold exactly is an engine limitation, which must never become NULL.
+    // A scale above 28 is never held (System.Decimal keeps at most 28 places).
     [Theory]
     [InlineData("decimal(38, 30)")]
     [InlineData("decimal(30, 29)")]
-    [InlineData("decimal(29, 2)")]
-    public void TryConvert_ToAPrecisionAbove28_IsAnError_NotNull(string type)
+    [InlineData("decimal(38, 29)")]
+    public void TryConvert_ToAScaleAbove28_IsAnError_NotNull(string type)
     {
         var act = () => CastConverter.TryConvert(10.55m, type);
 
         act.Should().Throw<NotSupportedException>();
+    }
+
+    // ---- decimal(p, s) wider than 28 digits: the value when it fits (maintainer decision, 2026-11-24) ----------
+
+    [Theory]
+    [InlineData("10.55", "decimal(29, 2)", "10.55")]
+    [InlineData("2.5", "decimal(38, 6)", "2.5")]
+    [InlineData("-1", "decimal(38, 6)", "-1")]
+    [InlineData("10000000000000", "decimal(38, 6)", "10000000000000")]
+    [InlineData("1.23456789", "decimal(38, 6)", "1.234568")]
+    [InlineData("0.5", "decimal(38, 28)", "0.5")]
+    // the boundary, fitting side: 22 digits before the point + 6 places = 28 digits
+    [InlineData("1234567890123456789012.123456", "decimal(38, 6)", "1234567890123456789012.123456")]
+    [InlineData("-1234567890123456789012.123456", "decimal(38, 6)", "-1234567890123456789012.123456")]
+    // 28 digits before the point and no places
+    [InlineData("1234567890123456789012345678", "decimal(38, 0)", "1234567890123456789012345678")]
+    public void DecimalWiderThan28_ReturnsTheValue_WhenItFitsIn28Digits(string value, string type, string expected)
+    {
+        var parsed = decimal.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+
+        ((decimal)CastConverter.Convert(parsed, type)!).Should().Be(decimal.Parse(expected, System.Globalization.CultureInfo.InvariantCulture));
+        ((decimal)CastConverter.TryConvert(parsed, type)!).Should().Be(decimal.Parse(expected, System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Theory]
+    // the boundary, refused side: 23 digits before the point + 6 places = 29 digits
+    [InlineData("12345678901234567890123", "decimal(38, 6)")]
+    [InlineData("-12345678901234567890123", "decimal(38, 6)")]
+    // 22 digits + 7 places
+    [InlineData("1234567890123456789012", "decimal(38, 7)")]
+    // a scale of 29 is never held, whatever the value
+    [InlineData("0.5", "decimal(38, 29)")]
+    [InlineData("0", "decimal(38, 29)")]
+    public void DecimalWiderThan28_IsRefused_WhenTheValueDoesNotFitIn28Digits(string value, string type)
+    {
+        var parsed = decimal.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+
+        var cast = () => CastConverter.Convert(parsed, type);
+        cast.Should().Throw<NotSupportedException>().WithMessage("*needs more than 28 digits*");
+        var tryCast = () => CastConverter.TryConvert(parsed, type);
+        tryCast.Should().Throw<NotSupportedException>("an engine limitation never becomes NULL");
+    }
+
+    [Fact]
+    public void DecimalWiderThan28_StillOverflowsAsTsqlDoes_WhenTheValueExceedsItsPrecision()
+    {
+        // decimal(30, 10) holds 20 digits before the point; 10^20 has 21.
+        var cast = () => CastConverter.Convert(100000000000000000000m, "decimal(30, 10)");
+
+        cast.Should().Throw<OverflowException>();
+        CastConverter.TryConvert(100000000000000000000m, "decimal(30, 10)").Should().BeNull();
     }
 
     [Theory]
