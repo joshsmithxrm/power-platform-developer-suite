@@ -248,7 +248,7 @@ internal static class DmlColumnValidator
             case "Lookup" when IsGuidValue(value):
                 return;
             case "Lookup":
-                throw Refuse($"{column} is a lookup; write the row id as a quoted GUID ('00000000-0000-0000-0000-000000000000'), or NULL.");
+                throw Refuse($"{column} is a lookup; write the row id as a quoted GUID with dashes, with or without braces and without spaces ('00000000-0000-0000-0000-000000000000'), or NULL.");
             case "DateTime":
                 if (Unwrap(value) is not StringLiteral literal)
                     throw Refuse($"{column} is a date/time column; write the value as a quoted literal ({DateHint(target)}), or NULL.");
@@ -481,14 +481,18 @@ internal static class DmlColumnValidator
 
     private static ScalarExpression Unwrap(ScalarExpression value) => value is ParenthesisExpression paren ? Unwrap(paren.Expression) : value;
 
+    /// <summary>
+    /// A written row id: a GUID string literal, or CAST of one to uniqueidentifier, in a spelling SQL Server and the engine
+    /// read the same (<see cref="DmlStatementSupport.IsCanonicalGuidText"/>: dashes, optional braces, no spaces).
+    /// </summary>
     private static bool IsGuidValue(ScalarExpression value) => Unwrap(value) switch
     {
-        StringLiteral s => IsGuidText(s.Value),
-        CastCall { DataType: SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.UniqueIdentifier }, Parameter: StringLiteral s } => IsGuidText(s.Value),
+        StringLiteral s => DmlStatementSupport.IsCanonicalGuidText(s.Value),
+        CastCall { DataType: SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.UniqueIdentifier }, Parameter: StringLiteral s } => DmlStatementSupport.IsCanonicalGuidText(s.Value),
         _ => false
     };
 
-    /// <summary>The GUID forms proven live: with dashes, with or without braces, any case.</summary>
+    /// <summary>The GUID forms a WHERE condition may compare an id with: with dashes, with or without braces, any case (.NET ignores surrounding spaces).</summary>
     private static bool IsGuidText(string text)
         => Guid.TryParseExact(text, "D", out _) || Guid.TryParseExact(text, "B", out _);
 

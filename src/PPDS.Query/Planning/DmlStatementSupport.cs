@@ -23,12 +23,13 @@ namespace PPDS.Query.Planning;
 /// (no <c>[ ]</c> or ESCAPE), <c>column [NOT] BETWEEN constant AND constant</c> and <c>column IS [NOT] NULL</c>. These are
 /// sent to Dataverse as FetchXML conditions; a constant is a string or number literal. NOT, functions, variables,
 /// subqueries, column-to-column comparisons and comparisons with NULL are refused.</item>
-/// <item>Values (UPDATE SET, INSERT ... SELECT list): literals, the target's (or source's) columns, arithmetic,
-/// COALESCE, ISNULL, NULLIF, IIF, CASE, CAST/CONVERT to nvarchar(n), int or decimal(p, s), TRY_CAST/TRY_CONVERT to int or
-/// decimal(p, s) and the functions in <see cref="AllowedFunctions"/> with their proven argument forms. Variables and
-/// subqueries are refused.</item>
+/// <item>Written values (UPDATE SET, INSERT VALUES, INSERT ... SELECT list), the interim rule: a string, whole-number or
+/// decimal literal, NULL, a minus sign on a whole-number or decimal literal, <c>CAST('&lt;guid&gt;' AS uniqueidentifier)</c>
+/// with a GUID spelled as <see cref="IsCanonicalGuidText"/> allows, or (not in VALUES) a column of the statement's table.
+/// Everything else (arithmetic, parentheses, functions, CASE, IIF, COALESCE, NULLIF, other conversions, variables,
+/// subqueries) is refused until the typed SQL value engine proves it; see <see cref="AdmittedValueNodeKinds"/>.</item>
 /// <item>INSERT: an explicit column list without duplicates; up to 1,000 VALUES rows of the same length whose values are
-/// literals, NULL or CAST('&lt;guid&gt;' AS uniqueidentifier); or a SELECT from the same table whose list has the same
+/// written values without columns; or a SELECT from the same table whose list has the same
 /// length, where every item is a column or an aliased expression with a unique name that is not a column the SELECT reads
 /// (values are mapped by position). <c>TOP n</c> / <c>TOP (n)</c> up to 5,000 only with ORDER BY on columns, and ORDER BY only
 /// with TOP.</item>
@@ -38,13 +39,6 @@ namespace PPDS.Query.Planning;
 internal static class DmlStatementSupport
 {
     private const string NothingExecuted = " Nothing was executed.";
-
-    /// <summary>Scalar functions proven (by tests) to evaluate correctly in DML values.</summary>
-    public static readonly IReadOnlySet<string> AllowedFunctions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        // REPLACE is not listed: the organisation's collation matches text without regard to accents, the evaluator does not.
-        "UPPER", "LOWER", "LTRIM", "RTRIM", "TRIM", "LEN", "CONCAT", "SUBSTRING", "ABS", "ROUND", "ISNULL"
-    };
 
     private static readonly Sql160ScriptGenerator Generator = new();
 
@@ -207,32 +201,8 @@ internal static class DmlStatementSupport
         }
     }
 
-    /// <summary>
-    /// A VALUES item: a literal (text, whole or decimal number, NULL), a negative number, or CAST('&lt;guid&gt;' AS
-    /// uniqueidentifier). Only these were proven live; an expression would be evaluated by the engine, not SQL.
-    /// </summary>
-    private static string? CheckInsertValue(ScalarExpression value)
-    {
-        const string context = "INSERT ... VALUES";
-        switch (value)
-        {
-            case StringLiteral or IntegerLiteral or NumericLiteral or NullLiteral:
-            case UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative, Expression: IntegerLiteral or NumericLiteral }:
-            case CastCall { DataType: SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.UniqueIdentifier }, Parameter: StringLiteral }:
-                return null;
-            case RealLiteral or UnaryExpression { Expression: RealLiteral }:
-                return Unsupported($"{Sql(value)} (a floating-point literal)", context, RealLiteralHowTo);
-            case ColumnReferenceExpression column:
-                return Unsupported($"the column {Sql(column)}", context, " VALUES takes constants; use INSERT ... SELECT to copy columns.");
-            case VariableReference or GlobalVariableExpression:
-                return Unsupported($"the variable {Sql(value)}", context, " Use a literal value instead.");
-            case FunctionCall function when function.FunctionName.Value.Equals("NEWID", StringComparison.OrdinalIgnoreCase):
-                return Unsupported("the function NEWID", context, " Dataverse generates row ids; leave the id column out.");
-            default:
-                return Unsupported(Sql(value), context,
-                    " VALUES takes literal values only (text, numbers, NULL, or CAST('<guid>' AS uniqueidentifier)); write the value you want stored as a literal.");
-        }
-    }
+    /// <summary>A VALUES item: a written value without columns (see <see cref="IsAdmittedValue"/>).</summary>
+    private static string? CheckInsertValue(ScalarExpression value) => CheckValue(value, null, "INSERT ... VALUES");
 
     private static string? CheckInsertSelect(QuerySpecification select, int columnCount, NamedTableReference target)
     {
@@ -537,138 +507,133 @@ internal static class DmlStatementSupport
 
     private const string RealLiteralHowTo = " Write the number as a decimal, for example 2.5 instead of 2.5E0.";
 
-    // ── values: expressions the engine evaluates against the row ───────
+    // ── values: the interim rule ────────────────────────────────────────
 
     /// <summary>
-    /// A value (SET, VALUES, SELECT list) made only of proven node kinds. <paramref name="columns"/> is null where columns
-    /// are not allowed (INSERT VALUES).
+    /// The expression node kinds a written value (UPDATE SET, INSERT VALUES, INSERT ... SELECT list) may be, matched by
+    /// exact type: a string, whole-number or decimal literal, NULL, a column, a minus sign on a whole-number or decimal
+    /// literal (<see cref="UnaryExpression"/>), and <c>CAST('&lt;guid&gt;' AS uniqueidentifier)</c> (<see cref="CastCall"/>).
+    /// Every other node kind, including any the parser adds later, is refused.
+    /// </summary>
+    /// <remarks>
+    /// The interim rule for DML on <c>main</c> (maintainer decisions of 2026-11-19 and 2026-11-24): until the typed SQL
+    /// value engine (#1764) proves a construct, a written value is a literal, a column reference or NULL. The query engine
+    /// computes other expressions with .NET rules, which the differential harness showed differ from SQL Server.
+    /// </remarks>
+    public static readonly IReadOnlySet<Type> AdmittedValueNodeKinds = new HashSet<Type>
+    {
+        typeof(StringLiteral), typeof(IntegerLiteral), typeof(NumericLiteral), typeof(NullLiteral),
+        typeof(ColumnReferenceExpression), typeof(UnaryExpression), typeof(CastCall)
+    };
+
+    /// <summary>
+    /// The GUID spellings a written <c>CAST('...' AS uniqueidentifier)</c> may use: 32 hexadecimal digits in groups of
+    /// 8-4-4-4-12 separated by dashes, either case, optionally inside one pair of braces, and nothing else (no spaces).
+    /// SQL Server and the engine read these the same; other spellings differ (#1875).
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex CanonicalGuid = new(
+        @"\A(?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}|\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\})\z",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>True when <paramref name="text"/> is a GUID in a spelling a written value may use (see <see cref="CanonicalGuid"/>).</summary>
+    public static bool IsCanonicalGuidText(string text) => CanonicalGuid.IsMatch(text);
+
+    /// <summary>
+    /// True when <paramref name="expression"/> is a written value the interim rule admits (before the check that a column
+    /// belongs to the statement's table). The node's exact type must be in <see cref="AdmittedValueNodeKinds"/>.
+    /// </summary>
+    public static bool IsAdmittedValue(ScalarExpression expression)
+    {
+        if (!AdmittedValueNodeKinds.Contains(expression.GetType()))
+            return false;
+        return expression switch
+        {
+            StringLiteral or IntegerLiteral or NumericLiteral or NullLiteral => true,
+            ColumnReferenceExpression column => column.ColumnType == ColumnType.Regular,
+            UnaryExpression unary => IsNegativeNumber(unary),
+            CastCall cast => IsGuidCast(cast),
+            _ => false
+        };
+    }
+
+    /// <summary>A minus sign written directly on a whole-number or decimal literal, such as <c>-5</c> or <c>-2.5</c>.</summary>
+    private static bool IsNegativeNumber(UnaryExpression unary)
+        => unary.UnaryExpressionType == UnaryExpressionType.Negative
+           && unary.Expression?.GetType() is { } operand
+           && (operand == typeof(IntegerLiteral) || operand == typeof(NumericLiteral));
+
+    /// <summary><c>CAST('&lt;guid&gt;' AS uniqueidentifier)</c> with a GUID in a spelling of <see cref="CanonicalGuid"/>.</summary>
+    private static bool IsGuidCast(CastCall cast)
+        => cast.DataType?.GetType() == typeof(SqlDataTypeReference)
+           && cast.DataType is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.UniqueIdentifier, Parameters.Count: 0 }
+           && cast.Parameter?.GetType() == typeof(StringLiteral)
+           && IsCanonicalGuidText(((StringLiteral)cast.Parameter).Value);
+
+    private const string InterimRule =
+        " Until the typed SQL value engine proves each kind of expression, INSERT and UPDATE write only literals (text, " +
+        "numbers, NULL, CAST('<guid>' AS uniqueidentifier)) and columns.";
+
+    /// <summary>
+    /// A written value (SET, VALUES, SELECT list): see <see cref="IsAdmittedValue"/>. <paramref name="columns"/> is null
+    /// where columns are not allowed (INSERT VALUES).
     /// </summary>
     private static string? CheckValue(ScalarExpression expression, HashSet<string>? columns, string context)
     {
-        string? All(IEnumerable<ScalarExpression?> parts)
-            => parts.Where(p => p != null).Select(p => CheckValue(p!, columns, context)).FirstOrDefault(m => m != null);
-
-        switch (expression)
+        if (IsAdmittedValue(expression))
         {
-            case RealLiteral:
-                return Unsupported($"{Sql(expression)} (a floating-point literal)", context, RealLiteralHowTo);
-            case StringLiteral or IntegerLiteral or NumericLiteral or NullLiteral:
-                return null;
-            case ColumnReferenceExpression column:
-                return columns == null
-                    ? Unsupported($"the column {Sql(column)}", context, " VALUES takes constants; use INSERT ... SELECT to copy columns.")
-                    : CheckColumn(column, columns, context);
-            case VariableReference or GlobalVariableExpression:
-                return Unsupported($"the variable {Sql(expression)}", context, " Use a literal value instead.");
-            case UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative } unary:
-                return CheckValue(unary.Expression, columns, context);
-            case BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add } add
-                when add.FirstExpression is StringLiteral || add.SecondExpression is StringLiteral:
-                return Unsupported($"{Sql(add)} (+ with text)", context, " Use CONCAT(...) to join text.");
-            case BinaryExpression binary when binary.BinaryExpressionType is BinaryExpressionType.Add
-                or BinaryExpressionType.Subtract or BinaryExpressionType.Multiply or BinaryExpressionType.Divide
-                or BinaryExpressionType.Modulo:
-                return All([binary.FirstExpression, binary.SecondExpression]);
-            case ParenthesisExpression paren:
-                return CheckValue(paren.Expression, columns, context);
-            case CoalesceExpression coalesce when coalesce.Expressions.All(e => e is NullLiteral):
-                return AllNull(coalesce, context);
-            case CoalesceExpression coalesce:
-                return All(coalesce.Expressions);
-            case NullIfExpression nullIf:
-                return All([nullIf.FirstExpression, nullIf.SecondExpression]);
-            case IIfCall { ThenExpression: NullLiteral, ElseExpression: NullLiteral } iif:
-                return AllNull(iif, context);
-            case IIfCall iif:
-                return CheckValuePredicate(iif.Predicate, columns, context) ?? All([iif.ThenExpression, iif.ElseExpression]);
-            case SearchedCaseExpression searched when searched.WhenClauses.All(w => w.ThenExpression is NullLiteral)
-                && searched.ElseExpression is null or NullLiteral:
-                return AllNull(searched, context);
-            case SimpleCaseExpression simple when simple.WhenClauses.All(w => w.ThenExpression is NullLiteral)
-                && simple.ElseExpression is null or NullLiteral:
-                return AllNull(simple, context);
-            case SearchedCaseExpression searched:
-                foreach (var when in searched.WhenClauses)
-                {
-                    var problem = CheckValuePredicate(when.WhenExpression, columns, context) ?? CheckValue(when.ThenExpression, columns, context);
-                    if (problem != null)
-                        return problem;
-                }
-                return searched.ElseExpression == null ? null : CheckValue(searched.ElseExpression, columns, context);
-            case SimpleCaseExpression simple:
-                return All(new[] { simple.InputExpression, simple.ElseExpression }
-                    .Concat(simple.WhenClauses.SelectMany(w => new[] { w.WhenExpression, w.ThenExpression })));
-            // Conversions verified live: to nvarchar(n), int, decimal(p, s), and (CAST of a GUID literal) uniqueidentifier;
-            // TRY_CAST/TRY_CONVERT to int or decimal(p, s). Date/time conversions are not (time zones), nor CONVERT styles,
-            // nor the forms whose length, precision or scale SQL would supply (nvarchar, nvarchar(max), decimal, numeric).
-            case CastCall cast when !IsConversionTarget(cast.DataType, allowGuid: true):
-                return Unsupported($"{Sql(cast)} (CAST to {Sql(cast.DataType)})", context, ConversionTargets);
-            case CastCall { Parameter: NullLiteral } cast:
-                return Unsupported(Sql(cast), context, " The conversion of NULL is NULL: write NULL instead.");
-            case CastCall cast:
-                return CheckValue(cast.Parameter, columns, context);
-            case ConvertCall { Style: not null } convert:
-                return Unsupported($"{Sql(convert)} (a CONVERT style)", context, " Remove the style: CONVERT(type, value), to nvarchar(n), int or decimal(p, s).");
-            case ConvertCall convert when !IsConversionTarget(convert.DataType, allowGuid: false):
-                return Unsupported($"{Sql(convert)} (CONVERT to {Sql(convert.DataType)})", context, ConversionTargets);
-            case ConvertCall { Parameter: NullLiteral } convert:
-                return Unsupported(Sql(convert), context, " The conversion of NULL is NULL: write NULL instead.");
-            case ConvertCall convert:
-                return CheckValue(convert.Parameter, columns, context);
-            case TryCastCall { Parameter: NullLiteral } or TryConvertCall { Parameter: NullLiteral }:
-                return Unsupported(Sql(expression), context, " The conversion of NULL is NULL: write NULL instead.");
-            case TryCastCall tryCast when IsNumberTarget(tryCast.DataType):
-                return CheckValue(tryCast.Parameter, columns, context);
-            case TryConvertCall { Style: null } tryConvert when IsNumberTarget(tryConvert.DataType):
-                return CheckValue(tryConvert.Parameter, columns, context);
-            case TryCastCall or TryConvertCall:
-                return Unsupported(Sql(expression), context, " TRY_CAST and TRY_CONVERT are supported to int or decimal(p, s) (precision at most 28) only.");
-            case LeftFunctionCall or RightFunctionCall:
-                return Unsupported(Sql(expression), context, " Use SUBSTRING(text, start, length) instead.");
-            case FunctionCall function when function.CallTarget == null && function.OverClause == null
-                && function.WithinGroupClause == null && function.UniqueRowFilter == UniqueRowFilter.NotSpecified
-                && AllowedFunctions.Contains(function.FunctionName.Value):
-                return CheckFunctionArguments(function, context) ?? NullArgument(function, context) ?? All(function.Parameters);
-            case FunctionCall function when function.FunctionName.Value.ToUpperInvariant() is "GETDATE" or "GETUTCDATE" or "SYSDATETIME"
-                or "SYSUTCDATETIME" or "SYSDATETIMEOFFSET" or "CURRENT_TIMESTAMP":
-                return Unsupported($"the function {function.FunctionName.Value}", context,
-                    " The engine would evaluate it again for every row, where SQL evaluates it once per statement. Write the time as a literal with Z, for example '2024-01-15T09:30:00Z'.");
-            case FunctionCall function when function.FunctionName.Value.Equals("NEWID", StringComparison.OrdinalIgnoreCase):
-                return Unsupported("the function NEWID", context, " Dataverse generates row ids; leave the id column out.");
-            case FunctionCall function when function.FunctionName.Value.Equals("REPLACE", StringComparison.OrdinalIgnoreCase):
-                return Unsupported("the function REPLACE", context,
-                    " Dataverse matches text without regard to accents and the query engine would not, so REPLACE could change different characters than SQL would.");
-            case FunctionCall function:
-                return Unsupported($"the function {function.FunctionName.Value}", context,
-                    $" Supported functions: {string.Join(", ", AllowedFunctions.OrderBy(f => f))}, and COALESCE, NULLIF, IIF, CASE, CAST, CONVERT, TRY_CAST and TRY_CONVERT.");
-            case ScalarSubquery:
-                return Unsupported("a subquery", context);
-            default:
-                return Unsupported(Sql(expression), context);
+            return expression switch
+            {
+                ColumnReferenceExpression column when columns == null =>
+                    Unsupported($"the column {Sql(column)}", context, " VALUES takes constants; use INSERT ... SELECT to copy columns."),
+                ColumnReferenceExpression column => CheckColumn(column, columns!, context),
+                _ => null
+            };
         }
+
+        return Unsupported($"{Sql(expression)} ({Construct(expression)})", context, HowTo(expression));
     }
 
-    /// <summary>A condition inside IIF/CASE, evaluated against the row like the values around it.</summary>
-    private static string? CheckValuePredicate(BooleanExpression predicate, HashSet<string>? columns, string context)
+    /// <summary>The kind of construct a refused written value is, named in the refusal.</summary>
+    private static string Construct(ScalarExpression expression) => expression switch
     {
-        switch (predicate)
-        {
-            case BooleanBinaryExpression binary:
-                // AND/OR over number comparisons with NULLs was verified live (unknown takes the ELSE branch, as in SQL).
-                return CheckValuePredicate(binary.FirstExpression, columns, context) ?? CheckValuePredicate(binary.SecondExpression, columns, context);
-            case BooleanParenthesisExpression paren:
-                return CheckValuePredicate(paren.Expression, columns, context);
-            case BooleanNotExpression:
-                // NOT over an unknown (NULL) comparison is unknown in SQL; the evaluator would make it true.
-                return Unsupported(Sql(predicate), context, " Write the condition without NOT.");
-            case BooleanComparisonExpression comparison when IsComparison(comparison.ComparisonType):
-                return CheckValue(comparison.FirstExpression, columns, context) ?? CheckValue(comparison.SecondExpression, columns, context);
-            case BooleanIsNullExpression isNull:
-                return CheckValue(isNull.Expression, columns, context);
-            default:
-                return Unsupported(Sql(predicate), context);
-        }
-    }
+        RealLiteral => "a floating-point literal",
+        UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative } => "a minus sign on something other than a number literal",
+        UnaryExpression => "a unary operator",
+        BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add } add
+            when add.FirstExpression is StringLiteral || add.SecondExpression is StringLiteral => "+ with text",
+        BinaryExpression => "arithmetic",
+        ParenthesisExpression => "parentheses",
+        VariableReference or GlobalVariableExpression => "a variable",
+        ScalarSubquery => "a subquery",
+        CoalesceExpression => "COALESCE",
+        NullIfExpression => "NULLIF",
+        IIfCall => "IIF",
+        SearchedCaseExpression or SimpleCaseExpression => "CASE",
+        CastCall => "a CAST other than CAST('<guid>' AS uniqueidentifier)",
+        ConvertCall => "CONVERT",
+        TryCastCall => "TRY_CAST",
+        TryConvertCall => "TRY_CONVERT",
+        ParseCall or TryParseCall => "PARSE",
+        LeftFunctionCall => "the function LEFT",
+        RightFunctionCall => "the function RIGHT",
+        FunctionCall function => $"the function {function.FunctionName.Value.ToUpperInvariant()}",
+        Literal => "a literal of this kind",
+        _ => "an expression"
+    };
+
+    private static string HowTo(ScalarExpression expression) => expression switch
+    {
+        RealLiteral or UnaryExpression { Expression: RealLiteral } => RealLiteralHowTo,
+        CastCall { DataType: SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.UniqueIdentifier }, Parameter: StringLiteral } =>
+            " Write the GUID as 8-4-4-4-12 hexadecimal digits with dashes, with or without braces and without spaces, " +
+            "for example CAST('6F9619FF-8B86-D011-B42D-00C04FC964FF' AS uniqueidentifier).",
+        ParenthesisExpression or UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative } =>
+            " Write the value as a literal (a negative number as -5, without parentheses) or a column." + InterimRule,
+        VariableReference or GlobalVariableExpression => " Use a literal value instead.",
+        FunctionCall function when function.FunctionName.Value.Equals("NEWID", StringComparison.OrdinalIgnoreCase) =>
+            " Dataverse generates row ids; leave the id column out.",
+        _ => " Compute the value first (for example with a SELECT) and write the result as a literal." + InterimRule
+    };
 
     // ── shared ─────────────────────────────────────────────────────────
 
@@ -755,108 +720,6 @@ internal static class DmlStatementSupport
         public override void Visit(OdbcLiteral node) => _found ??= Unsupported("an ODBC literal ({d ...})", "INSERT, UPDATE or DELETE");
 
         public override void Visit(IdentityFunctionCall node) => _found ??= Unsupported("IDENTITY()", "INSERT, UPDATE or DELETE");
-    }
-
-    private const string ConversionTargets =
-        " Supported: nvarchar(n) with a length from 1 to 4000, int, decimal(p, s) with both precision (at most 28) and scale " +
-        "(for example decimal(10, 2)), and CAST('<guid>' AS uniqueidentifier).";
-
-    /// <summary>The largest nvarchar(n) length a conversion may name.</summary>
-    public const int MaxNVarCharLength = 4000;
-
-    private static int? IntegerParameter(SqlDataTypeReference type, int index)
-        => type.Parameters.Count > index && type.Parameters[index] is IntegerLiteral literal
-           && int.TryParse(literal.Value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var value)
-            ? value
-            : null;
-
-    /// <summary>
-    /// The largest decimal precision a conversion may name: the engine computes decimals exactly up to 28 digits
-    /// (System.Decimal), and the live differential run proved decimal(28, 0), decimal(28, 28) and the precisions below.
-    /// </summary>
-    public const int MaxDecimalPrecision = 28;
-
-    /// <summary>The largest number of places ROUND may name (the live run proved 10, the most a decimal column holds).</summary>
-    public const int MaxRoundPlaces = 10;
-
-    /// <summary>int, or decimal(p, s) with both given (SQL's defaults would round to a whole number), p at most 28.</summary>
-    private static bool IsNumberTarget(DataTypeReference type) => type switch
-    {
-        SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.Int, Parameters.Count: 0 } => true,
-        SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.Decimal, Parameters.Count: 2 } d
-            => IntegerParameter(d, 0) is >= 1 and <= MaxDecimalPrecision and var p && IntegerParameter(d, 1) is { } s && s <= p,
-        _ => false
-    };
-
-    /// <summary>nvarchar(n) with an explicit length (SQL's default is 30, and max was not proven).</summary>
-    private static bool IsTextTarget(DataTypeReference type)
-        => type is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.NVarChar, Parameters.Count: 1 } t
-           && IntegerParameter(t, 0) is >= 1 and <= MaxNVarCharLength;
-
-    private static bool IsConversionTarget(DataTypeReference type, bool allowGuid)
-        => IsNumberTarget(type) || IsTextTarget(type)
-           || (allowGuid && type is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.UniqueIdentifier });
-
-    /// <summary>
-    /// The argument forms of the allowed functions that were proven: one argument for the text functions and ABS (no TRIM
-    /// options), SUBSTRING with a literal start of 1 or more and a literal length of 0 or more, ROUND with a literal number
-    /// of places of 0 or more.
-    /// </summary>
-    private static string? CheckFunctionArguments(FunctionCall function, string context)
-    {
-        var name = function.FunctionName.Value.ToUpperInvariant();
-        var arguments = function.Parameters;
-        static int? Literal(ScalarExpression e) => e is IntegerLiteral i
-            && int.TryParse(i.Value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
-
-        if (function.TrimOptions != null)
-        {
-            return Unsupported($"{Sql(function)} (TRIM with LEADING, TRAILING, BOTH or FROM)", context,
-                " Use LTRIM(text), RTRIM(text) or TRIM(text), which remove spaces.");
-        }
-
-        switch (name)
-        {
-            case "LTRIM" or "RTRIM" or "TRIM" when arguments.Count != 1:
-                return Unsupported(Sql(function), context,
-                    $" {name} takes one argument here (no LEADING, TRAILING, BOTH or FROM, and no characters to remove), for example {name}(name).");
-            case "UPPER" or "LOWER" or "LEN" or "ABS" when arguments.Count != 1:
-                return Unsupported(Sql(function), context, $" {name} takes one argument here, for example {name}(name).");
-            case "ISNULL" when arguments.Count != 2:
-                return Unsupported(Sql(function), context, " ISNULL takes two arguments.");
-            case "CONCAT" when arguments.Count < 2:
-                return Unsupported(Sql(function), context, " CONCAT takes two or more arguments.");
-            case "SUBSTRING" when arguments.Count != 3 || Literal(arguments[1]) is not >= 1 || Literal(arguments[2]) is not >= 0:
-                return Unsupported(Sql(function), context,
-                    " Give SUBSTRING a start of 1 or more and a length of 0 or more, written as numbers, for example SUBSTRING(name, 1, 10).");
-            case "ROUND" when arguments.Count != 2 || Literal(arguments[1]) is not (>= 0 and <= MaxRoundPlaces):
-                return Unsupported(Sql(function), context,
-                    $" Give ROUND a value and a number of decimal places from 0 to {MaxRoundPlaces}, written as a number, for example ROUND(amount, 1).");
-            default:
-                return null;
-        }
-    }
-
-    /// <summary>
-    /// COALESCE, IIF or CASE whose every result is the NULL constant: an error in SQL Server ("at least one of the
-    /// arguments ... must be an expression that is not the NULL constant"), which the engine would not raise.
-    /// </summary>
-    private static string AllNull(TSqlFragment node, string context)
-        => Unsupported($"{Sql(node)} (every result is NULL)", context,
-            " SQL Server refuses COALESCE, IIF and CASE whose results are all the NULL constant. Write NULL instead.");
-
-    /// <summary>A NULL constant as an argument of a function: never proven, and its result is NULL (CONCAT: empty text).</summary>
-    private static string? NullArgument(FunctionCall function, string context)
-    {
-        if (!function.Parameters.Any(p => p is NullLiteral))
-            return null;
-        var name = function.FunctionName.Value.ToUpperInvariant();
-        return name switch
-        {
-            "ISNULL" => null,
-            "CONCAT" => Unsupported(Sql(function), context, " CONCAT treats NULL as empty text: leave the NULL out."),
-            _ => Unsupported(Sql(function), context, $" {name} of NULL is NULL: write NULL instead.")
-        };
     }
 
     private static string Unsupported(string part, string context, string? howTo = null)
