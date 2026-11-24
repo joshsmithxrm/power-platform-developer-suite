@@ -319,6 +319,47 @@ public class DmlInterimValueRuleTests
         DmlStatementSupport.IsAdmittedValue(new ColumnReferenceExpression { ColumnType = ColumnType.Wildcard }).Should().BeFalse();
     }
 
+    // ---- text without N (maintainer decision, 2026-11-24, "Refuse it") ----------------------------------------
+
+    [Theory]
+    [InlineData("abc ~!@#$%^&*()_+{}|:<>?", false, true)]
+    [InlineData("\u007F", false, true)]                  // the last 7-bit character
+    [InlineData("\u0080", false, false)]                 // the first one outside
+    [InlineData("na\u00EFve", false, false)]             // one accented Latin character: refused, the conservative reading
+    [InlineData("\u041F\u0440\u0438\u0432\u0435\u0442", false, false)] // Cyrillic
+    [InlineData("\u6F22\u5B57", false, false)]           // CJK
+    [InlineData("\uD83D\uDE00", false, false)]           // outside the BMP (a surrogate pair)
+    [InlineData("na\u00EFve", true, true)]
+    [InlineData("\u041F\u0440\u0438\u0432\u0435\u0442", true, true)]
+    [InlineData("", false, true)]
+    public void ATextLiteral_IsAdmitted_WhenItHasNOrIsSevenBitAscii(string text, bool national, bool admitted)
+        => DmlStatementSupport.IsAdmittedValue(new StringLiteral { Value = text, IsNational = national }).Should().Be(admitted);
+
+    [Theory]
+    [InlineData("UPDATE account SET name = '\u041F\u0440\u0438\u0432\u0435\u0442' WHERE name = 'x'", "UPDATE ... SET")]
+    [InlineData("UPDATE account SET name = 'na\u00EFve' WHERE name = 'x'", "UPDATE ... SET")]
+    [InlineData("INSERT INTO account (name) VALUES ('na\u00EFve')", "INSERT ... VALUES")]
+    [InlineData("INSERT INTO account (name) SELECT 'na\u00EFve' AS v FROM account WHERE name = 'x'", "INSERT ... SELECT")]
+    public void ATextLiteralWithoutN_OutsideSevenBitAscii_IsRefused_AndTheMessageNamesTheNForm(string sql, string context)
+    {
+        var refusal = Refusal(sql);
+
+        refusal.Should().Contain("(text without the N prefix that holds characters outside 7-bit ASCII)")
+            .And.Contain($"is not supported in {context}.")
+            .And.Contain("Nothing was executed.")
+            .And.Contain("Write it with the N prefix: N'");
+    }
+
+    [Theory]
+    [InlineData("UPDATE account SET name = N'na\u00EFve' WHERE name = 'x'")]
+    [InlineData("INSERT INTO account (name) VALUES (N'\u041F\u0440\u0438\u0432\u0435\u0442')")]
+    [InlineData("UPDATE account SET name = 'plain ascii' WHERE name = 'x'")]
+    // A WHERE literal is not a written value: it is sent to Dataverse in the FetchXML as typed (unchanged).
+    [InlineData("UPDATE account SET name = 'x' WHERE name = 'na\u00EFve'")]
+    [InlineData("DELETE FROM account WHERE name = '\u041F\u0440\u0438\u0432\u0435\u0442'")]
+    public void TextWithN_AsciiWithoutN_AndAWhereLiteral_AreAdmitted(string sql)
+        => Refusal(sql).Should().BeNull();
+
     [Fact]
     public void TheCanonicalGuidCheck_IsTheOneTheRuleUses()
     {

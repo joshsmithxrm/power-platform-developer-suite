@@ -123,6 +123,85 @@ public sealed class DmlInterimRuleTests : IDisposable
         await AssertRefusedEverywhere(sql, "Nothing was executed.");
     }
 
+    // ---- text without N (maintainer decision, 2026-11-24, "Refuse it") --------------------------------------------
+    // SQL Server converts a text literal without N to the database's code page and stores what the code page lacks as
+    // question marks; the engine cannot tell the code page, so text without N is written only when it is 7-bit ASCII.
+
+    private const string Cyrillic = "\u041F\u0440\u0438\u0432\u0435\u0442";
+    private const string Accented = "na\u00EFve";
+
+    [Theory]
+    [InlineData("UPDATE account SET name = '" + Cyrillic + "' WHERE name = 'n1'", "N'" + Cyrillic + "'")]
+    [InlineData("INSERT INTO account (name) VALUES ('" + Cyrillic + "')", "N'" + Cyrillic + "'")]
+    [InlineData("INSERT INTO account (name, description) SELECT name, '" + Cyrillic + "' AS d FROM account WHERE name = 'n1'", "N'" + Cyrillic + "'")]
+    public async Task TextWithoutN_InANonLatinScript_IsRefusedBeforeAnythingIsReadOrWritten_AndNamesTheNForm(string sql, string nForm)
+        => await AssertRefusedEverywhere(sql, $"Write it with the N prefix: {nForm}.");
+
+    [Theory]
+    [InlineData("UPDATE account SET name = '" + Accented + "' WHERE name = 'n1'")]
+    [InlineData("INSERT INTO account (name) VALUES ('" + Accented + "')")]
+    [InlineData("INSERT INTO account (name, description) SELECT name, '" + Accented + "' AS d FROM account WHERE name = 'n1'")]
+    public async Task TextWithoutN_WithOneAccentedLatinCharacter_IsRefused_TheConservativeReading(string sql)
+        // A Latin code page (1252) would store this character; the engine cannot tell the code page, so it is refused too.
+        => await AssertRefusedEverywhere(sql, $"Write it with the N prefix: N'{Accented}'.");
+
+    [Fact]
+    public async Task AScriptWithTextWithoutN_RunsNoneOfItsStatements()
+        => await AssertRefusedEverywhere(
+            $"INSERT INTO account (name) VALUES ('a'); UPDATE account SET name = '{Accented}' WHERE name = 'n1'", "Nothing was executed.");
+
+    [Theory]
+    [InlineData(Cyrillic)]
+    [InlineData(Accented)]
+    public async Task TheSameTextWithN_IsWrittenAsTyped(string text)
+    {
+        var update = DmlTestHarness.Create(rows: 4);
+        await update.Service.ExecuteAsync(new SqlQueryRequest { Sql = $"UPDATE account SET name = N'{text}' WHERE name = 'n1'", DmlSafety = Confirmed });
+        Assert.Equal(text, Written(update, "name"));
+
+        var insert = DmlTestHarness.Create(rows: 1);
+        await insert.Service.ExecuteAsync(new SqlQueryRequest { Sql = $"INSERT INTO account (name) VALUES (N'{text}')", DmlSafety = Confirmed });
+        Assert.Equal(text, Written(insert, "name"));
+
+        var copy = DmlTestHarness.Create(rows: 4);
+        await copy.Service.ExecuteAsync(new SqlQueryRequest
+        {
+            Sql = $"INSERT INTO account (name, description) SELECT name, N'{text}' AS d FROM account WHERE name = 'n1'", DmlSafety = Confirmed
+        });
+        Assert.Equal(text, Written(copy, "description"));
+    }
+
+    [Fact]
+    public async Task AsciiTextWithoutN_IsWrittenAsTyped()
+    {
+        var h = DmlTestHarness.Create(rows: 4);
+        await h.Service.ExecuteAsync(new SqlQueryRequest { Sql = "UPDATE account SET name = 'a ~!@#$%^&*()' WHERE name = 'n1'", DmlSafety = Confirmed });
+        Assert.Equal("a ~!@#$%^&*()", Written(h, "name"));
+
+        var insert = DmlTestHarness.Create(rows: 1);
+        await insert.Service.ExecuteAsync(new SqlQueryRequest { Sql = "INSERT INTO account (name) VALUES ('plain')", DmlSafety = Confirmed });
+        Assert.Equal("plain", Written(insert, "name"));
+    }
+
+    /// <summary>
+    /// Every WHERE of an UPDATE, DELETE or INSERT ... SELECT is evaluated by Dataverse (a plan that needs PPDS to filter
+    /// rows is refused), so a WHERE literal is not a written value: it is sent in the FetchXML as typed, with or without N,
+    /// as before this decision. SQL Server would compare a literal without N after converting it to the code page.
+    /// </summary>
+    [Theory]
+    [InlineData("UPDATE account SET description = 'x' WHERE name = '" + Cyrillic + "'")]
+    [InlineData("DELETE FROM account WHERE name = '" + Accented + "'")]
+    [InlineData("UPDATE account SET description = 'x' WHERE name = N'" + Cyrillic + "'")]
+    public async Task AWhereLiteral_IsSentToDataverseAsTyped_WithOrWithoutN(string sql)
+    {
+        var h = DmlTestHarness.Create(rows: 4);
+
+        await h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed });
+
+        var typed = sql.Contains(Cyrillic) ? Cyrillic : Accented;
+        Assert.Contains(h.Reads, r => r.FetchXml.Contains($"value=\"{typed}\""));
+    }
+
     private static async Task AssertRefusedEverywhere(string sql, string named)
     {
         foreach (var options in new[] { Confirmed, new DmlSafetyOptions(), new DmlSafetyOptions { IsDryRun = true } })

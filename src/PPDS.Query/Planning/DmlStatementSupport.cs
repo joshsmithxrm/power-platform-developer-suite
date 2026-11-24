@@ -577,12 +577,29 @@ internal static class DmlStatementSupport
             return false;
         return expression switch
         {
-            StringLiteral or IntegerLiteral or NumericLiteral or NullLiteral => true,
+            StringLiteral text => text.IsNational || IsSevenBitAscii(text.Value),
+            IntegerLiteral or NumericLiteral or NullLiteral => true,
             ColumnReferenceExpression column => column.ColumnType == ColumnType.Regular,
             UnaryExpression unary => IsNegativeNumber(unary),
             CastCall cast => IsGuidCast(cast),
             _ => false
         };
+    }
+
+    /// <summary>
+    /// True when every character of <paramref name="text"/> is 7-bit ASCII. A text literal without the N prefix that holds
+    /// any other character is not written (maintainer decision, 2026-11-24, "Refuse it"): SQL Server converts such a
+    /// literal to the database's code page and stores the characters the code page lacks as question marks, and the engine
+    /// cannot tell which code page (collation) that is, so only the characters every code page shares are admitted.
+    /// </summary>
+    public static bool IsSevenBitAscii(string text)
+    {
+        foreach (var c in text)
+        {
+            if (c > '\u007F')
+                return false;
+        }
+        return true;
     }
 
     /// <summary>A minus sign written directly on a whole-number or decimal literal, such as <c>-5</c> or <c>-2.5</c>.</summary>
@@ -623,7 +640,7 @@ internal static class DmlStatementSupport
             ? $"the variable {Sql(expression)}"
             : $"{Sql(expression)} ({Construct(expression)})";
         var howTo = HowTo(expression);
-        if (columns == null && expression is not (VariableReference or GlobalVariableExpression or RealLiteral))
+        if (columns == null && expression is not (VariableReference or GlobalVariableExpression or RealLiteral or StringLiteral))
             howTo = " VALUES takes literal values only (text, numbers, NULL, or CAST('<guid>' AS uniqueidentifier)); write the value you want stored as a literal." +
                     (expression is FunctionCall { FunctionName.Value: var f } && f.Equals("NEWID", StringComparison.OrdinalIgnoreCase) ? howTo : string.Empty);
         return Unsupported(part, context, howTo);
@@ -632,6 +649,7 @@ internal static class DmlStatementSupport
     /// <summary>The kind of construct a refused written value is, named in the refusal.</summary>
     private static string Construct(ScalarExpression expression) => expression switch
     {
+        StringLiteral => "text without the N prefix that holds characters outside 7-bit ASCII",
         RealLiteral => "a floating-point literal",
         UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative } => "a minus sign on something other than a number literal",
         UnaryExpression => "a unary operator",
@@ -659,6 +677,10 @@ internal static class DmlStatementSupport
 
     private static string HowTo(ScalarExpression expression) => expression switch
     {
+        StringLiteral text =>
+            $" Write it with the N prefix: {Sql(new StringLiteral { Value = text.Value, IsNational = true })}. Without N, SQL Server " +
+            "stores the characters that the database's code page does not have as question marks; the engine cannot tell " +
+            "which code page that is, so text without N is written only when it is 7-bit ASCII.",
         RealLiteral or UnaryExpression { Expression: RealLiteral } => RealLiteralHowTo,
         CastCall { DataType: SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.UniqueIdentifier }, Parameter: StringLiteral } =>
             " Write the GUID as 8-4-4-4-12 hexadecimal digits with dashes, with or without braces and without spaces, " +
