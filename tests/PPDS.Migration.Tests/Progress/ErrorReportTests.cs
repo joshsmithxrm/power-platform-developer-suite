@@ -10,10 +10,13 @@ public class ImportErrorReportTests
     [Fact]
     public void Constructor_InitializesWithDefaults()
     {
+        var before = DateTime.UtcNow;
         var report = new ImportErrorReport();
+        var after = DateTime.UtcNow;
 
         report.Version.Should().Be("1.1");
-        report.GeneratedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(1));
+        // Bracketed by two readings of the clock the default uses, so load cannot move it outside the range.
+        report.GeneratedAt.Should().BeOnOrAfter(before).And.BeOnOrBefore(after);
         report.SourceFile.Should().BeNull();
         report.TargetEnvironment.Should().BeNull();
         report.ExecutionContext.Should().BeNull();
@@ -234,10 +237,13 @@ public class RetryManifestTests
     [Fact]
     public void Constructor_InitializesWithDefaults()
     {
+        var before = DateTime.UtcNow;
         var manifest = new RetryManifest();
+        var after = DateTime.UtcNow;
 
         manifest.Version.Should().Be("1.0");
-        manifest.GeneratedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(1));
+        // Bracketed by two readings of the clock the default uses, so load cannot move it outside the range.
+        manifest.GeneratedAt.Should().BeOnOrAfter(before).And.BeOnOrBefore(after);
         manifest.SourceFile.Should().BeNull();
         manifest.FailedRecordsByEntity.Should().NotBeNull().And.BeEmpty();
     }

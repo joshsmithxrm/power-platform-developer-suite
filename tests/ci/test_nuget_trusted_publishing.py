@@ -8,6 +8,7 @@ import subprocess
 
 import pytest
 import yaml
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/conftest.py puts tests/ on sys.path
 
 ROOT = Path(__file__).resolve().parents[2]
 PATH = ROOT / '.github/workflows/publish-nuget.yml'
@@ -104,7 +105,7 @@ def test_identity_guard_executes_without_login(workflow, value, exit_code):
     env = os.environ.copy()
     env['NUGET_PUBLISH_USER'] = value
     result = subprocess.run([bash, '--noprofile', '--norc', '-e', '-s'], input=step['run'],
-                            text=True, capture_output=True, env=env, timeout=10)
+                            text=True, capture_output=True, env=env, timeout=CHILD_PROCESS_HANG_BOUND_SECONDS)
     assert result.returncode == exit_code
     assert value == '' or value not in result.stdout + result.stderr
 

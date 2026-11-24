@@ -27,6 +27,8 @@ Each package has its own version line and its own tag prefix. Versions follow Se
 
 1.5 Odd and even minor versions select the Marketplace channel for the extension only: an odd minor is a pre-release, an even minor is stable. No other package gives the minor's parity a meaning; pre-releases of the other packages carry a pre-release label.
 
+1.6 A stable tag may share a commit with its own release candidate tags: the stable release is the last candidate that passed.
+
 ## 2. What the contract is
 
 | Surface | Contract | Not contract |
@@ -47,6 +49,8 @@ Each package has its own version line and its own tag prefix. Versions follow Se
 3.2 A minor may add: commands, options, fields, tools, API members, deprecation notices.
 
 3.3 Only a major removes or changes something in the contract.
+
+Rules 3.1 to 3.3 are applied to every pull request: its description carries the required "Breaking" line, a pull request that is breaking carries the `breaking-change` label, and the release-plan check refuses a patch or minor version of a package whose release contains a pull request with that label.
 
 3.4 A data-safety fix is the exception to 3.1 to 3.3. A change that stops PPDS writing wrong data, changing rows the statement did not select, writing to the wrong environment, or returning a silently wrong result may ship in any release, even when it refuses something that was accepted before. It always comes with an advisory (section 6).
 
@@ -72,7 +76,7 @@ Each package has its own version line and its own tag prefix. Versions follow Se
 
 ## 6. Data-correctness advisories
 
-6.1 When a released version returns wrong data or writes data the user did not ask for, the fix is announced in an advisory that lists the affected versions, the fixed version, what to check, and a workaround.
+6.1 When a released version returns wrong data or writes data the user did not ask for, the fix is announced in an advisory that lists the affected versions, the fixed version, what to check, and a workaround. The advisory is published in three places: a pinned issue, a notice in the README and the docs, and the release notes. When the defect fits the format of a GitHub security advisory, one is published as well.
 
 6.2 The maintainer marks the affected NuGet versions deprecated. Versions are never unlisted.
 
@@ -95,3 +99,21 @@ Each package has its own version line and its own tag prefix. Versions follow Se
 9.1 A sentence in a spec, changelog, release note or pull request that states an approval, an exception, a removal or a date links the issue comment where the maintainer made that decision. Without the link, it is marked "proposed".
 
 9.2 The maintainer creates and pushes every tag and makes every publication. Neither automation nor an agent session tags, publishes, unpublishes or deprecates; a session prepares the commands and verifies the result.
+
+## Not yet enforced
+
+The rules above are the policy. The checks below are not built yet; until one is, its rule is applied in review.
+
+| Rule | Not built yet | Issue |
+|---|---|---|
+| 1.2 | The release verifier does not check that PPDS.Query and PPDS.Migration take a major in the same release as PPDS.Dataverse | None yet |
+| 1.5 | The CLI update check still treats an odd CLI minor as a pre-release line | [#1744](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1744) |
+| 1.6 | The release-input verifier expects exactly one tag per package on the release commit, so it refuses a stable tag that shares a commit with its candidate tags | None yet |
+| 3.1 to 3.3 | No check yet for the "Breaking" line, the `breaking-change` label or the release plan; the pull request template has a "Breaking changes" section that nothing checks | [#1789](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1789) |
+| 3.6 | The values of the exit codes are pinned by a test; the table of the codes each command returns, and the test that checks it, are not built | [#1672](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1672) |
+| 5.2 | The daemon has no protocol version, and the extension still falls back to `ppds` on PATH | [#1729](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1729) |
+| 5.3 | The release-input verifier checks that each internal package dependency matches that package's tag on the same commit; it does not check that the version is published | None yet |
+| 6.3 | The extension's one-time notice is not built | [#1665](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1665) |
+| 7.2 | The scheduled check is still the 8-week release-cadence check, and the security policy states no targets for releasing a merged fix | [#1791](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1791) |
+| Section 2 (Libraries), 8.1, 8.2 | Only PPDS.Auth has API baseline files and the analyzer; PPDS.Dataverse, PPDS.Query, PPDS.Migration and PPDS.Plugins have none | [#1219](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1219) |
+| 9.1 | No check finds a decision sentence without a link | [#1790](https://github.com/joshsmithxrm/power-platform-developer-suite/issues/1790) |

@@ -1,4 +1,5 @@
 using Xunit;
+using PPDS.Tests.Shared;
 
 namespace PPDS.LiveTests.Infrastructure;
 
@@ -30,7 +31,7 @@ public class PropagationWaitTests
             value => value == "ready", TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(2), clock: clock);
         Assert.False(task.IsCompleted);
         clock.Advance(TimeSpan.FromSeconds(2));
-        var result = await task.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await HangBackstop.WaitAsync(task, "the propagation wait to return its result");
         Assert.True(result.Succeeded);
         Assert.Equal(2, result.Attempts);
         Assert.Equal("ready", result.Last);
@@ -44,7 +45,7 @@ public class PropagationWaitTests
         var task = PropagationWait.UntilAsync(_ => Task.FromResult("exit=1; drift=missing step"),
             _ => false, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(2), clock: clock);
         clock.Advance(TimeSpan.FromSeconds(10));
-        var result = await task.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await HangBackstop.WaitAsync(task, "the propagation wait to return its result");
         Assert.False(result.Succeeded);
         Assert.Equal(1, result.Attempts);
         Assert.Equal("exit=1; drift=missing step", result.Last);
@@ -61,7 +62,7 @@ public class PropagationWaitTests
             return "unreachable";
         }, _ => true, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(2), clock: clock);
         clock.Advance(TimeSpan.FromSeconds(10));
-        var result = await task.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await HangBackstop.WaitAsync(task, "the propagation wait to return its result");
         Assert.False(result.Succeeded);
         Assert.Null(result.Last);
         Assert.Equal(1, result.Attempts);

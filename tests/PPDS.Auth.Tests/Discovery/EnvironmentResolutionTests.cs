@@ -1,7 +1,12 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Moq;
 using PPDS.Auth;
+using PPDS.Auth.Credentials;
 using PPDS.Auth.Discovery;
 using PPDS.Auth.Profiles;
 using Xunit;
@@ -72,23 +77,88 @@ public class EnvironmentResolutionTests
     }
 
     [Theory]
-    [Trait("Category", "Integration")]
     [InlineData(AuthMethod.InteractiveBrowser)]
     [InlineData(AuthMethod.DeviceCode)]
     public async Task Interactive_NameIdentifier_RoutesGlobalDiscovery(AuthMethod authMethod)
     {
-        // Verifies the routing path actually executes for AC-27: an interactive auth method
-        // with a name (not URL) identifier should attempt Global Discovery, not BAP.
+        // AC-27: an interactive auth method with a name (not URL) identifier resolves through
+        // Global Discovery, not BAP. Both discovery services are fakes: the real Global Discovery
+        // service signs in (browser or device code) and calls the real discovery endpoint.
         var profile = new AuthProfile { AuthMethod = authMethod };
-        using var service = new EnvironmentResolutionService(profile);
+        var globalDiscovery = new FakeDiscoveryService(new DiscoveredEnvironment
+        {
+            FriendlyName = "MyEnvironment",
+            UniqueName = "myenvironment",
+            ApiUrl = "https://myenvironment.crm.dynamics.com",
+        });
+        var bapFactoryCalls = 0;
+        AuthProfile? profileGivenToGlobalDiscovery = null;
+        using var service = new EnvironmentResolutionService(
+            profile,
+            deviceCodeCallback: null,
+            credentialStore: null,
+            createGlobalDiscovery: p =>
+            {
+                profileGivenToGlobalDiscovery = p;
+                return globalDiscovery;
+            },
+            createBapDiscovery: (_, _, _) =>
+            {
+                Interlocked.Increment(ref bapFactoryCalls);
+                throw new InvalidOperationException("interactive auth must not route to BAP discovery");
+            });
 
         var result = await service.ResolveAsync("MyEnvironment");
 
-        result.Success.Should().BeFalse(because: "GDS will fail without real credentials");
-        result.ErrorMessage.Should().Contain("Global Discovery",
-            because: $"{authMethod} should route to GDS for name-based resolution");
-        result.ErrorMessage.Should().NotContain("BAP",
-            because: "interactive auth must not fall through to BAP discovery");
+        result.Success.Should().BeTrue(because: result.ErrorMessage);
+        result.Method.Should().Be(ResolutionMethod.GlobalDiscovery);
+        result.Environment!.Url.Should().Be("https://myenvironment.crm.dynamics.com");
+        globalDiscovery.Calls.Should().Be(1);
+        globalDiscovery.Disposed.Should().BeTrue(because: "the resolver disposes the discovery service it created");
+        profileGivenToGlobalDiscovery.Should().BeSameAs(profile);
+        bapFactoryCalls.Should().Be(0, because: "interactive auth must not fall through to BAP discovery");
+    }
+
+    [Theory]
+    [InlineData(AuthMethod.ClientSecret)]
+    [InlineData(AuthMethod.CertificateFile)]
+    [InlineData(AuthMethod.CertificateStore)]
+    public async Task SpnAuth_NameIdentifier_ResolvesThroughBapDiscovery_AndDisposesIt(AuthMethod authMethod)
+    {
+        var profile = new AuthProfile { AuthMethod = authMethod };
+        var store = new Mock<ISecureCredentialStore>().Object;
+        var bap = new FakeDiscoveryService(new DiscoveredEnvironment
+        {
+            FriendlyName = "MyEnvironment",
+            ApiUrl = "https://myenvironment.crm.dynamics.com",
+        });
+        ISecureCredentialStore? storeGivenToBap = null;
+        var globalDiscoveryCalls = 0;
+        using var service = new EnvironmentResolutionService(
+            profile,
+            deviceCodeCallback: null,
+            credentialStore: store,
+            createGlobalDiscovery: _ =>
+            {
+                Interlocked.Increment(ref globalDiscoveryCalls);
+                throw new InvalidOperationException("service principals must not route to Global Discovery");
+            },
+            createBapDiscovery: (p, s, _) =>
+            {
+                p.Should().BeSameAs(profile);
+                storeGivenToBap = s;
+                return Task.FromResult<IEnvironmentDiscoveryService>(bap);
+            });
+
+        var result = await service.ResolveAsync("MyEnvironment");
+
+        result.Success.Should().BeTrue(because: result.ErrorMessage);
+        result.Method.Should().Be(ResolutionMethod.BapDiscovery);
+        result.Environment!.Url.Should().Be("https://myenvironment.crm.dynamics.com");
+        bap.Calls.Should().Be(1);
+        bap.Disposed.Should().BeTrue(because: "the resolver disposes the BAP discovery service it created");
+        storeGivenToBap.Should().BeSameAs(store);
+        globalDiscoveryCalls.Should().Be(0);
     }
 
     [Theory]
@@ -169,5 +239,25 @@ public class EnvironmentResolutionTests
         message.Should().Contain("Env-0");
         message.Should().Contain("Env-9");
         message.Should().Contain("(+15 more)");
+    }
+
+    private sealed class FakeDiscoveryService : IEnvironmentDiscoveryService, IDisposable
+    {
+        private readonly IReadOnlyList<DiscoveredEnvironment> _environments;
+        private int _calls;
+
+        public FakeDiscoveryService(params DiscoveredEnvironment[] environments) => _environments = environments;
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        public bool Disposed { get; private set; }
+
+        public Task<IReadOnlyList<DiscoveredEnvironment>> DiscoverEnvironmentsAsync(CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _calls);
+            return Task.FromResult(_environments);
+        }
+
+        public void Dispose() => Disposed = true;
     }
 }

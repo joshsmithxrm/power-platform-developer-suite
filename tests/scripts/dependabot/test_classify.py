@@ -382,18 +382,6 @@ class TestClassifyPR(unittest.TestCase):
         self.assertEqual(c.group, "A")
         self.assertEqual(c.update_type, "patch")
 
-    def test_github_actions_minor_is_group_a(self):
-        pr = make_pr(
-            number=830,
-            title="Bump actions/checkout from 4.1.0 to 4.2.0",
-            labels=["github_actions", "dependencies"],
-            head_ref="dependabot/github_actions/actions/checkout-4.2.0",
-            files=[".github/workflows/ci.yml"],
-        )
-        c = classify.classify_pr(pr)
-        self.assertEqual(c.group, "A")
-        self.assertEqual(c.update_type, "minor")
-
     def test_lockfile_only_is_group_a(self):
         pr = make_pr(
             number=831,
@@ -1023,6 +1011,364 @@ class TestAuthCriticalDocCodeDrift(unittest.TestCase):
                 "Update both places to match (see issue #818)."
             ),
         )
+
+
+class TestGitHubActionsMaintainerFirst(unittest.TestCase):
+    """Every GitHub Actions bump is Group C: the maintainer goes first on them.
+
+    Before this rule, github-actions patch and minor bumps were Group A
+    (auto-merge eligible). They change workflow files, so they now always need
+    the maintainer, whatever their version, grouping or package name.
+    """
+
+    ACTIONS_LABELS = ["dependencies", "github-actions"]
+    WORKFLOW_FILES = [".github/workflows/build.yml"]
+
+    def actions_pr(self, **overrides) -> dict:
+        args = dict(
+            number=1900,
+            title="ci: bump actions/checkout from 6.0.0 to 6.0.1",
+            labels=self.ACTIONS_LABELS,
+            head_ref="dependabot/github_actions/actions/checkout-6.0.1",
+            files=self.WORKFLOW_FILES,
+        )
+        args.update(overrides)
+        return make_pr(**args)
+
+    def test_patch_bump_is_group_c(self):
+        c = classify.classify_pr(self.actions_pr())
+        self.assertEqual(c.group, "C")
+        self.assertEqual(c.ecosystem, "github-actions")
+        self.assertEqual(c.update_type, "patch")
+        self.assertIn("maintainer goes first", c.reason)
+
+    def test_minor_bump_is_group_c(self):
+        c = classify.classify_pr(self.actions_pr(
+            title="ci: bump actions/checkout from 4.1.0 to 4.2.0",
+            head_ref="dependabot/github_actions/actions/checkout-4.2.0",
+        ))
+        self.assertEqual(c.group, "C")
+        self.assertEqual(c.update_type, "minor")
+        self.assertIn("maintainer goes first", c.reason)
+
+    def test_major_bump_is_group_c_and_keeps_major_reason(self):
+        c = classify.classify_pr(self.actions_pr(
+            title="ci: bump actions/setup-python from 6 to 7",
+            head_ref="dependabot/github_actions/actions/setup-python-7",
+        ))
+        self.assertEqual(c.group, "C")
+        self.assertEqual(c.update_type, "major")
+        self.assertIn("major-version bump", c.reason)
+        self.assertIn("maintainer goes first", c.reason)
+
+    def test_grouped_patch_and_minor_bump_is_group_c(self):
+        # The shape .github/dependabot.yml produces: one "github-actions" group
+        # of minor and patch updates, every member listed in the body.
+        c = classify.classify_pr(self.actions_pr(
+            title="ci: bump the github-actions group with 2 updates",
+            head_ref="dependabot/github_actions/github-actions-abc123",
+            body=(
+                "Bumps the github-actions group with 2 updates:\n"
+                "Updates `actions/checkout` from 6.0.0 to 6.0.1\n"
+                "Updates `actions/setup-node` from 6.1.0 to 6.2.0\n"
+            ),
+            files=[".github/workflows/build.yml", ".github/workflows/test.yml"],
+        ))
+        self.assertEqual(c.group, "C")
+        self.assertEqual(c.package, "group:github-actions")
+        self.assertEqual(c.update_type, "minor")
+        self.assertIn("maintainer goes first", c.reason)
+
+    def test_grouped_all_patch_bump_is_group_c(self):
+        # Without the rule an all-patch group is Group A.
+        c = classify.classify_pr(self.actions_pr(
+            title="ci: bump the github-actions group with 2 updates",
+            head_ref="dependabot/github_actions/github-actions-def456",
+            body=(
+                "Updates `actions/checkout` from 6.0.0 to 6.0.1\n"
+                "Updates `actions/cache` from 4.2.0 to 4.2.1\n"
+            ),
+        ))
+        self.assertEqual(c.group, "C")
+        self.assertEqual(c.update_type, "patch")
+
+    def test_grouped_bump_with_unparseable_body_is_group_c(self):
+        c = classify.classify_pr(self.actions_pr(
+            title="ci: bump the github-actions group with 3 updates",
+            head_ref="dependabot/github_actions/github-actions-0a1b2c",
+            body="",
+        ))
+        self.assertEqual(c.group, "C")
+        self.assertEqual(c.update_type, "unknown")
+
+    def test_detected_by_label_alone(self):
+        c = classify.classify_pr(self.actions_pr(head_ref="some-branch", files=[]))
+        self.assertEqual(c.ecosystem, "github-actions")
+        self.assertEqual(c.group, "C")
+
+    def test_detected_by_branch_alone(self):
+        c = classify.classify_pr(self.actions_pr(labels=["dependencies"], files=[]))
+        self.assertEqual(c.ecosystem, "github-actions")
+        self.assertEqual(c.group, "C")
+
+    def test_detected_by_workflow_file_alone(self):
+        c = classify.classify_pr(self.actions_pr(
+            labels=["dependencies"], head_ref="human/bump-checkout",
+        ))
+        self.assertEqual(c.ecosystem, "github-actions")
+        self.assertEqual(c.group, "C")
+
+    def test_composite_action_file_is_group_c(self):
+        c = classify.classify_pr(self.actions_pr(
+            labels=["dependencies"],
+            head_ref="human/bump-composite",
+            files=[".github/actions/setup/action.yml"],
+        ))
+        self.assertEqual(c.group, "C")
+
+    def test_mixed_workflow_and_manifest_diff_is_group_c(self):
+        # Mixed files leave the ecosystem "unknown"; the path rule still applies.
+        c = classify.classify_pr(make_pr(
+            number=1901,
+            title="Bump knip from 6.1.0 to 6.1.1",
+            labels=["dependencies"],
+            head_ref="human/bump-knip",
+            files=["src/PPDS.Extension/package.json", ".github/workflows/build.yml"],
+        ))
+        self.assertEqual(c.ecosystem, "unknown")
+        self.assertEqual(c.group, "C")
+        self.assertIn("maintainer goes first", c.reason)
+
+    def test_npm_pr_touching_dependabot_yml_is_classified_as_before(self):
+        # .github/dependabot.yml is not a workflow or an action: an npm bump
+        # that also touches it keeps the group the version rules give it.
+        pr = make_pr(
+            number=1902,
+            title="Bump knip from 6.1.0 to 6.1.1",
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/npm_and_yarn/knip-6.1.1",
+            files=["src/PPDS.Extension/package.json", ".github/dependabot.yml"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.ecosystem, "npm")
+        self.assertEqual(c.group, "A")
+        self.assertEqual(c, classify._classify_by_version(pr))
+
+    def test_nuget_label_beside_actions_label_with_no_files_is_group_c(self):
+        # detect_ecosystem checks nuget before github-actions, so this comes
+        # out as nuget; the Actions label alone must still force Group C.
+        c = classify.classify_pr(self.actions_pr(
+            labels=["nuget", "dependencies", "github-actions"],
+            head_ref="dependabot/github_actions/x",
+            files=[],
+        ))
+        self.assertEqual(c.ecosystem, "nuget")
+        self.assertEqual(c.group, "C")
+
+    def test_npm_label_beside_actions_branch_with_no_files_is_group_c(self):
+        c = classify.classify_pr(self.actions_pr(
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/github_actions/actions/checkout-6.0.1",
+            files=[],
+        ))
+        self.assertEqual(c.ecosystem, "npm")
+        self.assertEqual(c.group, "C")
+
+    def test_hyphenated_actions_branch_with_no_files_is_group_c(self):
+        c = classify.classify_pr(self.actions_pr(
+            labels=["dependencies"],
+            head_ref="dependabot/github-actions/actions/checkout-6.0.1",
+            files=[],
+        ))
+        self.assertEqual(c.ecosystem, "unknown")
+        self.assertEqual(c.group, "C")
+
+    def test_actions_branch_in_other_case_with_no_files_is_group_c(self):
+        c = classify.classify_pr(self.actions_pr(
+            labels=["dependencies"],
+            head_ref="Dependabot/GitHub_Actions/actions/checkout-6.0.1",
+            files=[],
+        ))
+        self.assertEqual(c.group, "C")
+
+    def test_actions_label_in_other_case_with_no_files_is_group_c(self):
+        for label in ("GitHub-Actions", "GITHUB_ACTIONS"):
+            with self.subTest(label=label):
+                c = classify.classify_pr(self.actions_pr(
+                    labels=["dependencies", label], head_ref="human/x", files=[],
+                ))
+                self.assertEqual(c.group, "C")
+
+    def test_workflow_paths_with_leading_dot_slash_or_slash_are_group_c(self):
+        for path in ("./.github/workflows/build.yml",
+                     "/.github/workflows/build.yml",
+                     "./.github/actions/setup/action.yaml",
+                     "/.github/actions/a/b/action.yml"):
+            with self.subTest(path=path):
+                c = classify.classify_pr(make_pr(
+                    number=1905,
+                    title="Bump knip from 6.1.0 to 6.1.1",
+                    labels=["npm", "dependencies"],
+                    head_ref="human/bump-knip",
+                    files=["src/PPDS.Extension/package.json", path],
+                ))
+                self.assertEqual(c.group, "C")
+
+    def test_non_actions_prs_keep_the_version_rules_result(self):
+        # The override changes nothing for a PR with no Actions signal.
+        prs = [
+            make_pr(number=1906, title="Bump knip from 6.1.0 to 6.1.1",
+                    labels=["npm", "dependencies"],
+                    head_ref="dependabot/npm_and_yarn/knip-6.1.1",
+                    files=["src/PPDS.Extension/package.json"]),
+            make_pr(number=1907, title="Bump Newtonsoft.Json from 13.0.1 to 13.1.0",
+                    labels=["nuget", "dependencies"],
+                    head_ref="dependabot/nuget/Newtonsoft.Json-13.1.0",
+                    files=["Directory.Packages.props", ".github/dependabot.yml"]),
+            make_pr(number=1908, title="Bump Azure.Identity from 1.0.0 to 1.0.1",
+                    labels=["nuget", "dependencies"],
+                    head_ref="dependabot/nuget/Azure.Identity-1.0.1",
+                    files=["Directory.Packages.props", ".github/actions/README.md"]),
+            make_pr(number=1909, title="Bump vite from 5.0.0 to 8.0.0",
+                    labels=["npm", "dependencies"],
+                    head_ref="dependabot/npm_and_yarn/vite-8.0.0",
+                    files=["src/PPDS.Extension/package.json",
+                           ".github/pull_request_template.md"]),
+        ]
+        for pr in prs:
+            with self.subTest(title=pr["title"]):
+                self.assertEqual(classify.classify_pr(pr), classify._classify_by_version(pr))
+
+    def test_npm_and_nuget_prs_without_github_paths_are_unchanged(self):
+        npm = classify.classify_pr(make_pr(
+            number=1903,
+            title="Bump knip from 6.1.0 to 6.1.1",
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/npm_and_yarn/knip-6.1.1",
+            files=["src/PPDS.Extension/package.json"],
+        ))
+        self.assertEqual(npm.group, "A")
+        self.assertNotIn("maintainer goes first", npm.reason)
+        nuget = classify.classify_pr(make_pr(
+            number=1904,
+            title="Bump Newtonsoft.Json from 13.0.1 to 13.0.2",
+            labels=["nuget", "dependencies"],
+            head_ref="dependabot/nuget/Newtonsoft.Json-13.0.2",
+            files=["Directory.Packages.props"],
+        ))
+        self.assertEqual(nuget.group, "A")
+
+    def test_is_github_actions_update(self):
+        f = classify.is_github_actions_update
+        self.assertTrue(f("github-actions", []))
+        self.assertTrue(f("unknown", [".github/workflows/x.yml"]))
+        self.assertTrue(f("npm", [".github\\workflows\\x.yml"]))
+        self.assertTrue(f("nuget", [".GitHub/workflows/x.yml"]))
+        self.assertTrue(f("nuget", ["./.github/workflows/x.yml"]))
+        self.assertTrue(f("nuget", ["/.github/workflows/x.yml"]))
+        self.assertTrue(f("nuget", ["././.github/actions/a/action.yml"]))
+        self.assertTrue(f("npm", [".github/actions/a/b/action.yaml"]))
+        self.assertTrue(f("nuget", [], labels=["github-actions"]))
+        self.assertTrue(f("nuget", [], labels=["GitHub_Actions"]))
+        self.assertTrue(f("unknown", [], head_ref="dependabot/github_actions/x"))
+        self.assertTrue(f("unknown", [], head_ref="dependabot/github-actions/x"))
+        self.assertTrue(f("unknown", [], head_ref="DEPENDABOT/GITHUB_ACTIONS/x"))
+        self.assertFalse(f("npm", ["src/PPDS.Extension/package.json"]))
+        self.assertFalse(f("nuget", ["docs/.github-notes.md", "x/.github/workflows/y"]))
+        self.assertFalse(f("npm", [".github/dependabot.yml"]))
+        self.assertFalse(f("npm", [".github/actions/setup/README.md"]))
+        self.assertFalse(f("npm", [".github/pull_request_template.md"]))
+        self.assertFalse(f("nuget", [], labels=["dependencies", "nuget"],
+                           head_ref="dependabot/nuget/x"))
+        self.assertFalse(f("unknown", [], head_ref="human/github_actions/x"))
+        self.assertFalse(f("unknown", []))
+
+    def test_no_actions_bump_is_ever_auto_merge_eligible(self):
+        # Whatever else is true of it, an Actions bump never comes out Group A
+        # or Group B: try every combination of the signals the version rules
+        # look at (version change, tooling or auth-critical package name,
+        # lockfile-only or auth-critical-path files, grouped or multi-package
+        # title, breaking-change body) with every way of detecting an Actions
+        # bump, including an npm or nuget label beside it and no files at all.
+        titles = [
+            "Bump actions/checkout from 6.0.0 to 6.0.1",
+            "ci: bump actions/checkout from 6.0.0 to 6.1.0",
+            "ci: bump actions/checkout from 6 to 7",
+            "ci: bump actions/checkout from v6 to v6.0.1",
+            "ci: bump actions/checkout from 6.1.0 to 6.0.0",
+            "ci: bump eslint from 9.0.0 to 9.1.0",
+            "ci: bump @types/node from 22.0.0 to 22.0.1",
+            "ci: bump Azure.Identity from 1.0.0 to 1.0.1",
+            "ci: bump the github-actions group with 2 updates",
+            "ci: bump actions/checkout and actions/cache",
+            "ci: update actions",
+        ]
+        bodies = [
+            "",
+            "Updates `actions/checkout` from 6.0.0 to 6.0.1\n"
+            "Updates `actions/cache` from 4.2.0 to 4.2.1\n",
+            "Updates `eslint` from 9.0.0 to 9.1.0\n",
+            "### BREAKING CHANGE\nRemoved an input.",
+        ]
+        detections = [
+            # (labels, head_ref, extra files that identify it as Actions)
+            (["dependencies", "github-actions"], "dependabot/github_actions/x", []),
+            (["dependencies", "github_actions"], "human/x", []),
+            (["dependencies"], "dependabot/github_actions/x", []),
+            (["dependencies"], "human/x", [".github/workflows/build.yml"]),
+            ([], "dependabot/github_actions/x", []),
+            (["dependencies", "nuget", "github-actions"], "dependabot/github_actions/x", []),
+            (["dependencies", "npm"], "dependabot/github_actions/x", []),
+            (["dependencies"], "dependabot/github-actions/x", []),
+            (["dependencies"], "Dependabot/GitHub_Actions/x", []),
+            (["dependencies", "GitHub-Actions"], "human/x", []),
+            (["dependencies", "npm"], "human/x", ["./.github/workflows/build.yml"]),
+            (["dependencies", "nuget"], "human/x", ["/.github/actions/setup/action.yaml"]),
+        ]
+        file_sets = [
+            [],
+            [".github/workflows/build.yml"],
+            ["package-lock.json"],
+            ["src/PPDS.Auth/PPDS.Auth.csproj"],
+            ["src/PPDS.Extension/package.json", ".github/workflows/build.yml"],
+            [".github/actions/setup/action.yml"],
+        ]
+        checked = 0
+        for title in titles:
+            for body in bodies:
+                for labels, head_ref, detect_files in detections:
+                    for files in file_sets:
+                        all_files = list(dict.fromkeys(detect_files + files))
+                        pr = make_pr(
+                            number=1999,
+                            title=title,
+                            body=body,
+                            labels=labels,
+                            head_ref=head_ref,
+                            files=all_files,
+                        )
+                        with self.subTest(title=title, body=body[:30],
+                                          labels=labels, head_ref=head_ref,
+                                          files=all_files):
+                            c = classify.classify_pr(pr)
+                            self.assertEqual(c.group, "C", c.reason)
+                        checked += 1
+        self.assertEqual(checked, len(titles) * len(bodies) * len(detections) * len(file_sets))
+
+    def test_cli_reports_actions_bump_as_group_c(self):
+        import io
+        import json
+        pr = self.actions_pr()
+        stdin, stdout = sys.stdin, sys.stdout
+        try:
+            sys.stdin = io.StringIO(json.dumps([pr]))
+            sys.stdout = io.StringIO()
+            rc = classify._cli()
+            out = sys.stdout.getvalue()
+        finally:
+            sys.stdin, sys.stdout = stdin, stdout
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out)[0]["group"], "C")
 
 
 class TestCLIRoundTrip(unittest.TestCase):

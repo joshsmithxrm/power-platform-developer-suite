@@ -1,11 +1,8 @@
-using System.Text;
 using System.Text.Json;
 using Moq;
-using Nerdbank.Streams;
 using PPDS.Cli.Commands.Serve.Handlers;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Registration;
-using StreamJsonRpc;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Plugins.Registration;
@@ -96,37 +93,6 @@ public partial class PluginReconciliationWriteTests
     }
 
     private static async Task<JsonDocument> InvokeImageUpdateWireAsync(RpcMethodHandler handler, Guid imageId)
-    {
-        var (clientStream, serverStream) = FullDuplexStream.CreatePair();
-        using var client = clientStream;
-        using var server = serverStream;
-        using var rpc = new JsonRpc(new HeaderDelimitedMessageHandler(server, server, new SystemTextJsonFormatter()));
-        rpc.AddLocalRpcTarget(handler);
-        rpc.StartListening();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var payload = JsonSerializer.SerializeToUtf8Bytes(new
-        {
-            jsonrpc = "2.0", id = 1, method = "plugins/updateImage",
-            @params = new { id = imageId.ToString(), name = "Renamed" }
-        });
-        await client.WriteAsync(Encoding.ASCII.GetBytes($"Content-Length: {payload.Length}\r\n\r\n"), timeout.Token);
-        await client.WriteAsync(payload, timeout.Token);
-        await client.FlushAsync(timeout.Token);
-
-        var header = new StringBuilder();
-        var one = new byte[1];
-        while (!header.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal))
-        {
-            await client.ReadExactlyAsync(one, timeout.Token);
-            header.Append((char)one[0]);
-            Assert.True(header.Length < 4096);
-        }
-        var lengthLine = header.ToString().Split("\r\n")
-            .Single(line => line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase));
-        var length = int.Parse(lengthLine.Split(':')[1].Trim(), System.Globalization.CultureInfo.InvariantCulture);
-        Assert.InRange(length, 1, 16384);
-        var response = new byte[length];
-        await client.ReadExactlyAsync(response, timeout.Token);
-        return JsonDocument.Parse(response);
-    }
+        => JsonDocument.Parse(await InvokeWireAsync(handler, "plugins/updateImage",
+            new { id = imageId.ToString(), name = "Renamed" }));
 }

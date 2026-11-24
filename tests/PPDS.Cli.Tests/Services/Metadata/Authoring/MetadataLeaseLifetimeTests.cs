@@ -15,6 +15,7 @@ using PPDS.Dataverse.Pooling;
 using Xunit;
 using SdkUpdateOption = Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest;
 using SdkDeleteOption = Microsoft.Xrm.Sdk.Messages.DeleteOptionValueRequest;
+using PPDS.Tests.Shared;
 
 namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 
@@ -478,7 +479,7 @@ public sealed partial class MetadataLeaseLifetimeTests
         private async Task<OrganizationResponse> ExecuteAfterReleaseAsync(int lease, OrganizationRequest request)
         {
             FaultReached.TrySetResult();
-            await _releaseFault.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await HangBackstop.WaitAsync(_releaseFault.Task, "the test to release the delayed fault");
             return Execute(lease, request);
         }
 

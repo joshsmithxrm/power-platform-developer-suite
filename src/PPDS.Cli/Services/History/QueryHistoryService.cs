@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using PPDS.Cli.Infrastructure;
 
 namespace PPDS.Cli.Services.History;
 
@@ -9,12 +10,13 @@ namespace PPDS.Cli.Services.History;
 /// Application service for managing SQL query history with file persistence.
 /// </summary>
 /// <remarks>
-/// History is stored per-environment in ~/.ppds/history/{environment-hash}.json.
+/// History is stored per-environment in <c>history/{environment-hash}.json</c> under
+/// <see cref="CliDataPaths.DataDirectory"/>: the <c>PPDS_CONFIG_DIR</c> folder when that is set,
+/// otherwise <c>~/.ppds</c>.
 /// </remarks>
 public sealed class QueryHistoryService : IQueryHistoryService
 {
     private const int MaxHistorySize = 200;
-    private const string HistoryDirectoryName = "history";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -29,12 +31,24 @@ public sealed class QueryHistoryService : IQueryHistoryService
     /// Creates a new query history service.
     /// </summary>
     public QueryHistoryService(ILogger<QueryHistoryService> logger)
+        : this(logger, CliDataPaths.HistoryDirectory)
+    {
+    }
+
+    /// <summary>
+    /// Creates a query history service that keeps its files in <paramref name="historyDirectory"/>.
+    /// </summary>
+    /// <param name="logger">Logger.</param>
+    /// <param name="historyDirectory">Folder that holds one history file per environment.</param>
+    internal QueryHistoryService(ILogger<QueryHistoryService> logger, string historyDirectory)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _basePath = Path.Combine(
-            System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile),
-            ".ppds",
-            HistoryDirectoryName);
+        if (string.IsNullOrWhiteSpace(historyDirectory))
+        {
+            throw new ArgumentException("History directory cannot be empty.", nameof(historyDirectory));
+        }
+
+        _basePath = historyDirectory;
     }
 
     /// <inheritdoc />

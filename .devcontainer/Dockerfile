@@ -54,10 +54,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends locales \
 # python-is-python3 provides the python command, which the project hooks in
 # .claude/settings.json and the documented test commands call
 # (tests/test_devcontainer_python_command.py checks it).
+# shellcheck and file are for work on the shell scripts under scripts/ and the
+# workflow run steps; neither is in the base image.
 RUN apt-get update && apt-get install -y --no-install-recommends \
        xvfb xauth libglib2.0-0t64 libgtk-3-0t64 libnss3 libasound2t64 libxss1 libgbm1 \
        libxkbfile1 libsecret-1-0 libdrm2 libxshmfence1 libatk-bridge2.0-0t64 \
-       python3-pytest python3-yaml python-is-python3
+       python3-pytest python3-yaml python-is-python3 shellcheck file
 
 # Clean up apt cache
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*

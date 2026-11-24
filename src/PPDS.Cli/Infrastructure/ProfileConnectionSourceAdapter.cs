@@ -26,6 +26,9 @@ internal sealed class ProfileConnectionSourceAdapter : IConnectionSource
         _source = source ?? throw new ArgumentNullException(nameof(source));
     }
 
+    /// <summary>Gets the wrapped profile connection source (for tests that check which profile a pool was built from).</summary>
+    internal ProfileConnectionSource Source => _source;
+
     /// <inheritdoc />
     public string Name => _source.Name;
 

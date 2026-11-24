@@ -9,7 +9,9 @@ public class ProgressEventArgsTests
     [Fact]
     public void Constructor_InitializesWithDefaults()
     {
+        var before = DateTime.UtcNow;
         var args = new ProgressEventArgs();
+        var after = DateTime.UtcNow;
 
         args.Phase.Should().Be(MigrationPhase.Analyzing);
         args.Entity.Should().BeNull();
@@ -23,7 +25,8 @@ public class ProgressEventArgsTests
         args.SuccessCount.Should().Be(0);
         args.FailureCount.Should().Be(0);
         args.Message.Should().BeNull();
-        args.Timestamp.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(1));
+        // Bracketed by two readings of the clock the default uses, so load cannot move it outside the range.
+        args.Timestamp.Should().BeOnOrAfter(before).And.BeOnOrBefore(after);
     }
 
     [Fact]

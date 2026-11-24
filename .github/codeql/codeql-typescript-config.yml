@@ -1,0 +1,28 @@
+# CodeQL configuration for the VS Code extension's TypeScript.
+# The C# configuration is codeql-config.yml; each language has its own file so
+# that the paths, the exclusions and the query suite can differ.
+
+name: "PPDS CodeQL Config (TypeScript)"
+
+# Everything under the extension's folder except its tests: the source that
+# ships, and the build and development tooling beside it (esbuild.js, tools/,
+# dev/, the test-runner configuration files), which does not ship but handles
+# downloads and bundling. JavaScript elsewhere in the repository (scripts/, the
+# root tools/, the TUI end-to-end harness) is not scanned.
+paths:
+  - src/PPDS.Extension
+
+paths-ignore:
+  # Tests and test harnesses - excluded from security analysis, as for C#.
+  - src/PPDS.Extension/e2e/**
+  - '**/__tests__/**'
+  - '**/*.test.ts'
+  - '**/*.test.mjs'
+  # Build output and dependencies, when present.
+  - src/PPDS.Extension/dist/**
+  - '**/node_modules/**'
+
+# Security queries only. The C# scan also runs quality queries; for TypeScript
+# that job belongs to ESLint and the type checker, which already gate the build.
+queries:
+  - uses: security-extended

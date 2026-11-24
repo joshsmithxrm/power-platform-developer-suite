@@ -5,7 +5,7 @@ import json
 import os
 import sys
 
-SUITES = (("code", "test"), ("extraction", "single-file-extraction"),
+SUITES = (("code", "test"), ("code", "test-linux"), ("extraction", "single-file-extraction"),
           ("extraction", "vsix-artifacts"), ("python", "python-tests"))
 
 

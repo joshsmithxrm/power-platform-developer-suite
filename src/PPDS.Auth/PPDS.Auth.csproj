@@ -49,6 +49,8 @@
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" Condition="Exists('README.md')" />
     <InternalsVisibleTo Include="PPDS.Auth.Tests" />
+    <!-- Shared with PPDS.Dataverse: blocks interactive sign-in when a test host sets the switch. -->
+    <Compile Include="..\Shared\InteractiveSignInGuard.cs" Link="Shared\InteractiveSignInGuard.cs" />
   </ItemGroup>
 
   <!-- Public API surface tracking for Phase 0 docs pilot -->

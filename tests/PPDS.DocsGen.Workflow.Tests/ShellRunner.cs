@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using PPDS.Tests.Shared;
 
 namespace PPDS.DocsGen.Workflow.Tests;
 
@@ -104,7 +105,7 @@ internal static class ShellRunner
             }
         }
 
-        return RunAndCollect(psi, 60_000);
+        return RunAndCollect(psi);
     }
 
     public static Result RunNode(
@@ -137,7 +138,7 @@ internal static class ShellRunner
             psi.ArgumentList.Add(a);
         }
 
-        return RunAndCollect(psi, 60_000);
+        return RunAndCollect(psi);
     }
 
     public static Result RunGit(string workingDir, params string[] args)
@@ -165,7 +166,7 @@ internal static class ShellRunner
             psi.ArgumentList.Add(a);
         }
 
-        return RunAndCollect(psi, 30_000);
+        return RunAndCollect(psi);
     }
 
     /// <summary>
@@ -206,10 +207,11 @@ internal static class ShellRunner
     /// Spawn the process, drain stdout and stderr concurrently (avoids the
     /// classic Windows deadlock where the child blocks writing to a full
     /// stderr pipe while the parent is still synchronously reading stdout),
-    /// and return a <see cref="Result"/>. If the process does not exit in
-    /// <paramref name="timeoutMs"/> we kill it and fail loudly.
+    /// and return a <see cref="Result"/>. If the process does not exit within
+    /// <see cref="HangBackstop.Bound"/> we kill it and fail loudly, naming it. The bound
+    /// only catches a hang (#1684); it is not a limit on how long the scripts may take.
     /// </summary>
-    private static Result RunAndCollect(ProcessStartInfo psi, int timeoutMs)
+    private static Result RunAndCollect(ProcessStartInfo psi)
     {
         using var p = Process.Start(psi)
             ?? throw new InvalidOperationException("failed to start process");
@@ -217,12 +219,13 @@ internal static class ShellRunner
         var stdoutTask = p.StandardOutput.ReadToEndAsync();
         var stderrTask = p.StandardError.ReadToEndAsync();
 
-        if (!p.WaitForExit(timeoutMs))
+        if (!p.WaitForExit(HangBackstop.Bound))
         {
             try { p.Kill(entireProcessTree: true); }
             catch { /* best effort */ }
             throw new TimeoutException(
-                $"process {psi.FileName} did not exit in {timeoutMs}ms");
+                $"No completion after {HangBackstop.Bound.TotalSeconds:0}s waiting for process {psi.FileName} " +
+                $"{string.Join(' ', psi.ArgumentList)} to exit. This bound only catches a hang; treat the failure as one.");
         }
 
         // Now that the process has exited, the pipes have closed and the
