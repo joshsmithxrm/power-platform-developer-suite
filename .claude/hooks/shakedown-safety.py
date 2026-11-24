@@ -86,9 +86,16 @@ else is refused (exit 2):
   launcher it is registered through (``shakedown-safety-launcher.py``)
   kills it and refuses the command if it has not answered in time.
 
-What passes the environment gate with an unlisted (or unknown) active env:
-``env`` alone, ``env list``, ``env who``, the read forms of ``env config`` /
-``env type``, and ``env select`` / ``auth select`` to a listed target.
+What passes the environment gate with an unlisted (or unknown) active env,
+none of it sending anything to an unlisted environment: ``env`` alone,
+``env list`` (it asks the global discovery service, not an environment),
+the read forms of ``env config`` / ``env type`` (local settings), ``env
+select`` / ``auth select`` to a listed target, and ``env who`` only with
+``--environment`` / ``-env`` naming a listed one. ``env who`` without it
+sends WhoAmI to the active env and is gated like any other command (the
+maintainer's ruling, 2026-11-24): the refusal names the active env, the
+allowlist and the remedy, so it is also how a session finds out where it
+is.
 What passes the write-block: the paths ``CLI_COMMANDS`` marks read-only,
 and the conditional ones (``plugins deploy --dry-run``, ``query sql`` with
 inline SQL holding no write word as the T-SQL lexer splits words,
@@ -1757,14 +1764,28 @@ def _env_settings_read(path, rest: list) -> bool:
 
 
 def _env_read_form(path, rest: list) -> bool:
-    """True for the ``env`` forms that pass with an unlisted active env:
-    ``env`` alone or with a help flag, ``env list``, ``env who``, and the
-    read forms of ``env config`` / ``env type``."""
+    """True for the ``env`` forms that pass with an unlisted active env,
+    none of which sends anything to an environment: ``env`` alone or with a
+    help flag, ``env list`` (signs in to the global discovery service, not
+    to an environment), and the read forms of ``env config`` / ``env type``
+    (local settings). ``env who`` is not one: it sends WhoAmI to the
+    environment it names or to the active one (``_who_names_listed``)."""
     if path == ("env",):
         return not rest or (len(rest) == 1 and rest[0] in _HELP_FLAGS)
-    if path in (("env", "list"), ("env", "who")):
+    if path == ("env", "list"):
         return True
     return _env_settings_read(path, rest)
+
+
+def _who_names_listed(path, rest: list, allowlist) -> bool:
+    """True for ``env who`` with ``--environment`` / ``-env`` (value after a
+    space, ``=`` or ``:``) naming only listed environments: the CLI then
+    sends WhoAmI to that environment, not to the active one. Every target
+    option has already been checked (``_target_problem``)."""
+    if path != ("env", "who"):
+        return False
+    values, problem = _option_values(rest, {"--environment", "-env"}, set())
+    return not problem and bool(values) and all(target_listed(v, allowlist) for _, v in values)
 
 
 def _switch_targets(rest: list, names: set, letters: set):
@@ -1974,6 +1995,11 @@ def decide_env(argv, allowlist, active, store=_MISSING, required=None, names_tar
             return refuse(why)
     if path[:1] == ("env",) and _env_read_form(path, rest):
         return True, ""
+    if _who_names_listed(path, rest, allowlist):
+        # The named environment replaces the active one; a variable the CLI
+        # inherits (``required``) may still pick another, so it must match.
+        if all(env_matches_allowlist(c, allowlist) for c in (required or ())):
+            return True, ""
     return active_check()
 
 

@@ -272,9 +272,9 @@ def test_the_exit_tally_sees_a_hook_that_decided_nothing(tmp_path, hook_text, re
 
 
 def test_a_mode_tag_alone_excuses_nothing():
-    known = {"r5-env-who-on-unlisted"}
-    assert _excused("r5-env-who-on-unlisted+r5-mode-gate-unknown", known)
-    assert _excused("r5-env-who-on-unlisted", known)
+    known = {"r2-example-class"}
+    assert _excused("r2-example-class+r5-mode-gate-unknown", known)
+    assert _excused("r2-example-class", known)
     assert not _excused("r5-mode-gate-settings", known)
     assert not _excused("r2-target-override+r5-mode-gate-settings", known)
     assert not any(label.startswith("r5-mode-") for label in EXPECTED["labels"])

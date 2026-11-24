@@ -22,9 +22,13 @@ the C# `IShakedownGuard` consume what this phase sets up; see
    the user to configure (`docs/SAFE-SHAKEDOWN.md` for details). Do not
    continue without one: the hook's environment gating is opt-in, so with no
    allowlist nothing stops `ppds` commands from reaching an unsafe environment.
-2. **Verify active env is in the allowlist** — run `ppds env who` and confirm
-   the displayed env matches an allowlist entry. The `shakedown-safety` hook
-   will block downstream `ppds *` calls otherwise.
+2. **Verify active env is in the allowlist** — run `ppds env who`. It
+   passes only when the active env is listed (it sends WhoAmI there), so a
+   pass with the displayed env matching an allowlist entry confirms it. If
+   the active env is not listed, the `shakedown-safety` hook refuses it, and
+   the refusal names the active env, the allowlist and the remedy: switch
+   with `ppds env select <listed env>` and run `ppds env who` again. The hook
+   blocks downstream `ppds *` calls until the active env is listed.
 3. **Arm the shakedown write-block (sentinel file).** Before any
    mutating Bash work (steps 1-2 are read-only checks and run first
    by design), write `.claude/state/shakedown-active.json` containing at

@@ -78,8 +78,9 @@ by program name (a path ending in `ppds` counts) or through `dotnet`
 
 Before running anything below:
 
-1. `ppds env who` (allowed whatever the active env) and confirm the env is a dev/test env you
-   mean to touch, and in the allowlist if one is configured.
+1. `ppds env who` and confirm the env is a dev/test env you mean to touch. With an allowlist
+   configured it passes only when the active env is listed (it sends WhoAmI there); otherwise
+   the hook refuses it, and the refusal names the active env, the allowlist and how to switch.
 2. When invoked from `/shakedown`, confirm `.claude/state/shakedown-active.json`
    exists so writes fail closed.
 3. Invoke the CLI as `ppds`, `src/PPDS.Cli/bin/Debug/net10.0/ppds` or

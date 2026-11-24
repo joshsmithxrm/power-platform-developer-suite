@@ -126,7 +126,7 @@ python tests/hooks/differential/repro.py out/args/<name>.case.json
 At commit 3164e825 (the second review round of #1814) the requirement-severity tests fail: they rediscover the round-2 must-fix findings and find more.
 `findings.py` labels each failure after the fact (the generators never use these labels), and `expected_failures.json` lists the labels known at that commit with the finding each belongs to.
 When a fix lands, the failures with its label disappear; remove the label from `expected_failures.json`.
-Mode tags (`r5-mode-*`) are not listed and excuse nothing: a failure is excused only when it carries a class label and every class label it carries is listed. After the three long fresh-seed runs of round 6 the list holds only `r5-env-who-on-unlisted`, kept until the maintainer rules on `env who`.
+Mode tags (`r5-mode-*`) are not listed and excuse nothing: a failure is excused only when it carries a class label and every class label it carries is listed. After the maintainer's ruling on `env who` (2026-11-24: refuse it, as the hook now does) the list is empty.
 Round-4 labels (`new-xargs-options`, `new-hidden-words`, `new-unknown-wrapper`, `new-home-override`, `new-sql-exponent-glue`, `cost-rule-false-block`) were added against the #1814 head a39e7e68; some earlier labels are listed again because they reappear combined with a round-4 one.
 A failure labelled `unlabelled` is a finding nobody has named yet.
 

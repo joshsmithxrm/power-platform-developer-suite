@@ -465,7 +465,6 @@ class TestEnvSwitchTarget:
 class TestReadOnlyAlwaysAllowed:
     @pytest.mark.parametrize("cmd", [
         "ppds env list",
-        "ppds env who",
         "ppds env config",
         "ppds env config --list",
         "ppds env config --show",
@@ -481,6 +480,23 @@ class TestReadOnlyAlwaysAllowed:
             env_extra={"PPDS_SAFE_ENVS": "ppds-dev", "PPDS_CONFIG_DIR": config_dir},
         )
         assert r.returncode == 0, f"cmd={cmd}: stderr={r.stderr!r}"
+
+
+class TestEnvWhoGated:
+    """``env who`` sends WhoAmI, so it is gated (maintainer's ruling,
+    2026-11-24): it passes only when the env it reaches is listed."""
+
+    @pytest.mark.parametrize("cmd,active,expected", [
+        ("ppds env who", "ppds-prod", 2),
+        ("ppds env who", "ppds-dev", 0),
+        ("ppds env who --environment ppds-dev", "ppds-prod", 0),
+        ("ppds env who --environment ppds-prod", "ppds-prod", 2),
+        ("ppds env who --environment ppds-prod", "ppds-dev", 2),
+    ])
+    def test_env_who_reaches_only_a_listed_env(self, fake_profile_dir, cmd, active, expected):
+        config_dir = fake_profile_dir(active_env_name=active)
+        r = _run_hook(cmd, env_extra={"PPDS_SAFE_ENVS": "ppds-dev", "PPDS_CONFIG_DIR": config_dir})
+        assert r.returncode == expected, f"cmd={cmd}: stderr={r.stderr!r}"
 
 
 class TestFailSafe:

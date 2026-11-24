@@ -457,11 +457,20 @@ was started.
    - `ppds auth select`: allowed when every profile it names
      (`--name` / `-n`, `--index` / `-i`, a plain word) resolves to a listed
      environment, whatever the active env; no profile is refused.
-   - With an unlisted (or unknown) active env, only these read forms pass:
-     `ppds env` alone or with a help flag, `env list`, `env who` (issues
-     only WhoAmI), `env config` alone, with `--list`, `--show` / `-s`, a
-     URL, or a URL then `--show` / `-s`, and `env type` alone or with
-     `--list`.
+   - With an unlisted (or unknown) active env, only these read forms pass,
+     none of which sends anything to an environment: `ppds env` alone or
+     with a help flag, `env list` (it signs in to the global discovery
+     service, not to an environment), `env config` alone, with `--list`,
+     `--show` / `-s`, a URL, or a URL then `--show` / `-s`, and `env type`
+     alone or with `--list` (both read local settings).
+   - `ppds env who` (and `org who`) sends WhoAmI to an environment, so it is
+     gated like any other command (maintainer's ruling, 2026-11-24: nothing
+     is sent to an environment that is not listed, with no exception). It
+     passes when the active env is listed, or when `--environment` / `-env`
+     (with a space, `=` or `:`) names only listed environments, whatever
+     the active env. With an unlisted active env and no such option it is
+     refused, and the refusal names the active env, the allowlist and how
+     to switch: that message is how a session finds out where it is.
    - All other `ppds *` invocations, `ppds` with no arguments (it starts
      the TUI against the active env) included: allowed only when the
      **active** env is in the allowlist.

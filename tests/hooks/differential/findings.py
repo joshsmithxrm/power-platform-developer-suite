@@ -92,8 +92,6 @@ def _labels(f: dict) -> list:
         out.append("new-unknown-wrapper")
     if cause == "home-override" or recipe.startswith("home:"):
         out.append("new-home-override")
-    if cause == "runs-on-unlisted-active" and argv[:2] in (["env", "who"], ["org", "who"]):
-        out.append("r5-env-who-on-unlisted")
     if cause == "environment-url-override":
         out.append("r5-environment-url")
     if cause == "switch-without-allowlist":

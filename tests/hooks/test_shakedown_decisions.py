@@ -647,7 +647,6 @@ GATE_CASES = [
     ("unlisted", f"{P} env", 0),
     ("unlisted", f"{P} env --help", 0),
     ("unlisted", f"{P} env list", 0),
-    ("unlisted", f"{P} env who", 0),
     ("unlisted", f"{P} env config", 0),
     ("unlisted", f"{P} env config --list", 0),
     ("unlisted", f"{P} env config https://x --show", 0),
@@ -656,7 +655,29 @@ GATE_CASES = [
     ("unlisted", f"{P} env config https://x --type Production", 2),
     ("unlisted", f"{P} env type Production --color Red", 2),
     ("unlisted", f"{P} env current", 2),
+    # env who sends WhoAmI (maintainer's ruling, 2026-11-24): gated like any
+    # command that reaches the active env, unless --environment names a listed one
+    ("unlisted", f"{P} env who", 2),
+    ("unlisted", f"{P} org who", 2),
+    ("unlisted", f"{P} env who --output json", 2),
+    ("unlisted", f"{P}.exe env who", 2),
+    ("unlisted", f"dotnet run --project src/PPDS.Cli -- env who", 2),
+    ("listed", f"{P} env who", 0),
+    ("listed", f"{P} org who", 0),
+    ("unlisted", f"{P} env who --environment zz-dev", 0),
+    ("unlisted", f"{P} env who --environment=zz-dev", 0),
+    ("unlisted", f"{P} env who --environment:zz-dev", 0),
+    ("unlisted", f"{P} env who -env zz-dev", 0),
+    ("unlisted", f"{P} env who --environment https://zz-dev", 0),
+    ("unlisted", f"{P} org who --environment zz-dev", 0),
     ("unlisted", f"{P} env who --environment zz-prod", 2),
+    ("unlisted", f"{P} env who --environment=zz-prod", 2),
+    ("unlisted", f"{P} env who -env zz-prod", 2),
+    ("unlisted", f"{P} env who --environment zz-dev --environment zz-prod", 2),
+    ("unlisted", f"{P} env who --environment", 2),
+    ("unlisted", f"{P} env who -e zz-dev", 2),
+    ("unlisted", f"{P} env who --profile p", 2),
+    ("listed", f"{P} env who --environment zz-prod", 2),
     # the write-block: env select needs an allowlist; version --update writes
     ("shakedown", f"{P} env select --environment zz-dev", 0),
     ("shakedown-no-allowlist", f"{P} env select --environment zz-dev", 2),
@@ -679,6 +700,26 @@ def test_the_gates_at_the_argument_level(gate_env, tool, mode, command, expected
 ])
 def test_target_variables_in_the_hooks_own_environment(gate_env, extra, expected):
     code, err = gate_env("listed", "Bash", f"{P} data list", **extra)
+    assert code == expected, err
+
+
+@pytest.mark.parametrize("tool", ["Bash", "PowerShell"])
+def test_env_who_on_an_unlisted_env_names_where_the_session_is(gate_env, tool):
+    """The refusal is how a session finds out where it is: it names the
+    active env, the allowlist and how to switch to a listed one."""
+    code, err = gate_env("unlisted", tool, f"{P} env who")
+    assert code == 2, err
+    assert "Active env: zz-prod" in err, err
+    assert "Allowlist:  zz-dev" in err, err
+    assert "ppds env select" in err, err
+
+
+@pytest.mark.parametrize("extra,expected", [
+    ({"PPDS_ENVIRONMENT_URL": "https://zzprod.crm.example.com"}, 2),
+    ({"PPDS_ENVIRONMENT_URL": "https://zz-dev.crm.example.com"}, 0),
+])
+def test_env_who_naming_a_listed_env_still_checks_the_inherited_url(gate_env, extra, expected):
+    code, err = gate_env("unlisted", "Bash", f"{P} env who --environment zz-dev", **extra)
     assert code == expected, err
 
 

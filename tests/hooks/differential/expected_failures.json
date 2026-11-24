@@ -6,7 +6,5 @@
   "Mode tags (r5-mode-*) are not listed: they name where a failure happened, not what it is, so a failure",
   "is excused only by its class labels (a failure with a mode tag alone still fails)."
  ],
- "labels": {
-  "r5-env-who-on-unlisted": "round 5: env who passes with an unlisted active environment, but it sends WhoAmI there (kept until the maintainer's ruling)"
- }
+ "labels": {}
 }
