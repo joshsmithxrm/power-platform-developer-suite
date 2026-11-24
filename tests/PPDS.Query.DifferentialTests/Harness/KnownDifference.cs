@@ -9,7 +9,11 @@ namespace PPDS.Query.DifferentialTests.Harness;
 /// <param name="RowId">The operand row (1 when the expression reads no column).</param>
 /// <param name="SqlServer">The reference outcome.</param>
 /// <param name="PpdsToday">The engine's outcome today.</param>
-public sealed record KnownCase(string Expression, int RowId, string SqlServer, string PpdsToday);
+/// <param name="Tree">
+/// The same expression built from harness nodes, so that the runner can find its cause and check that this entry's own
+/// matcher explains it. Its SQL text may differ from <paramref name="Expression"/> only in parentheses.
+/// </param>
+public sealed record KnownCase(string Expression, int RowId, string SqlServer, string PpdsToday, Expr Tree);
 
 /// <summary>
 /// A difference between the engine and SQL Server that an open issue already records. It has hand-written cases
@@ -21,8 +25,9 @@ public sealed record KnownCase(string Expression, int RowId, string SqlServer, s
 /// <param name="Summary">The defect, in one sentence.</param>
 /// <param name="Cases">The hand-written cases.</param>
 /// <param name="Matches">
-/// True when a cause found in a generated expression is this defect. It must be narrow: it sees the construct, the
-/// operands' outcomes and both results, and it must not accept a difference of another kind on the same construct.
+/// True when a cause found in a generated expression is this defect. It must be narrow: it recomputes the defect's own
+/// arithmetic from the operands' outcomes (the value the defect produces, and the value SQL Server produces), so that
+/// a different defect on the same construct stays new. Each entry has near-miss tests that must stay unexplained.
 /// </param>
 public sealed record KnownDifference(string Id, string Issue, string Summary, IReadOnlyList<KnownCase> Cases, Func<NodeDifference, bool> Matches)
 {

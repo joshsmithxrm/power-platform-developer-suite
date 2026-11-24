@@ -129,6 +129,9 @@ public sealed class HarnessSelfTests
         Assert.Equal(Difference.Error, Outcome.Compare(reference, Outcome.Failed(ErrorClass.DivideByZero, "x")));
         Assert.Equal(Difference.Error, Outcome.Compare(Outcome.Failed(ErrorClass.Overflow, "8115"), Outcome.Failed(ErrorClass.DivideByZero, "x")));
         Assert.Equal(Difference.None, Outcome.Compare(Outcome.Failed(ErrorClass.Overflow, "8115"), Outcome.Failed(ErrorClass.Overflow, "OverflowException")));
+        // Two unclassified errors say nothing about each other: never equal, whatever their numbers or names.
+        Assert.Equal(Difference.Error, Outcome.Compare(Outcome.Failed(ErrorClass.Other, "-2"), Outcome.Failed(ErrorClass.Other, "NullReferenceException")));
+        Assert.Equal(Difference.Error, Outcome.Compare(Outcome.Failed(ErrorClass.Other, "1234"), Outcome.Failed(ErrorClass.Other, "1234")));
         Assert.True(Outcome.NumericallyEqual("2.5", "2.500000"));
     }
 

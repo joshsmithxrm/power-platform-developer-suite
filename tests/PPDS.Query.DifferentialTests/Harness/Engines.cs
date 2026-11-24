@@ -62,7 +62,22 @@ public sealed class SqlServerEngine(SqlConnection connection) : IExpressionEngin
         }
         catch (SqlException ex)
         {
+            ThrowIfHarnessFault(connection, expression, ex);
             return Classify(expression, ex);
+        }
+    }
+
+    /// <summary>
+    /// Throws a <see cref="HarnessException"/> when the error is about the connection rather than the expression: a
+    /// timeout (-2), a severity of 20 or more (the connection is closed), or a connection left not open. Such an error
+    /// is not an outcome to compare.
+    /// </summary>
+    public static void ThrowIfHarnessFault(SqlConnection connection, string statement, SqlException ex)
+    {
+        if (ex.Number == -2 || ex.Class >= 20 || connection.State != System.Data.ConnectionState.Open)
+        {
+            throw new HarnessException(
+                $"The reference server failed rather than the statement (error {ex.Number}, severity {ex.Class}): {statement}: {ReferenceServer.Redact(ex.Message)}");
         }
     }
 
@@ -112,6 +127,10 @@ public sealed class PpdsEngine(IReadOnlyDictionary<int, IReadOnlyDictionary<stri
     /// <inheritdoc />
     public Outcome Evaluate(string expression, int rowId)
     {
+        // A missing row is a fault of the harness, not an error of the engine: look it up outside the engine's try.
+        if (!rows.TryGetValue(rowId, out var row))
+            throw new HarnessException($"Operand row {rowId} is missing.");
+
         var (compiled, refusal) = Compile(expression);
         if (refusal is not null)
             return refusal;
@@ -119,7 +138,7 @@ public sealed class PpdsEngine(IReadOnlyDictionary<int, IReadOnlyDictionary<stri
         object? value;
         try
         {
-            value = compiled!(rows[rowId]);
+            value = compiled!(row);
         }
         catch (Exception ex)
         {
@@ -160,7 +179,9 @@ public sealed class PpdsEngine(IReadOnlyDictionary<int, IReadOnlyDictionary<stri
     public static string? FamilyOf(object? value) => value switch
     {
         null => null,
-        int or short or byte => "int",
+        int => "int",
+        short => "smallint",
+        byte => "tinyint",
         long => "bigint",
         decimal => "decimal",
         double or float => "float",

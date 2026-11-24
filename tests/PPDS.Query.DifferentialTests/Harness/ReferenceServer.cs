@@ -93,6 +93,12 @@ public sealed partial class ReferenceDatabase : IDisposable
     /// <summary>The prefix of every database the harness creates.</summary>
     public const string NamePrefix = "ppds_sqldiff_";
 
+    /// <summary>
+    /// The collation the harness database is created with, so that text results do not depend on the server's default.
+    /// It is the reference server's collation and, by #1799's probe, to be aligned with the Dataverse endpoint's.
+    /// </summary>
+    public const string Collation = "SQL_Latin1_General_CP1_CI_AS";
+
     private SqlConnection? _connection;
 
     /// <summary>Creates the database and the operand table when a server is configured; otherwise does nothing.</summary>
@@ -107,11 +113,18 @@ public sealed partial class ReferenceDatabase : IDisposable
         {
             using (var master = Open("master"))
             {
-                Execute(master, $"CREATE DATABASE [{Name}];");
+                Execute(master, $"CREATE DATABASE [{Name}] COLLATE {Collation};");
                 Created = true;
-                using var version = new SqlCommand("SELECT CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128)) + N' ' + CAST(SERVERPROPERTY('Edition') AS nvarchar(128)) + N', collation ' + CAST(DATABASEPROPERTYEX(@db, 'Collation') AS nvarchar(128))", master);
+                using var version = new SqlCommand("SELECT CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128)) + N' ' + CAST(SERVERPROPERTY('Edition') AS nvarchar(128)), CAST(DATABASEPROPERTYEX(@db, 'Collation') AS nvarchar(128))", master);
                 version.Parameters.AddWithValue("@db", Name);
-                ServerDescription = (string)version.ExecuteScalar();
+                using (var reader = version.ExecuteReader())
+                {
+                    reader.Read();
+                    var collation = reader.GetString(1);
+                    if (collation != Collation)
+                        throw new HarnessException($"The harness database has collation {collation}, not {Collation}.");
+                    ServerDescription = reader.GetString(0) + ", collation " + collation;
+                }
             }
 
             _connection = Open(Name);
@@ -120,10 +133,19 @@ public sealed partial class ReferenceDatabase : IDisposable
             Execute(_connection, Operands.InsertRowsSql());
             RowValues = ReadRows(_connection);
         }
-        catch (SqlException ex)
+        catch (Exception ex)
         {
-            Dispose();
-            throw new InvalidOperationException("Could not set up the reference database: " + ReferenceServer.Redact(ex.Message));
+            // Every failure here, including one while cleaning up, is reported without the host name or the password.
+            var message = "Could not set up the reference database: " + ReferenceServer.Redact(ex.Message);
+            try
+            {
+                Dispose();
+            }
+            catch (Exception cleanup)
+            {
+                message += " Cleaning up also failed: " + ReferenceServer.Redact(cleanup.Message);
+            }
+            throw new InvalidOperationException(message);
         }
     }
 
@@ -153,9 +175,16 @@ public sealed partial class ReferenceDatabase : IDisposable
         if (!OwnName().IsMatch(Name))
             throw new InvalidOperationException("Refusing to drop a database whose name the harness did not generate.");
 
-        using var master = Open("master");
-        Execute(master, $"IF DB_ID(N'{Name}') IS NOT NULL BEGIN ALTER DATABASE [{Name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{Name}]; END;");
-        Created = false;
+        try
+        {
+            using var master = Open("master");
+            Execute(master, $"IF DB_ID(N'{Name}') IS NOT NULL BEGIN ALTER DATABASE [{Name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{Name}]; END;");
+            Created = false;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Could not drop the harness database {Name}: " + ReferenceServer.Redact(ex.Message));
+        }
     }
 
     [GeneratedRegex("^ppds_sqldiff_[0-9]{14}_[0-9a-f]{8}$")]

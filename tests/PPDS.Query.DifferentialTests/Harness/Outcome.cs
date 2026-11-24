@@ -21,7 +21,7 @@ public enum ErrorClass
     TypeClash,
     /// <summary>The engine refused the expression before evaluating it (PPDS parse or compile refusal).</summary>
     Refused,
-    /// <summary>Any other error; the detail names it.</summary>
+    /// <summary>Any other error; the detail names it. Two "Other" errors never compare equal.</summary>
     Other,
 }
 
@@ -49,7 +49,9 @@ public sealed record SqlTypeInfo(string Name, int? Precision = null, int? Scale 
     /// <summary>
     /// The family used when the engine under test reports no more than a family. The engine computes currency as a
     /// .NET decimal and text as a .NET string, so it cannot report money apart from decimal, varchar apart from
-    /// nvarchar, or any precision or length.
+    /// nvarchar, or any precision or length. The whole-number types are not folded: tinyint, smallint, int and bigint
+    /// are four families, because each overflows at a different point and the engine does distinguish int from bigint
+    /// (SQL Server types <c>NULLIF(7, 1.005)</c> tinyint, which is reported as a difference).
     /// </summary>
     public string Family => FamilyOf(Name);
 
@@ -130,6 +132,10 @@ public sealed record Outcome(string? Value, ErrorClass Error, string? ErrorDetai
     public static Difference Compare(Outcome reference, Outcome actual)
     {
         if (reference.Error != actual.Error)
+            return Difference.Error;
+        // Two errors of the same named class agree. Two "Other" errors say nothing about each other (an unmapped SQL
+        // Server error number and a .NET exception), so they never agree.
+        if (reference.Error == ErrorClass.Other)
             return Difference.Error;
         if (reference.IsError)
             return Difference.None;

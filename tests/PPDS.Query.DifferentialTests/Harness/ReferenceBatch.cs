@@ -44,6 +44,7 @@ public static class ReferenceBatch
         }
         catch (SqlException ex)
         {
+            SqlServerEngine.ThrowIfHarnessFault(connection, batch, ex);
             var outcome = SqlServerEngine.Classify(batch, ex);
             if (text.Length > 0)
                 text.Append(" || ");

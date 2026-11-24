@@ -206,12 +206,29 @@ public sealed class RunReport(int seed, int expressions, int maxDepth)
         }
     }
 
+    /// <summary>
+    /// The new-difference groups of this run that are not in the recorded baseline (<see cref="NewDifferenceBaseline"/>),
+    /// so that one more group among the known new ones cannot be overlooked. The run fails while any new group exists,
+    /// in the baseline or not.
+    /// </summary>
+    public IReadOnlyList<string> NotInBaseline => NewGroups.Select(g => g.Group).Where(g => !NewDifferenceBaseline.Groups.Contains(g)).ToList();
+
+    /// <summary>The limit of what an expected difference proves, printed with every report.</summary>
+    public const string Limit =
+        "Limit: a node above a cause has operands that already differ, so its own result is not checked in that evaluation. "
+        + "A defect in that node shows only where the generator puts the same construct over operands that agree.";
+
     /// <summary>The report as text: counts, then each new difference with a reproducible example.</summary>
     public override string ToString()
     {
         var text = new StringBuilder();
         text.AppendLine(CultureInfo.InvariantCulture, $"Seed {Seed}, depth up to {MaxDepth}: {Expressions} expressions, {Evaluations} evaluations (an expression that reads a column is evaluated over each of the {Operands.Rows.Count} rows).");
         text.AppendLine(CultureInfo.InvariantCulture, $"  equal {Equal}, expected differences {Expected}, new differences {New}.");
+        var notInBaseline = NotInBaseline;
+        text.AppendLine(CultureInfo.InvariantCulture, $"  new-difference groups: {NewGroups.Count}, of which not in the recorded baseline: {notInBaseline.Count}.");
+        foreach (var group in notInBaseline)
+            text.AppendLine(CultureInfo.InvariantCulture, $"  NOT IN BASELINE: {group}");
+        text.AppendLine("  " + Limit);
         foreach (var (id, n) in _expected)
             text.AppendLine(CultureInfo.InvariantCulture, $"  expected {id}: {n}");
         foreach (var group in NewGroups)
