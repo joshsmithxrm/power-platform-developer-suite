@@ -17,7 +17,7 @@ MANIFEST = REPO_ROOT / "scripts" / "ci" / "release_labels.json"
 WORKFLOWS = [
     REPO_ROOT / ".github" / "workflows" / "post-merge-release-check.yml",
     REPO_ROOT / ".github" / "workflows" / "milestone-release-check.yml",
-    REPO_ROOT / ".github" / "workflows" / "release-cadence-check.yml",
+    REPO_ROOT / ".github" / "workflows" / "release-risk-check.yml",
 ]
 
 
@@ -26,7 +26,7 @@ def test_manifest_defines_exactly_four_workflow_owned_release_labels() -> None:
     assert {label.name for label in labels} == {
         "release:patch",
         "release:minor",
-        "release:cadence-check",
+        "release:unreleased-fix",
         "release:extension-corelease",
     }
     assert all(label.description for label in labels)

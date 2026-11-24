@@ -1,7 +1,7 @@
 # Release Cycle
 
 **Status:** Draft
-**Last Updated:** 2026-11-19
+**Last Updated:** 2026-11-21
 **Code:** [docs/runbooks/release.md](../docs/runbooks/release.md), [.claude/skills/release/](../.claude/skills/release/), [.github/workflows/](../.github/workflows/), [scripts/ci/](../scripts/ci/), [tests/ci/](../tests/ci/), [tests/compatibility/](../tests/compatibility/), [tests/test_release_runbook_content.py](../tests/test_release_runbook_content.py), [tests/ci/test_extension_publish_workflow.py](../tests/ci/test_extension_publish_workflow.py)
 **Surfaces:** All
 
@@ -13,7 +13,7 @@ Policy layer governing *when* PPDS releases happen, *how* work is grouped into m
 
 ### Goals
 
-- **Predictable release cadence**: patches ship fast, minors ship when ready, nothing drifts silently
+- **No silent exposure**: patches ship fast, minors ship when ready, and a merged data-safety or security fix cannot stay unreleased past its target without an issue saying so
 - **Automated detection**: the system tells the maintainer when a release is warranted — not the other way around
 - **Manual ceremony**: irreversible actions (tag push, NuGet/Marketplace publish) remain human-initiated by the maintainer following the release runbook
 - **Explained scope**: direct changes, downstream deliverables, and MinVer tag prerequisites are reported separately
@@ -44,11 +44,11 @@ PR merges to main
        │                           Opens "Milestone vX.Y.0 ready"
        │                           issue with summary
        │
-       └── (accumulates) ──────────▶ release-cadence-check.yml (weekly cron)
-                                          │
+       └── data-safety / security ──▶ release-risk-check.yml (weekly cron)
+           fix merged                     │
                                           ▼
-                                   Opens "Release check-in" issue
-                                   if >8 weeks + unreleased commits
+                                   Opens one "Unreleased fix" issue
+                                   per fix past its SECURITY.md target
 
 All three paths lead to:
        │
@@ -65,7 +65,7 @@ All three paths lead to:
 |-----------|----------------|
 | `post-merge-release-check.yml` | Detects `release:patch` label on merged PRs, opens patch release issue |
 | `milestone-release-check.yml` | Detects milestone completion, opens minor release readiness issue |
-| `release-cadence-check.yml` | Weekly cron, checks days since last release tag, opens check-in issue |
+| `release-risk-check.yml` | Weekly cron, opens one check-in issue per merged `data-safety` or `security` fix (labelled itself, or closing a labelled issue) still unreleased in a deliverable that ships it, past its target in `SECURITY.md` |
 | [docs/runbooks/release.md](../docs/runbooks/release.md) | Release ceremony — CHANGELOGs, version bumps, tag push, CI monitoring |
 | `/release` skill (optional) | Directs an AI agent to follow the runbook and lists the actions it must confirm with the maintainer |
 | `verify_public_release.py` | Read-only post-publish verification through nuget.org, GitHub Releases, and the VS Code Marketplace |
@@ -92,13 +92,13 @@ All three paths lead to:
 
 ### Release Triggering Model
 
-Releases are **event-driven with a cadence floor**:
+Releases are **event-driven, with a risk rule for unreleased fixes**:
 
 1. **Patch releases** ship when ready. Any merged PR labeled `release:patch` triggers automated detection. The maintainer decides whether to release immediately or batch with other pending fixes.
 
 2. **Minor releases** ship when complete. GitHub Milestones define scope. When all issues/PRs in a milestone are closed, automated detection surfaces readiness. The maintainer follows the release runbook.
 
-3. **Cadence floor**: if no release (patch or minor) has shipped in 8 weeks and main has unreleased commits, a scheduled workflow opens a check-in issue. This prevents drift where accumulated changes never ship because nothing feels "ready enough."
+3. **Risk rule**: a scheduled workflow opens a check-in issue for each merged fix (a pull request labelled `data-safety` or `security`, or one that closes an issue with that label) that is not yet in a stable release of every deliverable that ships it, once it is older than that kind of fix's target in the security policy (`SECURITY.md`). Time since the last release is not a trigger: it says nothing about whether users are exposed, and an unreleased fix for wrong data, lost data or a security flaw does. The policy for when a release is made is rule 7.2 of the [versioning policy](../docs/VERSIONING.md#7-support). This replaced the 8-week cadence floor (#1791).
 
 ### Milestone Targeting Strategy
 
@@ -200,16 +200,55 @@ or reopened; a different merged PR receives a different marker and record.
 5. **Maintainer reviews**, follows the full release runbook ceremony
 6. **Maintainer closes milestone and issue** after publish verification
 
-**Flow 3 — Cadence floor (scheduled):**
+**Flow 3 — Unreleased data-safety and security fixes (scheduled):**
 
-1. **Weekly cron** (`release-cadence-check.yml`) runs on Monday
-2. **Discovers** release prefixes from the product graph, rejects malformed tags
-   with the shared strict SemVer model, and selects the most recently created
-   valid release tag across the independent package version lines
-3. **Normalizes** git's ISO-strict tag timestamp and the current time to UTC,
-   then checks the elapsed time and commit count since that exact tag
-4. **If >8 weeks and >0 unreleased commits**: opens issue titled "Release check-in: {N} commits unreleased, {W} weeks since last release"
-5. **Maintainer triages**: release now, defer with reason, or close as not-needed
+1. **Weekly cron** (`release-risk-check.yml`) runs on Monday
+2. **Lists** the repository's labels, the pull requests merged into `main`
+   with their labels and closing-issue references, the issues labelled
+   `data-safety` or `security` with their state and state reason, and the
+   existing `release:unreleased-fix` issues. A **fix** is a merged pull
+   request that carries `data-safety` or `security`, or closes an issue in
+   this repository that carries one (the label is usually on the issue)
+3. **Stops with an error and opens nothing** when:
+   - a label it relies on (`data-safety`, `security`, `release:unreleased-fix`)
+     does not exist;
+   - a list reaches its fetch limit and may be truncated;
+   - a list is empty that cannot be (no merged pull requests at all, or no
+     issue for a fix label that exists);
+   - `SECURITY.md` states no targets, or a target twice.
+
+   The targets (days after merge, one per label) are the table between the
+   `RELEASE_TARGETS` markers in `SECURITY.md`
+4. **Maps** each fix's merge-commit diff to the release plan's own patch
+   targets (`build_release_plan`): the changed packages plus every downstream
+   deliverable that consumes or bundles them. A fix is released only when
+   every one of them has a stable tag that contains the merge commit; a
+   library tag alone does not release a fix the CLI, MCP server or Extension
+   still carries unshipped. A prerelease, or an odd-minor Extension tag, does
+   not count
+5. **Accounts for every closed fix issue** in exactly one of four states and
+   prints the count per state. If the counts do not add up to the number of
+   closed fix issues, it stops with a named error:
+   - (a) **not planned**: closed as not planned; ignored;
+   - (b) **released**: closed as fixed, covered by at least one merged pull
+     request's closing reference, every covering fix shipped in every
+     deliverable (or ships nothing);
+   - (c) **unreleased past target** or **pending**: covered, not all shipped;
+     past the target an issue is opened (step 6), within it the fix is
+     reported as pending;
+   - (d) **unattributed**: closed with any reason other than not planned, and
+     covered by no merged pull request (closed by hand, by a commit, or named
+     without a closing keyword)
+6. **Opens issues**, each created with the `release:unreleased-fix` label and
+   a marker, so each one opens once, open or closed:
+   - for an unreleased fix past its target: "Unreleased {label} fix #{N}:
+     {title}" (cut to 256 characters), naming the fix, the issues it closes,
+     the unreleased deliverables, the days since merge and the target. The
+     pull request title is escaped, so it cannot plant a marker;
+   - for an unattributed issue: "#{N} ({label}) was closed as fixed but no
+     merged pull request closes it", asking for the pull request to be linked
+7. **Maintainer triages**: release the affected packages, link the missing
+   pull request, or record why not and close the issue
 
 **Flow 4 — CLI/Extension co-release reconciliation (tag-driven):**
 
@@ -312,14 +351,15 @@ lookup failures stop for review; there is no automated rollback or repair.
 | AC-01 | `post-merge-release-check.yml` opens a GitHub issue when a PR with `release:patch` label merges to main and the advisory finds product impact | `tests/ci/test_post_merge_release_check.py::TestOpensIssueOnPatchLabel` | ✅ |
 | AC-02 | The patch release issue body explains direct product changes, downstream deliverables, and MinVer prerequisites | `tests/ci/test_post_merge_release_check.py::TestUnknownPackageWarning::test_workflow_uses_explained_release_model` | ✅ |
 | AC-03 | `milestone-release-check.yml` opens a GitHub issue when a milestone reaches 100% closed with merged PRs | `tests/ci/test_milestone_release_check.py::test_opens_issue_on_milestone_complete` | ✅ |
-| AC-04 | `release-cadence-check.yml` opens a check-in issue if >8 weeks since last release tag and >0 unreleased commits on main | `tests/ci/test_release_cadence_check.py::test_opens_issue_when_overdue` | ✅ |
-| AC-05 | `release-cadence-check.yml` does NOT open an issue if a release was cut within the last 8 weeks | `tests/ci/test_release_cadence_check.py::test_no_issue_when_recent_release` | ✅ |
+| AC-04 | `release-risk-check.yml` opens one check-in issue, naming the fix, for a merged fix (labelled `data-safety` or `security` itself, or closing an issue with that label) that is not in a stable release of every deliverable that ships it (the release plan's patch targets) and is older than its target in `SECURITY.md`. Recorded case: #1783, which closes data-safety issue #1731, is reported unreleased for the Extension | `tests/ci/test_unreleased_fix_check.py::TestRealCase1783`, `TestDecision::test_unreleased_fix_past_target_opens_one_issue_naming_it`, `TestReleaseStatus::test_library_fix_is_unreleased_until_its_consumers_ship`, `TestCommandLine::test_library_tagged_but_tool_not_is_still_unreleased` | ✅ |
+| AC-05 | No issue is opened because of elapsed time alone: only fixes are evaluated, a fix within its target or released in every deliverable opens nothing, and the workflow has no time-since-last-release input | `tests/ci/test_unreleased_fix_check.py::TestDecision`, `TestReadFixes::test_elapsed_time_alone_is_not_a_fix`, `TestWorkflowContract::test_no_elapsed_time_trigger` | ✅ |
 | AC-06 | The release runbook (`docs/runbooks/release.md`) contains a "Patch Release Procedure" section documenting the single-package abbreviated flow | `tests/test_release_runbook_content.py::test_patch_procedure_documented` | ✅ |
 | AC-07 | The release runbook contains a "Stabilization Branch" section documenting when to create one and how to merge back | `tests/test_release_runbook_content.py::test_stabilization_branch_documented` | ✅ |
-| AC-08 | `release-cadence-check.yml` does NOT open a duplicate issue if one is already open | `tests/ci/test_release_cadence_check.py::test_no_duplicate_issue` | ✅ |
+| AC-69 | Every closed `data-safety` or `security` issue ends in exactly one state, counted in the output: not planned (ignored), released, unreleased past target (issue opened) or pending, or unattributed (closed as fixed with no merged pull request closing it: its own once-only issue asking for the link). The counts must add up to the closed fix issues, or the check stops with a named error. Recorded case: #1731 without #1783's closing reference is unattributed | `tests/ci/test_unreleased_fix_check.py::TestAccounting`, `TestRealCase1731Unattributed`, `TestCommandLineAccounting::test_unattributed_issue_is_written_once_and_counted` | ✅ |
+| AC-08 | `release-risk-check.yml` does NOT open a second issue for a fix that already has one, open or closed: the issue is created with the `release:unreleased-fix` label, carries a per-PR marker, and the PR title is escaped so it cannot plant one | `tests/ci/test_unreleased_fix_check.py::TestDecision::test_fix_with_an_issue_gets_no_second_one`, `TestDecision::test_title_cannot_plant_a_marker_or_break_the_table`, `TestWorkflowSteps::test_each_issue_is_created_labelled_with_its_title_verbatim` | ✅ |
 | AC-09 | `milestone-release-check.yml` does NOT open a release issue when a milestone is closed with 0 merged PRs | `tests/ci/test_milestone_release_check.py::test_no_issue_on_empty_milestone` | ✅ |
 | AC-10 | `post-merge-release-check.yml` does not open a release issue when the explained advisory finds only deterministic non-product changes | `tests/ci/test_post_merge_release_check.py::TestUnknownPackageWarning::test_workflow_skips_issue_when_model_finds_no_product_impact` | ✅ |
-| AC-11 | `release-cadence-check.yml` does NOT open an issue if >8 weeks since last release but 0 unreleased commits on main | `tests/ci/test_release_cadence_check.py::test_no_issue_when_no_unreleased_commits` | ✅ |
+| AC-11 | `release-risk-check.yml` stops with a named error and opens nothing when `SECURITY.md` has no release targets (or one twice), when a label it relies on does not exist, when a list may be truncated (each list on its own), when a list is empty that cannot be, or when a query fails; no step can swallow the failure, and every query names this repository and the full limit | `tests/ci/test_unreleased_fix_check.py::TestTargets`, `TestFailsLoudly`, `TestPolicyAndMessages`, `TestCommandLine::test_missing_targets_exit_2_and_open_nothing`, `TestCommandLine::test_missing_label_exit_2_and_open_nothing`, `TestCommandLineAccounting`, `TestWorkflowSteps`, `TestWorkflowQueryArguments`, `TestWorkflowContract::test_no_step_can_swallow_a_failure` | ✅ |
 | AC-12 | The release model identifies and explains multiple direct/downstream surfaces when a patch spans the product graph | `tests/ci/test_release_model.py::TestImpactAnalysis::test_pr_1402_fixture_yields_seven_surfaces_excluding_plugins` | ✅ |
 | AC-13 | The release runbook enforces security review gate for stable releases — `docs/qa/security-review-*.md` must exist before tagging `vX.Y.0`; patches and prereleases are exempt | `tests/test_release_runbook_content.py::test_security_review_gate_documented` | ✅ |
 | AC-14 | `extension-publish.yml` auto-dispatches on `Extension-v*` tag push with channel inferred from odd/even minor convention | `tests/ci/test_extension_publish_workflow.py::test_tag_push_trigger` | ✅ |
@@ -339,7 +379,7 @@ lookup failures stop for review; there is no automated rollback or repair.
 | AC-28 | One authoritative manifest defines all four workflow-owned release labels and synchronization creates or updates them idempotently with precise failure diagnostics | `tests/ci/test_release_labels.py` | ✅ |
 | AC-29 | Milestone helper failures stop issue creation instead of being swallowed | `tests/ci/test_milestone_release_check.py::TestWorkflowFailureHandling` | ✅ |
 | AC-30 | Fork-originated merged PRs use the base repository token without executing historical PR content: executable automation is pinned to `github.workflow_sha`, checkout credentials are not persisted, strict event gates remain, the historical delivery manifest is preferred, and a trusted current fallback tolerates missing historical projects conservatively | `tests/ci/test_patch_release_issue.py::TestWorkflowTrustBoundary`, `tests/ci/test_release_model.py::TestProjectGraphDiscovery` | ✅ |
-| AC-31 | Cadence selection accepts production ISO-strict offsets, normalizes elapsed-time calculations to UTC, filters malformed release tags through the shared strict SemVer model, and fails loudly on invalid timestamps | `tests/ci/test_release_cadence_check.py::TestUtcAwareProductionTimestamps`, `tests/ci/test_release_cadence_check.py::TestStrictReleaseTagSelection` | ✅ |
+| AC-31 | The risk check normalizes merge times to UTC, parses release tags through the shared strict SemVer model (malformed, prerelease, other-package and odd-minor Extension tags are not stable releases), maps a fix to deliverables through the release plan, and fails loudly on invalid input | `tests/ci/test_unreleased_fix_check.py::TestReleaseStatus`, `TestCommandLine` | ✅ |
 | AC-32 | CLI and Extension tag events run one serialized, CLI-keyed reconciliation: exact commit co-location satisfies the relationship, legacy labeled records migrate safely, later Extension tags comment/close matching alerts, and higher stable CLI tags create their replacement before superseding older alerts | `tests/ci/test_extension_corelease_check.py::TestIncident1375`, `tests/ci/test_extension_corelease_check.py::TestIncident1410`, `tests/ci/test_extension_corelease_check.py::TestConvergentReconciliation`, `tests/ci/test_extension_corelease_check.py::TestIssueApplication` | ✅ |
 | AC-33 | Before NuGet upload, validate the exact package/symbol identity and tag version, repository commit, expected framework payloads, and internal dependency versions against unambiguous same-commit tags; stable releases reject alpha internal dependencies or missing/unexpected graph entries | `tests/ci/test_verify_release_inputs.py::TestNugetInputs` | ✅ |
 | AC-34 | Plugins publication verifies the packaged net462 assembly's full public key against the repository public key and forces cryptographic strong-name verification; unsigned, public-only, wrong-key, tampered, missing-tool, and process failures stop before upload | `tests/ci/test_verify_release_inputs.py::TestPluginSignature` | ✅ |
@@ -377,8 +417,15 @@ lookup failures stop for review; there is no automated rollback or repair.
 | Stable Query or Migration patch has no Dataverse tag on the target commit | List Dataverse separately as a same-commit MinVer prerequisite |
 | Milestone closed with 0 PRs (deferred all) | No release issue opened — workflow checks PR count |
 | Two `release:patch` PRs merge in quick succession | Two separate issues opened — maintainer can batch into one patch release |
-| Cadence check runs but an open check-in issue already exists | No duplicate issue — workflow checks for existing open issues with the label |
-| Git tag carries an ISO-strict offset but cadence uses current UTC time | Normalize both instants to UTC before calculating complete elapsed weeks |
+| Risk check runs but the fix already has an issue (open or closed) | No second issue — the issue body carries a per-PR marker |
+| A fix is released only in a prerelease (or an odd-minor Extension) | Still unreleased: users on the stable channel remain exposed |
+| A fix is labelled `data-safety` but changes no release surface | No issue: there is nothing to release (logged as "changes no release surface") |
+| The `data-safety` label is on the issue, not the pull request | The pull request is a fix through its closing-issue reference |
+| A fix issue is closed by hand, by a commit, or named without a closing keyword | Unattributed: its own once-only issue asks for the pull request to be linked |
+| A fix issue is closed as not planned | Ignored, and counted as not planned |
+| A library fix is tagged in the library but not in the CLI, MCP server or Extension that carry it | Still unreleased in those deliverables |
+| A label the check relies on does not exist | The check stops with a named error; it never reports "nothing found" |
+| `SECURITY.md` has no release targets | The check stops with an error and opens nothing; the targets are the maintainer's to set |
 | A malformed release-looking tag is newer than the last real release | Emit a diagnostic and retain the most recent valid strict-SemVer release tag |
 | CLI tag arrives before its co-located Extension tag (#1375/#1410) | Open one CLI-keyed alert, then comment and close it when the Extension event observes both tags on the same commit |
 | Extension tag arrives before its co-located CLI tag | First event is silent; the later CLI event observes the co-located pair and remains silent |
@@ -472,7 +519,7 @@ AC-64 remains pending until the separately authorized real experiment passes.
 
 **Context:** Solo maintainer needs a release model that doesn't create artificial pressure but also doesn't let releases drift indefinitely.
 
-**Decision:** Event-driven (patches on severity, minors on milestone completion) with an 8-week cadence floor as a safety net.
+**Decision:** Event-driven (patches on severity, minors on milestone completion), with a risk rule for merged data-safety and security fixes that stay unreleased past their target. The 8-week cadence floor it replaced measured time, not exposure (#1791).
 
 **Alternatives considered:**
 - **Calendar-driven (every N weeks)**: Creates pressure to ship half-baked features. Forces arbitrary scope cuts. Wrong for solo maintainer with variable bandwidth.
@@ -480,7 +527,7 @@ AC-64 remains pending until the separately authorized real experiment passes.
 - **Pure ad-hoc ("ship when it feels right")**: Current model. Works but causes drift — the 5-7 week gaps between prereleases were accidental, not intentional.
 
 **Consequences:**
-- Positive: Patches ship fast, minors ship complete, cadence floor prevents drift
+- Positive: Patches ship fast, minors ship complete, and an unreleased fix that leaves users exposed is surfaced
 - Negative: Requires discipline to label PRs and assign milestones (mitigated by automation surfacing gaps)
 
 ### Why trunk-based over GitFlow?
@@ -502,7 +549,7 @@ AC-64 remains pending until the separately authorized real experiment passes.
 
 **Context:** Want to reduce cognitive load ("do I need to release?") without losing control over irreversible actions.
 
-**Decision:** Three detection workflows (patch label, milestone completion, cadence floor) that open issues. The release runbook ceremony remains human-initiated.
+**Decision:** Three detection workflows (patch label, milestone completion, unreleased data-safety and security fixes) that open issues. The release runbook ceremony remains human-initiated.
 
 **Alternatives considered:**
 - **Full auto-release**: Tag push on merge. Too risky — NuGet publishes are permanent (unlisting is possible but the version is consumed).
@@ -664,6 +711,7 @@ claim. This change does not certify every installed component against all adviso
 
 | Date | Change |
 |------|--------|
+| 2026-11-21 | Replace the 8-week cadence floor with the risk rule for unreleased `data-safety` and `security` fixes (#1791): `release-risk-check.yml` replaces `release-cadence-check.yml`; a fix is a merged PR labelled `data-safety`/`security` or closing an issue so labelled; released means every deliverable in the release plan's patch targets has a stable tag containing the merge; every closed fix issue is accounted for in one of four states (AC-69); missing labels, targets, a possibly truncated or impossibly empty list are named errors; the `release:unreleased-fix` label replaces `release:cadence-check`, AC-04, AC-05, AC-08, AC-11 and AC-31 describe the new rule. Targets come from `SECURITY.md` |
 | 2026-11-19 | Version progression no longer states the Plugins package version; it points at the newest `Plugins-v*` tag. No release policy change |
 | 2026-11-19 | Move the release procedure from the `/release` skill into `docs/runbooks/release.md`; the skill now only directs an agent to the runbook. AC-06, AC-07, AC-13 and AC-16 are verified against the runbook by `tests/test_release_runbook_content.py`. No release policy change |
 | 2026-11-10 | Add source-bound closeout ledger, explicit required/optional gates, scoped evidence reuse and review contracts; preserve active pre-merge evaluation on ready-for-review events (AC-49 through AC-53) |

@@ -382,10 +382,20 @@ CLI or Extension release tags are reported as diagnostics and cannot outrank a
 valid tag. This automation only manages advisory issues. It never creates a tag,
 publishes an artifact, or invokes a release workflow.
 
-The weekly cadence check similarly validates release-looking tags through the
-shared strict SemVer implementation, discovers valid package tag prefixes from
-the release graph, and normalizes git's ISO-strict timestamps and the current
-time to UTC before calculating elapsed weeks.
+The weekly release risk check (`release-risk-check.yml`) replaces the former
+8-week cadence timer. A fix is a pull request merged into `main` that carries
+`data-safety` or `security`, or closes an issue that does. The check opens one
+issue per fix that is not yet in a stable release of every deliverable that
+ships it, once the fix is older than its target in `SECURITY.md`. The
+deliverables are the release plan's own patch targets for the merge commit's
+diff, so a library fix stays unreleased until the CLI, MCP server and Extension
+that carry it have shipped. Tags are parsed with the shared strict SemVer
+implementation; a prerelease or odd-minor Extension tag does not count. A
+missing label, missing targets, or a list that may be truncated or is empty
+when it cannot be, stops the run with a named error. Every closed fix issue is
+accounted for: not planned, released, unreleased past target or pending, or
+unattributed (closed as fixed, but no merged pull request closes it; that gets
+its own once-only issue asking for the link). See [specs/release-cycle.md](../specs/release-cycle.md) (Flow 3).
 
 ## Automated Public Artifact Verification
 

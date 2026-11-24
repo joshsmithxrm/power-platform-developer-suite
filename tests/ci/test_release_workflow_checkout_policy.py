@@ -35,7 +35,7 @@ def _checkout_steps(workflow: dict) -> list[dict]:
     [
         ("milestone-release-check.yml", 1),
         ("post-merge-release-check.yml", 3),
-        ("release-cadence-check.yml", 1),
+        ("release-risk-check.yml", 1),
     ],
 )
 def test_release_tracking_workflows_use_checkout_v6(
@@ -97,8 +97,8 @@ def test_post_merge_checkout_preserves_trusted_automation_and_data_revision() ->
     assert events["push"] == {"tags": ["Cli-v*", "Extension-v*"]}
 
 
-def test_cadence_checkout_preserves_main_ref_and_full_history() -> None:
-    workflow = _load_workflow("release-cadence-check.yml")
+def test_risk_check_checkout_preserves_main_ref_and_full_history() -> None:
+    workflow = _load_workflow("release-risk-check.yml")
     checkout = _checkout_steps(workflow)[0]
 
     assert checkout["with"] == {"ref": "main", "fetch-depth": 0}
