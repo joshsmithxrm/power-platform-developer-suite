@@ -465,9 +465,10 @@ class TestEnvSwitchTarget:
 class TestReadOnlyAlwaysAllowed:
     @pytest.mark.parametrize("cmd", [
         "ppds env list",
-        "ppds env current",
-        "ppds env who",
+        "ppds env config",
         "ppds env config --list",
+        "ppds env config --show",
+        "ppds env config https://x.example --show",
         "ppds env type --list",
     ])
     def test_readonly_env_subcommands_allowed_even_when_active_unsafe(
@@ -479,6 +480,23 @@ class TestReadOnlyAlwaysAllowed:
             env_extra={"PPDS_SAFE_ENVS": "ppds-dev", "PPDS_CONFIG_DIR": config_dir},
         )
         assert r.returncode == 0, f"cmd={cmd}: stderr={r.stderr!r}"
+
+
+class TestEnvWhoGated:
+    """``env who`` sends WhoAmI, so it is gated (maintainer's ruling,
+    2026-11-24): it passes only when the env it reaches is listed."""
+
+    @pytest.mark.parametrize("cmd,active,expected", [
+        ("ppds env who", "ppds-prod", 2),
+        ("ppds env who", "ppds-dev", 0),
+        ("ppds env who --environment ppds-dev", "ppds-prod", 0),
+        ("ppds env who --environment ppds-prod", "ppds-prod", 2),
+        ("ppds env who --environment ppds-prod", "ppds-dev", 2),
+    ])
+    def test_env_who_reaches_only_a_listed_env(self, fake_profile_dir, cmd, active, expected):
+        config_dir = fake_profile_dir(active_env_name=active)
+        r = _run_hook(cmd, env_extra={"PPDS_SAFE_ENVS": "ppds-dev", "PPDS_CONFIG_DIR": config_dir})
+        assert r.returncode == expected, f"cmd={cmd}: stderr={r.stderr!r}"
 
 
 class TestFailSafe:
@@ -652,30 +670,37 @@ class TestMutationsBlocked:
 class TestReadOnlyAllowedDuringShakedown:
     @pytest.mark.parametrize("cmd", [
         "ppds env list",
-        "ppds env current",
         "ppds env who",
-        "ppds env switch ppds-dev",
         "ppds env select ppds-dev",
         "ppds env config --list",
         "ppds env type --list",
         "ppds plugins list",
         "ppds logs tail",
-        "ppds logs show",
         "ppds auth list",
         "ppds version",
-        "ppds help",
+        "ppds --help",
     ])
     def test_reads_allowed_when_var_one(self, fake_profile_dir, cmd):
         config_dir = fake_profile_dir(active_env_name="ppds-dev")
         r = _run_hook(cmd, env_extra=_shakedown_env(config_dir))
         assert r.returncode == 0, f"cmd={cmd}: stderr={r.stderr!r}"
 
+    @pytest.mark.parametrize("cmd", [
+        "ppds env current", "ppds env switch ppds-dev", "ppds logs show", "ppds help",
+        "ppds env config --label x", "ppds env type --remove x",
+    ])
+    def test_commands_the_cli_does_not_have_or_that_write_are_blocked(self, fake_profile_dir, cmd):
+        """Only commands the hook knows to be read-only pass during a shakedown."""
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(cmd, env_extra=_shakedown_env(config_dir))
+        assert r.returncode == 2, f"cmd={cmd}: stderr={r.stderr!r}"
+
 
 class TestDryRunExempt:
     @pytest.mark.parametrize("cmd", [
         "ppds plugins deploy --dry-run",
-        "ppds plugins deploy -n",
-        "ppds plugins deploy --some-other-arg --dry-run",
+        "ppds plugins deploy --config x.json --dry-run",
+        "ppds plugins deploy --dry-run --config x.json",
     ])
     def test_dry_run_allowed(self, fake_profile_dir, cmd):
         config_dir = fake_profile_dir(active_env_name="ppds-dev")
@@ -690,13 +715,23 @@ class TestDryRunExempt:
         )
         assert r.returncode == 2
 
-    def test_dry_run_equals_true_treated_as_dry_run(self, fake_profile_dir):
+    @pytest.mark.parametrize("cmd", [
+        "ppds plugins deploy -n",                              # no such option
+        "ppds plugins deploy --some-other-arg --dry-run",      # may be that option's value
+        "ppds plugins deploy --correlation-id --dry-run",
+        "ppds plugins deploy -env --dry-run",
+        "ppds plugins deploy --solution --dry-run",
+        "ppds plugins deploy --dry-run ' false'",              # the flag takes the word as its value
+        "ppds plugins deploy --dry-run false",
+        "ppds plugins deploy --dry-run=true",                  # a value attached: not placed
+        "ppds plugins deploy --dry-run:true",
+        "ppds plugins deploy -- --dry-run",                    # an operand after `--`
+        "ppds plugins deploy --dry-run --dry-run false",
+    ])
+    def test_dry_run_not_positively_placed_is_blocked(self, fake_profile_dir, cmd):
         config_dir = fake_profile_dir(active_env_name="ppds-dev")
-        r = _run_hook(
-            "ppds plugins deploy --dry-run=true",
-            env_extra=_shakedown_env(config_dir),
-        )
-        assert r.returncode == 0, f"stderr={r.stderr!r}"
+        r = _run_hook(cmd, env_extra=_shakedown_env(config_dir))
+        assert r.returncode == 2, f"cmd={cmd}: stderr={r.stderr!r}"
 
 
 class TestMcpServerReadOnly:
@@ -715,13 +750,15 @@ class TestMcpServerReadOnly:
         )
         assert r.returncode == 0, f"stderr={r.stderr!r}"
 
-    def test_mcp_server_allowed_with_read_only_equals_true(self, fake_profile_dir):
+    def test_mcp_server_blocked_with_read_only_equals_true(self, fake_profile_dir):
+        """The server honours only the bare `--read-only`; `=true` starts it writable."""
         config_dir = fake_profile_dir(active_env_name="ppds-dev")
         r = _run_hook(
             "ppds-mcp-server --read-only=true",
             env_extra=_shakedown_env(config_dir),
         )
-        assert r.returncode == 0, f"stderr={r.stderr!r}"
+        assert r.returncode == 2, f"stderr={r.stderr!r}"
+        assert "only accepts the bare --read-only flag" in r.stderr
 
 
 class TestSentinelActivation:
@@ -989,8 +1026,15 @@ class TestDotnetHostForms:
         config_dir = fake_profile_dir(active_env_name="ppds-prod")
         r = _run_hook(cmd, env_extra=self._env(config_dir, project_dir))
         assert r.returncode == 2, r.stderr
+        if "--profile x" in argv:
+            # a profile the store does not have: its environment is not known
+            assert "Problem:   --profile x: profile 'x' is not in the profile store" in r.stderr
+            assert f"Command:   {argv}\n" in r.stderr or f"  (read as: {argv})\n" in r.stderr
+            return
         assert self.ENV_BLOCK in r.stderr
-        assert f"Command:    {argv}\n" in r.stderr
+        # a `dotnet run` reading shows the words as written, then the reading
+        assert f"Command:    {argv}\n" in r.stderr or (
+            "Command:    dotnet run " in r.stderr and f"  (read as: {argv})\n" in r.stderr)
 
     @pytest.mark.parametrize("cmd", [c for i, c, _ in DOTNET_HOST_FORMS if i in (
         "run-project-dir", "run-no-separator", "run-mcp", "exec-dll", "cd-then-run", "tool-run")])
@@ -1046,14 +1090,18 @@ class TestDotnetHostForms:
         found = hook.find_ppds_invocations(f"dotnet run --project src/PPDS.Cli --tl off -- {_DEL}")
         assert found == [["ppds"] + _DEL.split(), ["ppds", "off"] + _DEL.split()]
 
-    def test_existing_hits_survive_a_failure(self, monkeypatch):
+    @pytest.mark.parametrize("target", ["_dotnet_argvs", "sp.read"])
+    def test_a_failure_inside_the_reading_is_not_swallowed(self, monkeypatch, target):
+        """An error anywhere in the reading reaches main(), which refuses a
+        command that mentions a guarded program (the process tests in
+        test_shakedown_safety_process.py); no part of it turns into a pass."""
         def boom(*_args, **_kwargs):
             raise RuntimeError("bug")
 
-        monkeypatch.setattr(hook, "_dotnet_argvs", boom)
-        assert hook.find_ppds_invocations(f"ppds {_DEL} && dotnet run --project src/PPDS.Cli -- x") == [
-            ["ppds"] + _DEL.split()
-        ]
+        owner, name = (hook.sp, "read") if target == "sp.read" else (hook, target)
+        monkeypatch.setattr(owner, name, boom)
+        with pytest.raises(RuntimeError):
+            hook.find_ppds_invocations(f"ppds {_DEL} && dotnet run --project src/PPDS.Cli -- x")
 
 
 # ===========================================================================
@@ -1118,18 +1166,19 @@ class TestIsMutation:
         is_mut, _ = hook.is_mutation(["ppds", "plugins", "deploy", "--dry-run"])
         assert not is_mut
 
-    def test_plugins_deploy_with_short_dry_run(self):
+    def test_plugins_deploy_has_no_short_dry_run(self):
         is_mut, _ = hook.is_mutation(["ppds", "plugins", "deploy", "-n"])
-        assert not is_mut
+        assert is_mut
 
-    def test_logs_wildcard(self):
-        for verb in ("tail", "show", "stream", "anything"):
-            is_mut, _ = hook.is_mutation(["ppds", "logs", verb])
-            assert not is_mut, f"verb={verb}"
+    def test_logs_reads_pass_and_unknown_logs_commands_block(self):
+        for verb in ("tail", "dump"):
+            assert not hook.is_mutation(["ppds", "logs", verb])[0], verb
+        for verb in ("show", "stream", "anything"):
+            assert hook.is_mutation(["ppds", "logs", verb])[0], verb
 
-    def test_short_argv_not_mutation(self):
-        is_mut, _ = hook.is_mutation(["ppds"])
-        assert not is_mut
+    def test_bare_ppds_starts_the_tui_and_is_a_mutation(self):
+        is_mut, reason = hook.is_mutation(["ppds"])
+        assert is_mut and "TUI" in reason
         is_mut, _ = hook.is_mutation(["ppds", "env"])
         assert not is_mut
 

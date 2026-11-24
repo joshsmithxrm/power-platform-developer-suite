@@ -189,7 +189,8 @@ owners; if sending a reply or closing a PR needs the maintainer's permission,
 prepare the exact reply and decision and get that decision rather than leaving
 closeout silently unowned or marking it done. Use the policy's explicit
 no-contribution record when nothing external is included. None of this grants
-merge, publication or communication authority.
+merge, publication or communication authority; who may merge is in
+[MERGE-POLICY.md](../MERGE-POLICY.md#who-merges).
 
 ### 4. Version Bumps
 
