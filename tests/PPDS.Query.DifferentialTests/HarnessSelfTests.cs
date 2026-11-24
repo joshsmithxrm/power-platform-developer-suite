@@ -247,11 +247,13 @@ public sealed class HarnessSelfTests
     [Fact]
     public void The_snapshot_round_trips_byte_for_byte_and_sorts_its_rows()
     {
-        var rows = DifferenceSnapshot.FromRun([Differing(Sum, 4, "8"), Differing(Product, 1, "14", 3), Differing(Sum, 1, "8")]);
+        (int, int, Evaluation)[] run = [Differing(Sum, 4, "8"), Differing(Product, 1, "14", 3), Differing(Sum, 1, "8")];
+        var rows = DifferenceSnapshot.FromRun(run);
         Assert.Equal(["(c_int * 2)", "(c_int + 1)", "(c_int + 1)"], rows.Select(r => r.Expression));
         Assert.Equal([1, 1, 4], rows.Select(r => r.RowId));
-        var text = DifferenceSnapshot.Format(rows);
-        Assert.Equal(text, DifferenceSnapshot.Format(DifferenceSnapshot.Parse(text)));
+        var text = DifferenceSnapshot.Format(rows, RunFingerprint.Of(run));
+        Assert.Equal(text, DifferenceSnapshot.Format(DifferenceSnapshot.Parse(text), RunFingerprint.Read(text)));
+        Assert.Equal(RunFingerprint.Of(run), RunFingerprint.Read(text));
         Assert.DoesNotContain('\r', text);
     }
 
@@ -303,7 +305,59 @@ public sealed class HarnessSelfTests
         var text = File.ReadAllText(path);
         var rows = DifferenceSnapshot.Parse(text);
         Assert.NotEmpty(rows);
-        Assert.Equal(text, DifferenceSnapshot.Format(rows));
+        Assert.Equal(text, DifferenceSnapshot.Format(rows, RunFingerprint.Read(text)));
+    }
+
+    [Fact]
+    public void The_fingerprint_counts_every_evaluation_and_changes_when_one_is_left_out()
+    {
+        var equal = (1, 1, new Evaluation(Product, 1, Int7, Int7Actual, Difference.None));
+        (int, int, Evaluation)[] run = [Differing(Sum, 4, "8"), equal, Differing(Sum, 1, "8", 2)];
+        var all = RunFingerprint.Of(run);
+        Assert.Equal(3, all.Evaluations);
+        Assert.Equal(all, RunFingerprint.Of(run));
+
+        // Leaving out the equal evaluation changes no snapshot row, but it changes the fingerprint.
+        var fewer = RunFingerprint.Of([run[0], run[2]]);
+        Assert.Equal(DifferenceSnapshot.FromRun(run), DifferenceSnapshot.FromRun([run[0], run[2]]));
+        Assert.NotEqual(all, fewer);
+        Assert.NotEqual(all.Sha256, fewer.Sha256);
+    }
+
+    [Fact]
+    public void A_snapshot_without_a_well_formed_evaluation_line_is_refused()
+    {
+        var text = DifferenceSnapshot.Format(DifferenceSnapshot.FromRun([Differing(Sum, 4, "8")]), RunFingerprint.Of([Differing(Sum, 4, "8")]));
+        var without = string.Join('\n', text.Split('\n').Where(l => !l.StartsWith("# Evaluations: ", StringComparison.Ordinal)));
+        Assert.Throws<HarnessException>(() => RunFingerprint.Read(without));
+        Assert.Throws<HarnessException>(() => RunFingerprint.Read(text.Replace("# Evaluations: 1.", "# Evaluations: one.", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void A_duplicated_snapshot_row_is_refused_and_named()
+    {
+        var text = DifferenceSnapshot.Format(DifferenceSnapshot.FromRun([Differing(Sum, 4, "8")]), RunFingerprint.Of([Differing(Sum, 4, "8")]));
+        var lastRow = text.TrimEnd('\n').Split('\n')[^1];
+        var fault = Assert.Throws<HarnessException>(() => DifferenceSnapshot.Parse(text + lastRow + "\n"));
+        Assert.Contains("row 4: (c_int + 1)", fault.Message);
+    }
+
+    [Fact]
+    public void An_equal_evaluation_that_later_differs_is_nondeterminism()
+    {
+        var equal = (1, 0, new Evaluation(Sum, 4, Outcome.Of("8", new SqlTypeInfo("int"), "int"), Outcome.Of("8", null, "int"), Difference.None));
+        var fault = Assert.Throws<HarnessException>(() => DifferenceSnapshot.FromRun([equal, Differing(Sum, 4, "9", 5)]));
+        Assert.Contains("row 4", fault.Message);
+    }
+
+    [Fact]
+    public void The_engines_own_cast_failure_never_equals_a_sql_server_conversion_error()
+    {
+        // The engine cannot cast to tinyint; SQL Server's CAST('x' AS tinyint) is error 245, a conversion error.
+        var engine = new PpdsEngine(new Dictionary<int, IReadOnlyDictionary<string, QueryValue>> { [1] = new Dictionary<string, QueryValue>() });
+        var actual = engine.Evaluate("CAST('x' AS tinyint)", 1);
+        Assert.Equal("error Other (InvalidCastException)", actual.ToString());
+        Assert.Equal(Difference.Error, Outcome.Compare(Outcome.Failed(ErrorClass.Conversion, "245"), actual));
     }
 
     // ── Known differences ─────────────────────────────────────────────

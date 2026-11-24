@@ -13,7 +13,7 @@ public enum ErrorClass
     DivideByZero,
     /// <summary>Arithmetic overflow (SQL Server errors 220, 232, 237, 3606, 8115).</summary>
     Overflow,
-    /// <summary>A value could not be converted (SQL Server errors 235, 241, 245, 248, 293, 295, 8114, 8169).</summary>
+    /// <summary>A value could not be converted (SQL Server errors 235, 241, 245, 248, 293, 295, 8114, 8169; the engine's FormatException).</summary>
     Conversion,
     /// <summary>Text or binary data would be truncated (SQL Server errors 2628, 8152).</summary>
     Truncation,

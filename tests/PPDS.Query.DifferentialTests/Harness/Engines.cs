@@ -71,13 +71,14 @@ public sealed class SqlServerEngine(SqlConnection connection) : IExpressionEngin
     }
 
     /// <summary>
-    /// Throws a <see cref="HarnessException"/> when the error is about the connection rather than the expression: a
-    /// timeout (-2), a severity of 20 or more (the connection is closed), or a connection left not open. Such an error
-    /// is not an outcome to compare.
+    /// Throws a <see cref="HarnessException"/> when the error is about the server or the connection rather than the
+    /// expression: a timeout (-2), a severity of 17 to 19 (insufficient resources, such as errors 701, 1105 and 9002),
+    /// a severity of 20 or more (the connection is closed), or a connection left not open. Such an error is not an
+    /// outcome to compare.
     /// </summary>
     public static void ThrowIfHarnessFault(SqlConnection connection, string statement, SqlException ex)
     {
-        if (ex.Number == -2 || ex.Class >= 20 || connection.State != System.Data.ConnectionState.Open)
+        if (ex.Number == -2 || ex.Class >= 17 || connection.State != System.Data.ConnectionState.Open)
         {
             throw new HarnessException(
                 $"The reference server failed rather than the statement (error {ex.Number}, severity {ex.Class}): {statement}: {ReferenceServer.Redact(ex.Message)}");
@@ -199,7 +200,10 @@ public sealed class PpdsEngine(IReadOnlyDictionary<int, IReadOnlyDictionary<stri
     {
         DivideByZeroException => ErrorClass.DivideByZero,
         OverflowException => ErrorClass.Overflow,
-        FormatException or InvalidCastException => ErrorClass.Conversion,
+        FormatException => ErrorClass.Conversion,
+        // The engine's own .NET cast failing (for example a CAST to tinyint it does not implement) is not a SQL
+        // conversion error: as Other it can never compare equal to SQL Server's conversion errors.
+        InvalidCastException => ErrorClass.Other,
         QueryExecutionException { ErrorCode: QueryErrorCode.TypeMismatch } => ErrorClass.TypeClash,
         NotSupportedException => ErrorClass.Refused,
         _ => ErrorClass.Other,
