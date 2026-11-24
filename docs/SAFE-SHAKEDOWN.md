@@ -266,10 +266,14 @@ every command before reading it.
 with any exit code but 2. The hook is therefore registered as
 `python "$CLAUDE_PROJECT_DIR/.claude/hooks/shakedown-safety-launcher.py" || exit 2`.
 The launcher runs `shakedown-safety.py` as a child that reads the
-launcher's own input, passes on exit 0 and exit 2, and turns every other
-end into a refusal (exit 2) that names it: a signal or crash, exit 1 or
-any other code, a missing hook file, a hook that could not be started,
-and a hook that has not answered within 5 seconds (it is killed). The
+launcher's own input. The hook ends a pass it decided with a private exit
+code the launcher hands it (`--pass-exit-code=N`), which the launcher maps
+to 0; exit 2 stays a refusal. Every other end is a refusal (exit 2) that
+names it: a signal or crash, exit 1 or any other code, a bare exit 0 (an
+empty hook file, or one cut short, decided nothing), a missing hook file, a
+hook that could not be started, and a hook that has not answered within 5
+seconds (it is killed). Run directly, without the launcher, the hook gives
+the same decisions with a pass as exit 0, but none of these refusals. The
 hook and the launcher start no thread, so none can be running when the
 interpreter shuts down. The shell's `|| exit 2` refuses when the launcher
 itself cannot run: no `python` on the path, or the launcher ended by a

@@ -177,7 +177,8 @@ class HookResult:
 
 
 # What the launcher prints when the hook itself ended abnormally (it then refuses, exit 2).
-ABNORMAL_MARKERS = ("the hook ended abnormally", "the hook did not answer within", "the hook could not be started",
+ABNORMAL_MARKERS = ("the hook ended abnormally", "the hook ended without a decision", "the hook did not answer within",
+                    "the hook could not be started", "the hook file shakedown-safety.py is missing",
                     "the launcher was interrupted", "the launcher failed")
 _TALLY_LOCK = threading.Lock()
 _TALLY = {"runs": 0, "abnormal": 0, "let_through": 0, "by_reason": {}, "samples": []}
@@ -194,6 +195,10 @@ def _tally(code, stderr: str) -> None:
     not start, or the entry itself ended with anything but 0 or 2. Let through: abnormal, and the exit
     Claude Code sees is not 2 (so the command would run)."""
     reason = next((m for m in ABNORMAL_MARKERS if m in stderr), None)
+    if reason is None and code == 0 and stderr.strip():
+        # A pass prints nothing; an exit 0 with output is not a clean pass (a hook run without the
+        # launcher that crashed into exit 0, or a launcher message this tally does not know).
+        reason = "exit 0 with output"
     if reason is None and code not in (0, 2):
         reason = f"entry exit {code}"
     with _TALLY_LOCK:

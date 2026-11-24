@@ -45,7 +45,7 @@ A fifth, the **ordinary-mention check** (`gen_ordinary.py`), is the other direct
 
 The timing oracle's property: the hook refuses each text inside its documented budget (`_BUDGET_SECONDS`, read from the hook, plus 0.5 s for interpreter start-up) and never after the timeout registered for it in `.claude/settings.json` (read from the file).
 
-Every hook run is a subprocess with the payload on stdin, started the way it is registered: through `shakedown-safety-launcher.py` next to the hook (the hook itself when no launcher sits next to it). Every run is tallied in the report's `hook_exits`: `abnormal` counts the runs where the launcher reports that the hook crashed, was ended by a signal, exited with a code other than 0 or 2, hung or could not start (and runs where the entry itself ended so); `let_through` counts those of them whose final exit was not 2, so the command would have run. `let_through` above 0 is an integrity failure (`test_no_abnormal_hook_exit_lets_a_command_run`); `abnormal` is reported, with up to five stderr samples (the hook runs with `PYTHONFAULTHANDLER=1`).
+Every hook run is a subprocess with the payload on stdin, started the way it is registered: through `shakedown-safety-launcher.py` next to the hook (the hook itself when no launcher sits next to it). Every run is tallied in the report's `hook_exits`: `abnormal` counts the runs where the launcher reports that the hook crashed, was ended by a signal, exited with any code but its pass code or 2 (a bare exit 0 included: an empty or cut-short hook file), hung, was missing or could not start, and runs where the entry itself ended with a code other than 0 or 2 or passed with output; `let_through` counts those of them whose final exit was not 2, so the command would have run. `let_through` above 0 is an integrity failure (`test_no_abnormal_hook_exit_lets_a_command_run`); `abnormal` is reported, with up to five stderr samples (the hook runs with `PYTHONFAULTHANDLER=1`).
 
 The runs are in eight modes (`_harness.MODE_SPEC`). Each has a throwaway profile store under its own `HOME` and its own project folder, and, except where noted, a made-up allowlist (`zz-safe-a`, `zz-safe-b`) in `PPDS_SAFE_ENVS`:
 
@@ -126,6 +126,7 @@ python tests/hooks/differential/repro.py out/args/<name>.case.json
 At commit 3164e825 (the second review round of #1814) the requirement-severity tests fail: they rediscover the round-2 must-fix findings and find more.
 `findings.py` labels each failure after the fact (the generators never use these labels), and `expected_failures.json` lists the labels known at that commit with the finding each belongs to.
 When a fix lands, the failures with its label disappear; remove the label from `expected_failures.json`.
+Mode tags (`r5-mode-*`) are not listed and excuse nothing: a failure is excused only when it carries a class label and every class label it carries is listed. After the three long fresh-seed runs of round 6 the list holds only `r5-env-who-on-unlisted`, kept until the maintainer rules on `env who`.
 Round-4 labels (`new-xargs-options`, `new-hidden-words`, `new-unknown-wrapper`, `new-home-override`, `new-sql-exponent-glue`, `cost-rule-false-block`) were added against the #1814 head a39e7e68; some earlier labels are listed again because they reappear combined with a round-4 one.
 A failure labelled `unlabelled` is a finding nobody has named yet.
 
@@ -252,6 +253,7 @@ The Python tests job (`.github/workflows/workflow-tests.yml`, `ubuntu-latest`) r
 
 ## What is not covered
 
+- Windows, not verified here. The registered command (`python "$CLAUDE_PROJECT_DIR/.claude/hooks/shakedown-safety-launcher.py" || exit 2`) assumes a POSIX hook shell. In a hook shell where `||` does not parse (Windows PowerShell 5.1), the line is a parse error that exits 1, and Claude Code runs every command: the gate is silently off. Under `cmd` or PowerShell 7 `$CLAUDE_PROJECT_DIR` does not expand and every command is refused. A Windows check must show, in the shell Claude Code actually uses for hooks, in a Bash-tool session and in a PowerShell-tool session (also on a machine without Git Bash): a refusable payload gives 2 and a harmless one 0; no `python`, or the Microsoft Store `python` stub, gives 2; a hook stand-in that ends with an access violation gives 2; a hook that hangs gives 2 within about 6 s with the child process gone; a 1 MB payload reaches the hook whole.
 - Windows shells: `cmd`, Windows PowerShell 5.1 and Git Bash are not run (`cmd /c` is approximated by a stand-in). Windows' case-insensitive program lookup is modelled only for the spellings in `_shells.EXTRA_SPELLINGS`. `LOCALAPPDATA` / `USERPROFILE` as the store's location on Windows are not modelled.
 - What a command does beyond its parse: write-ness of a path comes from `read_paths.json`, a frozen copy of the read-only paths of the hook's table at 3164e825, which review B checked handler by handler, plus the conditional rules above. A handler that writes despite being listed there is not caught. **When the hook's command table changes, `read_paths.json` must be re-frozen by review** (a reviewer checks each added or reclassified read-only path against its handler); it is deliberately not derived from the hook, so a wrong classification in the hook cannot make the oracle agree with it.
 - The .NET SDK's own argument forwarding for `dotnet run`, `dnx` and `dotnet tool exec` is approximated (see `-approx`).
@@ -259,3 +261,22 @@ The Python tests job (`.github/workflows/workflow-tests.yml`, `ubuntu-latest`) r
 - Profiles resolve only against each mode's two-profile made-up store.
 - Script files (`./x.sh`, `pwsh -File`), aliases defined in the text, programs found through a changed `PATH`, and Windows-only launchers are not generated.
 - `sudo`, `cmd`, `ssh`, `parallel`, `busybox`, `winpty` and `xvfb-run` are approximated (`-approx`); `chroot /` needs root here, so nothing starts under it.
+
+## Registered through the launcher, or directly
+
+The checked-in registration runs the hook through `.claude/hooks/shakedown-safety-launcher.py`, and these tests run it the same way. Through the launcher, a pass is the hook's private pass code (the launcher hands it over as `--pass-exit-code=N` and maps it to 0); exit 2 stays a refusal; everything else is refused: a signal or crash, exit 1 or any other code, a bare exit 0 (an empty hook file, or one cut short, which decided nothing), a missing hook file, and no answer within 5 s (the hook is killed). The shell's `|| exit 2` refuses when the launcher cannot run.
+
+A direct registration (`python ".../shakedown-safety.py"`, as in an older settings file) gets the same decisions, a pass as exit 0 and a refusal as exit 2, and the refusal of any internal error. It does not get: a refusal when the hook crashes, is killed or exits 1 (Claude Code runs the command), a time limit beyond the budget checks between steps (a hang runs into Claude Code's timeout, and the command runs), or a refusal of an empty or cut-short hook file.
+
+## Known limits of the hook (documented, not failed by a fix)
+
+By class; these are limits of a text-reading guard, written here so that nobody takes a green suite as their absence:
+
+1. A program name supplied at run time from outside the text (a variable exported earlier), behind a wrapper the hook does not know: passes in every mode.
+2. A program name built at run time inside code handed to a runner the reader does not know, or after a PowerShell assignment: passes with a listed active environment. The long statement-oracle runs find this class (requirement failures in `gate-listed` and `gate-settings`).
+3. A target hidden in a script file, in a response file given to a guessed program, or in a variable set outside the text: passes with a listed active environment.
+4. Above 200,000 characters only byte checks apply; run-time text passes with a listed active environment.
+5. Launcher: Claude Code's own 10 s timeout, a hook shell that cannot start, a module planted in the hooks folder or on `PYTHONPATH`, and a fake interpreter on `PATH` let the command run.
+6. A hook input with no parseable command and no mention of a guarded program is passed.
+7. Oracle: up to two PowerShell-only failures that one fresh re-run does not reproduce are tolerated (`MAX_UNCONFIRMED`); the suite runs the launcher as `python launcher`, not through the registered shell line (the unit tests in `tests/hooks/test_shakedown_safety_launcher.py` do that).
+

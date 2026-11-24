@@ -5,8 +5,13 @@ Claude Code runs a command whose hook exits with any code other than 2
 launcher runs the hook as a child process and turns every end other than a
 pass into a refusal:
 
-* exit 0 from the hook: exit 0 (the command runs);
+* the private pass code (``_PASS_CODE``, handed to the hook as
+  ``--pass-exit-code=N``; the hook ends a pass it decided with it): exit 0
+  (the command runs);
 * exit 2 from the hook: exit 2 (the hook has printed its reason);
+* a bare exit 0: a refusal. The hook never ends a pass with 0 under the
+  launcher, so 0 means it decided nothing: an empty hook file, or one cut
+  short (by a checkout or merge rewriting it while it starts);
 * any other exit, a signal, or a hook that cannot be started: a refusal
   that names the exit, exit 2;
 * no answer within ``_TIMEOUT_SECONDS`` of the launcher's start: the hook
@@ -36,6 +41,10 @@ _START = time.monotonic()
 # this limit adds the child's start-up and a margin, and stays at half of
 # the 10 s the hook is registered with.
 _TIMEOUT_SECONDS = 5.0
+
+# The exit code the hook ends a pass with when started from here. Not 0 or
+# 2, and not a code Python, a shell or a signal gives on its own.
+_PASS_CODE = 86
 
 _HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shakedown-safety.py")
 
@@ -81,7 +90,8 @@ def main():
     if not os.path.isfile(_HOOK):
         _refuse("the hook file shakedown-safety.py is missing next to its launcher")
     try:
-        child = subprocess.Popen([sys.executable, _HOOK], stdin=0, stdout=1, stderr=2)
+        child = subprocess.Popen([sys.executable, _HOOK, "--pass-exit-code=%d" % _PASS_CODE],
+                                 stdin=0, stdout=1, stderr=2)
     except BaseException as exc:  # noqa: BLE001
         _refuse("the hook could not be started (%s)" % type(exc).__name__)
     try:
@@ -93,10 +103,13 @@ def main():
     except BaseException as exc:  # noqa: BLE001 -- an interrupt, or anything else
         _kill(child)
         _refuse("the launcher was interrupted (%s)" % type(exc).__name__)
-    if code == 0:
+    if code == _PASS_CODE:
         _end(0)
     if code == 2:
         _end(2)
+    if code == 0:
+        _refuse("the hook ended without a decision (exit 0 without its pass code; "
+                "an empty or cut-short hook file)")
     _refuse("the hook ended abnormally (%s)" % _describe(code))
 
 

@@ -2698,6 +2698,18 @@ def _decide_oversized(data: bytes, shakedown_active: bool, allowlist, misconfigu
     sys.exit(0)
 
 
+def _launcher_pass_code(args) -> Optional[int]:
+    """The exit code a pass ends with when the launcher started the hook
+    (``--pass-exit-code=N``, 3 to 125), or None when run directly."""
+    if len(args) != 1 or not args[0].startswith("--pass-exit-code="):
+        return None
+    try:
+        code = int(args[0].split("=", 1)[1])
+    except ValueError:
+        return None
+    return code if 3 <= code <= 125 else None
+
+
 def main() -> None:
     try:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -2706,10 +2718,17 @@ def main() -> None:
     # No thread is started here or anywhere in the hook, so nothing but the
     # main thread is alive at interpreter shutdown. The time limit beyond
     # the budget is the launcher's (shakedown-safety-launcher.py).
+    pass_code = _launcher_pass_code(sys.argv[1:])
     budget = _budget()
     try:
         _main(time.monotonic() + budget)
-    except SystemExit:
+    except SystemExit as done:
+        if pass_code is not None and done.code in (0, None):
+            # A pass decided here, under the launcher: its own exit code, so
+            # that a bare exit 0 (an empty hook file, one cut short before it
+            # reaches main) is refused by the launcher. Run directly, a pass
+            # stays exit 0.
+            raise SystemExit(pass_code) from None
         raise
     except BaseException:  # noqa: BLE001 -- a crash (exit 1) would let the command run
         # Any internal error refuses, whatever the command (exit 2).

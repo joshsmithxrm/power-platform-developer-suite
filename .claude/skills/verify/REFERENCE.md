@@ -531,8 +531,8 @@ is descriptive, not a raw exception.
 How to test changes to `.claude/` infrastructure: hooks, skills, settings.
 The hooks are `.claude/hooks/snk-protect.py` (Edit|Write) and
 `.claude/hooks/shakedown-safety.py` (Bash and PowerShell, registered through
-`shakedown-safety-launcher.py`, which refuses on any exit of the hook other
-than 0 or 2); `_pathfix.py` and `_shellparse.py` are shared helpers, not hooks.
+`shakedown-safety-launcher.py`, which passes only on the hook's private pass
+code and refuses on any other end but exit 2, a bare 0 included); `_pathfix.py` and `_shellparse.py` are shared helpers, not hooks.
 
 ### Hook testing
 

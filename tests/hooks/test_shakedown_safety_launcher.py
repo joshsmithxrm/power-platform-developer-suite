@@ -2,10 +2,11 @@
 registered command around it: every abnormal end of the hook refuses.
 
 Claude Code runs a command whose PreToolUse hook exits with anything but 2,
-or outlives its registered timeout. The launcher runs the hook as a child
-and passes on exit 0 and exit 2; any other end of the hook (a signal, a
-crash, exit 1 or another code, a hang, a missing file) becomes a refusal,
-exit 2. The registered command ends in ``|| exit 2`` so that a launcher
+or outlives its registered timeout. The launcher runs the hook as a child;
+the hook ends a pass with the launcher's private pass code (mapped to 0)
+and a refusal with 2; any other end of the hook (a signal, a crash, exit 1
+or another code, a bare exit 0 from an empty or cut-short file, a hang, a
+missing file) becomes a refusal, exit 2. The registered command ends in ``|| exit 2`` so that a launcher
 which cannot start (no interpreter) or is killed refuses as well.
 
 Each abnormal end is produced for real: a stand-in hook placed next to a
@@ -128,8 +129,10 @@ def test_a_large_input_reaches_the_hook_whole(tmp_path):
     ("raise RuntimeError('internal error')\n", "exit code 1"),
     ("import os\nos._exit(3)\n", "exit code 3"),
     ("import os\nos._exit(255)\n", "exit code 255"),
+    ("import sys\nsys.exit(0)\n", "without a decision"),
+    ("", "without a decision"),
     ("def broken(:\n", "exit code 1"),
-], ids=["segfault", "uncaught-exception", "exit-3", "exit-255", "syntax-error"])
+], ids=["segfault", "uncaught-exception", "exit-3", "exit-255", "exit-0", "empty", "syntax-error"])
 def test_an_abnormal_end_refuses(tmp_path, body, shows):
     code, _, err, _ = _launch(_stand_in(tmp_path, body), BLOCK_PAYLOAD)
     assert code == 2, err
@@ -245,6 +248,73 @@ def test_the_registered_command_passes_and_refuses(tmp_path):
     assert _run_registered(env, PASS_PAYLOAD).returncode == 0
     r = _run_registered(env, BLOCK_PAYLOAD)
     assert r.returncode == 2 and b"BLOCKED [shakedown-safety/env]" in r.stderr, r.stderr
+
+
+def _project_copy(tmp_path: Path, hook_text=None) -> Path:
+    """A project folder holding a copy of the hooks folder; ``hook_text`` replaces the hook file."""
+    project = tmp_path / "copy"
+    shutil.copytree(HOOKS, project / ".claude" / "hooks", ignore=shutil.ignore_patterns("__pycache__"))
+    if hook_text is not None:
+        (project / ".claude" / "hooks" / HOOK.name).write_text(hook_text, encoding="utf-8")
+    return project
+
+
+def _cut_inside_a_statement(text: str) -> str:
+    """The hook text cut in the middle of the line that calls ``_main`` (a syntax error)."""
+    mark = "        _main(time.monotonic() + budget)"
+    assert mark in text
+    return text[:text.index(mark) + len(mark) - 8]
+
+
+_HOOK_TEXT = HOOK.read_text(encoding="utf-8")
+_LAST_TWO = 'if __name__ == "__main__":\n    main()\n'
+
+
+@pytest.mark.skipif(not _sh(), reason="needs a POSIX sh, as Claude Code uses for hook commands here")
+@pytest.mark.parametrize("hook_text", [
+    "",
+    _HOOK_TEXT[:-len(_LAST_TWO)],
+    _cut_inside_a_statement(_HOOK_TEXT),
+    "import sys\nsys.stdin.buffer.read()\nsys.exit(0)\n",
+], ids=["empty-file", "cut-before-last-two-lines", "cut-inside-a-statement", "reads-and-exits-0"])
+def test_a_hook_that_decides_nothing_is_refused(tmp_path, hook_text):
+    """A hook file that is empty, cut short or ends with a bare exit 0 has decided nothing: through
+    the registered command it is refused, for a payload the hook would refuse and one it would pass."""
+    assert _HOOK_TEXT.endswith(_LAST_TWO)
+    project = _project_copy(tmp_path, hook_text)
+    for payload in (BLOCK_PAYLOAD, PASS_PAYLOAD):
+        r = _run_registered(_gate_env(tmp_path), payload, project=project)
+        assert r.returncode == 2, (payload, r.stderr)
+        assert b"BLOCKED [shakedown-safety]" in r.stderr, r.stderr
+
+
+@pytest.mark.skipif(not _sh(), reason="needs a POSIX sh, as Claude Code uses for hook commands here")
+def test_a_whole_hook_copy_still_passes_and_refuses(tmp_path):
+    """The same copy with the hook unchanged: the ordinary pass is 0, the refusal 2."""
+    project = _project_copy(tmp_path)
+    assert _run_registered(_gate_env(tmp_path), PASS_PAYLOAD, project=project).returncode == 0
+    r = _run_registered(_gate_env(tmp_path), BLOCK_PAYLOAD, project=project)
+    assert r.returncode == 2 and b"BLOCKED [shakedown-safety/env]" in r.stderr, r.stderr
+    off = {k: v for k, v in _gate_env(tmp_path).items() if k != "PPDS_SAFE_ENVS"}
+    assert _run_registered(off, PASS_PAYLOAD, project=project).returncode == 0  # no gate: passes
+
+
+@pytest.mark.parametrize("args, expected_pass", [
+    ([], 0), (["--pass-exit-code=86"], 86), (["--pass-exit-code=2"], 0), (["--pass-exit-code=x"], 0),
+    (["--pass-exit-code=86", "y"], 0),
+], ids=["direct", "launcher", "code-2-ignored", "not-a-number", "extra-argument"])
+def test_the_hook_ends_a_pass_with_the_launchers_code_only_when_given(tmp_path, args, expected_pass):
+    """Run directly (as a direct registration does) a pass is exit 0 and a refusal exit 2; with the
+    launcher's argument a pass ends with that code, and a refusal is still 2."""
+    run = lambda payload: subprocess.run([sys.executable, str(HOOK), *args], input=payload.encode("utf-8"),
+                                         capture_output=True, env=_gate_env(tmp_path), timeout=60)
+    assert run(PASS_PAYLOAD).returncode == expected_pass
+    assert run(BLOCK_PAYLOAD).returncode == 2
+
+
+def test_the_launcher_and_the_hook_agree_on_the_pass_code():
+    assert 3 <= _launcher_constant("_PASS_CODE") <= 125
+    assert f'"--pass-exit-code=%d" % _PASS_CODE' in LAUNCHER.read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(not _sh(), reason="needs a POSIX sh")

@@ -65,6 +65,13 @@ def timing_report():
     return differential.run_timing_oracle(TIMING_LENGTHS, ("shakedown",), 110 if SEED is None else SEED, CASES)
 
 
+def _excused(label: str, known: set) -> bool:
+    """A failure label (``a+b+r5-mode-x``) is excused when it has a class label and every class label
+    in it is known. Mode tags (``r5-mode-*``) say where it failed, not what it is: never an excuse."""
+    classes = {part for part in label.split("+") if not part.startswith("r5-mode-")}
+    return bool(classes) and classes <= known
+
+
 def _check(report: dict, mode: str) -> None:
     sev = ("requirement",) + (("policy", "requirement-approx", "policy-approx") if STRICT else ("requirement-approx",))
     bad = [f for f in report["failures"] if f["mode"] == mode and f["severity"] in sev]
@@ -78,7 +85,7 @@ def _check(report: dict, mode: str) -> None:
         f = fs[0]
         lines.append(f"  [{label}] x{len(fs)}  {f['tool']}: {f['command'][:160]!r}  -> {f['cause']}: {f['detail'][:120]}")
     known = set(EXPECTED["labels"])  # keys
-    if XFAIL and all(set(label.split("+")) <= known for label in groups):
+    if XFAIL and all(_excused(label, known) for label in groups):
         pytest.xfail("\n".join(["known at 3164e825 (expected_failures.json):"] + lines))
     pytest.fail("\n".join(lines))
 
@@ -237,3 +244,37 @@ def test_a_timed_out_text_the_hook_passes_is_not_judged_correct():
                (2, "gate-unlisted"): {"Bash": passed, "PowerShell": passed}}
     assert differential.unjudged_passes(by_case, {0, 1}) == [0]
     assert differential.unjudged_passes(by_case, set()) == []
+
+
+@pytest.mark.parametrize("hook_text, reason", [
+    ("", "the hook ended without a decision"),
+    ("import sys\nsys.exit(0)\n", "the hook ended without a decision"),
+    ("import os\nos._exit(3)\n", "the hook ended abnormally"),
+], ids=["empty-hook-file", "bare-exit-0", "exit-3"])
+def test_the_exit_tally_sees_a_hook_that_decided_nothing(tmp_path, hook_text, reason):
+    """The tally counts an empty or cut-short hook (a bare exit 0 the launcher refuses) as abnormal,
+    and not as let through, since the launcher refused it."""
+    import _harness
+    hooks = tmp_path / ".claude" / "hooks"
+    shutil.copytree(_harness.REPO / ".claude" / "hooks", hooks, ignore=shutil.ignore_patterns("__pycache__"))
+    (hooks / "shakedown-safety.py").write_text(hook_text, encoding="utf-8")
+    sandbox = _harness.Sandbox()
+    try:
+        _harness.exit_tally(reset=True)
+        res = _harness.run_hook(sandbox, "Bash", "ppds data delete --entity account", "gate-unlisted",
+                                hook=hooks / "shakedown-safety.py")
+        tally = _harness.exit_tally(reset=True)
+    finally:
+        sandbox.cleanup()
+    assert res.code == 2, res.stderr
+    assert (tally["runs"], tally["abnormal"], tally["let_through"]) == (1, 1, 0), tally
+    assert tally["by_reason"] == {reason: 1}, tally
+
+
+def test_a_mode_tag_alone_excuses_nothing():
+    known = {"r5-env-who-on-unlisted"}
+    assert _excused("r5-env-who-on-unlisted+r5-mode-gate-unknown", known)
+    assert _excused("r5-env-who-on-unlisted", known)
+    assert not _excused("r5-mode-gate-settings", known)
+    assert not _excused("r2-target-override+r5-mode-gate-settings", known)
+    assert not any(label.startswith("r5-mode-") for label in EXPECTED["labels"])
