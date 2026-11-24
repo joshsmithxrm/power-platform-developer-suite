@@ -13,10 +13,12 @@ Will be the first published 1.2.x version. 1.2.0 was tagged but never published 
 
 ### Added
 
+- `EnvironmentConfigStore.SaveConfigAsync` overload with a `validate` callback, called with the entry as freshly read from the file and the entry about to be written; if it throws, nothing is written. `EnvironmentConfigStore.UpdateAsync` changes the freshly read collection and writes it when the callback returns true (#1829).
 - The AppContext switch `PPDS.BlockInteractiveSignIn`, for test hosts: when a host turns it on, browser and device-code sign-in are refused before they start (an `InvalidOperationException` where the refusal is raised; environment resolution reports it as a failed result). It is off by default and changes nothing unless set; see "Blocking Interactive Sign-In (Test Hosts)" in the package README (#1757).
 
 ### Changed
 
+- `EnvironmentConfigStore.SaveConfigAsync` and `RemoveConfigAsync` re-read the file under the store's lock and change only the given fields on the fresh entry. Before, they changed the cached collection and wrote all of it back, so a long-lived store could undo a change another process had saved, such as a raised environment type. The lock is in-process: two processes saving at the same moment are not excluded, and the later write wins. Not breaking: signatures are unchanged. No credential, token or profile code changed (#1829).
 - Refreshed MSAL and its cache extensions from 4.90.1 to 4.92.0 (#1513), and System.Text.Json from 10.0.9 to 10.0.14 (#1565). `CloudEndpoints.GetAzureCloudInstance` still returns MSAL's `AzureCloudInstance`, now from MSAL 4.92.0; consumers that pin an older MSAL need to allow 4.92.0. Authentication source and public APIs are unchanged.
 
 ## [1.2.0] - 2026-11-01 (tagged, not published)
