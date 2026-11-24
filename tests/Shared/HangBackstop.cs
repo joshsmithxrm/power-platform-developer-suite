@@ -70,7 +70,11 @@ internal static class HangBackstop
         using var backstop = new CancellationTokenSource();
         using var timer = new CancellationTokenSource();
         // Task.Run: an operation that blocks before its first await must not block the race itself.
-        var work = Task.Run(() => operation(backstop.Token));
+        // The token is read here, not inside the delegate: on a loaded runner the delegate can still be
+        // queued when the bound fires and backstop is disposed, and reading Token then would throw
+        // ObjectDisposedException instead of handing the operation its already cancelled token.
+        var token = backstop.Token;
+        var work = Task.Run(() => operation(token));
         var deadline = Task.Delay(bound, timer.Token);
 
         if (await Task.WhenAny(work, deadline) != work)

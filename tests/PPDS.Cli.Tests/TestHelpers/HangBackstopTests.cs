@@ -96,7 +96,11 @@ public sealed class HangBackstopTests
             return never.Task; // Ignores the token, so only the guard can cancel it.
         }, "a signal that never completes", ShortBound));
 
-        Assert.True((await observed.Task).IsCancellationRequested);
+        // The operation may start only after the bound has fired (a queued Task.Run on a loaded runner); it
+        // still gets the token, already cancelled, so the assertion does not depend on when it starts. The
+        // wait for it is itself bounded, so a regression fails here instead of hanging the run.
+        var token = await HangBackstop.WaitAsync(observed.Task, "the operation to receive its token");
+        Assert.True(token.IsCancellationRequested);
     }
 
     public static TheoryData<string> TwoArgumentOverloads => new() { "signal of T", "operation of T", "signal", "operation" };
