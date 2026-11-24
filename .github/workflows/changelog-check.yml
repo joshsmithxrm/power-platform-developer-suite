@@ -1,0 +1,44 @@
+name: Changelog Check
+
+# Issue #1789: a pull request that changes a package under src/ carries its
+# changelog entry (under the package's `## [X.Y.Z] - Unreleased` section) and a
+# breaking-change statement that agrees with the `breaking-change` label.
+# Rule logic: scripts/ci/check_changelog_entry.py. See docs/MERGE-POLICY.md.
+#
+# NOT a required status check. The script reads the event payload and git only;
+# it calls no GitHub API, so the job needs only `contents: read`.
+
+on:
+  pull_request:
+    # labeled/unlabeled: the `internal` and `breaking-change` labels are inputs.
+    # edited: the description holds the breaking statement.
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled, ready_for_review]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: changelog-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  changelog-entry:
+    name: Changelog entry and breaking statement
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Both the base and the PR head are needed to diff the changelogs.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Check changelog entry and breaking statement
+        run: python scripts/ci/check_changelog_entry.py --event "$GITHUB_EVENT_PATH"
