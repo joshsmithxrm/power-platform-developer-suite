@@ -677,7 +677,7 @@
     "esbuild": "^0.28.2",
     "eslint": "^10.14.0",
     "eslint-plugin-import-x": "^4.17.1",
-    "knip": "^6.45.1",
+    "knip": "^6.46.1",
     "stylelint": "^17.16.0",
     "stylelint-config-standard": "^40.0.0",
     "typescript": ">=6.0.2 <6.1.0",
