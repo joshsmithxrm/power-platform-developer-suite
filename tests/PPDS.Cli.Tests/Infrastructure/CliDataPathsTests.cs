@@ -276,10 +276,16 @@ public sealed class CliDataPathsTests : IDisposable
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            return Task.FromResult(CreateResponse());
+        }
+
+        // The caller (HttpClient's user) owns and disposes the response.
+        private HttpResponseMessage CreateResponse()
+        {
+            return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
-            });
+            };
         }
     }
 }
