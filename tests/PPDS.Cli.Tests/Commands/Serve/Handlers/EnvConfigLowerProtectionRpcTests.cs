@@ -55,6 +55,25 @@ public sealed class EnvConfigLowerProtectionRpcTests : IDisposable
         (await _store.GetConfigAsync(Url))!.Type.Should().Be(EnvironmentType.Production);
     }
 
+    /// <summary>
+    /// Review round 3: env/config/get on the long-lived daemon store reads the file, so a raise another process saved
+    /// is shown at once (the daemon's store cached Development).
+    /// </summary>
+    [Fact]
+    public async Task Get_AfterAnotherProcessRaisedTheType_ShowsTheRaise()
+    {
+        await _store.SaveConfigAsync(Url, type: EnvironmentType.Development);
+        (await _handler.EnvConfigGetAsync(Url)).Type.Should().Be("Development");
+        (await _store.LoadAsync()).Environments.Single().Type.Should().Be(EnvironmentType.Development); // the daemon's cache
+
+        using (var cli = new EnvironmentConfigStore(_store.FilePath))
+            await new EnvironmentConfigService(cli).SaveConfigAsync(Url, type: EnvironmentType.Production);
+
+        var response = await _handler.EnvConfigGetAsync(Url);
+        response.Type.Should().Be("Production");
+        response.ResolvedType.Should().Be("Production");
+    }
+
     [Fact]
     public async Task Set_LoweringWithConfirmationNamingTheEnvironment_IsSaved()
     {
