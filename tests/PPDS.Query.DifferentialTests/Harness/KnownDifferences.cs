@@ -32,12 +32,12 @@ public static class KnownDifferences
     public static readonly KnownDifference ConditionalUnconverted = new(
         "conditional-whole-number-unconverted",
         "#1764, first known case",
-        "COALESCE, IIF and CASE mixing a whole number with decimal, currency or float return the whole number unconverted, so a following / divides as integers.",
+        "COALESCE, IIF and CASE mixing a whole number with decimal, currency or float return the whole number unconverted, so a following / divides as integers. (Since #1698 whole-number arithmetic stays int, so the engine's wrong result is int, no longer bigint.)",
         [
-            new("COALESCE(5, 2.50) / 2", 1, "2.500000 : decimal(7,6)", "2 : ~bigint"),
-            new("IIF(1 = 1, 5, 2.50) / 2", 1, "2.500000 : decimal(7,6)", "2 : ~bigint"),
-            new("CASE WHEN 1 = 1 THEN 7 ELSE 2.5E0 END / 2", 1, "3.5 : float", "3 : ~bigint"),
-            new("COALESCE(c_int, c_money) / 2", 1, "3.5000 : money", "3 : ~bigint"),
+            new("COALESCE(5, 2.50) / 2", 1, "2.500000 : decimal(7,6)", "2 : ~int"),
+            new("IIF(1 = 1, 5, 2.50) / 2", 1, "2.500000 : decimal(7,6)", "2 : ~int"),
+            new("CASE WHEN 1 = 1 THEN 7 ELSE 2.5E0 END / 2", 1, "3.5 : float", "3 : ~int"),
+            new("COALESCE(c_int, c_money) / 2", 1, "3.5000 : money", "3 : ~int"),
         ]);
 
     /// <summary>#1764, second known case: round-whole-number-float.</summary>
