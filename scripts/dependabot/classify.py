@@ -28,15 +28,18 @@ Group C — manual review required (do NOT auto-merge):
     diff touches .github/workflows/ or a .github/actions/**/action.yml|yaml
     file. This rule is applied last, over whatever group the version rules
     chose, so nothing else true of the PR can make it auto-merge eligible.
-    Other ecosystems are classified as before.
+  - ANY dependency PR whose diff touches a path under .github/ (for example
+    .github/dependabot.yml or a template), whatever its ecosystem: the
+    maintainer goes first on everything under .github/. Applied with the
+    github-actions rule, after the version rules.
   - Anything in MERGE-POLICY's "When NOT to use auto-merge" list that isn't Group B
 
 The ground truth for the policy is docs/MERGE-POLICY.md. If this file and that
-file disagree, the doc wins and this file needs a patch. One known exception:
-the github-actions rule above follows the maintainer's decision that he goes
-first on Dependabot's GitHub Actions bumps. Until docs/MERGE-POLICY.md and the
-/dependabot-triage skill are updated to match, where they still list GitHub
-Actions group bumps as auto-merge eligible, this file wins for those bumps.
+file disagree, the doc wins and this file needs a patch. One exception: the
+github-actions and .github/ rules above follow the maintainer's decisions that
+he goes first on Dependabot's GitHub Actions bumps and on anything under
+.github/. Where any text still lists such a PR as auto-merge eligible, this
+file wins for it.
 """
 from __future__ import annotations
 
@@ -450,6 +453,11 @@ def is_actions_path(raw_path: str) -> bool:
     return path.startswith(".github/actions/") and basename in {"action.yml", "action.yaml"}
 
 
+def touches_github_path(files: Iterable[str]) -> bool:
+    """True if any changed file is under ``.github/`` (paths normalised as in ``is_actions_path``)."""
+    return any(_normalise_path(f).startswith(".github/") for f in files)
+
+
 def is_github_actions_update(
     ecosystem: str,
     files: Iterable[str],
@@ -606,10 +614,11 @@ def classify_pr(pr: dict) -> Classification:
     missing fields default to safe (Group C with reason "ambiguous").
 
     The version rules (``_classify_by_version``) choose a group first. A GitHub
-    Actions bump (``is_github_actions_update``) is then moved to Group C: the
+    Actions bump (``is_github_actions_update``), or any PR whose diff touches
+    ``.github/`` (``touches_github_path``), is then moved to Group C: the
     maintainer goes first on those, so no other property of the PR can leave it
-    auto-merge eligible. Every other PR keeps the version rules' result. For an
-    Actions bump only ``group`` and ``reason`` change; ``update_type`` and
+    auto-merge eligible. Every other PR keeps the version rules' result. For a
+    PR moved to Group C only ``group`` and ``reason`` change; ``update_type`` and
     ``ecosystem`` stay as the version rules found them, because scripts/ci/
     uses them to decide whether major-version evidence is required.
     """
@@ -617,13 +626,17 @@ def classify_pr(pr: dict) -> Classification:
     files = [f.get("path", "") for f in pr.get("files", [])]
     labels = [lbl.get("name", "") for lbl in pr.get("labels", [])]
     head_ref = pr.get("headRefName", "") or ""
-    if not is_github_actions_update(classification.ecosystem, files, labels, head_ref):
+    if is_github_actions_update(classification.ecosystem, files, labels, head_ref):
+        why = "GitHub Actions bump"
+    elif touches_github_path(files):
+        why = "diff touches .github/"
+    else:
         return classification
     if classification.group == "C":
-        reason = f"{classification.reason}; GitHub Actions bump — maintainer goes first"
+        reason = f"{classification.reason}; {why} — maintainer goes first"
     else:
         reason = (
-            "GitHub Actions bump — maintainer goes first, "
+            f"{why} — maintainer goes first, "
             f"never auto-merge (version rules alone gave Group "
             f"{classification.group}: {classification.reason})"
         )
