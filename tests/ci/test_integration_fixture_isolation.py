@@ -25,9 +25,20 @@ REFUSAL_SCRIPT = (
 # No Git calls or mutable refs are used by these tests.
 # 2026-11-19: '.editorconfig' added to the build.yml code filter and the
 # test.yml code and python filters (it sets CS1591 to error in the libraries).
+# 2026-11-20: 'scripts/ci/ci_images.py' (the one container image definition,
+# #1794) added to the test.yml extraction filter; no job, permission or secret
+# reference changed.
+# 2026-11-22: test.yml: a new test-linux job runs the same unit suite on
+# ubuntu-latest, and test-status now needs it under the "code" classification.
+# The new job reads no secret and has no write permission. No trigger changed
+# and no other job changed.
+# 2026-11-22: build.yml: build-status needs dependency-review and requires it to
+# have succeeded on a pull request (skipped on a push; any other event fails).
+# The review job's comments were corrected. No job, permission, trigger or
+# secret reference changed.
 REVIEWED_WORKFLOW_HASHES = {
-    "build.yml": "5b58e3dce7cb80ca1f4f828761a77f68fb17b6a03f7ab77f33863de80de6b0d5",
-    "test.yml": "0146164e1fcd9d9f719b0a18ebe26d31b580c9b217867cd9ab80174eb8df65d0",
+    "build.yml": "1db7195c6d60974fc5c32f40fe01fe450ee164725cb380f1df9fc6658ef5e72a",
+    "test.yml": "118ec514ab73e1d4621edf4a7f692212f0fc680df49e6d17942356d08554b0e4",
 }
 
 

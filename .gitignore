@@ -112,6 +112,7 @@ src/PPDS.Extension/tools/.webview-cdp-profile-*/
 # Python
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Claude Code scheduled-tasks runtime lock (session state, not source)
 .claude/scheduled_tasks.lock

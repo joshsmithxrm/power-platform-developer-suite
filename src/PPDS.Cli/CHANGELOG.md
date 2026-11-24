@@ -52,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `service-endpoints register webhook` and `service-endpoints update --url` reject a URL that is not an absolute `http://` or `https://` address, with `ServiceEndpoint.ValidationFailed`, before anything is written. On Linux and macOS a rooted path such as `/hooks/order` was accepted as a `file://` address, other schemes were accepted on every platform, and `update` did not check the URL (#1854).
 - Direct plugin image updates preserve omitted registration values and use Dataverse row-version checks. Concurrent edits or unavailable capabilities fail without automatic mutation retries; acknowledged updates remain distinguished from connection-cleanup failures. RPC callers receive the service's structured codes and safe outcome warnings without private diagnostics.
 
 - Version 2 image-only cleanup also refuses present-null step/image protection metadata during planning and fresh pre-dispatch checks. Public DTO bool values/signatures remain; the checks do not make deletion atomic.

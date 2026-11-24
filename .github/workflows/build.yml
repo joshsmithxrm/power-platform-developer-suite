@@ -46,7 +46,8 @@ jobs:
               - 'package.json'
               - 'package-lock.json'
 
-  # Dependency review for PRs - checks for vulnerabilities in dependency changes
+  # Dependency review for PRs - checks for vulnerabilities in dependency changes.
+  # build-status requires it to succeed on every pull request; it does not run on a push.
   dependency-review:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
@@ -60,8 +61,10 @@ jobs:
       - name: Dependency Review
         uses: actions/dependency-review-action@v5
         with:
+          # The action looks only at dependencies the pull request adds or changes;
+          # vulnerable packages already on the base branch do not fail it.
           fail-on-severity: high
-          # Allow existing vulnerabilities, only fail on new ones
+          # No licence is denied.
           deny-licenses: ''
 
   build:
@@ -284,13 +287,30 @@ jobs:
   build-status:
     permissions: {}
     runs-on: ubuntu-latest
-    needs: [changes, build, extension, extension-node22, extension-e2e]
+    needs: [changes, dependency-review, build, extension, extension-node22, extension-e2e]
     if: always()
     steps:
       - name: Check build status
         run: |
           if [[ "${{ needs.changes.result }}" != "success" ]]; then
             echo "Changes detection failed: ${{ needs.changes.result }}"
+            exit 1
+          fi
+          # Dependency review runs on pull requests only. There it must succeed; a skip,
+          # a cancellation or a failure blocks. On a push it is skipped by design. Any
+          # other event fails: a new trigger must decide what it requires here.
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            if [[ "${{ needs.dependency-review.result }}" != "success" ]]; then
+              echo "Dependency review did not succeed on a pull request: ${{ needs.dependency-review.result }}"
+              exit 1
+            fi
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            if [[ "${{ needs.dependency-review.result }}" != "skipped" ]]; then
+              echo "Dependency review reported an unexpected result on a push: ${{ needs.dependency-review.result }}"
+              exit 1
+            fi
+          else
+            echo "No dependency review rule for event '${{ github.event_name }}'; add one before using this trigger"
             exit 1
           fi
           if [[ "${{ needs.build.result }}" == "success" || "${{ needs.build.result }}" == "skipped" ]] && \
