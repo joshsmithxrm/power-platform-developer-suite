@@ -5,7 +5,7 @@ description: Drain open dependabot PRs per docs/MERGE-POLICY.md - classify each,
 
 # Dependabot Triage
 
-The policy is `docs/MERGE-POLICY.md` ("Who merges", grouped PRs, the auth-critical package list). The classification is `scripts/dependabot/classify.py`. Its docstring and reason strings still call Group A "auto-merge eligible"; follow the policy, not that wording. If they disagree, the policy wins over the classifier, and both win over this skill. Do not edit the policy while triaging; file an issue for a gap.
+The policy is `docs/MERGE-POLICY.md` ("Who merges", grouped PRs, the auth-critical package list). The classification is `scripts/dependabot/classify.py`. If they disagree, the policy wins over the classifier, and both win over this skill. Do not edit the policy while triaging; file an issue for a gap.
 
 ## Before starting
 

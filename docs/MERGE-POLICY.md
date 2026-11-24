@@ -51,8 +51,7 @@ a group:
   and puts it on the list of decisions waiting (D5).
 
 A Dependabot pull request that falls in any maintainer-first category below is maintainer first,
-whatever its group. The classifier's docstring and reason strings still call Group A "auto-merge
-eligible". That wording is older than this section, and this section wins.
+whatever its group.
 
 If `main` goes red after a merge, whoever made it, merging stops, for whoever merges, until it is
 fixed or reverted. The fix or revert is merged under the same tiers as any change: an agent merges it when it is ordinary and its review converged, and it is the
@@ -199,7 +198,7 @@ To add or remove a package: edit the list above (between the `BEGIN`/`END` marke
 
 ## Branch Protection
 
-`main` is protected. A pull request must pass the two required status checks, `build-status` and `test-status`. It does not have to be up to date with `main`.
+`main` is protected. A pull request must pass the two required status checks, `build-status` and `test-status`. It does not have to be up to date with `main`, so a branch is not updated only in order to merge it.
 
 No approving review is required by branch protection. Every other check (Codecov, CodeQL, the Pre-Merge Gate, the TUI end-to-end workflow, automated review comments) is advisory: read it before merging, but GitHub does not block on it.
 
@@ -340,9 +339,8 @@ section, with HTML comments and a trailing "Generated with …" footer removed.
   package ([Release Scope Analysis](RELEASE.md#breaking-changes-refuse-a-non-major-plan)).
 
 **Not checked:**
-- Pull requests labelled `internal` (nothing user-visible changed). The
-  label does not exist yet; the maintainer creates it. `internal` together
-  with `breaking-change` fails.
+- Pull requests labelled `internal` (nothing user-visible changed).
+  `internal` together with `breaking-change` fails.
 - Dependabot pull requests, by author; major updates are covered by Rule 3.
 - These files under `src/`, which the check knows by location:
   - `src/PPDS.Extension/src/**/__tests__/`;
@@ -360,5 +358,5 @@ says so; it needs the `internal` exemption.
 
 To make the check required, the maintainer adds the check `Changelog entry and
 breaking statement` to the required status checks of `main`. Before that, the
-`internal` label must exist, and the check should have run on open pull
-requests long enough to show it does not fail correct ones.
+check should have run on open pull requests long enough to show it does not
+fail correct ones.

@@ -135,7 +135,7 @@ class TestClassifyUpdateType(unittest.TestCase):
 
     def test_minor_downgrade_treated_as_major(self):
         # Any downgrade — including minor (1.2.0 -> 1.1.0) — must classify as
-        # 'major' so it routes to Group C / manual review and never auto-merges.
+        # 'major' so it routes to Group C and the maintainer decides.
         self.assertEqual(classify.classify_update_type("1.2.0", "1.1.0"), "major")
 
     def test_patch_downgrade_treated_as_major(self):
@@ -244,7 +244,7 @@ class TestDependencyPolicySignals(unittest.TestCase):
 
 
 class TestClassifyPR(unittest.TestCase):
-    # Group A — auto-merge eligible
+    # Group A — routine: one fresh review, then an agent merges on green
 
     def test_patch_npm_tooling_is_group_a(self):
         pr = make_pr(
@@ -423,7 +423,7 @@ class TestClassifyPR(unittest.TestCase):
     def test_patch_auth_critical_is_group_b(self):
         # Regression for real PR #1288: an auth-critical PATCH bump
         # (System.Security.Cryptography.Pkcs 10.0.5 -> 10.0.9) must go through
-        # verify-then-merge (Group B), NOT auto-merge (Group A). Per
+        # verify-then-merge (Group B), NOT the routine Group A. Per
         # docs/MERGE-POLICY.md, auth-critical packages route to Group B at any
         # non-major version — patch included. Before the fix this fell through
         # to the generic "patch bump on non-critical path" branch and became A.
@@ -500,7 +500,7 @@ class TestClassifyPR(unittest.TestCase):
     # all-patch -> A, any-minor (no major) -> B, any-major -> C.
 
     def test_grouped_all_patch_is_group_a(self):
-        # All members are patch bumps -> Group A (auto-merge eligible).
+        # All members are patch bumps -> Group A (routine).
         pr = make_pr(
             number=860,
             title="Bump the npm_and_yarn group across 1 directory with 3 updates",
@@ -924,7 +924,7 @@ class TestClassifyPR(unittest.TestCase):
 
     def test_minor_downgrade_is_group_c(self):
         # 1.2.0 -> 1.1.0 was previously classified as 'minor' and could slip
-        # through auto-merge. Now any downgrade is Group C.
+        # through as a routine bump. Now any downgrade is Group C.
         pr = make_pr(
             number=856,
             title="Bump SomePkg from 1.2.0 to 1.1.0",
@@ -1017,7 +1017,7 @@ class TestGitHubActionsMaintainerFirst(unittest.TestCase):
     """Every GitHub Actions bump is Group C: the maintainer goes first on them.
 
     Before this rule, github-actions patch and minor bumps were Group A
-    (auto-merge eligible). They change workflow files, so they now always need
+    (routine). They change workflow files, so they now always need
     the maintainer, whatever their version, grouping or package name.
     """
 
