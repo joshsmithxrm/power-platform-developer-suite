@@ -19,12 +19,20 @@ namespace PPDS.Auth.Profiles;
 /// (save, remove, update, and the de-duplication write while reading) happens under a cross-process lock: an
 /// exclusive lock on a sibling file, <c>environments.json.lock</c>, opened with <see cref="FileShare.None"/>.
 /// On Windows that is a sharing lock; on Linux and macOS .NET takes an advisory <c>flock</c> on it, which every
-/// PPDS process honours. So a change made by one process cannot be overwritten by another that read the file
-/// before it (#1829). The lock is held only for one read or one read-modify-write (milliseconds); a caller
+/// PPDS process on the same machine takes too. So a change made by one process cannot be overwritten by another
+/// that read the file before it (#1829). The lock is held only for one read or one read-modify-write (milliseconds); a caller
 /// that cannot get it within <see cref="DefaultLockTimeout"/> gets a <see cref="TimeoutException"/> and nothing
 /// is written. When a process dies holding the lock, the operating system closes its handle and the lock is
 /// released at once; the lock file itself stays (it is never deleted, so two processes can never lock two
 /// different files of that name).
+/// </para>
+/// <para>
+/// Where the lock does not hold, nothing reports it and two processes can again overwrite each other's change:
+/// when file locking is turned off for the process with the .NET environment switch
+/// <c>DOTNET_SYSTEM_IO_DISABLEFILELOCKING</c>; on a network share (SMB/CIFS, and some NFS set-ups) where the
+/// advisory lock is not enforced, as .NET on Linux ignores <c>flock</c> errors other than "would block"; and
+/// across machines when the configuration folder is synced between them, since each machine locks only its own
+/// copy.
 /// </para>
 /// <para>
 /// The file is written to a temporary file in the same folder and then moved over the old one, so a reader

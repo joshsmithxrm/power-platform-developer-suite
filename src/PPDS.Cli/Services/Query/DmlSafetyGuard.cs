@@ -65,11 +65,13 @@ public sealed class DmlSafetyGuard
 
     /// <summary>
     /// Maps a Dataverse environment type to a protection level.
-    /// Only Production environments are locked down; everything else is unrestricted.
+    /// Only Production environments are locked down; the other defined types are unrestricted. A value that is
+    /// not a defined member is Production (#1829).
     /// </summary>
     public static ProtectionLevel DetectProtectionLevel(EnvironmentType environmentType) => environmentType switch
     {
         EnvironmentType.Production => ProtectionLevel.Production,
+        _ when !Enum.IsDefined(environmentType) => ProtectionLevel.Production,
         _ => ProtectionLevel.Development
     };
 
@@ -107,8 +109,8 @@ public sealed class DmlSafetyGuard
             };
         }
 
-        // Hard rule: Production target always prompts
-        if (targetProtection == ProtectionLevel.Production)
+        // Hard rule: Production target always prompts (and a value that is not a defined level is Production, #1829)
+        if (targetProtection == ProtectionLevel.Production || !Enum.IsDefined(targetProtection))
         {
             return new DmlSafetyResult
             {
@@ -141,6 +143,10 @@ public sealed class DmlSafetyGuard
         // If already blocked, protection level doesn't change anything
         if (result.IsBlocked)
             return result;
+
+        // A value that is not a defined level is Production, never weaker (#1829).
+        if (!Enum.IsDefined(level))
+            level = ProtectionLevel.Production;
 
         if (level == ProtectionLevel.Production && !options.IsConfirmed)
         {

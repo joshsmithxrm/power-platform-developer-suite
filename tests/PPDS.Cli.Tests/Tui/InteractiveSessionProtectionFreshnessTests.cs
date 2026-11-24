@@ -128,6 +128,41 @@ public sealed class InteractiveSessionProtectionFreshnessTests : IDisposable
         WriteProtectionResolver.ResolveForCrossEnvironmentTarget(target).Should().Be(ProtectionLevel.Production, "no type is Production");
     }
 
+    [Fact]
+    public async Task DuplicateAndReservedLabelsInTheFile_DoNotFailTheQuery_AsInTheDaemon()
+    {
+        // Review round 4: the session builds the label index on every query, so it must not fail on a file the
+        // daemon accepts. Duplicate labels keep the first entry; the reserved label "dbo" is skipped.
+        await StartAsync();
+        File.WriteAllText(_envPath, $$"""
+            { "version": 1, "environments": [
+              { "url": "{{Url}}", "type": "Development" },
+              { "url": "{{TargetUrl}}", "label": "B", "type": "Production" },
+              { "url": "https://second.crm.dynamics.com", "label": "b", "type": "Development" },
+              { "url": "https://third.crm.dynamics.com", "label": "dbo" } ] }
+            """);
+
+        var service = await NextQueryServiceAsync();
+
+        service.EnvironmentProtectionLevel.Should().Be(ProtectionLevel.Development);
+        service.ProfileResolver!.ResolveByLabel("B")!.Url.Should().Be(EnvironmentConfig.NormalizeUrl(TargetUrl));
+        CrossEnvironmentDecision(service).RequiresConfirmation.Should().BeTrue("the first B is Production");
+        service.ProfileResolver.ResolveByLabel("dbo").Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("\"type\": 42")]
+    [InlineData("\"type\": 3")]
+    [InlineData("\"type\": \"Development\", \"protection\": -1")]
+    public async Task AValueThatIsNotAMemberName_FailsTheQueryWiring_SoNoDmlRuns(string fields)
+    {
+        await _otherProcessStore.SaveConfigAsync(Url, type: EnvironmentType.Development); // arrange
+        await StartAsync();
+        File.WriteAllText(_envPath, $$"""{ "version": 1, "environments": [ { "url": "{{Url}}", {{fields}} } ] }""");
+
+        await FluentActions.Awaiting(NextQueryServiceAsync).Should().ThrowAsync<System.Text.Json.JsonException>();
+    }
+
     /// <summary>
     /// The decision the query service makes for <c>UPDATE [B].account ...</c> with <c>cross_env_dml_policy</c> Allow:
     /// the target's protection comes from the resolver the session wired for this query.

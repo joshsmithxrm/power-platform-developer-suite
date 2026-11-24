@@ -86,7 +86,9 @@ public sealed class EnvironmentConfirmationService : IEnvironmentConfirmationSer
         var policy = $"{type}|{protection}";
         var key = $"{Context.SessionId}\n{Context.ProfileIdentity}\n{target}";
         var acknowledged = _acknowledgements.Check(key, policy, supplied);
-        if (protection is ProtectionLevel.Production or ProtectionLevel.Test && !acknowledged)
+        // Anything but Development needs the acknowledgement, so a level that is not a defined member (which the
+        // resolver already makes Production) can never pass unconfirmed (#1829).
+        if (protection is not ProtectionLevel.Development && !acknowledged)
             throw new PpdsException(EnvironmentConfirmationErrorCodes.Required,
                 $"Confirm '{operation}' against '{target}' (type: {type}, protection: {protection}) " +
                 $"with --confirm-env {target} or confirmEnvironment before writing." +

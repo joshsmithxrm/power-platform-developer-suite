@@ -74,6 +74,24 @@ public sealed class EnvConfigLowerProtectionRpcTests : IDisposable
         response.ResolvedType.Should().Be("Production");
     }
 
+    /// <summary>
+    /// Review round 4: the type is taken by name only. <c>Enum.TryParse</c> alone accepted "42", which names no type.
+    /// </summary>
+    [Theory]
+    [InlineData("42")]
+    [InlineData("-1")]
+    [InlineData("1")]
+    [InlineData("Production, Development")]
+    public async Task Set_ATypeThatIsNotAName_IsInvalidArguments_AndNothingIsSaved(string type)
+    {
+        await _store.SaveConfigAsync(Url, type: EnvironmentType.Development);
+
+        var ex = (await FluentActions.Awaiting(() => _handler.EnvConfigSetAsync(Url, type: type)).Should().ThrowAsync<RpcException>()).Which;
+
+        ex.StructuredErrorCode.Should().Be(PPDS.Cli.Infrastructure.Errors.ErrorCodes.Validation.InvalidArguments);
+        (await _store.ReloadAsync()).Environments.Single().Type.Should().Be(EnvironmentType.Development);
+    }
+
     [Fact]
     public async Task Set_LoweringWithConfirmationNamingTheEnvironment_IsSaved()
     {

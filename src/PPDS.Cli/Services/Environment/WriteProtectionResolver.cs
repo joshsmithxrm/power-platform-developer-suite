@@ -29,13 +29,19 @@ public static class WriteProtectionResolver
     /// Fail-safe: an unknown/undetectable environment type resolves to Production so mutating
     /// requests are blocked without confirmation. (<see cref="DmlSafetyGuard.DetectProtectionLevel"/> on
     /// its own maps Unknown to Development, which would fail open, so Unknown is resolved here first.)
-    /// An explicit per-environment protection override always wins.
+    /// An explicit per-environment protection override always wins. A value that is not a defined member of
+    /// <see cref="EnvironmentType"/> or <see cref="ProtectionLevel"/> (a number cast in, for example) is
+    /// Production: it never resolves weaker than Production (#1829).
     /// </summary>
     public static ProtectionLevel Resolve(EnvironmentType envType, ProtectionLevel? configuredProtection)
-        => configuredProtection
-            ?? (envType == EnvironmentType.Unknown
-                ? ProtectionLevel.Production
-                : DmlSafetyGuard.DetectProtectionLevel(envType));
+    {
+        if (configuredProtection is { } explicitProtection)
+            return Enum.IsDefined(explicitProtection) ? explicitProtection : ProtectionLevel.Production;
+
+        return envType == EnvironmentType.Unknown || !Enum.IsDefined(envType)
+            ? ProtectionLevel.Production
+            : DmlSafetyGuard.DetectProtectionLevel(envType);
+    }
 
     /// <summary>
     /// Resolves the effective protection level for an environment by reading its (local) configuration.

@@ -53,6 +53,9 @@ public sealed class EnvironmentConfigService : IEnvironmentConfigService
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(url);
+        if (type is { } requested && !Enum.IsDefined(requested))
+            throw new PpdsException(ErrorCodes.Validation.InvalidArguments,
+                $"Invalid environment type '{requested}'. Valid values: {string.Join(", ", Enum.GetNames<EnvironmentType>())}.");
 
         // The store re-reads the file under its lock and calls the check with the entry as it is on disk
         // and the entry it is about to write, so the decision is made on the state the save replaces, not

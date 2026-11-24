@@ -383,7 +383,9 @@ public partial class RpcMethodHandler
         EnvironmentType? parsedType = null;
         if (!string.IsNullOrWhiteSpace(type))
         {
-            if (!Enum.TryParse<EnvironmentType>(type, ignoreCase: true, out var t))
+            // By name only: Enum.TryParse also accepts "42", which names no type (#1829).
+            if (!Enum.GetNames<EnvironmentType>().Contains(type.Trim(), StringComparer.OrdinalIgnoreCase)
+                || !Enum.TryParse<EnvironmentType>(type, ignoreCase: true, out var t))
             {
                 throw new RpcException(
                     ErrorCodes.Validation.InvalidArguments,
