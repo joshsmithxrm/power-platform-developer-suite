@@ -64,8 +64,8 @@ public sealed class EnvironmentConfigService : IEnvironmentConfigService
         var before = await _store.GetConfigAsync(url, ct).ConfigureAwait(false);
 
         // Label and colour never affect protection; only the type does (an explicit protection value
-        // cannot be set through this service). A change that leaves the type alone still creates an
-        // entry when there is none, which FindLowering judges by the confirmation-gate rule only.
+        // cannot be set through this service). Creating an entry without a type changes nothing either:
+        // no entry and an entry without a type are both Production for every writer.
         var after = new EnvironmentConfig
         {
             Url = before?.Url ?? EnvironmentConfig.NormalizeUrl(url),
@@ -74,9 +74,9 @@ public sealed class EnvironmentConfigService : IEnvironmentConfigService
             DiscoveredType = before?.DiscoveredType
         };
 
-        var lowerings = WriteProtectionResolver.FindLowering(before, after);
+        var lowering = WriteProtectionResolver.FindLowering(before, after);
         return new ProtectionChangeAssessment(
-            url, before?.Type, after.Type, lowerings, DescribeDiscoveryContradiction(before, after));
+            url, before?.Type, after.Type, lowering, DescribeDiscoveryContradiction(before, after));
     }
 
     public async Task<bool> RemoveConfigAsync(string url, CancellationToken ct = default)
@@ -84,9 +84,9 @@ public sealed class EnvironmentConfigService : IEnvironmentConfigService
         // Every writer treats a missing entry as Production, so removal never lowers protection.
         // The check stays so that a future resolver rule cannot make removal a silent way round it.
         var before = await _store.GetConfigAsync(url, ct).ConfigureAwait(false);
-        var lowerings = WriteProtectionResolver.FindLowering(before, after: null);
+        var lowering = WriteProtectionResolver.FindLowering(before, after: null);
         EnsureLoweringAllowed(
-            new ProtectionChangeAssessment(url, before?.Type, null, lowerings, null),
+            new ProtectionChangeAssessment(url, before?.Type, null, lowering, null),
             confirmLowerProtection: null);
         return await _store.RemoveConfigAsync(url, ct).ConfigureAwait(false);
     }

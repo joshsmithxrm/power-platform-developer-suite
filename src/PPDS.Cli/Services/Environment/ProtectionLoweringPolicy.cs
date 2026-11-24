@@ -27,17 +27,17 @@ public sealed class ProtectionLoweringPolicy
 /// <param name="EnvironmentUrl">The environment being changed, as the caller named it.</param>
 /// <param name="CurrentType">The saved type before the change (null: none).</param>
 /// <param name="NewType">The saved type after the change (null: none).</param>
-/// <param name="Lowerings">Each writer whose protection the change weakens; empty when none.</param>
+/// <param name="Lowering">How the change weakens protection; null when it keeps or raises it.</param>
 /// <param name="DiscoveredTypeWarning">Set when the new type is less protected than the type discovery reported.</param>
 public sealed record ProtectionChangeAssessment(
     string EnvironmentUrl,
     EnvironmentType? CurrentType,
     EnvironmentType? NewType,
-    IReadOnlyList<ProtectionLowering> Lowerings,
+    ProtectionLowering? Lowering,
     string? DiscoveredTypeWarning)
 {
-    /// <summary>True when the change weakens protection for at least one writer.</summary>
-    public bool LowersProtection => Lowerings.Count > 0;
+    /// <summary>True when the change weakens protection.</summary>
+    public bool LowersProtection => Lowering is not null;
 
     /// <summary>One sentence (two with a discovery warning) saying what the change lowers, for prompts and errors.</summary>
     public string Describe()
@@ -45,7 +45,8 @@ public sealed record ProtectionChangeAssessment(
         var change = NewType == CurrentType
             ? $"Saving configuration for '{EnvironmentUrl}'"
             : $"Changing the type of '{EnvironmentUrl}' from {CurrentType?.ToString() ?? "(none)"} to {NewType?.ToString() ?? "(none)"}";
-        var text = $"{change} lowers write protection: {string.Join("; ", Lowerings.Select(l => l.Describe()))}.";
+        var lowering = Lowering is null ? "nothing" : Lowering.Describe();
+        var text = $"{change} lowers write protection from {lowering} for forms, views, flows, apps, api request and SQL DML.";
         return DiscoveredTypeWarning is null ? text : $"{text} {DiscoveredTypeWarning}";
     }
 }

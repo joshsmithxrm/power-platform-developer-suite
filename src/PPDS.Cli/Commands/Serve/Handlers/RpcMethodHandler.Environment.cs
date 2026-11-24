@@ -133,14 +133,7 @@ public partial class RpcMethodHandler
         var resolvedProfileName = profileKey;
 
         // Tag all discovered environments with this profile in environments.json
-        foreach (var env in discovered)
-        {
-            await configStore.SaveConfigAsync(
-                env.ApiUrl,
-                discoveredType: env.Type,
-                profileName: resolvedProfileName,
-                ct: cancellationToken);
-        }
+        await TagDiscoveredEnvironmentsAsync(configStore, discovered, resolvedProfileName, cancellationToken);
 
         // Load config (fresh — after tagging) so the merge below reflects the writes above.
         configStore.ClearCache();
@@ -331,6 +324,27 @@ public partial class RpcMethodHandler
             ResolvedType = resolvedType.ToString(),
             ResolvedColor = resolvedColor.ToString()
         };
+    }
+
+    /// <summary>
+    /// Records, for each discovered environment, the profile that sees it and the type discovery reported.
+    /// It never saves a type, so it creates entries without one, which every writer treats as Production
+    /// (#1829); before, SQL DML treated them as Development.
+    /// </summary>
+    internal static async Task TagDiscoveredEnvironmentsAsync(
+        EnvironmentConfigStore configStore,
+        IEnumerable<EnvironmentInfo> discovered,
+        string profileName,
+        CancellationToken cancellationToken)
+    {
+        foreach (var env in discovered)
+        {
+            await configStore.SaveConfigAsync(
+                env.ApiUrl,
+                discoveredType: env.Type,
+                profileName: profileName,
+                ct: cancellationToken);
+        }
     }
 
     /// <summary>

@@ -89,6 +89,49 @@ public sealed class EnvConfigLowerProtectionRpcTests : IDisposable
     }
 
     [Fact]
+    public async Task AddEnvironment_UrlOnly_LeavesEveryWriterAtProduction()
+    {
+        // The extension's Add Environment sends env/config/set with the URL and nothing else.
+        AssertEveryWriterIsProduction(await _store.GetConfigAsync(Url));
+
+        var response = await _handler.EnvConfigSetAsync(Url);
+
+        response.Saved.Should().BeTrue();
+        response.Type.Should().BeNull();
+        AssertEveryWriterIsProduction(await _store.GetConfigAsync(Url));
+    }
+
+    [Fact]
+    public async Task EnvListTagging_CreatesEntriesWithoutAType_ThatStayProductionForEveryWriter()
+    {
+        // env/list tags every discovered environment through this step (discovery itself signs in,
+        // so it is not run here). Sandbox and Developer discovery types are recorded but never lower
+        // protection: no type is saved.
+        const string sandbox = "https://sandbox.crm.dynamics.com";
+        const string developer = "https://developer.crm.dynamics.com";
+        AssertEveryWriterIsProduction(await _store.GetConfigAsync(sandbox));
+        AssertEveryWriterIsProduction(await _store.GetConfigAsync(developer));
+
+        await RpcMethodHandler.TagDiscoveredEnvironmentsAsync(_store,
+            [new PPDS.Cli.Commands.Serve.Handlers.EnvironmentInfo { ApiUrl = sandbox, Type = "Sandbox" }, new PPDS.Cli.Commands.Serve.Handlers.EnvironmentInfo { ApiUrl = developer, Type = "Developer" }],
+            "profile", CancellationToken.None);
+
+        var tagged = await _store.GetConfigAsync(sandbox);
+        tagged!.Type.Should().BeNull();
+        tagged.DiscoveredType.Should().Be("Sandbox");
+        tagged.Profiles.Should().Contain("profile");
+        AssertEveryWriterIsProduction(tagged);
+        AssertEveryWriterIsProduction(await _store.GetConfigAsync(developer));
+    }
+
+    private static void AssertEveryWriterIsProduction(EnvironmentConfig? config)
+    {
+        WriteProtectionResolver.ResolveForConfirmation(config).Should().Be(ProtectionLevel.Production);
+        WriteProtectionResolver.ResolveForSqlDml(config).Should().Be(ProtectionLevel.Production);
+        WriteProtectionResolver.ResolveForCrossEnvironmentTarget(config).Should().Be(ProtectionLevel.Production);
+    }
+
+    [Fact]
     public async Task Remove_GoesThroughTheServiceAndNeedsNoConfirmation()
     {
         await _store.SaveConfigAsync(Url, type: EnvironmentType.Production);

@@ -55,23 +55,24 @@ public sealed class EnvironmentProtectionLoweringTests : IDisposable
 
     public static TheoryData<Before, EnvironmentType, bool, string> Transitions => new()
     {
-        // before, new type, lowers?, writers lowered (comma-separated, in FindLowering order)
+        // before, new type, lowers?, the lowering (one rule serves every writer, #1829)
         { Before.NoEntry, EnvironmentType.Production, false, "" },
-        { Before.NoEntry, EnvironmentType.Development, true, "WriteConfirmation" },
-        { Before.NoEntry, EnvironmentType.Sandbox, true, "WriteConfirmation" },
-        { Before.NoEntry, EnvironmentType.Test, true, "WriteConfirmation" },
-        { Before.NoEntry, EnvironmentType.Trial, true, "WriteConfirmation" },
+        { Before.NoEntry, EnvironmentType.Development, true, "Production to Development" },
+        { Before.NoEntry, EnvironmentType.Sandbox, true, "Production to Development" },
+        { Before.NoEntry, EnvironmentType.Test, true, "Production to Development" },
+        { Before.NoEntry, EnvironmentType.Trial, true, "Production to Development" },
         { Before.NoEntry, EnvironmentType.Unknown, false, "" },
         { Before.EntryWithoutType, EnvironmentType.Production, false, "" },
-        { Before.EntryWithoutType, EnvironmentType.Development, true, "WriteConfirmation,CrossEnvironmentSqlDml" },
-        { Before.EntryWithoutType, EnvironmentType.Unknown, true, "CrossEnvironmentSqlDml" },
+        { Before.EntryWithoutType, EnvironmentType.Development, true, "Production to Development" },
+        { Before.EntryWithoutType, EnvironmentType.Sandbox, true, "Production to Development" },
+        { Before.EntryWithoutType, EnvironmentType.Unknown, false, "" },
         { Before.TypeProduction, EnvironmentType.Production, false, "" },
-        { Before.TypeProduction, EnvironmentType.Development, true, "WriteConfirmation,SqlDml,CrossEnvironmentSqlDml" },
-        { Before.TypeProduction, EnvironmentType.Sandbox, true, "WriteConfirmation,SqlDml,CrossEnvironmentSqlDml" },
-        { Before.TypeProduction, EnvironmentType.Test, true, "WriteConfirmation,SqlDml,CrossEnvironmentSqlDml" },
-        { Before.TypeProduction, EnvironmentType.Trial, true, "WriteConfirmation,SqlDml,CrossEnvironmentSqlDml" },
-        { Before.TypeProduction, EnvironmentType.Unknown, true, "SqlDml,CrossEnvironmentSqlDml" },
-        { Before.TypeUnknown, EnvironmentType.Development, true, "WriteConfirmation" },
+        { Before.TypeProduction, EnvironmentType.Development, true, "Production to Development" },
+        { Before.TypeProduction, EnvironmentType.Sandbox, true, "Production to Development" },
+        { Before.TypeProduction, EnvironmentType.Test, true, "Production to Development" },
+        { Before.TypeProduction, EnvironmentType.Trial, true, "Production to Development" },
+        { Before.TypeProduction, EnvironmentType.Unknown, false, "" },
+        { Before.TypeUnknown, EnvironmentType.Development, true, "Production to Development" },
         { Before.TypeUnknown, EnvironmentType.Production, false, "" },
         { Before.TypeDevelopment, EnvironmentType.Sandbox, false, "" },
         { Before.TypeDevelopment, EnvironmentType.Production, false, "" },
@@ -83,7 +84,7 @@ public sealed class EnvironmentProtectionLoweringTests : IDisposable
 
     [Theory]
     [MemberData(nameof(Transitions))]
-    public async Task Transition_IsJudgedByEveryWriter(Before before, EnvironmentType newType, bool lowers, string writers)
+    public async Task Transition_IsJudgedByTheOneRule(Before before, EnvironmentType newType, bool lowers, string lowering)
     {
         await ArrangeAsync(before);
         var service = new EnvironmentConfigService(_store);
@@ -91,15 +92,68 @@ public sealed class EnvironmentProtectionLoweringTests : IDisposable
         var assessment = await service.AssessConfigChangeAsync(Url, newType);
 
         assessment.LowersProtection.Should().Be(lowers);
-        string.Join(",", assessment.Lowerings.Select(l => l.Writer)).Should().Be(writers);
+        (assessment.Lowering?.Describe() ?? "").Should().Be(lowering);
+    }
+
+    /// <summary>The saves that never set a type, on an environment with no entry.</summary>
+    public enum UntypedSave
+    {
+        /// <summary><c>env config &lt;url&gt; --label</c>, the TUI dialog, <c>env/config/set {label}</c>.</summary>
+        LabelOnly,
+        /// <summary><c>env config &lt;url&gt; --color</c>.</summary>
+        ColourOnly,
+        /// <summary>The extension's Add Environment: <c>env/config/set {environmentUrl}</c> and nothing else.</summary>
+        AddEnvironment
+    }
+
+    [Theory]
+    [InlineData(UntypedSave.LabelOnly)]
+    [InlineData(UntypedSave.ColourOnly)]
+    [InlineData(UntypedSave.AddEnvironment)]
+    public async Task UntypedSave_OnAnEnvironmentWithNoEntry_LeavesEveryWriterAtProduction(UntypedSave save)
+    {
+        var service = new EnvironmentConfigService(_store);
+        var before = await _store.GetConfigAsync(Url);
+        before.Should().BeNull();
+        AssertEveryWriterIsProduction(before);
+
+        var saved = save switch
+        {
+            UntypedSave.LabelOnly => await service.SaveConfigAsync(Url, label: "Contoso"),
+            UntypedSave.ColourOnly => await service.SaveConfigAsync(Url, color: EnvironmentColor.Blue),
+            _ => await service.SaveConfigAsync(Url)
+        };
+
+        saved.Type.Should().BeNull();
+        AssertEveryWriterIsProduction(await _store.GetConfigAsync(Url));
+    }
+
+    [Fact]
+    public async Task EntryWithoutType_RecordingAWeakerType_IsALoweringThatNeedsConfirmation()
+    {
+        await _store.SaveConfigAsync(Url, label: "Contoso");
+        var service = new EnvironmentConfigService(_store);
+
+        var save = () => service.SaveConfigAsync(Url, type: EnvironmentType.Development);
+
+        (await save.Should().ThrowAsync<PpdsException>()).Which.ErrorCode
+            .Should().Be(EnvironmentConfirmationErrorCodes.ProtectionLoweringConfirmationRequired);
+        AssertEveryWriterIsProduction(await _store.GetConfigAsync(Url));
+    }
+
+    private static void AssertEveryWriterIsProduction(EnvironmentConfig? config)
+    {
+        WriteProtectionResolver.ResolveForConfirmation(config).Should().Be(ProtectionLevel.Production);
+        WriteProtectionResolver.ResolveForSqlDml(config).Should().Be(ProtectionLevel.Production);
+        WriteProtectionResolver.ResolveForCrossEnvironmentTarget(config).Should().Be(ProtectionLevel.Production);
     }
 
     [Theory]
     [MemberData(nameof(Transitions))]
     public async Task Transition_LoweringIsRefusedWithoutConfirmationAndNothingIsSaved(
-        Before before, EnvironmentType newType, bool lowers, string writers)
+        Before before, EnvironmentType newType, bool lowers, string lowering)
     {
-        _ = writers;
+        _ = lowering;
         await ArrangeAsync(before);
         var snapshot = Snapshot();
         var service = new EnvironmentConfigService(_store);
@@ -120,9 +174,9 @@ public sealed class EnvironmentProtectionLoweringTests : IDisposable
 
     [Theory]
     [MemberData(nameof(Transitions))]
-    public async Task Transition_ConfirmedLoweringIsSaved(Before before, EnvironmentType newType, bool lowers, string writers)
+    public async Task Transition_ConfirmedLoweringIsSaved(Before before, EnvironmentType newType, bool lowers, string lowering)
     {
-        _ = (lowers, writers);
+        _ = (lowers, lowering);
         await ArrangeAsync(before);
         var service = new EnvironmentConfigService(_store);
 
@@ -134,9 +188,9 @@ public sealed class EnvironmentProtectionLoweringTests : IDisposable
     [Theory]
     [MemberData(nameof(Transitions))]
     public async Task Transition_McpPolicyRefusesLoweringEvenWhenConfirmed(
-        Before before, EnvironmentType newType, bool lowers, string writers)
+        Before before, EnvironmentType newType, bool lowers, string lowering)
     {
-        _ = writers;
+        _ = lowering;
         await ArrangeAsync(before);
         var snapshot = Snapshot();
         var service = new EnvironmentConfigService(_store, ProtectionLoweringPolicy.Refuse);
@@ -251,7 +305,7 @@ public sealed class EnvironmentProtectionLoweringTests : IDisposable
         var stored = await _store.GetConfigAsync(Url);
         var service = new EnvironmentConfigService(_store, ProtectionLoweringPolicy.Refuse);
 
-        WriteProtectionResolver.FindLowering(stored, after: null).Should().BeEmpty();
+        WriteProtectionResolver.FindLowering(stored, after: null).Should().BeNull();
         (await service.RemoveConfigAsync(Url)).Should().BeTrue();
         (await _store.GetConfigAsync(Url)).Should().BeNull();
     }
