@@ -5,6 +5,7 @@ using System.Security.Principal;
 using PPDS.Cli.Plugins.Extraction;
 using PPDS.Cli.Tests.TestHelpers;
 using Xunit;
+using PPDS.Tests.Shared;
 
 namespace PPDS.Cli.Tests.Plugins.Extraction;
 
@@ -126,7 +127,7 @@ public sealed class ReferenceCacheTrustTests : IDisposable
         // Hold a transient, invalid tree state behind the cooperating writer's lock.
         // Readers must inspect the final tree after the writer finishes, not fail
         // midway through repair. Existing unsafe-storage tests cover permanent states.
-        using var started = new ManualResetEventSlim();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task<string?> reader;
         bool completedWhileLocked;
         using (var writer = new FileStream(cache + ".lock", FileMode.Open, FileAccess.ReadWrite, FileShare.None))
@@ -134,12 +135,12 @@ public sealed class ReferenceCacheTrustTests : IDisposable
             var restore = AllowOtherWrite(cache);
             reader = Task.Factory.StartNew(() =>
             {
-                started.Set();
+                started.TrySetResult();
                 return AssemblyExtractor.GetNet462ReferenceAssemblyDirectory(root);
             }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
             try
             {
-                Assert.True(started.Wait(TimeSpan.FromSeconds(10)), "Reader did not start.");
+                await HangBackstop.WaitAsync(started.Task, "the reader thread to start");
                 await Task.WhenAny(reader, Task.Delay(TimeSpan.FromSeconds(1)));
                 completedWhileLocked = reader.IsCompleted;
             }
@@ -149,7 +150,7 @@ public sealed class ReferenceCacheTrustTests : IDisposable
             }
         }
 
-        var result = await reader.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await HangBackstop.WaitAsync(reader, "the reader to finish after the repair lock was released");
         Assert.False(completedWhileLocked, "Reader inspected a tree while a repair held the lock.");
         Assert.Equal(cache, result);
         Assert.Equal(expected, File.ReadAllBytes(facade));
@@ -405,11 +406,13 @@ public sealed class ReferenceCacheTrustTests : IDisposable
         using var process = Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(10_000))
+        // The fixture commands (chmod, mkfifo, mklink) are start-up plus trivial I/O; the bound only catches a hang.
+        if (!process.WaitForExit(HangBackstop.Bound))
         {
             process.Kill(entireProcessTree: true);
             process.WaitForExit();
-            Assert.Fail("Fixture command timed out.");
+            Assert.Fail($"No completion after {HangBackstop.Bound.TotalSeconds:0}s waiting for the fixture command '{command}' to exit. " +
+                "This bound only catches a hang; treat the failure as one, not as slowness.");
         }
         Assert.True(process.ExitCode == 0, $"Fixture command failed: {output.GetAwaiter().GetResult()} {error.GetAwaiter().GetResult()}");
     }

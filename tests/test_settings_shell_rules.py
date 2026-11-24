@@ -153,14 +153,17 @@ def test_the_command_text_guard_is_not_registered():
     assert "command-text-guard" not in SETTINGS.read_text(encoding="utf-8")
 
 
-def test_git_merge_does_not_ask_but_gh_pr_merge_and_git_reset_do():
-    """Maintainer decision of 2026-11-20: the git merge ask rule is removed;
-    gh pr merge and git reset keep asking in both shells."""
+def test_merge_reset_apply_am_do_not_ask_but_rebase_does():
+    """The git merge ask rule went first (maintainer decision of 2026-11-20);
+    #1861 and #1862 on main removed git reset, git apply, git am and
+    gh pr merge. The git rebase ask rules stay, in both shells."""
     ask = _settings()["permissions"]["ask"]
-    assert not [r for r in ask if _command_text(_RULE_RE.match(r).group("body")) == "git merge"]
-    for text in ("gh pr merge", "git reset"):
+    gone = {"git merge", "git reset", "git apply", "git am", "gh pr merge"}
+    assert not [r for r in ask if _command_text(_RULE_RE.match(r).group("body")) in gone]
+    for text in ("git rebase -i", "git rebase --interactive", "git rebase --onto",
+                 "git rebase --root", "git rebase --exec"):
         for tool in SHELL_TOOLS:
-            assert any(r.startswith(f"{tool}({text}") for r in ask), (tool, text)
+            assert any(r.startswith(f"{tool}({text}:") for r in ask), (tool, text)
 
 
 def test_allow_list_is_bash_only_and_unchanged_in_kind():
@@ -172,7 +175,8 @@ def test_allow_list_is_bash_only_and_unchanged_in_kind():
 # The rule lists as reviewed for #1780. Any change to them (an allow rule
 # added or widened, a deny or ask rule removed in both forms) must change
 # these lists in the same pull request. `git merge` is absent from the ask
-# list by the maintainer's decision of 2026-11-20.
+# list by the maintainer's decision of 2026-11-20; `git reset`, `git apply`,
+# `git am` and `gh pr merge` were removed on main by #1861 and #1862.
 EXPECTED_DENY_COMMANDS = [
     "git push --force",
     "git push -f",
@@ -197,12 +201,8 @@ EXPECTED_ASK_COMMANDS = [
     "git rebase --onto",
     "git rebase --root",
     "git rebase --exec",
-    "git reset",
-    "git apply",
-    "git am",
     "git tag -d",
     "git tag -fa",
-    "gh pr merge",
     "gh pr close",
     "gh issue close",
     "gh release create",
@@ -308,7 +308,7 @@ def test_git_merge_is_not_pinned_as_an_ask_rule():
     ("allow", "add", "Bash(git push:*)"),
     ("allow", "widen", None),
     ("deny", "remove-both", "git push --force"),
-    ("ask", "remove-both", "gh pr merge"),
+    ("ask", "remove-both", "gh pr close"),
 ])
 def test_the_pins_catch_a_change(change):
     """Each kind of change makes a pinned comparison fail."""

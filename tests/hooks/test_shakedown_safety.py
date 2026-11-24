@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/conftest.py puts tests/ on sys.path
 
 
 HOOK_PATH = (
@@ -60,7 +61,7 @@ def _run_hook(command: str, env_extra: dict | None = None) -> subprocess.Complet
         input=json.dumps(payload),
         capture_output=True,
         text=True,
-        timeout=15,
+        timeout=CHILD_PROCESS_HANG_BOUND_SECONDS,
         env=env,
     )
 
@@ -525,7 +526,7 @@ class TestFailSafe:
             input="not valid json{{",
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=CHILD_PROCESS_HANG_BOUND_SECONDS,
         )
         assert proc.returncode == 0
 

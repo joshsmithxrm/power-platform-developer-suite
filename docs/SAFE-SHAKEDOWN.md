@@ -617,6 +617,8 @@ Each probe was run once through the Bash tool and once through the PowerShell to
 | `git --version` with an allowlist the active env is not on (control) | prints version | runs | ran / ran | — | `f91f3af` |
 | `ppds --version` with an allowlist the active env is not on, empty profile directory | prints version, touches no environment; the profile directory was still empty afterwards | environment hook blocks | blocked / blocked | "PreToolUse:`<tool>` hook error: [python "$CLAUDE_PROJECT_DIR/.claude/hooks/shakedown-safety.py"]: BLOCKED [shakedown-safety/env]: active env is not in the safe-env allowlist." | `f91f3af` |
 
+After these observations, #1861 and #1862 removed the `git reset`, `git apply`, `git am` and `gh pr merge` ask rules from `main`; where the table names them, it records the rules as they were then.
+
 **Not separately observable in the test setup.** These rules are covered by the static test and by the observed rules of the same form:
 - deny `git push --force`, `git push -f`, `git reset --hard`, `git clean`, `dotnet nuget push`, `npm publish`, `Publish-Module`;
 - ask `git tag -d`, `gh release create`, `gh repo delete`.

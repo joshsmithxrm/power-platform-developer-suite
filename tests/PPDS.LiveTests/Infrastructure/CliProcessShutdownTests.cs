@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text.Json;
 using PPDS.LiveTests.Cli;
 using Xunit;
+using PPDS.Tests.Shared;
 
 namespace PPDS.LiveTests.Infrastructure;
 
@@ -27,14 +28,14 @@ public sealed class CliProcessShutdownTests
         };
         var pending = fixture.RunCommandAsync(() => process, _ => operation.Task, caller.Token);
         clock.Fire(0, TimeSpan.FromMinutes(2));
-        await process.StopStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await HangBackstop.WaitAsync(process.StopStarted.Task, "the fixture to start stopping the process");
         Assert.True(fixture.Unsafe);
         Assert.False(process.StopToken.IsCancellationRequested);
         caller.Cancel(); // Late cancellation must not reclassify the already-established timeout.
         clock.Fire(1, TimeSpan.FromSeconds(30));
         try
         {
-            var failure = await Assert.ThrowsAsync<TimeoutException>(() => pending.WaitAsync(TimeSpan.FromSeconds(10)));
+            var failure = await Assert.ThrowsAsync<TimeoutException>(() => HangBackstop.WaitAsync(pending, "the command to report its outcome"));
             Assert.IsAssignableFrom<OperationCanceledException>(failure.InnerException);
             Assert.Contains("ObserveDispatchedProcessAsync", failure.StackTrace);
             Assert.False(fixture.StopEvidence!.ExitConfirmed);
@@ -74,7 +75,7 @@ public sealed class CliProcessShutdownTests
         var process = new FakeProcess { OnWait = _ => stop.Task };
         var primary = new IOException("reader failed after dispatch");
         var pending = fixture.RunCommandAsync(() => process, _ => ThrowOriginal(primary), default);
-        await process.StopStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await HangBackstop.WaitAsync(process.StopStarted.Task, "the fixture to start stopping the process");
         Assert.True(fixture.Unsafe);
         var started = false;
         var refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -83,7 +84,7 @@ public sealed class CliProcessShutdownTests
         Assert.Contains("refusing another", refused.Message);
         Assert.False(await fixture.Cleanup(() => throw new InvalidOperationException("must never execute cleanup")));
         clock.Fire(1, TimeSpan.FromSeconds(30));
-        try { Assert.Same(primary, await Assert.ThrowsAsync<IOException>(() => pending.WaitAsync(TimeSpan.FromSeconds(10)))); }
+        try { Assert.Same(primary, await Assert.ThrowsAsync<IOException>(() => HangBackstop.WaitAsync(pending, "the command to report its outcome"))); }
         finally { stop.TrySetResult(); }
         using var independent = new Harness();
         Assert.Equal(7, (await independent.RunCommandAsync(() => new FakeProcess(),

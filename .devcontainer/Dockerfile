@@ -9,6 +9,15 @@ COPY --from=mcr.microsoft.com/dotnet/sdk:8.0 /usr/share/dotnet/shared /usr/share
 COPY --from=mcr.microsoft.com/dotnet/sdk:9.0 /usr/share/dotnet/sdk /usr/share/dotnet/sdk
 COPY --from=mcr.microsoft.com/dotnet/sdk:9.0 /usr/share/dotnet/shared /usr/share/dotnet/shared
 
+# Install the exact SDK that global.json pins. The base image's 10.0 SDK is in a
+# different feature band, and global.json's latestPatch roll-forward stays inside
+# its band, so without this restore and build fail. Keep in step with global.json
+# (tests/test_devcontainer_sdk_pin.py checks it).
+ARG DOTNET_SDK_VERSION=10.0.115
+RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
+    && bash /tmp/dotnet-install.sh --version "${DOTNET_SDK_VERSION}" --install-dir /usr/share/dotnet \
+    && rm /tmp/dotnet-install.sh
+
 # Match the repository tooling major in .nvmrc.
 ARG NODE_MAJOR=26
 RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
@@ -39,6 +48,18 @@ RUN (type -p wget >/dev/null || apt-get install -y --no-install-recommends wget)
 RUN apt-get update && apt-get install -y --no-install-recommends locales \
     && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
     && locale-gen
+
+# Libraries and a virtual display for the VS Code extension's end-to-end tests
+# (npm run ext:test:e2e under xvfb-run), and pytest for the Python policy tests.
+# python-is-python3 provides the python command, which the project hooks in
+# .claude/settings.json and the documented test commands call
+# (tests/test_devcontainer_python_command.py checks it).
+# shellcheck and file are for work on the shell scripts under scripts/ and the
+# workflow run steps; neither is in the base image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+       xvfb xauth libglib2.0-0t64 libgtk-3-0t64 libnss3 libasound2t64 libxss1 libgbm1 \
+       libxkbfile1 libsecret-1-0 libdrm2 libxshmfence1 libatk-bridge2.0-0t64 \
+       python3-pytest python3-yaml python-is-python3 shellcheck file
 
 # Clean up apt cache
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*
