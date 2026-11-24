@@ -10,7 +10,7 @@ namespace PPDS.Cli.Tests.Services.Query.Faithful;
 /// offline must equal live: a case the audit marks correct is correct offline, and a case it marks WRONG RESULT is wrong
 /// offline in the same way.
 /// <para>
-/// 436 cases. Since the DML safety branch (#1698): 293 replay and match; 87 wrong results still reproduce as recorded
+/// 436 cases. Since the DML safety branch (#1698): 287 replay and match; 87 wrong results still reproduce as recorded
 /// (<see cref="WrongCase_ReproducesItsRecordedDefectUntilTheIssueIsFixed"/>); 18 are fixed and return the audit's own
 /// expected value (<see cref="FixedCases_NowReturnTheAuditsExpectedValue"/>); 19 wrong results are now a clean error
 /// (<see cref="RefusedCase_RaisesItsCleanError"/>); 2 changed but are still wrong, with the new result pinned
@@ -19,8 +19,9 @@ namespace PPDS.Cli.Tests.Services.Query.Faithful;
 /// (<see cref="LiveObservationOwedCase_IsRefusedByTheFakeForItsUnobservedShape"/>); and 11 cannot be replayed
 /// (<see cref="Expected"/> lists each with the reason, <see cref="Case_DoesNotMatch_ForItsRecordedReason"/>). An error
 /// the service reports as a PpdsException with an error code, keeping the live exception as its inner exception, is the
-/// same error. Six cases the audit records as correct (W13, W24, W26, W51, X13, T06) are refused by the branch on purpose
-/// and fail here until the maintainer decides. A change that moves any case out of its class fails here.
+/// same error. Six cases the audit records as correct (W13, W24, W26, W51, X13, T06) are refused on purpose by the
+/// maintainer's decision of 2026-11-24 (<see cref="RefusedByDecision_RaisesItsCodeAndNamesTheReplacement"/>), and are not among
+/// the 287 that replay and match. A change that moves any case out of its class fails here.
 /// Each case writes how much the record let it compare (<see cref="ReplayResult.Coverage"/>), and
 /// <see cref="Coverage_Totals"/> pins the totals.
 /// </para>
@@ -294,9 +295,29 @@ public class AuditCaseReplayTests(ITestOutputHelper output)
         ["FN91"] = "<fetch><entity name=\"P\"><attribute name=\"ppds_itemtype\" /><attribute name=\"ppds_key\" /><filter><condition attribute=\"ppds_key\" operator=\"le\" value=\"5\" /></filter></entity></fetch>",
     };
 
+    /// <summary>
+    /// Cases the audit records as correct that the engine now refuses on purpose. Each was right on main only because of
+    /// the data: the translation behind it selects wrong rows for the neighbouring statements (#1615, #1616, #1618,
+    /// #1619). The maintainer decided to refuse all of them (2026-11-24, "Refuse all seven"; the seventh is the faithful
+    /// row <c>description = NULL</c>). Each must raise a PpdsException with the pinned code and a message that says what
+    /// to write instead.
+    /// </summary>
+    private static readonly Dictionary<string, (string Code, string Message)> RefusedByMaintainerDecision = new()
+    {
+        ["W13"] = (PPDS.Cli.Infrastructure.Errors.ErrorCodes.Query.ParseError, NotRefused + " Write the condition without NOT"),
+        ["W24"] = (PPDS.Cli.Infrastructure.Errors.ErrorCodes.Query.ParseError, NullComparisonRefused + " Use IS NULL or IS NOT NULL"),
+        ["W26"] = (PPDS.Cli.Infrastructure.Errors.ErrorCodes.Query.ParseError, NullComparisonRefused + " Use IS NULL or IS NOT NULL"),
+        ["W51"] = (PPDS.Cli.Infrastructure.Errors.ErrorCodes.Query.ParseError, "in an IN list, leave NULL out, and add OR <column> IS NULL"),
+        ["X13"] = (PPDS.Cli.Infrastructure.Errors.ErrorCodes.Query.ExecutionFailed, "The variable @n cannot be used in a WHERE condition sent to Dataverse. Use a literal value, or IS NULL or IS NOT NULL"),
+        ["T06"] = (PPDS.Cli.Infrastructure.Errors.ErrorCodes.Query.ParseError, "Write the number of rows, for example TOP (3), without PERCENT or WITH TIES."),
+    };
+
     public static IEnumerable<object[]> MatchingCaseIds() => AuditCaseReplay.Cases
-        .Where(c => !Expected.ContainsKey(c.Id) && !WrongCases.ContainsKey(c.Id) && !ErrorChangedSinceTheAudit.ContainsKey(c.Id) && !LiveObservationOwed.ContainsKey(c.Id))
+        .Where(c => !Expected.ContainsKey(c.Id) && !WrongCases.ContainsKey(c.Id) && !ErrorChangedSinceTheAudit.ContainsKey(c.Id)
+            && !LiveObservationOwed.ContainsKey(c.Id) && !RefusedByMaintainerDecision.ContainsKey(c.Id))
         .Select(c => new object[] { c.Id });
+
+    public static IEnumerable<object[]> RefusedByDecisionIds() => RefusedByMaintainerDecision.Keys.Select(id => new object[] { id });
 
     public static IEnumerable<object[]> WrongCaseIds() => WrongCases.Where(w => w.Value.State == WrongState.Wrong && !LiveObservationOwed.ContainsKey(w.Key)).Select(w => new object[] { w.Key });
 
@@ -423,6 +444,21 @@ public class AuditCaseReplayTests(ITestOutputHelper output)
         var error = Assert.IsAssignableFrom<PPDS.Cli.Infrastructure.Errors.PpdsException>(run.Error);
         Assert.False(string.IsNullOrEmpty(error.ErrorCode), $"{id}: the error has no error code");
         Assert.True(run.Text.Contains(message, StringComparison.Ordinal), $"{id} ({why}): expected \"{message}\", got {run.Text}");
+    }
+
+    /// <summary>A case recorded as correct that the engine refuses by the maintainer's decision: the pinned code and replacement.</summary>
+    [Theory]
+    [MemberData(nameof(RefusedByDecisionIds))]
+    public async Task RefusedByDecision_RaisesItsCodeAndNamesTheReplacement(string id)
+    {
+        var c = AuditCaseReplay.Cases.Single(x => x.Id == id);
+        Assert.Equal("correct", c.Verdict);
+        var run = await AuditCaseReplay.ExecuteAsync(c);
+        var (code, message) = RefusedByMaintainerDecision[id];
+
+        var error = Assert.IsAssignableFrom<PPDS.Cli.Infrastructure.Errors.PpdsException>(run.Error);
+        Assert.Equal(code, error.ErrorCode);
+        Assert.Contains(message, run.Text, StringComparison.Ordinal);
     }
 
     /// <summary>A case whose new FetchXML uses a shape the fake has no live observation for: it cannot be replayed until it is observed.</summary>

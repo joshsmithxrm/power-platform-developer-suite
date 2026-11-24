@@ -261,7 +261,8 @@ public sealed class FetchXmlGenerator
         if (topRowFilter.Percent || topRowFilter.WithTies || expression is not IntegerLiteral)
         {
             throw new PPDS.Query.Parsing.QueryParseException(
-                "Only TOP n or TOP (n) with a whole number is supported (not PERCENT, WITH TIES, variables or expressions).");
+                "Only TOP n or TOP (n) with a whole number is supported (not PERCENT, WITH TIES, variables or expressions). " +
+                "Write the number of rows, for example TOP (3), without PERCENT or WITH TIES.");
         }
 
         if (expression is IntegerLiteral intLiteral)
@@ -1684,7 +1685,8 @@ public sealed class FetchXmlGenerator
             case NullLiteral:
                 // In SQL, = NULL and <> NULL match no rows; sending an empty value would match empty strings.
                 throw new PPDS.Query.Parsing.QueryParseException(
-                    "Comparing with NULL (= NULL, <> NULL, IN (NULL)) is not supported. Use IS NULL or IS NOT NULL.");
+                    "Comparing with NULL (= NULL, <> NULL, IN (NULL)) is not supported. Use IS NULL or IS NOT NULL; in an IN list, " +
+                    "leave NULL out, and add OR <column> IS NULL if you mean the rows with no value.");
 
             case UnaryExpression unary when unary.UnaryExpressionType == UnaryExpressionType.Negative:
                 return $"-{FormatLiteralValue(unary.Expression)}";
@@ -1692,7 +1694,8 @@ public sealed class FetchXmlGenerator
             case VariableReference varRef:
                 // The variable's value is not available here; sending its name would compare with the text "@n".
                 throw new PPDS.Query.Parsing.QueryParseException(
-                    $"The variable {varRef.Name} cannot be used in a WHERE condition sent to Dataverse. Use a literal value.");
+                    $"The variable {varRef.Name} cannot be used in a WHERE condition sent to Dataverse. Use a literal value, or IS NULL or " +
+                    "IS NOT NULL to test for no value.");
 
             default:
                 throw new PPDS.Query.Parsing.QueryParseException(
