@@ -1,0 +1,129 @@
+# Ordinary sentences that state no decision, written for this check in
+# round 2: technical facts, past records, code exceptions, processes and
+# third-party plans. "today" in the test is 2026-11-21.
+The command throws an exception when the profile is missing.
+An exception is raised for an unknown verb.
+The handler logs the exception and exits with code 2.
+Unhandled exceptions are written to the error log.
+The exception message names the missing column.
+`id` is exempt from the brace-GUID check.
+Generated files are exempt from analyzer warnings.
+The digest can waive only unresolved ancestry.
+Merging needs maintainer approval.
+A release requires approval from the maintainer.
+Pull requests merge only with maintainer approval.
+Dates are set once the release is approved.
+The approved pinned tool signs the assembly.
+Microsoft's approved connector list includes it.
+The approved run produced 12 rows.
+The planner decided to use a hash join.
+The optimizer chose a nested loop for small tables.
+The client and server agreed to use gzip.
+Both sides agreed on protocol version 3 during the handshake.
+The request was accepted by the server.
+The connection is accepted once the token validates.
+The temporary directory will be deleted when the process exits.
+The lock file will be removed after the run.
+Stale entries will be dropped from the cache.
+The command will delete the selected rows after confirmation.
+`column delete` will remove the column from the table.
+The import will remove rows that fail validation from the batch.
+Temporary profiles will be cleaned up on exit.
+Rows to be deleted are listed first.
+The `--legacy` flag was removed in 1.6.
+The old verbs were dropped in 1.4.
+Version 1.2 removed the XML output.
+Removed the `--raw` switch (#123).
+The daemon removes stale sockets on start.
+The certificate is valid for at least 90 days.
+The service retains audit logs for at least 30 days.
+The certificate expires on 2027-04-01.
+The test certificate is valid until 2027-04-01.
+Rows created on or after 2027-01-01 are exported.
+The filter selects records modified before 2027-01-01.
+The token lifetime is at least 60 minutes.
+Tokens are cached for at least one hour.
+Microsoft's legacy endpoint will be removed in 2027.
+Dataverse will retire the old Web API version in 2027.
+Azure will stop issuing classic certificates in 2027.
+The timeout is 60 seconds.
+The job is scheduled for 09:00 UTC on Mondays.
+Retry at least three times before failing.
+Each batch holds at least one record.
+Observed on 2026-11-10 in the English-base test environment.
+The 2026-10-30 release fixed the export bug.
+Released on 2026-09-12.
+The run on 2026-11-01 passed.
+Version 3 of the Web API returns JSON.
+The CLI 2.0 output keeps the same keys.
+This release adds `--dry-run` to `plugins deploy`.
+Exit code 12 means the check could not be completed.
+A stable extension never bundles a prerelease CLI.
+The extension checks the daemon's protocol version when it connects.
+The model maps each project to a release surface.
+Tests run on Windows and Linux.
+The number of releases is shown in the summary.
+The maintainer reviews every pull request.
+The owner of the table is shown in the output.
+Dates are shown in UTC.
+The export ends at the end of the page.
+The year 2027 has no special meaning for the parser.
+The sample record has a due date of 2027-02-01.
+The fixture sets the expiry to 2027-12-31.
+The trace keeps the last 1000 entries.
+The cache entry expires after 10 minutes.
+The command waits for at least 5 seconds.
+The session ends after 30 minutes of inactivity.
+The release plan lists the affected packages.
+The command accepts a solution name or id.
+The parser accepts both forms.
+The query is approved for execution once the plan is safe.
+Each tool is decided at runtime from the manifest.
+The panel shows the decision tree for the plugin step.
+The confirmation prompt asks before deleting.
+Option sets are removed with `optionset delete`.
+Deleted rows are reported in the summary.
+The command drops the connection on timeout.
+The release window in the table below is from the 1.8 cycle.
+Support for proxies was added in 1.5.
+The `--env` flag replaced `--url` in 1.2.
+The server is kept alive for two minutes after the last request.
+A deprecated option prints a notice on stderr.
+Each surface has its own CHANGELOG.
+The import resumes from the last committed batch.
+The minimum VS Code version is 1.90.
+Node 20 is required to build the extension.
+The schedule field holds a cron expression.
+The step runs after the release job.
+Logs older than 30 days are deleted by the cleanup task.
+The spec lists the exceptions the parser can raise.
+The validator rejects an empty name.
+The plugin step is retired when its assembly is unregistered.
+
+# Round 3: sample data, API documentation, runtime facts and past records,
+# written before the round-3 classes were added.
+The sample plugin sets the approval status to approved.
+The sample account has an exempt flag set to true.
+The demo flow marks each expense as approved.
+The fixture contains an exempt customer and a taxed customer.
+The sample component approves the request when the amount is small.
+The test data includes two approved orders and one rejected order.
+The seed data marks the first record as exempt.
+`approved` is one of the option values of the sample status column.
+The plugin copies the `exempt` attribute to the child record.
+The query returns the approved rows only.
+The caller is not required to pass a timeout.
+The parameter is not required for read-only commands.
+The server will stop accepting connections after shutdown.
+The import will stop processing rows on the first error.
+The token expires within 30 days.
+The cache is refreshed within 5 minutes.
+The job runs next to the export step.
+The report covers the second half of the table.
+The lint check is disabled for generated files.
+The analyzer is disabled for test projects.
+Except for the header row, every row is parsed.
+The value was removed in 1.6 and is no longer read.
+The client stays connected until the server ends its session.
+The flag was marked obsolete in 1.4 and removed in 1.6.
+The feature reached general availability in Dataverse in 2024.

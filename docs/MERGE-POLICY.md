@@ -169,3 +169,139 @@ This keeps `main` linear and gives one commit per PR for clean `git log` and `gi
 Dependabot config lives in `.github/dependabot.yml`. Bumps that meet the auto-merge criteria above can be `--auto` enabled in batch. Bumps that don't (auth, crypto, major core libs) get manual review with the verification steps documented in the relevant spec or commit message.
 
 For roll-up branches consolidating many bumps into one PR: avoid unless auto-merge is unavailable. Per-bump squash commits give better `git bisect` granularity and clearer attribution than a single roll-up commit.
+
+## Decision Link Check (not required)
+
+The [`decision-link-check.yml`](../.github/workflows/decision-link-check.yml)
+workflow runs `scripts/ci/check_decision_links.py` on every pull request to
+`main` (#1790). It is **not** a required status check.
+
+**What it is: a net, not a proof.** It catches the classes of decision text
+listed below. It does not prove that no decision text is unlinked, so
+reviewers still read specs, changelogs and release notes for decisions.
+
+It reads the lines a pull request adds or changes in `specs/`,
+`docs/releases/` and `src/<package>/CHANGELOG.md`. A pure rename is not a
+change; a file moved in from outside those paths, or a new file, is read
+whole; a deleted file is not read. A sentence there that states an approval,
+an exception, a removal or a date must link the comment in this repository
+where the maintainer made that decision, or be marked as proposed. This is
+rule 9.1 of the versioning policy proposed in #1831.
+
+**The classes** (`DECISION_PHRASES`, `FRAGMENTS`, `DECISION_COLUMNS` and
+`STATE_CELLS` in the script):
+- **Approval:**
+  - "approved" as a verb, with any subject and object;
+  - "approval" or "sign-off" given, received or held ("has maintainer
+    approval", "sign-off … was given"), or as a label ("Approval: <name>,
+    <date>", "Sign-off: …");
+  - "decided", "chose", "have chosen", "opted to/for/against", "agreed",
+    "authorised the/a …", "accepted the proposal/recommendation/split", "was
+    accepted", "the release review accepted";
+  - "Decision: …", "Decision (<date>): …", "the decision to … was taken",
+    "per <name>,";
+  - a table cell "Accepted" or "Ratified".
+- **Exception:**
+  - "exception" in a policy frame: "is an exception", "exception to/for",
+    "made an exception", "an exception has been made", "the exception
+    covers", "by exception", "Exception:" (also in a table cell);
+  - "exempt" or "exemption", "excepted", "waived" or a waiver;
+  - a rule, requirement, check, policy or guarantee that "does not apply
+    to", "does not cover", "does not extend to" or "is not enforced for" X;
+  - "excluded from", "not subject to", "not bound by" or "not covered by"
+    it; it is "suspended/relaxed/lifted/disabled for";
+  - "is not required to", "Except for X, …", "Not applicable to X: …", "by
+    agreement", "this once".
+- **Removal:**
+  - a removal verb in the future or as a schedule: "will be removed,
+    unlisted or withdrawn", "we'll drop", "we intend to drop", "<version>
+    will remove", "is retired in 2.0", "will stop <verb>ing", "will no
+    longer", "will go away";
+  - two-step forms: "first ignored and then removed", "marked obsolete in
+    2.1";
+  - end of support: "end of support", "end of life", "support … ends/will
+    end", "no further fixes/updates", "no longer supported";
+  - "scheduled for removal", "Removal of …: 3.0", and labels "Removed in
+    3.0: …", "Dropping in 2.2: …", "Sunset: …", also as a table cell. In a
+    changelog, a removal label under a section for a released (dated) version
+    is history and is not read.
+- **Date:**
+  - a future date in any ordinary written form, with or without a
+    preposition before it, and "by mid-January", "next Monday", "the second
+    half of 2027";
+  - a version committed to: "until the 3.0 release", "takes effect in 2.1",
+    "from 2.1 onwards", "From 2.1, …", "planned for 2.2", "continues through
+    2.4", "becomes an error in 2.4", "planned to ship in 2.3", "will reach
+    general availability";
+  - labels "Ships in: 2.1", "Due: 2.1";
+  - a duration counted in days, months or releases: "for one more release",
+    "for two more minor versions", "for the lifetime of 2.x", "at least 90
+    days", "within 30 days", "six months after 2.0", "deprecation period";
+  - an event: "until Microsoft ends its support", "on the same day as", "no
+    later than the day of".
+- **Tables:** a future date under a `When`, `Date`, `Target`, `Deadline` or
+  `Due` column; a version under a `Removal` or `Removed in` column; a state
+  cell as above.
+
+**Product commitment or technical fact** (`GUARDS` in the script). A match
+does not count:
+- when the sentence is a runtime or data fact: rows, records, columns,
+  temporary files, cache, lock files, certificates, tokens, logs, validity,
+  expiry, created or modified dates, samples, fixtures. It counts anyway when
+  the sentence also names a product commitment: a version, a `--flag`, an
+  alias, "support for", the next major or minor, a deprecation;
+- when it states Microsoft's, Dataverse's, Azure's or GitHub's plans;
+- when the exception is a thrown, raised, caught, wrapped, inner or
+  unhandled exception, or an exception to a data shape or schema;
+- when the exemption is from a check, a warning, an analyzer, a validation, a
+  compiler rule such as `CS1591`, or for a code path such as `Generated/`;
+- when a client, server, handshake, planner, optimizer, request, connection,
+  runtime, or a command in a code span "decides", "agrees" or "accepts";
+- when "approval" or "sign-off" is named as a requirement ("needs maintainer
+  approval", "approval gates the merge");
+- when "approved" is conditional ("once the release is approved", "approved
+  … once the plan is safe") or an adjective ("the approved tool", "Approved
+  runs are listed", "a separately approved setup");
+- when "approved" or "exempt" is a value in sample, demo, fixture, test or
+  seed data, or a code value;
+- when "is not required to" is about a caller, a parameter, a field, a value,
+  or a person's duty in a process (a contributor, author, user or reviewer);
+- when the wording is in the past ("was marked obsolete", "reached general
+  availability");
+- when "approves" is habitual ("approves every release");
+- when it is a spec's `**Decision:**` design-record line.
+
+Past wording does not count: removals are matched in the future or present,
+never "was removed in 1.6", and a date counts only if it is after the day of
+the change (the pull request's head commit). A date inside a link target, a
+URL or a code span is not read.
+
+**Links and "proposed":**
+- A decision link is a URL to a comment in this repository:
+  `…/issues/N#issuecomment-M`, `…/pull/N#issuecomment-M`,
+  `…/pull/N#discussion_rM` or `…/pull/N#pullrequestreview-M`, or an issue
+  body, `…/issues/N#issue-M`. These do not count: a bare `#N`, an issue URL
+  without a comment anchor, another repository's URL, or a URL inside another
+  URL.
+- "Proposed" exempts a decision only where it qualifies that decision: a
+  leading "Proposed:", or "(proposed)", "is proposed" or "proposed removal"
+  in the same clause (clauses are separated by `;`). A qualifier in another
+  clause does not reach back.
+
+**Limits:** headings, fenced code and HTML comments are not checked. A table
+row is one unit, and "e.g." or "i.e." do not end a sentence.
+
+**Changing the list:** each entry, alternative, guard and column has an
+example sentence, and a test generated from the list proves that each one is
+needed. The whole list is pinned by a digest, so deleting anything fails a
+test. To add a class, add the entry with its example, check that its
+generated test passes, and update the pin. Add the sentence that showed the
+gap to `tests/ci/fixtures/decision_links/regression_must_fail.txt` or
+`regression_must_pass.txt`; the `must_fail.txt`/`must_pass.txt` corpus is
+for measurement.
+
+`--whole-tree` reports how many existing sentences would fail, without
+failing.
+
+To make it required, the maintainer adds the check `Decision text links its
+decision` to the required status checks of `main`.

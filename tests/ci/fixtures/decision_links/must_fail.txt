@@ -1,0 +1,195 @@
+# Decision sentences written for this check in round 2, before the class
+# redesign, by class and kind. They are not taken from any review list.
+# "today" in the test is 2026-11-21, so every date here is still to come.
+# Format: <category>: <sentence>
+approval: The maintainer approved a separate channel for nightly builds.
+approval: Josh approved dropping the beta label from the MCP server.
+approval: The owner approved switching the default output to JSON.
+approval: Maintainer approved: the extension keeps its own lineage.
+approval: Approved by Josh in the planning review.
+approval: The rename of `auth select` was approved.
+approval: The plan to sign the MSI has been approved.
+approval: Josh has approved a third release candidate.
+approval: The maintainer gave approval for a hotfix branch.
+approval: This change has the maintainer's approval.
+approval: Josh has given his approval to ship without the TUI.
+approval: The CLI split received sign-off from the maintainer.
+approval: Sign-off from the owner was received on Tuesday.
+approval: The maintainer signed off on keeping net8.0.
+approval: Josh decided that the daemon keeps its port.
+approval: The maintainer decided to keep YAML profiles.
+approval: We decided against a separate Linux package.
+approval: Decision: the extension bundles exactly one CLI.
+approval: The decision is to keep exit code 3 for usage errors.
+approval: The maintainer chose option C for profile storage.
+approval: Option B was chosen by the owner.
+approval: The maintainer agreed to defer the TUI rewrite.
+approval: The team agreed on monthly prereleases.
+approval: Josh agreed that the old cache path stays.
+approval: The proposal to merge the docs site was accepted.
+approval: The maintainer accepted the risk of a later stable date.
+approval: Per Josh, the MCP server ships with the CLI.
+approval: Per the owner's decision, notebooks stay experimental.
+approval: The maintainer gave the green light for 1.9.
+approval: Josh gave the go-ahead to publish to Open VSX.
+approval: The owner confirmed the per-package versioning.
+approval: The publishing route is authorised by the maintainer.
+approval: The maintainer has authorized a second signing key.
+approval: Status: approved by the maintainer.
+approval: The roadmap change is maintainer-approved.
+exception: The Plugins package is an exception to per-package majors.
+exception: We make an exception for security fixes.
+exception: An exception applies to the bundled CLI.
+exception: The exception covers only the 1.9 release.
+exception: As an exception, the extension may ship a prerelease CLI once.
+exception: The docs site is the one exception to the freeze.
+exception: An exemption was granted for the signing workflow.
+exception: The MCP server is exempt from the two-reviewer rule.
+exception: Test-only packages are excepted from the changelog rule.
+exception: The extension is excluded from the stable freeze by exception.
+exception: The size limit is waived for generated code reviews.
+exception: A waiver covers the missing Linux arm64 build.
+exception: The freeze is suspended for data-safety fixes.
+exception: The release gate is relaxed for documentation-only changes.
+exception: Exception: the CLI keeps `-e` until 2.0.
+exception: - **Exception:** `PPDS.Plugins` keeps its key until 4.0.
+exception: Rule 2 does not apply to the MCP server by agreement.
+exception: The CLI may skip the soak period this once.
+exception: Security fixes get an exception to the one-minor-per-month rule.
+exception: The maintainer made an exception for the hotfix.
+removal: The `--profile-file` flag will be removed.
+removal: The `-e` alias will be removed in a later release.
+removal: Support for Node 18 will be removed from the extension in 2.2.
+removal: The legacy query syntax will be dropped.
+removal: The old notebook format will be deleted in 3.0.
+removal: `auth legacy` will be retired.
+removal: The XML profile store will be sunset next year.
+removal: We'll remove the `--raw` switch in 3.0.
+removal: We will drop the net6.0 target.
+removal: Version 2.0 will remove the old verbs.
+removal: CLI 3.0 will drop support for protocol 1.
+removal: We are dropping the TUI's classic theme.
+removal: The `solution pack` command is retired in 2.0.
+removal: The v1 daemon protocol will stop working in 3.0.
+removal: Support for Windows Server 2016 ends with 2.0.
+removal: The deprecated `--json` flag is removed as of 3.0.
+removal: The interactive mode is deprecated and will be removed.
+removal: The `ppds env` alias goes away in 2.0.
+removal: The MCP tool `data_query_v1` is no longer supported from 2.1.
+removal: The old settings key will no longer be read after 2.0.
+removal: Removal of the `--force` alias: 3.0.
+removal: The fallback to PATH is scheduled for removal.
+removal: The classic panel layout is planned for retirement in 2.3.
+removal: Removal is planned for the next major.
+removal: Version 1 of the profile format reaches end of life with 3.0.
+removal: We plan to remove the Windows PowerShell 5.1 shim.
+removal: The `--verbose-json` option is going away.
+removal: The extension will no longer support VS Code 1.85.
+removal: The `plugins push` verb will be discontinued after 2.1.
+removal: The old installer will be phased out.
+date: Stable ships 2027-01-15.
+date: Support for 1.x ends 2027-06-30.
+date: Release date: 2027-02-01.
+date: 2.0 stable: 2027-01-15.
+date: Expected release: January 2027.
+date: The feature freeze starts 2027-01-04.
+date: Public preview closes 31 March 2027.
+date: The beta channel stays open until the 3.0 release.
+date: The alias stays for two more minors.
+date: The old flag is kept for two minor releases.
+date: The new default takes effect in 2.1.
+date: The fallback is available from 2.1 onwards.
+date: The alias is supported for six months after 2.0.
+date: The deprecation period is 90 days.
+date: Version 1 is supported for 12 months after 2.0 ships.
+date: Keep the alias for at least one minor.
+date: The shim remains for at least two releases.
+date: The cut-over happens no earlier than 2027-03-01.
+date: Removal comes no sooner than six months after the stable release.
+date: The 2.0 stable lands no later than Q2 2027.
+date: The prerelease line closes on 15 February 2027.
+date: The old endpoint is served until March 2027.
+date: We ship the signed MSI by the end of Q1 2027.
+date: The CLI moves to .NET 10 in 2027.
+date: The new TFM becomes the default as of 2027-04-01.
+date: Support for net8.0 continues through November 2027.
+date: The migration window opens 2027-05-01.
+date: The next major is planned for Q3 2027.
+date: The profile migration is scheduled for 2.2.
+date: The removal is targeted for the 3.0 release.
+date: Prereleases continue weekly until 2027-01-31.
+date: The beta keeps running till the end of 2027.
+date: Old configs are read for one more major release.
+date: The shim stays two weeks after the next stable.
+date: A minimum of two prereleases precedes 2.0.
+date: The waiting period before removal is one minor release.
+
+# Round 3: written for this check from the class names the held-out measurement gave
+# (kinds of wording, not its sentences), before the round-3 classes were added.
+approval: Approval: Josh, 2026-11-19.
+approval: Decision (2026-11-18): the CLI keeps one binary per platform.
+approval: Decision recorded: notebooks stay behind a setting.
+approval: Approved in the release review: the MSI ships unsigned once.
+approval: Approved at the planning meeting: two prerelease channels.
+approval: Josh authorised the split of the docs repository.
+approval: The maintainer authorized moving the samples out.
+approval: The maintainer accepted the recommendation to drop the TUI theme.
+approval: Josh accepted the split into two packages.
+approval: We have chosen per-package versions.
+approval: The maintainer has chosen the YAML format.
+approval: The maintainer opted to keep the old cache path.
+approval: We opted against a separate installer.
+approval: The maintainer decided against a 1.9 release.
+approval: The team decided to ship monthly.
+approval: The team agreed to freeze the API surface.
+approval: The release review accepted the MSI change.
+approval: The triage meeting accepted the proposal.
+approval: Sign-off for the signing route was given by the owner.
+approval: Approval for the hotfix line was granted on Friday.
+approval: The decision to keep exit code 2 was taken in the review.
+approval: The decision to drop the TUI was made last week.
+approval: | ADR-12 | Per-package versions | Accepted |
+exception: The extension is exempt from the size check.
+exception: The size limit does not apply to generated documentation.
+exception: Hotfix pull requests are not required to carry a milestone.
+exception: The compatibility guarantee does not cover the preview MCP tools.
+exception: The support policy does not extend to forks.
+exception: Preview packages are excluded from the stability guarantee.
+exception: The daemon is not bound by the two-reviewer rule.
+exception: Internal helpers are not covered by the API policy.
+exception: The changelog rule is not enforced for documentation-only changes.
+exception: The soak check is disabled for hotfixes only.
+exception: An exemption for the extension has been granted.
+exception: An exception has been made for the bundled CLI.
+exception: The maintainer exempted the docs site from the freeze.
+exception: Except for hotfixes, every release must soak for a week.
+exception: Exempt: the Plugins package, until 4.0.
+exception: Not applicable to the MCP server: the per-package major rule.
+exception: | Plugins | Exception: keeps its strong-name key |
+removal: Version 1 reaches end of support with 3.0.
+removal: Support for Node 18 will end in 2.2.
+removal: The 1.x line receives no further fixes after 2.0.
+removal: The 1.x line receives no more updates once 2.0 ships.
+removal: The preview package will be unlisted.
+removal: The old MCP tool names will be withdrawn.
+removal: The short form will go away in 3.0.
+removal: The CLI will stop reading the old profile file in 3.0.
+removal: The extension will stop bundling the legacy daemon.
+removal: The flag will first be ignored and then removed.
+removal: The verb is marked obsolete in 2.1 and removed in 3.0.
+removal: Removed in 3.0: the `--legacy` flag.
+removal: Dropping in 2.2: the net6.0 target.
+removal: Sunset: the XML profile store, after 2.4.
+removal: | `--legacy` | Removed in 3.0 |
+date: The old protocol stays until Microsoft ends its support.
+date: The CLI and the extension release on the same day as the stable tag.
+date: The notice ships no later than the day of the release.
+date: Security fixes ship within 30 days.
+date: The freeze lifts by mid-January.
+date: The prerelease goes out next Monday.
+date: The stable line opens in the second half of 2027.
+date: The alias stays for one more release.
+date: The old format is read for the lifetime of 2.x.
+date: The fallback continues for three more releases.
+date: From 2.1, the CLI will refuse unsigned plugins.
+date: The MCP server will reach general availability in 2.0.
