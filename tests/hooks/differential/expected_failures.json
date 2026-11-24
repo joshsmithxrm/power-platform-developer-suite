@@ -1,0 +1,10 @@
+{
+ "_comment": [
+  "Failure labels (findings.py) the requirement-severity tests are known to fail with at the head they were last run against.",
+  "Used only with PPDS_DIFF_XFAIL=1: a test whose failures all carry these labels is reported as xfail.",
+  "A failure with any other label, or 'unlabelled', still fails. Remove a label when its fix lands.",
+  "Mode tags (r5-mode-*) are not listed: they name where a failure happened, not what it is, so a failure",
+  "is excused only by its class labels (a failure with a mode tag alone still fails)."
+ ],
+ "labels": {}
+}
