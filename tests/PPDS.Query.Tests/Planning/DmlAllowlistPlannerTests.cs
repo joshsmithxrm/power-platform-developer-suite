@@ -23,6 +23,9 @@ public class DmlAllowlistPlannerTests
 
     [Theory]
     [InlineData("DELETE TOP (2) FROM account WHERE name = 'x'", "TOP")]
+    [InlineData("UPDATE TOP (1) account SET name = 'y' WHERE name = 'x'", "TOP is not supported on UPDATE or DELETE")]
+    [InlineData("UPDATE TOP (50) PERCENT account SET name = 'y' WHERE name = 'x'", "TOP is not supported on UPDATE or DELETE")]
+    [InlineData("DELETE TOP (50) PERCENT FROM account WHERE name = 'x'", "TOP is not supported on UPDATE or DELETE")]
     [InlineData("DELETE FROM account WHERE NOT (name = 'x')", "NOT")]
     [InlineData("UPDATE account SET name = GETDATE() WHERE name = 'x'", "GETDATE")]
     [InlineData("UPDATE account SET name = 'y' FROM account JOIN contact ON contact.parentcustomerid = account.accountid", "FROM is supported only")]

@@ -170,6 +170,11 @@ public class DmlStatementFidelityTests
     [Theory]
     [InlineData("DELETE TOP (2) FROM account WHERE name = 'x'", "TOP")]
     [InlineData("UPDATE TOP (2) account SET name = 'y' WHERE name = 'x'", "TOP")]
+    // The planner never applied TOP to UPDATE or DELETE: on main these change every matching row (and the dry run shows 1).
+    [InlineData("UPDATE TOP (1) account SET name = 'y' WHERE name LIKE 'n%'", "TOP is not supported on UPDATE or DELETE")]
+    [InlineData("DELETE TOP (1) FROM account WHERE name LIKE 'n%'", "TOP is not supported on UPDATE or DELETE")]
+    [InlineData("UPDATE TOP (50) PERCENT account SET name = 'y' WHERE name LIKE 'n%'", "TOP is not supported on UPDATE or DELETE")]
+    [InlineData("DELETE TOP (50) PERCENT FROM account WHERE name LIKE 'n%'", "TOP is not supported on UPDATE or DELETE")]
     [InlineData("INSERT TOP (2) INTO account (name) SELECT name FROM account WHERE name = 'x'", "TOP")]
     [InlineData("DELETE FROM account OUTPUT deleted.accountid WHERE name = 'x'", "OUTPUT")]
     [InlineData("UPDATE account SET name = 'y' OUTPUT inserted.name WHERE name = 'x'", "OUTPUT")]
