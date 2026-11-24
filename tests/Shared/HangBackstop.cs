@@ -26,28 +26,36 @@ internal static class HangBackstop
     public static readonly TimeSpan Bound = TimeSpan.FromMinutes(2);
 
     /// <summary>
+    /// Replaces <see cref="Bound"/> for the two-argument overloads within the current async flow only, so the
+    /// tests of this helper can show those overloads apply a bound without waiting two minutes. Nothing else sets it.
+    /// </summary>
+    internal static readonly AsyncLocal<TimeSpan?> BoundOverrideForHelperTests = new();
+
+    private static TimeSpan DefaultBound => BoundOverrideForHelperTests.Value ?? Bound;
+
+    /// <summary>
     /// Runs <paramref name="operation"/> and waits for it under <see cref="Bound"/>. The token it is given
     /// is cancelled when the bound elapses. Whether or not the operation observes that token, the test
     /// fails at the bound with a message naming <paramref name="awaiting"/>, never with a bare
     /// <see cref="OperationCanceledException"/>. An exception the operation throws before then surfaces unchanged.
     /// </summary>
     public static Task<T> WaitAsync<T>(Func<CancellationToken, Task<T>> operation, string awaiting)
-        => WaitAsync(operation, awaiting, Bound);
+        => WaitAsync(operation, awaiting, DefaultBound);
 
     /// <summary>
     /// Waits for <paramref name="signal"/> to complete under <see cref="Bound"/>, failing the test as described in
     /// <see cref="WaitAsync{T}(Func{CancellationToken, Task{T}}, string)"/> if the bound elapses first.
     /// </summary>
     public static Task<T> WaitAsync<T>(Task<T> signal, string awaiting)
-        => WaitAsync(_ => signal, awaiting, Bound);
+        => WaitAsync(_ => signal, awaiting, DefaultBound);
 
     /// <summary>As <see cref="WaitAsync{T}(Func{CancellationToken, Task{T}}, string)"/> for an operation with no result.</summary>
     public static Task WaitAsync(Func<CancellationToken, Task> operation, string awaiting)
-        => WaitAsync(operation, awaiting, Bound);
+        => WaitAsync(operation, awaiting, DefaultBound);
 
     /// <summary>As <see cref="WaitAsync{T}(Task{T}, string)"/> for a signal with no result.</summary>
     public static Task WaitAsync(Task signal, string awaiting)
-        => WaitAsync(_ => signal, awaiting, Bound);
+        => WaitAsync(_ => signal, awaiting, DefaultBound);
 
     /// <summary>As <see cref="WaitAsync(Func{CancellationToken, Task}, string)"/> with an explicit bound (tests of this helper only).</summary>
     internal static Task WaitAsync(Func<CancellationToken, Task> operation, string awaiting, TimeSpan bound)
@@ -62,7 +70,11 @@ internal static class HangBackstop
         using var backstop = new CancellationTokenSource();
         using var timer = new CancellationTokenSource();
         // Task.Run: an operation that blocks before its first await must not block the race itself.
-        var work = Task.Run(() => operation(backstop.Token));
+        // The token is read here, not inside the delegate: on a loaded runner the delegate can still be
+        // queued when the bound fires and backstop is disposed, and reading Token then would throw
+        // ObjectDisposedException instead of handing the operation its already cancelled token.
+        var token = backstop.Token;
+        var work = Task.Run(() => operation(token));
         var deadline = Task.Delay(bound, timer.Token);
 
         if (await Task.WhenAny(work, deadline) != work)
