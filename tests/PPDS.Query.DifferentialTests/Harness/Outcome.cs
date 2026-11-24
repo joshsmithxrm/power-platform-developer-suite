@@ -17,7 +17,7 @@ public enum ErrorClass
     Conversion,
     /// <summary>Text or binary data would be truncated (SQL Server errors 2628, 8152).</summary>
     Truncation,
-    /// <summary>The operand types are not allowed together (SQL Server errors 206, 402, 529, 4151, 8116, 8117).</summary>
+    /// <summary>The operand types are not allowed together (SQL Server errors 206, 402, 529, 4127, 4151, 8116, 8117, 8133).</summary>
     TypeClash,
     /// <summary>The engine refused the expression before evaluating it (PPDS parse or compile refusal).</summary>
     Refused,
@@ -63,22 +63,20 @@ public sealed record SqlTypeInfo(string Name, int? Precision = null, int? Scale 
     };
 
     /// <summary>
-    /// Parses the <c>system_type_name</c> column of <c>sp_describe_first_result_set</c>, such as <c>numeric(16,6)</c>,
-    /// <c>nvarchar(30)</c> or <c>money</c>.
+    /// The type described by a result column's metadata: its type name, the precision and scale of a decimal, and the
+    /// size, in characters, of a character type (-1 for <c>max</c>). Money and smallmoney get their documented
+    /// precision and scale of 19,4 and 10,4, which the metadata does not carry.
     /// </summary>
-    public static SqlTypeInfo Parse(string systemTypeName, int precision, int scale)
+    public static SqlTypeInfo FromMetadata(string dataTypeName, int? precision, int? scale, int? size)
     {
-        var open = systemTypeName.IndexOf('(');
-        var name = (open < 0 ? systemTypeName : systemTypeName[..open]).Trim().ToLowerInvariant();
-        var args = open < 0 ? Array.Empty<string>() : systemTypeName[(open + 1)..^1].Split(',');
-        if (name == "numeric")
-            name = "decimal";
+        var name = dataTypeName.Trim().ToLowerInvariant();
         return name switch
         {
-            "decimal" => new SqlTypeInfo(name, precision, scale),
-            "money" or "smallmoney" => new SqlTypeInfo(name, precision, scale),
+            "decimal" or "numeric" => new SqlTypeInfo("decimal", precision, scale),
+            "money" => new SqlTypeInfo(name, 19, 4),
+            "smallmoney" => new SqlTypeInfo(name, 10, 4),
             "varchar" or "nvarchar" or "char" or "nchar" or "varbinary" or "binary" =>
-                new SqlTypeInfo(name, Length: args.Length == 1 && args[0].Trim() == "max" ? -1 : int.Parse(args[0], CultureInfo.InvariantCulture)),
+                new SqlTypeInfo(name, Length: size is null or < 0 or >= 1073741823 ? -1 : size),
             _ => new SqlTypeInfo(name),
         };
     }

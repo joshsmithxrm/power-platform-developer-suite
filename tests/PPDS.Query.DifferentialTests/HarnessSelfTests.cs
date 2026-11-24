@@ -107,13 +107,14 @@ public sealed class HarnessSelfTests
     }
 
     [Fact]
-    public void Type_names_parse_with_precision_scale_and_length()
+    public void Result_column_metadata_gives_precision_scale_and_length()
     {
-        Assert.Equal(new SqlTypeInfo("decimal", 16, 6), SqlTypeInfo.Parse("numeric(16,6)", 16, 6));
-        Assert.Equal(new SqlTypeInfo("varchar", Length: 4), SqlTypeInfo.Parse("varchar(4)", 0, 0));
-        Assert.Equal(new SqlTypeInfo("nvarchar", Length: -1), SqlTypeInfo.Parse("nvarchar(max)", 0, 0));
-        Assert.Equal(new SqlTypeInfo("money", 19, 4), SqlTypeInfo.Parse("money", 19, 4));
-        Assert.Equal(new SqlTypeInfo("int"), SqlTypeInfo.Parse("int", 10, 0));
+        Assert.Equal(new SqlTypeInfo("decimal", 16, 6), SqlTypeInfo.FromMetadata("decimal", 16, 6, 17));
+        Assert.Equal(new SqlTypeInfo("decimal", 16, 6), SqlTypeInfo.FromMetadata("numeric", 16, 6, 17));
+        Assert.Equal(new SqlTypeInfo("varchar", Length: 4), SqlTypeInfo.FromMetadata("varchar", 255, 255, 4));
+        Assert.Equal(new SqlTypeInfo("nvarchar", Length: -1), SqlTypeInfo.FromMetadata("nvarchar", 255, 255, int.MaxValue));
+        Assert.Equal(new SqlTypeInfo("money", 19, 4), SqlTypeInfo.FromMetadata("money", 19, 255, 8));
+        Assert.Equal(new SqlTypeInfo("int"), SqlTypeInfo.FromMetadata("int", 10, 255, 4));
         Assert.Equal("decimal", SqlTypeInfo.FamilyOf("money"));
         Assert.Equal("text", SqlTypeInfo.FamilyOf("varchar"));
     }
