@@ -108,6 +108,18 @@ public sealed class EnvironmentConfigStaleCacheTests : IDisposable
     }
 
     [Fact]
+    public async Task StoreRemove_OfAnotherEnvironment_FromTheStaleStore_KeepsTheRaise()
+    {
+        // Directly on the store, as profile delete (ProfileService) removes entries.
+        await ArrangeStaleDevelopmentThenRaiseAsync();
+
+        (await _daemonStore.RemoveConfigAsync(Other)).Should().BeTrue();
+
+        (await FileStateAsync(Url))!.Type.Should().Be(EnvironmentType.Production);
+        (await FileStateAsync(Other)).Should().BeNull();
+    }
+
+    [Fact]
     public async Task LabelOnlySave_FromTheStaleStore_KeepsTheRaise()
     {
         await ArrangeStaleDevelopmentThenRaiseAsync();
