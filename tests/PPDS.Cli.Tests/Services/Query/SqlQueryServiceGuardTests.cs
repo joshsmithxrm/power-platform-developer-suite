@@ -5,6 +5,7 @@ using Moq;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Infrastructure.Safety;
 using PPDS.Cli.Services.Query;
+using PPDS.Cli.Tests.Services.Query.Faithful;
 using PPDS.Dataverse.Query;
 using Xunit;
 
@@ -41,21 +42,7 @@ public class SqlQueryServiceGuardTests
         bool expectGuardCalled)
     {
         // Arrange
-        var mockExecutor = new Mock<IQueryExecutor>();
-        mockExecutor
-            .Setup(x => x.ExecuteFetchXmlAsync(
-                It.IsAny<string>(),
-                It.IsAny<int?>(),
-                It.IsAny<string?>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new QueryResult
-            {
-                EntityLogicalName = "account",
-                Columns = new List<QueryColumn>(),
-                Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
-                Count = 0
-            });
+        var mockExecutor = SelectFixture.Create().CreateExecutorMock();
 
         var guard = new RecordingShakedownGuard();
         var service = new SqlQueryService(

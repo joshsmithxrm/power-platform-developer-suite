@@ -15,7 +15,6 @@ namespace PPDS.LiveTests.Infrastructure;
 /// _BothKnownDifferent 0x8004F064, _BlockingUnknown 0x8004F067; EntityCustomizationLockException 0x80090412;
 /// RACCannotAcquireCustomizationLock 0x8004F077; SolutionConcurrencyFailure 0x80071151 ("The solution installation or
 /// removal failed due to the installation or removal of another solution at the same time").
-/// The approach is the one on branch test/metadata-second-language-live.
 /// </remarks>
 public static class CustomizationLockRetry
 {

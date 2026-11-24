@@ -46,7 +46,7 @@ public sealed class CombinedMetadataWorkflowTests : IDisposable
                 Assert.Equal(_operationToken, token);
                 return Task.FromResult(CheckOut());
             });
-        _service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard());
+        _service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
     }
 
     [Theory]
@@ -199,13 +199,15 @@ public sealed class CombinedMetadataWorkflowTests : IDisposable
             inserted = new OptionMetadata { Label = r.Label, Value = r.Value, Color = (string)r["Color"] };
             return new InsertOptionValueResponse { Results = new ParameterCollection { ["NewOptionValue"] = r.Value } };
         });
-        ExpectRead(true);
+        // The draft read-back that confirms the label and colour is answered from the recorded insert (_labels).
+        var readBacksBefore = ReadBackLeases.Count;
         var value = await _service.AddColumnOptionAsync(new AddColumnOptionRequest
         {
             SolutionUniqueName = Solution, EntityLogicalName = Table, ColumnLogicalName = Local,
             Label = "Added", Color = "#abcdef"
         }, _cancellation.Token);
         Assert.Equal(10002, value);
+        Assert.Equal(readBacksBefore + 1, ReadBackLeases.Count);
         AssertReleased();
 
         ExpectRead(false);
@@ -286,6 +288,9 @@ public sealed class CombinedMetadataWorkflowTests : IDisposable
         AssertReleased();
     }
 
+    private readonly LabelWriteStore _labels = new();
+    private List<int> ReadBackLeases { get; } = [];
+
     private IPooledClient CheckOut()
     {
         Assert.Null(_activeLease);
@@ -319,8 +324,12 @@ public sealed class CombinedMetadataWorkflowTests : IDisposable
             {
                 Assert.Equal(_operationToken, token);
                 Assert.Equal(id, _activeLease);
+                // A label read-back after a write is answered from the write, outside the scripted replies.
+                if (_labels.FollowsRecordedWrite(request)) { ReadBackLeases.Add(id); return Task.FromResult(_labels.Synthesize(request)); }
                 _sdkLeases.Add(id);
-                return Task.FromResult(_replies.Dequeue()(request));
+                var response = _replies.Dequeue()(request);
+                _labels.Record(request);
+                return Task.FromResult(response);
             });
         return client.Object;
     }

@@ -254,6 +254,32 @@ public class ServiceEndpointServiceTests
         Assert.Equal(ErrorCodes.ServiceEndpoint.ValidationFailed, ex.ErrorCode);
     }
 
+    [Theory]
+    [InlineData("ftp://example.com/hook")]
+    [InlineData("file:///srv/hook")]
+    [InlineData("mailto:hook@example.com")]
+    [InlineData("sb://example.servicebus.windows.net")]
+    public async Task RegisterWebhookAsync_ThrowsValidation_WhenUrlIsNotHttpOrHttps(string url)
+    {
+        var reg = new WebhookRegistration("Test", url, "WebhookKey");
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => _sut.RegisterWebhookAsync(reg));
+        Assert.Equal(ErrorCodes.ServiceEndpoint.ValidationFailed, ex.ErrorCode);
+        _mockClient.Verify(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+        _mockClient.Verify(s => s.CreateAsync(It.IsAny<Entity>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RegisterWebhookAsync_CreatesEndpoint_WhenUrlIsHttp()
+    {
+        _retrieveMultipleResult = new EntityCollection(); // no existing
+        _createResult = Guid.NewGuid();
+
+        var reg = new WebhookRegistration("PlainHook", "http://example.com/hook", "WebhookKey", "mySecret");
+        var result = await _sut.RegisterWebhookAsync(reg);
+
+        Assert.Equal(_createResult, result);
+    }
+
     [Fact]
     public async Task RegisterWebhookAsync_ThrowsNameInUse_WhenNameAlreadyExists()
     {
@@ -437,6 +463,49 @@ public class ServiceEndpointServiceTests
         Assert.Equal("NewName", _updatedEntity!.GetAttributeValue<string>(global::PPDS.Dataverse.Generated.ServiceEndpoint.Fields.Name));
         Assert.Equal("Desc", _updatedEntity.GetAttributeValue<string>(global::PPDS.Dataverse.Generated.ServiceEndpoint.Fields.Description));
     }
+
+    [Theory]
+    [InlineData("not-a-url")]
+    [InlineData("/relative/path")]
+    [InlineData("ftp://example.com/hook")]
+    [InlineData("file:///srv/hook")]
+    public async Task UpdateAsync_ThrowsValidation_WhenUrlIsNotHttpOrHttps(string url)
+    {
+        var id = Guid.NewGuid();
+        _retrieveMultipleResult = new EntityCollection { Entities = { ExistingWebhook(id) } };
+
+        var ex = await Assert.ThrowsAsync<PpdsException>(
+            () => _sut.UpdateAsync(id, new ServiceEndpointUpdateRequest(Url: url)));
+
+        Assert.Equal(ErrorCodes.ServiceEndpoint.ValidationFailed, ex.ErrorCode);
+        Assert.Null(_updatedEntity);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_WritesUrl_WhenUrlIsHttps()
+    {
+        var id = Guid.NewGuid();
+        _retrieveMultipleResult = new EntityCollection { Entities = { ExistingWebhook(id) } };
+
+        await _sut.UpdateAsync(id, new ServiceEndpointUpdateRequest(Url: "https://example.com/new-hook"));
+
+        Assert.NotNull(_updatedEntity);
+        Assert.Equal(
+            "https://example.com/new-hook",
+            _updatedEntity!.GetAttributeValue<string>(global::PPDS.Dataverse.Generated.ServiceEndpoint.Fields.Url));
+    }
+
+    private static Entity ExistingWebhook(Guid id) =>
+        new(global::PPDS.Dataverse.Generated.ServiceEndpoint.EntityLogicalName)
+        {
+            Id = id,
+            [global::PPDS.Dataverse.Generated.ServiceEndpoint.Fields.Name] = "MyHook",
+            [global::PPDS.Dataverse.Generated.ServiceEndpoint.Fields.IsManaged] = false,
+            [global::PPDS.Dataverse.Generated.ServiceEndpoint.Fields.Contract] =
+                new OptionSetValue((int)serviceendpoint_contract.Webhook),
+            [global::PPDS.Dataverse.Generated.ServiceEndpoint.Fields.AuthType] =
+                new OptionSetValue((int)serviceendpoint_authtype.WebhookKey),
+        };
 
     #endregion
 

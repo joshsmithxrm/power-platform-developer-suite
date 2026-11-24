@@ -146,6 +146,7 @@ public sealed class OptionWriteRequestTests
         public List<OrganizationRequest> Requests { get; } = [];
         public DataverseMetadataAuthoringService Service { get; }
         public Func<string, string> StoreColorAs { get; init; } = c => c;
+        private readonly LabelWriteStore _labels = new() { OverlayColors = false };
 
         public Fixture()
         {
@@ -154,6 +155,7 @@ public sealed class OptionWriteRequestTests
                 .Returns<OrganizationRequest, CancellationToken>((request, _) =>
                 {
                     Requests.Add(request);
+                    _labels.Record(request);
                     var target = request.Parameters.TryGetValue("AttributeLogicalName", out var a) && a is string attribute ? attribute : Choice;
                     OrganizationResponse response = request switch
                     {
@@ -165,7 +167,7 @@ public sealed class OptionWriteRequestTests
                         OrderOptionRequest => new OrderOptionResponse(),
                         _ => new OrganizationResponse()
                     };
-                    return Task.FromResult(response);
+                    return Task.FromResult(_labels.Apply(request, response));
                 });
             client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
                 .Returns<QueryBase, CancellationToken>((query, _) =>
@@ -178,13 +180,14 @@ public sealed class OptionWriteRequestTests
                 });
             var pool = new Mock<IDataverseConnectionPool>();
             pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>())).ReturnsAsync(client.Object);
-            Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(), cacheProvider: Cache.Object);
+            Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(), cacheProvider: Cache.Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
         }
 
         private OrganizationResponse Inserted(OrganizationRequest request, string target)
         {
             OrganizationResponse response = request is InsertStatusValueRequest ? new InsertStatusValueResponse() : new InsertOptionValueResponse();
             response.Results["NewOptionValue"] = 5;
+            _labels.InsertedValue(5);
             return Store(request, target, 5, response);
         }
 

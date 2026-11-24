@@ -1,0 +1,1175 @@
+# Every evaluation of the default differential run that differs from SQL Server, exactly. Regenerate with the command in tests/PPDS.Query.DifferentialTests/README.md.
+# Run: seeds 1,2,3, 300 expressions per seed, depth up to 3. Rows: 1171.
+# Evaluations: 3162. Evaluation list SHA-256: 1143688cc90e6704141f6136f6b47ff686d8173a3f7f1be4fc37d2e4e7c7b40b.
+expression	row	sql_server	ppds	first_seen	note
+(((c_dec / 748.58) + RTRIM(c_text)) * c_dec)	2	error Conversion (8114)	0.000000000000000000 : ~decimal	seed 2 expression 17	
+((0.1 * (c_money / 1.005)) / (2147483647 * CASE WHEN '' IS NULL THEN 1E-1 ELSE c_dec2 END))	1	2.288106663100471E-10 : float	0.0000000002288106663189433254 : ~decimal	seed 2 expression 238	
+((0.1 * (c_money / 1.005)) / (2147483647 * CASE WHEN '' IS NULL THEN 1E-1 ELSE c_dec2 END))	3	4.633422943127073E-13 : float	0.0000000000004633445647010743 : ~decimal	seed 2 expression 238	
+((0.1 * (c_money / 1.005)) / (2147483647 * CASE WHEN '' IS NULL THEN 1E-1 ELSE c_dec2 END))	4	4.273599301496811E-06 : float	0.0000042735993014968109131977 : ~decimal	seed 2 expression 238	
+((0.1 * (c_money / 1.005)) / (2147483647 * CASE WHEN '' IS NULL THEN 1E-1 ELSE c_dec2 END))	5	4.273599301496811E-06 : float	0.000004273599301496810913661 : ~decimal	seed 2 expression 238	
+((0.1 * (c_money / 1.005)) / (2147483647 * CASE WHEN '' IS NULL THEN 1E-1 ELSE c_dec2 END))	7	4.633422943127073E-13 : float	0.0000000000004633445647010743 : ~decimal	seed 2 expression 238	
+((1 + 'ā') * (c_dec2 * c_bigint))	4	error Conversion (245)	error Overflow (OverflowException)	seed 1 expression 223	
+((1 + 'ā') * (c_dec2 * c_bigint))	5	error Conversion (245)	error Overflow (OverflowException)	seed 1 expression 223	
+((1 + 'ā') * (c_dec2 * c_bigint))	6	error Conversion (245)	NULL : ~untyped	seed 1 expression 223	
+((1 / 2147483648) - ROUND(1, 2))	1	-0.99999999954 : decimal(22,11)	-0.9999999995343387 : ~float	seed 2 expression 178	
+((1.5E0 * 3000000000) + CONCAT('', N'ꞔ'))	1	error Conversion (8114)	'4500000000{U+A794}' : ~text	seed 2 expression 169	
+((1E-1 / c_dec2) % 0.1)	1	error TypeClash (402)	0.04 : ~float	seed 3 expression 67	
+((1E-1 / c_dec2) % 0.1)	2	error TypeClash (402)	error DivideByZero (DivideByZeroException)	seed 3 expression 67	
+((1E-1 / c_dec2) % 0.1)	3	error TypeClash (402)	-0.09999999999999945 : ~float	seed 3 expression 67	
+((1E-1 / c_dec2) % 0.1)	4	error TypeClash (402)	1.0000000000010001E-11 : ~float	seed 3 expression 67	
+((1E-1 / c_dec2) % 0.1)	5	error TypeClash (402)	-1.0000000000010001E-11 : ~float	seed 3 expression 67	
+((1E-1 / c_dec2) % 0.1)	6	error TypeClash (402)	NULL : ~untyped	seed 3 expression 67	
+((1E-1 / c_dec2) % 0.1)	7	error TypeClash (402)	0.09999999999999945 : ~float	seed 3 expression 67	
+((2.5 / 1E-1) % CASE WHEN 7 IS NULL THEN (c_dec2 % c_money) ELSE (2147483647 - 2147483647) END)	1	error TypeClash (402)	error DivideByZero (DivideByZeroException)	seed 3 expression 125	
+((2.5 / 1E-1) % CASE WHEN 7 IS NULL THEN (c_dec2 % c_money) ELSE (2147483647 - 2147483647) END)	2	error TypeClash (402)	error DivideByZero (DivideByZeroException)	seed 3 expression 125	
+((2.5 / 1E-1) % CASE WHEN 7 IS NULL THEN (c_dec2 % c_money) ELSE (2147483647 - 2147483647) END)	3	error TypeClash (402)	error DivideByZero (DivideByZeroException)	seed 3 expression 125	
+((2.5 / 1E-1) % CASE WHEN 7 IS NULL THEN (c_dec2 % c_money) ELSE (2147483647 - 2147483647) END)	4	error TypeClash (402)	error DivideByZero (DivideByZeroException)	seed 3 expression 125	
+((2.5 / 1E-1) % CASE WHEN 7 IS NULL THEN (c_dec2 % c_money) ELSE (2147483647 - 2147483647) END)	5	error TypeClash (402)	error DivideByZero (DivideByZeroException)	seed 3 expression 125	
+((2.5 / 1E-1) % CASE WHEN 7 IS NULL THEN (c_dec2 % c_money) ELSE (2147483647 - 2147483647) END)	6	error TypeClash (402)	error DivideByZero (DivideByZeroException)	seed 3 expression 125	
+((2.5 / 1E-1) % CASE WHEN 7 IS NULL THEN (c_dec2 % c_money) ELSE (2147483647 - 2147483647) END)	7	error TypeClash (402)	error DivideByZero (DivideByZeroException)	seed 3 expression 125	
+((2.5 / 748.58) / 3000000000)	1	0.000000000001113200 : decimal(21,18)	0.0000000000011132188053826356 : ~decimal	seed 3 expression 239	
+((2147483647 + '2.5') * 748.58)	1	error Conversion (245)	16075633086584.050 : ~decimal	seed 1 expression 238	
+((2147483648 / 2147483648) / CAST(0.0001 AS decimal(38,6)))	1	10000.0000000000000000000000 : decimal(38,22)	10000 : ~decimal	seed 1 expression 26	
+((7 - 7) + (c_money - 2147483647))	5	error Overflow (8115)	-922339351169124.5808 : ~decimal	seed 1 expression 275	
+((9.99 * 2147483648) / CAST(1.005 AS decimal(10,2)))	1	21240952122.2970297029702 : decimal(27,13)	21240952122.29702970297029703 : ~decimal	seed 2 expression 136	
+((CAST(3000000000 AS money) % c_int) / 9.99)	1	0.40040040 : decimal(25,8)	0.4004004004004004004004004004 : ~decimal	seed 2 expression 70	
+((CAST(3000000000 AS money) % c_int) / 9.99)	3	0.40040040 : decimal(25,8)	0.4004004004004004004004004004 : ~decimal	seed 2 expression 70	
+((CAST(3000000000 AS money) % c_int) / 9.99)	4	85336972.27227227 : decimal(25,8)	85336972.27227227227227227227 : ~decimal	seed 2 expression 70	
+((CAST(3000000000 AS money) % c_int) / 9.99)	5	85336972.17217217 : decimal(25,8)	85336972.17217217217217217217 : ~decimal	seed 2 expression 70	
+((CAST(3000000000 AS money) % c_int) / 9.99)	7	0.00000000 : decimal(25,8)	0 : ~decimal	seed 2 expression 70	
+((CAST(N'5' AS int) / CEILING(2147483648)) * 2)	1	0.00000000464 : decimal(23,11)	0.0000000046566128730773925782 : ~decimal	seed 1 expression 24	
+((c_bigint * COALESCE(1, c_float)) + ABS(CHARINDEX(N'b', 'ā')))	1	3000000000 : float	3000000000 : ~bigint	seed 2 expression 227	
+((c_bigint * COALESCE(1, c_float)) + ABS(CHARINDEX(N'b', 'ā')))	2	0 : float	0 : ~bigint	seed 2 expression 227	
+((c_bigint * COALESCE(1, c_float)) + ABS(CHARINDEX(N'b', 'ā')))	3	-9000000000 : float	-9000000000 : ~bigint	seed 2 expression 227	
+((c_bigint * COALESCE(1, c_float)) + ABS(CHARINDEX(N'b', 'ā')))	4	9.223372036854776E+18 : float	9223372036854775807 : ~bigint	seed 2 expression 227	
+((c_bigint * COALESCE(1, c_float)) + ABS(CHARINDEX(N'b', 'ā')))	5	-9.223372036854776E+18 : float	-9223372036854775808 : ~bigint	seed 2 expression 227	
+((c_bigint * COALESCE(1, c_float)) + ABS(CHARINDEX(N'b', 'ā')))	7	2147483648 : float	2147483648 : ~bigint	seed 2 expression 227	
+((c_dec / ROUND(1E-1, -1)) * (ROUND(7, 0) * ISNULL(7, 0.1)))	1	error DivideByZero (8134)	error Other (ArgumentOutOfRangeException)	seed 1 expression 5	
+((c_dec / ROUND(1E-1, -1)) * (ROUND(7, 0) * ISNULL(7, 0.1)))	2	error DivideByZero (8134)	error Other (ArgumentOutOfRangeException)	seed 1 expression 5	
+((c_dec / ROUND(1E-1, -1)) * (ROUND(7, 0) * ISNULL(7, 0.1)))	3	error DivideByZero (8134)	error Other (ArgumentOutOfRangeException)	seed 1 expression 5	
+((c_dec / ROUND(1E-1, -1)) * (ROUND(7, 0) * ISNULL(7, 0.1)))	4	error DivideByZero (8134)	error Other (ArgumentOutOfRangeException)	seed 1 expression 5	
+((c_dec / ROUND(1E-1, -1)) * (ROUND(7, 0) * ISNULL(7, 0.1)))	5	error DivideByZero (8134)	error Other (ArgumentOutOfRangeException)	seed 1 expression 5	
+((c_dec / ROUND(1E-1, -1)) * (ROUND(7, 0) * ISNULL(7, 0.1)))	6	NULL : float	error Other (ArgumentOutOfRangeException)	seed 1 expression 5	
+((c_dec / ROUND(1E-1, -1)) * (ROUND(7, 0) * ISNULL(7, 0.1)))	7	error DivideByZero (8134)	error Other (ArgumentOutOfRangeException)	seed 1 expression 5	
+((c_int / ROUND(2147483647, -3)) - (ROUND(2.5, 2) + LTRIM('abc ')))	1	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 3 expression 85	
+((c_int / ROUND(2147483647, -3)) - (ROUND(2.5, 2) + LTRIM('abc ')))	2	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 3 expression 85	
+((c_int / ROUND(2147483647, -3)) - (ROUND(2.5, 2) + LTRIM('abc ')))	3	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 3 expression 85	
+((c_int / ROUND(2147483647, -3)) - (ROUND(2.5, 2) + LTRIM('abc ')))	4	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 3 expression 85	
+((c_int / ROUND(2147483647, -3)) - (ROUND(2.5, 2) + LTRIM('abc ')))	5	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 3 expression 85	
+((c_int / ROUND(2147483647, -3)) - (ROUND(2.5, 2) + LTRIM('abc ')))	6	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 3 expression 85	
+((c_int / ROUND(2147483647, -3)) - (ROUND(2.5, 2) + LTRIM('abc ')))	7	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 3 expression 85	
+(-(2147483648 + (N'5' + '2.5')))	1	-2147483701 : decimal(11,0)	error TypeClash (QueryExecutionException Query.TypeMismatch)	seed 1 expression 65	
+(-COALESCE(CAST(1 AS money), CASE WHEN 2147483647 < c_int THEN 1.5E0 ELSE 0 END))	1	-1 : float	-1 : ~decimal	seed 1 expression 29	
+(-COALESCE(CAST(1 AS money), CASE WHEN 2147483647 < c_int THEN 1.5E0 ELSE 0 END))	2	-1 : float	-1 : ~decimal	seed 1 expression 29	
+(-COALESCE(CAST(1 AS money), CASE WHEN 2147483647 < c_int THEN 1.5E0 ELSE 0 END))	3	-1 : float	-1 : ~decimal	seed 1 expression 29	
+(-COALESCE(CAST(1 AS money), CASE WHEN 2147483647 < c_int THEN 1.5E0 ELSE 0 END))	4	-1 : float	-1 : ~decimal	seed 1 expression 29	
+(-COALESCE(CAST(1 AS money), CASE WHEN 2147483647 < c_int THEN 1.5E0 ELSE 0 END))	5	-1 : float	-1 : ~decimal	seed 1 expression 29	
+(-COALESCE(CAST(1 AS money), CASE WHEN 2147483647 < c_int THEN 1.5E0 ELSE 0 END))	6	-1 : float	-1 : ~decimal	seed 1 expression 29	
+(-COALESCE(CAST(1 AS money), CASE WHEN 2147483647 < c_int THEN 1.5E0 ELSE 0 END))	7	-1 : float	-1 : ~decimal	seed 1 expression 29	
+(-IIF(1.5E0 <> 2, ISNULL(0.1, 1.5E0), (2147483647 + 1.5E0)))	1	-0.1 : float	-0.1 : ~decimal	seed 3 expression 210	
+(-ROUND(2, 0))	1	-2 : int	-2 : ~float	seed 3 expression 188	
+(-ROUND(IIF(0.0001 <> c_int, 2147483648, 1E-1), -1))	1	-2147483650 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 126	
+(-ROUND(IIF(0.0001 <> c_int, 2147483648, 1E-1), -1))	2	-2147483650 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 126	
+(-ROUND(IIF(0.0001 <> c_int, 2147483648, 1E-1), -1))	3	-2147483650 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 126	
+(-ROUND(IIF(0.0001 <> c_int, 2147483648, 1E-1), -1))	4	-2147483650 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 126	
+(-ROUND(IIF(0.0001 <> c_int, 2147483648, 1E-1), -1))	5	-2147483650 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 126	
+(-ROUND(IIF(0.0001 <> c_int, 2147483648, 1E-1), -1))	6	-0 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 126	
+(-ROUND(IIF(0.0001 <> c_int, 2147483648, 1E-1), -1))	7	-2147483650 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 126	
+(-c_money)	5	error Overflow (8115)	922337203685477.5808 : ~decimal	seed 2 expression 129	
+(0.1 + (9.99 / c_bigint))	1	0.1000000033300000000000 : decimal(24,22)	0.10000000333 : ~decimal	seed 2 expression 170	
+(0.1 + (9.99 / c_bigint))	3	0.0999999988900000000000 : decimal(24,22)	0.09999999889 : ~decimal	seed 2 expression 170	
+(0.1 + (9.99 / c_bigint))	4	0.1000000000000000010831 : decimal(24,22)	0.1000000000000000010831179703 : ~decimal	seed 2 expression 170	
+(0.1 + (9.99 / c_bigint))	5	0.0999999999999999989169 : decimal(24,22)	0.0999999999999999989168820297 : ~decimal	seed 2 expression 170	
+(0.1 + (9.99 / c_bigint))	7	0.1000000046519562602043 : decimal(24,22)	0.1000000046519562602043151855 : ~decimal	seed 2 expression 170	
+(0.1 - COALESCE(2, 1.005))	1	-1.900 : decimal(5,3)	-1.9 : ~decimal	seed 2 expression 105	
+(0.1 / c_dec2)	1	0.04000000000000 : decimal(16,14)	0.04 : ~decimal	seed 1 expression 207	
+(0.1 / c_dec2)	3	-10.00000000000000 : decimal(16,14)	-10 : ~decimal	seed 1 expression 207	
+(0.1 / c_dec2)	4	0.00000000001000 : decimal(16,14)	0.00000000001000000000001 : ~decimal	seed 1 expression 207	
+(0.1 / c_dec2)	5	-0.00000000001000 : decimal(16,14)	-0.00000000001000000000001 : ~decimal	seed 1 expression 207	
+(0.1 / c_dec2)	7	10.00000000000000 : decimal(16,14)	10 : ~decimal	seed 1 expression 207	
+(1 / ((c_money - 0) / c_int))	1	0.5670 : money	0.5670036288232244686365992742 : ~decimal	seed 2 expression 134	
+(1 / ((c_money - 0) / c_int))	3	error DivideByZero (8134)	70000.00000000000000000007 : ~decimal	seed 2 expression 134	
+(1 / ((c_money - 0) / c_int))	4	0.0000 : money	0.0000023283064354544941168294 : ~decimal	seed 2 expression 134	
+(1 / ((c_money - 0) / c_int))	5	0.0000 : money	0.0000023283064365386962890625 : ~decimal	seed 2 expression 134	
+(1 / ((c_money - 0) / c_int))	7	10000.0000 : money	10000 : ~decimal	seed 2 expression 134	
+(1 / 0.1)	1	10.000000 : decimal(8,6)	10 : ~decimal	seed 3 expression 45	
+(1.005 + (c_text + N'Abc'))	1	error Conversion (8114)	'1.005abc Abc' : ~text	seed 2 expression 95	
+(1.005 + (c_text + N'Abc'))	2	error Conversion (8114)	'1.005Abc' : ~text	seed 2 expression 95	
+(1.005 + (c_text + N'Abc'))	3	error Conversion (8114)	'1.005 xAbc' : ~text	seed 2 expression 95	
+(1.005 + (c_text + N'Abc'))	4	error Conversion (8114)	'1.005ZAbc' : ~text	seed 2 expression 95	
+(1.005 + (c_text + N'Abc'))	5	error Conversion (8114)	'1.005~Abc' : ~text	seed 2 expression 95	
+(1.005 + (c_text + N'Abc'))	7	error Conversion (8114)	'1.005xa{U+000A}Abc' : ~text	seed 2 expression 95	
+(1.005 / 1.005)	1	1.00000000 : decimal(12,8)	1 : ~decimal	seed 2 expression 289	
+(2 + TRIM(CAST('2.5' AS varchar(3))))	1	error Conversion (245)	'22.5' : ~text	seed 1 expression 54	
+(2 / 0.1)	1	20.000000 : decimal(8,6)	20 : ~decimal	seed 1 expression 162	
+(2147483647 % 1)	1	0 : int	0 : ~bigint	seed 3 expression 276	
+(2147483647 * CAST(COALESCE(c_float, NULL) AS money))	1	214748364.7000 : money	214748364.7 : ~decimal	seed 2 expression 253	
+(2147483647 * CAST(COALESCE(c_float, NULL) AS money))	2	0.0000 : money	0 : ~decimal	seed 2 expression 253	
+(2147483647 * CAST(COALESCE(c_float, NULL) AS money))	3	-5368709117.5000 : money	-5368709117.5 : ~decimal	seed 2 expression 253	
+(2147483647 * CAST(COALESCE(c_float, NULL) AS money))	7	0.0000 : money	0 : ~decimal	seed 2 expression 253	
+(2147483647 + (N'ꞔ' + 'ā'))	1	error Conversion (245)	'2147483647{U+A794}{U+0101}' : ~text	seed 2 expression 298	
+(2147483647 + c_money)	4	error Overflow (8115)	922339351169124.5807 : ~decimal	seed 3 expression 58	
+(2147483648 % c_money)	4	2147483648.0000 : decimal(14,4)	2147483648 : ~decimal	seed 2 expression 106	
+(2147483648 % c_money)	5	2147483648.0000 : decimal(14,4)	2147483648 : ~decimal	seed 2 expression 106	
+(2147483648 - ROUND(CASE WHEN 2.5 > 1E-1 THEN 9.99 ELSE 0 END, 0))	1	error Overflow (8115)	2147483638 : ~decimal	seed 3 expression 128	
+(7 + 0)	1	7 : int	7 : ~bigint	seed 2 expression 242	
+(7 + 2)	1	9 : int	9 : ~bigint	seed 1 expression 248	
+(7 - PATINDEX('a%b', UPPER(N'5')))	1	7 : int	7 : ~bigint	seed 1 expression 296	
+(7 / (c_money / 1.005))	1	0.5698386469894960593697315730 : decimal(38,28)	0.5698386469673405909797822706 : ~decimal	seed 2 expression 165	
+(7 / (c_money / 1.005))	3	-70350.3447166891117766477055737573 : decimal(38,28)	-70349.999999999999999999971157 : ~decimal	seed 2 expression 165	
+(7 / (c_money / 1.005))	7	70350.3447166891117766477055737573 : decimal(38,28)	70349.999999999999999999971157 : ~decimal	seed 2 expression 165	
+(748.58 - ((2147483648 / c_float) * COALESCE(2, c_dec)))	7	error Overflow (8115)	-Infinity : ~float	seed 1 expression 34	
+(748.58 / 0.1)	1	7485.800000 : decimal(10,6)	7485.8 : ~decimal	seed 3 expression 107	
+(748.58 / c_bigint)	1	0.0000002495266666666666 : decimal(25,22)	0.0000002495266666666666666667 : ~decimal	seed 1 expression 142	
+(748.58 / c_bigint)	3	-0.0000000831755555555555 : decimal(25,22)	-0.0000000831755555555555555556 : ~decimal	seed 1 expression 142	
+(748.58 / c_bigint)	4	0.0000000000000000811612 : decimal(25,22)	0.0000000000000000811612062279 : ~decimal	seed 1 expression 142	
+(748.58 / c_bigint)	5	-0.0000000000000000811612 : decimal(25,22)	-0.0000000000000000811612062279 : ~decimal	seed 1 expression 142	
+(748.58 / c_bigint)	7	0.0000003485847264528274 : decimal(25,22)	0.0000003485847264528274536133 : ~decimal	seed 1 expression 142	
+(9.99 / 9.99)	1	1.000000 : decimal(9,6)	1 : ~decimal	seed 3 expression 200	
+(ABS(0) / (0 + 7))	1	0 : int	0 : ~bigint	seed 2 expression 108	
+(ABS(1E-1) % CAST('ā' AS decimal(10,2)))	1	error TypeClash (402)	error Conversion (FormatException)	seed 2 expression 219	
+(ABS(2) + CAST(TRIM(N'5') AS varchar(3)))	1	7 : int	'25' : ~text	seed 3 expression 192	
+(ABS(9.99) / (7 / COALESCE(2147483647, 9.99)))	1	3064793226.1627193520677383728 : decimal(33,19)	error DivideByZero (DivideByZeroException)	seed 2 expression 132	
+(CASE WHEN N' x ' = N'' THEN (-3000000000) ELSE PATINDEX('a%b', N'') END * CAST(1.5E0 AS bigint))	1	0 : decimal(30,0)	0 : ~bigint	seed 3 expression 100	
+(CAST(0.0001 AS int) * CAST(PATINDEX('%a', N'5') AS money))	1	0.0000 : money	0 : ~decimal	seed 1 expression 11	
+(CAST(0.1 AS money) * (1 + 7))	1	0.8000 : money	0.8 : ~decimal	seed 3 expression 42	
+(CAST(1 AS int) / (c_money % c_int))	1	0.1870 : money	0.1870697395989224782999102065 : ~decimal	seed 2 expression 110	
+(CAST(1 AS int) / (c_money % c_int))	3	-10000.0000 : money	-10000 : ~decimal	seed 2 expression 110	
+(CAST(1 AS int) / (c_money % c_int))	4	0.0000 : money	0.0000000006380669875644696905 : ~decimal	seed 2 expression 110	
+(CAST(1 AS int) / (c_money % c_int))	5	0.0000 : money	-0.0000000006382418959810022722 : ~decimal	seed 2 expression 110	
+(CAST(1 AS int) / (c_money % c_int))	7	10000.0000 : money	10000 : ~decimal	seed 2 expression 110	
+(CAST(2.5 AS decimal(10,2)) * PATINDEX('%[^a-z]%', c_text))	1	10.00 : decimal(21,2)	0.0 : ~decimal	seed 3 expression 155	
+(CAST(2.5 AS decimal(10,2)) * PATINDEX('%[^a-z]%', c_text))	2	0.00 : decimal(21,2)	0.0 : ~decimal	seed 3 expression 155	
+(CAST(2.5 AS decimal(10,2)) * PATINDEX('%[^a-z]%', c_text))	3	2.50 : decimal(21,2)	0.0 : ~decimal	seed 3 expression 155	
+(CAST(2.5 AS decimal(10,2)) * PATINDEX('%[^a-z]%', c_text))	4	0.00 : decimal(21,2)	0.0 : ~decimal	seed 3 expression 155	
+(CAST(2.5 AS decimal(10,2)) * PATINDEX('%[^a-z]%', c_text))	5	2.50 : decimal(21,2)	0.0 : ~decimal	seed 3 expression 155	
+(CAST(2.5 AS decimal(10,2)) * PATINDEX('%[^a-z]%', c_text))	7	7.50 : decimal(21,2)	0.0 : ~decimal	seed 3 expression 155	
+(CAST(2147483648 AS bigint) * COALESCE(NULL, c_money))	4	error Overflow (8115)	1980704062856608439623850.3936 : ~decimal	seed 1 expression 189	
+(CAST(2147483648 AS bigint) * COALESCE(NULL, c_money))	5	error Overflow (8115)	-1980704062856608439838598.7584 : ~decimal	seed 1 expression 189	
+(CAST(ISNULL(2.5, 7) AS money) * CASE WHEN '' = N'ꞔ' THEN 2147483648 ELSE (0.0001 - 2147483647) END)	1	5368709120.00000000 : decimal(35,8)	-5368709117.49975 : ~decimal	seed 3 expression 203	
+(CAST(NULL AS decimal(10,2)) / ROUND(1.005, -3))	1	NULL : decimal(18,7)	error Other (ArgumentOutOfRangeException)	seed 1 expression 250	
+(CAST(PATINDEX('%b%', N'Abc') AS money) + ((1E-1 + 2) + ROUND(c_dec, -3)))	1	4.1 : float	error Other (ArgumentOutOfRangeException)	seed 3 expression 43	
+(CAST(PATINDEX('%b%', N'Abc') AS money) + ((1E-1 + 2) + ROUND(c_dec, -3)))	2	4.1 : float	error Other (ArgumentOutOfRangeException)	seed 3 expression 43	
+(CAST(PATINDEX('%b%', N'Abc') AS money) + ((1E-1 + 2) + ROUND(c_dec, -3)))	3	4.1 : float	error Other (ArgumentOutOfRangeException)	seed 3 expression 43	
+(CAST(PATINDEX('%b%', N'Abc') AS money) + ((1E-1 + 2) + ROUND(c_dec, -3)))	4	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 3 expression 43	
+(CAST(PATINDEX('%b%', N'Abc') AS money) + ((1E-1 + 2) + ROUND(c_dec, -3)))	5	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 3 expression 43	
+(CAST(PATINDEX('%b%', N'Abc') AS money) + ((1E-1 + 2) + ROUND(c_dec, -3)))	7	4.1 : float	error Other (ArgumentOutOfRangeException)	seed 3 expression 43	
+(CAST(c_dec AS int) * CAST(N'' AS int))	1	0 : int	error Conversion (FormatException)	seed 2 expression 5	
+(CAST(c_dec AS int) * CAST(N'' AS int))	2	0 : int	error Conversion (FormatException)	seed 2 expression 5	
+(CAST(c_dec AS int) * CAST(N'' AS int))	3	0 : int	error Conversion (FormatException)	seed 2 expression 5	
+(CAST(c_dec AS int) * CAST(N'' AS int))	6	NULL : int	error Conversion (FormatException)	seed 2 expression 5	
+(CAST(c_dec AS int) * CAST(N'' AS int))	7	0 : int	error Conversion (FormatException)	seed 2 expression 5	
+(CAST(c_int AS decimal(10,2)) / ROUND(2, 1))	1	3.5000000000000 : decimal(21,13)	3.5 : ~float	seed 1 expression 206	
+(CAST(c_int AS decimal(10,2)) / ROUND(2, 1))	2	0.0000000000000 : decimal(21,13)	0 : ~float	seed 1 expression 206	
+(CAST(c_int AS decimal(10,2)) / ROUND(2, 1))	3	-3.5000000000000 : decimal(21,13)	-3.5 : ~float	seed 1 expression 206	
+(CAST(c_int AS decimal(10,2)) / ROUND(2, 1))	4	error Overflow (8115)	1073741823.5 : ~float	seed 1 expression 206	
+(CAST(c_int AS decimal(10,2)) / ROUND(2, 1))	5	error Overflow (8115)	-1073741824 : ~float	seed 1 expression 206	
+(CAST(c_int AS decimal(10,2)) / ROUND(2, 1))	7	0.5000000000000 : decimal(21,13)	0.5 : ~float	seed 1 expression 206	
+(CAST(c_int AS money) - CAST(1E-1 AS money))	1	6.9000 : money	6.9 : ~decimal	seed 3 expression 88	
+(CAST(c_int AS money) - CAST(1E-1 AS money))	2	-0.1000 : money	-0.1 : ~decimal	seed 3 expression 88	
+(CAST(c_int AS money) - CAST(1E-1 AS money))	3	-7.1000 : money	-7.1 : ~decimal	seed 3 expression 88	
+(CAST(c_int AS money) - CAST(1E-1 AS money))	4	2147483646.9000 : money	2147483646.9 : ~decimal	seed 3 expression 88	
+(CAST(c_int AS money) - CAST(1E-1 AS money))	5	-2147483648.1000 : money	-2147483648.1 : ~decimal	seed 3 expression 88	
+(CAST(c_int AS money) - CAST(1E-1 AS money))	7	0.9000 : money	0.9 : ~decimal	seed 3 expression 88	
+(CEILING(2147483647) * CAST(1E-1 AS money))	1	214748364.7000 : money	214748364.7 : ~decimal	seed 2 expression 109	
+(COALESCE(NULL, 7) - PATINDEX('%a', N'Abc'))	1	7 : int	7 : ~bigint	seed 1 expression 2	
+(COALESCE(c_dec2, 2.5) + (2.5 % c_float))	1	error TypeClash (402)	2.5999999999999996 : ~float	seed 2 expression 247	
+(COALESCE(c_dec2, 2.5) + (2.5 % c_float))	2	error TypeClash (402)	error DivideByZero (DivideByZeroException)	seed 2 expression 247	
+(COALESCE(c_dec2, 2.5) + (2.5 % c_float))	3	error TypeClash (402)	-0.01 : ~float	seed 2 expression 247	
+(COALESCE(c_dec2, 2.5) + (2.5 % c_float))	4	error TypeClash (402)	10000000002.49 : ~float	seed 2 expression 247	
+(COALESCE(c_dec2, 2.5) + (2.5 % c_float))	5	error TypeClash (402)	-9999999997.49 : ~float	seed 2 expression 247	
+(COALESCE(c_dec2, 2.5) + (2.5 % c_float))	6	error TypeClash (402)	NULL : ~untyped	seed 2 expression 247	
+(COALESCE(c_dec2, 2.5) + (2.5 % c_float))	7	error TypeClash (402)	0.01 : ~float	seed 2 expression 247	
+(COALESCE(c_int, LEN('2.5')) * COALESCE(PATINDEX('%[0-9]%', N' x '), (c_dec % 1)))	1	0.0000000000 : decimal(31,10)	0 : ~bigint	seed 1 expression 271	
+(COALESCE(c_int, LEN('2.5')) * COALESCE(PATINDEX('%[0-9]%', N' x '), (c_dec % 1)))	2	0.0000000000 : decimal(31,10)	0 : ~bigint	seed 1 expression 271	
+(COALESCE(c_int, LEN('2.5')) * COALESCE(PATINDEX('%[0-9]%', N' x '), (c_dec % 1)))	3	0.0000000000 : decimal(31,10)	0 : ~bigint	seed 1 expression 271	
+(COALESCE(c_int, LEN('2.5')) * COALESCE(PATINDEX('%[0-9]%', N' x '), (c_dec % 1)))	4	0.0000000000 : decimal(31,10)	0 : ~bigint	seed 1 expression 271	
+(COALESCE(c_int, LEN('2.5')) * COALESCE(PATINDEX('%[0-9]%', N' x '), (c_dec % 1)))	5	0.0000000000 : decimal(31,10)	0 : ~bigint	seed 1 expression 271	
+(COALESCE(c_int, LEN('2.5')) * COALESCE(PATINDEX('%[0-9]%', N' x '), (c_dec % 1)))	6	0.0000000000 : decimal(31,10)	0 : ~bigint	seed 1 expression 271	
+(COALESCE(c_int, LEN('2.5')) * COALESCE(PATINDEX('%[0-9]%', N' x '), (c_dec % 1)))	7	0.0000000000 : decimal(31,10)	0 : ~bigint	seed 1 expression 271	
+(CONCAT(N' x ', c_ntext) + 'ā')	1	' x Abca' : nvarchar(104)	' x Abc{U+0101}' : ~text	seed 1 expression 282	
+(CONCAT(N' x ', c_ntext) + 'ā')	2	' x a' : nvarchar(104)	' x {U+0101}' : ~text	seed 1 expression 282	
+(CONCAT(N' x ', c_ntext) + 'ā')	3	' x  x a' : nvarchar(104)	' x  x {U+0101}' : ~text	seed 1 expression 282	
+(CONCAT(N' x ', c_ntext) + 'ā')	4	' x {U+00DF}tra{U+00DF}ea' : nvarchar(104)	' x {U+00DF}tra{U+00DF}e{U+0101}' : ~text	seed 1 expression 282	
+(CONCAT(N' x ', c_ntext) + 'ā')	5	' x {U+0101}ba' : nvarchar(104)	' x {U+0101}b{U+0101}' : ~text	seed 1 expression 282	
+(CONCAT(N' x ', c_ntext) + 'ā')	6	' x a' : nvarchar(104)	' x {U+0101}' : ~text	seed 1 expression 282	
+(CONCAT(N' x ', c_ntext) + 'ā')	7	' x a{U+000A}ba' : nvarchar(104)	' x a{U+000A}b{U+0101}' : ~text	seed 1 expression 282	
+(FLOOR(c_bigint) / (c_int - 2))	5	error Overflow (8115)	4294967292 : ~bigint	seed 1 expression 121	
+(IIF('2.5' IS NULL, (748.58 / 2.5), (c_bigint * 9.99)) - ((2147483648 + 2147483648) % 1.005))	1	29969999999.495000 : decimal(28,6)	29969999999.495 : ~decimal	seed 2 expression 147	
+(IIF('2.5' IS NULL, (748.58 / 2.5), (c_bigint * 9.99)) - ((2147483648 + 2147483648) % 1.005))	2	-0.505000 : decimal(28,6)	-0.505 : ~decimal	seed 2 expression 147	
+(IIF('2.5' IS NULL, (748.58 / 2.5), (c_bigint * 9.99)) - ((2147483648 + 2147483648) % 1.005))	3	-89910000000.505000 : decimal(28,6)	-89910000000.505 : ~decimal	seed 2 expression 147	
+(IIF('2.5' IS NULL, (748.58 / 2.5), (c_bigint * 9.99)) - ((2147483648 + 2147483648) % 1.005))	4	92141486648179210311.425000 : decimal(28,6)	92141486648179210311.425 : ~decimal	seed 2 expression 147	
+(IIF('2.5' IS NULL, (748.58 / 2.5), (c_bigint * 9.99)) - ((2147483648 + 2147483648) % 1.005))	5	-92141486648179210322.425000 : decimal(28,6)	-92141486648179210322.425 : ~decimal	seed 2 expression 147	
+(IIF('2.5' IS NULL, (748.58 / 2.5), (c_bigint * 9.99)) - ((2147483648 + 2147483648) % 1.005))	7	21453361643.015000 : decimal(28,6)	21453361643.015 : ~decimal	seed 2 expression 147	
+(IIF(N'Abc' IS NULL, CAST(2147483647 AS float), (2147483647 / c_dec2)) + ((0.1 + c_bigint) - (2 / 2)))	1	3858993457.8999996 : float	3858993457.9 : ~decimal	seed 1 expression 160	
+(IIF(N'Abc' IS NULL, CAST(2147483647 AS float), (2147483647 / c_dec2)) + ((0.1 + c_bigint) - (2 / 2)))	3	-223748364700.9 : float	-223748364700.9 : ~decimal	seed 1 expression 160	
+(IIF(N'Abc' IS NULL, CAST(2147483647 AS float), (2147483647 / c_dec2)) + ((0.1 + c_bigint) - (2 / 2)))	4	9.223372036854776E+18 : float	9223372036854775806.314748365 : ~decimal	seed 1 expression 160	
+(IIF(N'Abc' IS NULL, CAST(2147483647 AS float), (2147483647 / c_dec2)) + ((0.1 + c_bigint) - (2 / 2)))	5	-9.223372036854776E+18 : float	-9223372036854775809.114748365 : ~decimal	seed 1 expression 160	
+(IIF(N'Abc' IS NULL, CAST(2147483647 AS float), (2147483647 / c_dec2)) + ((0.1 + c_bigint) - (2 / 2)))	7	216895848347.1 : float	216895848347.1 : ~decimal	seed 1 expression 160	
+(IIF(c_bigint = c_dec2, ROUND(3000000000, -1), ISNULL(c_dec2, 2147483647)) - (c_money % (7 * 1)))	2	3000000000.0000 : decimal(20,4)	error Other (ArgumentOutOfRangeException)	seed 3 expression 236	
+(IIF(c_int > 2, 0, 0) % IIF(1.5E0 IS NULL, c_bigint, 0.0001))	1	0.0000 : decimal(14,4)	0 : ~decimal	seed 2 expression 213	
+(IIF(c_int > 2, 0, 0) % IIF(1.5E0 IS NULL, c_bigint, 0.0001))	2	0.0000 : decimal(14,4)	0 : ~decimal	seed 2 expression 213	
+(IIF(c_int > 2, 0, 0) % IIF(1.5E0 IS NULL, c_bigint, 0.0001))	3	0.0000 : decimal(14,4)	0 : ~decimal	seed 2 expression 213	
+(IIF(c_int > 2, 0, 0) % IIF(1.5E0 IS NULL, c_bigint, 0.0001))	4	0.0000 : decimal(14,4)	0 : ~decimal	seed 2 expression 213	
+(IIF(c_int > 2, 0, 0) % IIF(1.5E0 IS NULL, c_bigint, 0.0001))	5	0.0000 : decimal(14,4)	0 : ~decimal	seed 2 expression 213	
+(IIF(c_int > 2, 0, 0) % IIF(1.5E0 IS NULL, c_bigint, 0.0001))	6	0.0000 : decimal(14,4)	0 : ~decimal	seed 2 expression 213	
+(IIF(c_int > 2, 0, 0) % IIF(1.5E0 IS NULL, c_bigint, 0.0001))	7	0.0000 : decimal(14,4)	0 : ~decimal	seed 2 expression 213	
+(ISNULL(748.58, (0 * c_int)) + '')	1	error Conversion (8114)	'748.58' : ~text	seed 1 expression 171	
+(ISNULL(748.58, (0 * c_int)) + '')	2	error Conversion (8114)	'748.58' : ~text	seed 1 expression 171	
+(ISNULL(748.58, (0 * c_int)) + '')	3	error Conversion (8114)	'748.58' : ~text	seed 1 expression 171	
+(ISNULL(748.58, (0 * c_int)) + '')	4	error Conversion (8114)	'748.58' : ~text	seed 1 expression 171	
+(ISNULL(748.58, (0 * c_int)) + '')	5	error Conversion (8114)	'748.58' : ~text	seed 1 expression 171	
+(ISNULL(748.58, (0 * c_int)) + '')	6	error Conversion (8114)	'748.58' : ~text	seed 1 expression 171	
+(ISNULL(748.58, (0 * c_int)) + '')	7	error Conversion (8114)	'748.58' : ~text	seed 1 expression 171	
+(ISNULL(CASE WHEN NULL = 9.99 THEN 1 ELSE c_dec2 END, ROUND(2.5, -1)) - COALESCE(ROUND(2.5, 1), ROUND(1.5E0, 2)))	1	0 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 194	
+(ISNULL(CASE WHEN NULL = 9.99 THEN 1 ELSE c_dec2 END, ROUND(2.5, -1)) - COALESCE(ROUND(2.5, 1), ROUND(1.5E0, 2)))	2	-2.5 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 194	
+(ISNULL(CASE WHEN NULL = 9.99 THEN 1 ELSE c_dec2 END, ROUND(2.5, -1)) - COALESCE(ROUND(2.5, 1), ROUND(1.5E0, 2)))	3	-2.51 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 194	
+(ISNULL(CASE WHEN NULL = 9.99 THEN 1 ELSE c_dec2 END, ROUND(2.5, -1)) - COALESCE(ROUND(2.5, 1), ROUND(1.5E0, 2)))	4	9999999997.49 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 194	
+(ISNULL(CASE WHEN NULL = 9.99 THEN 1 ELSE c_dec2 END, ROUND(2.5, -1)) - COALESCE(ROUND(2.5, 1), ROUND(1.5E0, 2)))	5	-10000000002.49 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 194	
+(ISNULL(CASE WHEN NULL = 9.99 THEN 1 ELSE c_dec2 END, ROUND(2.5, -1)) - COALESCE(ROUND(2.5, 1), ROUND(1.5E0, 2)))	6	-2.5 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 194	
+(ISNULL(CASE WHEN NULL = 9.99 THEN 1 ELSE c_dec2 END, ROUND(2.5, -1)) - COALESCE(ROUND(2.5, 1), ROUND(1.5E0, 2)))	7	-2.49 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 194	
+(ISNULL(ROUND(c_dec2, 2), 1E-1) * CAST(ROUND(9.99, 2) AS int))	6	0.90 : decimal(23,2)	0.9 : ~float	seed 2 expression 200	
+(ISNULL(ROUND(c_int, -3), (1.5E0 / NULL)) % (748.58 + (0 * 0.0001)))	1	0.0000 : decimal(8,4)	error Other (ArgumentOutOfRangeException)	seed 1 expression 202	
+(ISNULL(ROUND(c_int, -3), (1.5E0 / NULL)) % (748.58 + (0 * 0.0001)))	2	0.0000 : decimal(8,4)	error Other (ArgumentOutOfRangeException)	seed 1 expression 202	
+(ISNULL(ROUND(c_int, -3), (1.5E0 / NULL)) % (748.58 + (0 * 0.0001)))	3	0.0000 : decimal(8,4)	error Other (ArgumentOutOfRangeException)	seed 1 expression 202	
+(ISNULL(ROUND(c_int, -3), (1.5E0 / NULL)) % (748.58 + (0 * 0.0001)))	4	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 1 expression 202	
+(ISNULL(ROUND(c_int, -3), (1.5E0 / NULL)) % (748.58 + (0 * 0.0001)))	5	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 1 expression 202	
+(ISNULL(ROUND(c_int, -3), (1.5E0 / NULL)) % (748.58 + (0 * 0.0001)))	7	0.0000 : decimal(8,4)	error Other (ArgumentOutOfRangeException)	seed 1 expression 202	
+(ISNULL(c_dec2, 1.005) + (1 / 1.5E0))	6	1.6766666666666667 : float	1.6716666666666664 : ~float	seed 1 expression 226	
+(LEN(CAST(N'Abc' AS varchar(3))) * CAST(CASE WHEN 2 = 748.58 THEN 2.5 ELSE c_dec2 END AS decimal(10,2)))	4	error Overflow (8115)	29999999999.97 : ~decimal	seed 2 expression 1	
+(LEN(CAST(N'Abc' AS varchar(3))) * CAST(CASE WHEN 2 = 748.58 THEN 2.5 ELSE c_dec2 END AS decimal(10,2)))	5	error Overflow (8115)	-29999999999.97 : ~decimal	seed 2 expression 1	
+(LEN(LTRIM(N'')) - CAST(CAST(c_text AS int) AS decimal(38,6)))	2	0.000000 : decimal(38,6)	error Conversion (FormatException)	seed 2 expression 122	
+(LEN(N'ꞔ') / ROUND(748.58, -3))	1	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 1 expression 157	
+(LTRIM('ā') + (REPLACE('abc ', N'a', N'xy') + UPPER('abc ')))	1	'axybc ABC ' : nvarchar(4000)	'{U+0101}xybc ABC ' : ~text	seed 2 expression 13	
+(N'5' + ISNULL('ā', c_text))	1	'5a' : nvarchar(2)	'5{U+0101}' : ~text	seed 1 expression 124	
+(N'5' + ISNULL('ā', c_text))	2	'5a' : nvarchar(2)	'5{U+0101}' : ~text	seed 1 expression 124	
+(N'5' + ISNULL('ā', c_text))	3	'5a' : nvarchar(2)	'5{U+0101}' : ~text	seed 1 expression 124	
+(N'5' + ISNULL('ā', c_text))	4	'5a' : nvarchar(2)	'5{U+0101}' : ~text	seed 1 expression 124	
+(N'5' + ISNULL('ā', c_text))	5	'5a' : nvarchar(2)	'5{U+0101}' : ~text	seed 1 expression 124	
+(N'5' + ISNULL('ā', c_text))	6	'5a' : nvarchar(2)	'5{U+0101}' : ~text	seed 1 expression 124	
+(N'5' + ISNULL('ā', c_text))	7	'5a' : nvarchar(2)	'5{U+0101}' : ~text	seed 1 expression 124	
+(NULL % (0 - c_bigint))	5	error Overflow (8115)	NULL : ~untyped	seed 1 expression 79	
+(NULLIF(CAST(0.0001 AS bigint), c_float) - IIF(c_bigint = c_dec2, PATINDEX('%b%', c_text), (0.1 + 1E-1)))	4	-0.2 : float	error Overflow (OverflowException)	seed 1 expression 61	
+(NULLIF(CAST(0.0001 AS bigint), c_float) - IIF(c_bigint = c_dec2, PATINDEX('%b%', c_text), (0.1 + 1E-1)))	5	-0.2 : float	error Overflow (OverflowException)	seed 1 expression 61	
+(NULLIF(CAST(0.0001 AS bigint), c_float) - IIF(c_bigint = c_dec2, PATINDEX('%b%', c_text), (0.1 + 1E-1)))	7	-0.2 : float	NULL : ~untyped	seed 1 expression 61	
+(PATINDEX('%[0-9]%', LEFT('abc ', 2)) + c_dec)	1	2.5000000000 : decimal(24,10)	error Refused (NotSupportedException)	seed 3 expression 156	
+(PATINDEX('%[0-9]%', LEFT('abc ', 2)) + c_dec)	2	0.0000000000 : decimal(24,10)	error Refused (NotSupportedException)	seed 3 expression 156	
+(PATINDEX('%[0-9]%', LEFT('abc ', 2)) + c_dec)	3	-1.0000000001 : decimal(24,10)	error Refused (NotSupportedException)	seed 3 expression 156	
+(PATINDEX('%[0-9]%', LEFT('abc ', 2)) + c_dec)	4	9999999999999.9999999999 : decimal(24,10)	error Refused (NotSupportedException)	seed 3 expression 156	
+(PATINDEX('%[0-9]%', LEFT('abc ', 2)) + c_dec)	5	-9999999999999.9999999999 : decimal(24,10)	error Refused (NotSupportedException)	seed 3 expression 156	
+(PATINDEX('%[0-9]%', LEFT('abc ', 2)) + c_dec)	6	NULL : decimal(24,10)	error Refused (NotSupportedException)	seed 3 expression 156	
+(PATINDEX('%[0-9]%', LEFT('abc ', 2)) + c_dec)	7	0.0000000001 : decimal(24,10)	error Refused (NotSupportedException)	seed 3 expression 156	
+(PATINDEX('%[0-9]%', RTRIM('')) - LEN((N'Abc' + N'ꞔ')))	1	-4 : int	-4 : ~bigint	seed 1 expression 112	
+(PATINDEX('%a', N' x ') + ISNULL(NULL, 2147483647))	1	2147483647 : int	2147483647 : ~bigint	seed 1 expression 111	
+(PATINDEX('%a', SUBSTRING(N'Abc', 2, 2)) * ROUND((1.005 + c_dec), 1))	1	0.0000000000 : decimal(35,10)	0.0 : ~decimal	seed 1 expression 194	
+(PATINDEX('%a', SUBSTRING(N'Abc', 2, 2)) * ROUND((1.005 + c_dec), 1))	2	0.0000000000 : decimal(35,10)	0.0 : ~decimal	seed 1 expression 194	
+(PATINDEX('%a', SUBSTRING(N'Abc', 2, 2)) * ROUND((1.005 + c_dec), 1))	3	0.0000000000 : decimal(35,10)	0.0 : ~decimal	seed 1 expression 194	
+(PATINDEX('%a', SUBSTRING(N'Abc', 2, 2)) * ROUND((1.005 + c_dec), 1))	4	0.0000000000 : decimal(35,10)	0 : ~decimal	seed 1 expression 194	
+(PATINDEX('%a', SUBSTRING(N'Abc', 2, 2)) * ROUND((1.005 + c_dec), 1))	5	0.0000000000 : decimal(35,10)	0 : ~decimal	seed 1 expression 194	
+(PATINDEX('%a', SUBSTRING(N'Abc', 2, 2)) * ROUND((1.005 + c_dec), 1))	7	0.0000000000 : decimal(35,10)	0.0 : ~decimal	seed 1 expression 194	
+(PATINDEX('%b%', 'ā') + RIGHT(c_ntext, 2))	1	error Conversion (245)	error Refused (NotSupportedException)	seed 1 expression 148	
+(PATINDEX('%b%', 'ā') + RIGHT(c_ntext, 2))	2	0 : int	error Refused (NotSupportedException)	seed 1 expression 148	
+(PATINDEX('%b%', 'ā') + RIGHT(c_ntext, 2))	3	error Conversion (245)	error Refused (NotSupportedException)	seed 1 expression 148	
+(PATINDEX('%b%', 'ā') + RIGHT(c_ntext, 2))	4	error Conversion (245)	error Refused (NotSupportedException)	seed 1 expression 148	
+(PATINDEX('%b%', 'ā') + RIGHT(c_ntext, 2))	5	error Conversion (245)	error Refused (NotSupportedException)	seed 1 expression 148	
+(PATINDEX('%b%', 'ā') + RIGHT(c_ntext, 2))	6	NULL : int	error Refused (NotSupportedException)	seed 1 expression 148	
+(PATINDEX('%b%', 'ā') + RIGHT(c_ntext, 2))	7	error Conversion (245)	error Refused (NotSupportedException)	seed 1 expression 148	
+(PATINDEX('%b%', ISNULL('', N'')) - (COALESCE(1.005, 0.0001) * CAST(0.1 AS decimal(10,2))))	1	-0.100500 : decimal(17,6)	-0.1005 : ~decimal	seed 3 expression 171	
+(PATINDEX('_b%', N' x ') + ROUND(0.0001, 0))	1	0.0000 : decimal(15,4)	0 : ~decimal	seed 3 expression 205	
+(ROUND((0.1 + c_bigint), -1) / 9.99)	1	300300300.300300 : decimal(28,6)	error Other (ArgumentOutOfRangeException)	seed 1 expression 86	
+(ROUND((0.1 + c_bigint), -1) / 9.99)	2	0.000000 : decimal(28,6)	error Other (ArgumentOutOfRangeException)	seed 1 expression 86	
+(ROUND((0.1 + c_bigint), -1) / 9.99)	3	-900900900.900900 : decimal(28,6)	error Other (ArgumentOutOfRangeException)	seed 1 expression 86	
+(ROUND((0.1 + c_bigint), -1) / 9.99)	4	923260464149627208.208208 : decimal(28,6)	error Other (ArgumentOutOfRangeException)	seed 1 expression 86	
+(ROUND((0.1 + c_bigint), -1) / 9.99)	5	-923260464149627208.208208 : decimal(28,6)	error Other (ArgumentOutOfRangeException)	seed 1 expression 86	
+(ROUND((0.1 + c_bigint), -1) / 9.99)	7	214963328.328328 : decimal(28,6)	error Other (ArgumentOutOfRangeException)	seed 1 expression 86	
+(ROUND((1 * 0.1), -3) - (c_dec % 2147483647))	1	-2.5000000000 : decimal(21,10)	error Other (ArgumentOutOfRangeException)	seed 2 expression 160	
+(ROUND((1 * 0.1), -3) - (c_dec % 2147483647))	2	0.0000000000 : decimal(21,10)	error Other (ArgumentOutOfRangeException)	seed 2 expression 160	
+(ROUND((1 * 0.1), -3) - (c_dec % 2147483647))	3	1.0000000001 : decimal(21,10)	error Other (ArgumentOutOfRangeException)	seed 2 expression 160	
+(ROUND((1 * 0.1), -3) - (c_dec % 2147483647))	4	-1316139567.9999999999 : decimal(21,10)	error Other (ArgumentOutOfRangeException)	seed 2 expression 160	
+(ROUND((1 * 0.1), -3) - (c_dec % 2147483647))	5	1316139567.9999999999 : decimal(21,10)	error Other (ArgumentOutOfRangeException)	seed 2 expression 160	
+(ROUND((1 * 0.1), -3) - (c_dec % 2147483647))	6	NULL : decimal(21,10)	error Other (ArgumentOutOfRangeException)	seed 2 expression 160	
+(ROUND((1 * 0.1), -3) - (c_dec % 2147483647))	7	-0.0000000001 : decimal(21,10)	error Other (ArgumentOutOfRangeException)	seed 2 expression 160	
+(ROUND((c_dec2 % 1E-1), -1) / CEILING(CAST(3000000000 AS int)))	1	error TypeClash (402)	error Other (ArgumentOutOfRangeException)	seed 3 expression 29	
+(ROUND((c_dec2 % 1E-1), -1) / CEILING(CAST(3000000000 AS int)))	2	error TypeClash (402)	error Other (ArgumentOutOfRangeException)	seed 3 expression 29	
+(ROUND((c_dec2 % 1E-1), -1) / CEILING(CAST(3000000000 AS int)))	3	error TypeClash (402)	error Other (ArgumentOutOfRangeException)	seed 3 expression 29	
+(ROUND((c_dec2 % 1E-1), -1) / CEILING(CAST(3000000000 AS int)))	4	error TypeClash (402)	error Other (ArgumentOutOfRangeException)	seed 3 expression 29	
+(ROUND((c_dec2 % 1E-1), -1) / CEILING(CAST(3000000000 AS int)))	5	error TypeClash (402)	error Other (ArgumentOutOfRangeException)	seed 3 expression 29	
+(ROUND((c_dec2 % 1E-1), -1) / CEILING(CAST(3000000000 AS int)))	6	error TypeClash (402)	error Overflow (OverflowException)	seed 3 expression 29	
+(ROUND((c_dec2 % 1E-1), -1) / CEILING(CAST(3000000000 AS int)))	7	error TypeClash (402)	error Other (ArgumentOutOfRangeException)	seed 3 expression 29	
+(ROUND(1, -3) * 0)	1	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 31	
+(ROUND(1, 0) + 2147483648)	1	2147483649 : decimal(11,0)	2147483649 : ~float	seed 2 expression 47	
+(ROUND(1.005, 1) / CAST(748.58 AS decimal(10,2)))	1	0.00133586256645 : decimal(17,14)	0.0013358625664591626813433434 : ~decimal	seed 3 expression 182	
+(ROUND(7, -3) - (0.0001 % 3000000000))	1	-0.0001 : decimal(15,4)	error Other (ArgumentOutOfRangeException)	seed 2 expression 239	
+(ROUND(748.58, 1) + PATINDEX('%b%', '2.5'))	1	748.60 : decimal(13,2)	748.6 : ~decimal	seed 3 expression 13	
+(ROUND(9.99, -3) / 1E-1)	1	0 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 9	
+(ROUND(COALESCE(1.5E0, 0.1), -3) / ROUND(c_int, -3))	1	error DivideByZero (8134)	error Other (ArgumentOutOfRangeException)	seed 2 expression 128	
+(ROUND(COALESCE(1.5E0, 0.1), -3) / ROUND(c_int, -3))	2	error DivideByZero (8134)	error Other (ArgumentOutOfRangeException)	seed 2 expression 128	
+(ROUND(COALESCE(1.5E0, 0.1), -3) / ROUND(c_int, -3))	3	error DivideByZero (8134)	error Other (ArgumentOutOfRangeException)	seed 2 expression 128	
+(ROUND(COALESCE(1.5E0, 0.1), -3) / ROUND(c_int, -3))	4	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 2 expression 128	
+(ROUND(COALESCE(1.5E0, 0.1), -3) / ROUND(c_int, -3))	5	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 2 expression 128	
+(ROUND(COALESCE(1.5E0, 0.1), -3) / ROUND(c_int, -3))	6	NULL : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 128	
+(ROUND(COALESCE(1.5E0, 0.1), -3) / ROUND(c_int, -3))	7	error DivideByZero (8134)	error Other (ArgumentOutOfRangeException)	seed 2 expression 128	
+(ROUND(ROUND(c_bigint, 2), -1) + 2)	1	3000000002 : bigint	error Other (ArgumentOutOfRangeException)	seed 2 expression 255	
+(ROUND(ROUND(c_bigint, 2), -1) + 2)	2	2 : bigint	error Other (ArgumentOutOfRangeException)	seed 2 expression 255	
+(ROUND(ROUND(c_bigint, 2), -1) + 2)	3	-8999999998 : bigint	error Other (ArgumentOutOfRangeException)	seed 2 expression 255	
+(ROUND(ROUND(c_bigint, 2), -1) + 2)	4	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 2 expression 255	
+(ROUND(ROUND(c_bigint, 2), -1) + 2)	5	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 2 expression 255	
+(ROUND(ROUND(c_bigint, 2), -1) + 2)	7	2147483652 : bigint	error Other (ArgumentOutOfRangeException)	seed 2 expression 255	
+(ROUND(c_dec2, 0) - (ROUND(748.58, 1) % (3000000000 % 0.1)))	4	error Overflow (8115)	error DivideByZero (DivideByZeroException)	seed 1 expression 59	
+(ROUND(c_dec2, 0) - (ROUND(748.58, 1) % (3000000000 % 0.1)))	5	error Overflow (8115)	error DivideByZero (DivideByZeroException)	seed 1 expression 59	
+(ROUND(c_dec2, 0) / ROUND(9.99, 0))	1	error Overflow (8115)	0.3 : ~decimal	seed 1 expression 119	
+(ROUND(c_dec2, 0) / ROUND(9.99, 0))	2	error Overflow (8115)	0 : ~decimal	seed 1 expression 119	
+(ROUND(c_dec2, 0) / ROUND(9.99, 0))	3	error Overflow (8115)	0 : ~decimal	seed 1 expression 119	
+(ROUND(c_dec2, 0) / ROUND(9.99, 0))	4	error Overflow (8115)	1000000000 : ~decimal	seed 1 expression 119	
+(ROUND(c_dec2, 0) / ROUND(9.99, 0))	5	error Overflow (8115)	-1000000000 : ~decimal	seed 1 expression 119	
+(ROUND(c_dec2, 0) / ROUND(9.99, 0))	6	error Overflow (8115)	NULL : ~untyped	seed 1 expression 119	
+(ROUND(c_dec2, 0) / ROUND(9.99, 0))	7	error Overflow (8115)	0 : ~decimal	seed 1 expression 119	
+(RTRIM(IIF(N' x ' = N'5', c_ntext, c_text)) + (RTRIM(N'Abc') + LTRIM(N'ꞔ')))	7	'xa{U+000A}Abc{U+A794}' : nvarchar(104)	'xaAbc{U+A794}' : ~text	seed 1 expression 230	
+(TRIM(REPLACE(N' x ', N'a', N'xy')) + RIGHT(LOWER('ā'), 2))	1	'xa' : nvarchar(4000)	error Refused (NotSupportedException)	seed 2 expression 264	
+(UPPER(N' x ') + ISNULL('ā', c_text))	1	' X a' : nvarchar(4)	' X {U+0101}' : ~text	seed 2 expression 53	
+(UPPER(N' x ') + ISNULL('ā', c_text))	2	' X a' : nvarchar(4)	' X {U+0101}' : ~text	seed 2 expression 53	
+(UPPER(N' x ') + ISNULL('ā', c_text))	3	' X a' : nvarchar(4)	' X {U+0101}' : ~text	seed 2 expression 53	
+(UPPER(N' x ') + ISNULL('ā', c_text))	4	' X a' : nvarchar(4)	' X {U+0101}' : ~text	seed 2 expression 53	
+(UPPER(N' x ') + ISNULL('ā', c_text))	5	' X a' : nvarchar(4)	' X {U+0101}' : ~text	seed 2 expression 53	
+(UPPER(N' x ') + ISNULL('ā', c_text))	6	' X a' : nvarchar(4)	' X {U+0101}' : ~text	seed 2 expression 53	
+(UPPER(N' x ') + ISNULL('ā', c_text))	7	' X a' : nvarchar(4)	' X {U+0101}' : ~text	seed 2 expression 53	
+(UPPER(c_text) + LEFT('ā', 2))	1	'ABC a' : varchar(101)	error Refused (NotSupportedException)	seed 2 expression 233	
+(UPPER(c_text) + LEFT('ā', 2))	2	'a' : varchar(101)	error Refused (NotSupportedException)	seed 2 expression 233	
+(UPPER(c_text) + LEFT('ā', 2))	3	' Xa' : varchar(101)	error Refused (NotSupportedException)	seed 2 expression 233	
+(UPPER(c_text) + LEFT('ā', 2))	4	'Za' : varchar(101)	error Refused (NotSupportedException)	seed 2 expression 233	
+(UPPER(c_text) + LEFT('ā', 2))	5	'~a' : varchar(101)	error Refused (NotSupportedException)	seed 2 expression 233	
+(UPPER(c_text) + LEFT('ā', 2))	6	NULL : varchar(101)	error Refused (NotSupportedException)	seed 2 expression 233	
+(UPPER(c_text) + LEFT('ā', 2))	7	'XA{U+000A}a' : varchar(101)	error Refused (NotSupportedException)	seed 2 expression 233	
+(c_dec * 2147483647)	4	21474836469999999999999.7852516353 : decimal(34,10)	21474836469999999999999.785252 : ~decimal	seed 2 expression 161	
+(c_dec * 2147483647)	5	-21474836469999999999999.7852516353 : decimal(34,10)	-21474836469999999999999.785252 : ~decimal	seed 2 expression 161	
+(c_dec * c_money)	1	30.864000000 : decimal(38,9)	30.86400000000000 : ~decimal	seed 2 expression 151	
+(c_dec * c_money)	2	0.000000000 : decimal(38,9)	0.00000000000000 : ~decimal	seed 2 expression 151	
+(c_dec * c_money)	3	0.000100000 : decimal(38,9)	0.00010000000001 : ~decimal	seed 2 expression 151	
+(c_dec * c_money)	4	9223372036854775806999907766.279631452 : decimal(38,9)	9223372036854775806999907766 : ~decimal	seed 2 expression 151	
+(c_dec * c_money)	5	9223372036854775807999907766.279631452 : decimal(38,9)	9223372036854775807999907766 : ~decimal	seed 2 expression 151	
+(c_dec * c_money)	7	0.000000000 : decimal(38,9)	0.00000000000001 : ~decimal	seed 2 expression 151	
+(c_dec + N'ꞔ')	1	error Conversion (8114)	'2.5000000000{U+A794}' : ~text	seed 2 expression 104	
+(c_dec + N'ꞔ')	2	error Conversion (8114)	'0.0000000000{U+A794}' : ~text	seed 2 expression 104	
+(c_dec + N'ꞔ')	3	error Conversion (8114)	'-1.0000000001{U+A794}' : ~text	seed 2 expression 104	
+(c_dec + N'ꞔ')	4	error Conversion (8114)	'9999999999999.9999999999{U+A794}' : ~text	seed 2 expression 104	
+(c_dec + N'ꞔ')	5	error Conversion (8114)	'-9999999999999.9999999999{U+A794}' : ~text	seed 2 expression 104	
+(c_dec + N'ꞔ')	6	error Conversion (8114)	NULL : ~untyped	seed 2 expression 104	
+(c_dec + N'ꞔ')	7	error Conversion (8114)	'0.0000000001{U+A794}' : ~text	seed 2 expression 104	
+(c_dec / ((1.005 * 3000000000) * (-c_money)))	1	-0.000000000067164608 : decimal(38,18)	-0.000000000067164608957974943 : ~decimal	seed 3 expression 288	
+(c_dec / ((1.005 * 3000000000) * (-c_money)))	3	-0.000003316749585737 : decimal(38,18)	-0.0000033167495857379767827529 : ~decimal	seed 3 expression 288	
+(c_dec / ((1.005 * 3000000000) * (-c_money)))	4	-0.000000000003596027 : decimal(38,18)	-0.0000000000035960271060879086 : ~decimal	seed 3 expression 288	
+(c_dec / ((1.005 * 3000000000) * (-c_money)))	5	error Overflow (8115)	-0.0000000000035960271060879086 : ~decimal	seed 3 expression 288	
+(c_dec / ((1.005 * 3000000000) * (-c_money)))	7	-0.000000000000000331 : decimal(38,18)	-0.0000000000000003316749585406 : ~decimal	seed 3 expression 288	
+(c_dec / 748.58)	1	0.0033396564161479 : decimal(31,16)	0.0033396564161479067033583585 : ~decimal	seed 2 expression 250	
+(c_dec / 748.58)	2	0.0000000000000000 : decimal(31,16)	0.00000000 : ~decimal	seed 2 expression 250	
+(c_dec / 748.58)	3	-0.0013358625665927 : decimal(31,16)	-0.0013358625665927489379892597 : ~decimal	seed 2 expression 250	
+(c_dec / 748.58)	4	13358625664.5916268134333003 : decimal(31,16)	13358625664.591626813433300382 : ~decimal	seed 2 expression 250	
+(c_dec / 748.58)	5	-13358625664.5916268134333003 : decimal(31,16)	-13358625664.591626813433300382 : ~decimal	seed 2 expression 250	
+(c_dec / 748.58)	7	0.0000000000001335 : decimal(31,16)	0.0000000000001335862566459163 : ~decimal	seed 2 expression 250	
+(c_dec2 / 748.58)	1	0.00333965 : decimal(20,8)	0.0033396564161479067033583585 : ~decimal	seed 2 expression 157	
+(c_dec2 / 748.58)	2	0.00000000 : decimal(20,8)	0 : ~decimal	seed 2 expression 157	
+(c_dec2 / 748.58)	3	-0.00001335 : decimal(20,8)	-0.0000133586256645916268134334 : ~decimal	seed 2 expression 157	
+(c_dec2 / 748.58)	4	13358625.66457826 : decimal(20,8)	13358625.664578268187768842341 : ~decimal	seed 2 expression 157	
+(c_dec2 / 748.58)	5	-13358625.66457826 : decimal(20,8)	-13358625.664578268187768842341 : ~decimal	seed 2 expression 157	
+(c_dec2 / 748.58)	7	0.00001335 : decimal(20,8)	0.0000133586256645916268134334 : ~decimal	seed 2 expression 157	
+(c_float % 7)	1	error TypeClash (402)	0.1 : ~float	seed 2 expression 279	
+(c_float % 7)	2	error TypeClash (402)	0 : ~float	seed 2 expression 279	
+(c_float % 7)	3	error TypeClash (402)	-2.5 : ~float	seed 2 expression 279	
+(c_float % 7)	4	error TypeClash (402)	5 : ~float	seed 2 expression 279	
+(c_float % 7)	5	error TypeClash (402)	-5 : ~float	seed 2 expression 279	
+(c_float % 7)	6	error TypeClash (402)	NULL : ~untyped	seed 2 expression 279	
+(c_float % 7)	7	error TypeClash (402)	1E-300 : ~float	seed 2 expression 279	
+(c_float * c_dec)	4	error Overflow (8115)	Infinity : ~float	seed 3 expression 109	
+(c_float * c_dec)	5	error Overflow (8115)	Infinity : ~float	seed 3 expression 109	
+(c_int + 1)	1	8 : int	8 : ~bigint	seed 1 expression 228	
+(c_int + 1)	2	1 : int	1 : ~bigint	seed 1 expression 228	
+(c_int + 1)	3	-6 : int	-6 : ~bigint	seed 1 expression 228	
+(c_int + 1)	4	error Overflow (8115)	2147483648 : ~bigint	seed 1 expression 228	
+(c_int + 1)	5	-2147483647 : int	-2147483647 : ~bigint	seed 1 expression 228	
+(c_int + 1)	7	2 : int	2 : ~bigint	seed 1 expression 228	
+(c_int / 0.0001)	1	70000.000000 : decimal(20,6)	70000 : ~decimal	seed 2 expression 171	
+(c_int / 0.0001)	2	0.000000 : decimal(20,6)	0 : ~decimal	seed 2 expression 171	
+(c_int / 0.0001)	3	-70000.000000 : decimal(20,6)	-70000 : ~decimal	seed 2 expression 171	
+(c_int / 0.0001)	4	21474836470000.000000 : decimal(20,6)	21474836470000 : ~decimal	seed 2 expression 171	
+(c_int / 0.0001)	5	-21474836480000.000000 : decimal(20,6)	-21474836480000 : ~decimal	seed 2 expression 171	
+(c_int / 0.0001)	7	10000.000000 : decimal(20,6)	10000 : ~decimal	seed 2 expression 171	
+(c_int / 748.58)	1	0.009351 : decimal(18,6)	0.0093510379652141387694034038 : ~decimal	seed 2 expression 175	
+(c_int / 748.58)	2	0.000000 : decimal(18,6)	0 : ~decimal	seed 2 expression 175	
+(c_int / 748.58)	3	-0.009351 : decimal(18,6)	-0.0093510379652141387694034038 : ~decimal	seed 2 expression 175	
+(c_int / 748.58)	4	2868743.016110 : decimal(18,6)	2868743.016110502551497501937 : ~decimal	seed 2 expression 175	
+(c_int / 748.58)	5	-2868743.017446 : decimal(18,6)	-2868743.0174463651179566646183 : ~decimal	seed 2 expression 175	
+(c_int / 748.58)	7	0.001335 : decimal(18,6)	0.0013358625664591626813433434 : ~decimal	seed 2 expression 175	
+(c_int / c_dec2)	1	2.8000000000000 : decimal(25,13)	2.8 : ~decimal	seed 3 expression 25	
+(c_int / c_dec2)	3	700.0000000000000 : decimal(25,13)	700 : ~decimal	seed 3 expression 25	
+(c_int / c_dec2)	4	0.2147483647002 : decimal(25,13)	0.2147483647002147483647002147 : ~decimal	seed 3 expression 25	
+(c_int / c_dec2)	5	0.2147483648002 : decimal(25,13)	0.2147483648002147483648002147 : ~decimal	seed 3 expression 25	
+(c_int / c_dec2)	7	100.0000000000000 : decimal(25,13)	100 : ~decimal	seed 3 expression 25	
+(c_money + 2147483647)	4	error Overflow (8115)	922339351169124.5807 : ~decimal	seed 2 expression 168	
+ABS(IIF(c_text = N'5', ISNULL(NULL, NULL), ROUND(7, -3)))	1	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 230	
+ABS(IIF(c_text = N'5', ISNULL(NULL, NULL), ROUND(7, -3)))	2	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 230	
+ABS(IIF(c_text = N'5', ISNULL(NULL, NULL), ROUND(7, -3)))	3	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 230	
+ABS(IIF(c_text = N'5', ISNULL(NULL, NULL), ROUND(7, -3)))	4	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 230	
+ABS(IIF(c_text = N'5', ISNULL(NULL, NULL), ROUND(7, -3)))	5	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 230	
+ABS(IIF(c_text = N'5', ISNULL(NULL, NULL), ROUND(7, -3)))	6	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 230	
+ABS(IIF(c_text = N'5', ISNULL(NULL, NULL), ROUND(7, -3)))	7	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 230	
+CASE WHEN '2.5' = '2.5' THEN 3000000000 ELSE c_float END	1	3000000000 : float	3000000000 : ~decimal	seed 1 expression 56	
+CASE WHEN '2.5' = '2.5' THEN 3000000000 ELSE c_float END	2	3000000000 : float	3000000000 : ~decimal	seed 1 expression 56	
+CASE WHEN '2.5' = '2.5' THEN 3000000000 ELSE c_float END	3	3000000000 : float	3000000000 : ~decimal	seed 1 expression 56	
+CASE WHEN '2.5' = '2.5' THEN 3000000000 ELSE c_float END	4	3000000000 : float	3000000000 : ~decimal	seed 1 expression 56	
+CASE WHEN '2.5' = '2.5' THEN 3000000000 ELSE c_float END	5	3000000000 : float	3000000000 : ~decimal	seed 1 expression 56	
+CASE WHEN '2.5' = '2.5' THEN 3000000000 ELSE c_float END	6	3000000000 : float	3000000000 : ~decimal	seed 1 expression 56	
+CASE WHEN '2.5' = '2.5' THEN 3000000000 ELSE c_float END	7	3000000000 : float	3000000000 : ~decimal	seed 1 expression 56	
+CASE WHEN 'abc ' < N'Abc' THEN 748.58 ELSE c_int END	1	7.00 : decimal(12,2)	7 : ~int	seed 2 expression 127	
+CASE WHEN 'abc ' < N'Abc' THEN 748.58 ELSE c_int END	2	0.00 : decimal(12,2)	0 : ~int	seed 2 expression 127	
+CASE WHEN 'abc ' < N'Abc' THEN 748.58 ELSE c_int END	3	-7.00 : decimal(12,2)	-7 : ~int	seed 2 expression 127	
+CASE WHEN 'abc ' < N'Abc' THEN 748.58 ELSE c_int END	4	2147483647.00 : decimal(12,2)	2147483647 : ~int	seed 2 expression 127	
+CASE WHEN 'abc ' < N'Abc' THEN 748.58 ELSE c_int END	5	-2147483648.00 : decimal(12,2)	-2147483648 : ~int	seed 2 expression 127	
+CASE WHEN 'abc ' < N'Abc' THEN 748.58 ELSE c_int END	7	1.00 : decimal(12,2)	1 : ~int	seed 2 expression 127	
+CASE WHEN 'abc ' IS NULL THEN c_money ELSE 1 END	1	1.0000 : money	1 : ~int	seed 1 expression 221	
+CASE WHEN 'abc ' IS NULL THEN c_money ELSE 1 END	2	1.0000 : money	1 : ~int	seed 1 expression 221	
+CASE WHEN 'abc ' IS NULL THEN c_money ELSE 1 END	3	1.0000 : money	1 : ~int	seed 1 expression 221	
+CASE WHEN 'abc ' IS NULL THEN c_money ELSE 1 END	4	1.0000 : money	1 : ~int	seed 1 expression 221	
+CASE WHEN 'abc ' IS NULL THEN c_money ELSE 1 END	5	1.0000 : money	1 : ~int	seed 1 expression 221	
+CASE WHEN 'abc ' IS NULL THEN c_money ELSE 1 END	6	1.0000 : money	1 : ~int	seed 1 expression 221	
+CASE WHEN 'abc ' IS NULL THEN c_money ELSE 1 END	7	1.0000 : money	1 : ~int	seed 1 expression 221	
+CASE WHEN 1E-1 > 2.5 THEN c_dec ELSE 2147483647 END	1	2147483647.0000000000 : decimal(23,10)	2147483647 : ~int	seed 3 expression 157	
+CASE WHEN 1E-1 > 2.5 THEN c_dec ELSE 2147483647 END	2	2147483647.0000000000 : decimal(23,10)	2147483647 : ~int	seed 3 expression 157	
+CASE WHEN 1E-1 > 2.5 THEN c_dec ELSE 2147483647 END	3	2147483647.0000000000 : decimal(23,10)	2147483647 : ~int	seed 3 expression 157	
+CASE WHEN 1E-1 > 2.5 THEN c_dec ELSE 2147483647 END	4	2147483647.0000000000 : decimal(23,10)	2147483647 : ~int	seed 3 expression 157	
+CASE WHEN 1E-1 > 2.5 THEN c_dec ELSE 2147483647 END	5	2147483647.0000000000 : decimal(23,10)	2147483647 : ~int	seed 3 expression 157	
+CASE WHEN 1E-1 > 2.5 THEN c_dec ELSE 2147483647 END	6	2147483647.0000000000 : decimal(23,10)	2147483647 : ~int	seed 3 expression 157	
+CASE WHEN 1E-1 > 2.5 THEN c_dec ELSE 2147483647 END	7	2147483647.0000000000 : decimal(23,10)	2147483647 : ~int	seed 3 expression 157	
+CASE WHEN 2 = 1E-1 THEN 0.1 ELSE 2 END	1	2.0 : decimal(2,1)	2 : ~int	seed 1 expression 246	
+CASE WHEN 2.5 < c_dec THEN c_float ELSE CHARINDEX(N'b', c_ntext) END	1	2 : float	2 : ~int	seed 2 expression 231	
+CASE WHEN 2.5 < c_dec THEN c_float ELSE CHARINDEX(N'b', c_ntext) END	2	0 : float	0 : ~int	seed 2 expression 231	
+CASE WHEN 2.5 < c_dec THEN c_float ELSE CHARINDEX(N'b', c_ntext) END	3	0 : float	0 : ~int	seed 2 expression 231	
+CASE WHEN 2.5 < c_dec THEN c_float ELSE CHARINDEX(N'b', c_ntext) END	5	2 : float	2 : ~int	seed 2 expression 231	
+CASE WHEN 2.5 < c_dec THEN c_float ELSE CHARINDEX(N'b', c_ntext) END	7	3 : float	3 : ~int	seed 2 expression 231	
+CASE WHEN 3000000000 < 2147483647 THEN (2147483647 / 748.58) ELSE 0 END	1	0.000000 : decimal(18,6)	0 : ~int	seed 2 expression 84	
+CASE WHEN CAST(0 AS money) = ISNULL(1E-1, 2147483647) THEN ABS(c_float) ELSE 3000000000 END	1	3000000000 : float	3000000000 : ~decimal	seed 2 expression 80	
+CASE WHEN CAST(0 AS money) = ISNULL(1E-1, 2147483647) THEN ABS(c_float) ELSE 3000000000 END	2	3000000000 : float	3000000000 : ~decimal	seed 2 expression 80	
+CASE WHEN CAST(0 AS money) = ISNULL(1E-1, 2147483647) THEN ABS(c_float) ELSE 3000000000 END	3	3000000000 : float	3000000000 : ~decimal	seed 2 expression 80	
+CASE WHEN CAST(0 AS money) = ISNULL(1E-1, 2147483647) THEN ABS(c_float) ELSE 3000000000 END	4	3000000000 : float	3000000000 : ~decimal	seed 2 expression 80	
+CASE WHEN CAST(0 AS money) = ISNULL(1E-1, 2147483647) THEN ABS(c_float) ELSE 3000000000 END	5	3000000000 : float	3000000000 : ~decimal	seed 2 expression 80	
+CASE WHEN CAST(0 AS money) = ISNULL(1E-1, 2147483647) THEN ABS(c_float) ELSE 3000000000 END	6	3000000000 : float	3000000000 : ~decimal	seed 2 expression 80	
+CASE WHEN CAST(0 AS money) = ISNULL(1E-1, 2147483647) THEN ABS(c_float) ELSE 3000000000 END	7	3000000000 : float	3000000000 : ~decimal	seed 2 expression 80	
+CASE WHEN COALESCE(c_dec, 0.1) = FLOOR(0.0001) THEN ABS(COALESCE(c_int, c_float)) ELSE 9.99 END	1	9.99 : float	9.99 : ~decimal	seed 1 expression 63	
+CASE WHEN COALESCE(c_dec, 0.1) = FLOOR(0.0001) THEN ABS(COALESCE(c_int, c_float)) ELSE 9.99 END	2	0 : float	0 : ~int	seed 1 expression 63	
+CASE WHEN COALESCE(c_dec, 0.1) = FLOOR(0.0001) THEN ABS(COALESCE(c_int, c_float)) ELSE 9.99 END	3	9.99 : float	9.99 : ~decimal	seed 1 expression 63	
+CASE WHEN COALESCE(c_dec, 0.1) = FLOOR(0.0001) THEN ABS(COALESCE(c_int, c_float)) ELSE 9.99 END	4	9.99 : float	9.99 : ~decimal	seed 1 expression 63	
+CASE WHEN COALESCE(c_dec, 0.1) = FLOOR(0.0001) THEN ABS(COALESCE(c_int, c_float)) ELSE 9.99 END	5	9.99 : float	9.99 : ~decimal	seed 1 expression 63	
+CASE WHEN COALESCE(c_dec, 0.1) = FLOOR(0.0001) THEN ABS(COALESCE(c_int, c_float)) ELSE 9.99 END	6	9.99 : float	9.99 : ~decimal	seed 1 expression 63	
+CASE WHEN COALESCE(c_dec, 0.1) = FLOOR(0.0001) THEN ABS(COALESCE(c_int, c_float)) ELSE 9.99 END	7	9.99 : float	9.99 : ~decimal	seed 1 expression 63	
+CASE WHEN c_ntext IS NULL THEN 9.99 ELSE 3000000000 END	1	3000000000.00 : decimal(12,2)	3000000000 : ~decimal	seed 2 expression 198	
+CASE WHEN c_ntext IS NULL THEN 9.99 ELSE 3000000000 END	2	3000000000.00 : decimal(12,2)	3000000000 : ~decimal	seed 2 expression 198	
+CASE WHEN c_ntext IS NULL THEN 9.99 ELSE 3000000000 END	3	3000000000.00 : decimal(12,2)	3000000000 : ~decimal	seed 2 expression 198	
+CASE WHEN c_ntext IS NULL THEN 9.99 ELSE 3000000000 END	4	3000000000.00 : decimal(12,2)	3000000000 : ~decimal	seed 2 expression 198	
+CASE WHEN c_ntext IS NULL THEN 9.99 ELSE 3000000000 END	5	3000000000.00 : decimal(12,2)	3000000000 : ~decimal	seed 2 expression 198	
+CASE WHEN c_ntext IS NULL THEN 9.99 ELSE 3000000000 END	7	3000000000.00 : decimal(12,2)	3000000000 : ~decimal	seed 2 expression 198	
+CASE WHEN c_text IS NULL THEN COALESCE(0, 0.1) ELSE (3000000000 / 1) END	1	3000000000.000000 : decimal(16,6)	3000000000 : ~decimal	seed 1 expression 94	
+CASE WHEN c_text IS NULL THEN COALESCE(0, 0.1) ELSE (3000000000 / 1) END	2	3000000000.000000 : decimal(16,6)	3000000000 : ~decimal	seed 1 expression 94	
+CASE WHEN c_text IS NULL THEN COALESCE(0, 0.1) ELSE (3000000000 / 1) END	3	3000000000.000000 : decimal(16,6)	3000000000 : ~decimal	seed 1 expression 94	
+CASE WHEN c_text IS NULL THEN COALESCE(0, 0.1) ELSE (3000000000 / 1) END	4	3000000000.000000 : decimal(16,6)	3000000000 : ~decimal	seed 1 expression 94	
+CASE WHEN c_text IS NULL THEN COALESCE(0, 0.1) ELSE (3000000000 / 1) END	5	3000000000.000000 : decimal(16,6)	3000000000 : ~decimal	seed 1 expression 94	
+CASE WHEN c_text IS NULL THEN COALESCE(0, 0.1) ELSE (3000000000 / 1) END	6	0.000000 : decimal(16,6)	0 : ~int	seed 1 expression 94	
+CASE WHEN c_text IS NULL THEN COALESCE(0, 0.1) ELSE (3000000000 / 1) END	7	3000000000.000000 : decimal(16,6)	3000000000 : ~decimal	seed 1 expression 94	
+CAST('' AS int)	1	0 : int	error Conversion (FormatException)	seed 3 expression 249	
+CAST(((1.5E0 / 2147483648) - LEN(c_text)) AS money)	7	-3.0000 : money	-2.0000 : ~decimal	seed 3 expression 12	
+CAST(((2147483648 - 1.005) + LEN(N'ꞔ')) AS decimal(10,2))	1	error Overflow (8115)	2147483648.00 : ~decimal	seed 3 expression 270	
+CAST(((3000000000 / c_bigint) - IIF('ā' = 'abc ', c_int, 3000000000)) AS money)	1	-2999999999.0000 : money	-2999999999 : ~decimal	seed 1 expression 12	
+CAST((0 / 7) AS money)	1	0.0000 : money	0 : ~decimal	seed 2 expression 216	
+CAST((2.5 - c_float) AS nvarchar(30))	4	'-1.79769e+308' : nvarchar(30)	'-1.7976931348623157E+308' : ~text	seed 3 expression 290	
+CAST((2.5 - c_float) AS nvarchar(30))	5	'1.79769e+308' : nvarchar(30)	'1.7976931348623157E+308' : ~text	seed 3 expression 290	
+CAST((9.99 / c_money) AS money)	3	-99900.0000 : money	-99900 : ~decimal	seed 1 expression 254	
+CAST((9.99 / c_money) AS money)	7	99900.0000 : money	99900 : ~decimal	seed 1 expression 254	
+CAST((c_dec * c_money) AS decimal(10,2))	4	error Overflow (8115)	9223372036854775806999907766 : ~decimal	seed 2 expression 143	
+CAST((c_dec * c_money) AS decimal(10,2))	5	error Overflow (8115)	9223372036854775807999907766 : ~decimal	seed 2 expression 143	
+CAST((c_money - 1E-1) AS decimal(38,6))	1	12.245600 : decimal(38,6)	12.2456 : ~decimal	seed 2 expression 72	
+CAST((c_money - 1E-1) AS decimal(38,6))	2	-0.100000 : decimal(38,6)	-0.1 : ~decimal	seed 2 expression 72	
+CAST((c_money - 1E-1) AS decimal(38,6))	3	-0.100100 : decimal(38,6)	-0.1001 : ~decimal	seed 2 expression 72	
+CAST((c_money - 1E-1) AS decimal(38,6))	4	922337203685477.500000 : decimal(38,6)	922337203685478 : ~decimal	seed 2 expression 72	
+CAST((c_money - 1E-1) AS decimal(38,6))	5	-922337203685477.750000 : decimal(38,6)	-922337203685478 : ~decimal	seed 2 expression 72	
+CAST((c_money - 1E-1) AS decimal(38,6))	7	-0.099900 : decimal(38,6)	-0.0999 : ~decimal	seed 2 expression 72	
+CAST(0 AS decimal(38,6))	1	0.000000 : decimal(38,6)	0 : ~decimal	seed 1 expression 19	
+CAST(1 AS money)	1	1.0000 : money	1 : ~decimal	seed 1 expression 279	
+CAST(1.005 AS decimal(38,6))	1	1.005000 : decimal(38,6)	1.005 : ~decimal	seed 1 expression 163	
+CAST(1.005 AS money)	1	1.0050 : money	1.005 : ~decimal	seed 3 expression 80	
+CAST(1.5E0 AS decimal(10,2))	1	1.50 : decimal(10,2)	1.5 : ~decimal	seed 2 expression 10	
+CAST(1E-1 AS money)	1	0.1000 : money	0.1 : ~decimal	seed 3 expression 51	
+CAST(2 AS money)	1	2.0000 : money	2 : ~decimal	seed 1 expression 127	
+CAST(2147483647 AS decimal(10,2))	1	error Overflow (8115)	2147483647 : ~decimal	seed 2 expression 236	
+CAST(2147483647 AS money)	1	2147483647.0000 : money	2147483647 : ~decimal	seed 1 expression 168	
+CAST(2147483648 AS money)	1	2147483648.0000 : money	2147483648 : ~decimal	seed 1 expression 240	
+CAST(3000000000 AS decimal(10,2))	1	error Overflow (8115)	3000000000 : ~decimal	seed 2 expression 51	
+CAST(748.58 AS money)	1	748.5800 : money	748.58 : ~decimal	seed 1 expression 193	
+CAST(CAST('' AS int) AS money)	1	0.0000 : money	error Conversion (FormatException)	seed 2 expression 263	
+CAST(CAST(0.1 AS money) AS money)	1	0.1000 : money	0.1 : ~decimal	seed 2 expression 88	
+CAST(CAST(1.5E0 AS int) AS money)	1	1.0000 : money	1 : ~decimal	seed 1 expression 9	
+CAST(CAST(2147483647 AS decimal(10,2)) AS decimal(10,2))	1	error Overflow (8115)	2147483647 : ~decimal	seed 2 expression 130	
+CAST(IIF('ā' = N'5', 1.005, (0 + c_bigint)) AS decimal(10,2))	1	error Overflow (8115)	3000000000 : ~decimal	seed 1 expression 182	
+CAST(IIF('ā' = N'5', 1.005, (0 + c_bigint)) AS decimal(10,2))	2	0.00 : decimal(10,2)	0 : ~decimal	seed 1 expression 182	
+CAST(IIF('ā' = N'5', 1.005, (0 + c_bigint)) AS decimal(10,2))	3	error Overflow (8115)	-9000000000 : ~decimal	seed 1 expression 182	
+CAST(IIF('ā' = N'5', 1.005, (0 + c_bigint)) AS decimal(10,2))	4	error Overflow (8115)	9223372036854775807 : ~decimal	seed 1 expression 182	
+CAST(IIF('ā' = N'5', 1.005, (0 + c_bigint)) AS decimal(10,2))	5	error Overflow (8115)	-9223372036854775808 : ~decimal	seed 1 expression 182	
+CAST(IIF('ā' = N'5', 1.005, (0 + c_bigint)) AS decimal(10,2))	7	error Overflow (8115)	2147483648 : ~decimal	seed 1 expression 182	
+CAST(IIF(0 = NULL, 9.99, 7) AS nvarchar(30))	1	'7.00' : nvarchar(30)	'7' : ~text	seed 3 expression 3	
+CAST(IIF(c_text IS NULL, 2147483647, ABS(0)) AS money)	1	0.0000 : money	0 : ~decimal	seed 3 expression 30	
+CAST(IIF(c_text IS NULL, 2147483647, ABS(0)) AS money)	2	0.0000 : money	0 : ~decimal	seed 3 expression 30	
+CAST(IIF(c_text IS NULL, 2147483647, ABS(0)) AS money)	3	0.0000 : money	0 : ~decimal	seed 3 expression 30	
+CAST(IIF(c_text IS NULL, 2147483647, ABS(0)) AS money)	4	0.0000 : money	0 : ~decimal	seed 3 expression 30	
+CAST(IIF(c_text IS NULL, 2147483647, ABS(0)) AS money)	5	0.0000 : money	0 : ~decimal	seed 3 expression 30	
+CAST(IIF(c_text IS NULL, 2147483647, ABS(0)) AS money)	6	2147483647.0000 : money	2147483647 : ~decimal	seed 3 expression 30	
+CAST(IIF(c_text IS NULL, 2147483647, ABS(0)) AS money)	7	0.0000 : money	0 : ~decimal	seed 3 expression 30	
+CAST(LEFT('ā', 2) AS int)	1	error Conversion (245)	error Refused (NotSupportedException)	seed 2 expression 141	
+CAST(LEFT(N' x ', 2) AS int)	1	error Conversion (245)	error Refused (NotSupportedException)	seed 1 expression 128	
+CAST(LEN('2.5') AS money)	1	3.0000 : money	3 : ~decimal	seed 3 expression 39	
+CAST(LEN(LTRIM(N'5')) AS decimal(38,6))	1	1.000000 : decimal(38,6)	1 : ~decimal	seed 1 expression 132	
+CAST(LOWER(c_text) AS int)	2	0 : int	error Conversion (FormatException)	seed 2 expression 212	
+CAST(N'' AS int)	1	0 : int	error Conversion (FormatException)	seed 2 expression 59	
+CAST(N'5' AS decimal(10,2))	1	5.00 : decimal(10,2)	5 : ~decimal	seed 1 expression 292	
+CAST(PATINDEX('%[^a-z]%', UPPER(N'')) AS decimal(38,6))	1	0.000000 : decimal(38,6)	0 : ~decimal	seed 2 expression 252	
+CAST(PATINDEX('%b%', 'ā') AS decimal(38,6))	1	0.000000 : decimal(38,6)	0 : ~decimal	seed 3 expression 280	
+CAST(PATINDEX('%b%', N' x ') AS decimal(38,6))	1	0.000000 : decimal(38,6)	0 : ~decimal	seed 2 expression 286	
+CAST(PATINDEX('_b%', RTRIM('ā')) AS decimal(10,2))	1	0.00 : decimal(10,2)	0 : ~decimal	seed 1 expression 219	
+CAST(ROUND((-7), 2) AS money)	1	-7.0000 : money	-7 : ~decimal	seed 2 expression 205	
+CAST(ROUND(0, -3) AS nvarchar(30))	1	'0' : nvarchar(30)	error Other (ArgumentOutOfRangeException)	seed 3 expression 233	
+CAST(ROUND(0.1, -1) AS money)	1	0.0000 : money	error Other (ArgumentOutOfRangeException)	seed 3 expression 269	
+CAST(ROUND(2147483648, -1) AS int)	1	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 1 expression 58	
+CAST(ROUND(3000000000, -1) AS money)	1	3000000000.0000 : money	error Other (ArgumentOutOfRangeException)	seed 3 expression 37	
+CAST(ROUND(7, -1) AS money)	1	10.0000 : money	error Other (ArgumentOutOfRangeException)	seed 2 expression 196	
+CAST(ROUND(CASE WHEN N' x ' IS NULL THEN 1E-1 ELSE 1.5E0 END, 2) AS money)	1	1.5000 : money	1.5 : ~decimal	seed 2 expression 94	
+CAST(ROUND(IIF('2.5' = N' x ', 7, 2147483647), 2) AS decimal(10,2))	1	error Overflow (8115)	2147483647 : ~decimal	seed 1 expression 53	
+CAST(ROUND(PATINDEX('%b%', c_text), -1) AS float)	1	0 : float	error Other (ArgumentOutOfRangeException)	seed 1 expression 104	
+CAST(ROUND(PATINDEX('%b%', c_text), -1) AS float)	2	0 : float	error Other (ArgumentOutOfRangeException)	seed 1 expression 104	
+CAST(ROUND(PATINDEX('%b%', c_text), -1) AS float)	3	0 : float	error Other (ArgumentOutOfRangeException)	seed 1 expression 104	
+CAST(ROUND(PATINDEX('%b%', c_text), -1) AS float)	4	0 : float	error Other (ArgumentOutOfRangeException)	seed 1 expression 104	
+CAST(ROUND(PATINDEX('%b%', c_text), -1) AS float)	5	0 : float	error Other (ArgumentOutOfRangeException)	seed 1 expression 104	
+CAST(ROUND(PATINDEX('%b%', c_text), -1) AS float)	7	0 : float	error Other (ArgumentOutOfRangeException)	seed 1 expression 104	
+CAST(ROUND(ROUND(1, 1), -1) AS bigint)	1	0 : bigint	error Other (ArgumentOutOfRangeException)	seed 3 expression 165	
+CAST(ROUND(c_bigint, 2) AS money)	1	3000000000.0000 : money	3000000000 : ~decimal	seed 3 expression 114	
+CAST(ROUND(c_bigint, 2) AS money)	2	0.0000 : money	0 : ~decimal	seed 3 expression 114	
+CAST(ROUND(c_bigint, 2) AS money)	3	-9000000000.0000 : money	-9000000000 : ~decimal	seed 3 expression 114	
+CAST(ROUND(c_bigint, 2) AS money)	4	error Overflow (8115)	9223372036854780000 : ~decimal	seed 3 expression 114	
+CAST(ROUND(c_bigint, 2) AS money)	5	error Overflow (8115)	-9223372036854780000 : ~decimal	seed 3 expression 114	
+CAST(ROUND(c_bigint, 2) AS money)	7	2147483648.0000 : money	2147483648 : ~decimal	seed 3 expression 114	
+CAST(TRIM(c_text) AS varchar(3))	7	'xa{U+000A}' : varchar(3)	'xa' : ~text	seed 3 expression 73	
+CAST(c_bigint AS decimal(38,6))	1	3000000000.000000 : decimal(38,6)	3000000000 : ~decimal	seed 1 expression 27	
+CAST(c_bigint AS decimal(38,6))	2	0.000000 : decimal(38,6)	0 : ~decimal	seed 1 expression 27	
+CAST(c_bigint AS decimal(38,6))	3	-9000000000.000000 : decimal(38,6)	-9000000000 : ~decimal	seed 1 expression 27	
+CAST(c_bigint AS decimal(38,6))	4	9223372036854775807.000000 : decimal(38,6)	9223372036854775807 : ~decimal	seed 1 expression 27	
+CAST(c_bigint AS decimal(38,6))	5	-9223372036854775808.000000 : decimal(38,6)	-9223372036854775808 : ~decimal	seed 1 expression 27	
+CAST(c_bigint AS decimal(38,6))	7	2147483648.000000 : decimal(38,6)	2147483648 : ~decimal	seed 1 expression 27	
+CAST(c_float AS decimal(38,6))	1	0.100000 : decimal(38,6)	0.1 : ~decimal	seed 1 expression 209	
+CAST(c_float AS decimal(38,6))	2	0.000000 : decimal(38,6)	0 : ~decimal	seed 1 expression 209	
+CAST(c_float AS decimal(38,6))	3	-2.500000 : decimal(38,6)	-2.5 : ~decimal	seed 1 expression 209	
+CAST(c_float AS decimal(38,6))	7	0.000000 : decimal(38,6)	0 : ~decimal	seed 1 expression 209	
+CAST(c_int AS decimal(10,2))	1	7.00 : decimal(10,2)	7 : ~decimal	seed 1 expression 231	
+CAST(c_int AS decimal(10,2))	2	0.00 : decimal(10,2)	0 : ~decimal	seed 1 expression 231	
+CAST(c_int AS decimal(10,2))	3	-7.00 : decimal(10,2)	-7 : ~decimal	seed 1 expression 231	
+CAST(c_int AS decimal(10,2))	4	error Overflow (8115)	2147483647 : ~decimal	seed 1 expression 231	
+CAST(c_int AS decimal(10,2))	5	error Overflow (8115)	-2147483648 : ~decimal	seed 1 expression 231	
+CAST(c_int AS decimal(10,2))	7	1.00 : decimal(10,2)	1 : ~decimal	seed 1 expression 231	
+CAST(c_int AS money)	1	7.0000 : money	7 : ~decimal	seed 1 expression 88	
+CAST(c_int AS money)	2	0.0000 : money	0 : ~decimal	seed 1 expression 88	
+CAST(c_int AS money)	3	-7.0000 : money	-7 : ~decimal	seed 1 expression 88	
+CAST(c_int AS money)	4	2147483647.0000 : money	2147483647 : ~decimal	seed 1 expression 88	
+CAST(c_int AS money)	5	-2147483648.0000 : money	-2147483648 : ~decimal	seed 1 expression 88	
+CAST(c_int AS money)	7	1.0000 : money	1 : ~decimal	seed 1 expression 88	
+CAST(c_money AS decimal(10,2))	4	error Overflow (8115)	922337203685477.58 : ~decimal	seed 2 expression 299	
+CAST(c_money AS decimal(10,2))	5	error Overflow (8115)	-922337203685477.58 : ~decimal	seed 2 expression 299	
+CAST(c_text AS int)	2	0 : int	error Conversion (FormatException)	seed 1 expression 15	
+CEILING(CAST(c_text AS int))	2	0 : int	error Conversion (FormatException)	seed 1 expression 283	
+COALESCE('ā', RTRIM(IIF(0.0001 <> 0, c_text, c_text)))	1	'a' : varchar(1)	'{U+0101}' : ~text	seed 1 expression 256	
+COALESCE('ā', RTRIM(IIF(0.0001 <> 0, c_text, c_text)))	2	'a' : varchar(1)	'{U+0101}' : ~text	seed 1 expression 256	
+COALESCE('ā', RTRIM(IIF(0.0001 <> 0, c_text, c_text)))	3	'a' : varchar(1)	'{U+0101}' : ~text	seed 1 expression 256	
+COALESCE('ā', RTRIM(IIF(0.0001 <> 0, c_text, c_text)))	4	'a' : varchar(1)	'{U+0101}' : ~text	seed 1 expression 256	
+COALESCE('ā', RTRIM(IIF(0.0001 <> 0, c_text, c_text)))	5	'a' : varchar(1)	'{U+0101}' : ~text	seed 1 expression 256	
+COALESCE('ā', RTRIM(IIF(0.0001 <> 0, c_text, c_text)))	6	'a' : varchar(1)	'{U+0101}' : ~text	seed 1 expression 256	
+COALESCE('ā', RTRIM(IIF(0.0001 <> 0, c_text, c_text)))	7	'a' : varchar(1)	'{U+0101}' : ~text	seed 1 expression 256	
+COALESCE((COALESCE(2, 1) * 2147483647), CASE WHEN '2.5' = 'ā' THEN (1E-1 + c_int) ELSE ROUND(0.1, 1) END)	1	error Overflow (8115)	4294967294 : ~bigint	seed 1 expression 216	
+COALESCE((COALESCE(2, 1) * 2147483647), CASE WHEN '2.5' = 'ā' THEN (1E-1 + c_int) ELSE ROUND(0.1, 1) END)	2	error Overflow (8115)	4294967294 : ~bigint	seed 1 expression 216	
+COALESCE((COALESCE(2, 1) * 2147483647), CASE WHEN '2.5' = 'ā' THEN (1E-1 + c_int) ELSE ROUND(0.1, 1) END)	3	error Overflow (8115)	4294967294 : ~bigint	seed 1 expression 216	
+COALESCE((COALESCE(2, 1) * 2147483647), CASE WHEN '2.5' = 'ā' THEN (1E-1 + c_int) ELSE ROUND(0.1, 1) END)	4	error Overflow (8115)	4294967294 : ~bigint	seed 1 expression 216	
+COALESCE((COALESCE(2, 1) * 2147483647), CASE WHEN '2.5' = 'ā' THEN (1E-1 + c_int) ELSE ROUND(0.1, 1) END)	5	error Overflow (8115)	4294967294 : ~bigint	seed 1 expression 216	
+COALESCE((COALESCE(2, 1) * 2147483647), CASE WHEN '2.5' = 'ā' THEN (1E-1 + c_int) ELSE ROUND(0.1, 1) END)	6	error Overflow (8115)	4294967294 : ~bigint	seed 1 expression 216	
+COALESCE((COALESCE(2, 1) * 2147483647), CASE WHEN '2.5' = 'ā' THEN (1E-1 + c_int) ELSE ROUND(0.1, 1) END)	7	error Overflow (8115)	4294967294 : ~bigint	seed 1 expression 216	
+COALESCE((PATINDEX('_b%', N'Abc') / CAST(1 AS decimal(10,2))), CAST(UPPER(N'Abc') AS int))	1	1.00000000000 : decimal(23,11)	1 : ~decimal	seed 3 expression 251	
+COALESCE((ROUND(1.005, 1) * CASE WHEN 2147483647 = NULL THEN c_money ELSE 2.5 END), (ROUND(1, 0) + c_bigint))	1	2.5000000 : decimal(26,7)	2.50 : ~decimal	seed 2 expression 73	
+COALESCE((ROUND(1.005, 1) * CASE WHEN 2147483647 = NULL THEN c_money ELSE 2.5 END), (ROUND(1, 0) + c_bigint))	2	2.5000000 : decimal(26,7)	2.50 : ~decimal	seed 2 expression 73	
+COALESCE((ROUND(1.005, 1) * CASE WHEN 2147483647 = NULL THEN c_money ELSE 2.5 END), (ROUND(1, 0) + c_bigint))	3	2.5000000 : decimal(26,7)	2.50 : ~decimal	seed 2 expression 73	
+COALESCE((ROUND(1.005, 1) * CASE WHEN 2147483647 = NULL THEN c_money ELSE 2.5 END), (ROUND(1, 0) + c_bigint))	4	2.5000000 : decimal(26,7)	2.50 : ~decimal	seed 2 expression 73	
+COALESCE((ROUND(1.005, 1) * CASE WHEN 2147483647 = NULL THEN c_money ELSE 2.5 END), (ROUND(1, 0) + c_bigint))	5	2.5000000 : decimal(26,7)	2.50 : ~decimal	seed 2 expression 73	
+COALESCE((ROUND(1.005, 1) * CASE WHEN 2147483647 = NULL THEN c_money ELSE 2.5 END), (ROUND(1, 0) + c_bigint))	6	2.5000000 : decimal(26,7)	2.50 : ~decimal	seed 2 expression 73	
+COALESCE((ROUND(1.005, 1) * CASE WHEN 2147483647 = NULL THEN c_money ELSE 2.5 END), (ROUND(1, 0) + c_bigint))	7	2.5000000 : decimal(26,7)	2.50 : ~decimal	seed 2 expression 73	
+COALESCE(2, 1E-1)	1	2 : float	2 : ~int	seed 1 expression 122	
+COALESCE(2.5, 1E-1)	1	2.5 : float	2.5 : ~decimal	seed 2 expression 218	
+COALESCE(2147483647, c_float)	1	2147483647 : float	2147483647 : ~int	seed 2 expression 235	
+COALESCE(2147483647, c_float)	2	2147483647 : float	2147483647 : ~int	seed 2 expression 235	
+COALESCE(2147483647, c_float)	3	2147483647 : float	2147483647 : ~int	seed 2 expression 235	
+COALESCE(2147483647, c_float)	4	2147483647 : float	2147483647 : ~int	seed 2 expression 235	
+COALESCE(2147483647, c_float)	5	2147483647 : float	2147483647 : ~int	seed 2 expression 235	
+COALESCE(2147483647, c_float)	6	2147483647 : float	2147483647 : ~int	seed 2 expression 235	
+COALESCE(2147483647, c_float)	7	2147483647 : float	2147483647 : ~int	seed 2 expression 235	
+COALESCE(3000000000, 2.5)	1	3000000000.0 : decimal(11,1)	3000000000 : ~decimal	seed 3 expression 76	
+COALESCE(7, 1.005)	1	7.000 : decimal(4,3)	7 : ~int	seed 1 expression 268	
+COALESCE(7, FLOOR(ROUND(c_float, 2)))	1	7 : float	7 : ~int	seed 1 expression 208	
+COALESCE(7, FLOOR(ROUND(c_float, 2)))	2	7 : float	7 : ~int	seed 1 expression 208	
+COALESCE(7, FLOOR(ROUND(c_float, 2)))	3	7 : float	7 : ~int	seed 1 expression 208	
+COALESCE(7, FLOOR(ROUND(c_float, 2)))	4	7 : float	7 : ~int	seed 1 expression 208	
+COALESCE(7, FLOOR(ROUND(c_float, 2)))	5	7 : float	7 : ~int	seed 1 expression 208	
+COALESCE(7, FLOOR(ROUND(c_float, 2)))	6	7 : float	7 : ~int	seed 1 expression 208	
+COALESCE(7, FLOOR(ROUND(c_float, 2)))	7	7 : float	7 : ~int	seed 1 expression 208	
+COALESCE(CASE WHEN c_dec2 = 1.005 THEN 1.005 ELSE 0.1 END, CAST((c_float / 7) AS decimal(38,6)))	1	0.100000 : decimal(38,6)	0.1 : ~decimal	seed 2 expression 124	
+COALESCE(CASE WHEN c_dec2 = 1.005 THEN 1.005 ELSE 0.1 END, CAST((c_float / 7) AS decimal(38,6)))	2	0.100000 : decimal(38,6)	0.1 : ~decimal	seed 2 expression 124	
+COALESCE(CASE WHEN c_dec2 = 1.005 THEN 1.005 ELSE 0.1 END, CAST((c_float / 7) AS decimal(38,6)))	3	0.100000 : decimal(38,6)	0.1 : ~decimal	seed 2 expression 124	
+COALESCE(CASE WHEN c_dec2 = 1.005 THEN 1.005 ELSE 0.1 END, CAST((c_float / 7) AS decimal(38,6)))	4	0.100000 : decimal(38,6)	0.1 : ~decimal	seed 2 expression 124	
+COALESCE(CASE WHEN c_dec2 = 1.005 THEN 1.005 ELSE 0.1 END, CAST((c_float / 7) AS decimal(38,6)))	5	0.100000 : decimal(38,6)	0.1 : ~decimal	seed 2 expression 124	
+COALESCE(CASE WHEN c_dec2 = 1.005 THEN 1.005 ELSE 0.1 END, CAST((c_float / 7) AS decimal(38,6)))	6	0.100000 : decimal(38,6)	0.1 : ~decimal	seed 2 expression 124	
+COALESCE(CASE WHEN c_dec2 = 1.005 THEN 1.005 ELSE 0.1 END, CAST((c_float / 7) AS decimal(38,6)))	7	0.100000 : decimal(38,6)	0.1 : ~decimal	seed 2 expression 124	
+COALESCE(CAST(3000000000 AS decimal(10,2)), (NULL / c_dec))	1	error Overflow (8115)	3000000000 : ~decimal	seed 1 expression 217	
+COALESCE(CAST(3000000000 AS decimal(10,2)), (NULL / c_dec))	2	error Overflow (8115)	3000000000 : ~decimal	seed 1 expression 217	
+COALESCE(CAST(3000000000 AS decimal(10,2)), (NULL / c_dec))	3	error Overflow (8115)	3000000000 : ~decimal	seed 1 expression 217	
+COALESCE(CAST(3000000000 AS decimal(10,2)), (NULL / c_dec))	4	error Overflow (8115)	3000000000 : ~decimal	seed 1 expression 217	
+COALESCE(CAST(3000000000 AS decimal(10,2)), (NULL / c_dec))	5	error Overflow (8115)	3000000000 : ~decimal	seed 1 expression 217	
+COALESCE(CAST(3000000000 AS decimal(10,2)), (NULL / c_dec))	6	error Overflow (8115)	3000000000 : ~decimal	seed 1 expression 217	
+COALESCE(CAST(3000000000 AS decimal(10,2)), (NULL / c_dec))	7	error Overflow (8115)	3000000000 : ~decimal	seed 1 expression 217	
+COALESCE(CAST(COALESCE(1, c_bigint) AS decimal(10,2)), 1)	1	1.00 : decimal(10,2)	1 : ~decimal	seed 2 expression 149	
+COALESCE(CAST(COALESCE(1, c_bigint) AS decimal(10,2)), 1)	2	1.00 : decimal(10,2)	1 : ~decimal	seed 2 expression 149	
+COALESCE(CAST(COALESCE(1, c_bigint) AS decimal(10,2)), 1)	3	1.00 : decimal(10,2)	1 : ~decimal	seed 2 expression 149	
+COALESCE(CAST(COALESCE(1, c_bigint) AS decimal(10,2)), 1)	4	1.00 : decimal(10,2)	1 : ~decimal	seed 2 expression 149	
+COALESCE(CAST(COALESCE(1, c_bigint) AS decimal(10,2)), 1)	5	1.00 : decimal(10,2)	1 : ~decimal	seed 2 expression 149	
+COALESCE(CAST(COALESCE(1, c_bigint) AS decimal(10,2)), 1)	6	1.00 : decimal(10,2)	1 : ~decimal	seed 2 expression 149	
+COALESCE(CAST(COALESCE(1, c_bigint) AS decimal(10,2)), 1)	7	1.00 : decimal(10,2)	1 : ~decimal	seed 2 expression 149	
+COALESCE(CAST(PATINDEX('_b%', N' x ') AS money), (ROUND(NULL, -3) + (c_money * c_dec2)))	1	0 : float	0 : ~decimal	seed 2 expression 283	
+COALESCE(CAST(PATINDEX('_b%', N' x ') AS money), (ROUND(NULL, -3) + (c_money * c_dec2)))	2	0 : float	0 : ~decimal	seed 2 expression 283	
+COALESCE(CAST(PATINDEX('_b%', N' x ') AS money), (ROUND(NULL, -3) + (c_money * c_dec2)))	3	0 : float	0 : ~decimal	seed 2 expression 283	
+COALESCE(CAST(PATINDEX('_b%', N' x ') AS money), (ROUND(NULL, -3) + (c_money * c_dec2)))	4	0 : float	0 : ~decimal	seed 2 expression 283	
+COALESCE(CAST(PATINDEX('_b%', N' x ') AS money), (ROUND(NULL, -3) + (c_money * c_dec2)))	5	0 : float	0 : ~decimal	seed 2 expression 283	
+COALESCE(CAST(PATINDEX('_b%', N' x ') AS money), (ROUND(NULL, -3) + (c_money * c_dec2)))	6	0 : float	0 : ~decimal	seed 2 expression 283	
+COALESCE(CAST(PATINDEX('_b%', N' x ') AS money), (ROUND(NULL, -3) + (c_money * c_dec2)))	7	0 : float	0 : ~decimal	seed 2 expression 283	
+COALESCE(CONCAT('ā', N'Abc'), CONCAT(N'', 'abc '))	1	'aAbc' : nvarchar(4)	'{U+0101}Abc' : ~text	seed 3 expression 298	
+COALESCE(ROUND(0.0001, -3), LEN(c_text))	1	0.0000 : decimal(14,4)	error Other (ArgumentOutOfRangeException)	seed 2 expression 78	
+COALESCE(ROUND(0.0001, -3), LEN(c_text))	2	0.0000 : decimal(14,4)	error Other (ArgumentOutOfRangeException)	seed 2 expression 78	
+COALESCE(ROUND(0.0001, -3), LEN(c_text))	3	0.0000 : decimal(14,4)	error Other (ArgumentOutOfRangeException)	seed 2 expression 78	
+COALESCE(ROUND(0.0001, -3), LEN(c_text))	4	0.0000 : decimal(14,4)	error Other (ArgumentOutOfRangeException)	seed 2 expression 78	
+COALESCE(ROUND(0.0001, -3), LEN(c_text))	5	0.0000 : decimal(14,4)	error Other (ArgumentOutOfRangeException)	seed 2 expression 78	
+COALESCE(ROUND(0.0001, -3), LEN(c_text))	6	0.0000 : decimal(14,4)	error Other (ArgumentOutOfRangeException)	seed 2 expression 78	
+COALESCE(ROUND(0.0001, -3), LEN(c_text))	7	0.0000 : decimal(14,4)	error Other (ArgumentOutOfRangeException)	seed 2 expression 78	
+COALESCE(ROUND(2147483647, -3), CAST(NULL AS money))	1	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 2 expression 68	
+COALESCE(ROUND(CASE WHEN c_float > 2147483647 THEN NULL ELSE c_dec2 END, -3), ROUND((c_dec / c_money), 2))	1	0.000000000000000000000 : decimal(38,21)	error Other (ArgumentOutOfRangeException)	seed 1 expression 220	
+COALESCE(ROUND(CASE WHEN c_float > 2147483647 THEN NULL ELSE c_dec2 END, -3), ROUND((c_dec / c_money), 2))	2	0.000000000000000000000 : decimal(38,21)	error Other (ArgumentOutOfRangeException)	seed 1 expression 220	
+COALESCE(ROUND(CASE WHEN c_float > 2147483647 THEN NULL ELSE c_dec2 END, -3), ROUND((c_dec / c_money), 2))	3	0.000000000000000000000 : decimal(38,21)	error Other (ArgumentOutOfRangeException)	seed 1 expression 220	
+COALESCE(ROUND(CASE WHEN c_float > 2147483647 THEN NULL ELSE c_dec2 END, -3), ROUND((c_dec / c_money), 2))	4	0.010000000000000000000 : decimal(38,21)	error Overflow (OverflowException)	seed 1 expression 220	
+COALESCE(ROUND(CASE WHEN c_float > 2147483647 THEN NULL ELSE c_dec2 END, -3), ROUND((c_dec / c_money), 2))	7	0.000000000000000000000 : decimal(38,21)	error Other (ArgumentOutOfRangeException)	seed 1 expression 220	
+COALESCE(ROUND(LEN(''), 0), ROUND(c_dec, 2))	1	0.0000000000 : decimal(23,10)	0 : ~float	seed 1 expression 64	
+COALESCE(ROUND(LEN(''), 0), ROUND(c_dec, 2))	2	0.0000000000 : decimal(23,10)	0 : ~float	seed 1 expression 64	
+COALESCE(ROUND(LEN(''), 0), ROUND(c_dec, 2))	3	0.0000000000 : decimal(23,10)	0 : ~float	seed 1 expression 64	
+COALESCE(ROUND(LEN(''), 0), ROUND(c_dec, 2))	4	0.0000000000 : decimal(23,10)	0 : ~float	seed 1 expression 64	
+COALESCE(ROUND(LEN(''), 0), ROUND(c_dec, 2))	5	0.0000000000 : decimal(23,10)	0 : ~float	seed 1 expression 64	
+COALESCE(ROUND(LEN(''), 0), ROUND(c_dec, 2))	6	0.0000000000 : decimal(23,10)	0 : ~float	seed 1 expression 64	
+COALESCE(ROUND(LEN(''), 0), ROUND(c_dec, 2))	7	0.0000000000 : decimal(23,10)	0 : ~float	seed 1 expression 64	
+COALESCE(ROUND(c_float, 1), (1.5E0 % c_bigint))	1	error TypeClash (402)	0.1 : ~float	seed 2 expression 278	
+COALESCE(ROUND(c_float, 1), (1.5E0 % c_bigint))	2	error TypeClash (402)	0 : ~float	seed 2 expression 278	
+COALESCE(ROUND(c_float, 1), (1.5E0 % c_bigint))	3	error TypeClash (402)	-2.5 : ~float	seed 2 expression 278	
+COALESCE(ROUND(c_float, 1), (1.5E0 % c_bigint))	4	error TypeClash (402)	1.7976931348623157E+308 : ~float	seed 2 expression 278	
+COALESCE(ROUND(c_float, 1), (1.5E0 % c_bigint))	5	error TypeClash (402)	-1.7976931348623157E+308 : ~float	seed 2 expression 278	
+COALESCE(ROUND(c_float, 1), (1.5E0 % c_bigint))	6	error TypeClash (402)	NULL : ~untyped	seed 2 expression 278	
+COALESCE(ROUND(c_float, 1), (1.5E0 % c_bigint))	7	error TypeClash (402)	0 : ~float	seed 2 expression 278	
+COALESCE(c_bigint, 1.5E0)	1	3000000000 : float	3000000000 : ~bigint	seed 1 expression 44	
+COALESCE(c_bigint, 1.5E0)	2	0 : float	0 : ~bigint	seed 1 expression 44	
+COALESCE(c_bigint, 1.5E0)	3	-9000000000 : float	-9000000000 : ~bigint	seed 1 expression 44	
+COALESCE(c_bigint, 1.5E0)	4	9.223372036854776E+18 : float	9223372036854775807 : ~bigint	seed 1 expression 44	
+COALESCE(c_bigint, 1.5E0)	5	-9.223372036854776E+18 : float	-9223372036854775808 : ~bigint	seed 1 expression 44	
+COALESCE(c_bigint, 1.5E0)	7	2147483648 : float	2147483648 : ~bigint	seed 1 expression 44	
+COALESCE(c_bigint, 2.5)	1	3000000000.0 : decimal(20,1)	3000000000 : ~bigint	seed 2 expression 226	
+COALESCE(c_bigint, 2.5)	2	0.0 : decimal(20,1)	0 : ~bigint	seed 2 expression 226	
+COALESCE(c_bigint, 2.5)	3	-9000000000.0 : decimal(20,1)	-9000000000 : ~bigint	seed 2 expression 226	
+COALESCE(c_bigint, 2.5)	4	9223372036854775807.0 : decimal(20,1)	9223372036854775807 : ~bigint	seed 2 expression 226	
+COALESCE(c_bigint, 2.5)	5	-9223372036854775808.0 : decimal(20,1)	-9223372036854775808 : ~bigint	seed 2 expression 226	
+COALESCE(c_bigint, 2.5)	7	2147483648.0 : decimal(20,1)	2147483648 : ~bigint	seed 2 expression 226	
+COALESCE(c_int, 0.1)	1	7.0 : decimal(11,1)	7 : ~int	seed 3 expression 293	
+COALESCE(c_int, 0.1)	2	0.0 : decimal(11,1)	0 : ~int	seed 3 expression 293	
+COALESCE(c_int, 0.1)	3	-7.0 : decimal(11,1)	-7 : ~int	seed 3 expression 293	
+COALESCE(c_int, 0.1)	4	2147483647.0 : decimal(11,1)	2147483647 : ~int	seed 3 expression 293	
+COALESCE(c_int, 0.1)	5	-2147483648.0 : decimal(11,1)	-2147483648 : ~int	seed 3 expression 293	
+COALESCE(c_int, 0.1)	7	1.0 : decimal(11,1)	1 : ~int	seed 3 expression 293	
+COALESCE(c_money, 2147483648)	6	2147483648.0000 : decimal(19,4)	2147483648 : ~decimal	seed 3 expression 217	
+CONCAT('abc ', 'ā')	1	'abc a' : varchar(5)	'abc {U+0101}' : ~text	seed 3 expression 104	
+CONCAT('ā', 'ā')	1	'aa' : varchar(2)	'{U+0101}{U+0101}' : ~text	seed 2 expression 93	
+CONCAT('ā', c_ntext)	1	'aAbc' : nvarchar(101)	'{U+0101}Abc' : ~text	seed 3 expression 81	
+CONCAT('ā', c_ntext)	2	'a' : nvarchar(101)	'{U+0101}' : ~text	seed 3 expression 81	
+CONCAT('ā', c_ntext)	3	'a x ' : nvarchar(101)	'{U+0101} x ' : ~text	seed 3 expression 81	
+CONCAT('ā', c_ntext)	4	'a{U+00DF}tra{U+00DF}e' : nvarchar(101)	'{U+0101}{U+00DF}tra{U+00DF}e' : ~text	seed 3 expression 81	
+CONCAT('ā', c_ntext)	5	'a{U+0101}b' : nvarchar(101)	'{U+0101}{U+0101}b' : ~text	seed 3 expression 81	
+CONCAT('ā', c_ntext)	6	'a' : nvarchar(101)	'{U+0101}' : ~text	seed 3 expression 81	
+CONCAT('ā', c_ntext)	7	'aa{U+000A}b' : nvarchar(101)	'{U+0101}a{U+000A}b' : ~text	seed 3 expression 81	
+CONCAT(CAST('abc ' AS varchar(3)), 'ā')	1	'abca' : varchar(4)	'abc{U+0101}' : ~text	seed 1 expression 266	
+CONCAT(ISNULL(UPPER(N'ꞔ'), LTRIM(c_text)), 'ā')	1	'{U+A794}a' : nvarchar(2)	'{U+A7C4}{U+0101}' : ~text	seed 2 expression 156	
+CONCAT(ISNULL(UPPER(N'ꞔ'), LTRIM(c_text)), 'ā')	2	'{U+A794}a' : nvarchar(2)	'{U+A7C4}{U+0101}' : ~text	seed 2 expression 156	
+CONCAT(ISNULL(UPPER(N'ꞔ'), LTRIM(c_text)), 'ā')	3	'{U+A794}a' : nvarchar(2)	'{U+A7C4}{U+0101}' : ~text	seed 2 expression 156	
+CONCAT(ISNULL(UPPER(N'ꞔ'), LTRIM(c_text)), 'ā')	4	'{U+A794}a' : nvarchar(2)	'{U+A7C4}{U+0101}' : ~text	seed 2 expression 156	
+CONCAT(ISNULL(UPPER(N'ꞔ'), LTRIM(c_text)), 'ā')	5	'{U+A794}a' : nvarchar(2)	'{U+A7C4}{U+0101}' : ~text	seed 2 expression 156	
+CONCAT(ISNULL(UPPER(N'ꞔ'), LTRIM(c_text)), 'ā')	6	'{U+A794}a' : nvarchar(2)	'{U+A7C4}{U+0101}' : ~text	seed 2 expression 156	
+CONCAT(ISNULL(UPPER(N'ꞔ'), LTRIM(c_text)), 'ā')	7	'{U+A794}a' : nvarchar(2)	'{U+A7C4}{U+0101}' : ~text	seed 2 expression 156	
+CONCAT(N'', RTRIM(RTRIM(c_text)))	7	'xa{U+000A}' : nvarchar(101)	'xa' : ~text	seed 2 expression 284	
+CONCAT(RTRIM(c_text), SUBSTRING(N'Abc', 2, 2))	7	'xa{U+000A}bc' : nvarchar(102)	'xabc' : ~text	seed 2 expression 12	
+CONCAT(UPPER('abc '), CAST(c_ntext AS varchar(3)))	5	'ABC ab' : varchar(7)	'ABC {U+0101}b' : ~text	seed 3 expression 220	
+CONCAT(c_ntext, LTRIM('ā'))	1	'Abca' : nvarchar(101)	'Abc{U+0101}' : ~text	seed 3 expression 135	
+CONCAT(c_ntext, LTRIM('ā'))	2	'a' : nvarchar(101)	'{U+0101}' : ~text	seed 3 expression 135	
+CONCAT(c_ntext, LTRIM('ā'))	3	' x a' : nvarchar(101)	' x {U+0101}' : ~text	seed 3 expression 135	
+CONCAT(c_ntext, LTRIM('ā'))	4	'{U+00DF}tra{U+00DF}ea' : nvarchar(101)	'{U+00DF}tra{U+00DF}e{U+0101}' : ~text	seed 3 expression 135	
+CONCAT(c_ntext, LTRIM('ā'))	5	'{U+0101}ba' : nvarchar(101)	'{U+0101}b{U+0101}' : ~text	seed 3 expression 135	
+CONCAT(c_ntext, LTRIM('ā'))	6	'a' : nvarchar(101)	'{U+0101}' : ~text	seed 3 expression 135	
+CONCAT(c_ntext, LTRIM('ā'))	7	'a{U+000A}ba' : nvarchar(101)	'a{U+000A}b{U+0101}' : ~text	seed 3 expression 135	
+IIF((0.1 % 1E-1) > 2147483648, (c_money * c_dec), CAST(ROUND(0, -3) AS decimal(38,6)))	1	error TypeClash (402)	error Other (ArgumentOutOfRangeException)	seed 1 expression 247	
+IIF((0.1 % 1E-1) > 2147483648, (c_money * c_dec), CAST(ROUND(0, -3) AS decimal(38,6)))	2	error TypeClash (402)	error Other (ArgumentOutOfRangeException)	seed 1 expression 247	
+IIF((0.1 % 1E-1) > 2147483648, (c_money * c_dec), CAST(ROUND(0, -3) AS decimal(38,6)))	3	error TypeClash (402)	error Other (ArgumentOutOfRangeException)	seed 1 expression 247	
+IIF((0.1 % 1E-1) > 2147483648, (c_money * c_dec), CAST(ROUND(0, -3) AS decimal(38,6)))	4	error TypeClash (402)	error Other (ArgumentOutOfRangeException)	seed 1 expression 247	
+IIF((0.1 % 1E-1) > 2147483648, (c_money * c_dec), CAST(ROUND(0, -3) AS decimal(38,6)))	5	error TypeClash (402)	error Other (ArgumentOutOfRangeException)	seed 1 expression 247	
+IIF((0.1 % 1E-1) > 2147483648, (c_money * c_dec), CAST(ROUND(0, -3) AS decimal(38,6)))	6	error TypeClash (402)	error Other (ArgumentOutOfRangeException)	seed 1 expression 247	
+IIF((0.1 % 1E-1) > 2147483648, (c_money * c_dec), CAST(ROUND(0, -3) AS decimal(38,6)))	7	error TypeClash (402)	error Other (ArgumentOutOfRangeException)	seed 1 expression 247	
+IIF(1.5E0 = c_money, 1E-1, c_int)	1	7 : float	7 : ~int	seed 2 expression 7	
+IIF(1.5E0 = c_money, 1E-1, c_int)	2	0 : float	0 : ~int	seed 2 expression 7	
+IIF(1.5E0 = c_money, 1E-1, c_int)	3	-7 : float	-7 : ~int	seed 2 expression 7	
+IIF(1.5E0 = c_money, 1E-1, c_int)	4	2147483647 : float	2147483647 : ~int	seed 2 expression 7	
+IIF(1.5E0 = c_money, 1E-1, c_int)	5	-2147483648 : float	-2147483648 : ~int	seed 2 expression 7	
+IIF(1.5E0 = c_money, 1E-1, c_int)	7	1 : float	1 : ~int	seed 2 expression 7	
+IIF(1E-1 > c_float, 2147483648, c_int)	1	7 : decimal(10,0)	7 : ~int	seed 1 expression 258	
+IIF(1E-1 > c_float, 2147483648, c_int)	4	2147483647 : decimal(10,0)	error Overflow (OverflowException)	seed 1 expression 258	
+IIF(1E-1 > c_float, 2147483648, c_int)	5	2147483648 : decimal(10,0)	error Overflow (OverflowException)	seed 1 expression 258	
+IIF(2.5 < 2.5, LEFT(N'Abc', 2), COALESCE('ā', N''))	1	'a' : nvarchar(1)	error Refused (NotSupportedException)	seed 3 expression 22	
+IIF(2.5 > c_float, PATINDEX('%[^a-z]%', N'5'), NULLIF(7, 1.005))	1	1 : int	0 : ~int	seed 3 expression 180	
+IIF(2.5 > c_float, PATINDEX('%[^a-z]%', N'5'), NULLIF(7, 1.005))	2	1 : int	0 : ~int	seed 3 expression 180	
+IIF(2.5 > c_float, PATINDEX('%[^a-z]%', N'5'), NULLIF(7, 1.005))	3	1 : int	0 : ~int	seed 3 expression 180	
+IIF(2.5 > c_float, PATINDEX('%[^a-z]%', N'5'), NULLIF(7, 1.005))	4	7 : int	error Overflow (OverflowException)	seed 3 expression 180	
+IIF(2.5 > c_float, PATINDEX('%[^a-z]%', N'5'), NULLIF(7, 1.005))	5	1 : int	error Overflow (OverflowException)	seed 3 expression 180	
+IIF(2.5 > c_float, PATINDEX('%[^a-z]%', N'5'), NULLIF(7, 1.005))	7	1 : int	0 : ~int	seed 3 expression 180	
+IIF(2147483647 <> NULL, COALESCE(c_bigint, 2), 0)	1	0 : bigint	0 : ~int	seed 3 expression 113	
+IIF(2147483647 <> NULL, COALESCE(c_bigint, 2), 0)	2	0 : bigint	0 : ~int	seed 3 expression 113	
+IIF(2147483647 <> NULL, COALESCE(c_bigint, 2), 0)	3	0 : bigint	0 : ~int	seed 3 expression 113	
+IIF(2147483647 <> NULL, COALESCE(c_bigint, 2), 0)	4	0 : bigint	0 : ~int	seed 3 expression 113	
+IIF(2147483647 <> NULL, COALESCE(c_bigint, 2), 0)	5	0 : bigint	0 : ~int	seed 3 expression 113	
+IIF(2147483647 <> NULL, COALESCE(c_bigint, 2), 0)	6	0 : bigint	0 : ~int	seed 3 expression 113	
+IIF(2147483647 <> NULL, COALESCE(c_bigint, 2), 0)	7	0 : bigint	0 : ~int	seed 3 expression 113	
+IIF(3000000000 > c_dec2, (1.005 - 7), 9.99)	4	9.990 : decimal(5,3)	9.99 : ~decimal	seed 2 expression 58	
+IIF(3000000000 > c_dec2, (1.005 - 7), 9.99)	6	9.990 : decimal(5,3)	9.99 : ~decimal	seed 2 expression 58	
+IIF(7 > 2.5, CASE WHEN NULL = 1E-1 THEN 1E-1 ELSE c_bigint END, ISNULL(0.0001, 9.99))	1	3000000000 : float	3000000000 : ~bigint	seed 3 expression 286	
+IIF(7 > 2.5, CASE WHEN NULL = 1E-1 THEN 1E-1 ELSE c_bigint END, ISNULL(0.0001, 9.99))	2	0 : float	0 : ~bigint	seed 3 expression 286	
+IIF(7 > 2.5, CASE WHEN NULL = 1E-1 THEN 1E-1 ELSE c_bigint END, ISNULL(0.0001, 9.99))	3	-9000000000 : float	-9000000000 : ~bigint	seed 3 expression 286	
+IIF(7 > 2.5, CASE WHEN NULL = 1E-1 THEN 1E-1 ELSE c_bigint END, ISNULL(0.0001, 9.99))	4	9.223372036854776E+18 : float	9223372036854775807 : ~bigint	seed 3 expression 286	
+IIF(7 > 2.5, CASE WHEN NULL = 1E-1 THEN 1E-1 ELSE c_bigint END, ISNULL(0.0001, 9.99))	5	-9.223372036854776E+18 : float	-9223372036854775808 : ~bigint	seed 3 expression 286	
+IIF(7 > 2.5, CASE WHEN NULL = 1E-1 THEN 1E-1 ELSE c_bigint END, ISNULL(0.0001, 9.99))	7	2147483648 : float	2147483648 : ~bigint	seed 3 expression 286	
+IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	1	2 : bigint	error Other (ArgumentOutOfRangeException)	seed 3 expression 89	
+IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	2	0 : bigint	error Other (ArgumentOutOfRangeException)	seed 3 expression 89	
+IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	3	0 : bigint	error Other (ArgumentOutOfRangeException)	seed 3 expression 89	
+IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	4	0 : bigint	error Other (ArgumentOutOfRangeException)	seed 3 expression 89	
+IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	5	-9999999999 : bigint	error Other (ArgumentOutOfRangeException)	seed 3 expression 89	
+IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	6	748 : bigint	748.58 : ~decimal	seed 3 expression 89	
+IIF(CAST(1E-1 AS decimal(38,6)) < ROUND(c_float, -3), PATINDEX('%[0-9]%', CONCAT(c_text, N'')), ISNULL((NULL - c_bigint), ISNULL(c_dec2, 748.58)))	7	0 : bigint	error Other (ArgumentOutOfRangeException)	seed 3 expression 89	
+IIF(CAST(N'ꞔ' AS varchar(3)) = TRIM('ā'), 9.99, ROUND(ROUND(3000000000, -3), 0))	1	3000000000.00 : decimal(12,2)	error Other (ArgumentOutOfRangeException)	seed 3 expression 248	
+IIF(CONCAT('2.5', N'') < CONCAT('abc ', c_text), COALESCE(c_int, ISNULL(c_bigint, 7)), CHARINDEX(N'b', N' x '))	1	7 : bigint	7 : ~int	seed 3 expression 272	
+IIF(CONCAT('2.5', N'') < CONCAT('abc ', c_text), COALESCE(c_int, ISNULL(c_bigint, 7)), CHARINDEX(N'b', N' x '))	2	0 : bigint	0 : ~int	seed 3 expression 272	
+IIF(CONCAT('2.5', N'') < CONCAT('abc ', c_text), COALESCE(c_int, ISNULL(c_bigint, 7)), CHARINDEX(N'b', N' x '))	3	-7 : bigint	-7 : ~int	seed 3 expression 272	
+IIF(CONCAT('2.5', N'') < CONCAT('abc ', c_text), COALESCE(c_int, ISNULL(c_bigint, 7)), CHARINDEX(N'b', N' x '))	4	2147483647 : bigint	2147483647 : ~int	seed 3 expression 272	
+IIF(CONCAT('2.5', N'') < CONCAT('abc ', c_text), COALESCE(c_int, ISNULL(c_bigint, 7)), CHARINDEX(N'b', N' x '))	5	-2147483648 : bigint	-2147483648 : ~int	seed 3 expression 272	
+IIF(CONCAT('2.5', N'') < CONCAT('abc ', c_text), COALESCE(c_int, ISNULL(c_bigint, 7)), CHARINDEX(N'b', N' x '))	6	7 : bigint	7 : ~int	seed 3 expression 272	
+IIF(CONCAT('2.5', N'') < CONCAT('abc ', c_text), COALESCE(c_int, ISNULL(c_bigint, 7)), CHARINDEX(N'b', N' x '))	7	1 : bigint	1 : ~int	seed 3 expression 272	
+IIF(IIF(1E-1 > 1E-1, 1.5E0, c_dec) = ROUND(c_dec, 2), c_dec2, CAST(CAST(7 AS decimal(10,2)) AS float))	1	2.5 : float	2.50 : ~decimal	seed 2 expression 33	
+IIF(IIF(1E-1 > 1E-1, 1.5E0, c_dec) = ROUND(c_dec, 2), c_dec2, CAST(CAST(7 AS decimal(10,2)) AS float))	2	0 : float	0.00 : ~decimal	seed 2 expression 33	
+IIF(IIF(1E-1 > 1E-1, 1.5E0, c_dec) = ROUND(c_dec, 2), c_dec2, CAST(CAST(7 AS decimal(10,2)) AS float))	4	error Overflow (8115)	7 : ~float	seed 2 expression 33	
+IIF(IIF(1E-1 > 1E-1, 1.5E0, c_dec) = ROUND(c_dec, 2), c_dec2, CAST(CAST(7 AS decimal(10,2)) AS float))	5	error Overflow (8115)	7 : ~float	seed 2 expression 33	
+IIF(ISNULL(2, 3000000000) < ROUND(c_dec, 0), (9.99 - LEN(N'5')), 2147483648)	2	2147483648.00 : decimal(13,2)	2147483648 : ~decimal	seed 1 expression 192	
+IIF(ISNULL(2, 3000000000) < ROUND(c_dec, 0), (9.99 - LEN(N'5')), 2147483648)	3	2147483648.00 : decimal(13,2)	2147483648 : ~decimal	seed 1 expression 192	
+IIF(ISNULL(2, 3000000000) < ROUND(c_dec, 0), (9.99 - LEN(N'5')), 2147483648)	4	error Overflow (8115)	8.99 : ~decimal	seed 1 expression 192	
+IIF(ISNULL(2, 3000000000) < ROUND(c_dec, 0), (9.99 - LEN(N'5')), 2147483648)	5	error Overflow (8115)	2147483648 : ~decimal	seed 1 expression 192	
+IIF(ISNULL(2, 3000000000) < ROUND(c_dec, 0), (9.99 - LEN(N'5')), 2147483648)	6	2147483648.00 : decimal(13,2)	2147483648 : ~decimal	seed 1 expression 192	
+IIF(ISNULL(2, 3000000000) < ROUND(c_dec, 0), (9.99 - LEN(N'5')), 2147483648)	7	2147483648.00 : decimal(13,2)	2147483648 : ~decimal	seed 1 expression 192	
+IIF(N'5' < '', 1.005, c_bigint)	1	3000000000.000 : decimal(22,3)	3000000000 : ~bigint	seed 2 expression 103	
+IIF(N'5' < '', 1.005, c_bigint)	2	0.000 : decimal(22,3)	0 : ~bigint	seed 2 expression 103	
+IIF(N'5' < '', 1.005, c_bigint)	3	-9000000000.000 : decimal(22,3)	-9000000000 : ~bigint	seed 2 expression 103	
+IIF(N'5' < '', 1.005, c_bigint)	4	9223372036854775807.000 : decimal(22,3)	9223372036854775807 : ~bigint	seed 2 expression 103	
+IIF(N'5' < '', 1.005, c_bigint)	5	-9223372036854775808.000 : decimal(22,3)	-9223372036854775808 : ~bigint	seed 2 expression 103	
+IIF(N'5' < '', 1.005, c_bigint)	7	2147483648.000 : decimal(22,3)	2147483648 : ~bigint	seed 2 expression 103	
+IIF(N'Abc' < c_text, c_bigint, (2.5 % c_float))	1	error TypeClash (402)	3000000000 : ~bigint	seed 2 expression 190	
+IIF(N'Abc' < c_text, c_bigint, (2.5 % c_float))	2	error TypeClash (402)	error DivideByZero (DivideByZeroException)	seed 2 expression 190	
+IIF(N'Abc' < c_text, c_bigint, (2.5 % c_float))	3	error TypeClash (402)	0 : ~float	seed 2 expression 190	
+IIF(N'Abc' < c_text, c_bigint, (2.5 % c_float))	4	error TypeClash (402)	9223372036854775807 : ~bigint	seed 2 expression 190	
+IIF(N'Abc' < c_text, c_bigint, (2.5 % c_float))	5	error TypeClash (402)	-9223372036854775808 : ~bigint	seed 2 expression 190	
+IIF(N'Abc' < c_text, c_bigint, (2.5 % c_float))	6	error TypeClash (402)	NULL : ~untyped	seed 2 expression 190	
+IIF(N'Abc' < c_text, c_bigint, (2.5 % c_float))	7	error TypeClash (402)	2147483648 : ~bigint	seed 2 expression 190	
+IIF(N'Abc' = c_ntext, ROUND(1E-1, -1), (2147483648 * 1.005))	1	0 : float	error Other (ArgumentOutOfRangeException)	seed 1 expression 16	
+IIF(N'Abc' = c_ntext, ROUND(1E-1, -1), (2147483648 * 1.005))	2	2158221066.24 : float	2158221066.240 : ~decimal	seed 1 expression 16	
+IIF(N'Abc' = c_ntext, ROUND(1E-1, -1), (2147483648 * 1.005))	3	2158221066.24 : float	2158221066.240 : ~decimal	seed 1 expression 16	
+IIF(N'Abc' = c_ntext, ROUND(1E-1, -1), (2147483648 * 1.005))	4	2158221066.24 : float	2158221066.240 : ~decimal	seed 1 expression 16	
+IIF(N'Abc' = c_ntext, ROUND(1E-1, -1), (2147483648 * 1.005))	5	2158221066.24 : float	2158221066.240 : ~decimal	seed 1 expression 16	
+IIF(N'Abc' = c_ntext, ROUND(1E-1, -1), (2147483648 * 1.005))	6	2158221066.24 : float	2158221066.240 : ~decimal	seed 1 expression 16	
+IIF(N'Abc' = c_ntext, ROUND(1E-1, -1), (2147483648 * 1.005))	7	2158221066.24 : float	2158221066.240 : ~decimal	seed 1 expression 16	
+IIF(N'ꞔ' IS NULL, c_dec, 1)	1	1.0000000000 : decimal(23,10)	1 : ~int	seed 3 expression 208	
+IIF(N'ꞔ' IS NULL, c_dec, 1)	2	1.0000000000 : decimal(23,10)	1 : ~int	seed 3 expression 208	
+IIF(N'ꞔ' IS NULL, c_dec, 1)	3	1.0000000000 : decimal(23,10)	1 : ~int	seed 3 expression 208	
+IIF(N'ꞔ' IS NULL, c_dec, 1)	4	1.0000000000 : decimal(23,10)	1 : ~int	seed 3 expression 208	
+IIF(N'ꞔ' IS NULL, c_dec, 1)	5	1.0000000000 : decimal(23,10)	1 : ~int	seed 3 expression 208	
+IIF(N'ꞔ' IS NULL, c_dec, 1)	6	1.0000000000 : decimal(23,10)	1 : ~int	seed 3 expression 208	
+IIF(N'ꞔ' IS NULL, c_dec, 1)	7	1.0000000000 : decimal(23,10)	1 : ~int	seed 3 expression 208	
+IIF(PATINDEX('a%b', N' x ') > (9.99 + 2.5), IIF(N'Abc' = c_text, 1, (c_float / c_dec2)), c_int)	1	7 : float	7 : ~int	seed 2 expression 91	
+IIF(PATINDEX('a%b', N' x ') > (9.99 + 2.5), IIF(N'Abc' = c_text, 1, (c_float / c_dec2)), c_int)	2	0 : float	0 : ~int	seed 2 expression 91	
+IIF(PATINDEX('a%b', N' x ') > (9.99 + 2.5), IIF(N'Abc' = c_text, 1, (c_float / c_dec2)), c_int)	3	-7 : float	-7 : ~int	seed 2 expression 91	
+IIF(PATINDEX('a%b', N' x ') > (9.99 + 2.5), IIF(N'Abc' = c_text, 1, (c_float / c_dec2)), c_int)	4	2147483647 : float	2147483647 : ~int	seed 2 expression 91	
+IIF(PATINDEX('a%b', N' x ') > (9.99 + 2.5), IIF(N'Abc' = c_text, 1, (c_float / c_dec2)), c_int)	5	-2147483648 : float	-2147483648 : ~int	seed 2 expression 91	
+IIF(PATINDEX('a%b', N' x ') > (9.99 + 2.5), IIF(N'Abc' = c_text, 1, (c_float / c_dec2)), c_int)	7	1 : float	1 : ~int	seed 2 expression 91	
+IIF(RTRIM(N' x ') IS NULL, CASE WHEN 1.5E0 > c_int THEN ROUND(7, 1) ELSE CASE WHEN N'' = N' x ' THEN 2147483647 ELSE 0.1 END END, PATINDEX('a%b', RTRIM(N'Abc')))	1	0.0 : decimal(11,1)	0 : ~int	seed 3 expression 26	
+IIF(RTRIM(N' x ') IS NULL, CASE WHEN 1.5E0 > c_int THEN ROUND(7, 1) ELSE CASE WHEN N'' = N' x ' THEN 2147483647 ELSE 0.1 END END, PATINDEX('a%b', RTRIM(N'Abc')))	2	0.0 : decimal(11,1)	0 : ~int	seed 3 expression 26	
+IIF(RTRIM(N' x ') IS NULL, CASE WHEN 1.5E0 > c_int THEN ROUND(7, 1) ELSE CASE WHEN N'' = N' x ' THEN 2147483647 ELSE 0.1 END END, PATINDEX('a%b', RTRIM(N'Abc')))	3	0.0 : decimal(11,1)	0 : ~int	seed 3 expression 26	
+IIF(RTRIM(N' x ') IS NULL, CASE WHEN 1.5E0 > c_int THEN ROUND(7, 1) ELSE CASE WHEN N'' = N' x ' THEN 2147483647 ELSE 0.1 END END, PATINDEX('a%b', RTRIM(N'Abc')))	4	0.0 : decimal(11,1)	0 : ~int	seed 3 expression 26	
+IIF(RTRIM(N' x ') IS NULL, CASE WHEN 1.5E0 > c_int THEN ROUND(7, 1) ELSE CASE WHEN N'' = N' x ' THEN 2147483647 ELSE 0.1 END END, PATINDEX('a%b', RTRIM(N'Abc')))	5	0.0 : decimal(11,1)	0 : ~int	seed 3 expression 26	
+IIF(RTRIM(N' x ') IS NULL, CASE WHEN 1.5E0 > c_int THEN ROUND(7, 1) ELSE CASE WHEN N'' = N' x ' THEN 2147483647 ELSE 0.1 END END, PATINDEX('a%b', RTRIM(N'Abc')))	6	0.0 : decimal(11,1)	0 : ~int	seed 3 expression 26	
+IIF(RTRIM(N' x ') IS NULL, CASE WHEN 1.5E0 > c_int THEN ROUND(7, 1) ELSE CASE WHEN N'' = N' x ' THEN 2147483647 ELSE 0.1 END END, PATINDEX('a%b', RTRIM(N'Abc')))	7	0.0 : decimal(11,1)	0 : ~int	seed 3 expression 26	
+IIF(c_dec = 2147483648, (2147483647 / c_money), PATINDEX('a%b', c_ntext))	1	0.0000 : money	0 : ~int	seed 3 expression 86	
+IIF(c_dec = 2147483648, (2147483647 / c_money), PATINDEX('a%b', c_ntext))	2	0.0000 : money	0 : ~int	seed 3 expression 86	
+IIF(c_dec = 2147483648, (2147483647 / c_money), PATINDEX('a%b', c_ntext))	3	0.0000 : money	0 : ~int	seed 3 expression 86	
+IIF(c_dec = 2147483648, (2147483647 / c_money), PATINDEX('a%b', c_ntext))	4	0.0000 : money	0 : ~int	seed 3 expression 86	
+IIF(c_dec = 2147483648, (2147483647 / c_money), PATINDEX('a%b', c_ntext))	5	0.0000 : money	0 : ~int	seed 3 expression 86	
+IIF(c_dec = 2147483648, (2147483647 / c_money), PATINDEX('a%b', c_ntext))	7	1.0000 : money	0 : ~int	seed 3 expression 86	
+IIF(c_text = N'ꞔ', LEFT(N'', 2), N'Abc')	1	'Abc' : nvarchar(3)	error Refused (NotSupportedException)	seed 1 expression 30	
+IIF(c_text = N'ꞔ', LEFT(N'', 2), N'Abc')	2	'' : nvarchar(3)	error Refused (NotSupportedException)	seed 1 expression 30	
+IIF(c_text = N'ꞔ', LEFT(N'', 2), N'Abc')	3	'Abc' : nvarchar(3)	error Refused (NotSupportedException)	seed 1 expression 30	
+IIF(c_text = N'ꞔ', LEFT(N'', 2), N'Abc')	4	'Abc' : nvarchar(3)	error Refused (NotSupportedException)	seed 1 expression 30	
+IIF(c_text = N'ꞔ', LEFT(N'', 2), N'Abc')	5	'Abc' : nvarchar(3)	error Refused (NotSupportedException)	seed 1 expression 30	
+IIF(c_text = N'ꞔ', LEFT(N'', 2), N'Abc')	6	'Abc' : nvarchar(3)	error Refused (NotSupportedException)	seed 1 expression 30	
+IIF(c_text = N'ꞔ', LEFT(N'', 2), N'Abc')	7	'Abc' : nvarchar(3)	error Refused (NotSupportedException)	seed 1 expression 30	
+ISNULL(((2147483648 * c_bigint) / 9.99), CAST((0.0001 + N'5') AS decimal(10,2)))	1	644889984384384384.384384 : decimal(38,6)	644889984384384384.38438438438 : ~decimal	seed 3 expression 144	
+ISNULL(((2147483648 * c_bigint) / 9.99), CAST((0.0001 + N'5') AS decimal(10,2)))	2	0.000000 : decimal(38,6)	0 : ~decimal	seed 3 expression 144	
+ISNULL(((2147483648 * c_bigint) / 9.99), CAST((0.0001 + N'5') AS decimal(10,2)))	3	-1934669953153153153.153153 : decimal(38,6)	-1934669953153153153.1531531532 : ~decimal	seed 3 expression 144	
+ISNULL(((2147483648 * c_bigint) / 9.99), CAST((0.0001 + N'5') AS decimal(10,2)))	4	1982686749606214654278128522.122122 : decimal(38,6)	1982686749606214654278128522.1 : ~decimal	seed 3 expression 144	
+ISNULL(((2147483648 * c_bigint) / 9.99), CAST((0.0001 + N'5') AS decimal(10,2)))	5	-1982686749606214654493091850.250250 : decimal(38,6)	-1982686749606214654493091850.3 : ~decimal	seed 3 expression 144	
+ISNULL(((2147483648 * c_bigint) / 9.99), CAST((0.0001 + N'5') AS decimal(10,2)))	6	error Overflow (8115)	0.00 : ~decimal	seed 3 expression 144	
+ISNULL(((2147483648 * c_bigint) / 9.99), CAST((0.0001 + N'5') AS decimal(10,2)))	7	461630232074813604.004004 : decimal(38,6)	461630232074813604.004004004 : ~decimal	seed 3 expression 144	
+ISNULL(((c_bigint * c_money) / LEN(c_ntext)), (0.0001 + CAST('ā' AS int)))	1	12345600000.0000 : money	error Conversion (FormatException)	seed 2 expression 274	
+ISNULL(((c_bigint * c_money) / LEN(c_ntext)), (0.0001 + CAST('ā' AS int)))	3	450000.0000 : money	error Conversion (FormatException)	seed 2 expression 274	
+ISNULL(((c_bigint * c_money) / LEN(c_ntext)), (0.0001 + CAST('ā' AS int)))	7	71582.7882 : money	error Conversion (FormatException)	seed 2 expression 274	
+ISNULL((CAST('' AS varchar(3)) + ('abc ' + N'Abc')), ISNULL(IIF(1.005 < c_float, c_text, N'Abc'), LEFT(N'5', 2)))	1	'abc Abc' : nvarchar(10)	error Refused (NotSupportedException)	seed 2 expression 189	
+ISNULL((CAST('' AS varchar(3)) + ('abc ' + N'Abc')), ISNULL(IIF(1.005 < c_float, c_text, N'Abc'), LEFT(N'5', 2)))	2	'abc Abc' : nvarchar(10)	error Refused (NotSupportedException)	seed 2 expression 189	
+ISNULL((CAST('' AS varchar(3)) + ('abc ' + N'Abc')), ISNULL(IIF(1.005 < c_float, c_text, N'Abc'), LEFT(N'5', 2)))	3	'abc Abc' : nvarchar(10)	error Refused (NotSupportedException)	seed 2 expression 189	
+ISNULL((CAST('' AS varchar(3)) + ('abc ' + N'Abc')), ISNULL(IIF(1.005 < c_float, c_text, N'Abc'), LEFT(N'5', 2)))	4	'abc Abc' : nvarchar(10)	error Refused (NotSupportedException)	seed 2 expression 189	
+ISNULL((CAST('' AS varchar(3)) + ('abc ' + N'Abc')), ISNULL(IIF(1.005 < c_float, c_text, N'Abc'), LEFT(N'5', 2)))	5	'abc Abc' : nvarchar(10)	error Refused (NotSupportedException)	seed 2 expression 189	
+ISNULL((CAST('' AS varchar(3)) + ('abc ' + N'Abc')), ISNULL(IIF(1.005 < c_float, c_text, N'Abc'), LEFT(N'5', 2)))	6	'abc Abc' : nvarchar(10)	error Refused (NotSupportedException)	seed 2 expression 189	
+ISNULL((CAST('' AS varchar(3)) + ('abc ' + N'Abc')), ISNULL(IIF(1.005 < c_float, c_text, N'Abc'), LEFT(N'5', 2)))	7	'abc Abc' : nvarchar(10)	error Refused (NotSupportedException)	seed 2 expression 189	
+ISNULL((N'ꞔ' + 'ā'), c_text)	1	'{U+A794}a' : nvarchar(2)	'{U+A794}{U+0101}' : ~text	seed 3 expression 169	
+ISNULL((N'ꞔ' + 'ā'), c_text)	2	'{U+A794}a' : nvarchar(2)	'{U+A794}{U+0101}' : ~text	seed 3 expression 169	
+ISNULL((N'ꞔ' + 'ā'), c_text)	3	'{U+A794}a' : nvarchar(2)	'{U+A794}{U+0101}' : ~text	seed 3 expression 169	
+ISNULL((N'ꞔ' + 'ā'), c_text)	4	'{U+A794}a' : nvarchar(2)	'{U+A794}{U+0101}' : ~text	seed 3 expression 169	
+ISNULL((N'ꞔ' + 'ā'), c_text)	5	'{U+A794}a' : nvarchar(2)	'{U+A794}{U+0101}' : ~text	seed 3 expression 169	
+ISNULL((N'ꞔ' + 'ā'), c_text)	6	'{U+A794}a' : nvarchar(2)	'{U+A794}{U+0101}' : ~text	seed 3 expression 169	
+ISNULL((N'ꞔ' + 'ā'), c_text)	7	'{U+A794}a' : nvarchar(2)	'{U+A794}{U+0101}' : ~text	seed 3 expression 169	
+ISNULL((PATINDEX('%[0-9]%', N' x ') / 3000000000), (1.005 - 2147483647))	1	0.00000000000 : decimal(21,11)	0 : ~decimal	seed 3 expression 221	
+ISNULL((ROUND(c_bigint, -1) - (-NULL)), ROUND(1E-1, 2))	1	0 : bigint	error Other (ArgumentOutOfRangeException)	seed 1 expression 37	
+ISNULL((ROUND(c_bigint, -1) - (-NULL)), ROUND(1E-1, 2))	2	0 : bigint	error Other (ArgumentOutOfRangeException)	seed 1 expression 37	
+ISNULL((ROUND(c_bigint, -1) - (-NULL)), ROUND(1E-1, 2))	3	0 : bigint	error Other (ArgumentOutOfRangeException)	seed 1 expression 37	
+ISNULL((ROUND(c_bigint, -1) - (-NULL)), ROUND(1E-1, 2))	4	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 1 expression 37	
+ISNULL((ROUND(c_bigint, -1) - (-NULL)), ROUND(1E-1, 2))	5	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 1 expression 37	
+ISNULL((ROUND(c_bigint, -1) - (-NULL)), ROUND(1E-1, 2))	6	0 : bigint	0.1 : ~float	seed 1 expression 37	
+ISNULL((ROUND(c_bigint, -1) - (-NULL)), ROUND(1E-1, 2))	7	0 : bigint	error Other (ArgumentOutOfRangeException)	seed 1 expression 37	
+ISNULL((ROUND(c_dec2, -3) - NULL), COALESCE(IIF(9.99 IS NULL, c_money, 7), CAST(2 AS int)))	1	7.00 : decimal(13,2)	error Other (ArgumentOutOfRangeException)	seed 3 expression 35	
+ISNULL((ROUND(c_dec2, -3) - NULL), COALESCE(IIF(9.99 IS NULL, c_money, 7), CAST(2 AS int)))	2	7.00 : decimal(13,2)	error Other (ArgumentOutOfRangeException)	seed 3 expression 35	
+ISNULL((ROUND(c_dec2, -3) - NULL), COALESCE(IIF(9.99 IS NULL, c_money, 7), CAST(2 AS int)))	3	7.00 : decimal(13,2)	error Other (ArgumentOutOfRangeException)	seed 3 expression 35	
+ISNULL((ROUND(c_dec2, -3) - NULL), COALESCE(IIF(9.99 IS NULL, c_money, 7), CAST(2 AS int)))	4	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 3 expression 35	
+ISNULL((ROUND(c_dec2, -3) - NULL), COALESCE(IIF(9.99 IS NULL, c_money, 7), CAST(2 AS int)))	5	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 3 expression 35	
+ISNULL((ROUND(c_dec2, -3) - NULL), COALESCE(IIF(9.99 IS NULL, c_money, 7), CAST(2 AS int)))	6	7.00 : decimal(13,2)	7 : ~int	seed 3 expression 35	
+ISNULL((ROUND(c_dec2, -3) - NULL), COALESCE(IIF(9.99 IS NULL, c_money, 7), CAST(2 AS int)))	7	7.00 : decimal(13,2)	error Other (ArgumentOutOfRangeException)	seed 3 expression 35	
+ISNULL((RTRIM('abc ') + RTRIM('ā')), COALESCE(REPLACE(N' x ', N'a', N'xy'), COALESCE('', N'Abc')))	1	'abca' : varchar(5)	'abc{U+0101}' : ~text	seed 2 expression 83	
+ISNULL(CASE WHEN c_dec = 9.99 THEN 3000000000 ELSE 0 END, c_dec2)	1	0 : decimal(10,0)	0 : ~int	seed 2 expression 99	
+ISNULL(CASE WHEN c_dec = 9.99 THEN 3000000000 ELSE 0 END, c_dec2)	2	0 : decimal(10,0)	0 : ~int	seed 2 expression 99	
+ISNULL(CASE WHEN c_dec = 9.99 THEN 3000000000 ELSE 0 END, c_dec2)	3	0 : decimal(10,0)	0 : ~int	seed 2 expression 99	
+ISNULL(CASE WHEN c_dec = 9.99 THEN 3000000000 ELSE 0 END, c_dec2)	4	0 : decimal(10,0)	0 : ~int	seed 2 expression 99	
+ISNULL(CASE WHEN c_dec = 9.99 THEN 3000000000 ELSE 0 END, c_dec2)	5	0 : decimal(10,0)	0 : ~int	seed 2 expression 99	
+ISNULL(CASE WHEN c_dec = 9.99 THEN 3000000000 ELSE 0 END, c_dec2)	6	0 : decimal(10,0)	0 : ~int	seed 2 expression 99	
+ISNULL(CASE WHEN c_dec = 9.99 THEN 3000000000 ELSE 0 END, c_dec2)	7	0 : decimal(10,0)	0 : ~int	seed 2 expression 99	
+ISNULL(CAST(CAST(2 AS decimal(10,2)) AS decimal(38,6)), NULLIF(CAST(0 AS bigint), 9.99))	1	2.000000 : decimal(38,6)	2 : ~decimal	seed 3 expression 211	
+ISNULL(CAST(ROUND(1.5E0, -1) AS int), CAST((2147483647 - 3000000000) AS money))	1	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 284	
+ISNULL(CAST(c_bigint AS money), CAST(LTRIM(N'') AS decimal(10,2)))	1	3000000000.0000 : money	error Conversion (FormatException)	seed 1 expression 174	
+ISNULL(CAST(c_bigint AS money), CAST(LTRIM(N'') AS decimal(10,2)))	2	0.0000 : money	error Conversion (FormatException)	seed 1 expression 174	
+ISNULL(CAST(c_bigint AS money), CAST(LTRIM(N'') AS decimal(10,2)))	3	-9000000000.0000 : money	error Conversion (FormatException)	seed 1 expression 174	
+ISNULL(CAST(c_bigint AS money), CAST(LTRIM(N'') AS decimal(10,2)))	4	error Overflow (8115)	error Conversion (FormatException)	seed 1 expression 174	
+ISNULL(CAST(c_bigint AS money), CAST(LTRIM(N'') AS decimal(10,2)))	5	error Overflow (8115)	error Conversion (FormatException)	seed 1 expression 174	
+ISNULL(CAST(c_bigint AS money), CAST(LTRIM(N'') AS decimal(10,2)))	7	2147483648.0000 : money	error Conversion (FormatException)	seed 1 expression 174	
+ISNULL(COALESCE('ā', 'ā'), CONCAT('', c_text))	1	'a' : varchar(1)	'{U+0101}' : ~text	seed 2 expression 224	
+ISNULL(COALESCE('ā', 'ā'), CONCAT('', c_text))	2	'a' : varchar(1)	'{U+0101}' : ~text	seed 2 expression 224	
+ISNULL(COALESCE('ā', 'ā'), CONCAT('', c_text))	3	'a' : varchar(1)	'{U+0101}' : ~text	seed 2 expression 224	
+ISNULL(COALESCE('ā', 'ā'), CONCAT('', c_text))	4	'a' : varchar(1)	'{U+0101}' : ~text	seed 2 expression 224	
+ISNULL(COALESCE('ā', 'ā'), CONCAT('', c_text))	5	'a' : varchar(1)	'{U+0101}' : ~text	seed 2 expression 224	
+ISNULL(COALESCE('ā', 'ā'), CONCAT('', c_text))	6	'a' : varchar(1)	'{U+0101}' : ~text	seed 2 expression 224	
+ISNULL(COALESCE('ā', 'ā'), CONCAT('', c_text))	7	'a' : varchar(1)	'{U+0101}' : ~text	seed 2 expression 224	
+ISNULL(COALESCE('ā', N''), LTRIM('ā'))	1	'a' : nvarchar(1)	'{U+0101}' : ~text	seed 1 expression 239	
+ISNULL(COALESCE(c_dec, 748.58), CAST(748.58 AS float))	6	748.5800000000 : decimal(23,10)	748.58 : ~decimal	seed 2 expression 217	
+ISNULL(LEFT(N'ꞔ', 2), LOWER(c_ntext))	1	'{U+A794}' : nvarchar(1)	error Refused (NotSupportedException)	seed 3 expression 173	
+ISNULL(LEFT(N'ꞔ', 2), LOWER(c_ntext))	2	'{U+A794}' : nvarchar(1)	error Refused (NotSupportedException)	seed 3 expression 173	
+ISNULL(LEFT(N'ꞔ', 2), LOWER(c_ntext))	3	'{U+A794}' : nvarchar(1)	error Refused (NotSupportedException)	seed 3 expression 173	
+ISNULL(LEFT(N'ꞔ', 2), LOWER(c_ntext))	4	'{U+A794}' : nvarchar(1)	error Refused (NotSupportedException)	seed 3 expression 173	
+ISNULL(LEFT(N'ꞔ', 2), LOWER(c_ntext))	5	'{U+A794}' : nvarchar(1)	error Refused (NotSupportedException)	seed 3 expression 173	
+ISNULL(LEFT(N'ꞔ', 2), LOWER(c_ntext))	6	'{U+A794}' : nvarchar(1)	error Refused (NotSupportedException)	seed 3 expression 173	
+ISNULL(LEFT(N'ꞔ', 2), LOWER(c_ntext))	7	'{U+A794}' : nvarchar(1)	error Refused (NotSupportedException)	seed 3 expression 173	
+ISNULL(LEN((c_ntext + N'ꞔ')), (ROUND(1.005, 1) - ROUND(0.0001, -3)))	1	4 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 49	
+ISNULL(LEN((c_ntext + N'ꞔ')), (ROUND(1.005, 1) - ROUND(0.0001, -3)))	2	1 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 49	
+ISNULL(LEN((c_ntext + N'ꞔ')), (ROUND(1.005, 1) - ROUND(0.0001, -3)))	3	4 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 49	
+ISNULL(LEN((c_ntext + N'ꞔ')), (ROUND(1.005, 1) - ROUND(0.0001, -3)))	4	7 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 49	
+ISNULL(LEN((c_ntext + N'ꞔ')), (ROUND(1.005, 1) - ROUND(0.0001, -3)))	5	3 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 49	
+ISNULL(LEN((c_ntext + N'ꞔ')), (ROUND(1.005, 1) - ROUND(0.0001, -3)))	6	1 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 49	
+ISNULL(LEN((c_ntext + N'ꞔ')), (ROUND(1.005, 1) - ROUND(0.0001, -3)))	7	4 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 49	
+ISNULL(LOWER(LOWER('ā')), LOWER(LTRIM('2.5')))	1	'a' : varchar(1)	'{U+0101}' : ~text	seed 1 expression 139	
+ISNULL(PATINDEX('%[^a-z]%', c_text), 1.5E0)	1	4 : int	0 : ~int	seed 3 expression 69	
+ISNULL(PATINDEX('%[^a-z]%', c_text), 1.5E0)	3	1 : int	0 : ~int	seed 3 expression 69	
+ISNULL(PATINDEX('%[^a-z]%', c_text), 1.5E0)	5	1 : int	0 : ~int	seed 3 expression 69	
+ISNULL(PATINDEX('%[^a-z]%', c_text), 1.5E0)	6	1 : int	1.5 : ~float	seed 3 expression 69	
+ISNULL(PATINDEX('%[^a-z]%', c_text), 1.5E0)	7	3 : int	0 : ~int	seed 3 expression 69	
+ISNULL(RIGHT(RIGHT(N'5', 2), 2), (('' + N' x ') + CAST(N'Abc' AS varchar(3))))	1	'5' : nvarchar(1)	error Refused (NotSupportedException)	seed 3 expression 274	
+ISNULL(ROUND(PATINDEX('%a', N''), 0), 0.1)	1	0 : int	0 : ~float	seed 1 expression 43	
+ISNULL(c_bigint, ISNULL(9.99, 1E-1))	6	9 : bigint	9.99 : ~decimal	seed 3 expression 44	
+ISNULL(c_int, 2.5)	6	2 : int	2.5 : ~decimal	seed 1 expression 153	
+LEFT(LOWER(N'Abc'), 2)	1	'ab' : nvarchar(2)	error Refused (NotSupportedException)	seed 1 expression 276	
+LEFT(N'', 2)	1	'' : nvarchar(1)	error Refused (NotSupportedException)	seed 1 expression 213	
+LEFT(REPLACE(SUBSTRING('abc ', 2, 2), N'a', N'xy'), 2)	1	'bc' : nvarchar(2)	error Refused (NotSupportedException)	seed 3 expression 138	
+LEFT(c_text, 2)	1	'ab' : varchar(2)	error Refused (NotSupportedException)	seed 1 expression 227	
+LEFT(c_text, 2)	2	'' : varchar(2)	error Refused (NotSupportedException)	seed 1 expression 227	
+LEFT(c_text, 2)	3	' x' : varchar(2)	error Refused (NotSupportedException)	seed 1 expression 227	
+LEFT(c_text, 2)	4	'Z' : varchar(2)	error Refused (NotSupportedException)	seed 1 expression 227	
+LEFT(c_text, 2)	5	'~' : varchar(2)	error Refused (NotSupportedException)	seed 1 expression 227	
+LEFT(c_text, 2)	6	NULL : varchar(2)	error Refused (NotSupportedException)	seed 1 expression 227	
+LEFT(c_text, 2)	7	'xa' : varchar(2)	error Refused (NotSupportedException)	seed 1 expression 227	
+LEN(LEFT(N'Abc', 2))	1	2 : int	error Refused (NotSupportedException)	seed 2 expression 113	
+LEN(LOWER(c_text))	7	3 : int	2 : ~int	seed 3 expression 52	
+LEN(REPLACE(c_text, N'a', N'xy'))	7	4 : int	3 : ~int	seed 2 expression 152	
+LEN(RIGHT(N'ꞔ', 2))	1	1 : int	error Refused (NotSupportedException)	seed 2 expression 2	
+LEN(SUBSTRING(c_text, 2, 2))	7	2 : int	1 : ~int	seed 2 expression 203	
+LEN(c_text)	7	3 : int	2 : ~int	seed 3 expression 71	
+LOWER('ā')	1	'a' : varchar(1)	'{U+0101}' : ~text	seed 3 expression 258	
+LOWER((LEFT(N'ꞔ', 2) + '2.5'))	1	'{U+A794}2.5' : nvarchar(4)	error Refused (NotSupportedException)	seed 1 expression 135	
+LOWER((N'5' + 'ā'))	1	'5a' : nvarchar(2)	'5{U+0101}' : ~text	seed 2 expression 215	
+LTRIM(CONCAT('ā', c_text))	1	'aabc ' : varchar(101)	'{U+0101}abc ' : ~text	seed 3 expression 6	
+LTRIM(CONCAT('ā', c_text))	2	'a' : varchar(101)	'{U+0101}' : ~text	seed 3 expression 6	
+LTRIM(CONCAT('ā', c_text))	3	'a x' : varchar(101)	'{U+0101} x' : ~text	seed 3 expression 6	
+LTRIM(CONCAT('ā', c_text))	4	'aZ' : varchar(101)	'{U+0101}Z' : ~text	seed 3 expression 6	
+LTRIM(CONCAT('ā', c_text))	5	'a~' : varchar(101)	'{U+0101}~' : ~text	seed 3 expression 6	
+LTRIM(CONCAT('ā', c_text))	6	'a' : varchar(101)	'{U+0101}' : ~text	seed 3 expression 6	
+LTRIM(CONCAT('ā', c_text))	7	'axa{U+000A}' : varchar(101)	'{U+0101}xa{U+000A}' : ~text	seed 3 expression 6	
+NULLIF(1, c_float)	1	1 : tinyint	1 : ~int	seed 3 expression 259	
+NULLIF(1, c_float)	2	1 : tinyint	1 : ~int	seed 3 expression 259	
+NULLIF(1, c_float)	3	1 : tinyint	1 : ~int	seed 3 expression 259	
+NULLIF(1, c_float)	4	1 : tinyint	error Overflow (OverflowException)	seed 3 expression 259	
+NULLIF(1, c_float)	5	1 : tinyint	error Overflow (OverflowException)	seed 3 expression 259	
+NULLIF(1, c_float)	6	1 : tinyint	1 : ~int	seed 3 expression 259	
+NULLIF(1, c_float)	7	1 : tinyint	1 : ~int	seed 3 expression 259	
+NULLIF(ABS((c_money + c_dec)), c_float)	4	932337203685477.5806999999 : decimal(26,10)	error Overflow (OverflowException)	seed 1 expression 40	
+NULLIF(ABS((c_money + c_dec)), c_float)	5	932337203685477.5807999999 : decimal(26,10)	error Overflow (OverflowException)	seed 1 expression 40	
+NULLIF(NULL, 1E-1)	1	error TypeClash (4151)	NULL : ~untyped	seed 3 expression 10	
+PATINDEX('%[0-9]%', '2.5')	1	1 : int	0 : ~int	seed 1 expression 176	
+PATINDEX('%[^a-z]%', '2.5')	1	1 : int	0 : ~int	seed 3 expression 142	
+PATINDEX('%[^a-z]%', N' x ')	1	1 : int	0 : ~int	seed 3 expression 105	
+PATINDEX('%[^a-z]%', N'5')	1	1 : int	0 : ~int	seed 1 expression 110	
+PATINDEX('%[^a-z]%', REPLACE(N' x ', N'a', N'xy'))	1	1 : int	0 : ~int	seed 1 expression 222	
+PATINDEX('%[^a-z]%', c_ntext)	3	1 : int	0 : ~int	seed 1 expression 151	
+PATINDEX('%[^a-z]%', c_ntext)	7	2 : int	0 : ~int	seed 1 expression 151	
+PATINDEX('%a', ((c_text + c_text) + UPPER('')))	7	0 : int	5 : ~int	seed 1 expression 278	
+PATINDEX('a%b', c_ntext)	7	1 : int	0 : ~int	seed 2 expression 61	
+REPLACE(ISNULL((c_text + 'abc '), N'ꞔ'), N'a', N'xy')	6	'?' : nvarchar(4000)	'{U+A794}' : ~text	seed 1 expression 6	
+RIGHT('abc ', 2)	1	'c ' : varchar(2)	error Refused (NotSupportedException)	seed 2 expression 295	
+RIGHT(N' x ', 2)	1	'x ' : nvarchar(2)	error Refused (NotSupportedException)	seed 1 expression 261	
+RIGHT(REPLACE(LTRIM(N' x '), N'a', N'xy'), 2)	1	'x ' : nvarchar(2)	error Refused (NotSupportedException)	seed 3 expression 36	
+RIGHT(SUBSTRING(COALESCE('2.5', N' x '), 2, 2), 2)	1	'.5' : nvarchar(2)	error Refused (NotSupportedException)	seed 3 expression 187	
+RIGHT(UPPER(N''), 2)	1	'' : nvarchar(1)	error Refused (NotSupportedException)	seed 2 expression 154	
+ROUND(((c_money + N' x ') / 0.0001), 1)	6	error Conversion (235)	NULL : ~untyped	seed 2 expression 281	
+ROUND((0 * 0.0001), -1)	1	0.0000 : decimal(6,4)	error Other (ArgumentOutOfRangeException)	seed 1 expression 92	
+ROUND((0.0001 - 2147483647), 1)	1	-2147483647.0000 : decimal(15,4)	-2147483647.0 : ~decimal	seed 3 expression 178	
+ROUND((1.005 * 0.1), -3)	1	0.0000 : decimal(6,4)	error Other (ArgumentOutOfRangeException)	seed 2 expression 148	
+ROUND((3000000000 + 748.58), 0)	1	3000000749.00 : decimal(13,2)	3000000749 : ~decimal	seed 1 expression 89	
+ROUND((3000000000 / c_money), 1)	1	243001555.20000000000000000000 : decimal(34,20)	243001555.2 : ~decimal	seed 2 expression 120	
+ROUND((3000000000 / c_money), 1)	3	-30000000000000.00000000000000000000 : decimal(34,20)	-30000000000000 : ~decimal	seed 2 expression 120	
+ROUND((3000000000 / c_money), 1)	4	0.00000000000000000000 : decimal(34,20)	0.0 : ~decimal	seed 2 expression 120	
+ROUND((3000000000 / c_money), 1)	5	0.00000000000000000000 : decimal(34,20)	0.0 : ~decimal	seed 2 expression 120	
+ROUND((3000000000 / c_money), 1)	7	30000000000000.00000000000000000000 : decimal(34,20)	30000000000000 : ~decimal	seed 2 expression 120	
+ROUND((ABS(c_float) - (2 - 2.5)), -1)	1	0 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 193	
+ROUND((ABS(c_float) - (2 - 2.5)), -1)	2	0 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 193	
+ROUND((ABS(c_float) - (2 - 2.5)), -1)	3	0 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 193	
+ROUND((ABS(c_float) - (2 - 2.5)), -1)	4	1.7976931348623157E+308 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 193	
+ROUND((ABS(c_float) - (2 - 2.5)), -1)	5	1.7976931348623157E+308 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 193	
+ROUND((ABS(c_float) - (2 - 2.5)), -1)	7	0 : float	error Other (ArgumentOutOfRangeException)	seed 2 expression 193	
+ROUND((ROUND(2147483647, 1) / (1.005 * 1E-1)), -3)	1	21367996000 : float	error Other (ArgumentOutOfRangeException)	seed 1 expression 181	
+ROUND((c_dec2 - 7), 0)	1	-5.00 : decimal(13,2)	-5 : ~decimal	seed 3 expression 18	
+ROUND((c_dec2 - 7), 0)	2	-7.00 : decimal(13,2)	-7 : ~decimal	seed 3 expression 18	
+ROUND((c_dec2 - 7), 0)	3	-7.00 : decimal(13,2)	-7 : ~decimal	seed 3 expression 18	
+ROUND((c_dec2 - 7), 0)	4	9999999993.00 : decimal(13,2)	9999999993 : ~decimal	seed 3 expression 18	
+ROUND((c_dec2 - 7), 0)	5	-10000000007.00 : decimal(13,2)	-10000000007 : ~decimal	seed 3 expression 18	
+ROUND((c_dec2 - 7), 0)	7	-7.00 : decimal(13,2)	-7 : ~decimal	seed 3 expression 18	
+ROUND((c_money * 7), 2)	1	86.4200 : money	86.42 : ~decimal	seed 1 expression 290	
+ROUND((c_money * 7), 2)	2	0.0000 : money	0.00 : ~decimal	seed 1 expression 290	
+ROUND((c_money * 7), 2)	3	0.0000 : money	0.00 : ~decimal	seed 1 expression 290	
+ROUND((c_money * 7), 2)	4	error Overflow (8115)	6456360425798343.06 : ~decimal	seed 1 expression 290	
+ROUND((c_money * 7), 2)	5	error Overflow (8115)	-6456360425798343.07 : ~decimal	seed 1 expression 290	
+ROUND((c_money * 7), 2)	7	0.0000 : money	0.00 : ~decimal	seed 1 expression 290	
+ROUND((c_money + IIF(748.58 = 2147483647, 7, 2147483648)), 1)	1	2147483660.3000 : decimal(20,4)	2147483660.3 : ~decimal	seed 2 expression 69	
+ROUND((c_money + IIF(748.58 = 2147483647, 7, 2147483648)), 1)	2	2147483648.0000 : decimal(20,4)	2147483648.0 : ~decimal	seed 2 expression 69	
+ROUND((c_money + IIF(748.58 = 2147483647, 7, 2147483648)), 1)	3	2147483648.0000 : decimal(20,4)	2147483648.0 : ~decimal	seed 2 expression 69	
+ROUND((c_money + IIF(748.58 = 2147483647, 7, 2147483648)), 1)	4	922339351169125.6000 : decimal(20,4)	922339351169125.6 : ~decimal	seed 2 expression 69	
+ROUND((c_money + IIF(748.58 = 2147483647, 7, 2147483648)), 1)	5	-922335056201829.6000 : decimal(20,4)	-922335056201829.6 : ~decimal	seed 2 expression 69	
+ROUND((c_money + IIF(748.58 = 2147483647, 7, 2147483648)), 1)	7	2147483648.0000 : decimal(20,4)	2147483648.0 : ~decimal	seed 2 expression 69	
+ROUND(0, -3)	1	0 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 290	
+ROUND(0, 2)	1	0 : int	0 : ~float	seed 3 expression 209	
+ROUND(1, -3)	1	0 : int	error Other (ArgumentOutOfRangeException)	seed 1 expression 108	
+ROUND(1, 1)	1	1 : int	1 : ~float	seed 2 expression 155	
+ROUND(1.005, -3)	1	0.000 : decimal(4,3)	error Other (ArgumentOutOfRangeException)	seed 2 expression 64	
+ROUND(1.005, 1)	1	1.000 : decimal(4,3)	1.0 : ~decimal	seed 1 expression 70	
+ROUND(1.005, 2)	1	1.010 : decimal(4,3)	1.01 : ~decimal	seed 2 expression 121	
+ROUND(1E-1, -1)	1	0 : float	error Other (ArgumentOutOfRangeException)	seed 1 expression 71	
+ROUND(2, -1)	1	0 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 146	
+ROUND(2, 0)	1	2 : int	2 : ~float	seed 3 expression 27	
+ROUND(2.5, -1)	1	0.0 : decimal(2,1)	error Other (ArgumentOutOfRangeException)	seed 1 expression 23	
+ROUND(2.5, 0)	1	3.0 : decimal(2,1)	3 : ~decimal	seed 1 expression 191	
+ROUND(2147483647, -1)	1	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 3 expression 266	
+ROUND(3000000000, -3)	1	3000000000 : decimal(10,0)	error Other (ArgumentOutOfRangeException)	seed 1 expression 78	
+ROUND(7, -3)	1	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 97	
+ROUND(7, 0)	1	7 : int	7 : ~float	seed 3 expression 179	
+ROUND(7, 2)	1	7 : int	7 : ~float	seed 2 expression 36	
+ROUND(748.58, -1)	1	750.00 : decimal(5,2)	error Other (ArgumentOutOfRangeException)	seed 1 expression 180	
+ROUND(9.99, -3)	1	0.00 : decimal(3,2)	error Other (ArgumentOutOfRangeException)	seed 3 expression 65	
+ROUND(ABS((0.0001 + 1)), 2)	1	1.0000 : decimal(6,4)	1.00 : ~decimal	seed 1 expression 262	
+ROUND(ABS(c_int), 0)	1	7 : int	7 : ~float	seed 1 expression 107	
+ROUND(ABS(c_int), 0)	2	0 : int	0 : ~float	seed 1 expression 107	
+ROUND(ABS(c_int), 0)	3	7 : int	7 : ~float	seed 1 expression 107	
+ROUND(ABS(c_int), 0)	4	2147483647 : int	2147483647 : ~float	seed 1 expression 107	
+ROUND(ABS(c_int), 0)	7	1 : int	1 : ~float	seed 1 expression 107	
+ROUND(CASE WHEN 1.005 < 2 THEN 748.58 ELSE CAST(1E-1 AS int) END, 1)	1	748.60 : decimal(12,2)	748.6 : ~decimal	seed 3 expression 162	
+ROUND(CAST((2147483647 * c_float) AS decimal(10,2)), 1)	1	error Overflow (8115)	214748364.7 : ~decimal	seed 2 expression 4	
+ROUND(CAST((2147483647 * c_float) AS decimal(10,2)), 1)	2	0.00 : decimal(10,2)	0 : ~decimal	seed 2 expression 4	
+ROUND(CAST((2147483647 * c_float) AS decimal(10,2)), 1)	3	error Overflow (8115)	-5368709117.5 : ~decimal	seed 2 expression 4	
+ROUND(CAST((2147483647 * c_float) AS decimal(10,2)), 1)	7	0.00 : decimal(10,2)	0 : ~decimal	seed 2 expression 4	
+ROUND(CAST(1E-1 AS decimal(10,2)), -1)	1	0.00 : decimal(10,2)	error Other (ArgumentOutOfRangeException)	seed 2 expression 167	
+ROUND(CAST(748.58 AS int), 1)	1	748 : int	748 : ~float	seed 2 expression 229	
+ROUND(CAST(748.58 AS money), 1)	1	748.6000 : money	748.6 : ~decimal	seed 1 expression 243	
+ROUND(CAST(SUBSTRING(N'5', 2, 2) AS int), 1)	1	0 : int	error Conversion (FormatException)	seed 1 expression 164	
+ROUND(CAST(c_dec2 AS int), 0)	1	2 : int	2 : ~float	seed 1 expression 75	
+ROUND(CAST(c_dec2 AS int), 0)	2	0 : int	0 : ~float	seed 1 expression 75	
+ROUND(CAST(c_dec2 AS int), 0)	3	0 : int	0 : ~float	seed 1 expression 75	
+ROUND(CAST(c_dec2 AS int), 0)	7	0 : int	0 : ~float	seed 1 expression 75	
+ROUND(CAST(c_dec2 AS money), -3)	1	0.0000 : money	error Other (ArgumentOutOfRangeException)	seed 3 expression 24	
+ROUND(CAST(c_dec2 AS money), -3)	2	0.0000 : money	error Other (ArgumentOutOfRangeException)	seed 3 expression 24	
+ROUND(CAST(c_dec2 AS money), -3)	3	0.0000 : money	error Other (ArgumentOutOfRangeException)	seed 3 expression 24	
+ROUND(CAST(c_dec2 AS money), -3)	4	10000000000.0000 : money	error Other (ArgumentOutOfRangeException)	seed 3 expression 24	
+ROUND(CAST(c_dec2 AS money), -3)	5	-10000000000.0000 : money	error Other (ArgumentOutOfRangeException)	seed 3 expression 24	
+ROUND(CAST(c_dec2 AS money), -3)	7	0.0000 : money	error Other (ArgumentOutOfRangeException)	seed 3 expression 24	
+ROUND(CEILING(1.005), -1)	1	0 : decimal(4,0)	error Other (ArgumentOutOfRangeException)	seed 2 expression 102	
+ROUND(CHARINDEX(N'b', c_text), -3)	1	0 : int	error Other (ArgumentOutOfRangeException)	seed 1 expression 0	
+ROUND(CHARINDEX(N'b', c_text), -3)	2	0 : int	error Other (ArgumentOutOfRangeException)	seed 1 expression 0	
+ROUND(CHARINDEX(N'b', c_text), -3)	3	0 : int	error Other (ArgumentOutOfRangeException)	seed 1 expression 0	
+ROUND(CHARINDEX(N'b', c_text), -3)	4	0 : int	error Other (ArgumentOutOfRangeException)	seed 1 expression 0	
+ROUND(CHARINDEX(N'b', c_text), -3)	5	0 : int	error Other (ArgumentOutOfRangeException)	seed 1 expression 0	
+ROUND(CHARINDEX(N'b', c_text), -3)	7	0 : int	error Other (ArgumentOutOfRangeException)	seed 1 expression 0	
+ROUND(COALESCE(CAST(N'' AS int), LEN(N' x ')), 0)	1	0 : int	error Conversion (FormatException)	seed 1 expression 170	
+ROUND(ISNULL((2.5 / c_int), PATINDEX('%[^a-z]%', N'5')), -1)	1	0.000000000000 : decimal(13,12)	error Other (ArgumentOutOfRangeException)	seed 2 expression 142	
+ROUND(ISNULL((2.5 / c_int), PATINDEX('%[^a-z]%', N'5')), -1)	3	0.000000000000 : decimal(13,12)	error Other (ArgumentOutOfRangeException)	seed 2 expression 142	
+ROUND(ISNULL((2.5 / c_int), PATINDEX('%[^a-z]%', N'5')), -1)	4	0.000000000000 : decimal(13,12)	error Other (ArgumentOutOfRangeException)	seed 2 expression 142	
+ROUND(ISNULL((2.5 / c_int), PATINDEX('%[^a-z]%', N'5')), -1)	5	0.000000000000 : decimal(13,12)	error Other (ArgumentOutOfRangeException)	seed 2 expression 142	
+ROUND(ISNULL((2.5 / c_int), PATINDEX('%[^a-z]%', N'5')), -1)	6	0.000000000000 : decimal(13,12)	error Other (ArgumentOutOfRangeException)	seed 2 expression 142	
+ROUND(ISNULL((2.5 / c_int), PATINDEX('%[^a-z]%', N'5')), -1)	7	0.000000000000 : decimal(13,12)	error Other (ArgumentOutOfRangeException)	seed 2 expression 142	
+ROUND(ISNULL(1, 7), 1)	1	1 : int	1 : ~float	seed 1 expression 57	
+ROUND(ISNULL(ISNULL(0.0001, NULL), c_float), 0)	1	0.0000 : decimal(4,4)	0 : ~decimal	seed 3 expression 275	
+ROUND(ISNULL(ISNULL(0.0001, NULL), c_float), 0)	2	0.0000 : decimal(4,4)	0 : ~decimal	seed 3 expression 275	
+ROUND(ISNULL(ISNULL(0.0001, NULL), c_float), 0)	3	0.0000 : decimal(4,4)	0 : ~decimal	seed 3 expression 275	
+ROUND(ISNULL(ISNULL(0.0001, NULL), c_float), 0)	4	0.0000 : decimal(4,4)	0 : ~decimal	seed 3 expression 275	
+ROUND(ISNULL(ISNULL(0.0001, NULL), c_float), 0)	5	0.0000 : decimal(4,4)	0 : ~decimal	seed 3 expression 275	
+ROUND(ISNULL(ISNULL(0.0001, NULL), c_float), 0)	6	0.0000 : decimal(4,4)	0 : ~decimal	seed 3 expression 275	
+ROUND(ISNULL(ISNULL(0.0001, NULL), c_float), 0)	7	0.0000 : decimal(4,4)	0 : ~decimal	seed 3 expression 275	
+ROUND(LEN(''), 1)	1	0 : int	0 : ~float	seed 3 expression 189	
+ROUND(LEN(N'Abc'), -3)	1	0 : int	error Other (ArgumentOutOfRangeException)	seed 1 expression 204	
+ROUND(NULLIF(9.99, ISNULL(c_int, 2)), -1)	1	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 2 expression 119	
+ROUND(NULLIF(9.99, ISNULL(c_int, 2)), -1)	2	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 2 expression 119	
+ROUND(NULLIF(9.99, ISNULL(c_int, 2)), -1)	3	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 2 expression 119	
+ROUND(NULLIF(9.99, ISNULL(c_int, 2)), -1)	4	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 2 expression 119	
+ROUND(NULLIF(9.99, ISNULL(c_int, 2)), -1)	5	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 2 expression 119	
+ROUND(NULLIF(9.99, ISNULL(c_int, 2)), -1)	6	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 2 expression 119	
+ROUND(NULLIF(9.99, ISNULL(c_int, 2)), -1)	7	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 2 expression 119	
+ROUND(PATINDEX('%[0-9]%', ''), 0)	1	0 : int	0 : ~float	seed 2 expression 195	
+ROUND(PATINDEX('%[0-9]%', N'Abc'), -1)	1	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 148	
+ROUND(PATINDEX('%[^a-z]%', LEFT(c_ntext, 2)), -1)	1	0 : int	error Refused (NotSupportedException)	seed 3 expression 247	
+ROUND(PATINDEX('%[^a-z]%', LEFT(c_ntext, 2)), -1)	2	0 : int	error Refused (NotSupportedException)	seed 3 expression 247	
+ROUND(PATINDEX('%[^a-z]%', LEFT(c_ntext, 2)), -1)	3	0 : int	error Refused (NotSupportedException)	seed 3 expression 247	
+ROUND(PATINDEX('%[^a-z]%', LEFT(c_ntext, 2)), -1)	4	0 : int	error Refused (NotSupportedException)	seed 3 expression 247	
+ROUND(PATINDEX('%[^a-z]%', LEFT(c_ntext, 2)), -1)	5	0 : int	error Refused (NotSupportedException)	seed 3 expression 247	
+ROUND(PATINDEX('%[^a-z]%', LEFT(c_ntext, 2)), -1)	6	NULL : int	error Refused (NotSupportedException)	seed 3 expression 247	
+ROUND(PATINDEX('%[^a-z]%', LEFT(c_ntext, 2)), -1)	7	0 : int	error Refused (NotSupportedException)	seed 3 expression 247	
+ROUND(PATINDEX('%b%', c_ntext), -1)	1	0 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 294	
+ROUND(PATINDEX('%b%', c_ntext), -1)	2	0 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 294	
+ROUND(PATINDEX('%b%', c_ntext), -1)	3	0 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 294	
+ROUND(PATINDEX('%b%', c_ntext), -1)	4	0 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 294	
+ROUND(PATINDEX('%b%', c_ntext), -1)	5	0 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 294	
+ROUND(PATINDEX('%b%', c_ntext), -1)	7	0 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 294	
+ROUND(PATINDEX('_b%', (c_ntext + 'ā')), -3)	1	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 72	
+ROUND(PATINDEX('_b%', (c_ntext + 'ā')), -3)	2	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 72	
+ROUND(PATINDEX('_b%', (c_ntext + 'ā')), -3)	3	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 72	
+ROUND(PATINDEX('_b%', (c_ntext + 'ā')), -3)	4	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 72	
+ROUND(PATINDEX('_b%', (c_ntext + 'ā')), -3)	5	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 72	
+ROUND(PATINDEX('_b%', (c_ntext + 'ā')), -3)	7	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 72	
+ROUND(PATINDEX('a%b', N'5'), 2)	1	0 : int	0 : ~float	seed 2 expression 186	
+ROUND(ROUND(0, -3), -1)	1	0 : int	error Other (ArgumentOutOfRangeException)	seed 1 expression 93	
+ROUND(ROUND(0.1, 2), -1)	1	0.0 : decimal(1,1)	error Other (ArgumentOutOfRangeException)	seed 2 expression 114	
+ROUND(ROUND(1, 0), -3)	1	0 : int	error Other (ArgumentOutOfRangeException)	seed 3 expression 9	
+ROUND(ROUND(9.99, -1), -3)	1	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 3 expression 116	
+ROUND(c_bigint, -1)	1	3000000000 : bigint	error Other (ArgumentOutOfRangeException)	seed 1 expression 161	
+ROUND(c_bigint, -1)	2	0 : bigint	error Other (ArgumentOutOfRangeException)	seed 1 expression 161	
+ROUND(c_bigint, -1)	3	-9000000000 : bigint	error Other (ArgumentOutOfRangeException)	seed 1 expression 161	
+ROUND(c_bigint, -1)	4	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 1 expression 161	
+ROUND(c_bigint, -1)	5	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 1 expression 161	
+ROUND(c_bigint, -1)	7	2147483650 : bigint	error Other (ArgumentOutOfRangeException)	seed 1 expression 161	
+ROUND(c_dec, 0)	1	3.0000000000 : decimal(23,10)	3 : ~decimal	seed 2 expression 197	
+ROUND(c_dec, 0)	2	0.0000000000 : decimal(23,10)	0 : ~decimal	seed 2 expression 197	
+ROUND(c_dec, 0)	3	-1.0000000000 : decimal(23,10)	-1 : ~decimal	seed 2 expression 197	
+ROUND(c_dec, 0)	4	error Overflow (8115)	10000000000000 : ~decimal	seed 2 expression 197	
+ROUND(c_dec, 0)	5	error Overflow (8115)	-10000000000000 : ~decimal	seed 2 expression 197	
+ROUND(c_dec, 0)	7	0.0000000000 : decimal(23,10)	0 : ~decimal	seed 2 expression 197	
+ROUND(c_dec, 2)	1	2.5000000000 : decimal(23,10)	2.50 : ~decimal	seed 2 expression 185	
+ROUND(c_dec, 2)	2	0.0000000000 : decimal(23,10)	0.00 : ~decimal	seed 2 expression 185	
+ROUND(c_dec, 2)	3	-1.0000000000 : decimal(23,10)	-1.00 : ~decimal	seed 2 expression 185	
+ROUND(c_dec, 2)	4	error Overflow (8115)	10000000000000.00 : ~decimal	seed 2 expression 185	
+ROUND(c_dec, 2)	5	error Overflow (8115)	-10000000000000.00 : ~decimal	seed 2 expression 185	
+ROUND(c_dec, 2)	7	0.0000000000 : decimal(23,10)	0.00 : ~decimal	seed 2 expression 185	
+ROUND(c_dec2, -1)	1	0.00 : decimal(12,2)	error Other (ArgumentOutOfRangeException)	seed 1 expression 74	
+ROUND(c_dec2, -1)	2	0.00 : decimal(12,2)	error Other (ArgumentOutOfRangeException)	seed 1 expression 74	
+ROUND(c_dec2, -1)	3	0.00 : decimal(12,2)	error Other (ArgumentOutOfRangeException)	seed 1 expression 74	
+ROUND(c_dec2, -1)	4	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 1 expression 74	
+ROUND(c_dec2, -1)	5	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 1 expression 74	
+ROUND(c_dec2, -1)	7	0.00 : decimal(12,2)	error Other (ArgumentOutOfRangeException)	seed 1 expression 74	
+ROUND(c_int, -3)	1	0 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 37	
+ROUND(c_int, -3)	2	0 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 37	
+ROUND(c_int, -3)	3	0 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 37	
+ROUND(c_int, -3)	4	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 2 expression 37	
+ROUND(c_int, -3)	5	error Overflow (8115)	error Other (ArgumentOutOfRangeException)	seed 2 expression 37	
+ROUND(c_int, -3)	7	0 : int	error Other (ArgumentOutOfRangeException)	seed 2 expression 37	
+ROUND(c_int, 0)	1	7 : int	7 : ~float	seed 1 expression 205	
+ROUND(c_int, 0)	2	0 : int	0 : ~float	seed 1 expression 205	
+ROUND(c_int, 0)	3	-7 : int	-7 : ~float	seed 1 expression 205	
+ROUND(c_int, 0)	4	2147483647 : int	2147483647 : ~float	seed 1 expression 205	
+ROUND(c_int, 0)	5	-2147483648 : int	-2147483648 : ~float	seed 1 expression 205	
+ROUND(c_int, 0)	7	1 : int	1 : ~float	seed 1 expression 205	
+ROUND(c_int, 1)	1	7 : int	7 : ~float	seed 1 expression 67	
+ROUND(c_int, 1)	2	0 : int	0 : ~float	seed 1 expression 67	
+ROUND(c_int, 1)	3	-7 : int	-7 : ~float	seed 1 expression 67	
+ROUND(c_int, 1)	4	2147483647 : int	2147483647 : ~float	seed 1 expression 67	
+ROUND(c_int, 1)	5	-2147483648 : int	-2147483648 : ~float	seed 1 expression 67	
+ROUND(c_int, 1)	7	1 : int	1 : ~float	seed 1 expression 67	
+ROUND(c_money, 1)	1	12.3000 : money	12.3 : ~decimal	seed 1 expression 269	
+ROUND(c_money, 1)	2	0.0000 : money	0.0 : ~decimal	seed 1 expression 269	
+ROUND(c_money, 1)	3	0.0000 : money	0.0 : ~decimal	seed 1 expression 269	
+ROUND(c_money, 1)	4	error Overflow (8115)	922337203685477.6 : ~decimal	seed 1 expression 269	
+ROUND(c_money, 1)	5	error Overflow (8115)	-922337203685477.6 : ~decimal	seed 1 expression 269	
+ROUND(c_money, 1)	7	0.0000 : money	0.0 : ~decimal	seed 1 expression 269	
+ROUND(c_money, 2)	1	12.3500 : money	12.35 : ~decimal	seed 1 expression 69	
+ROUND(c_money, 2)	2	0.0000 : money	0.00 : ~decimal	seed 1 expression 69	
+ROUND(c_money, 2)	3	0.0000 : money	0.00 : ~decimal	seed 1 expression 69	
+ROUND(c_money, 2)	4	922337203685477.5800 : money	922337203685477.58 : ~decimal	seed 1 expression 69	
+ROUND(c_money, 2)	5	-922337203685477.5800 : money	-922337203685477.58 : ~decimal	seed 1 expression 69	
+ROUND(c_money, 2)	7	0.0000 : money	0.00 : ~decimal	seed 1 expression 69	
+RTRIM(c_text)	7	'xa{U+000A}' : varchar(100)	'xa' : ~text	seed 2 expression 40	
+SUBSTRING(RIGHT('', 2), 2, 2)	1	'' : varchar(1)	error Refused (NotSupportedException)	seed 3 expression 2	
+SUBSTRING(RIGHT(N'ꞔ', 2), 2, 2)	1	'' : nvarchar(1)	error Refused (NotSupportedException)	seed 1 expression 35	
+TRIM(ISNULL('ā', N'5'))	1	'a' : varchar(1)	'{U+0101}' : ~text	seed 2 expression 44	
+UPPER(CONCAT('ā', N''))	1	'A' : nvarchar(2)	'{U+0100}' : ~text	seed 2 expression 82	
+UPPER(CONCAT(N' x ', N'ꞔ'))	1	' X {U+A794}' : nvarchar(4)	' X {U+A7C4}' : ~text	seed 3 expression 238	
+UPPER(LEFT(LEFT('ā', 2), 2))	1	'A' : varchar(1)	error Refused (NotSupportedException)	seed 3 expression 198	

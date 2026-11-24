@@ -11,6 +11,8 @@ using PPDS.Dataverse.Query.Execution;
 namespace PPDS.Dataverse.Query.Planning.Nodes;
 
 /// <summary>A compiled SET clause for UPDATE statements.</summary>
+/// <param name="ColumnName">Logical name of the attribute to set on each updated record (the last part of the SET target's column reference).</param>
+/// <param name="Value">The right-hand-side expression compiled to a delegate, evaluated against each source row's values; when attribute metadata is available, the result is coerced to the column's attribute type before it is written.</param>
 public sealed record CompiledSetClause(string ColumnName, CompiledScalarExpression Value);
 
 /// <summary>

@@ -13,9 +13,6 @@ PATHS = [".github/workflows/release-cli.yml", ".github/workflows/test.yml",
 
 
 PUBLISHER_CHANGE_PATHS = (
-    '.claude/skills/implement/SKILL.md',
-    '.claude/skills/pr/SKILL.md',
-    '.claude/skills/release/SKILL.md',
     '.github/pull_request_template.md',
     '.github/workflows/publish-nuget.yml',
     'CONTRIBUTING.md',
@@ -23,6 +20,7 @@ PUBLISHER_CHANGE_PATHS = (
     'docs/CONTRIBUTOR-LIFECYCLE.md',
     'docs/MERGE-POLICY.md',
     'docs/RELEASE.md',
+    'docs/runbooks/release.md',
     'scripts/ci/check_contributor_provenance.py',
     'specs/README.md',
     'specs/contributor-lifecycle.md',
@@ -45,6 +43,7 @@ NATIVE_INPUT_PROBES = {
     "tests/fixtures/ReferenceCacheProbe/**": "tests/fixtures/ReferenceCacheProbe/ReferenceCacheProbe.csproj",
     "scripts/ci/smoke_single_file_extraction.py": "scripts/ci/smoke_single_file_extraction.py",
     "scripts/ci/verify_native_distribution.py": "scripts/ci/verify_native_distribution.py",
+    "scripts/ci/ci_images.py": "scripts/ci/ci_images.py",
     "scripts/ci/check_native_glibc.sh": "scripts/ci/check_native_glibc.sh",
     ".github/workflows/extension-publish.yml": ".github/workflows/extension-publish.yml",
     "Directory.*.props": "Directory.Packages.props",
@@ -240,7 +239,7 @@ def test_distribution_inputs_are_coherent_and_candidate_route_is_no_publish():
     (PATHS[3], "'obj', 'Release', CLI_TARGET_FRAMEWORK, rid", "'obj', 'Release', 'net8.0', rid"),
     (PATHS[2], "dotnet-version: '10.0.115'", "dotnet-version: '8.0.x'"),
     (PATHS[1], "    permissions:\n      contents: read\n    runs-on: ${{ matrix.os }}", "    permissions:\n      contents: write\n    runs-on: ${{ matrix.os }}"),
-    (PATHS[1], "needs: [changes, test, single-file-extraction, vsix-artifacts, python-tests]", "needs: [changes, test, single-file-extraction, python-tests]"),
+    (PATHS[1], "needs: [changes, test, test-linux, single-file-extraction, vsix-artifacts, python-tests]", "needs: [changes, test, test-linux, single-file-extraction, python-tests]"),
 ])
 def test_stale_or_unsafe_runtime_input_fails(path, old, new):
     value = sources()

@@ -9,6 +9,7 @@ using PPDS.Cli.Services.Flows;
 using PPDS.Dataverse.Models;
 using PPDS.Dataverse.Pooling;
 using Xunit;
+using PPDS.Tests.Shared;
 
 namespace PPDS.Cli.Tests.Services.Flows;
 
@@ -270,9 +271,9 @@ public sealed class FlowActivationServiceTests
             return f.Flows[id];
         };
         var pending = f.Service.ExecuteAsync(Batch() with { VerificationTimeout = TimeSpan.FromSeconds(5) });
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await HangBackstop.WaitAsync(entered.Task, "the verification read to block");
         time.Advance(TimeSpan.FromSeconds(5));
-        var result = await pending.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await HangBackstop.WaitAsync(pending, "the batch to report the verification timeout");
         Assert.Equal("Flow.VerificationTimeout", result.Flows[0].ErrorCode);
         Assert.Equal(new[] { "unknown", "not-attempted" }, result.Flows.Select(x => x.Status));
         Assert.Single(f.Writes);

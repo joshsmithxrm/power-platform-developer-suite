@@ -81,7 +81,7 @@ All libraries except PPDS.Plugins target net8.0, net9.0, and net10.0. Per-packag
 | [ppds-tools](https://github.com/joshsmithxrm/ppds-tools) | PowerShell deployment module |
 | [ppds-alm](https://github.com/joshsmithxrm/ppds-alm) | CI/CD pipeline templates |
 | [ppds-demo](https://github.com/joshsmithxrm/ppds-demo) | Reference implementation |
-| [Claude Code templates](templates/claude/INSTALL.md) | PPDS integration for Claude Code users |
+| [ppds-skills](https://github.com/joshsmithxrm/ppds-skills) | Agent skills for driving the PPDS CLI and MCP server |
 
 ## Contributing
 

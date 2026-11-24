@@ -296,12 +296,17 @@ public static class ServiceRegistration
             sp.GetRequiredService<IComponentNameResolver>(),
             sp.GetRequiredService<ICachedMetadataProvider>()));
 
+        // One base-language provider per service provider, i.e. per environment's connection pool: the language is read
+        // once (organization.languagecode) and shared by every authoring service resolved for that environment.
+        services.AddSingleton<IOrganizationBaseLanguageProvider>(sp =>
+            new OrganizationBaseLanguageProvider(sp.GetRequiredService<IDataverseConnectionPool>()));
         services.AddTransient<IMetadataAuthoringService>(sp => new DataverseMetadataAuthoringService(
             sp.GetRequiredService<IDataverseConnectionPool>(),
             sp.GetRequiredService<SchemaValidator>(),
             sp.GetRequiredService<IShakedownGuard>(),
             sp.GetService<ILogger<DataverseMetadataAuthoringService>>(),
-            sp.GetService<ICachedMetadataProvider>()));
+            sp.GetService<ICachedMetadataProvider>(),
+            sp.GetRequiredService<IOrganizationBaseLanguageProvider>()));
 
         services.AddTransient<IRoleService>(sp => new RoleService(
             sp.GetRequiredService<IDataverseConnectionPool>(),

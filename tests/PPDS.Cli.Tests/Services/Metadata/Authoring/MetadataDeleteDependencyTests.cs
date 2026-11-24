@@ -233,7 +233,7 @@ public sealed class MetadataDeleteDependencyTests
             Assert.Equal(typeof(Task), method.ReturnType);
             Assert.Equal(3, method.GetParameters().Length);
         }
-        Assert.Contains(service.GetConstructors(), ctor => ctor.GetParameters().Length == 5);
+        Assert.Contains(service.GetConstructors(), ctor => ctor.GetParameters().Length == 6); // + base-language provider
     }
 
     internal sealed class Fixture : IDisposable
@@ -363,7 +363,7 @@ public sealed class MetadataDeleteDependencyTests
                         });
                     return Task.FromResult(client.Object);
                 });
-            Service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), guard.Object, cacheProvider: _cache.Object);
+            Service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), guard.Object, cacheProvider: _cache.Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
         }
 
         internal void BindOperationToken(CancellationToken token)

@@ -20,6 +20,7 @@ namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 [Trait("Category", "Unit")]
 public sealed class PrimaryIdLabelUpdateTests : IDisposable
 {
+    private readonly LabelWriteStore _labels = new();
     private const string Table = "new_table";
     // Deliberately does not end in 'id'. The table definition identifies the key.
     private const string Key = "new_recordkey";
@@ -43,7 +44,7 @@ public sealed class PrimaryIdLabelUpdateTests : IDisposable
         _pool.Setup(p => p.GetClientAsync(null, null, _cancellation.Token)).ReturnsAsync(CheckOutClient);
         _cache.Setup(c => c.InvalidateEntity(Table)).Callback(() => _lifecycle.Add("invalidate"));
         _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(),
-            new InactiveFakeShakedownGuard(), cacheProvider: _cache.Object);
+            new InactiveFakeShakedownGuard(), cacheProvider: _cache.Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
     }
 
     private IPooledClient CheckOutClient()
@@ -75,8 +76,10 @@ public sealed class PrimaryIdLabelUpdateTests : IDisposable
                 Assert.False(released);
                 _lifecycle.Add(request.RequestName);
                 _requests.Add(request);
+                _labels.Record(request);
                 OrganizationResponse response = request switch
                 {
+                    _ when LabelWriteStore.IsReadBack(request) => _labels.Synthesize(request), // never the shared _attribute
                     RetrieveAttributeRequest => new RetrieveAttributeResponse
                     {
                         Results = new ParameterCollection { ["AttributeMetadata"] = _attribute }
@@ -110,6 +113,7 @@ public sealed class PrimaryIdLabelUpdateTests : IDisposable
         if (primaryId) expected.Add("RetrieveEntity");
         expected.Add("UpdateAttribute");
         expected.Add("invalidate");
+        expected.Add("RetrieveAttribute"); // label read-back, on its own lease, before any publish
         if (publish) expected.Add("PublishXml");
         AssertSingleSlotOrder(expected);
     }
@@ -174,7 +178,7 @@ public sealed class PrimaryIdLabelUpdateTests : IDisposable
         request.ColumnLogicalName = "NEW_RECORDKEY";
         await UpdateAsync(request);
 
-        var expectedRequests = new List<string> { "RetrieveAttribute", "RetrieveEntity", "UpdateAttribute" };
+        var expectedRequests = new List<string> { "RetrieveAttribute", "RetrieveEntity", "UpdateAttribute", "RetrieveAttribute" };
         if (publish) expectedRequests.Add("PublishXml");
         Assert.Equal(expectedRequests, _requests.Select(r => r.RequestName));
         var attributeRead = Assert.IsType<RetrieveAttributeRequest>(_requests[0]);
@@ -200,7 +204,7 @@ public sealed class PrimaryIdLabelUpdateTests : IDisposable
         Assert.Equal(2, _attribute.DisplayName.LocalizedLabels.Count);
         Assert.Equal("Old English", _attribute.DisplayName.LocalizedLabels[0].Label);
         _cache.Verify(c => c.InvalidateEntity(Table), Times.Once);
-        if (publish) Assert.Contains($"<entity>{Table}</entity>", Assert.IsType<PublishXmlRequest>(_requests[3]).ParameterXml);
+        if (publish) Assert.Contains($"<entity>{Table}</entity>", Assert.IsType<PublishXmlRequest>(_requests[4]).ParameterXml); // after the label read-back
     }
 
     [Theory]
@@ -309,7 +313,7 @@ public sealed class PrimaryIdLabelUpdateTests : IDisposable
         var request = NewRequest("New");
         request.MaxLength = 90;
         await UpdateAsync(request);
-        Assert.Equal(new[] { "RetrieveAttribute", "UpdateAttribute" }, _requests.Select(r => r.RequestName));
+        Assert.Equal(new[] { "RetrieveAttribute", "UpdateAttribute", "RetrieveAttribute" }, _requests.Select(r => r.RequestName));
         var update = Assert.IsType<UpdateAttributeRequest>(_requests[1]);
         Assert.NotSame(_attribute, update.Attribute);
         Assert.Equal(90, Assert.IsType<StringAttributeMetadata>(update.Attribute).MaxLength);

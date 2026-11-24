@@ -1,0 +1,20 @@
+<Project>
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <!--
+    No test process may start an interactive sign-in (system browser, device code, or a Dataverse SDK OAuth prompt).
+    For every test project, including the integration and live projects:
+    - the AppContext switch goes into the project's runtimeconfig.json; PPDS.Auth and PPDS.Dataverse check it
+      before every interactive sign-in (src/Shared/InteractiveSignInGuard.cs) and throw instead;
+    - tests/Shared/InteractiveSignInTripwire.cs is compiled in: it fails a test when a sign-in was blocked,
+      even if product code caught the exception, and checks that the switch is on.
+    No test opts out. The integration and live tests never prompt: they use service principals or an
+    already signed-in profile, and refuse when a prompt would be needed.
+    Child processes the tests start (for example the ppds CLI) use their own runtime configuration and are
+    not covered.
+  -->
+  <ItemGroup Condition="'$(IsTestProject)' == 'true'">
+    <RuntimeHostConfigurationOption Include="PPDS.BlockInteractiveSignIn" Value="true" />
+    <Compile Include="$(MSBuildThisFileDirectory)Shared/InteractiveSignInTripwire.cs" Link="Shared/InteractiveSignInTripwire.cs" />
+  </ItemGroup>
+</Project>

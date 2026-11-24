@@ -41,7 +41,7 @@ public partial class DataverseMetadataAuthoringService
     }
 
     private async Task UpdateFiniteColumnLabelsAsync(
-        UpdateColumnRequest request, AttributeMetadata source, IMetadataAuthoringProgressReporter? reporter, CancellationToken ct)
+        UpdateColumnRequest request, AttributeMetadata source, int lcid, IMetadataAuthoringProgressReporter? reporter, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         ValidateFiniteColumnLabels(request, source);
@@ -58,8 +58,8 @@ public partial class DataverseMetadataAuthoringService
         fresh.LogicalName = source.LogicalName;
         fresh.SchemaName = source.SchemaName;
         fresh.MetadataId = source.MetadataId;
-        if (request.DisplayName != null) fresh.DisplayName = new Label(request.DisplayName, 1033);
-        if (request.Description != null) fresh.Description = new Label(request.Description, 1033);
+        if (request.DisplayName != null) fresh.DisplayName = new Label(request.DisplayName, lcid);
+        if (request.Description != null) fresh.Description = new Label(request.Description, lcid);
 
         reporter?.ReportPhase("Updating column", source.LogicalName);
         ct.ThrowIfCancellationRequested();
@@ -72,9 +72,12 @@ public partial class DataverseMetadataAuthoringService
         }, ct).ConfigureAwait(false);
 
         // The SDK acknowledged the update. Invalidate after returning its lease,
-        // including when cancellation arrived with the acknowledgement; never replay.
+        // including when cancellation arrived with the acknowledgement; never replay. The label is written from here
+        // on: a cancellation between this acknowledgement and the end of the read-back is reported by the read-back as
+        // WRITE_NOT_CONFIRMED (written, not confirmed), as on the typed path. A cancellation after the label was
+        // confirmed (during the publish, or at the checkpoints below) is a plain cancellation.
         _cacheProvider?.InvalidateEntity(source.EntityLogicalName);
-        ct.ThrowIfCancellationRequested();
+        await ConfirmColumnLabelsAsync(request, lcid, ct).ConfigureAwait(false);
         if (request.Publish)
         {
             try
@@ -94,6 +97,16 @@ public partial class DataverseMetadataAuthoringService
         ct.ThrowIfCancellationRequested();
         _logger?.LogInformation("Updated column {Column} on {Entity}", source.LogicalName, source.EntityLogicalName);
     }
+
+    /// <summary>
+    /// Reads the column back as-if-published (one request, only when a label was sent) and confirms the requested
+    /// base-language display name and description; raises WRITE_NOT_CONFIRMED otherwise, before any publish.
+    /// </summary>
+    private Task ConfirmColumnLabelsAsync(UpdateColumnRequest request, int lcid, CancellationToken ct)
+        => ConfirmLabelsAsync("column", $"Column '{request.ColumnLogicalName}' was updated on '{request.EntityLogicalName}'.", request.Publish, lcid,
+            token => ReadColumnForConfirmationAsync(request.EntityLogicalName, request.ColumnLogicalName, token), ct,
+            new LabelExpectation<AttributeMetadata>("display name", request.DisplayName, a => a.DisplayName),
+            new LabelExpectation<AttributeMetadata>("description", request.Description, a => a.Description));
 
     private static void ValidateFiniteColumnLabels(UpdateColumnRequest request, AttributeMetadata source)
     {

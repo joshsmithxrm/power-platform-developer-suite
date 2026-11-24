@@ -41,6 +41,7 @@ public class MetadataStatusReasonServiceTests
 
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new OrganizationResponse());
+        LabelWriteStore.Attach(_client); // label/colour read-backs answered from the writes
 
         // Registered after the blanket setup so it wins for the colour follow-up.
         _client.Setup(c => c.ExecuteAsync(It.Is<Microsoft.Xrm.Sdk.Messages.UpdateOptionValueRequest>(r => r.Parameters.ContainsKey("Color")), It.IsAny<CancellationToken>()))
@@ -55,7 +56,7 @@ public class MetadataStatusReasonServiceTests
         _service = new DataverseMetadataAuthoringService(
             _pool.Object,
             new SchemaValidator(),
-            new InactiveFakeShakedownGuard());
+            new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
     }
 
     private string? CapturedStatusColorFor(int value)
@@ -98,6 +99,7 @@ public class MetadataStatusReasonServiceTests
                     r.EntityLogicalName == entityLogicalName && r.LogicalName == "statuscode"),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(response);
+        LabelWriteStore.Attach(_client); // the read-back after a write is answered from the write
     }
 
     private void SetupInsertStatusValue(int assignedValue)

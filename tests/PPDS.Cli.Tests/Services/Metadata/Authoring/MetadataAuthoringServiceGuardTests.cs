@@ -52,7 +52,7 @@ public class MetadataAuthoringServiceGuardTests
         var validator = new SchemaValidator();
         var guard = new ActiveFakeShakedownGuard();
 
-        var service = new DataverseMetadataAuthoringService(pool, validator, guard);
+        var service = new DataverseMetadataAuthoringService(pool, validator, guard, baseLanguage: new FixedOrganizationBaseLanguage(1033));
 
         Func<Task> act = methodName switch
         {

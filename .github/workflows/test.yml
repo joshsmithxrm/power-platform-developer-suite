@@ -46,6 +46,7 @@ jobs:
               - '**.targets'
               - 'global.json'
               - 'NuGet.config'
+              - '.editorconfig'
               - '.github/workflows/test.yml'
             extraction:
               - '.nvmrc'
@@ -57,6 +58,7 @@ jobs:
               - 'tests/fixtures/ReferenceCacheProbe/**'
               - 'scripts/ci/smoke_single_file_extraction.py'
               - 'scripts/ci/verify_native_distribution.py'
+              - 'scripts/ci/ci_images.py'
               - 'scripts/ci/check_native_glibc.sh'
               - '.github/workflows/extension-publish.yml'
               - 'Directory.*.props'
@@ -82,6 +84,7 @@ jobs:
               - 'global.json'
               - 'NuGet.config'
               - 'nuget.config'
+              - '.editorconfig'
               - '.github/**'
               - 'pyproject.toml'
               - 'pytest.ini'
@@ -147,6 +150,51 @@ jobs:
         flags: unittests
         fail_ci_if_error: false  # Don't fail build if upload fails
         verbose: true
+
+  # The same unit suite on Linux. Linux and macOS binaries ship, and .NET behaves
+  # differently there (path parsing, file-system case, line endings); the Windows
+  # job alone cannot see a test that fails only on Unix. Coverage stays with the
+  # Windows job.
+  test-linux:
+    name: ${{ github.event_name == 'workflow_dispatch' && '.NET tests on Linux not selected for artifact qualification' || 'test-linux' }}
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+        fetch-depth: 0  # Required for MinVer to read git history
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v6
+      with:
+        # Keep in step with the Windows test job above.
+        dotnet-version: |
+          8.0.428
+          9.0.321
+          10.0.115
+
+    - name: Cache NuGet packages
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.nuget/packages
+          ~/.local/share/NuGet/http-cache
+        key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', '**/Directory.Build.props', 'nuget.config') }}
+        restore-keys: |
+          nuget-${{ runner.os }}-
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build
+      run: dotnet build --configuration Release --no-restore
+
+    - name: Test
+      run: dotnet test --configuration Release --no-build --verbosity normal --filter "Category!=Integration"
 
   single-file-extraction:
     name: Single-file extraction (${{ matrix.rid }})
@@ -317,7 +365,7 @@ jobs:
     permissions:
       contents: read # Read the tested aggregate evaluator; no write grant.
     runs-on: ubuntu-latest
-    needs: [changes, test, single-file-extraction, vsix-artifacts, python-tests]
+    needs: [changes, test, test-linux, single-file-extraction, vsix-artifacts, python-tests]
     if: always()
     steps:
       - uses: actions/checkout@v6

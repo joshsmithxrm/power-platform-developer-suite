@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Version:** 1.0
-**Last Updated:** 2026-03-16
+**Last Updated:** 2026-11-18
 **Code:** [tests/PPDS.Tui.E2eTests/tools/](../tests/PPDS.Tui.E2eTests/tools/) | None
 
 ---
@@ -240,8 +240,7 @@ Terminal.Gui uses ANSI/VT escape sequences. The key mapper must handle:
 | AC-16 | No orphaned processes after `close` | Manual: run `close`, check task manager for stale `dotnet` or `ppds` processes | 🔲 |
 | AC-17 | Tool works on Windows (primary dev platform) | Manual: all above criteria pass on Windows 11 | 🔲 |
 | AC-18 | `/verify tui` command updated to use tui-verify.mjs for interactive verification | Manual: run `/verify tui`, verify it uses tui-verify commands | 🔲 |
-| AC-19 | `@tui-verify` skill created with command reference and common patterns | Manual: invoke skill, verify content covers all commands and Terminal.Gui patterns | 🔲 |
-| AC-20 | `/qa` command updated with TUI Mode blind verifier section | Manual: run `/qa tui`, verify blind verifier dispatched with TUI-specific protocol | 🔲 |
+| AC-19 | `.claude/skills/verify/REFERENCE.md` carries the TUI command reference and common patterns | Manual: read the TUI section, verify content covers all commands and Terminal.Gui patterns | 🔲 |
 
 ### Edge Cases
 
@@ -474,10 +473,9 @@ node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs close
 
 ## Integration
 
-### Skill: `@tui-verify`
+### TUI reference in the verify skill
 
-Create `.claude/skills/tui-verify/SKILL.md` with:
-- **Frontmatter** must include `allowed-tools: Bash(node *tui-verify*), Bash(cd * && node *tui-verify*)` — sandboxes the skill to tui-verify commands only (mirrors webview-cdp's `Bash(node *webview-cdp*)` pattern)
+The TUI command reference lives in `.claude/skills/verify/REFERENCE.md` ("§tui — TUI Mode"), not in a separate skill. It covers:
 - When to use (after any TUI change that affects rendering or interaction)
 - Command reference table (all 8 commands with examples)
 - Common patterns (navigate screens, verify status bar, check menu items)
@@ -530,74 +528,8 @@ node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs screenshot $TEMP/tui-verify.js
 node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs close
 ```
 
-See @tui-verify skill for full command reference and Terminal.Gui keyboard patterns.
+See `.claude/skills/verify/REFERENCE.md` for full command reference and Terminal.Gui keyboard patterns.
 ```
-
-### Command: `/qa tui`
-
-Add a "TUI Mode — Verifier Prompt" section to `.claude/skills/qa/SKILL.md`, parallel to Extension Mode. The blind verifier prompt:
-
-```markdown
-#### TUI Mode — Verifier Prompt
-
-```
-You are a QA tester. You have NEVER seen the source code for this TUI
-application. You don't know how anything is implemented. You only know
-what the product SHOULD do.
-
-## Your Tools
-
-You may ONLY use these tools:
-- Bash: ONLY for running `node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs` commands
-- Read: ONLY for viewing screenshot JSON files (in $TEMP)
-
-You MUST NOT use Read/Grep/Glob on source code files. You cannot look
-at .cs, .ts, .json, or any file under src/. You are blind to the
-implementation.
-
-## Verification Protocol
-
-For EACH check below:
-1. Perform the action using tui-verify commands
-2. Read the relevant terminal row(s): `text <row>`
-3. Optionally dump full state: `screenshot $TEMP/qa-tui-{check-number}.json`
-4. Compare actual text to expected text
-5. Report PASS or FAIL with the actual text content as evidence
-
-If a check FAILS:
-- Show exactly what text you SAW vs what was EXPECTED
-- Include the row number and full row content
-- Do NOT speculate about why it failed
-
-## Setup
-
-```bash
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs close  # clean up prior
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs launch --build
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs wait "PPDS" 15000
-```
-
-## Checks
-
-{paste generated checklist here}
-
-## Teardown
-
-```bash
-node tests/PPDS.Tui.E2eTests/tools/tui-verify.mjs close
-```
-
-## Report Format
-
-| # | Check | Status | Evidence |
-|---|-------|--------|----------|
-| 1 | description | PASS/FAIL | row N: "actual text content" |
-
-### Verdict: PASS (all green) / FAIL (N issues found)
-```
-```
-
-Also update the mode detection in Step 2: change `src/PPDS.Cli/Tui/` from "TUI mode (snapshot tests — no blind verification yet)" to "TUI mode (tui-verify)".
 
 ---
 
@@ -614,3 +546,11 @@ Also update the mode detection in Step 2: change `src/PPDS.Cli/Tui/` from "TUI m
 - **Mouse support**: Terminal.Gui supports mouse — add `click <row> <col>` command
 - **Record/replay**: Capture keystroke sequences for repeatable verification scripts
 - **CI integration**: Run TUI verification in CI with headless PTY
+
+---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-11-18 | Removed the `/qa tui` criterion (AC-20) and section along with the deleted qa skill; TUI reference material lives in the verify skill |

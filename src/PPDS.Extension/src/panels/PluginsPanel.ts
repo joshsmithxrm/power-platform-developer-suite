@@ -150,6 +150,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
     }
 
     private async loadTree(isRetry = false): Promise<void> {
+        const isCurrent = this.beginRequest('tree');
         try {
             this.postMessage({ command: 'loading' });
 
@@ -158,37 +159,37 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                 this.daemon.pluginsList(this.environmentUrl, this.profileName),
                 this.daemon.dataProvidersList(undefined, this.environmentUrl, this.profileName),
             ]);
+            if (!isCurrent()) return;
 
-            // Collect assembly names that already appear under a package to avoid duplication
-            const packagedAssemblyNames = new Set<string>(
-                pluginsResult.packages.flatMap(pkg => pkg.assemblies.map(a => a.name))
-            );
+            const data = this.buildTreeData(pluginsResult, dataProvidersResult);
 
-            // Build assemblies tree nodes — skip any assembly already nested under a package
-            const assemblies: PluginTreeNode[] = pluginsResult.assemblies
-                .filter(asm => !packagedAssemblyNames.has(asm.name))
-                .map(asm => ({
-                    id: asm.id ?? `assembly:${asm.name}`,
-                    name: `${asm.name}${asm.version ? ` (${asm.version})` : ''}`,
-                    nodeType: 'assembly',
-                    hasChildren: asm.types.length > 0,
-                    children: asm.types.map(t => ({
-                        id: t.id ?? `type:${t.typeName}`,
-                        name: t.typeName,
-                        nodeType: 'type',
-                        hasChildren: t.steps.length > 0,
-                        children: t.steps.map(s => ({
-                            id: s.id ?? `step:${s.name}`,
-                            name: s.name,
-                            nodeType: 'step',
-                            isEnabled: s.isEnabled,
-                            badge: s.isEnabled ? undefined : 'Disabled',
-                        })),
-                    })),
-                }));
+            this.postMessage({ command: 'treeLoaded', data });
+        } catch (error) {
+            if (!isCurrent()) return;
+            const msg = error instanceof Error ? error.message : String(error);
 
-            // Build packages tree nodes
-            const mapAssemblyNode = (asm: PluginAssemblyInfoDto): PluginTreeNode => ({
+            if (await handleAuthError(this.daemon, error, isRetry, () => this.loadTree(true))) {
+                return;
+            }
+            if (!isCurrent()) return;
+
+            this.postMessage({ command: 'error', message: msg });
+        }
+    }
+
+    private buildTreeData(
+        pluginsResult: Awaited<ReturnType<DaemonClient['pluginsList']>>,
+        dataProvidersResult: Awaited<ReturnType<DaemonClient['dataProvidersList']>>,
+    ): PluginTreeData {
+        // Collect assembly names that already appear under a package to avoid duplication
+        const packagedAssemblyNames = new Set<string>(
+            pluginsResult.packages.flatMap(pkg => pkg.assemblies.map(a => a.name))
+        );
+
+        // Build assemblies tree nodes — skip any assembly already nested under a package
+        const assemblies: PluginTreeNode[] = pluginsResult.assemblies
+            .filter(asm => !packagedAssemblyNames.has(asm.name))
+            .map(asm => ({
                 id: asm.id ?? `assembly:${asm.name}`,
                 name: `${asm.name}${asm.version ? ` (${asm.version})` : ''}`,
                 nodeType: 'assembly',
@@ -206,106 +207,118 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                         badge: s.isEnabled ? undefined : 'Disabled',
                     })),
                 })),
-            });
-
-            const packages: PluginTreeNode[] = pluginsResult.packages.map(pkg => ({
-                id: pkg.id ?? `package:${pkg.name}`,
-                name: `${pkg.name}${pkg.version ? ` (${pkg.version})` : ''}`,
-                nodeType: 'package',
-                hasChildren: pkg.assemblies.length > 0,
-                children: pkg.assemblies.map(mapAssemblyNode),
             }));
 
-            // Build service endpoints tree nodes (from consolidated plugins/list response)
-            const serviceEndpoints: PluginTreeNode[] = pluginsResult.serviceEndpoints.map(ep => ({
-                id: `serviceendpoint:${ep.id}`,
-                name: ep.name,
-                nodeType: 'serviceEndpoint',
-                isManaged: ep.isManaged,
-                badge: ep.isWebhook ? 'Webhook' : ep.contractType,
-            }));
+        // Build packages tree nodes
+        const mapAssemblyNode = (asm: PluginAssemblyInfoDto): PluginTreeNode => ({
+            id: asm.id ?? `assembly:${asm.name}`,
+            name: `${asm.name}${asm.version ? ` (${asm.version})` : ''}`,
+            nodeType: 'assembly',
+            hasChildren: asm.types.length > 0,
+            children: asm.types.map(t => ({
+                id: t.id ?? `type:${t.typeName}`,
+                name: t.typeName,
+                nodeType: 'type',
+                hasChildren: t.steps.length > 0,
+                children: t.steps.map(s => ({
+                    id: s.id ?? `step:${s.name}`,
+                    name: s.name,
+                    nodeType: 'step',
+                    isEnabled: s.isEnabled,
+                    badge: s.isEnabled ? undefined : 'Disabled',
+                })),
+            })),
+        });
 
-            // Build custom APIs tree nodes (from consolidated plugins/list response)
-            const customApis: PluginTreeNode[] = pluginsResult.customApis.map(api => ({
-                id: `customapi:${api.id}`,
-                name: api.displayName || api.uniqueName,
-                nodeType: 'customApi',
-                isManaged: api.isManaged,
-                badge: api.isFunction ? 'Function' : undefined,
-                hasChildren: (api.requestParameters.length + api.responseProperties.length) > 0,
-            }));
+        const packages: PluginTreeNode[] = pluginsResult.packages.map(pkg => ({
+            id: pkg.id ?? `package:${pkg.name}`,
+            name: `${pkg.name}${pkg.version ? ` (${pkg.version})` : ''}`,
+            nodeType: 'package',
+            hasChildren: pkg.assemblies.length > 0,
+            children: pkg.assemblies.map(mapAssemblyNode),
+        }));
 
-            // Build data sources tree nodes (from consolidated plugins/list response, with data providers as children)
-            const dataSources: PluginTreeNode[] = pluginsResult.dataSources.map(ds => {
-                const providers = dataProvidersResult.providers.filter(p => p.dataSourceId === ds.id);
-                return {
-                    id: `datasource:${ds.id}`,
-                    name: ds.name,
-                    nodeType: 'dataSource',
-                    isManaged: false,
-                    hasChildren: providers.length > 0,
-                    children: providers.map(p => ({
-                        id: `dataprovider:${p.id}`,
-                        name: p.name,
-                        nodeType: 'dataProvider',
-                        isManaged: p.isManaged,
-                    })),
-                };
-            });
+        // Build service endpoints tree nodes (from consolidated plugins/list response)
+        const serviceEndpoints: PluginTreeNode[] = pluginsResult.serviceEndpoints.map(ep => ({
+            id: `serviceendpoint:${ep.id}`,
+            name: ep.name,
+            nodeType: 'serviceEndpoint',
+            isManaged: ep.isManaged,
+            badge: ep.isWebhook ? 'Webhook' : ep.contractType,
+        }));
 
-            // Add orphaned data providers (no matching data source)
-            const orphanedProviders = dataProvidersResult.providers.filter(
-                p => !p.dataSourceId || !pluginsResult.dataSources.some(ds => ds.id === p.dataSourceId)
-            );
-            for (const p of orphanedProviders) {
-                dataSources.push({
+        // Build custom APIs tree nodes (from consolidated plugins/list response)
+        const customApis: PluginTreeNode[] = pluginsResult.customApis.map(api => ({
+            id: `customapi:${api.id}`,
+            name: api.displayName || api.uniqueName,
+            nodeType: 'customApi',
+            isManaged: api.isManaged,
+            badge: api.isFunction ? 'Function' : undefined,
+            hasChildren: (api.requestParameters.length + api.responseProperties.length) > 0,
+        }));
+
+        // Build data sources tree nodes (from consolidated plugins/list response, with data providers as children)
+        const dataSources: PluginTreeNode[] = pluginsResult.dataSources.map(ds => {
+            const providers = dataProvidersResult.providers.filter(p => p.dataSourceId === ds.id);
+            return {
+                id: `datasource:${ds.id}`,
+                name: ds.name,
+                nodeType: 'dataSource',
+                isManaged: false,
+                hasChildren: providers.length > 0,
+                children: providers.map(p => ({
                     id: `dataprovider:${p.id}`,
                     name: p.name,
                     nodeType: 'dataProvider',
                     isManaged: p.isManaged,
-                });
-            }
-
-            // Build descriptive status summary
-            const summaryParts: string[] = [];
-            if (packages.length > 0) summaryParts.push(`${packages.length} package${packages.length !== 1 ? 's' : ''}`);
-            if (assemblies.length > 0) summaryParts.push(`${assemblies.length} assembl${assemblies.length !== 1 ? 'ies' : 'y'}`);
-            const webhookCount = serviceEndpoints.filter(se => se.badge === 'Webhook').length;
-            const otherEndpointCount = serviceEndpoints.length - webhookCount;
-            if (webhookCount > 0) summaryParts.push(`${webhookCount} webhook${webhookCount !== 1 ? 's' : ''}`);
-            if (otherEndpointCount > 0) summaryParts.push(`${otherEndpointCount} service endpoint${otherEndpointCount !== 1 ? 's' : ''}`);
-            if (customApis.length > 0) summaryParts.push(`${customApis.length} custom API${customApis.length !== 1 ? 's' : ''}`);
-            if (dataSources.length > 0) summaryParts.push(`${dataSources.length} data source${dataSources.length !== 1 ? 's' : ''}`);
-            const statusSummary = summaryParts.length > 0 ? summaryParts.join(' \u2014 ') : 'No registrations';
-
-            const data: PluginTreeData = {
-                assemblies,
-                packages,
-                serviceEndpoints,
-                customApis,
-                dataSources,
-                statusSummary,
+                })),
             };
+        });
 
-            this.postMessage({ command: 'treeLoaded', data });
-        } catch (error) {
-            const msg = error instanceof Error ? error.message : String(error);
-
-            if (await handleAuthError(this.daemon, error, isRetry, () => this.loadTree(true))) {
-                return;
-            }
-
-            this.postMessage({ command: 'error', message: msg });
+        // Add orphaned data providers (no matching data source)
+        const orphanedProviders = dataProvidersResult.providers.filter(
+            p => !p.dataSourceId || !pluginsResult.dataSources.some(ds => ds.id === p.dataSourceId)
+        );
+        for (const p of orphanedProviders) {
+            dataSources.push({
+                id: `dataprovider:${p.id}`,
+                name: p.name,
+                nodeType: 'dataProvider',
+                isManaged: p.isManaged,
+            });
         }
+
+        // Build descriptive status summary
+        const summaryParts: string[] = [];
+        if (packages.length > 0) summaryParts.push(`${packages.length} package${packages.length !== 1 ? 's' : ''}`);
+        if (assemblies.length > 0) summaryParts.push(`${assemblies.length} assembl${assemblies.length !== 1 ? 'ies' : 'y'}`);
+        const webhookCount = serviceEndpoints.filter(se => se.badge === 'Webhook').length;
+        const otherEndpointCount = serviceEndpoints.length - webhookCount;
+        if (webhookCount > 0) summaryParts.push(`${webhookCount} webhook${webhookCount !== 1 ? 's' : ''}`);
+        if (otherEndpointCount > 0) summaryParts.push(`${otherEndpointCount} service endpoint${otherEndpointCount !== 1 ? 's' : ''}`);
+        if (customApis.length > 0) summaryParts.push(`${customApis.length} custom API${customApis.length !== 1 ? 's' : ''}`);
+        if (dataSources.length > 0) summaryParts.push(`${dataSources.length} data source${dataSources.length !== 1 ? 's' : ''}`);
+        const statusSummary = summaryParts.length > 0 ? summaryParts.join(' \u2014 ') : 'No registrations';
+
+        return {
+            assemblies,
+            packages,
+            serviceEndpoints,
+            customApis,
+            dataSources,
+            statusSummary,
+        };
     }
 
     private async loadChildren(nodeId: string, nodeType: string): Promise<void> {
+        const isCurrent = this.beginRequest(`children:${nodeId}`);
         try {
             // Extract type and id from composite nodeId (e.g. "assembly:some-name" → type="assembly", id="some-name")
             const colonIdx = nodeId.indexOf(':');
             const id = colonIdx >= 0 ? nodeId.slice(colonIdx + 1) : nodeId;
 
             const result = await this.daemon.pluginsGet(nodeType, id, this.environmentUrl, this.profileName);
+            if (!isCurrent()) return;
             // Map type to property name ('type' nodeType maps to 'pluginType' property)
             const propName = nodeType === 'type' ? 'pluginType' : nodeType;
             const entity = (result as unknown as Record<string, unknown>)[propName] as Record<string, unknown> | undefined;
@@ -331,12 +344,14 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
 
             this.postMessage({ command: 'childrenLoaded', parentId: nodeId, children });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to load children: ${msg}` });
         }
     }
 
     private async loadDetail(nodeId: string, nodeType: string): Promise<void> {
+        const isCurrent = this.beginRequest('detail');
         try {
             const colonIdx = nodeId.indexOf(':');
             const id = colonIdx >= 0 ? nodeId.slice(colonIdx + 1) : nodeId;
@@ -345,27 +360,32 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
 
             if (nodeType === 'customApi') {
                 const result = await this.daemon.customApisGet(id, this.environmentUrl, this.profileName);
+                if (!isCurrent()) return;
                 entity = result.api as unknown as Record<string, unknown>;
             } else if (nodeType === 'serviceEndpoint' || nodeType === 'webhook') {
                 const result = await this.daemon.serviceEndpointsGet(id, this.environmentUrl, this.profileName);
+                if (!isCurrent()) return;
                 entity = result.endpoint as unknown as Record<string, unknown>;
             } else if (nodeType === 'dataSource' || nodeType === 'dataProvider') {
                 // No dedicated get endpoint — skip detail load
                 return;
             } else {
                 const result = await this.daemon.pluginsGet(nodeType, id, this.environmentUrl, this.profileName);
+                if (!isCurrent()) return;
                 // Extract entity from type-specific property
                 entity = result.assembly ?? result.package ?? result.pluginType ?? result.step ?? result.image ?? {};
             }
 
             this.postMessage({ command: 'detailLoaded', detail: entity });
         } catch (error) {
+            if (!isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'detailError', message: `Failed to load detail: ${msg}` });
         }
     }
 
     private async handleToggle(id: string, enabled: boolean): Promise<void> {
+        const sameEnvironment = this.captureEnvironment();
         try {
             await vscode.window.withProgress(
                 { location: vscode.ProgressLocation.Notification, title: `${enabled ? 'Enabling' : 'Disabling'} step...` },
@@ -373,9 +393,18 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                     await this.daemon.pluginsToggleStep(id, enabled, this.environmentUrl, this.profileName);
                 }
             );
+        } catch (error) {
+            // The outcome of a write is always reported, even after an environment switch.
+            const msg = error instanceof Error ? error.message : String(error);
+            this.postMessage({ command: 'error', message: `Failed to toggle step: ${msg}` });
+            return;
+        }
 
-            // Reload detail for the updated node to get fresh state
+        // Only the refreshed view of the node is guarded: reload it for the updated state.
+        const isCurrent = this.beginRequest(`refresh:${id}`);
+        try {
             const result = await this.daemon.pluginsGet('step', id, this.environmentUrl, this.profileName);
+            if (!sameEnvironment() || !isCurrent()) return;
             const entity = result.step;
             this.postMessage({
                 command: 'nodeUpdated',
@@ -387,6 +416,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                 },
             });
         } catch (error) {
+            if (!sameEnvironment() || !isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to toggle step: ${msg}` });
         }
@@ -492,6 +522,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
 
     private async handleUpdate(message: Extract<PluginsPanelWebviewToHost, { command: 'updateEntity' }>): Promise<void> {
         const { entityType, id, fields } = message;
+        const sameEnvironment = this.captureEnvironment();
 
         try {
             await vscode.window.withProgress(
@@ -523,7 +554,16 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                     }
                 }
             );
+        } catch (error) {
+            // The outcome of a write is always reported, even after an environment switch.
+            const msg = error instanceof Error ? error.message : String(error);
+            this.postMessage({ command: 'error', message: `Failed to update ${entityType}: ${msg}` });
+            return;
+        }
 
+        // Only the refreshed view of the node is guarded.
+        const isCurrent = this.beginRequest(`refresh:${id}`);
+        try {
             // Reload detail for the updated node, routing through the correct endpoint
             let updatedEntity: Record<string, unknown> | null;
             if (entityType === 'customApi') {
@@ -536,6 +576,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                 const result = await this.daemon.pluginsGet(entityType, id, this.environmentUrl, this.profileName);
                 updatedEntity = result.assembly ?? result.package ?? result.pluginType ?? result.step ?? result.image ?? null;
             }
+            if (!sameEnvironment() || !isCurrent()) return;
             this.postMessage({
                 command: 'nodeUpdated',
                 node: {
@@ -545,6 +586,7 @@ export class PluginsPanel extends WebviewPanelBase<PluginsPanelWebviewToHost, Pl
                 },
             });
         } catch (error) {
+            if (!sameEnvironment() || !isCurrent()) return;
             const msg = error instanceof Error ? error.message : String(error);
             this.postMessage({ command: 'error', message: `Failed to update ${entityType}: ${msg}` });
         }

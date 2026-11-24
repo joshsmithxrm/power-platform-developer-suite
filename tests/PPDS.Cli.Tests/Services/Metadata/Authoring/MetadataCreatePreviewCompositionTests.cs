@@ -166,7 +166,7 @@ public sealed class MetadataCreatePreviewCompositionTests(ITestOutputHelper outp
         {
             _route = route; _scenario = scenario;
             _guard.Setup(g => g.EnsureCanMutate(route == "global" ? "metadata.globalChoice.create" : "metadata.column.create"));
-            _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), _guard.Object, cacheProvider: _cache.Object);
+            _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), _guard.Object, cacheProvider: _cache.Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
             Router.Setup(s => s.CreateColumnAsync(It.IsAny<CreateColumnRequest>(), null, It.IsAny<CancellationToken>()))
                 .Returns(async (CreateColumnRequest request, IMetadataAuthoringProgressReporter? reporter, CancellationToken token) =>
                 {

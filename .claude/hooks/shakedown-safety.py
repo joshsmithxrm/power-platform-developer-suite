@@ -8,9 +8,11 @@ safety surface harder to review and invited drift.
 
 Two concerns, one hook:
 
-1. **Env allowlist gating (always on).** Every Bash invocation that mentions
-   ``ppds`` / ``ppds-mcp-server`` is gated against a configured allowlist of
-   dev/test env names. The active env is read directly from the PPDS profile
+1. **Env allowlist gating (opt-in).** Once an allowlist names at least one
+   env, every Bash invocation that mentions ``ppds`` / ``ppds-mcp-server``
+   is gated against that allowlist of dev/test env names. With no allowlist
+   configured the gate is off; a misconfigured allowlist blocks (see
+   below). The active env is read directly from the PPDS profile
    store (``profiles.json``). Read-only subcommands (``env list``,
    ``env who``, ...) are always allowed; switching INTO a safe env is
    allowed even when currently on an unsafe one.
@@ -21,23 +23,44 @@ Two concerns, one hook:
    ``--dry-run``, ``solutions import``, etc.) are refused outright. This
    provides a mechanical boundary that the shakedown / verify skills rely on.
 
-**Allowlist sources (checked in order):**
+**.NET host forms.** Besides ``ppds`` / ``ppds-mcp-server`` themselves, the
+hook recognises the CLI and MCP server started through ``dotnet``:
+``dotnet run`` / ``dotnet watch run`` with ``--project`` (or ``-p``) naming
+``PPDS.Cli`` / ``PPDS.Mcp`` or after ``cd`` into that directory in the same
+command, ``dotnet [exec] <path>/ppds.dll`` / ``ppds-mcp-server.dll``,
+``dotnet ppds`` and ``dotnet tool run ppds``. These are normalised to the
+same argv and only ever add hits. Matching is broad and best-effort.
+
+**Allowlist sources (checked in order; the first that names an env wins):**
 
 1. Env var ``$PPDS_SAFE_ENVS`` -- comma-separated list of env names.
 2. ``.claude/settings.json`` top-level ``safety.shakedown_safe_envs`` array.
-3. ``.claude/state/safe-envs.json`` -- legacy fallback, kept for a single
-   release so in-flight branches don't break during migration. Will be
-   removed once all trees have re-landed the settings.json form.
-4. Neither set -- BLOCK with an instructive message.
+3. ``.claude/state/safe-envs.json`` ``safe_envs`` array -- legacy fallback,
+   kept for a single release so in-flight branches don't break during
+   migration. Will be removed once all trees have re-landed the
+   settings.json form.
+
+**Gate off** only when no source is configured at all: ``$PPDS_SAFE_ENVS``
+unset or empty, ``safety.shakedown_safe_envs`` absent or ``[]``, and the
+legacy file absent or with ``safe_envs`` absent or ``[]``. An empty
+settings list falls through to the legacy file. The write-block below
+still applies during a shakedown either way.
+
+**Misconfigured -> BLOCK** every ``ppds`` command (exit 2, message naming
+the problem): ``$PPDS_SAFE_ENVS`` non-empty but naming no env (e.g.
+``","``); ``.claude/settings.json`` present but not parseable JSON, or a
+``safety`` / ``shakedown_safe_envs`` value of the wrong type; the legacy
+file present but unparseable or with a non-list ``safe_envs``; or any
+non-empty list whose entries are not env-name strings.
 
 **Envelope contract:** Claude Code wraps tool input as
 ``{"tool_name": "...", "tool_input": {"command": "..."}}``. Always read the
 command from the nested ``tool_input`` dict -- reading at the top level was
 the v1-prelaunch hook bug fixed by PR #816.
 
-**Fail-safe:** when the active env cannot be determined the hook BLOCKS
-rather than allows -- an unknown env is more dangerous than a false
-positive.
+**Fail-safe:** with an allowlist configured, when the active env cannot be
+determined the hook BLOCKS rather than allows -- an unknown env is more
+dangerous than a false positive.
 
 **Activation sources for the write-block (either is sufficient):**
 
@@ -113,19 +136,86 @@ def _read_json(path: str) -> Optional[dict]:
         return None
 
 
+class AllowlistConfigError(Exception):
+    """An allowlist source is present but unusable (the hook blocks)."""
+
+
+_MISSING = object()
+
+_SETTINGS_REL = ".claude/settings.json"
+_LEGACY_REL = ".claude/state/safe-envs.json"
+
+
+def _json_type(value) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return type(value).__name__
+
+
+def _read_json_checked(path: str):
+    """Return ``(data, error)``. ``data`` is ``_MISSING`` when no file exists.
+
+    ``error`` is a short description when the file exists but cannot be read
+    or parsed as JSON; ``data`` is then None.
+    """
+    if not os.path.isfile(path):
+        return _MISSING, None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh), None
+    except (OSError, ValueError) as exc:
+        return None, str(exc)
+
+
 def load_safety_config() -> dict:
-    """Return a dict with ``shakedown_safe_envs`` and ``readonly_env_var``.
+    """Return a dict with ``shakedown_safe_envs``, ``readonly_env_var`` and
+    ``allowlist_error``.
 
     Reads from ``.claude/settings.json`` under the ``safety`` top-level key.
-    Falls back to sensible defaults when missing. Never raises.
+    ``shakedown_safe_envs`` is the list as written, or None when the key is
+    absent or unusable. ``allowlist_error`` describes why the settings file
+    cannot supply an allowlist (unparseable file, or a ``safety`` /
+    ``shakedown_safe_envs`` value of the wrong type), else None.
+    ``readonly_env_var`` falls back to the default. Never raises.
     """
-    settings = _read_json(_settings_path()) or {}
-    safety = settings.get("safety") if isinstance(settings, dict) else None
-    if not isinstance(safety, dict):
-        safety = {}
+    settings, read_error = _read_json_checked(_settings_path())
+    allowlist_error = None
+    safety = {}
+    if read_error is not None:
+        allowlist_error = f"{_SETTINGS_REL} could not be parsed as JSON ({read_error})."
+    elif settings is not _MISSING:
+        if not isinstance(settings, dict):
+            allowlist_error = (
+                f"{_SETTINGS_REL} is a JSON {_json_type(settings)}, not an object."
+            )
+        else:
+            raw_safety = settings.get("safety", _MISSING)
+            if isinstance(raw_safety, dict):
+                safety = raw_safety
+            elif raw_safety is not _MISSING:
+                allowlist_error = (
+                    f"`safety` in {_SETTINGS_REL} is a {_json_type(raw_safety)}, "
+                    "not an object."
+                )
 
-    safe_envs = safety.get("shakedown_safe_envs")
-    if not isinstance(safe_envs, list):
+    safe_envs = safety.get("shakedown_safe_envs", _MISSING)
+    if safe_envs is _MISSING:
+        safe_envs = None
+    elif not isinstance(safe_envs, list):
+        allowlist_error = (
+            f"`safety.shakedown_safe_envs` in {_SETTINGS_REL} is a "
+            f"{_json_type(safe_envs)} ({safe_envs!r}), not a list."
+        )
         safe_envs = None
 
     env_var = safety.get("readonly_env_var")
@@ -135,36 +225,91 @@ def load_safety_config() -> dict:
     return {
         "shakedown_safe_envs": safe_envs,
         "readonly_env_var": env_var.strip(),
+        "allowlist_error": allowlist_error,
     }
 
 
-def load_allowlist(config: Optional[dict] = None) -> Optional[list]:
-    """Return the list of safe env names, or None when no allowlist configured.
+def _names_from_list(values: list, source: str) -> list:
+    """Return the env names in a non-empty JSON list, or raise if it has none."""
+    names = []
+    for value in values:
+        if not isinstance(value, str):
+            raise AllowlistConfigError(
+                f"{source} contains a {_json_type(value)} entry ({value!r}); "
+                "every entry must be an env name string."
+            )
+        if value.strip():
+            names.append(value.strip())
+    if not names:
+        raise AllowlistConfigError(f"{source} has entries but names no env.")
+    return names
 
-    Resolution order:
-    1. ``$PPDS_SAFE_ENVS`` env var (comma-separated).
-    2. ``safety.shakedown_safe_envs`` in ``.claude/settings.json``.
-    3. ``.claude/state/safe-envs.json`` (legacy fallback -- migration aid).
-    4. None -> caller treats as a hard block with a config-help message.
+
+def load_allowlist(config: Optional[dict] = None) -> list:
+    """Return the safe env names. An empty list means env gating is off.
+
+    Resolution order -- the first source that names an env wins:
+    1. ``$PPDS_SAFE_ENVS`` env var (comma-separated), when non-empty.
+    2. ``safety.shakedown_safe_envs`` in ``.claude/settings.json``, when a
+       non-empty list.
+    3. ``safe_envs`` in ``.claude/state/safe-envs.json`` (legacy fallback --
+       migration aid), when a non-empty list.
+
+    Returns ``[]`` (gate off) only when nothing is configured: the env var is
+    unset or empty, the settings key is absent or ``[]`` (``[]`` falls
+    through to the legacy file), and the legacy file is absent or its
+    ``safe_envs`` is absent or ``[]``.
+
+    Raises ``AllowlistConfigError`` (the caller blocks) when a source is
+    present but unusable: the env var is non-empty but names no env; the
+    settings file is unparseable or has a wrong-typed ``safety`` /
+    ``shakedown_safe_envs``; the legacy file is unparseable, not an object,
+    or has a non-list ``safe_envs``; or a non-empty list names no env or has
+    a non-string entry. A source consulted after one that already named envs
+    is not read.
     """
-    env_var = os.environ.get("PPDS_SAFE_ENVS", "").strip()
-    if env_var:
-        return [name.strip() for name in env_var.split(",") if name.strip()]
+    raw = os.environ.get("PPDS_SAFE_ENVS", "")
+    if raw.strip():
+        names = [name.strip() for name in raw.split(",") if name.strip()]
+        if not names:
+            raise AllowlistConfigError(
+                f"PPDS_SAFE_ENVS is set to {raw!r}, which names no env."
+            )
+        return names
 
     if config is None:
         config = load_safety_config()
+    if config.get("allowlist_error"):
+        raise AllowlistConfigError(config["allowlist_error"])
     safe = config.get("shakedown_safe_envs")
-    if isinstance(safe, list):
-        return [str(name).strip() for name in safe if str(name).strip()]
+    if safe:
+        return _names_from_list(
+            safe, f"`safety.shakedown_safe_envs` in {_SETTINGS_REL}"
+        )
 
     # Legacy fallback -- keep for one release so mid-migration trees still work.
-    legacy = _read_json(_legacy_safe_envs_path())
-    if isinstance(legacy, dict):
-        legacy_safe = legacy.get("safe_envs")
-        if isinstance(legacy_safe, list):
-            return [str(name).strip() for name in legacy_safe if str(name).strip()]
-
-    return None
+    legacy, read_error = _read_json_checked(_legacy_safe_envs_path())
+    if legacy is _MISSING:
+        return []
+    if read_error is not None:
+        raise AllowlistConfigError(
+            f"{_LEGACY_REL} could not be parsed as JSON ({read_error})."
+        )
+    if not isinstance(legacy, dict):
+        raise AllowlistConfigError(
+            f"{_LEGACY_REL} is a JSON {_json_type(legacy)}, not an object."
+        )
+    legacy_safe = legacy.get("safe_envs", _MISSING)
+    if legacy_safe is _MISSING:
+        return []
+    if not isinstance(legacy_safe, list):
+        raise AllowlistConfigError(
+            f"`safe_envs` in {_LEGACY_REL} is a {_json_type(legacy_safe)} "
+            f"({legacy_safe!r}), not a list."
+        )
+    if not legacy_safe:
+        return []
+    return _names_from_list(legacy_safe, f"`safe_envs` in {_LEGACY_REL}")
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +502,139 @@ def find_ppds_invocations(command: str) -> list:
                 break
             args.append(tok)
         out.append([prog] + args)
+    out.extend(_dotnet_invocations(command))
     return out
+
+
+# PPDS run through the .NET host. Additive: these hits are appended to the
+# matcher above and nothing is ever cleared. Broad like that matcher: any
+# `dotnet` word after the start, whitespace, an operator, a quote or a
+# parenthesis. Caps keep the work linear: at most 50 `dotnet` occurrences
+# per command, and 400 tokens / 4096 characters after each, are examined.
+_DOTNET_MAX_OCCURRENCES = 50
+_DOTNET_MAX_TOKENS = 400
+_DOTNET_MAX_CHARS = 4096
+_DOTNET_RE = re.compile(
+    r"""(?:^|[\s|;&()`'"])(?:[^\s|;&()`'"]*[\\/])?dotnet(?:\.exe)?(?=$|[\s|;&)`'"])""",
+    re.IGNORECASE,
+)
+_CD_RE = re.compile(r"""(?:^|[\s|;&(])(?:cd|pushd)\s+(?:-\S*\s+)*("[^"]*"|'[^']*'|[^\s|;&()]+)""")
+# Project (folder or .csproj stem) -> program; AssemblyName in the csproj.
+_PPDS_PROJECTS = {"ppds.cli": "ppds", "ppds.mcp": "ppds-mcp-server"}
+_PPDS_ASSEMBLIES = {"ppds.dll": "ppds", "ppds-mcp-server.dll": "ppds-mcp-server"}
+# `dotnet run` options that take a value / take none (learn.microsoft.com
+# dotnet-run); every other token before `--` is forwarded to the app.
+_RUN_VALUE_OPTS = set("-a --arch --artifacts-path -c --configuration -e --environment --file "
+                      "-f --framework -lp --launch-profile --os --project -r --runtime -v "
+                      "--verbosity --property".split())
+_RUN_FLAGS = set("--disable-build-servers --force --interactive --no-build --no-cache "
+                 "--no-dependencies --no-launch-profile --no-restore --no-self-contained "
+                 "--sc --self-contained -? -h --help".split())
+# `dotnet [exec]` host options that take a value.
+_HOST_VALUE_OPTS = set("--additionalprobingpath --additional-deps --depsfile --fx-version "
+                       "--roll-forward --runtimeconfig --roll-forward-on-no-candidate-fx".split())
+_OPTION_VALUE_RE = re.compile(r"^(--?[A-Za-z?][\w-]*)[=:](.*)$", re.DOTALL)
+
+
+def _dotnet_project(path):
+    """``ppds`` / ``ppds-mcp-server`` when ``path``'s last component names that project."""
+    parts = []
+    for part in (path or "").replace("\\", "/").split("/"):
+        if part == "..":
+            parts = parts[:-1]
+        elif part not in ("", "."):
+            parts.append(part)
+    last = parts[-1].lower() if parts else ""
+    return _PPDS_PROJECTS.get(last[:-7] if last.endswith(".csproj") else last)
+
+
+def _dotnet_run(tokens: list, project) -> list:
+    """argv readings for ``dotnet run <tokens>``: args after ``--`` only, and
+    unrecognised tokens plus those (a hit for each, so either can block)."""
+    unknown, after, i = [], [], 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "--":
+            after = tokens[i + 1:]
+            break
+        m = _OPTION_VALUE_RE.match(tok)
+        name, inline = (m.group(1), m.group(2)) if m else (tok, None)
+        value = inline if inline is not None else (tokens[i + 1] if i + 1 < len(tokens) else "")
+        if name in _RUN_VALUE_OPTS or (name == "-p" and "=" not in value):
+            if name == "--file":
+                return []
+            if name in ("--project", "-p"):  # -p:x=y and -p x=y are properties
+                project = value
+            i += 1 if inline is not None else 2
+        else:
+            if name != "-p" and name not in _RUN_FLAGS and not name.startswith("--tl"):
+                unknown.append(tok)
+            i += 1 if name != "-p" or inline is not None else 2
+    program = _dotnet_project(project)
+    if program is None:
+        return []
+    readings = [[program] + after, [program] + unknown + after]
+    return readings[:1] if readings[0] == readings[1] else readings
+
+
+def _dotnet_argvs(tokens: list, cwd) -> list:
+    """Normalise the tokens after a ``dotnet`` word to PPDS argvs (or [])."""
+    i = 0
+    while i < len(tokens) and (tokens[i].startswith("-") or tokens[i].lower() == "exec"):
+        i += 2 if tokens[i] in _HOST_VALUE_OPTS else 1
+    verb, rest = (tokens[i].lower(), tokens[i + 1:]) if i < len(tokens) else ("", [])
+    if verb == "watch" and "run" in rest[: rest.index("--") if "--" in rest else len(rest)]:
+        rest.remove("run")
+        verb = "run"
+    if verb == "run":
+        return _dotnet_run(rest, cwd)
+    if verb == "tool" and rest[:1] == ["run"]:
+        j = 1
+        while j < len(rest) and rest[j].startswith("-"):
+            j += 1
+        verb, rest = (rest[j].lower(), rest[j + 1:]) if j < len(rest) else ("", [])
+        rest = rest[1:] if rest[:1] == ["--"] else rest
+    verb = _PPDS_ASSEMBLIES.get(re.split(r"[\\/]", verb)[-1], verb)
+    return [[verb] + rest] if verb in ("ppds", "ppds-mcp-server") else []
+
+
+def _dotnet_invocations(command: str) -> list:
+    """Hits for PPDS started through ``dotnet``; [] on any error."""
+    try:
+        cds, parts = [], []  # (position, directory after each cd / pushd)
+        for m in _CD_RE.finditer(command):
+            target = m.group(1).strip("'\"").replace("\\", "/")
+            if target.startswith("/") or target[1:2] == ":":
+                parts = []
+            parts = (parts + target.split("/"))[-32:]
+            cds.append((m.start(), "/".join(parts)))
+        out, cwd, k = [], None, 0
+        for count, match in enumerate(_DOTNET_RE.finditer(command)):
+            if count >= _DOTNET_MAX_OCCURRENCES:
+                break
+            while k < len(cds) and cds[k][0] < match.start():
+                cwd, k = cds[k][1], k + 1
+            tail = command[match.end():match.end() + _DOTNET_MAX_CHARS]
+            tail = tail[1:] if tail[:1] in ("'", '"') else tail
+            lexer = shlex.shlex(tail, posix=True)
+            # As shlex.split, but a backslash stays literal (Windows paths).
+            lexer.whitespace_split, lexer.commenters, lexer.escape = True, "", ""
+            args = []
+            try:
+                tok = lexer.get_token()
+                while tok is not None and tok not in _SHELL_OPERATORS and len(args) < _DOTNET_MAX_TOKENS:
+                    args.append(tok.rstrip(";"))
+                    tok = None if tok.endswith(";") else lexer.get_token()
+            except ValueError:
+                args = []
+                for tok in tail.split(None, _DOTNET_MAX_TOKENS)[:_DOTNET_MAX_TOKENS]:
+                    if tok in _SHELL_OPERATORS:
+                        break
+                    args.append(tok)
+            out.extend(_dotnet_argvs(args, cwd))
+        return out
+    except Exception:  # noqa: BLE001 -- new detection must never remove existing hits
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -530,12 +807,6 @@ def _format_active(active):
     return active[0]
 
 
-def _format_allowlist(allowlist):
-    if not allowlist:
-        return "(empty)"
-    return ", ".join(allowlist)
-
-
 def _config_help_lines():
     return [
         "  Configure the allowlist via either:",
@@ -545,24 +816,12 @@ def _config_help_lines():
     ]
 
 
-def _block_msg_no_allowlist(argv):
-    lines = [
-        "BLOCKED [shakedown-safety/env]: no safe-env allowlist configured.",
-        f"  Command: {' '.join(argv)}",
-        "  ppds CLI commands are gated against an allowlist of dev/test envs",
-        "  to prevent accidental writes against production environments.",
-        "",
-    ]
-    lines.extend(_config_help_lines())
-    return "\n".join(lines)
-
-
 def _block_msg_active_not_allowed(active, allowlist, argv):
     lines = [
         "BLOCKED [shakedown-safety/env]: active env is not in the safe-env allowlist.",
         f"  Command:    {' '.join(argv)}",
         f"  Active env: {_format_active(active)}",
-        f"  Allowlist:  {_format_allowlist(allowlist)}",
+        f"  Allowlist:  {', '.join(allowlist)}",
         "",
         "  To proceed, switch to a safe env:",
         "    ppds env select <name>           # canonical CLI",
@@ -578,7 +837,21 @@ def _block_msg_target_not_allowed(target, allowlist, argv):
         "BLOCKED [shakedown-safety/env]: switch target is not in the safe-env allowlist.",
         f"  Command:   {' '.join(argv)}",
         f"  Target:    {target}",
-        f"  Allowlist: {_format_allowlist(allowlist)}",
+        f"  Allowlist: {', '.join(allowlist)}",
+        "",
+    ]
+    lines.extend(_config_help_lines())
+    return "\n".join(lines)
+
+
+def _block_msg_misconfigured(problem, argv):
+    lines = [
+        "BLOCKED [shakedown-safety/env]: the safe-env allowlist is misconfigured.",
+        f"  Command: {' '.join(argv)}",
+        f"  Problem: {problem}",
+        "",
+        "  Fix it so it names at least one env, or remove it (unset the env",
+        "  var, or set the list to []) to leave env gating off.",
         "",
     ]
     lines.extend(_config_help_lines())
@@ -669,11 +942,17 @@ def main() -> None:
                 )
                 sys.exit(2)
 
-    # Concern 1: env allowlist gating -- always on.
-    allowlist = load_allowlist(config)
-    if allowlist is None:
-        print(_block_msg_no_allowlist(invocations[0]), file=sys.stderr)
+    # Concern 1: env allowlist gating -- opt-in. It is active once an
+    # allowlist names at least one env; with none configured (missing or
+    # empty) the hook does not gate ppds commands, so a fresh clone works
+    # without setup. A source that is present but unusable blocks.
+    try:
+        allowlist = load_allowlist(config)
+    except AllowlistConfigError as exc:
+        print(_block_msg_misconfigured(str(exc), invocations[0]), file=sys.stderr)
         sys.exit(2)
+    if not allowlist:
+        sys.exit(0)
 
     active = get_active_env_names()
 

@@ -45,7 +45,7 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
         h.Attribute.Description.UserLocalizedLabel = new LocalizedLabel("Description francaise", 1036);
         var result = await h.UpdateAsync(Request("both"));
         Assert.Equal(new[] { "DisplayName", "Description" }, result.ValidationMessages.Select(m => m.Field));
-        Assert.All(result.ValidationMessages, m => Assert.Equal(MetadataLabelWriteResult.EnglishLabelOnlyRule, m.Rule));
+        Assert.All(result.ValidationMessages, m => Assert.Equal(MetadataLabelWriteResult.BaseLanguageLabelOnlyRule, m.Rule));
         Assert.Contains("'Original French'", result.ValidationMessages[0].Message);
         Assert.True(Assert.Single(h.Requests.OfType<UpdateAttributeRequest>()).MergeLabels);
 
@@ -289,16 +289,43 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
         h.AssertNoMutation(attributeReadOnly: true);
     }
 
-    [Fact, Trait("AC", "AC-127")]
+    [Fact, Trait("AC", "AC-127"), Trait("AC", "AC-148")]
     public async Task UpdateAck_CancellationStopsPublishAndInvalidatesKnownAppliedCache()
     {
+        // The update was acknowledged, so the label is written: a cancellation from here on is reported as written but
+        // not confirmed (as on the typed path), never as a plain cancellation that hides the write.
         using var h = new ColumnLabelHarness("state", output);
         h.AfterAcknowledgement = name => { if (name == "UpdateAttribute") h.Cancel(); };
-        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.UpdateAsync(Request("display", publish: true)));
-        Assert.Equal(h.Token, error.CancellationToken);
+        var error = await Assert.ThrowsAsync<PpdsException>(() => h.UpdateAsync(Request("display", publish: true)));
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.Contains("was updated", error.Message);
+        Assert.Contains("could not be confirmed: the read was cancelled", error.Message);
+        Assert.Contains("Publication (--publish) was not attempted.", error.Message);
+        Assert.Equal(h.Token, Assert.IsAssignableFrom<OperationCanceledException>(error.InnerException).CancellationToken);
         Assert.Single(h.Requests.OfType<UpdateAttributeRequest>());
         Assert.DoesNotContain(h.Requests, r => r is PublishXmlRequest);
         Assert.Equal(1, h.CacheInvalidations);
+    }
+
+    [Theory, MemberData(nameof(AllShapes)), Trait("AC", "AC-148")]
+    public async Task ReadBackWithNoMetadata_IsWriteNotConfirmed_AndPublishesNothing(string shape)
+    {
+        using var h = new ColumnLabelHarness(shape, output) { ConfirmationFault = "missing-metadata" };
+        var error = await Assert.ThrowsAsync<PpdsException>(() => h.UpdateAsync(Request("both", publish: true)));
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.Contains("could not be confirmed: Dataverse returned no metadata for column", error.Message);
+        Assert.Single(h.Requests.OfType<UpdateAttributeRequest>());
+        Assert.DoesNotContain(h.Requests, r => r is PublishXmlRequest);
+    }
+
+    [Theory, MemberData(nameof(AllShapes)), Trait("AC", "AC-148")]
+    public async Task ALabelUpdateDataverseDidNotStore_IsWriteNotConfirmed_AndPublishesNothing(string shape)
+    {
+        using var h = new ColumnLabelHarness(shape, output) { IgnoreLabelWrites = true };
+        var error = await Assert.ThrowsAsync<PpdsException>(() => h.UpdateAsync(Request("display", publish: true)));
+        Assert.Equal(MetadataErrorCodes.WriteNotConfirmed, error.ErrorCode);
+        Assert.Contains("Dataverse did not store its display name", error.Message);
+        Assert.DoesNotContain(h.Requests, r => r is PublishXmlRequest);
     }
 
     public static IEnumerable<object[]> GenericTypes() => new[] { "string", "memo", "integer", "bigint", "decimal", "double", "money",
@@ -377,9 +404,9 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
     public void PublicRequestAndServiceContracts_RemainCompatible()
     {
         var constructor = Assert.Single(typeof(DataverseMetadataAuthoringService).GetConstructors());
-        Assert.Equal(5, constructor.GetParameters().Length);
+        Assert.Equal(6, constructor.GetParameters().Length); // + the optional base-language provider
         var method = typeof(IMetadataAuthoringService).GetMethod(nameof(IMetadataAuthoringService.UpdateColumnAsync))!;
-        Assert.Equal(typeof(Task<MetadataLabelWriteResult>), method.ReturnType); // AC-147: English-only label notices.
+        Assert.Equal(typeof(Task<MetadataLabelWriteResult>), method.ReturnType); // AC-147: base-language label notices.
         Assert.Equal(new[] { typeof(UpdateColumnRequest), typeof(IMetadataAuthoringProgressReporter), typeof(CancellationToken) }, method.GetParameters().Select(p => p.ParameterType));
         Assert.Equal(new[] { "AutoNumberFormat", "ColumnLogicalName", "Description", "DisplayName", "DryRun", "EntityLogicalName", "Format", "IsAuditEnabled",
             "IsSecured", "IsValidForAdvancedFind", "MaxLength", "MaxValue", "MinValue", "Precision", "Publish", "RequiredLevel", "SolutionUniqueName" },

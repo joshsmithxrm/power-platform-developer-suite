@@ -25,11 +25,16 @@ permissions:
 
 concurrency:
   group: pre-merge-gate-${{ github.event.pull_request.number }}
-  # Draft readiness is not an input to the enforcing rule, so marking a PR ready
-  # need not cancel active evaluation. Keep cancellation for edits and source
-  # pushes: title/body/base changes can invalidate an in-flight rule result.
-  # The ready event still runs the rule through the default pending slot.
-  cancel-in-progress: ${{ github.event.action != 'ready_for_review' }}
+  # Only an event that can bring a new head commit (opened, synchronize,
+  # reopened) cancels the run in progress: a run on a superseded head is
+  # obsolete. `ready_for_review` and `edited` keep the head commit, so they do
+  # not cancel. Cancelling for an edit left a cancelled Rule 3 job and a failed
+  # `Pre-Merge Gate` aggregate (it runs on `always()`) on the PR (#1685).
+  # Rule 3 reads the PR title and body, so an edit is still evaluated: its run
+  # waits in the group's single pending slot and starts when the run in
+  # progress ends, so its result is the newest. A later event replaces a run
+  # still waiting there, so the newest edit is the one evaluated.
+  cancel-in-progress: ${{ github.event.action != 'ready_for_review' && github.event.action != 'edited' }}
 
 jobs:
   size:

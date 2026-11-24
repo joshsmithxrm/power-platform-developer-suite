@@ -177,6 +177,119 @@ public sealed class MetadataExplorerScreenTests : IDisposable
         Assert.Null(exception);
     }
 
+    private static PPDS.Cli.Infrastructure.Errors.PpdsException Unconfirmed(string message)
+        => new(PPDS.Dataverse.Metadata.Authoring.MetadataErrorCodes.WriteNotConfirmed, message);
+
+    private static PPDS.Cli.Infrastructure.Errors.PpdsException Failed(string message)
+        => new(PPDS.Dataverse.Metadata.Authoring.MetadataErrorCodes.SdkOperationFailed, message);
+
+    [Theory]
+    [InlineData("table")]
+    [InlineData("column")]
+    [InlineData("relationship")]
+    [InlineData("global choice")]
+    [InlineData("key")]
+    [Trait("AC", "AC-148")]
+    public void ACreateThatWroteButCouldNotConfirm_IsNotTitledAFailedCreate(string what)
+    {
+        // WRITE_NOT_CONFIRMED after a create: the object exists, only its labels could not be confirmed.
+        var unconfirmed = Unconfirmed("Table 'x' was created. Its display name could not be confirmed.");
+        Assert.True(MetadataExplorerScreen.CreatedButNotConfirmed(unconfirmed));
+        Assert.Equal($"Created {what}, but its labels are not confirmed", MetadataExplorerScreen.CreateErrorTitle(what, unconfirmed));
+
+        var failed = Failed("The create failed.");
+        Assert.False(MetadataExplorerScreen.CreatedButNotConfirmed(failed));
+        Assert.Equal($"Failed to create {what}", MetadataExplorerScreen.CreateErrorTitle(what, failed));
+    }
+
+    [Theory]
+    [InlineData("column")]
+    [InlineData("choice")]
+    [Trait("AC", "AC-148")]
+    public void AnUpdateThatWroteButCouldNotConfirm_IsNotTitledAFailedUpdate(string what)
+    {
+        var unconfirmed = Unconfirmed("Column 'x' was updated. Its display name could not be confirmed.");
+        Assert.Equal($"Updated {what}, but its labels are not confirmed", MetadataExplorerScreen.UpdateErrorTitle(what, unconfirmed));
+        Assert.Equal($"Failed to update {what}", MetadataExplorerScreen.UpdateErrorTitle(what, Failed("The update failed.")));
+    }
+
+    public static TheoryData<string> WriteKinds => new() { "create", "update" };
+
+    private static string TitleFor(string kind, Exception ex)
+        => kind == "create" ? MetadataExplorerScreen.CreateErrorTitle("column", ex) : MetadataExplorerScreen.UpdateErrorTitle("column", ex);
+
+    [Theory]
+    [MemberData(nameof(WriteKinds))]
+    [Trait("AC", "AC-148")]
+    public async Task AWriteThatWasNotConfirmed_IsReportedUnderItsTitle_Reloads_AndKeepsTheNotConfirmedTextInTheStatusLine(string kind)
+    {
+        using var screen = new MetadataExplorerScreen(_session, environmentUrl: null);
+        var ex = Unconfirmed("Column 'new_x' was written. Its display name could not be confirmed.");
+        var reloads = 0;
+
+        await screen.ReportWriteFailureAsync(TitleFor(kind, ex), ex, "Metadata.Test", "account", () =>
+        {
+            reloads++;
+            // A loader writes its own status on success; the not-confirmed text must still be the final state.
+            screen.StatusTextForTest = "account: 12 attributes";
+            return Task.FromResult(true);
+        });
+
+        Assert.Equal(1, reloads);
+        var reported = _session.GetErrorService().LatestError;
+        Assert.NotNull(reported);
+        Assert.Equal($"{(kind == "create" ? "Created" : "Updated")} column, but its labels are not confirmed", reported!.Message);
+        Assert.Equal($"Error: {ex.Message}", screen.StatusTextForTest);
+    }
+
+    [Theory]
+    [MemberData(nameof(WriteKinds))]
+    [Trait("AC", "AC-148")]
+    public async Task AWriteThatWasNotConfirmed_WhoseReloadFails_ShowsBothInTheStatusLine(string kind)
+    {
+        using var screen = new MetadataExplorerScreen(_session, environmentUrl: null);
+        var ex = Unconfirmed("Column 'new_x' was written. Its display name could not be confirmed.");
+
+        await screen.ReportWriteFailureAsync(TitleFor(kind, ex), ex, "Metadata.Test", "account", () =>
+        {
+            screen.StatusTextForTest = "Error loading account";
+            return Task.FromResult(false);
+        });
+
+        Assert.Equal($"Error: {ex.Message} Error loading account", screen.StatusTextForTest);
+    }
+
+    [Theory]
+    [MemberData(nameof(WriteKinds))]
+    public async Task AFailedWrite_IsReportedAsFailed_AndDoesNotReload(string kind)
+    {
+        using var screen = new MetadataExplorerScreen(_session, environmentUrl: null);
+        var ex = Failed("The write failed.");
+        var reloads = 0;
+
+        await screen.ReportWriteFailureAsync(TitleFor(kind, ex), ex, "Metadata.Test", "account", () =>
+        {
+            reloads++;
+            return Task.FromResult(true);
+        });
+
+        Assert.Equal(0, reloads);
+        Assert.Equal($"Failed to {kind} column", _session.GetErrorService().LatestError!.Message);
+        Assert.Equal("Error: The write failed.", screen.StatusTextForTest);
+    }
+
+    [Fact]
+    public async Task AnExceptionThatEscapesTheReload_IsNotSwallowed()
+    {
+        // The loaders report their own failures; anything that escapes is a programming error and must surface.
+        using var screen = new MetadataExplorerScreen(_session, environmentUrl: null);
+        var ex = Unconfirmed("Column 'new_x' was written. Its display name could not be confirmed.");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => screen.ReportWriteFailureAsync(
+            MetadataExplorerScreen.CreateErrorTitle("column", ex), ex, "Metadata.Test", "account",
+            () => throw new InvalidOperationException("programming error")));
+    }
+
     [Fact]
     public void Dispose_IsIdempotent()
     {

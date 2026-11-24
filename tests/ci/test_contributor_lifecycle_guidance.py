@@ -8,6 +8,7 @@ import subprocess
 import sys
 
 import pytest
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/conftest.py puts tests/ on sys.path
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY = ROOT / "docs/CONTRIBUTOR-LIFECYCLE.md"
@@ -15,8 +16,7 @@ POLICY = ROOT / "docs/CONTRIBUTOR-LIFECYCLE.md"
 
 @pytest.mark.parametrize("relative", [
     "CONTRIBUTING.md", "docs/MERGE-POLICY.md",
-    ".claude/skills/implement/SKILL.md", ".claude/skills/pr/SKILL.md",
-    ".claude/skills/release/SKILL.md",
+    "docs/runbooks/release.md",
 ])
 def test_entry_points_resolve_to_the_single_shared_policy(relative):
     source = ROOT / relative
@@ -25,15 +25,22 @@ def test_entry_points_resolve_to_the_single_shared_policy(relative):
     assert (source.parent / links[0]).resolve(strict=True) == POLICY.resolve(strict=True)
 
 
-def test_pr_template_exposes_routes_and_shared_policy_reference():
-    template = (ROOT / ".github/pull_request_template.md").read_text(encoding="utf-8")
-    section = template.split("## Contributor provenance\n", 1)[1].split("\n## ", 1)[0]
-    assert "docs/CONTRIBUTOR-LIFECYCLE.md" in section
+def test_merge_checklist_exposes_routes_and_shared_policy_reference():
+    policy = (ROOT / "docs/MERGE-POLICY.md").read_text(encoding="utf-8")
+    assert policy.count("## Maintainer merge checklist\n") == 1
+    section = policy.split("## Maintainer merge checklist\n", 1)[1].split("\n## ", 1)[0]
+    assert "](CONTRIBUTOR-LIFECYCLE.md)" in section
     assert len(re.findall(r"^- \[ \]", section, re.MULTILINE)) == 4
     assert "No external contribution" in section
     assert "Original contributor PR" in section
     assert "Work incorporated elsewhere" in section
+
+
+def test_pr_template_is_contributor_facing():
+    template = (ROOT / ".github/pull_request_template.md").read_text(encoding="utf-8")
     assert template.count("## Testing\n") == 1
+    assert "## Contributor provenance" not in template
+    assert "CONTRIBUTOR-LIFECYCLE" not in template
 
 
 def test_documented_no_contribution_example_runs_without_other_evidence(tmp_path):
@@ -46,7 +53,7 @@ def test_documented_no_contribution_example_runs_without_other_evidence(tmp_path
     result = subprocess.run(
         [sys.executable, str(ROOT / "scripts/ci/check_contributor_provenance.py"),
          "--record", str(path), "--stage", "plan"],
-        cwd=tmp_path, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15, check=False,
+        cwd=tmp_path, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=CHILD_PROCESS_HANG_BOUND_SECONDS, check=False,
     )
     assert result.returncode == 0, result.stderr
     output = json.loads(result.stdout)

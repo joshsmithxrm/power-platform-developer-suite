@@ -16,6 +16,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The live SELECT audit's recorded cases, replayed offline by AuditCaseReplayTests (#1639). -->
+    <EmbeddedResource Include="Services/Query/Faithful/AuditRecords/select-fidelity-audit-2026-11.txt" LogicalName="AuditRecords.select-fidelity-audit-2026-11.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
     <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" GeneratePathProperty="true" PrivateAssets="all" ExcludeAssets="all" />
@@ -48,5 +53,10 @@
       SourceFiles="$(PkgMicrosoft_NETFramework_ReferenceAssemblies_net462)\build\.NETFramework\v4.6.2\mscorlib.dll"
       DestinationFiles="$(OutDir)TestAssets\mscorlib.dll" />
   </Target>
+
+  <ItemGroup>
+    <!-- Shared hang guard for tests that wait on a completion signal (#1684). -->
+    <Compile Include="..\Shared\HangBackstop.cs" Link="Shared\HangBackstop.cs" />
+  </ItemGroup>
 
 </Project>

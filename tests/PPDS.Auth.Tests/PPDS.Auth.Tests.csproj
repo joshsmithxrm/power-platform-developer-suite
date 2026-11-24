@@ -22,6 +22,8 @@
     </PackageReference>
     <PackageReference Include="Moq" />
     <PackageReference Include="FluentAssertions" />
+    <!-- InteractiveSignInGuardTests parses the product sources to check every interactive sign-in is guarded. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
   </ItemGroup>
 
   <ItemGroup>

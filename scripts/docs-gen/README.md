@@ -116,7 +116,7 @@ When annotating public types in the four libraries (Phase 0 curation), follow th
 2. **One-line synopsis in `<summary>`, non-obvious invariants in `<remarks>`.** Reserve `<remarks>` for constraints a consumer needs to know before calling (thread safety, disposal rules, required call order).
 3. **Use `<param>` for every parameter, `<returns>` for every non-void method, `<exception>` for every documented throw condition.**
 4. **Cross-reference with `<see cref="..."/>`.** Helps IntelliSense and docs site navigation.
-5. **Don't document implementation details.** If a consumer shouldn't rely on something, mark it `[EditorBrowsable(EditorBrowsableState.Never)]` and skip the summary.
+5. **Don't document implementation details.** If a consumer shouldn't rely on something, mark it `[EditorBrowsable(EditorBrowsableState.Never)]`; it still needs a short `/// <summary>`, because CS1591 does not exempt hidden members.
 
 The Phase 0 triage decides per type whether it's **customer-facing** (annotate fully), **implementation-detail-but-public** (mark `[EditorBrowsable(Never)]`), or **safe-to-internalize** (`public` → `internal` + `[InternalsVisibleTo]` if needed).
 
@@ -171,12 +171,13 @@ done
 
 ## Troubleshooting
 
-### PPDS014: "Public type/member requires /// <summary> or [EditorBrowsable(Never)]"
+### CS1591: "Missing XML comment for publicly visible type or member"
 
-The analyzer fires on public API in the four libraries without XML docs. Fix options:
-- Add a meaningful `/// <summary>` (see style guide above)
-- Mark the type `[EditorBrowsable(EditorBrowsableState.Never)]` (hides from IntelliSense but stays public)
+The compiler reports CS1591 for public API without XML docs, and `.editorconfig` makes it an error in the four libraries (code under `Generated/` is exempt). Fix options:
+- Add a meaningful `/// <summary>` (see style guide above); document positional record parameters with `<param>` tags on the record, which CS1591 does not check
 - Change `public` → `internal` (add `[InternalsVisibleTo]` in `AssemblyInfo.cs` if cross-project consumers need it)
+
+`[EditorBrowsable(EditorBrowsableState.Never)]` does not silence CS1591; a hidden type still needs a summary or must become internal.
 
 ### RS0016: "Public API is not part of the declared API"
 
@@ -202,5 +203,5 @@ A `[McpServerTool]` method is missing metadata. Set `Name` via the attribute's n
 ## Design references
 
 - [`specs/docs-generation.md`](../../specs/docs-generation.md) — the full spec with 30 ACs
-- [`specs/CONSTITUTION.md`](../../specs/CONSTITUTION.md) — non-negotiable principles
-- [`specs/analyzers.md`](../../specs/analyzers.md) — PPDS.Analyzers project conventions (extended by PPDS014/015/016)
+- [`specs/CONSTITUTION.md`](../../specs/CONSTITUTION.md) — architecture principles and spec process
+- [`specs/analyzers.md`](../../specs/analyzers.md) — PPDS.Analyzers project conventions (extended by PPDS015/016)

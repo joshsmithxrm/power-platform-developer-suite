@@ -186,6 +186,8 @@ public sealed class MetadataCreateOptionAllocationTests(ITestOutputHelper output
 
     private sealed class Fixture : IDisposable
     {
+
+        private readonly LabelWriteStore _labels = new();
         private readonly string _route;
         private readonly CancellationTokenSource _cts = new();
         private readonly Mock<IDataverseConnectionPool> _pool = new(MockBehavior.Strict);
@@ -233,6 +235,7 @@ public sealed class MetadataCreateOptionAllocationTests(ITestOutputHelper output
                         .Returns<OrganizationRequest, CancellationToken>((request, ct) =>
                         {
                             Begin(number, request.RequestName, ct);
+                            if (LabelWriteStore.IsReadBack(request)) return Task.FromResult(_labels.Synthesize(request));
                             Creates.Add(request);
                             OptionSetMetadata set;
                             OrganizationResponse response;
@@ -255,11 +258,13 @@ public sealed class MetadataCreateOptionAllocationTests(ITestOutputHelper output
                             Values = set.Options.Select(o => o.Value!.Value).ToArray();
                             Labels = set.Options.Select(o => Assert.Single(o.Label.LocalizedLabels).Label).ToArray();
                             if (FailCreate) throw SdkFailure;
+                            _labels.Record(request);
+                            if (request is CreateOptionSetRequest created) _labels.ChoiceCreated(Guid.Parse("33333333-3333-3333-3333-333333333333"), created.OptionSet.Name);
                             return Task.FromResult(response);
                         });
                     return Task.FromResult(lease.Object);
                 });
-            Service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard());
+            Service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
         }
 
         private void Begin(int lease, string stage, CancellationToken ct)

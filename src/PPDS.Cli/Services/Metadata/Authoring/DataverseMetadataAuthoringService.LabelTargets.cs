@@ -55,38 +55,47 @@ public partial class DataverseMetadataAuthoringService
     }
 
     /// <summary>
-    /// The label an option or status-reason update sends: a requested label as the single LCID 1033 label (the request
-    /// also sets MergeLabels, so other languages keep their text), and no label at all when the caller did not ask to
-    /// change it. Asserted live (OptionColorPersistenceLiveTests for a global option;
-    /// MetadataGlobalChoiceLiveTests.ColourMechanisms_LocalOptionStatusReasonAndStateValue for a local option and a
-    /// status reason): an UpdateOptionValue without a Label leaves the English label unchanged, so a colour- or
-    /// description-only update never rewrites it. Other languages are not observed (English-only organisation).
+    /// A requested label as the single label in the organisation's base language <paramref name="baseLanguage"/> (every
+    /// label write also sets MergeLabels, so other languages keep their text); null when the caller did not ask to change
+    /// it. Writing any other LCID is unsafe: in an organisation whose base language is 1036 without English provisioned,
+    /// a 1033 label was silently ignored by UpdateOptionSet and (in one probe) UpdateOptionValue, rejected (0x80044195) by
+    /// InsertOptionValue/InsertStatusValue, the status-reason update and (in a later replay) UpdateOptionValue, and stored
+    /// as the 1036 label by UpdateEntity/UpdateAttribute and the create messages (live, 2026-11-17, a French-base
+    /// organisation; MetadataGlobalChoiceLiveTests.BaseLanguage_D1/D2/D3 record the replay). Asserted live on an English-base
+    /// organisation: an UpdateOptionValue without a Label leaves the label unchanged, so a colour- or description-only
+    /// update never rewrites it, and a requested base-language label with MergeLabels keeps the French translation.
     /// </summary>
-    private static Label? OptionLabelForUpdate(string? requested)
-        => requested == null ? null : new Label(requested, 1033);
+    private static Label? BaseLanguageLabel(string? requested, int baseLanguage)
+        => requested == null ? null : new Label(requested, baseLanguage);
 
     /// <summary>
-    /// Notices for requested labels that are written for English only while the label Dataverse shows the caller (its
-    /// user-localised label) is in another language, so that label is left as it was. The user-localised label is the
-    /// caller's UI language when the target has one, otherwise a fallback (believed to be the organisation's base
-    /// language; unconfirmed live), so the message names its LCID rather than claiming it is "your language". No notice
-    /// when that label already reads the requested text. Surfaces show them as warnings; without them a caller could
-    /// see no change in their own listing after a successful update.
+    /// Notices for requested labels written in the base language while the label Dataverse shows the caller (its
+    /// user-localised label) is a STORED label in another language that the write does not change. A notice is given only
+    /// when (1) the shown label's LCID is not the base language, (2) a label in that LCID is actually stored on the target
+    /// (it appears in <see cref="Label.LocalizedLabels"/>), and (3) its stored text differs from the requested text. When the
+    /// shown label is only a fallback (no stored label in that LCID), the caller is shown the new base-language text after
+    /// the write, so there is nothing to warn about. Observed live 2026-11-17: a table description created with English text
+    /// only is stored under 1033 AND 1036 once French is provisioned (a real copy the write leaves as it was), while an option
+    /// created in English only is stored under 1033 alone. The message names both LCIDs rather than claiming either is "your
+    /// language". Surfaces show notices as warnings; without them a caller could see no change in their own listing after
+    /// a successful update.
     /// </summary>
-    private static MetadataLabelWriteResult EnglishOnlyNotices(params (string Field, string Noun, string? Requested, Label? Existing)[] labels)
+    private static MetadataLabelWriteResult BaseLanguageNotices(int baseLanguage, params (string Field, string Noun, string? Requested, Label? Existing)[] labels)
     {
         var notices = new List<ValidationMessage>();
         foreach (var (field, noun, requested, existing) in labels)
         {
-            if (requested == null || existing?.UserLocalizedLabel is not { } shown || shown.LanguageCode == 1033
-                || string.Equals(shown.Label, requested, StringComparison.Ordinal))
+            if (requested == null || existing?.UserLocalizedLabel is not { } shown || shown.LanguageCode == baseLanguage)
+                continue;
+            var stored = existing.LocalizedLabels?.FirstOrDefault(l => l.LanguageCode == shown.LanguageCode);
+            if (stored is null || string.Equals(stored.Label, requested, StringComparison.Ordinal))
                 continue;
             notices.Add(new ValidationMessage
             {
                 Field = field,
-                Rule = MetadataLabelWriteResult.EnglishLabelOnlyRule,
-                Message = $"Only the English (LCID 1033) {noun} is written. The {noun} Dataverse shows you " +
-                    $"(LCID {shown.LanguageCode}) is not changed and still reads '{shown.Label}'."
+                Rule = MetadataLabelWriteResult.BaseLanguageLabelOnlyRule,
+                Message = $"Only the base-language (LCID {baseLanguage}) {noun} is written. The {noun} Dataverse shows you " +
+                    $"(LCID {shown.LanguageCode}) is not changed and still reads '{stored.Label}'."
             });
         }
 

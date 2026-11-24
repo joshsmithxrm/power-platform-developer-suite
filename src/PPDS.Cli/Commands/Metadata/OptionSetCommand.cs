@@ -60,7 +60,7 @@ public static class OptionSetCommand
                 return ExitCodes.Success;
             }
 
-            return await ExecuteReadAsync(name!, profile, environment, globalOptions, cancellationToken);
+            return await ExecuteReadAsync(name!, profile, environment, globalOptions, cancellationToken, serviceProviderFactory);
         });
 
         return command;
@@ -71,19 +71,22 @@ public static class OptionSetCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfileAsync(
-                profile,
-                environment,
-                globalOptions.Verbose,
-                globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken: cancellationToken);
+            await using var serviceProvider = serviceProviderFactory is null
+                ? await ProfileServiceFactory.CreateFromProfileAsync(
+                    profile,
+                    environment,
+                    globalOptions.Verbose,
+                    globalOptions.Debug,
+                    ProfileServiceFactory.DefaultDeviceCodeCallback,
+                    cancellationToken: cancellationToken)
+                : await serviceProviderFactory(cancellationToken);
 
             var metadataService = serviceProvider.GetRequiredService<IMetadataQueryService>();
 
@@ -143,7 +146,7 @@ public static class OptionSetCommand
             var msg = ex.Message;
             var isNotFound = msg.Contains("Could not find", StringComparison.OrdinalIgnoreCase)
                           || msg.Contains("optionset", StringComparison.OrdinalIgnoreCase)
-                          || ex is PpdsNotFoundException;
+                          || ex is PpdsNotFoundException or OptionSetNotFoundException;
 
             if (isNotFound && !globalOptions.IsJsonMode)
             {
@@ -348,12 +351,12 @@ public static class OptionSetCommand
 
         var displayNameOption = new Option<string?>("--display-name")
         {
-            Description = "Updated display name (English, LCID 1033)"
+            Description = "Updated display name (in the organization's base language)"
         };
 
         var descriptionOption = new Option<string?>("--description")
         {
-            Description = "Updated description (English, LCID 1033)"
+            Description = "Updated description (in the organization's base language)"
         };
 
         var dryRunOption = new Option<bool>("--dry-run")
@@ -856,7 +859,7 @@ public static class OptionSetCommand
 
         var newLabelOption = new Option<string?>("--new-label")
         {
-            Description = "New label to apply (English, LCID 1033)"
+            Description = "New label to apply (in the organization's base language)"
         };
 
         var colorOption = new Option<string?>("--color")

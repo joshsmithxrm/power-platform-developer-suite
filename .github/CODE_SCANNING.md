@@ -6,14 +6,20 @@ This document explains how code scanning tools are configured for the PPDS repos
 
 | Tool | Configuration | Purpose |
 |------|---------------|---------|
-| **CodeQL** | `.github/codeql/codeql-config.yml` | Security analysis (style rules disabled) |
+| **CodeQL** (C#) | `.github/codeql/codeql-config.yml` | Security analysis (style rules disabled) |
+| **CodeQL** (TypeScript) | `.github/codeql/codeql-typescript-config.yml` | Security analysis of the VS Code extension |
 | **Copilot** | `.github/copilot-instructions.md` | PR review guidance |
-| **Gemini** | `.gemini/config.yaml`, `.gemini/styleguide.md` | PR review with architecture focus |
+| **CodeRabbit** | `.coderabbit.yaml` | PR review |
 | **Roslyn Analyzers** | `src/PPDS.Analyzers/` | Compile-time enforcement |
 
 ## CodeQL Configuration
 
-CodeQL runs the `security-and-quality` query suite with style rules disabled.
+For C#, CodeQL runs the `security-and-quality` query suite with style rules disabled.
+
+For the VS Code extension (`src/PPDS.Extension`: the TypeScript source and the build and
+development tooling beside it; the `e2e/`, `__tests__/` and `*.test.*` files are excluded), CodeQL
+runs the `security-extended` suite: security queries only, because ESLint and the type checker
+already cover code quality there. No build is needed for that analysis.
 
 ### Disabled Rules
 
@@ -39,31 +45,34 @@ Based on PR feedback analysis:
 
 | Bot | Value | Notes |
 |-----|-------|-------|
-| **Gemini** | HIGH | Catches real bugs: concurrency, performance, logic errors |
 | **Copilot** | MIXED | Good for duplication, resource leaks; noisy for style |
 | **CodeQL** | LOW | Mostly style noise for this codebase |
 
 ## Roslyn Analyzers (PPDS.Analyzers)
 
-Compile-time enforcement of architectural patterns. Analyzers run during build and show as warnings in IDE.
+Compile-time enforcement of architectural patterns. Analyzers run during the PPDS.Cli and PPDS.Mcp builds; PPDS001-PPDS013 show as suggestions in the IDE and PPDS015-PPDS016 as warnings, which those projects treat as errors.
 
-### Implemented Rules (All 13)
+### Implemented Rules (All 15)
+
+Severity is the effective level: each analyzer defaults to Warning, and `.editorconfig` lowers PPDS001-PPDS013 to suggestion. The gap in numbering is a retired rule whose ID is not reused (see `DiagnosticIds.cs`). XML documentation on public API in PPDS.Dataverse, PPDS.Migration, PPDS.Auth and PPDS.Plugins is enforced by the compiler's CS1591, which `.editorconfig` makes an error in those four libraries.
 
 | ID | Name | Description | Severity |
 |----|------|-------------|----------|
-| PPDS001 | NoDirectFileIoInUi | Flags direct File I/O in presentation layer | Warning |
-| PPDS002 | NoConsoleInServices | Flags Console usage in Application Services | Warning |
-| PPDS003 | NoUiFrameworkInServices | Flags Terminal.Gui/Spectre.Console in Services | Warning |
-| PPDS004 | UseStructuredExceptions | Flags raw exception throws in Application Services | Warning |
-| PPDS005 | NoSdkInPresentation | Flags direct SDK access in presentation layer | Warning |
-| PPDS006 | UseEarlyBoundEntities | Flags string literals in QueryExpression | Warning |
-| PPDS007 | PoolClientInParallel | Flags pooled clients held across multiple awaits | Warning |
-| PPDS008 | UseBulkOperations | Flags individual CRUD calls inside loops | Warning |
-| PPDS009 | UseAggregateForCount | Flags RetrieveMultiple used only for counting | Warning |
-| PPDS010 | ValidateTopCount | Flags unbounded QueryExpression without TopCount | Warning |
-| PPDS011 | PropagateCancellation | Flags async methods that drop CancellationToken | Warning |
-| PPDS012 | NoSyncOverAsync | Flags `.GetAwaiter().GetResult()`, `.Result`, `.Wait()` | Warning |
-| PPDS013 | NoFireAndForgetInCtor | Flags async calls in constructors without await | Warning |
+| PPDS001 | NoDirectFileIoInUi | Flags direct File I/O in presentation layer | Suggestion |
+| PPDS002 | NoConsoleInServices | Flags Console usage in Application Services | Suggestion |
+| PPDS003 | NoUiFrameworkInServices | Flags Terminal.Gui/Spectre.Console in Services | Suggestion |
+| PPDS004 | UseStructuredExceptions | Flags raw exception throws in Application Services | Suggestion |
+| PPDS005 | NoSdkInPresentation | Flags direct SDK access in presentation layer | Suggestion |
+| PPDS006 | UseEarlyBoundEntities | Flags string literals in QueryExpression | Suggestion |
+| PPDS007 | PoolClientInParallel | Flags pooled clients held across multiple awaits | Suggestion |
+| PPDS008 | UseBulkOperations | Flags individual CRUD calls inside loops | Suggestion |
+| PPDS009 | UseAggregateForCount | Flags RetrieveMultiple used only for counting | Suggestion |
+| PPDS010 | ValidateTopCount | Flags unbounded QueryExpression without TopCount | Suggestion |
+| PPDS011 | PropagateCancellation | Flags async methods that drop CancellationToken | Suggestion |
+| PPDS012 | NoSyncOverAsync | Flags `.GetAwaiter().GetResult()`, `.Result`, `.Wait()` | Suggestion |
+| PPDS013 | NoFireAndForgetInCtor | Flags async calls in constructors without await | Suggestion |
+| PPDS015 | CliCommandNeedsDescription | Flags System.CommandLine commands, options and arguments without a Description | Warning |
+| PPDS016 | McpToolNeedsMetadata | Flags `[McpServerTool]` methods missing Name or Description | Warning |
 
 ### Suppressing Analyzer Warnings
 

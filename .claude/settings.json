@@ -1,8 +1,4 @@
 {
-  "enabledPlugins": {
-    "superpowers@claude-plugins-official": false,
-    "picasso@picasso": false
-  },
   "safety": {
     "shakedown_safe_envs": [],
     "readonly_env_var": "PPDS_SHAKEDOWN"
@@ -23,154 +19,66 @@
       "Bash(which:*)",
       "Bash(where:*)",
       "Bash(grep:*)",
-      "Bash(rg:*)",
-      "Bash(find:*)",
       "Bash(findstr:*)",
-      "Bash(awk:*)",
-      "Bash(sed:*)",
       "Bash(sort:*)",
       "Bash(uniq:*)",
       "Bash(wc:*)",
       "Bash(test:*)",
       "Bash([:*)",
-      "Bash(mkdir:*)",
-      "Bash(touch:*)",
-      "Bash(cp:*)",
-      "Bash(copy:*)",
-      "Bash(mv:*)",
-      "Bash(move:*)",
-      "Bash(xargs:*)",
-      "Bash(rm:*)",
-      "Bash(rm -rf:*)",
-      "Bash(rm -fr:*)",
-      "Bash(del:*)",
-      "Bash(rmdir:*)",
-      "Bash(Remove-Item:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
       "Bash(git show:*)",
-      "Bash(git branch:*)",
       "Bash(git ls-files:*)",
       "Bash(git ls-tree:*)",
       "Bash(git rev-parse:*)",
       "Bash(git rev-list:*)",
-      "Bash(git remote:*)",
-      "Bash(git fetch:*)",
-      "Bash(git checkout:*)",
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(git push:*)",
-      "Bash(git pull:*)",
-      "Bash(git stash:*)",
-      "Bash(git stash drop:*)",
-      "Bash(git stash pop:*)",
-      "Bash(git rm:*)",
-      "Bash(git mv:*)",
-      "Bash(git restore:*)",
-      "Bash(git worktree list:*)",
-      "Bash(git worktree prune:*)",
-      "Bash(git worktree add:*)",
-      "Bash(git worktree remove:*)",
       "Bash(git describe:*)",
-      "Bash(git tag:*)",
-      "Bash(git -C:*)",
-      "Bash(git branch -d:*)",
-      "Bash(git branch -D:*)",
-      "Bash(git prune:*)",
-      "Bash(git remote prune:*)",
-      "Bash(git rebase --abort:*)",
-      "Bash(git rebase --continue:*)",
-      "Bash(git rebase --skip:*)",
-      "Bash(git rebase --edit-todo:*)",
-      "Bash(git rebase origin/*:*)",
-      "Bash(git rebase main:*)",
-      "Bash(git rebase develop:*)",
-      "Bash(git cherry-pick:*)",
-      "Bash(git revert:*)",
-      "Bash(dotnet:*)",
+      "Bash(git fetch:*)",
+      "Bash(git worktree list:*)",
       "Bash(dotnet build:*)",
       "Bash(dotnet test:*)",
-      "Bash(dotnet pack:*)",
       "Bash(dotnet restore:*)",
       "Bash(dotnet clean:*)",
-      "Bash(dotnet run:*)",
-      "Bash(dotnet sln:*)",
-      "Bash(sn:*)",
-      "Bash(ilspycmd:*)",
-      "Bash(ppds:*)",
-      "Bash(pac solution export:*)",
-      "Bash(pac solution import:*)",
-      "Bash(pac solution unpack:*)",
-      "Bash(pac solution pack:*)",
-      "Bash(pac solution check:*)",
-      "Bash(pac modelbuilder build:*)",
-      "Bash(pac auth:*)",
-      "Bash(npm:*)",
-      "Bash(npm install:*)",
-      "Bash(npm run:*)",
-      "Bash(npm start)",
-      "Bash(npm run build)",
-      "Bash(npm run serve)",
-      "Bash(npm run typecheck)",
       "Bash(npm ci)",
-      "Bash(npx:*)",
-      "Bash(node:*)",
+      "Bash(npm run compile --prefix src/PPDS.Extension)",
+      "Bash(npm run typecheck:all --prefix src/PPDS.Extension)",
+      "Bash(npm run lint --prefix src/PPDS.Extension)",
+      "Bash(npm run lint:css --prefix src/PPDS.Extension)",
+      "Bash(npm run dead-code --prefix src/PPDS.Extension)",
+      "Bash(npm run test --prefix src/PPDS.Extension)",
+      "Bash(npm run compile)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run typecheck:all)",
+      "Bash(npm run lint)",
+      "Bash(npm run lint:css)",
+      "Bash(npm run test)",
+      "Bash(npm run ext:compile)",
+      "Bash(npm run ext:test)",
+      "Bash(npm run ext:test:e2e)",
+      "Bash(npm run tui:test)",
+      "Bash(npm test:*)",
       "Bash(tsc:*)",
-      "Bash(eslint:*)",
-      "Bash(prettier:*)",
-      "Bash(powershell:*)",
-      "Bash(pwsh:*)",
-      "Bash(Get-ChildItem:*)",
-      "Bash(Test-Path:*)",
-      "Bash(Get-Content:*)",
-      "Bash(Select-String:*)",
-      "Bash(Select-Object:*)",
-      "Bash(ForEach-Object:*)",
-      "Bash(Where-Object:*)",
-      "Bash(Measure-Object:*)",
-      "Bash(Import-Module:*)",
-      "Bash(Remove-Module:*)",
-      "Bash(Get-Module:*)",
-      "Bash(Get-Command:*)",
-      "Bash(Test-ModuleManifest:*)",
-      "Bash(Invoke-Pester:*)",
-      "Bash(Invoke-ScriptAnalyzer:*)",
-      "Bash(Install-Module:*)",
       "Bash(gh pr list:*)",
       "Bash(gh pr view:*)",
       "Bash(gh pr status:*)",
-      "Bash(gh pr checkout:*)",
       "Bash(gh pr diff:*)",
-      "Bash(gh pr create:*)",
-      "Bash(gh pr edit:*)",
-      "Bash(gh pr comment:*)",
-      "Bash(gh pr review:*)",
-      "Bash(gh pr ready:*)",
-      "Bash(gh api:*)",
+      "Bash(gh pr checks:*)",
       "Bash(gh issue list:*)",
       "Bash(gh issue view:*)",
       "Bash(gh issue status:*)",
-      "Bash(gh issue create:*)",
-      "Bash(gh issue edit:*)",
       "Bash(gh repo view:*)",
-      "Bash(gh repo list:*)",
       "Bash(gh run list:*)",
       "Bash(gh run view:*)",
-      "Bash(gh run watch:*)",
-      "Bash(gh run rerun:*)",
       "Bash(gh workflow list:*)",
       "Bash(gh workflow view:*)",
-      "Bash(gh workflow run:*)",
-      "Bash(gh auth status:*)",
+      "Bash(gh auth status)",
       "Bash(gh release list:*)",
       "Bash(gh release view:*)",
       "Bash(gh label list:*)",
-      "Bash(gh project:*)",
       "Bash(actionlint:*)",
       "Bash(yamllint:*)",
-      "WebSearch",
-      "mcp__github__*"
+      "WebSearch"
     ],
     "deny": [
       "Bash(git push --force:*)",
@@ -191,18 +99,13 @@
       "Bash(ppds data truncate:*)"
     ],
     "ask": [
-      "Bash(git merge:*)",
       "Bash(git rebase -i:*)",
       "Bash(git rebase --interactive:*)",
       "Bash(git rebase --onto:*)",
       "Bash(git rebase --root:*)",
       "Bash(git rebase --exec:*)",
-      "Bash(git reset:*)",
-      "Bash(git apply:*)",
-      "Bash(git am:*)",
       "Bash(git tag -d:*)",
       "Bash(git tag -fa:*)",
-      "Bash(gh pr merge:*)",
       "Bash(gh pr close:*)",
       "Bash(gh issue close:*)",
       "Bash(gh release create:*)",
@@ -213,121 +116,11 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-main-branch.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-main-branch.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Edit",
+        "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
             "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/snk-protect.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/snk-protect.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/claudemd-line-cap.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/claudemd-line-cap.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(rm:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/rm-guard.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(rm -rf:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/rm-guard.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(rm -fr:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/rm-guard.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(Remove-Item:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/rm-guard.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(del:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/rm-guard.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(rmdir:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/rm-guard.py\"",
             "timeout": 5
           }
         ]
@@ -338,90 +131,6 @@
           {
             "type": "command",
             "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/shakedown-safety.py\"",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/sdk-spend-warn.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/skill-line-cap.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/skill-line-cap.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash(git worktree remove:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/worktree-safety.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/settings-json-guard.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/settings-json-guard.py\"",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Bash(git worktree remove:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/worktree-safety.py\"",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "Notification": [],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/shakedown-readonly-guard.py\"",
             "timeout": 10
           }
         ]

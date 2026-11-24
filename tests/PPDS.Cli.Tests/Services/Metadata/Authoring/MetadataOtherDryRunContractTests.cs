@@ -125,7 +125,7 @@ public sealed class MetadataOtherDryRunContractTests
                         });
                     return Task.FromResult(client.Object);
                 });
-            _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), guard.Object, cacheProvider: _cache.Object);
+            _service = new DataverseMetadataAuthoringService(_pool.Object, new SchemaValidator(), guard.Object, cacheProvider: _cache.Object, baseLanguage: new FixedOrganizationBaseLanguage(1033));
         }
         internal async Task<int?> Run()
         {

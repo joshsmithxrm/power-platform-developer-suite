@@ -1,95 +1,49 @@
 ---
 name: spec
-description: Spec
+description: Create, update, reconcile, or audit a PPDS specification in specs/. Use when writing a spec for new feature work, changing what an existing spec says, aligning a spec with code that has drifted from it (--reconcile), or checking specs against code and tests without changing them (--audit). Not needed for bug fixes or small contributor changes.
 ---
 
 # Spec
 
-Create, update, or reconcile a specification following PPDS conventions. Three modes: forward (create new), update (modify existing), reconcile (align spec with code). Ensures consistency, cross-references related specs, and enforces numbered acceptance criteria.
+`$ARGUMENTS` = spec name (`connection-pooling` → `specs/connection-pooling.md`), optionally followed by `--reconcile` or `--audit`. For `--audit`, an empty name means every spec.
 
-## Input
+## Foundation
 
-$ARGUMENTS = spec name (e.g., `connection-pooling` for existing, `new-feature` for new)
+- `specs/CONSTITUTION.md`: Part 1 (architecture principles) applies to everything a spec describes; Part 2 (I3, I6, SL1–SL5) governs the spec itself.
+- `specs/SPEC-TEMPLATE.md`: structure. Address every section, even if only with "N/A".
+- Code-to-spec map: grep `specs/*.md` for `**Code:**` lines and match path prefixes against the code in question. This, not `specs/README.md`, is how to find governing and related specs. Several specs can share a path; consider all of them. Always treat `specs/architecture.md` as related.
 
-## Process
+## `**Code:**` frontmatter (SL4)
 
-### Step 1: Load Foundation
+Relative, grep-friendly path prefixes, e.g. `[src/PPDS.Cli/Commands/PluginTraces/](../src/PPDS.Cli/Commands/PluginTraces/)`. Never prose ("Multiple — see sections") and never `None` once code exists. System-wide specs use `**Code:** System-wide`. When work adds code in a new location, add its prefix so the map keeps finding the spec.
 
-Read these files before doing anything else:
-- `specs/CONSTITUTION.md` — non-negotiable principles (includes Spec Laws SL1–SL5)
-- `specs/SPEC-TEMPLATE.md` — structural template
-- Glob `specs/*.md` and grep each for `**Code:**` lines to build a code-path-to-spec map. This replaces the README index.
+## Modes
 
-### Step 2: Determine Mode
+**Create** (spec file does not exist). Check the map and spec names for overlapping scope first; if a spec already covers the concept, ask whether to extend it (SL1: one spec per domain concept, named after the thing; SL3: surface behaviour goes in surface sections). Draft section by section with the user. Capture their intent; ask rather than invent requirements. Changelog starts with "Initial spec".
 
-**Forward mode** — spec does not exist (`specs/$ARGUMENTS.md` not found):
-- Search existing specs for overlapping scope — check that this isn't already covered
-- If overlap found, ask user: update existing spec or create new one?
-- Proceed to authoring (Step 4)
+**Update** (user asks for changes). Read the spec and the code at its `Code:` paths, report any drift you see, then make the requested changes once the user agrees.
 
-**Update mode** — spec exists, user requests specific changes:
-- Read the existing spec
-- Read the code files referenced in the spec's `Code:` header line
-- Identify drift: does the code match what the spec describes?
-- Identify missing ACs: does the spec have numbered acceptance criteria?
-- Present findings to user before making changes
-- Proceed to authoring (Step 4)
+**Reconcile** (`--reconcile`, or update mode finds significant drift).
+1. Extract the spec's ACs, Code paths, and described types.
+2. Enumerate public types, methods, and behaviours at those paths.
+3. Classify: missing ACs (code behaviour with no AC), stale ACs (behaviour the code no longer has), status drift (test result differs from the Status column).
+4. Member-count check: count public types/methods and count ACs, and report the delta. Warn explicitly if ACs cover under 90% of the public surface; summaries tend to capture 70–80% and miss the rest.
+5. Compare Architecture and requirement prose against the actual structure.
+6. Present all proposed changes for approval before writing. If nothing drifted, say the spec is current and write nothing.
 
-**Reconcile mode** — spec exists, user wants to align spec with code (`/spec <name> --reconcile` or when significant code divergence is detected):
-- Read the existing spec and extract all ACs, Code paths, and type descriptions
-- Read the code at the spec's `Code:` paths
-- Enumerate public types, methods, and behaviors in the code
-- Compare against existing ACs:
-  - **Missing ACs:** Code behavior with no corresponding AC → propose new ACs
-  - **Stale ACs:** AC describes behavior the code no longer has → flag for removal
-  - **Status drift:** AC references a test that now passes/fails differently → flag for update
-- **Member-count verification:** Count public types/methods in code, count ACs. Report the delta. If ACs cover less than 90% of public surface area, warn explicitly. This prevents the known LLM summarization problem (capturing ~70-80% and missing the rest).
-- Compare spec prose (Architecture, Core Requirements) against actual code structure
-- Present all proposed changes to user for approval before writing
-- After writing: regenerate README, append to Changelog
-- Skip to Step 6 (reconcile does not go through the authoring flow)
+**Audit** (`--audit`). Read-only: report findings with file/test evidence and the change each one needs; fix nothing. For a full audit, glob `specs/*.md` excluding CONSTITUTION, SPEC-TEMPLATE, and README; parallel subagents per spec are fine. Per spec, check:
+- **ACs**: a numbered AC table exists (I3); each referenced test exists (grep for it) and its Status is accurate. Run single tests to confirm:
+  - .NET: `dotnet test PPDS.sln --filter "FullyQualifiedName~{TestMethod}" -v q`
+  - Extension (vitest, from repo root): `npm test --prefix src/PPDS.Extension -- -t "{test name}"`. `-t` matches the `describe`/`it` name, not a function name; a file path in place of `-t ...` runs one file.
+- **Code alignment**: requirements, architecture, and core types against the code, as matches, drifted, missing (spec claims it, code lacks it), or extra (code does it, spec is silent).
+- **Constitution**: A1–A3 and R1–R3 for any spec with code; D1–D4 for Dataverse specs; SS1–SS2 for profile, environment, or MCP session specs; I1 for CLI output; S1–S3, I4, and I5 for UI specs; SL1–SL5 for every spec.
+- **Cross-spec**: contradictions with the specs in its Related Specs section.
 
-### Step 3: Cross-Reference Related Specs
+Treat audit findings with reconcile mode.
 
-Use the code-path-to-spec map from Step 1 to find related specs. Match the spec's Code: paths against the directories being touched. Always include `specs/architecture.md` and `specs/CONSTITUTION.md`.
+## Finish (create, update, reconcile)
 
-### Step 4: Author/Update Spec
-
-**For new specs:** Walk through the template section by section with the user. One section at a time, ask if it looks right before moving to the next. Follow the brainstorming pattern — multiple choice questions when possible, open-ended when needed.
-
-**For existing specs:** Present the drift analysis and proposed changes. Get user approval before modifying.
-
-**For both:**
-- Ensure every section from the template is addressed (even if just "N/A" for optional sections)
-- Cross-check against constitution — hard stop on violations
-- Cross-check against related specs — flag contradictions
-
-### Step 5: Enforce Acceptance Criteria
-
-This is a HARD GATE. The spec is not complete without:
-- Numbered AC IDs (AC-01, AC-02, ...)
-- Each criterion is specific and testable (not vague prose)
-- Test column populated where tests exist (can be "TBD" for new specs)
-- Status column accurate
-
-If the user tries to skip ACs, remind them: Constitution I3 requires numbered acceptance criteria before implementation begins.
-
-### Step 6: Finalize
-
-1. Write/update the spec file at `specs/$ARGUMENTS.md`
-2. Regenerate `specs/README.md` by running `python scripts/generate-spec-readme.py` (or manually scraping frontmatter from all specs if the script doesn't exist yet)
-3. Commit:
-   ```
-   docs(specs): add/update {spec-name} specification
-
-   Co-Authored-By: {use the format from the system prompt}
-   ```
-
-## Rules
-
-1. **Always read foundation first** — constitution and spec template. No exceptions.
-2. **Always cross-reference** — no spec exists in isolation.
-3. **ACs are mandatory** — the spec is incomplete without them.
-4. **One section at a time** — don't dump the entire spec at once.
-5. **Constitution violations are hard stops** — if a spec proposes something that violates the constitution, flag it immediately.
-6. **Don't invent requirements** — ask the user. The spec captures their intent, not your assumptions.
+1. Numbered, testable ACs (AC-01, ...), with a `Test` column (`TBD` is fine for new work) and an accurate `Status` (I3, I6).
+2. Append a dated row to `## Changelog`. Update `**Last Updated:**`.
+3. Regenerate the index: `python scripts/generate-spec-readme.py`. `specs/README.md` is generated; never hand-edit it.
+4. Commit as `docs(specs): add|update {spec-name} specification`.

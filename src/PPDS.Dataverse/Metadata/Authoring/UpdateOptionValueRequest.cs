@@ -28,7 +28,7 @@ public sealed class UpdateOptionValueRequest
     /// <summary>Gets or sets the new label to apply (optional; the current label is preserved when omitted).</summary>
     public string? NewLabel { get; set; }
 
-    /// <summary>Gets or sets the updated English description (null leaves it unchanged; "" clears it). Service callers only; no CLI option sets it.</summary>
+    /// <summary>Gets or sets the updated description, written in the organization's base language (null leaves it unchanged; "" clears it). Service callers only; no CLI option sets it.</summary>
     public string? Description { get; set; }
 
     /// <summary>Gets or sets the colour, sent to Dataverse verbatim (null or "" leaves it unchanged; a colour cannot be cleared).</summary>

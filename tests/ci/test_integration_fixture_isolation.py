@@ -7,6 +7,7 @@ import subprocess
 
 import pytest
 import yaml
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/conftest.py puts tests/ on sys.path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REFUSAL_SCRIPT = (
@@ -22,9 +23,22 @@ REFUSAL_SCRIPT = (
 # servicing and automatic full-.NET routing for SDK/config/props/targets/workflow
 # inputs; the separate Integration Tests workflow remains a tokenless refusal.
 # No Git calls or mutable refs are used by these tests.
+# 2026-11-19: '.editorconfig' added to the build.yml code filter and the
+# test.yml code and python filters (it sets CS1591 to error in the libraries).
+# 2026-11-20: 'scripts/ci/ci_images.py' (the one container image definition,
+# #1794) added to the test.yml extraction filter; no job, permission or secret
+# reference changed.
+# 2026-11-22: test.yml: a new test-linux job runs the same unit suite on
+# ubuntu-latest, and test-status now needs it under the "code" classification.
+# The new job reads no secret and has no write permission. No trigger changed
+# and no other job changed.
+# 2026-11-22: build.yml: build-status needs dependency-review and requires it to
+# have succeeded on a pull request (skipped on a push; any other event fails).
+# The review job's comments were corrected. No job, permission, trigger or
+# secret reference changed.
 REVIEWED_WORKFLOW_HASHES = {
-    "build.yml": "776c71af79b10ddb3e2415d8a23405bd7e8c7d4c774bb6ddf0fbde0699f52b6a",
-    "test.yml": "b8d90fedf6dfdb3f76e04abccee95bd2321c72c558b247881dfd53343d1d6027",
+    "build.yml": "1db7195c6d60974fc5c32f40fe01fe450ee164725cb380f1df9fc6658ef5e72a",
+    "test.yml": "118ec514ab73e1d4621edf4a7f692212f0fc680df49e6d17942356d08554b0e4",
 }
 
 
@@ -124,7 +138,7 @@ def test_actual_refusal_bash_fails_and_reports_no_live_tests(workflow, tmp_path)
         [str(bash), "--noprofile", "--norc", "-e", "-o", "pipefail", "-c",
          workflow["jobs"]["integration-tests-hold"]["steps"][0]["run"]],
         env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, timeout=10, check=False,
+        capture_output=True, text=True, timeout=CHILD_PROCESS_HANG_BOUND_SECONDS, check=False,
     )
     assert result.returncode == 1, result.stderr
     assert result.stderr == ""

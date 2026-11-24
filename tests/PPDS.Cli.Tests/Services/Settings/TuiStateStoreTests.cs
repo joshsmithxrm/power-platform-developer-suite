@@ -1,18 +1,22 @@
 using PPDS.Cli.Services.Settings;
 using PPDS.Cli.Services.PluginTraces;
+using PPDS.Cli.Tests.TestHelpers;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Services.Settings;
 
 [Trait("Category", "TuiUnit")]
+[Collection(EnvironmentVariableMutatingCollection.Name)]
 public class TuiStateStoreTests : IDisposable
 {
+    private readonly string? _originalConfigDir;
     private readonly string _tempDir;
     private readonly string _filePath;
     private readonly TuiStateStore _store;
 
     public TuiStateStoreTests()
     {
+        _originalConfigDir = System.Environment.GetEnvironmentVariable("PPDS_CONFIG_DIR");
         _tempDir = Path.Combine(Path.GetTempPath(), "ppds-test-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_tempDir);
         System.Environment.SetEnvironmentVariable("PPDS_CONFIG_DIR", _tempDir);
@@ -236,7 +240,7 @@ public class TuiStateStoreTests : IDisposable
     public void Dispose()
     {
         _store.Dispose();
-        System.Environment.SetEnvironmentVariable("PPDS_CONFIG_DIR", null);
+        System.Environment.SetEnvironmentVariable("PPDS_CONFIG_DIR", _originalConfigDir);
         try { if (Directory.Exists(_tempDir)) Directory.Delete(_tempDir, true); }
         catch { /* best effort */ }
     }

@@ -24,7 +24,7 @@ public static class DiagnosticIds
     public const string NoFireAndForgetInCtor = "PPDS013";
 
     // Documentation rules (from specs/docs-generation.md)
-    public const string XmlDocOnPublicApi = "PPDS014";
+    // PPDS014 is retired (was XmlDocOnPublicApi; CS1591 enforces XML docs now). Do not reuse.
     public const string CliCommandNeedsDescription = "PPDS015";
     public const string McpToolNeedsMetadata = "PPDS016";
 }

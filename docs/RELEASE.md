@@ -1,8 +1,62 @@
 # PPDS Release Operations
 
-Tool-neutral reference for release scope analysis, release operations,
-strong-name rotation, key custody, and incident response. Automation may advise
-what should be released, but a maintainer must approve every tag and publish.
+Tool-neutral reference for the release model and policy: tags, channels and
+package lineage, the closeout ledger, release scope analysis, CLI/Extension
+co-release reconciliation, publisher input checks, public artifact verification,
+signing and key custody, strong-name rotation, and the distributed native
+runtime. Automation may advise what should be released, but a maintainer must
+approve every tag and publish.
+
+The step-by-step release procedure (CHANGELOGs, version bumps, tag pushes, CI
+monitoring, verification, patches, stabilization branches, recovery) is in
+[docs/runbooks/release.md](runbooks/release.md). The docs-site release is in
+[docs/runbooks/docs-release.md](runbooks/docs-release.md), and the policy for
+when to release is [specs/release-cycle.md](../specs/release-cycle.md).
+
+## Release model: tags, channels and lineage
+
+PPDS publishes from git tags. The tag *prefix* selects the package and the
+workflow; there is no single `v`-prefix-for-everything scheme.
+
+| Tag | Versions | Workflow | Output |
+|---|---|---|---|
+| `Auth-v*`, `Dataverse-v*`, `Migration-v*`, `Query-v*`, `Mcp-v*`, `Plugins-v*` | That NuGet package, via MinVer | `publish-nuget.yml` | nuget.org package |
+| `Cli-v*` | PPDS.Cli, via MinVer | `publish-nuget.yml` and `release-cli.yml` | NuGet tool package; five native binaries (win-x64, win-arm64, osx-x64, osx-arm64, linux-x64) plus `checksums.sha256` on a workflow-owned GitHub release |
+| `Extension-v*` | Nothing; the version is in `src/PPDS.Extension/package.json` | `extension-publish.yml` (runs on tag push; manual dispatch for overrides) | VS Code Marketplace, four targets (win32-x64, linux-x64, darwin-x64, darwin-arm64) |
+| `v<X.Y.Z>` (unified) | Nothing | `docs-release.yml` | Regenerated reference docs PR in ppds-docs and an API-baseline rollover PR |
+
+- **Per-package tags are the source of truth for versions.** The seven NuGet
+  packages version from their own `<MinVerTagPrefix>` (`Auth-v`, `Cli-v`,
+  `Dataverse-v`, `Mcp-v`, `Migration-v`, `Plugins-v`, `Query-v`), so no csproj
+  carries a `<Version>`.
+- **The unified tag** is pushed once per coordinated release and only triggers
+  docs generation. It does not version any package. Per-product tags do not
+  trigger `docs-release.yml`.
+- `post-merge-release-check.yml` also runs on `Cli-v*` and `Extension-v*` tags
+  for [co-release reconciliation](#cli-extension-co-release-reconciliation).
+
+Channels:
+
+- **Stable**: a plain SemVer version on each prefix (`Auth-v1.1.0`).
+- **Prerelease**: a SemVer prerelease suffix such as `-beta.N` or `-rc.N`
+  (`Mcp-v1.0.0-beta.2`). The CLI workflow marks a hyphenated version as a GitHub
+  prerelease.
+- **Extension channel** is chosen by the **odd/even minor** rule, not a suffix:
+  an odd minor (0.7, 1.1) publishes to the Marketplace pre-release channel and an
+  even minor (0.6, 1.2) to stable. `extension-publish.yml` infers it from the tag
+  version; a manual dispatch can override it.
+
+Lineage:
+
+- **Each package keeps its own version lineage.** A coordinated minor includes
+  every surface, but their major/minor numbers need not match.
+- **PPDS.Plugins has its own lineage.** It was first released as `1.0.0` in
+  December 2025, ahead of the other packages, and is now on `3.x`. Never regress
+  its major to reconcile it with the others.
+- **A strong-name key change is a SemVer breaking change** for the re-signed
+  package ([Strong-Name Keys](#strong-name-keys)); bump its major.
+
+## Publishing pipeline
 
 NuGet restore, build and pack run in `build-package` without private signing keys
 or OIDC permission. Non-Plugins packages continue directly to full release-input
@@ -24,6 +78,85 @@ established by the offline fixture tests. Activation requires a reviewed produce
 assurance choice, accepted signer binary hash/version, real compatibility receipt,
 and separate authorization for key use and release. Signature validity does not
 prove that a compromised producer built trustworthy source.
+
+## NuGet trusted publishing
+
+Since #1564 (merged 2026-11-09) `publish-nuget.yml` on `main` uses pinned
+official NuGet/login and a temporary key for both package and symbol uploads.
+It has not yet run in a real publish; see the runbook's
+[first-publish note](runbooks/release.md#first-nuget-publish-through-trusted-publishing). The login user is **JoshSmithMSFT**, confirmed
+by Josh as the **individual policy creator** profile. The step-local nonsecret
+`NUGET_PUBLISH_USER` guard uses that same identity; no repository variable is needed.
+NuGet's token service searches policies by their creator; a package owner may
+be an organization and is not necessarily the login user. Missing or malformed
+identity fails before login. There is no stored-key fallback.
+
+On November 2, 2026 Josh supplied **user-reported** evidence of an active
+`PPDS-GitHub-Actions` policy with package owner **JoshSmithMSFT**, new-version-only
+push scope, and these exact package IDs: PPDS.Auth, PPDS.Cli, PPDS.Dataverse,
+PPDS.Mcp, PPDS.Migration, PPDS.Plugins and PPDS.Query. Its GitHub tuple is
+`joshsmithxrm/power-platform-developer-suite`, workflow `publish-nuget.yml`.
+This is not an independent policy inspection or a tested token exchange.
+Josh subsequently confirmed the individual creator username as JoshSmithMSFT.
+Earlier public package-owner metadata named joshsmithxrm; that does not establish
+the newer policy owner's package authorization. That ownership/authorization
+discrepancy and actual login/upload remain unverified; an Active policy with
+matching subjects alone is not proof it can publish these packages. Keep the
+exact seven IDs; do not broaden them.
+
+The workflow currently has no GitHub environment. Keep the matching policy's
+environment blank unless a separately reviewed coordinated environment change
+is approved. Only the upload-only `publish` job requests `id-token: write`; public
+verification remains read-only. The permission is available to every step in
+that job, so it remains upload-only: no restore/build/pack or signing runs there.
+The artifact-integrity handoff checks the producer and its output before login.
+The reviewed tag, workflow, verifier, runner and build inputs remain trusted.
+
+Keep source/dependency/signing/vacancy/public-artifact gates and sequential
+publication verification. New source must contain this workflow; retrying an old
+immutable tag still executes its historical secret-based publisher. The offline
+checks do not exercise the token exchange or package/symbol uploads; the first
+real publish needs the maintainer's final publication approval like any other.
+Changes to trust/identity settings are reviewed separately. Do not remove old secrets,
+create trust settings or invoke login as part of local validation.
+
+Primary references: [NuGet trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing),
+[individual creator binding](https://github.com/NuGet/NuGetGallery/blob/main/src/NuGetGallery.Services/Authentication/Federated/FederatedCredentialService.cs#L396),
+and [official login action](https://github.com/NuGet/login).
+
+## Signing and credentials
+
+| Surface | Signing or publishing credential | Workflow |
+|---|---|---|
+| NuGet packages and symbols | Temporary API key from NuGet trusted publishing (OIDC via `NuGet/login`, [above](#nuget-trusted-publishing)). The current workflow reads no stored NuGet key; tags cut before this workflow still carry the historical publisher that used the `NUGET_API_KEY` secret, so a rerun of such a tag uses that secret | `.github/workflows/publish-nuget.yml` |
+| PPDS.Plugins assembly strong name | `PLUGINS_SNK_BASE64` secret, read only by the isolated `sign-plugins` job's signing step on `Plugins-v*` tags, and blocked until the signing policy is activated ([Isolated Plugins signing preparation](#isolated-plugins-signing-preparation)) | `.github/workflows/publish-nuget.yml` |
+| Other .NET assemblies | Not strong-name signed | n/a |
+| VS Code Extension | `ADO_MARKETPLACE_PAT` secret, passed to `vsce` as `VSCE_PAT` | `.github/workflows/extension-publish.yml` |
+| CLI GitHub release and binaries | The workflow's `GITHUB_TOKEN` | `.github/workflows/release-cli.yml` |
+| Windows code signing of CLI `.exe` files | **Not implemented.** `release-cli.yml` ships unsigned executables, so users may see SmartScreen warnings. There is no `signtool` step and no signing-certificate secret; adding Authenticode signing is a follow-up. | n/a |
+| macOS notarization | Not implemented. If added, it would run as a post-sign step in `release-cli.yml`, which builds the macOS binaries. | n/a |
+
+Secrets live only in the repository's Actions secrets. Never place them, or a
+temporary NuGet key, in commits, comments or chat.
+
+## Pre-upload release-input checks
+
+`release-cli.yml` owns the CLI GitHub release, its assets and its publication. It
+extracts the exact version's curated CLI CHANGELOG section and records the source
+commit and workflow run in the draft body. A retry can resume only that same
+run's owned draft with unchanged notes and verified existing asset hashes; it
+uploads only missing assets and never replaces them. A published version, a
+foreign draft, an unknown digest or mismatched content stops for reconciliation.
+
+Before uploading, `scripts/ci/verify_release_inputs.py` checks NuGet IDs,
+versions, same-commit internal dependency versions and assembly source identity;
+Plugins also requires the repository public-key identity and forced cryptographic
+strong-name verification. Native CLI builds verify version and source identity.
+The Extension validates its manifest and lock file, channel, VSIX identity and
+bundled CLI, then publishes that exact VSIX with `--packagePath`. Unexpected
+occupied public versions fail closed. These gates complement the public
+verification after upload; they do not authorize publication or prove that
+credentials are valid.
 
 ## Release closeout ledger
 
@@ -97,64 +230,12 @@ of cancellation and does not cache or substitute a previous required check.
 
 ## Release Scope Analysis
 
-### NuGet trusted publishing preparation
-
-The proposed publisher uses pinned official NuGet/login and a temporary key for
-both package and symbol uploads. The login user is **JoshSmithMSFT**, confirmed
-by Josh as the **individual policy creator** profile. The step-local nonsecret
-`NUGET_PUBLISH_USER` guard uses that same identity; no repository variable is needed.
-NuGet's token service searches policies by their creator; a package owner may
-be an organization and is not necessarily the login user. Missing or malformed
-identity fails before login. There is no stored-key fallback.
-
-On November 2, 2026 Josh supplied **user-reported** evidence of an active
-`PPDS-GitHub-Actions` policy with package owner **JoshSmithMSFT**, new-version-only
-push scope, and these exact package IDs: PPDS.Auth, PPDS.Cli, PPDS.Dataverse,
-PPDS.Mcp, PPDS.Migration, PPDS.Plugins and PPDS.Query. Its GitHub tuple is
-`joshsmithxrm/power-platform-developer-suite`, workflow `publish-nuget.yml`.
-This is not an independent policy inspection or a tested token exchange.
-Josh subsequently confirmed the individual creator username as JoshSmithMSFT.
-Earlier public package-owner metadata named joshsmithxrm; that does not establish
-the newer policy owner's package authorization. That ownership/authorization
-discrepancy and actual login/upload remain unverified; an Active policy with
-matching subjects alone is not proof it can publish these packages. Keep the
-exact seven IDs; do not broaden them.
-
-The workflow currently has no GitHub environment. Keep the matching policy's
-environment blank unless a separately reviewed coordinated environment change
-is approved. Only the upload-only `publish` job requests `id-token: write`; public
-verification remains read-only. The permission is available to every step in
-that job, so it remains upload-only: no restore/build/pack or signing runs there.
-The artifact-integrity handoff checks the producer and its output before login.
-The reviewed tag, workflow, verifier, runner and build inputs remain trusted.
-
-Keep source/dependency/signing/vacancy/public-artifact gates and sequential
-publication verification. New source must contain this workflow; retrying an old
-immutable tag still executes its historical secret-based publisher. Actual
-token exchange and package/symbol uploads are untested by offline checks and
-require separate authorization. Trust/identity settings and final publication
-approval remain separate from preparing this change. Do not remove old secrets,
-create trust settings or invoke login as part of local validation.
-
-Primary references: [NuGet trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing),
-[individual creator binding](https://github.com/NuGet/NuGetGallery/blob/main/src/NuGetGallery.Services/Authentication/Federated/FederatedCredentialService.cs#L396),
-and [official login action](https://github.com/NuGet/login).
-
-Before preparing CHANGELOGs or choosing versions, generate an explained scope
-advisory from the exact commit range:
-
-```bash
-python scripts/ci/release_plan.py \
-  --base <base-commit> \
-  --head <release-commit> \
-  --release-kind patch \
-  --channel stable \
-  --format markdown
-```
-
-Use `--release-kind minor` or `major` for coordinated releases, and
-`--channel prerelease` for a prerelease plan. The command is read-only: it does
-not create or push tags, publish packages, or dispatch a workflow.
+Before CHANGELOGs are prepared or versions chosen, `scripts/ci/release_plan.py`
+generates an explained, read-only scope advisory for an exact commit range
+([runbook Step 2](runbooks/release.md#2-generate-and-review-the-release-scope-advisory)).
+`--release-kind` is `patch`, `minor` or `major` and `--channel` is `stable` or
+`prerelease`. The command does not create or push tags, publish packages, or
+dispatch a workflow.
 
 The advisory deliberately separates five concepts:
 
@@ -198,32 +279,10 @@ prereleases of the same version, numeric identifiers compare numerically
 malformed tags are surfaced as diagnostics instead of silently winning a git
 refname sort.
 
-For a patch, review the proposed direct and downstream targets plus any delivery
-or MinVer tag prerequisites. A coordinated minor or major intentionally plans all release
-surfaces, even when some have no user-facing change. Update each target's
-CHANGELOG, create tags only after review, push tags individually, monitor every
-publish workflow, and verify the public artifacts before closing the release
-record.
-
-### Documentation for per-product releases
-
-Per-product tags such as `Cli-v*` and `Extension-v*` do not trigger
-`docs-release.yml`, which listens for unified `v*` tags and explicit dispatch.
-For a coordinated patch, record an explicit docs dispatch against the final
-reviewed release ref; do not invent a unified version tag just to trigger docs.
-After the applicable release/docs approval, select a co-located product tag
-whose peeled commit equals the reviewed release SHA and dispatch, for example:
-
-```bash
-gh workflow run docs-release.yml --ref <reviewed-product-release-tag> -f dry_run=true
-```
-
-Review the generated artifacts, then separately authorize the `dry_run=false`
-dispatch that opens the paired docs and API-rollover PRs. Check the existing
-rollover-PR gate and review both outputs, including an expected no-op rollover
-when no unshipped API entries exist. Recapture companion skills against the
-same final CLI/MCP versions. A successful product publish alone does not prove
-that docs or skills were refreshed.
+A patch plans only its direct and downstream targets plus any delivery or MinVer
+tag prerequisites. A coordinated minor or major intentionally plans all release
+surfaces, even when some have no user-facing change. How to act on the advisory
+is in the [release runbook](runbooks/release.md).
 
 ### Patch release records
 
@@ -261,17 +320,45 @@ built by `scripts/ci/patch_release_issue.py`. PR titles are treated as untrusted
 text, and issue bodies reach GitHub through `--body-file` rather than shell
 interpolation.
 
-The repository's optional `.claude/skills/release/SKILL.md` documents the same
-ceremony for supported agents; this public document remains the authoritative,
-tool-neutral entry point for generated GitHub issues.
+### Tags, not release branches, record what shipped
+
+When working out what shipped as version X, trust the release tag, not a
+`release/X` branch. The branch tip may sit on a separate lineage from the tagged
+commit. Check with `git merge-base --is-ancestor <release-tag> <branch>` before
+assuming a branch contains a release.
+
+<a id="cli-extension-co-release-reconciliation"></a>
 
 ## CLI/Extension Co-release Reconciliation
 
-The VS Code Extension bundles the CLI selected from an exact `Cli-v*` tag on
-the Extension release commit. The automated guard therefore treats the
-relationship as satisfied only when a strict-SemVer `Extension-v*` tag and the
-highest stable strict-SemVer `Cli-v*` tag point to the same commit. It does not
-compare tag timestamps or the two independent version numbers.
+**Rule: a release train that ships a `Cli-v*` tag also ships an `Extension-v*`
+bundled-CLI refresh on the same commit.** The Extension bundles the CLI at publish
+time (`extension-publish.yml` runs `npm run bundle:cli`), so Marketplace users get
+new CLI behavior only when a new `Extension-v*` tag is cut. Cut the refresh even
+when the Extension's own source is unchanged: bump the Extension patch version
+to force a fresh VSIX (a minor bump would change the odd/even channel).
+
+This is the default that `Cli-v1.3.0` and `Mcp-v1.1.0` missed on 2026-07-14: no
+Extension release rode along, so Marketplace users kept running older bundled CLI
+behavior, including a bug 1.3.0 fixed. The reconciliation below is a backstop;
+treat its issue as a missed default, not the intended path.
+
+**Opting out.** If the refresh is deliberately skipped (for example the CLI
+change cannot affect bundled behavior, or the Extension is mid pre-release
+cycle), comment the reason on the workflow's `release:extension-corelease`
+issue for that CLI tag and close it. The closed, labeled issue is the durable
+opt-out record: reconciliation reads open and closed records, never reopens a
+closed one, and does not create another alert for the same CLI tag. A note only
+in the release PR is not an opt-out record, because the workflow does not read
+it.
+
+**How the backstop decides.** The VS Code Extension bundles the CLI selected from
+an exact `Cli-v*` tag on the Extension release commit. The automated guard
+(`post-merge-release-check.yml`, job `extension-corelease-detection`, running
+`scripts/ci/check_extension_corelease.py`) therefore treats the relationship as
+satisfied only when a strict-SemVer `Extension-v*` tag and the highest stable
+strict-SemVer `Cli-v*` tag point to the same commit. It does not compare tag
+timestamps or the two independent version numbers.
 
 Both CLI and Extension tag pushes trigger one serialized reconciliation. If the
 CLI arrives first, the workflow may create an advisory issue containing a
@@ -333,7 +420,9 @@ publishing secrets are confined to the preceding publish jobs.
 
 ## Strong-Name Keys
 
-PPDS strong-names its assemblies. The key custody model is:
+PPDS.Plugins is the only strong-named product assembly (`SignAssembly` in
+`src/PPDS.Plugins/PPDS.Plugins.csproj`); the other packages are not strong-named.
+The key custody model is:
 
 | Artifact | Where it lives | Tracked in git? |
 |----------|----------------|-----------------|
@@ -341,7 +430,7 @@ PPDS strong-names its assemblies. The key custody model is:
 | `*.snk` private keypair | GitHub Actions secret `PLUGINS_SNK_BASE64` | **No — never commit** |
 | Public signing default; separate release delay-sign overrides | Project/workflow | Yes |
 
-**Public-only signing for local builds.** csproj files declare
+**Public-only signing for local builds.** The Plugins csproj declares
 `<PublicSign>true</PublicSign>` so local `dotnet build` succeeds against the
 public key alone. Plugins release preparation selects `PublicSign=false` and
 `DelaySign=true` for both build and no-build pack. These modes are mutually
@@ -350,7 +439,7 @@ exclusive. The private key is used only by the isolated post-build signer.
 ### Why the .snk is sacred
 
 The assembly's `PublicKeyToken` is derived from the keypair. Every consumer
-of `PPDS.Plugins`, `PPDS.Dataverse`, `PPDS.Migration`, etc. binds against
+of `PPDS.Plugins` binds against
 the existing `PublicKeyToken`. Rotating the keypair changes the token,
 which is a **SemVer breaking change** for every downstream consumer — they
 must rebuild against the new identity.
@@ -492,7 +581,7 @@ Rotate the keypair only when one of the following is true:
 3. **Update the public key in the repo.**
 
    Replace `src/PPDS.Plugins/PPDS.Plugins.PublicKey` with the new public
-   key file. Verify any csproj `<AssemblyOriginatorPublicKey>` references
+   key file. Verify any csproj `<AssemblyOriginatorKeyFile>` references
    point at the new file. Commit the change to a `feat/strong-name-rotate`
    branch.
 
@@ -517,8 +606,8 @@ Rotate the keypair only when one of the following is true:
    This is mandatory — a `PublicKeyToken` change is a binary-incompatible
    change.
 
-7. **Run the release skill** (`/release`) to publish the new majors with
-   the rotation noted in CHANGELOG.
+7. **Follow the [release runbook](runbooks/release.md)** to publish the new
+   majors with the rotation noted in CHANGELOG.
 
 8. **Post-release verification.** Confirm `sn -T <published.dll>` shows
    the new `PublicKeyToken` matching `PPDS.Plugins.new.PublicKey`.
@@ -538,7 +627,8 @@ design.
 
 ## Related
 
-- Routine release ceremony: `.claude/skills/release/SKILL.md`
+- Release procedure: [docs/runbooks/release.md](runbooks/release.md)
+- Docs-site release: [docs/runbooks/docs-release.md](runbooks/docs-release.md)
 - Hook implementation: `.claude/hooks/snk-protect.py`
 - CI workflow: `.github/workflows/publish-nuget.yml`
 - Public artifact verifier: `scripts/ci/verify_public_release.py`

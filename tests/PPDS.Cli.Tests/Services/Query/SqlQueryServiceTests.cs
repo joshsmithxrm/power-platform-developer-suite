@@ -3,6 +3,7 @@ using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services;
 using PPDS.Cli.Services.Query;
+using PPDS.Cli.Tests.Services.Query.Faithful;
 using PPDS.Cli.Tests.Services.Shared;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Query;
@@ -143,37 +144,34 @@ public class SqlQueryServiceTests
     [Fact]
     public async Task ExecuteAsync_WithValidRequest_ReturnsResult()
     {
+        var dataverse = SelectFixture.Create();
+        var executor = dataverse.CreateExecutorMock();
+        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard());
+
         var request = new SqlQueryRequest { Sql = "SELECT name FROM account" };
-        var expectedResult = new QueryResult
-        {
-            EntityLogicalName = "account",
-            Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
-            Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
-            Count = 0
-        };
 
-        _mockQueryExecutor
-            .Setup(x => x.ExecuteFetchXmlAsync(
-                It.IsAny<string>(),
-                It.IsAny<int?>(),
-                It.IsAny<string?>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(expectedResult);
-
-        var result = await _service.ExecuteAsync(request);
+        var result = await service.ExecuteAsync(request);
 
         Assert.NotNull(result);
         Assert.Equal(request.Sql, result.OriginalSql);
         Assert.NotNull(result.TranspiledFetchXml);
         Assert.Equal("account", result.Result.EntityLogicalName);
-        Assert.Equal(0, result.Result.Count);
-        Assert.Empty(result.Result.Records);
+        Assert.Equal(10, result.Result.Count);
+        Assert.Equal(10, result.Result.Records.Count);
     }
 
     [Fact]
     public async Task ExecuteAsync_PassesRequestParametersToExecutor()
     {
+        // What this checks is that the service passes the page, cookie and count request to the executor, as on main. The
+        // fake would refuse the FetchXML (returntotalrecordcount and a cookie of another form are not observed), so this one
+        // call returns an empty result, as main's mock did.
+        var dataverse = SelectFixture.Create();
+        var executor = dataverse.CreateExecutorMock();
+        executor.Setup(x => x.ExecuteFetchXmlAsync(It.IsAny<string>(), 2, "test-cookie", true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueryResult { EntityLogicalName = "account", Columns = [], Records = [], Count = 0 });
+        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard());
+
         var request = new SqlQueryRequest
         {
             Sql = "SELECT name FROM account",
@@ -182,26 +180,9 @@ public class SqlQueryServiceTests
             IncludeCount = true
         };
 
-        var expectedResult = new QueryResult
-        {
-            EntityLogicalName = "account",
-            Columns = new List<QueryColumn>(),
-            Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
-            Count = 0
-        };
+        await service.ExecuteAsync(request);
 
-        _mockQueryExecutor
-            .Setup(x => x.ExecuteFetchXmlAsync(
-                It.IsAny<string>(),
-                2,
-                "test-cookie",
-                true,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(expectedResult);
-
-        await _service.ExecuteAsync(request);
-
-        _mockQueryExecutor.Verify(x => x.ExecuteFetchXmlAsync(
+        executor.Verify(x => x.ExecuteFetchXmlAsync(
             It.IsAny<string>(),
             2,
             "test-cookie",
@@ -212,32 +193,21 @@ public class SqlQueryServiceTests
     [Fact]
     public async Task ExecuteAsync_WithTopOverride_AppliesTopToFetchXml()
     {
+        var dataverse = SelectFixture.Create();
+        var executor = dataverse.CreateExecutorMock();
+        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard());
+
         var request = new SqlQueryRequest
         {
             Sql = "SELECT name FROM account",
             TopOverride = 5
         };
 
-        string? capturedFetchXml = null;
-        _mockQueryExecutor
-            .Setup(x => x.ExecuteFetchXmlAsync(
-                It.IsAny<string>(),
-                It.IsAny<int?>(),
-                It.IsAny<string?>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<string, int?, string?, bool, CancellationToken>((fx, _, _, _, _) => capturedFetchXml = fx)
-            .ReturnsAsync(new QueryResult
-            {
-                EntityLogicalName = "account",
-                Columns = new List<QueryColumn>(),
-                Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
-                Count = 0
-            });
+        var result = await service.ExecuteAsync(request);
 
-        await _service.ExecuteAsync(request);
-
+        var capturedFetchXml = dataverse.FetchXml.FirstOrDefault();
         Assert.NotNull(capturedFetchXml);
+        Assert.Equal(5, result.Result.Count);
         // The new PPDS.Query engine handles TopOverride via the plan node's MaxRows
         // rather than injecting top/count into FetchXML. Verify valid FetchXML was sent.
         Assert.Contains("<fetch", capturedFetchXml);
@@ -261,21 +231,16 @@ public class SqlQueryServiceTests
     [Fact]
     public async Task ExecuteAsync_RespectsCancellationToken()
     {
+        var dataverse = SelectFixture.Create();
+        var executor = dataverse.CreateExecutorMock();
+        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard());
+
         var request = new SqlQueryRequest { Sql = "SELECT name FROM account" };
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        _mockQueryExecutor
-            .Setup(x => x.ExecuteFetchXmlAsync(
-                It.IsAny<string>(),
-                It.IsAny<int?>(),
-                It.IsAny<string?>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new OperationCanceledException());
-
         await Assert.ThrowsAsync<OperationCanceledException>(
-            () => _service.ExecuteAsync(request, cts.Token));
+            () => service.ExecuteAsync(request, cts.Token));
     }
 
     #endregion
@@ -286,6 +251,8 @@ public class SqlQueryServiceTests
     [Trait("Category", "PlanUnit")]
     public async Task ExecuteAsync_AggregateQuery_FetchesMetadata()
     {
+        // Not on the faithful fake (#1639): COUNT(*) sends aggregate FetchXML, which FakeDataverse refuses as not observed.
+        // This test asserts only the metadata calls, never returned rows.
         // Arrange: mock the metadata methods
         var mockExecutor = new Mock<IQueryExecutor>();
         mockExecutor
@@ -342,21 +309,8 @@ public class SqlQueryServiceTests
     public async Task ExecuteAsync_NonAggregateQuery_DoesNotFetchMetadata()
     {
         // Arrange
-        var mockExecutor = new Mock<IQueryExecutor>();
-        mockExecutor
-            .Setup(x => x.ExecuteFetchXmlAsync(
-                It.IsAny<string>(),
-                It.IsAny<int?>(),
-                It.IsAny<string?>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new QueryResult
-            {
-                EntityLogicalName = "account",
-                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
-                Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
-                Count = 0
-            });
+        var dataverse = SelectFixture.Create();
+        var mockExecutor = dataverse.CreateExecutorMock();
 
         var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
         var request = new SqlQueryRequest { Sql = "SELECT name FROM account" };
@@ -969,8 +923,11 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteAsync_UseTdsHint_RoutesThroughTdsExecutor()
     {
+        // The TDS executor stays a mock (#1639): the TDS endpoint takes SQL, not FetchXML, and FakeDataverse does not model it.
+        // This test asserts routing only; the Dataverse executor is the faithful fake.
         // Arrange: service with a TDS executor that returns a result
-        var mockExecutor = new Mock<IQueryExecutor>();
+        var dataverse = SelectFixture.Create();
+        var mockExecutor = dataverse.CreateExecutorMock();
         var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
 
         var tdsResult = new QueryResult
@@ -1016,25 +973,9 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteAsync_NoLockHint_InjectsNoLockIntoFetchXml()
     {
-        // Arrange: capture the FetchXML string passed to the executor
-        string? capturedFetchXml = null;
-
-        _mockQueryExecutor
-            .Setup(x => x.ExecuteFetchXmlAsync(
-                It.IsAny<string>(),
-                It.IsAny<int?>(),
-                It.IsAny<string?>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<string, int?, string?, bool, CancellationToken>(
-                (fx, _, _, _, _) => capturedFetchXml = fx)
-            .ReturnsAsync(new QueryResult
-            {
-                EntityLogicalName = "account",
-                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
-                Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
-                Count = 0
-            });
+        var dataverse = SelectFixture.Create();
+        var executor = dataverse.CreateExecutorMock();
+        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard());
 
         var request = new SqlQueryRequest
         {
@@ -1042,9 +983,10 @@ public class SqlQueryServiceTests
         };
 
         // Act
-        await _service.ExecuteAsync(request);
+        await service.ExecuteAsync(request);
 
-        // Assert: FetchXML sent to the executor contains no-lock="true"
+        // Assert: FetchXML sent to Dataverse contains no-lock="true"
+        var capturedFetchXml = dataverse.FetchXml.FirstOrDefault();
         Assert.NotNull(capturedFetchXml);
         Assert.Contains("no-lock=\"true\"", capturedFetchXml);
     }
@@ -1055,41 +997,23 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteAsync_MaxRowsHint_LimitsReturnedRows()
     {
-        // Arrange: executor returns 200 records; hint should cap at 100
-        var mockExecutor = new Mock<IQueryExecutor>();
-        var records = Enumerable.Range(0, 200)
-            .Select(i => (IReadOnlyDictionary<string, QueryValue>)new Dictionary<string, QueryValue>
-            { ["name"] = QueryValue.Simple($"Record {i}") })
-            .ToList();
-
-        mockExecutor
-            .Setup(x => x.ExecuteFetchXmlAsync(
-                It.IsAny<string>(),
-                It.IsAny<int?>(),
-                It.IsAny<string?>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new QueryResult
-            {
-                EntityLogicalName = "account",
-                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
-                Records = records,
-                Count = records.Count
-            });
-
-        var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
+        // Arrange: a table of 200 rows behind a fake that honours FetchXML like Dataverse; the hint caps at 100
+        var table = new FakeTable("account").Column("name", FakeColumnType.String);
+        for (var i = 0; i < 200; i++)
+            table.Row(("name", $"Record {i:D3}"));
+        var service = new FakeDataverse().Add(table).CreateSqlQueryService();
         var request = new SqlQueryRequest
         {
-            Sql = "-- ppds:MAX_ROWS 100\nSELECT name FROM account"
+            Sql = "-- ppds:MAX_ROWS 100\nSELECT name FROM account ORDER BY name"
         };
 
         // Act
         var result = await service.ExecuteAsync(request);
 
-        // Assert: the plan node's MaxRows cap was applied — at most 100 rows returned
-        Assert.NotNull(result);
-        Assert.True(result.Result.Count <= 100,
-            $"Expected at most 100 rows, got {result.Result.Count}");
+        // Assert: exactly the first 100 rows
+        Assert.Equal(
+            Enumerable.Range(0, 100).Select(i => $"Record {i:D3}"),
+            result.Result.Records.Select(r => (string?)r["name"].Value));
     }
 
     // ── AC-09: MAXDOP 2 caps parallelism ─────────────────────────────────
@@ -1117,22 +1041,12 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteAsync_BatchSizeHint_IsAcceptedWithoutError()
     {
+        var dataverse = SelectFixture.Create();
+        var executor = dataverse.CreateExecutorMock();
+        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard());
+
         // Arrange: BATCH_SIZE is a DML planning hint; for a SELECT it is parsed but ignored
         // without error — query proceeds normally.
-        _mockQueryExecutor
-            .Setup(x => x.ExecuteFetchXmlAsync(
-                It.IsAny<string>(),
-                It.IsAny<int?>(),
-                It.IsAny<string?>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new QueryResult
-            {
-                EntityLogicalName = "account",
-                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
-                Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
-                Count = 0
-            });
 
         var request = new SqlQueryRequest
         {
@@ -1140,7 +1054,7 @@ public class SqlQueryServiceTests
         };
 
         // Act — should not throw
-        var result = await _service.ExecuteAsync(request);
+        var result = await service.ExecuteAsync(request);
 
         // Assert
         Assert.NotNull(result);
@@ -1152,9 +1066,12 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteAsync_UseTdsHintOverridesCallerFalse_TdsWins()
     {
+        // The TDS executor stays a mock (#1639): the TDS endpoint takes SQL, not FetchXML, and FakeDataverse does not model it.
+        // This test asserts routing only; the Dataverse executor is the faithful fake.
         // Arrange: caller passes UseTdsEndpoint=false, but inline hint says USE_TDS.
         // The hint must win.
-        var mockExecutor = new Mock<IQueryExecutor>();
+        var dataverse = SelectFixture.Create();
+        var mockExecutor = dataverse.CreateExecutorMock();
         var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
 
         mockTdsExecutor
@@ -1199,22 +1116,12 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteAsync_MalformedHintValue_QueryProceeds()
     {
+        var dataverse = SelectFixture.Create();
+        var executor = dataverse.CreateExecutorMock();
+        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard());
+
         // Arrange: MAX_ROWS with non-numeric value is silently ignored;
         // the query should execute normally without throwing.
-        _mockQueryExecutor
-            .Setup(x => x.ExecuteFetchXmlAsync(
-                It.IsAny<string>(),
-                It.IsAny<int?>(),
-                It.IsAny<string?>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new QueryResult
-            {
-                EntityLogicalName = "account",
-                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
-                Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
-                Count = 0
-            });
 
         var request = new SqlQueryRequest
         {
@@ -1223,11 +1130,11 @@ public class SqlQueryServiceTests
         };
 
         // Act — must not throw
-        var result = await _service.ExecuteAsync(request);
+        var result = await service.ExecuteAsync(request);
 
         // Assert: query executed normally
         Assert.NotNull(result);
-        _mockQueryExecutor.Verify(
+        executor.Verify(
             x => x.ExecuteFetchXmlAsync(
                 It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(),
                 It.IsAny<bool>(), It.IsAny<CancellationToken>()),
@@ -1238,21 +1145,11 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteAsync_UnrecognizedHint_QueryProceeds()
     {
+        var dataverse = SelectFixture.Create();
+        var executor = dataverse.CreateExecutorMock();
+        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard());
+
         // A completely unknown hint directive should be silently ignored.
-        _mockQueryExecutor
-            .Setup(x => x.ExecuteFetchXmlAsync(
-                It.IsAny<string>(),
-                It.IsAny<int?>(),
-                It.IsAny<string?>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new QueryResult
-            {
-                EntityLogicalName = "account",
-                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
-                Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
-                Count = 0
-            });
 
         var request = new SqlQueryRequest
         {
@@ -1260,7 +1157,7 @@ public class SqlQueryServiceTests
         };
 
         // Act — must not throw
-        var result = await _service.ExecuteAsync(request);
+        var result = await service.ExecuteAsync(request);
 
         // Assert
         Assert.NotNull(result);
@@ -1952,20 +1849,9 @@ public class SqlQueryServiceTests
     public async Task ExecuteAsync_CrossEnvSelect_ReadOnlyPolicy_Passes()
     {
         // Arrange: SELECT is always allowed cross-env, even with ReadOnly policy
-        var mockExecutor = new Mock<IQueryExecutor>();
-        var mockRemoteExecutor = new Mock<IQueryExecutor>();
-
-        mockRemoteExecutor
-            .Setup(x => x.ExecuteFetchXmlAsync(
-                It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(),
-                It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new QueryResult
-            {
-                EntityLogicalName = "account",
-                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
-                Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
-                Count = 0
-            });
+        var dataverse = SelectFixture.Create();
+        var mockExecutor = dataverse.CreateExecutorMock();
+        var mockRemoteExecutor = SelectFixture.Create().CreateExecutorMock();
 
         var service = new SqlQueryService(mockExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
@@ -2012,6 +1898,8 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteAsync_TdsRoute_ReturnsExecutionModeTds()
     {
+        // Mocks only (#1639): the TDS endpoint takes SQL, not FetchXML, and FakeDataverse does not model it. This test asserts
+        // the execution mode, never returned rows.
         // Arrange: service with a TDS executor that returns a result
         var mockExecutor = new Mock<IQueryExecutor>();
         var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
@@ -2050,21 +1938,11 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteAsync_DataverseRoute_ReturnsExecutionModeDataverse()
     {
+        var dataverse = SelectFixture.Create();
+        var executor = dataverse.CreateExecutorMock();
+        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard());
+
         // Arrange: standard Dataverse execution (no TDS)
-        _mockQueryExecutor
-            .Setup(x => x.ExecuteFetchXmlAsync(
-                It.IsAny<string>(),
-                It.IsAny<int?>(),
-                It.IsAny<string?>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new QueryResult
-            {
-                EntityLogicalName = "account",
-                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
-                Records = new List<IReadOnlyDictionary<string, QueryValue>>(),
-                Count = 0
-            });
 
         var request = new SqlQueryRequest
         {
@@ -2072,7 +1950,7 @@ public class SqlQueryServiceTests
         };
 
         // Act
-        var result = await _service.ExecuteAsync(request);
+        var result = await service.ExecuteAsync(request);
 
         // Assert: ExecutionMode must be Dataverse for standard queries
         Assert.NotNull(result.ExecutionMode);
@@ -2166,6 +2044,7 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteAsync_TdsConnectionFails_ThrowsTdsConnectionFailed()
     {
+        // The TDS executor stays a mock (#1639): it only throws; FakeDataverse does not model the TDS endpoint.
         // Arrange: TDS executor that throws on execute (simulating connection failure)
         var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
         mockTdsExecutor
@@ -2175,7 +2054,7 @@ public class SqlQueryServiceTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Connection refused on port 5558"));
 
-        var service = new SqlQueryService(_mockQueryExecutor.Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
+        var service = new SqlQueryService(SelectFixture.Create().CreateExecutorMock().Object, tdsQueryExecutor: mockTdsExecutor.Object, guard: new InactiveFakeShakedownGuard(), metadataProvider: TestMetadata.Provider);
 
         var request = new SqlQueryRequest
         {
@@ -2201,27 +2080,11 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteStreamingAsync_FinalChunk_HasExecutionModeDataverse()
     {
+        var dataverse = SelectFixture.Create();
+        var executor = dataverse.CreateExecutorMock();
+        var service = new SqlQueryService(executor.Object, guard: new InactiveFakeShakedownGuard());
+
         // Arrange: standard Dataverse execution; mock executor returns rows via FetchXML
-        _mockQueryExecutor
-            .Setup(x => x.ExecuteFetchXmlAsync(
-                It.IsAny<string>(),
-                It.IsAny<int?>(),
-                It.IsAny<string?>(),
-                It.IsAny<bool>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new QueryResult
-            {
-                EntityLogicalName = "account",
-                Columns = new List<QueryColumn> { new() { LogicalName = "name" } },
-                Records = new List<IReadOnlyDictionary<string, QueryValue>>
-                {
-                    new Dictionary<string, QueryValue>
-                    {
-                        ["name"] = QueryValue.Simple("Contoso")
-                    }
-                },
-                Count = 1
-            });
 
         var request = new SqlQueryRequest
         {
@@ -2230,7 +2093,7 @@ public class SqlQueryServiceTests
 
         // Act: collect all chunks
         var chunks = new List<SqlQueryStreamChunk>();
-        await foreach (var chunk in _service.ExecuteStreamingAsync(request))
+        await foreach (var chunk in service.ExecuteStreamingAsync(request))
         {
             chunks.Add(chunk);
         }
@@ -2247,6 +2110,8 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteStreamingAsync_TdsRoute_FinalChunkHasExecutionModeTds()
     {
+        // Mocks only (#1639): the TDS endpoint takes SQL, not FetchXML, and FakeDataverse does not model it. This test asserts
+        // the execution mode of the chunks, not their rows.
         // Arrange: TDS executor returns results
         var mockExecutor = new Mock<IQueryExecutor>();
         var mockTdsExecutor = new Mock<ITdsQueryExecutor>();
@@ -2298,6 +2163,8 @@ public class SqlQueryServiceTests
     [Trait("Category", "Unit")]
     public async Task ExecuteStreamingAsync_NonFinalChunks_DoNotHaveExecutionMode()
     {
+        // Mocks only (#1639): the TDS endpoint takes SQL, not FetchXML, and FakeDataverse does not model it. This test asserts
+        // chunk metadata, not rows.
         // Arrange: TDS executor returns enough rows to cause multiple chunks
         var mockExecutor = new Mock<IQueryExecutor>();
         var mockTdsExecutor = new Mock<ITdsQueryExecutor>();

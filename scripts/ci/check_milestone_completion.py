@@ -31,7 +31,7 @@ from typing import Optional
 
 PUBLIC_RELEASE_RUNBOOK = (
     "https://github.com/joshsmithxrm/power-platform-developer-suite/"
-    "blob/main/docs/RELEASE.md"
+    "blob/main/docs/runbooks/release.md"
 )
 
 

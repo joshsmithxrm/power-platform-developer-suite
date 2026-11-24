@@ -256,12 +256,12 @@ public static class ColumnCommandGroup
 
         var displayNameOption = new Option<string?>("--display-name")
         {
-            Description = "Updated display name (English, LCID 1033)"
+            Description = "Updated display name (in the organization's base language)"
         };
 
         var descriptionOption = new Option<string?>("--description")
         {
-            Description = "Updated description (English, LCID 1033)"
+            Description = "Updated description (in the organization's base language)"
         };
 
         var requiredLevelOption = new Option<string?>("--required-level")

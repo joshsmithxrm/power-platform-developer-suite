@@ -350,12 +350,15 @@ public class DataverseMetadataQueryService : IMetadataQueryService
             // #1535: Dataverse stores global choice names in canonical (usually lower-case) form. The exact
             // spelling is always tried first; only a not-found fault (the ObjectDoesNotExist code, whatever the
             // object, or the English wording) lists the published catalog; any other failure propagates untouched. A single case-insensitive match is retried under its
-            // stored name. Otherwise (no match, an ambiguous match, the exact spelling is itself stored, or the
-            // listing fails) the original fault is rethrown, so existing not-found handling and the CLI's
-            // not-found hint are unchanged.
+            // stored name. Otherwise (an ambiguous match, the exact spelling is itself stored, or the
+            // listing fails) the original fault is rethrown; when the listed catalog holds the name in no spelling,
+            // OptionSetNotFoundException is thrown (#1759) and the CLI reports it as not found.
             var canonical = await TryResolveOptionSetCaseVariantAsync(name, cancellationToken).ConfigureAwait(false);
             if (canonical is null)
                 throw;
+
+            if (canonical.Length == 0)
+                throw new OptionSetNotFoundException(name, ex); // #1759: absent in every spelling
 
             _logger?.LogInformation("Option set {Name} resolved to stored name {StoredName}", name, canonical);
             response = await RetrieveOptionSetByNameAsync(canonical, cancellationToken).ConfigureAwait(false);
@@ -386,7 +389,8 @@ public class DataverseMetadataQueryService : IMetadataQueryService
 
     /// <summary>
     /// Returns the stored spelling of <paramref name="name"/> when exactly one published global choice matches it
-    /// case-insensitively and none matches it exactly; otherwise null.
+    /// case-insensitively and none matches it exactly; an empty string when the listed catalog holds the name in no
+    /// spelling (#1759); otherwise null (the original failure stands).
     /// </summary>
     private async Task<string?> TryResolveOptionSetCaseVariantAsync(string name, CancellationToken cancellationToken)
     {
@@ -417,6 +421,9 @@ public class DataverseMetadataQueryService : IMetadataQueryService
         var matches = definitions
             .Where(d => string.Equals(d?.Name, name, StringComparison.OrdinalIgnoreCase))
             .ToArray();
+        // #1759: an empty string (never a stored name) says the listed catalog holds the name in no spelling.
+        if (matches.Length == 0)
+            return string.Empty;
         if (matches.Length != 1 || string.Equals(matches[0].Name, name, StringComparison.Ordinal))
             return null;
 
@@ -424,8 +431,12 @@ public class DataverseMetadataQueryService : IMetadataQueryService
     }
 
     /// <summary>
-    /// Dataverse's language-independent "object not found" fault code (ObjectDoesNotExist, 0x80040217). ASSUMPTION,
-    /// pending live confirmation: Microsoft does not document which code an unknown global choice name returns.
+    /// Dataverse's language-independent "object not found" fault code (ObjectDoesNotExist, 0x80040217). Microsoft does
+    /// not document which code an unknown global choice name returns; observed live 2026-11-17: a mis-cased name returns
+    /// it from RetrieveOptionSet, published and as-if-published
+    /// (MetadataGlobalChoiceLiveTests.MisCasedName_ResolvesAndRecordsTheFaultCode), and an unknown name returns it on both
+    /// reads, on an English-base and on a French-base organisation, with the message in English
+    /// (MetadataGlobalChoiceLiveTests.UnknownGlobalChoiceName_IsReportedAsNotFound, 2026-11-17).
     /// Keep in step with the authoring service's copy.
     /// </summary>
     private const int ObjectDoesNotExistErrorCode = unchecked((int)0x80040217);

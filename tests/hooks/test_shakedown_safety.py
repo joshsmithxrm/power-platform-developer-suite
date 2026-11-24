@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/conftest.py puts tests/ on sys.path
 
 
 HOOK_PATH = (
@@ -60,7 +61,7 @@ def _run_hook(command: str, env_extra: dict | None = None) -> subprocess.Complet
         input=json.dumps(payload),
         capture_output=True,
         text=True,
-        timeout=15,
+        timeout=CHILD_PROCESS_HANG_BOUND_SECONDS,
         env=env,
     )
 
@@ -192,8 +193,9 @@ class TestAllowlistFromSettings:
         assert r.returncode == 2
         assert "BLOCKED [shakedown-safety/env]" in r.stderr
 
-    def test_settings_allowlist_empty_list_blocked(self, fake_profile_dir, project_dir):
-        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+    def test_settings_allowlist_empty_list_leaves_gating_off(self, fake_profile_dir, project_dir):
+        """An empty list is the checked-in default: env gating is opt-in."""
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
         project_dir["write_settings"]({"shakedown_safe_envs": []})
         r = _run_hook(
             "ppds query sql 'SELECT 1'",
@@ -202,8 +204,7 @@ class TestAllowlistFromSettings:
                 "CLAUDE_PROJECT_DIR": project_dir["path"],
             },
         )
-        # Allowlist resolved to empty -- nothing matches -> block.
-        assert r.returncode == 2
+        assert r.returncode == 0, r.stderr
 
     def test_env_var_takes_precedence_over_settings(self, fake_profile_dir, project_dir):
         config_dir = fake_profile_dir(active_env_name="ppds-prod")
@@ -219,10 +220,9 @@ class TestAllowlistFromSettings:
         assert r.returncode == 0
 
     def test_block_message_references_settings_json(self, fake_profile_dir, project_dir):
-        """Help text in no-allowlist path must mention settings.json, not the old safe-envs.json."""
-        config_dir = fake_profile_dir(active_env_name="ppds-dev")
-        # No safety block at all.
-        project_dir["write_settings"](None)
+        """Help text on an env block must mention settings.json, not the old safe-envs.json."""
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        project_dir["write_settings"]({"shakedown_safe_envs": ["ppds-dev"]})
         r = _run_hook(
             "ppds query sql 'SELECT 1'",
             env_extra={
@@ -272,8 +272,10 @@ class TestSettingsMigrationFallback:
 
 
 class TestNoAllowlistConfigured:
-    def test_no_allowlist_blocks_with_config_help(self, fake_profile_dir, tmp_path):
-        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+    """Env gating is opt-in: with no allowlist a fresh clone is not gated."""
+
+    def test_no_allowlist_leaves_env_gating_off(self, fake_profile_dir, tmp_path):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
         # CLAUDE_PROJECT_DIR at an empty dir -> no settings.json, no legacy file.
         empty_project = tmp_path / "empty-project"
         empty_project.mkdir()
@@ -281,9 +283,145 @@ class TestNoAllowlistConfigured:
             "ppds query sql 'SELECT 1'",
             env_extra={"PPDS_CONFIG_DIR": config_dir, "CLAUDE_PROJECT_DIR": str(empty_project)},
         )
+        assert r.returncode == 0, r.stderr
+        assert r.stderr == ""
+
+    def test_no_allowlist_does_not_need_a_profile_store(self, tmp_path):
+        """The fail-safe on an unreadable profile store only applies once gating is on."""
+        empty_project = tmp_path / "empty-project"
+        empty_project.mkdir()
+        r = _run_hook(
+            "ppds --help",
+            env_extra={
+                "PPDS_CONFIG_DIR": str(tmp_path / "no-such-config"),
+                "CLAUDE_PROJECT_DIR": str(empty_project),
+            },
+        )
+        assert r.returncode == 0, r.stderr
+
+    def test_write_block_still_applies_without_an_allowlist(self, fake_profile_dir, tmp_path):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        empty_project = tmp_path / "empty-project"
+        empty_project.mkdir()
+        r = _run_hook(
+            "ppds solutions import --file s.zip",
+            env_extra={
+                "PPDS_SHAKEDOWN": "1",
+                "PPDS_CONFIG_DIR": config_dir,
+                "CLAUDE_PROJECT_DIR": str(empty_project),
+            },
+        )
         assert r.returncode == 2
-        assert "no safe-env allowlist configured" in r.stderr
-        assert "PPDS_SAFE_ENVS" in r.stderr
+        assert "BLOCKED [shakedown-safety/readonly]" in r.stderr
+
+
+class TestMisconfiguredAllowlistBlocks:
+    """An allowlist that is present but unusable must block, not turn the gate off.
+
+    The active env is the safe one in every case, so a block can only come
+    from the misconfiguration check, not from the env match.
+    """
+
+    MISCONFIGURED = "BLOCKED [shakedown-safety/env]: the safe-env allowlist is misconfigured."
+
+    @staticmethod
+    def _env(config_dir: str, project: dict, **extra) -> dict:
+        env = {"PPDS_CONFIG_DIR": config_dir, "CLAUDE_PROJECT_DIR": project["path"]}
+        env.update(extra)
+        return env
+
+    @staticmethod
+    def _write_raw(project: dict, rel: str, text: str) -> None:
+        (Path(project["path"]) / rel).write_text(text, encoding="utf-8")
+
+    def test_settings_list_not_a_list_blocks(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        project_dir["write_settings"]({"shakedown_safe_envs": "ppds-dev"})
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert self.MISCONFIGURED in r.stderr
+        assert "`safety.shakedown_safe_envs` in .claude/settings.json is a string" in r.stderr
+
+    def test_unparseable_settings_json_blocks(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        self._write_raw(project_dir, ".claude/settings.json", "{ not valid json")
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert self.MISCONFIGURED in r.stderr
+        assert ".claude/settings.json could not be parsed as JSON" in r.stderr
+
+    def test_empty_settings_list_falls_through_to_legacy_file(
+        self, fake_profile_dir, project_dir
+    ):
+        """Checked-in [] must not hide a legacy list: the legacy list gates."""
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        project_dir["write_settings"]({"shakedown_safe_envs": []})
+        project_dir["write_legacy"](["ppds-dev"])
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert "active env is not in the safe-env allowlist" in r.stderr
+        assert "Allowlist:  ppds-dev" in r.stderr
+
+    def test_empty_settings_list_legacy_file_allows_safe_env(
+        self, fake_profile_dir, project_dir
+    ):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        project_dir["write_settings"]({"shakedown_safe_envs": []})
+        project_dir["write_legacy"](["ppds-dev"])
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 0, r.stderr
+
+    def test_env_var_naming_no_env_blocks(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(
+            "ppds query sql 'SELECT 1'",
+            env_extra=self._env(config_dir, project_dir, PPDS_SAFE_ENVS=","),
+        )
+        assert r.returncode == 2, r.stderr
+        assert self.MISCONFIGURED in r.stderr
+        assert "PPDS_SAFE_ENVS is set to ','" in r.stderr
+
+    def test_unparseable_legacy_file_blocks(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        self._write_raw(project_dir, ".claude/state/safe-envs.json", "{ not valid json")
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert self.MISCONFIGURED in r.stderr
+        assert ".claude/state/safe-envs.json could not be parsed as JSON" in r.stderr
+
+    def test_legacy_safe_envs_not_a_list_blocks(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        self._write_raw(
+            project_dir, ".claude/state/safe-envs.json", json.dumps({"safe_envs": "ppds-dev"})
+        )
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert self.MISCONFIGURED in r.stderr
+        assert "`safe_envs` in .claude/state/safe-envs.json is a string" in r.stderr
+
+    def test_settings_list_naming_no_env_blocks(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        project_dir["write_settings"]({"shakedown_safe_envs": ["", "  "]})
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert self.MISCONFIGURED in r.stderr
+        assert "has entries but names no env" in r.stderr
+
+    def test_misconfigured_message_includes_config_help(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        project_dir["write_settings"]({"shakedown_safe_envs": "ppds-dev"})
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 2
+        assert "Configure the allowlist via either:" in r.stderr
+
+    def test_empty_everywhere_stays_off(self, fake_profile_dir, project_dir):
+        """[] in settings plus a legacy file with [] is still 'not configured'."""
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        project_dir["write_settings"]({"shakedown_safe_envs": []})
+        project_dir["write_legacy"]([])
+        r = _run_hook("ppds query sql 'SELECT 1'", env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 0, r.stderr
+        assert r.stderr == ""
 
 
 class TestEnvSwitchTarget:
@@ -342,18 +480,6 @@ class TestReadOnlyAlwaysAllowed:
         )
         assert r.returncode == 0, f"cmd={cmd}: stderr={r.stderr!r}"
 
-    def test_no_allowlist_still_blocks_readonly_cmds(self, fake_profile_dir, tmp_path):
-        """Intentional: no-allowlist surfaces the config message on ANY ppds call."""
-        config_dir = fake_profile_dir(active_env_name="ppds-prod")
-        empty = tmp_path / "empty"
-        empty.mkdir()
-        r = _run_hook(
-            "ppds env list",
-            env_extra={"PPDS_CONFIG_DIR": config_dir, "CLAUDE_PROJECT_DIR": str(empty)},
-        )
-        assert r.returncode == 2
-        assert "no safe-env allowlist configured" in r.stderr
-
 
 class TestFailSafe:
     def test_no_active_env_blocks(self, fake_profile_dir):
@@ -398,7 +524,7 @@ class TestFailSafe:
             input="not valid json{{",
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=CHILD_PROCESS_HANG_BOUND_SECONDS,
         )
         assert proc.returncode == 0
 
@@ -814,6 +940,120 @@ class TestCustomReadonlyEnvVar:
             },
         )
         assert r.returncode == 2
+
+
+# (id, command, argv the hook must find)
+_DEL = "data delete --entity account"
+DOTNET_HOST_FORMS = [
+    ("run-project-dir", f"dotnet run --project src/PPDS.Cli -- {_DEL}", f"ppds {_DEL}"),
+    ("run-csproj-windows-path", rf'dotnet run --project "C:\repo\src\PPDS.Cli\PPDS.Cli.csproj" -- {_DEL}', f"ppds {_DEL}"),
+    ("run-project-equals-options", f"dotnet run -c Release --no-build --project=src/PPDS.Cli/ -f net10.0 -- {_DEL}", f"ppds {_DEL}"),
+    ("run-p-path", f"dotnet run -p:Configuration=Release -p src/ppds.cli -- {_DEL}", f"ppds {_DEL}"),
+    ("run-no-separator", f"dotnet run --project src/PPDS.Cli {_DEL}", f"ppds {_DEL}"),
+    ("run-mcp", "dotnet run --project src/PPDS.Mcp/PPDS.Mcp.csproj -- --profile x", "ppds-mcp-server --profile x"),
+    ("dll", f"dotnet src/PPDS.Cli/bin/Debug/net10.0/ppds.dll {_DEL}", f"ppds {_DEL}"),
+    ("exec-dll", f"dotnet exec --depsfile d.json bin/ppds.dll {_DEL}", f"ppds {_DEL}"),
+    ("cd-then-run", f"cd src/PPDS.Cli && dotnet run -- {_DEL}", f"ppds {_DEL}"),
+    ("watch-run", f"dotnet watch run --project src/PPDS.Cli -- {_DEL}", f"ppds {_DEL}"),
+    ("tool-run", f"dotnet tool run --allow-roll-forward ppds {_DEL}", f"ppds {_DEL}"),
+    ("quoted-dotnet-exe", rf'"C:\Program Files\dotnet\dotnet.exe" run --project src/PPDS.Cli -- {_DEL}', f"ppds {_DEL}"),
+]
+DOTNET_NOT_PPDS = [
+    "dotnet build src/PPDS.Cli/PPDS.Cli.csproj",
+    "dotnet test tests/PPDS.Cli.Tests",
+    "dotnet pack src/PPDS.Cli -c Release",
+    "dotnet format PPDS.sln && dotnet restore src/PPDS.Mcp",
+    f"dotnet run --project src/PPDS.DocsGen -- {_DEL}",
+    f"dotnet run --project scripts/docs-gen/cli-reflect -- {_DEL}",
+    f"dotnet run --project tests/PPDS.Cli.Tests -- {_DEL}",
+    f"dotnet run --project tests/PPDS.Cli.DaemonTests/PPDS.Cli.DaemonTests.csproj -- {_DEL}",
+    f"cd src/PPDS.Cli && cd .. && dotnet run -- {_DEL}",
+]
+
+
+class TestDotnetHostForms:
+    """PPDS started through ``dotnet`` is gated like the direct program."""
+
+    ENV_BLOCK = "BLOCKED [shakedown-safety/env]: active env is not in the safe-env allowlist."
+
+    @staticmethod
+    def _env(config_dir, project, **extra):
+        env = {"PPDS_SAFE_ENVS": "ppds-dev", "PPDS_CONFIG_DIR": config_dir,
+               "CLAUDE_PROJECT_DIR": project["path"]}
+        env.update(extra)
+        return env
+
+    @pytest.mark.parametrize("cmd,argv", [(c, a) for _, c, a in DOTNET_HOST_FORMS],
+                             ids=[i for i, _, _ in DOTNET_HOST_FORMS])
+    def test_env_gate_blocks(self, fake_profile_dir, project_dir, cmd, argv):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        r = _run_hook(cmd, env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 2, r.stderr
+        assert self.ENV_BLOCK in r.stderr
+        assert f"Command:    {argv}\n" in r.stderr
+
+    @pytest.mark.parametrize("cmd", [c for i, c, _ in DOTNET_HOST_FORMS if i in (
+        "run-project-dir", "run-no-separator", "run-mcp", "exec-dll", "cd-then-run", "tool-run")])
+    def test_write_block_during_shakedown(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(cmd, env_extra=self._env(config_dir, project_dir, PPDS_SHAKEDOWN="1"))
+        assert r.returncode == 2, r.stderr
+        assert "BLOCKED [shakedown-safety/readonly]" in r.stderr
+        assert "Pattern: data delete" in r.stderr or "missing --read-only" in r.stderr
+
+    @pytest.mark.parametrize("cmd", [c for i, c, _ in DOTNET_HOST_FORMS if i in (
+        "run-project-dir", "dll", "cd-then-run", "watch-run")])
+    def test_safe_env_allowed(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(cmd, env_extra=self._env(config_dir, project_dir))
+        assert r.returncode == 0, r.stderr
+        assert r.stderr == ""
+
+    @pytest.mark.parametrize("cmd", [
+        "dotnet run --project src/PPDS.Cli -- plugins deploy --dry-run",
+        "dotnet run --project src/PPDS.Mcp -- --read-only",
+    ])
+    def test_exemptions_as_for_the_direct_program(self, fake_profile_dir, project_dir, cmd):
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(cmd, env_extra=self._env(config_dir, project_dir, PPDS_SHAKEDOWN="1"))
+        assert r.returncode == 0, r.stderr
+
+    def test_dual_reading_blocks(self, fake_profile_dir, project_dir):
+        """An option the hook does not know before `--` cannot hide the verb."""
+        config_dir = fake_profile_dir(active_env_name="ppds-dev")
+        r = _run_hook(f"dotnet run --project src/PPDS.Cli --tl off -- {_DEL}",
+                      env_extra=self._env(config_dir, project_dir, PPDS_SHAKEDOWN="1"))
+        assert r.returncode == 2, r.stderr
+        assert "Pattern: data delete" in r.stderr
+
+    def test_other_dotnet_commands_allowed(self, fake_profile_dir, project_dir):
+        config_dir = fake_profile_dir(active_env_name="ppds-prod")
+        for cmd in DOTNET_NOT_PPDS[:4] + DOTNET_NOT_PPDS[4:6]:
+            r = _run_hook(cmd, env_extra=self._env(config_dir, project_dir, PPDS_SHAKEDOWN="1"))
+            assert r.returncode == 0, f"cmd={cmd}: stderr={r.stderr!r}"
+            assert r.stderr == ""
+
+    @pytest.mark.parametrize("cmd,argv", [(c, a) for _, c, a in DOTNET_HOST_FORMS],
+                             ids=[i for i, _, _ in DOTNET_HOST_FORMS])
+    def test_parse(self, cmd, argv):
+        assert argv.split(" ") in hook.find_ppds_invocations(cmd)
+
+    @pytest.mark.parametrize("cmd", DOTNET_NOT_PPDS)
+    def test_parse_not_ppds(self, cmd):
+        assert hook.find_ppds_invocations(cmd) == []
+
+    def test_parse_dual_reading(self):
+        found = hook.find_ppds_invocations(f"dotnet run --project src/PPDS.Cli --tl off -- {_DEL}")
+        assert found == [["ppds"] + _DEL.split(), ["ppds", "off"] + _DEL.split()]
+
+    def test_existing_hits_survive_a_failure(self, monkeypatch):
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("bug")
+
+        monkeypatch.setattr(hook, "_dotnet_argvs", boom)
+        assert hook.find_ppds_invocations(f"ppds {_DEL} && dotnet run --project src/PPDS.Cli -- x") == [
+            ["ppds"] + _DEL.split()
+        ]
 
 
 # ===========================================================================

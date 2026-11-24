@@ -25,6 +25,8 @@ export abstract class WebviewPanelBase<
     protected disposables: vscode.Disposable[] = [];
     private _disposed = false;
     private readonly _abortController = new AbortController();
+    private readonly _requestGenerations = new Map<string, number>();
+    private _environmentEpoch = 0;
 
     // ── Shared environment state ──────────────────────────────────────
     protected environmentUrl: string | undefined;
@@ -40,6 +42,41 @@ export abstract class WebviewPanelBase<
     /** Fires when the panel is disposed. Pass to async operations so they can bail out early. */
     protected get abortSignal(): AbortSignal {
         return this._abortController.signal;
+    }
+
+    /**
+     * Start a load and return a check that says whether its response is still wanted.
+     *
+     * Call before the daemon request and test the returned function after every `await`
+     * before posting the result or touching panel state. It returns `false` once the same
+     * `scope` has started a newer load, the panel's environment has changed, or the panel
+     * is disposed, so a slow response for an old environment cannot overwrite the list
+     * for the new one. Use one `scope` per kind of load (for example `'list'`, or
+     * `'detail'` for the selected item's detail); loads in different scopes do not
+     * invalidate each other, but an environment change invalidates all of them.
+     */
+    protected beginRequest(scope = 'default'): () => boolean {
+        const generation = (this._requestGenerations.get(scope) ?? 0) + 1;
+        this._requestGenerations.set(scope, generation);
+        const epoch = this._environmentEpoch;
+        return () => !this._disposed
+            && epoch === this._environmentEpoch
+            && this._requestGenerations.get(scope) === generation;
+    }
+
+    /**
+     * Capture the current environment and return a check that is false once it has changed
+     * (or the panel is disposed). Use it before a write to tell afterwards whether the
+     * follow-up refresh still belongs to this panel's environment; never to gate the write's outcome.
+     */
+    protected captureEnvironment(): () => boolean {
+        const epoch = this._environmentEpoch;
+        return () => !this._disposed && epoch === this._environmentEpoch;
+    }
+
+    /** Invalidate every in-flight request. Called whenever the panel's environment changes. */
+    private invalidateRequests(): void {
+        this._environmentEpoch++;
     }
 
     /**
@@ -205,6 +242,8 @@ export abstract class WebviewPanelBase<
         const result = await showContextPicker(daemon, this.profileName, this.environmentUrl);
         if (!result) return;
 
+        // Invalidate in-flight loads now: the awaits below give them time to land on the new state.
+        this.invalidateRequests();
         this.profileName = result.profileName;
         this.environmentUrl = result.url;
         this.environmentDisplayName = result.displayName;

@@ -116,36 +116,70 @@ public sealed class GlobalChoiceNameResolutionTests
         f.AssertLeases();
     }
 
-    public static TheoryData<string, Type, string?> MissingOutcomes => new()
+    public static TheoryData<string> MissingOperations => new()
     {
-        // Pre-existing outcome for a name that does not exist, preserved exactly (type and code).
-        { "choice-update", typeof(FaultException<OrganizationServiceFault>), null },
-        { "choice-delete", typeof(PpdsException), MetadataErrorCodes.SdkOperationFailed },
-        { "choice-delete-preview", typeof(PpdsException), MetadataErrorCodes.SdkOperationFailed },
-        { "option-add", typeof(FaultException<OrganizationServiceFault>), null },
-        { "option-add-color", typeof(FaultException<OrganizationServiceFault>), null },
-        { "option-update", typeof(PpdsException), MetadataErrorCodes.EntityNotFound },
-        { "option-update-color", typeof(PpdsException), MetadataErrorCodes.EntityNotFound },
-        { "option-delete", typeof(PpdsException), MetadataErrorCodes.EntityNotFound },
-        { "option-reorder", typeof(FaultException<OrganizationServiceFault>), null }
+        "choice-update", "choice-delete-preview", "option-add", "option-add-color",
+        "option-update", "option-update-color", "option-delete", "option-reorder"
     };
 
     [Theory]
-    [MemberData(nameof(MissingOutcomes))]
+    [MemberData(nameof(MissingOperations))]
     [Trait("AC", "AC-134")]
-    public async Task MissingName_KeepsThePreviousFailure_AndDoesNotRetry(string operation, Type expectedType, string? expectedCode)
+    public async Task MissingName_IsReportedAsNotFound_AndDoesNotRetry(string operation)
     {
+        // #1759: a name that exists in no spelling is one not-found error (Operation.NotFound, exit 6) on every path,
+        // naming the choice, keeping the original failure as the inner exception.
         using var f = new GlobalChoiceServerFake();
         var ex = await Record.ExceptionAsync(() => f.Run(operation, "mayo_Missing"));
-        Assert.IsType(expectedType, ex);
-        if (expectedCode != null)
-        {
-            Assert.Equal(expectedCode, Assert.IsAssignableFrom<PpdsException>(ex).ErrorCode);
-            Assert.IsType<FaultException<OrganizationServiceFault>>(ex!.InnerException);
-        }
+        var notFound = Assert.IsType<PpdsNotFoundException>(ex);
+        Assert.Equal(ErrorCodes.Operation.NotFound, notFound.ErrorCode);
+        Assert.Equal(ExitCodes.NotFoundError, ExceptionMapper.ToExitCode(notFound));
+        Assert.Contains("mayo_Missing", notFound.UserMessage);
+        Assert.NotNull(notFound.InnerException); // the server fault (wrapped by the delete read on the preview path)
         Assert.Equal("mayo_Missing", Assert.Single(f.Faults));
-        Assert.Equal(operation == "choice-delete" ? 0 : 1, f.Requests.Count(r => r is RetrieveAllOptionSetsRequest));
+        Assert.Equal(1, f.Requests.Count(r => r is RetrieveAllOptionSetsRequest));
         Assert.DoesNotContain(f.Requests, r => r is DeleteOptionSetRequest);
+        f.AssertLeases();
+    }
+
+    [Fact]
+    [Trait("AC", "AC-134")]
+    public async Task ChoiceDelete_MissingName_IsReportedAsNotFound_WithoutListingOrDeleting()
+    {
+        // #1759: the service delete (RPC metadata/deleteGlobalChoice) takes an exact name and never resolves case variants
+        // (#1535), so "absent" means this exact name is absent. It reports not-found like the CLI, which previews first,
+        // and still lists no catalog and sends no delete.
+        using var f = new GlobalChoiceServerFake();
+        var ex = await Record.ExceptionAsync(() => f.Run("choice-delete", "mayo_Missing"));
+        var notFound = Assert.IsType<PpdsNotFoundException>(ex);
+        Assert.Equal(ErrorCodes.Operation.NotFound, notFound.ErrorCode);
+        Assert.Equal(ExitCodes.NotFoundError, ExceptionMapper.ToExitCode(notFound));
+        Assert.Contains("mayo_Missing", notFound.UserMessage);
+        var wrapped = Assert.IsType<PpdsException>(notFound.InnerException);
+        Assert.Equal(MetadataErrorCodes.SdkOperationFailed, wrapped.ErrorCode);
+        Assert.IsType<FaultException<OrganizationServiceFault>>(wrapped.InnerException);
+        Assert.Equal("mayo_Missing", Assert.Single(f.Faults));
+        Assert.Equal(0, f.Requests.Count(r => r is RetrieveAllOptionSetsRequest));
+        Assert.DoesNotContain(f.Requests, r => r is DeleteOptionSetRequest);
+        f.AssertLeases();
+    }
+
+    [Fact]
+    [Trait("AC", "AC-134")]
+    public async Task MissingChoice_AndMissingSolution_ReportsTheChoiceNotFound_WithTheOriginalFaultInside()
+    {
+        // Dataverse reports a missing solution with the same ObjectDoesNotExist code. When the choice is absent too,
+        // the choice is what is reported (the catalog proves it); the server's fault stays reachable as the inner exception.
+        using var f = new GlobalChoiceServerFake
+        {
+            FailFirstNamedRequestWith = () => GlobalChoiceServerFake.Fault("The given solution unique name (Sol) is not valid")
+        };
+        var ex = await Record.ExceptionAsync(() => f.Run("option-add", "mayo_Missing"));
+        var notFound = Assert.IsType<PpdsNotFoundException>(ex);
+        Assert.Contains("mayo_Missing", notFound.UserMessage);
+        Assert.Same(f.InjectedFault, notFound.InnerException);
+        Assert.Single(f.Requests, r => r is RetrieveAllOptionSetsRequest);
+        Assert.Single(f.Requests, GlobalChoiceServerFake.IsWrite);
         f.AssertLeases();
     }
 
@@ -395,7 +429,8 @@ public sealed class GlobalChoiceNameResolutionTests
         }
         else
         {
-            Assert.Equal(MetadataErrorCodes.SdkOperationFailed, Assert.IsType<PpdsException>(ex).ErrorCode);
+            // #1759: the exact name is absent (the server looks names up case-sensitively): not found, not SDK_OPERATION_FAILED.
+            Assert.Equal(ErrorCodes.Operation.NotFound, Assert.IsType<PpdsNotFoundException>(ex).ErrorCode);
             Assert.DoesNotContain(f.Requests, r => r is DeleteOptionSetRequest);
         }
     }
@@ -713,6 +748,8 @@ internal sealed class GlobalChoiceServerFake : IDisposable
 
     internal static Exception PrivilegeFault() => Fault("Principal user is missing prvWriteOptionSet privilege.", 0x80040220);
 
+    private readonly LabelWriteStore _labels = new();
+
     internal GlobalChoiceServerFake()
     {
         var pool = new Mock<IDataverseConnectionPool>(MockBehavior.Strict);
@@ -731,11 +768,14 @@ internal sealed class GlobalChoiceServerFake : IDisposable
                 {
                     Assert.False(released);
                     Requests.Add(request);
-                    return Task.FromResult(Execute(request));
+                    var response = Execute(request);
+                    _labels.Record(request);
+                    if (response is InsertOptionValueResponse inserted) _labels.InsertedValue(inserted.NewOptionValue);
+                    return Task.FromResult(_labels.Apply(request, response));
                 });
             return client.Object;
         });
-        Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard());
+        Service = new DataverseMetadataAuthoringService(pool.Object, new SchemaValidator(), new InactiveFakeShakedownGuard(), baseLanguage: new FixedOrganizationBaseLanguage(1033));
     }
 
     internal static OptionSetMetadata Choice(string name, Guid? id = null)

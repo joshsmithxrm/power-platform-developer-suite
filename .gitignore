@@ -51,12 +51,8 @@ Thumbs.db
 # Claude Code settings (local)
 .claude/settings.local.json
 *.local.json
-# .workflow/** (not .workflow/) so negations below can re-include subdirs.
-# A directory-level match (.workflow/) prevents git from examining subdirs
-# for negation patterns entirely.
-.workflow/*
-!.workflow/ci-fix-decisions/
-!.workflow/ci-fix-decisions/**
+# Local workflow scratch state
+.workflow/
 
 # Temporary artifacts (testing, exports, logs)
 tmp/
@@ -108,7 +104,7 @@ src/PPDS.Extension/tools/.webview-cdp-profile-*/
 # Git worktrees
 .worktrees/
 
-# Implementation plans (ephemeral, consumed by /implement)
+# Local implementation plans (ephemeral)
 .plans/
 .muse/
 .dotnet
@@ -116,6 +112,7 @@ src/PPDS.Extension/tools/.webview-cdp-profile-*/
 # Python
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Claude Code scheduled-tasks runtime lock (session state, not source)
 .claude/scheduled_tasks.lock

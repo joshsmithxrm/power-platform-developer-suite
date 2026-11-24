@@ -6,6 +6,7 @@ using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Resilience;
 using PPDS.Dataverse.Security;
 using Xunit;
+using PPDS.Tests.Shared;
 
 namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 
@@ -32,7 +33,7 @@ public sealed partial class MetadataLeaseLifetimeTests
         {
             if (delayed)
             {
-                await h.FaultReached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                await HangBackstop.WaitAsync(h.FaultReached.Task, "the operation to reach the delayed fault");
                 Assert.False(operation.IsCompleted);
                 h.ReleaseFault();
             }
@@ -207,7 +208,7 @@ public sealed partial class TableUpdateLeaseTests
         Assert.Same(h.Injected, coded.InnerException);
         AssertCli(coded, ExceptionMapper.Map(h.Injected!).Code, ExceptionMapper.ToExitCode(h.Injected!));
         // AC-147: the table's labels are read before the update.
-        Assert.Equal(boundary == "publish-checkout" ? new[] { "read", "update" } : ["read"], h.SuccessfulSdk);
+        Assert.Equal(boundary == "publish-checkout" ? new[] { "read", "update", "confirm" } : ["read"], h.SuccessfulSdk);
         Assert.Equal(boundary == "publish-checkout" ? "Changed" : "Existing", h.StoredLabel);
         Assert.Empty(h.Infos);
         h.AssertReturned();
