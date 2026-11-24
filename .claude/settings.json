@@ -82,35 +82,63 @@
     ],
     "deny": [
       "Bash(git push --force:*)",
+      "PowerShell(git push --force:*)",
       "Bash(git push -f:*)",
+      "PowerShell(git push -f:*)",
       "Bash(git reset --hard:*)",
+      "PowerShell(git reset --hard:*)",
       "Bash(git clean:*)",
+      "PowerShell(git clean:*)",
       "Bash(dotnet nuget push:*)",
+      "PowerShell(dotnet nuget push:*)",
       "Bash(npm publish:*)",
+      "PowerShell(npm publish:*)",
       "Bash(npm install -g:*)",
+      "PowerShell(npm install -g:*)",
       "Bash(Publish-Module:*)",
+      "PowerShell(Publish-Module:*)",
       "Bash(curl:*)",
+      "PowerShell(curl:*)",
       "Bash(wget:*)",
+      "PowerShell(wget:*)",
       "Bash(Invoke-WebRequest:*)",
+      "PowerShell(Invoke-WebRequest:*)",
       "Bash(chmod 777:*)",
+      "PowerShell(chmod 777:*)",
       "Bash(sudo:*)",
+      "PowerShell(sudo:*)",
       "Bash(su:*)",
+      "PowerShell(su:*)",
       "Bash(rm -rf /:*)",
-      "Bash(ppds data truncate:*)"
+      "PowerShell(rm -rf /:*)",
+      "Bash(ppds data truncate:*)",
+      "PowerShell(ppds data truncate:*)"
     ],
     "ask": [
       "Bash(git rebase -i:*)",
+      "PowerShell(git rebase -i:*)",
       "Bash(git rebase --interactive:*)",
+      "PowerShell(git rebase --interactive:*)",
       "Bash(git rebase --onto:*)",
+      "PowerShell(git rebase --onto:*)",
       "Bash(git rebase --root:*)",
+      "PowerShell(git rebase --root:*)",
       "Bash(git rebase --exec:*)",
+      "PowerShell(git rebase --exec:*)",
       "Bash(git tag -d:*)",
+      "PowerShell(git tag -d:*)",
       "Bash(git tag -fa:*)",
+      "PowerShell(git tag -fa:*)",
       "Bash(gh pr close:*)",
+      "PowerShell(gh pr close:*)",
       "Bash(gh issue close:*)",
+      "PowerShell(gh issue close:*)",
       "Bash(gh release create:*)",
+      "PowerShell(gh release create:*)",
       "Bash(gh repo create:*)",
-      "Bash(gh repo delete:*)"
+      "PowerShell(gh repo create:*)",
+      "Bash(gh repo delete:*)",
+      "PowerShell(gh repo delete:*)"
     ]
   },
   "hooks": {
@@ -126,11 +154,11 @@
         ]
       },
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/shakedown-safety.py\"",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/shakedown-safety-launcher.py\" || exit 2",
             "timeout": 10
           }
         ]
