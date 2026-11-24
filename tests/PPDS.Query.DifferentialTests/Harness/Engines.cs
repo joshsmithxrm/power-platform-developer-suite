@@ -42,6 +42,9 @@ public sealed class SqlServerEngine(SqlConnection connection) : IExpressionEngin
     /// <summary>How many statements were sent to the server.</summary>
     public int RoundTrips { get; private set; }
 
+    /// <summary>Seconds before a statement times out; a timeout is a harness failure.</summary>
+    public int CommandTimeoutSeconds { get; init; } = 30;
+
     /// <summary>The statement the harness runs for an expression over a row.</summary>
     public static string StatementFor(string expression, int rowId)
         => $"SELECT {expression} AS v FROM dbo.Operands WHERE row_id = {rowId}";
@@ -52,7 +55,7 @@ public sealed class SqlServerEngine(SqlConnection connection) : IExpressionEngin
         try
         {
             RoundTrips++;
-            using var command = new SqlCommand(StatementFor(expression, rowId), connection);
+            using var command = new SqlCommand(StatementFor(expression, rowId), connection) { CommandTimeout = CommandTimeoutSeconds };
             using var reader = command.ExecuteReader();
             if (!reader.Read())
                 throw new HarnessException($"Operand row {rowId} is missing.");
@@ -151,18 +154,45 @@ public sealed class PpdsEngine(IReadOnlyDictionary<int, IReadOnlyDictionary<stri
     {
         if (_compiled.TryGetValue(expression, out var cached))
             return cached;
+
+        // The engine's own refusals are an outcome: its parser rejects the text, or its compiler does not support a
+        // construct. Anything else the engine throws while compiling is reported as an engine error of class Other.
+        TSqlStatement parsed;
         try
         {
-            var statement = (SelectStatement)_parser.ParseStatement("SELECT " + expression);
-            var element = (SelectScalarExpression)((QuerySpecification)statement.QueryExpression).SelectElements[0];
-            cached = (_compiler.CompileScalar(element.Expression), null);
+            parsed = _parser.ParseStatement("SELECT " + expression);
+        }
+        catch (Exception ex) when (ex is QueryParseException or NotSupportedException)
+        {
+            return Remember(expression, (null, Outcome.Failed(ErrorClass.Refused, ex.GetType().Name)));
         }
         catch (Exception ex)
         {
-            cached = (null, Outcome.Failed(ErrorClass.Refused, ex.GetType().Name));
+            return Remember(expression, (null, Outcome.Failed(ErrorClass.Other, ex.GetType().Name)));
         }
-        _compiled[expression] = cached;
-        return cached;
+
+        // The harness wrote "SELECT expression"; a different parse is a harness fault, not the engine refusing.
+        if (parsed is not SelectStatement { QueryExpression: QuerySpecification { SelectElements: [SelectScalarExpression element] } })
+            throw new HarnessException($"The engine's parser did not read \"SELECT {expression}\" as one scalar expression.");
+
+        try
+        {
+            return Remember(expression, (_compiler.CompileScalar(element.Expression), null));
+        }
+        catch (Exception ex) when (ex is QueryParseException or NotSupportedException)
+        {
+            return Remember(expression, (null, Outcome.Failed(ErrorClass.Refused, ex.GetType().Name)));
+        }
+        catch (Exception ex)
+        {
+            return Remember(expression, (null, Outcome.Failed(ErrorClass.Other, ex.GetType().Name)));
+        }
+    }
+
+    private (CompiledScalarExpression?, Outcome?) Remember(string expression, (CompiledScalarExpression?, Outcome?) compiled)
+    {
+        _compiled[expression] = compiled;
+        return compiled;
     }
 
     private static ErrorClass Classify(Exception ex) => ex switch

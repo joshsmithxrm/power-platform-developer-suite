@@ -3,30 +3,37 @@ using System.Text;
 
 namespace PPDS.Query.DifferentialTests.Harness;
 
-/// <summary>One node of an expression evaluated by both engines over one row.</summary>
-public sealed record NodeResult(Expr Node, Outcome Reference, Outcome Actual, Difference Difference);
+/// <summary>One expression evaluated by both engines over one operand row.</summary>
+/// <param name="Expression">The expression.</param>
+/// <param name="RowId">The operand row.</param>
+/// <param name="Reference">SQL Server's outcome.</param>
+/// <param name="Actual">The engine's outcome.</param>
+/// <param name="Difference">What differs.</param>
+public sealed record Evaluation(Expr Expression, int RowId, Outcome Reference, Outcome Actual, Difference Difference)
+{
+    /// <summary>True when the engines agree on value, error and type.</summary>
+    public bool IsEqual => Difference == Difference.None;
+}
 
 /// <summary>
-/// A node that differs while every one of its operands agrees: the construct itself computes something other than
-/// SQL Server, from the same inputs. This is what a known difference is matched against.
+/// The smallest node of a differing expression that differs while all its operands agree, for reading a report. It is
+/// a reading aid only: nothing passes or fails on it.
 /// </summary>
-public sealed record NodeDifference(Expr Node, int RowId, Outcome Reference, Outcome Actual, Difference Difference, IReadOnlyList<NodeResult> Children)
+public sealed record NodeDifference(Expr Node, int RowId, Outcome Reference, Outcome Actual, Difference Difference, IReadOnlyList<Evaluation> Children)
 {
-    /// <summary>
-    /// The group a new difference is reported under: the construct, its operands' SQL types, and what differs.
-    /// </summary>
+    /// <summary>The construct, its operands' SQL types, and what differs.</summary>
     public string Signature
     {
         get
         {
             var operands = Node.IsLeaf
                 ? ""
-                : "(" + string.Join(", ", Children.Select(c => c.Node.IsLeaf ? c.Node.Construct : c.Reference.Type?.Name ?? (c.Node.Kind == Kind.Predicate ? "predicate" : "error"))) + ")";
+                : "(" + string.Join(", ", Children.Select(c => c.Expression.IsLeaf ? c.Expression.Construct : c.Reference.Type?.Name ?? (c.Expression.Kind == Kind.Predicate ? "predicate" : "error"))) + ")";
             return $"{Node.Construct}{operands}: {Describe(Reference, Actual, Difference)}";
         }
     }
 
-    /// <summary>The coarser group a new difference is reported under: the construct and what differs.</summary>
+    /// <summary>The construct and what differs, the heading a report groups under.</summary>
     public string Group => $"{Node.Construct}: {Describe(Reference, Actual, Difference)}";
 
     /// <summary>What differs, in words.</summary>
@@ -51,232 +58,121 @@ public sealed record NodeDifference(Expr Node, int RowId, Outcome Reference, Out
     }
 }
 
-/// <summary>The verdict on one expression over one row.</summary>
-public sealed record CaseVerdict(
-    Expr Expression,
-    int RowId,
-    NodeResult Root,
-    IReadOnlyList<(NodeDifference Difference, KnownDifference? Known)> Causes)
+/// <summary>Runs generated expressions through both engines.</summary>
+public sealed class DifferentialRunner(IExpressionEngine reference, IExpressionEngine actual)
 {
-    /// <summary>The engines agree on value, error and type.</summary>
-    public bool IsEqual => Root.Difference == Difference.None;
+    private readonly Dictionary<(string Sql, int Row), Evaluation> _cache = new();
 
-    /// <summary>The engines differ, and every cause is a known difference.</summary>
-    public bool IsExpected => !IsEqual && Causes.All(c => c.Known is not null);
+    /// <summary>How many times SQL Server was asked to evaluate an expression.</summary>
+    public int ReferenceCalls { get; private set; }
 
-    /// <summary>The engines differ, and at least one cause is not a known difference.</summary>
-    public bool IsNew => !IsEqual && Causes.Any(c => c.Known is null);
-}
+    /// <summary>How many times the engine under test was asked to evaluate an expression.</summary>
+    public int ActualCalls { get; private set; }
 
-/// <summary>
-/// Runs expressions through the reference and the engine under test and classifies every difference.
-/// </summary>
-/// <remarks>
-/// <para>
-/// When the whole expression differs, the runner evaluates every node of it on both engines and finds the smallest
-/// nodes that differ while all their operands agree. Each such node is a cause; it is either explained by a known
-/// difference (<see cref="KnownDifferences"/>) or it is new. An expression counts as an expected difference only when
-/// every cause is known, so a known difference cannot hide a new one beside it.
-/// </para>
-/// <para>
-/// A node above a cause has inputs that already differ, so a second defect in that node cannot be seen in that
-/// expression. The generator also produces that construct directly over columns and literals, where its inputs agree,
-/// and a defect there is a cause of its own.
-/// </para>
-/// </remarks>
-public sealed class DifferentialRunner(IExpressionEngine reference, IExpressionEngine actual, IReadOnlyList<KnownDifference> known)
-{
-    private readonly Dictionary<(string Sql, int Row), NodeResult> _cache = new();
-
-    /// <summary>Evaluates one node over one row on both engines (cached: subexpressions repeat).</summary>
-    public NodeResult Evaluate(Expr node, int rowId)
+    /// <summary>Evaluates one expression over one row on both engines.</summary>
+    public Evaluation Evaluate(Expr expression, int rowId)
     {
-        var key = (node.ScalarSql, rowId);
-        if (_cache.TryGetValue(key, out var cached))
-            return cached with { Node = node };
-        var r = reference.Evaluate(node.ScalarSql, rowId);
-        var a = actual.Evaluate(node.ScalarSql, rowId);
-        var result = new NodeResult(node, r, a, Outcome.Compare(r, a));
-        _cache[key] = result;
-        return result;
-    }
-
-    /// <summary>Checks one expression over one row.</summary>
-    public CaseVerdict Check(Expr expression, int rowId)
-    {
-        var root = Evaluate(expression, rowId);
-        if (root.Difference == Difference.None)
-            return new CaseVerdict(expression, rowId, root, []);
-
-        var causes = Causes(expression, rowId)
-            .Select(d => (d, known.FirstOrDefault(k => k.Explains(d))))
-            .ToList();
-        return new CaseVerdict(expression, rowId, root, causes);
-    }
-
-    private List<NodeDifference> Causes(Expr node, int rowId)
-    {
-        var self = Evaluate(node, rowId);
-        if (self.Difference == Difference.None)
-            return [];
-        var below = node.Children.SelectMany(c => Causes(c, rowId)).ToList();
-        if (below.Count > 0)
-            return below;
-        var children = node.Children.Select(c => Evaluate(c, rowId)).ToList();
-        return [new NodeDifference(node, rowId, self.Reference, self.Actual, self.Difference, children)];
+        ReferenceCalls++;
+        var r = reference.Evaluate(expression.ScalarSql, rowId);
+        ActualCalls++;
+        var a = actual.Evaluate(expression.ScalarSql, rowId);
+        return new Evaluation(expression, rowId, r, a, Outcome.Compare(r, a));
     }
 
     /// <summary>
-    /// Generates <paramref name="count"/> expressions from <paramref name="seed"/> and checks each over every row; an
-    /// expression that reads no column does not depend on the row and is checked over the first row only.
+    /// The expressions <paramref name="seed"/> generates, each over every row (over the first row only when it reads
+    /// no column, because then it does not depend on the row), with its index in the generated sequence.
     /// </summary>
-    public RunReport Run(int seed, int count, int maxDepth, IReadOnlyList<int> rowIds)
+    public IEnumerable<(int Index, Evaluation Evaluation)> Run(int seed, int count, int maxDepth, IReadOnlyList<int> rowIds)
     {
-        var report = new RunReport(seed, count, maxDepth);
         var generator = new ExpressionGenerator(seed, maxDepth);
         for (var i = 0; i < count; i++)
         {
             var expression = generator.Next();
             var readsColumn = expression.Nodes().Any(n => n.IsLeaf && n.Construct.StartsWith("column ", StringComparison.Ordinal));
             foreach (var rowId in readsColumn ? rowIds : rowIds.Take(1))
-                report.Add(i, Check(expression, rowId));
+                yield return (i, Evaluate(expression, rowId));
         }
-        return report;
+    }
+
+    /// <summary>
+    /// For a report: the smallest nodes of a differing expression that differ while all their operands agree. Such a
+    /// node may sit in an IIF or CASE branch SQL Server did not take, and a node above it is not looked at, so this
+    /// names a place to start reading, not the cause.
+    /// </summary>
+    public IReadOnlyList<NodeDifference> Attribute(Expr node, int rowId)
+    {
+        var self = Cached(node, rowId);
+        if (self.IsEqual)
+            return [];
+        var below = node.Children.SelectMany(c => Attribute(c, rowId)).ToList();
+        if (below.Count > 0)
+            return below;
+        return [new NodeDifference(node, rowId, self.Reference, self.Actual, self.Difference, node.Children.Select(c => Cached(c, rowId)).ToList())];
+    }
+
+    private Evaluation Cached(Expr node, int rowId)
+    {
+        if (!_cache.TryGetValue((node.ScalarSql, rowId), out var evaluation))
+            _cache[(node.ScalarSql, rowId)] = evaluation = Evaluate(node, rowId);
+        return evaluation with { Expression = node };
     }
 }
 
-/// <summary>The counts and the new differences of one generated run.</summary>
+/// <summary>
+/// A report for reading: counts, and the differences grouped by the smallest differing node. It passes or fails
+/// nothing.
+/// </summary>
 public sealed class RunReport(int seed, int expressions, int maxDepth)
 {
-    private readonly SortedDictionary<string, int> _expected = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, NewDifferenceGroup> _new = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (int Count, int Index, Evaluation Example, NodeDifference Node)> _groups = new(StringComparer.Ordinal);
 
-    /// <summary>The seed.</summary>
-    public int Seed { get; } = seed;
+    /// <summary>What the grouping means, printed with every report.</summary>
+    public const string Attribution =
+        "Grouping: each differing evaluation is listed under the smallest node that differs while its operands agree. "
+        + "That node may sit in a branch SQL Server did not take, and a node above it is not looked at, so a group names "
+        + "a place to start reading, not a cause. Nothing passes or fails on a group.";
 
-    /// <summary>The number of generated expressions.</summary>
-    public int Expressions { get; } = expressions;
-
-    /// <summary>The maximum depth.</summary>
-    public int MaxDepth { get; } = maxDepth;
-
-    /// <summary>Expressions times rows.</summary>
+    /// <summary>Evaluations run.</summary>
     public int Evaluations { get; private set; }
 
     /// <summary>Evaluations where the engines agree.</summary>
     public int Equal { get; private set; }
 
-    /// <summary>Evaluations that differ only by known differences.</summary>
-    public int Expected { get; private set; }
+    /// <summary>Evaluations that differ.</summary>
+    public int Different => Evaluations - Equal;
 
-    /// <summary>Evaluations with at least one new difference.</summary>
-    public int New { get; private set; }
-
-    /// <summary>Known differences by id, counted once per evaluation they explain.</summary>
-    public IReadOnlyDictionary<string, int> ExpectedById => _expected;
-
-    /// <summary>The new differences, grouped by <see cref="NodeDifference.Group"/>, most frequent first.</summary>
-    public IReadOnlyList<NewDifferenceGroup> NewGroups => _new.Values.OrderByDescending(g => g.Count).ThenBy(g => g.Group, StringComparer.Ordinal).ToList();
-
-    /// <summary>Adds one verdict.</summary>
-    public void Add(int index, CaseVerdict verdict)
+    /// <summary>Adds one evaluation, attributing it when it differs.</summary>
+    public void Add(int index, Evaluation evaluation, DifferentialRunner runner)
     {
         Evaluations++;
-        if (verdict.IsEqual)
+        if (evaluation.IsEqual)
         {
             Equal++;
             return;
         }
-        if (verdict.IsExpected)
-            Expected++;
-        else
-            New++;
-
-        foreach (var (difference, known) in verdict.Causes)
+        foreach (var node in runner.Attribute(evaluation.Expression, evaluation.RowId))
         {
-            if (known is not null)
-            {
-                _expected[known.Id] = _expected.GetValueOrDefault(known.Id) + 1;
-                continue;
-            }
-            if (!_new.TryGetValue(difference.Group, out var group))
-                _new[difference.Group] = group = new NewDifferenceGroup(difference.Group, Seed, index, verdict, difference);
-            group.Count++;
-            group.Signatures.Add(difference.Signature);
+            _groups[node.Group] = _groups.TryGetValue(node.Group, out var g)
+                ? g with { Count = g.Count + 1 }
+                : (1, index, evaluation, node);
         }
     }
-
-    /// <summary>
-    /// The new-difference groups of this run that are not in the recorded baseline (<see cref="NewDifferenceBaseline"/>),
-    /// so that one more group among the known new ones cannot be overlooked. The run fails while any new group exists,
-    /// in the baseline or not.
-    /// </summary>
-    public IReadOnlyList<string> NotInBaseline => NewGroups.Select(g => g.Group).Where(g => !NewDifferenceBaseline.Groups.Contains(g)).ToList();
-
-    /// <summary>The limit of what an expected difference proves, printed with every report.</summary>
-    public const string Limit =
-        "Limit: a node above a cause has operands that already differ, so its own result is not checked in that evaluation. "
-        + "A defect in that node shows only where the generator puts the same construct over operands that agree.";
-
-    /// <summary>The report as text: counts, then each new difference with a reproducible example.</summary>
-    public override string ToString()
-    {
-        var text = new StringBuilder();
-        text.AppendLine(CultureInfo.InvariantCulture, $"Seed {Seed}, depth up to {MaxDepth}: {Expressions} expressions, {Evaluations} evaluations (an expression that reads a column is evaluated over each of the {Operands.Rows.Count} rows).");
-        text.AppendLine(CultureInfo.InvariantCulture, $"  equal {Equal}, expected differences {Expected}, new differences {New}.");
-        var notInBaseline = NotInBaseline;
-        text.AppendLine(CultureInfo.InvariantCulture, $"  new-difference groups: {NewGroups.Count}, of which not in the recorded baseline: {notInBaseline.Count}.");
-        foreach (var group in notInBaseline)
-            text.AppendLine(CultureInfo.InvariantCulture, $"  NOT IN BASELINE: {group}");
-        text.AppendLine("  " + Limit);
-        foreach (var (id, n) in _expected)
-            text.AppendLine(CultureInfo.InvariantCulture, $"  expected {id}: {n}");
-        foreach (var group in NewGroups)
-            text.Append(group);
-        return text.ToString();
-    }
-}
-
-/// <summary>New differences of one construct and one kind, with the first example found.</summary>
-public sealed class NewDifferenceGroup(string group, int seed, int index, CaseVerdict example, NodeDifference cause)
-{
-    /// <summary>The construct and what differs.</summary>
-    public string Group { get; } = group;
-
-    /// <summary>The operand shapes it was seen with (<see cref="NodeDifference.Signature"/>).</summary>
-    public SortedSet<string> Signatures { get; } = new(StringComparer.Ordinal);
-
-    /// <summary>How many causes had it.</summary>
-    public int Count { get; set; }
-
-    /// <summary>The seed of the run that found it.</summary>
-    public int Seed { get; } = seed;
-
-    /// <summary>The 0-based index of the first expression of the run that showed it.</summary>
-    public int Index { get; } = index;
-
-    /// <summary>The first evaluation that showed it.</summary>
-    public CaseVerdict Example { get; } = example;
-
-    /// <summary>The cause in that evaluation.</summary>
-    public NodeDifference Cause { get; } = cause;
 
     /// <inheritdoc />
     public override string ToString()
     {
         var text = new StringBuilder();
-        text.AppendLine(CultureInfo.InvariantCulture, $"  NEW [{Count}x] {Group}");
-        text.AppendLine(CultureInfo.InvariantCulture, $"      seen as: {string.Join("; ", Signatures.Take(6).Select(s => s[..s.IndexOf(": ", StringComparison.Ordinal)]))}{(Signatures.Count > 6 ? $"; and {Signatures.Count - 6} more" : "")}");
-        text.AppendLine(CultureInfo.InvariantCulture, $"      cause:  {Cause.Node.ScalarSql}   (row {Cause.RowId})");
-        text.AppendLine(CultureInfo.InvariantCulture, $"        SQL Server: {Cause.Reference}");
-        text.AppendLine(CultureInfo.InvariantCulture, $"        PPDS:       {Cause.Actual}");
-        if (!ReferenceEquals(Example.Expression, Cause.Node))
+        text.AppendLine(CultureInfo.InvariantCulture, $"Seed {seed}, depth up to {maxDepth}: {expressions} expressions, {Evaluations} evaluations; equal {Equal}, different {Different}; {_groups.Count} groups.");
+        text.AppendLine("  " + Attribution);
+        foreach (var (group, (count, index, example, node)) in _groups.OrderByDescending(g => g.Value.Count).ThenBy(g => g.Key, StringComparer.Ordinal))
         {
-            text.AppendLine(CultureInfo.InvariantCulture, $"      in:     {Example.Expression.ScalarSql}");
-            text.AppendLine(CultureInfo.InvariantCulture, $"        SQL Server: {Example.Root.Reference}");
-            text.AppendLine(CultureInfo.InvariantCulture, $"        PPDS:       {Example.Root.Actual}");
+            text.AppendLine(CultureInfo.InvariantCulture, $"  [{count}x] {group}");
+            text.AppendLine(CultureInfo.InvariantCulture, $"      at:  {node.Node.ScalarSql}   (row {node.RowId})   SQL Server: {node.Reference}   PPDS: {node.Actual}");
+            if (!ReferenceEquals(example.Expression, node.Node))
+                text.AppendLine(CultureInfo.InvariantCulture, $"      in:  {example.Expression.ScalarSql}   SQL Server: {example.Reference}   PPDS: {example.Actual}");
+            text.AppendLine(CultureInfo.InvariantCulture, $"      reproduce: seed {seed}, expression {index}");
         }
-        text.AppendLine(CultureInfo.InvariantCulture, $"      reproduce: seed {Seed}, expression {Index}");
         return text.ToString();
     }
 }

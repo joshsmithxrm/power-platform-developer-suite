@@ -9,8 +9,8 @@ namespace PPDS.Query.DifferentialTests;
 
 /// <summary>
 /// Tests of the harness itself. They need no server, so they run in every CI build: the generator is deterministic and
-/// writes SQL the product parses, values render exactly, the comparison sees each kind of difference, and a known
-/// difference cannot absorb a new one.
+/// writes SQL the product parses, values render exactly or stop the run, the comparison sees each kind of difference,
+/// a harness fault is never an outcome, and the snapshot compares exactly.
 /// </summary>
 [Trait("Category", "SqlDifferential")]
 public sealed class HarnessSelfTests
@@ -151,11 +151,16 @@ public sealed class HarnessSelfTests
         Assert.Equal(Difference.None, Outcome.Compare(reference, Outcome.Of("NULL", null, PpdsEngine.FamilyOf(null))));
     }
 
-    // ── Runner and known differences ──────────────────────────────────
+    // ── Runner, attribution and harness faults ───────────────────────
 
     private sealed class FakeEngine(Dictionary<string, Outcome> outcomes) : IExpressionEngine
     {
         public Outcome Evaluate(string expression, int rowId) => outcomes[expression];
+    }
+
+    private sealed class FaultingEngine : IExpressionEngine
+    {
+        public Outcome Evaluate(string expression, int rowId) => throw new HarnessException("injected");
     }
 
     private static Expr Leaf(string sql, string construct = "literal int") => new(construct, Kind.Number, sql, []);
@@ -164,12 +169,11 @@ public sealed class HarnessSelfTests
     private static readonly Outcome Int7Actual = Outcome.Of("7", null, "int");
 
     [Fact]
-    public void The_cause_is_the_smallest_node_whose_operands_agree()
+    public void A_report_attributes_a_difference_to_the_smallest_node_whose_operands_agree()
     {
         // ROUND(7, 0) / 2: ROUND differs (float), its operand agrees; the division differs only because of it.
         var round = new Expr("ROUND(x, 0)", Kind.Number, "ROUND(7, 0)", [Leaf("7")]);
-        var two = Leaf("2");
-        var division = new Expr("/", Kind.Number, "(ROUND(7, 0) / 2)", [round, two]);
+        var division = new Expr("/", Kind.Number, "(ROUND(7, 0) / 2)", [round, Leaf("2")]);
         var reference = new FakeEngine(new()
         {
             ["7"] = Int7, ["2"] = Outcome.Of("2", new SqlTypeInfo("int"), "int"),
@@ -181,60 +185,142 @@ public sealed class HarnessSelfTests
             ["ROUND(7, 0)"] = Outcome.Of("7", null, "float"), ["(ROUND(7, 0) / 2)"] = Outcome.Of("3.5", null, "float"),
         });
 
-        var verdict = new DifferentialRunner(reference, actual, KnownDifferences.All).Check(division, 1);
-
-        var cause = Assert.Single(verdict.Causes);
-        Assert.Same(round, cause.Difference.Node);
-        Assert.Same(KnownDifferences.RoundWholeNumberFloat, cause.Known);
-        Assert.True(verdict.IsExpected);
+        var node = Assert.Single(new DifferentialRunner(reference, actual).Attribute(division, 1));
+        Assert.Same(round, node.Node);
+        Assert.Equal("ROUND(x, 0): type int vs float", node.Group);
     }
 
     [Fact]
-    public void A_new_difference_beside_a_known_one_is_reported_as_new()
+    public void The_runner_counts_both_engines_and_lets_a_harness_fault_through()
     {
-        // ROUND(7, 0) + (2147483647 + 1): the ROUND cause is known; the int overflow beside it is not, so the whole
-        // evaluation is new and the known entry does not hide it.
-        var round = new Expr("ROUND(x, 0)", Kind.Number, "ROUND(7, 0)", [Leaf("7")]);
-        var max = Leaf("2147483647");
-        var one = Leaf("1");
-        var overflow = new Expr("+", Kind.Number, "(2147483647 + 1)", [max, one]);
-        var sum = new Expr("+", Kind.Number, "(ROUND(7, 0) + (2147483647 + 1))", [round, overflow]);
-        var intType = new SqlTypeInfo("int");
-        var reference = new FakeEngine(new()
-        {
-            ["7"] = Int7, ["1"] = Outcome.Of("1", intType, "int"), ["2147483647"] = Outcome.Of("2147483647", intType, "int"),
-            ["ROUND(7, 0)"] = Int7, ["(2147483647 + 1)"] = Outcome.Failed(ErrorClass.Overflow, "8115"),
-            ["(ROUND(7, 0) + (2147483647 + 1))"] = Outcome.Failed(ErrorClass.Overflow, "8115"),
-        });
-        var actual = new FakeEngine(new()
-        {
-            ["7"] = Int7Actual, ["1"] = Outcome.Of("1", null, "int"), ["2147483647"] = Outcome.Of("2147483647", null, "int"),
-            ["ROUND(7, 0)"] = Outcome.Of("7", null, "float"), ["(2147483647 + 1)"] = Outcome.Of("2147483648", null, "bigint"),
-            ["(ROUND(7, 0) + (2147483647 + 1))"] = Outcome.Of("2147483655", null, "float"),
-        });
+        var runner = new DifferentialRunner(new FakeEngine(new() { ["7"] = Int7 }), new FakeEngine(new() { ["7"] = Int7Actual }));
+        runner.Evaluate(Leaf("7"), 1);
+        Assert.Equal((1, 1), (runner.ReferenceCalls, runner.ActualCalls));
 
-        var verdict = new DifferentialRunner(reference, actual, KnownDifferences.All).Check(sum, 1);
-
-        Assert.Equal(2, verdict.Causes.Count);
-        Assert.True(verdict.IsNew);
-        var unknown = Assert.Single(verdict.Causes, c => c.Known is null);
-        Assert.Equal("+(literal int, literal int): PPDS returns a value where SQL Server raises Overflow", unknown.Difference.Signature);
+        Assert.Throws<HarnessException>(() => new DifferentialRunner(new FaultingEngine(), new FakeEngine(new())).Run(1, 5, 2, [1]).ToList());
+        Assert.Throws<HarnessException>(() => new DifferentialRunner(new FakeEngine(new() { ["7"] = Int7 }), new FaultingEngine()).Evaluate(Leaf("7"), 1));
     }
 
     [Fact]
-    public void A_known_entry_does_not_accept_another_kind_of_difference_on_its_construct()
+    public void A_missing_operand_row_is_a_harness_fault_not_an_engine_error()
     {
-        // ROUND of a whole number that SQL Server overflows and the engine rejects with an exception: an error
-        // difference, not the float result the entry records.
-        var cause = new NodeDifference(
-            new Expr("ROUND(x, -1)", Kind.Number, "ROUND(c_int, -1)", [Leaf("c_int", "column int")]),
-            4,
-            Outcome.Failed(ErrorClass.Overflow, "8115"),
-            Outcome.Failed(ErrorClass.Other, "ArgumentOutOfRangeException"),
-            Difference.Error,
-            [new NodeResult(Leaf("c_int", "column int"), Outcome.Of("2147483647", new SqlTypeInfo("int"), "int"), Outcome.Of("2147483647", null, "int"), Difference.None)]);
+        var engine = new PpdsEngine(new Dictionary<int, IReadOnlyDictionary<string, QueryValue>>());
+        Assert.Throws<HarnessException>(() => engine.Evaluate("1 + 1", 99));
+    }
 
-        Assert.DoesNotContain(KnownDifferences.All, k => k.Explains(cause));
+    [Fact]
+    public void The_engine_refusing_is_an_outcome_and_a_crash_is_not_a_refusal()
+    {
+        var engine = new PpdsEngine(new Dictionary<int, IReadOnlyDictionary<string, QueryValue>> { [1] = new Dictionary<string, QueryValue>() });
+        Assert.Equal(ErrorClass.Refused, engine.Evaluate("LEFT(N'abc', 2)", 1).Error);
+        Assert.Equal(ErrorClass.Refused, engine.Evaluate("1 +", 1).Error);
+        Assert.Equal(ErrorClass.DivideByZero, engine.Evaluate("1 / 0", 1).Error);
+    }
+
+    [Theory]
+    [MemberData(nameof(UnrenderedValues))]
+    public void A_value_the_harness_cannot_render_exactly_stops_the_run(object value)
+        => Assert.Throws<HarnessException>(() => Outcome.Render(value));
+
+    /// <summary>Values of types the harness has no exact rendering for.</summary>
+    public static TheoryData<object> UnrenderedValues() => new()
+    {
+        new byte[] { 1, 2 },
+        new SqlBinary([1, 2]),
+        new DateTimeOffset(2026, 11, 24, 10, 0, 0, TimeSpan.FromHours(5)),
+        TimeSpan.FromHours(1),
+        new[] { 1, 2 },
+    };
+
+    // ── Snapshot ──────────────────────────────────────────────────────
+
+    private static readonly Expr Sum = new("+", Kind.Number, "(c_int + 1)", [Leaf("c_int", "column int"), Leaf("1")]);
+    private static readonly Expr Product = new("*", Kind.Number, "(c_int * 2)", [Leaf("c_int", "column int"), Leaf("2")]);
+
+    private static (int, int, Evaluation) Differing(Expr expression, int row, string ppds, int index = 0)
+    {
+        var reference = Outcome.Of("8", new SqlTypeInfo("int"), "int");
+        var actual = Outcome.Of(ppds, null, "bigint");
+        return (1, index, new Evaluation(expression, row, reference, actual, Outcome.Compare(reference, actual)));
+    }
+
+    [Fact]
+    public void The_snapshot_round_trips_byte_for_byte_and_sorts_its_rows()
+    {
+        var rows = DifferenceSnapshot.FromRun([Differing(Sum, 4, "8"), Differing(Product, 1, "14", 3), Differing(Sum, 1, "8")]);
+        Assert.Equal(["(c_int * 2)", "(c_int + 1)", "(c_int + 1)"], rows.Select(r => r.Expression));
+        Assert.Equal([1, 1, 4], rows.Select(r => r.RowId));
+        var text = DifferenceSnapshot.Format(rows);
+        Assert.Equal(text, DifferenceSnapshot.Format(DifferenceSnapshot.Parse(text)));
+        Assert.DoesNotContain('\r', text);
+    }
+
+    [Fact]
+    public void An_equal_evaluation_is_not_a_snapshot_row_and_a_repeat_is_one_row()
+    {
+        var equal = new Evaluation(Sum, 1, Int7, Int7Actual, Difference.None);
+        var rows = DifferenceSnapshot.FromRun([(1, 0, equal), Differing(Sum, 4, "8"), Differing(Sum, 4, "8", 9)]);
+        var row = Assert.Single(rows);
+        Assert.Equal("seed 1 expression 0", row.FirstSeen);
+    }
+
+    [Fact]
+    public void A_nondeterministic_outcome_stops_the_run()
+        => Assert.Throws<HarnessException>(() => DifferenceSnapshot.FromRun([Differing(Sum, 4, "8"), Differing(Sum, 4, "9")]));
+
+    [Fact]
+    public void The_comparison_names_new_changed_and_gone_rows_and_ignores_the_note()
+    {
+        var snapshot = DifferenceSnapshot.FromRun([Differing(Sum, 4, "8"), Differing(Product, 1, "14")])
+            .Select(r => r with { Note = "#1873" }).ToList();
+
+        var same = DifferenceSnapshot.FromRun([Differing(Sum, 4, "8"), Differing(Product, 1, "14")]);
+        var (added, changed, gone) = DifferenceSnapshot.Compare(snapshot, same);
+        Assert.Equal((0, 0, 0), (added.Count, changed.Count, gone.Count));
+
+        var found = DifferenceSnapshot.FromRun([Differing(Sum, 4, "9"), Differing(Sum, 1, "8")]);
+        (added, changed, gone) = DifferenceSnapshot.Compare(snapshot, found);
+        Assert.Equal("(c_int + 1)", Assert.Single(added).Expression);
+        Assert.Equal(1, Assert.Single(added).RowId);
+        Assert.Equal(("8 : ~bigint", "9 : ~bigint"), (Assert.Single(changed).Was.Ppds, changed[0].Now.Ppds));
+        Assert.Equal("(c_int * 2)", Assert.Single(gone).Expression);
+    }
+
+    [Fact]
+    public void A_regenerated_snapshot_keeps_the_note_of_an_unchanged_row_only()
+    {
+        var earlier = DifferenceSnapshot.FromRun([Differing(Sum, 4, "8"), Differing(Product, 1, "14")])
+            .Select(r => r with { Note = "#1873" }).ToList();
+        var regenerated = DifferenceSnapshot.FromRun([Differing(Sum, 4, "8"), Differing(Product, 1, "15")], earlier);
+        Assert.Equal(["", "#1873"], regenerated.Select(r => r.Note));
+    }
+
+    [Fact]
+    public void The_committed_snapshot_parses_and_matches_its_header()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Snapshots", DifferenceSnapshot.FileName);
+        Assert.True(File.Exists(path), $"The snapshot {DifferenceSnapshot.FileName} is not beside the test assembly.");
+        var text = File.ReadAllText(path);
+        var rows = DifferenceSnapshot.Parse(text);
+        Assert.NotEmpty(rows);
+        Assert.Equal(text, DifferenceSnapshot.Format(rows));
+    }
+
+    // ── Known differences ─────────────────────────────────────────────
+
+    [Fact]
+    public void The_known_list_is_pinned()
+    {
+        // Removing an entry or a case must be a visible change here, not a silent drop of negative-control rows.
+        Assert.Equal(
+            [
+                "conditional-whole-number-unconverted", "round-whole-number-float", "currency-arithmetic-full-precision",
+                "isnull-replacement-unconverted", "round-decimal-overflow-value", "varchar-literal-code-page",
+                "float-decimal-literal-comparison", "upper-lower-dotnet-casing", "patindex-end-anchor-line-feed",
+                "patindex-wildcard-line-feed", "patindex-character-class",
+            ],
+            KnownDifferences.All.Select(k => k.Id));
+        Assert.Equal([4, 2, 4, 3, 1, 2, 1, 2, 2, 2, 1], KnownDifferences.All.Select(k => k.Cases.Count));
     }
 
     [Fact]

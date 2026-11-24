@@ -50,24 +50,5 @@ public sealed class NegativeControlTests(ReferenceDatabase database, ITestOutput
             actual.ToString() == known.PpdsToday,
             $"{entry}: the engine's wrong result changed for {known.Expression}: recorded [{known.PpdsToday}], now [{actual}], "
             + $"SQL Server [{reference}]. It still differs; find out why before changing the pinned result.");
-
-        // The case's tree is the same expression: same outcomes; and its cause, found by the runner, is explained by
-        // this entry's own matcher and no other, so the matcher is proven on the case it was written for.
-        var runner = new DifferentialRunner(new SqlServerEngine(database.Connection), new PpdsEngine(database.RowValues), KnownDifferences.All);
-        var verdict = runner.Check(known.Tree, known.RowId);
-        Assert.True(
-            verdict.Root.Reference.ToString() == known.SqlServer && verdict.Root.Actual.ToString() == known.PpdsToday,
-            $"{entry}: the case's tree {known.Tree.ScalarSql} gives SQL Server [{verdict.Root.Reference}] and PPDS [{verdict.Root.Actual}], not the pinned outcomes.");
-        Assert.NotEmpty(verdict.Causes);
-        foreach (var (cause, explainedBy) in verdict.Causes)
-        {
-            output.WriteLine($"  cause: {cause.Node.ScalarSql}: {cause.Signature}");
-            Assert.True(
-                ReferenceEquals(explainedBy, entry),
-                $"{entry}: the cause {cause.Node.ScalarSql} ({cause.Signature}; SQL Server [{cause.Reference}], PPDS [{cause.Actual}]) "
-                + $"is explained by [{explainedBy?.ToString() ?? "nothing"}], not by its own entry.");
-            var others = KnownDifferences.All.Where(k => !ReferenceEquals(k, entry) && k.Explains(cause)).ToList();
-            Assert.True(others.Count == 0, $"{entry}: the cause {cause.Node.ScalarSql} is also explained by {string.Join(", ", others)}.");
-        }
     }
 }

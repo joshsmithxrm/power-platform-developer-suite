@@ -174,7 +174,7 @@ public sealed record Outcome(string? Value, ErrorClass Error, string? ErrorDetai
     /// Renders a value so that two values render alike exactly when they are the same value: NULL as <c>NULL</c>;
     /// decimals with their scale (<c>2.50</c> is not <c>2.5</c>); money with its four places; floats in round-trip form;
     /// text quoted, with every character outside printable ASCII (and the brace) written as <c>{U+XXXX}</c>, so
-    /// trailing spaces, line feeds and look-alike letters are visible.
+    /// trailing spaces, line feeds and look-alike letters are visible. A value of any other type is a harness failure.
     /// </summary>
     public static string Render(object? value) => value switch
     {
@@ -203,7 +203,9 @@ public sealed record Outcome(string? Value, ErrorClass Error, string? ErrorDetai
         byte b => b.ToString(CultureInfo.InvariantCulture),
         DateTime dt => dt.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff", CultureInfo.InvariantCulture),
         Guid g => g.ToString("D"),
-        _ => $"<{value.GetType().Name}> {Convert.ToString(value, CultureInfo.InvariantCulture)}",
+        // Anything else (binary, datetimeoffset, time, xml, a type not seen before) is not rendered exactly here, so
+        // comparing its text could call two different values equal: stop the run instead.
+        _ => throw new HarnessException($"The harness does not render values of type {value.GetType().Name} exactly; add an exact rendering before comparing them."),
     };
 
     private static string Quote(string text)

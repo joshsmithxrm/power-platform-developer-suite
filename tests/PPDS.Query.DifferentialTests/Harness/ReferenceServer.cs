@@ -234,11 +234,34 @@ public static class ReferenceSettings
         + "SET CONCAT_NULL_YIELDS_NULL ON; SET NUMERIC_ROUNDABORT OFF; SET QUOTED_IDENTIFIER ON; "
         + "SET LANGUAGE us_english; SET DATEFORMAT ymd;";
 
-    /// <summary>Applies the settings to an open connection.</summary>
+    private const string Check =
+        "SELECT CAST(SESSIONPROPERTY('ANSI_NULLS') AS int), CAST(SESSIONPROPERTY('ANSI_PADDING') AS int), CAST(SESSIONPROPERTY('ANSI_WARNINGS') AS int), "
+        + "CAST(SESSIONPROPERTY('ARITHABORT') AS int), CAST(SESSIONPROPERTY('CONCAT_NULL_YIELDS_NULL') AS int), CAST(SESSIONPROPERTY('NUMERIC_ROUNDABORT') AS int), "
+        + "CAST(SESSIONPROPERTY('QUOTED_IDENTIFIER') AS int), CAST(@@LANGUAGE AS nvarchar(128)), "
+        + "(SELECT CAST(date_format AS nvarchar(16)) FROM sys.dm_exec_sessions WHERE session_id = @@SPID), "
+        + "(SELECT CAST(compatibility_level AS int) FROM sys.databases WHERE name = DB_NAME())";
+
+    /// <summary>Applies the settings to an open connection and checks that they hold.</summary>
     public static void Apply(SqlConnection connection)
     {
-        using var command = new SqlCommand(Batch, connection);
-        command.ExecuteNonQuery();
+        using (var command = new SqlCommand(Batch, connection))
+            command.ExecuteNonQuery();
+        Verify(connection);
+    }
+
+    /// <summary>Throws a <see cref="HarnessException"/> unless the session runs under the reference settings and compatibility level.</summary>
+    public static void Verify(SqlConnection connection)
+    {
+        using var command = new SqlCommand(Check, connection);
+        using var reader = command.ExecuteReader();
+        reader.Read();
+        var actual = $"ANSI_NULLS {reader.GetInt32(0)}, ANSI_PADDING {reader.GetInt32(1)}, ANSI_WARNINGS {reader.GetInt32(2)}, ARITHABORT {reader.GetInt32(3)}, "
+                     + $"CONCAT_NULL_YIELDS_NULL {reader.GetInt32(4)}, NUMERIC_ROUNDABORT {reader.GetInt32(5)}, QUOTED_IDENTIFIER {reader.GetInt32(6)}, "
+                     + $"language {reader.GetString(7)}, dateformat {reader.GetString(8)}, compatibility {reader.GetInt32(9)}";
+        const string expected = "ANSI_NULLS 1, ANSI_PADDING 1, ANSI_WARNINGS 1, ARITHABORT 1, CONCAT_NULL_YIELDS_NULL 1, NUMERIC_ROUNDABORT 0, QUOTED_IDENTIFIER 1, "
+                                + "language us_english, dateformat ymd, compatibility 160";
+        if (actual != expected)
+            throw new HarnessException($"The session does not run under the reference settings: [{actual}], expected [{expected}].");
     }
 }
 

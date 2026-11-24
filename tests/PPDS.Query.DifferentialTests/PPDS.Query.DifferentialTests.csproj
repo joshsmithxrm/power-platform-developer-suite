@@ -22,6 +22,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The committed snapshot of the default run's differences, read by the gated test. -->
+    <None Include="Snapshots\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\PPDS.Query\PPDS.Query.csproj" />
     <ProjectReference Include="..\..\src\PPDS.Dataverse\PPDS.Dataverse.csproj" />
   </ItemGroup>
