@@ -25,7 +25,7 @@ dotnet test tests/PPDS.Query.DifferentialTests -f net10.0 --filter "Category=Sql
 **Developer machine or CI, container:** the reference has been SQL Server 2022 (16.0.4325.4, CU28) with collation `SQL_Latin1_General_CP1_CI_AS`. Use the same major version, for example:
 
 ```bash
-docker run -d --name ppds-refsql -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD="<a strong password>" -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest
+docker run -d --name sql-reference -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD="<a strong password>" -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest
 ```
 
 Then set `PPDS_REFSQL_HOST=localhost` and `PPDS_REFSQL_PASSWORD` to that password. In GitHub Actions the same image runs as a job service container on a Linux runner, with the password generated in the job, so no secret is needed. That wiring is not part of this project: where the comparison runs in CI, and whether it gates merges, is decided separately.
