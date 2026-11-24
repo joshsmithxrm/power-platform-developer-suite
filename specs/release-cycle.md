@@ -87,8 +87,8 @@ All three paths lead to:
 | Type | Version | Trigger | Scope | Example |
 |------|---------|---------|-------|---------|
 | Patch | `X.Y.Z` (Z > 0) | Bug fix or security fix merged with `release:patch` label | Direct product changes, downstream deliverables, and required same-commit MinVer dependency tags | `Dataverse-v1.0.1`, `Query-v1.0.1` |
-| Minor | `X.Y.0` (Y > 0) | GitHub Milestone reaches 100% closed | All packages — coordinated release via the release runbook | `Auth-v1.1.0`, `Cli-v1.1.0`, ... |
-| Major | `X.0.0` (X > 1) | Breaking change (API, strong-name rotation, etc.) | All packages — coordinated release via the release runbook | Future |
+| Minor | `X.Y.0` (Y > 0) | GitHub Milestone reaches 100% closed | Coordinated release via the release runbook; what a minor may contain is in [docs/VERSIONING.md](../docs/VERSIONING.md#3-what-may-change-in-a-patch-a-minor-and-a-major) | `Auth-v1.1.0`, `Cli-v1.1.0`, ... |
+| Major | `X.0.0` (X > 1) | A package's contract breaks; see [docs/VERSIONING.md](../docs/VERSIONING.md#1-packages-and-versions) | Per package, with the exceptions in that document; released via the release runbook | Future |
 
 ### Release Triggering Model
 
@@ -98,7 +98,7 @@ Releases are **event-driven with a cadence floor**:
 
 2. **Minor releases** ship when complete. GitHub Milestones define scope. When all issues/PRs in a milestone are closed, automated detection surfaces readiness. The maintainer follows the release runbook.
 
-3. **Cadence floor**: if no release (patch or minor) has shipped in 8 weeks and main has unreleased commits, a scheduled workflow opens a check-in issue. This prevents drift where accumulated changes never ship because nothing feels "ready enough."
+3. **Cadence floor**: if no release (patch or minor) has shipped in 8 weeks and main has unreleased commits, a scheduled workflow opens a check-in issue. This prevents drift where accumulated changes never ship because nothing feels "ready enough." [docs/VERSIONING.md](../docs/VERSIONING.md#7-support) rule 7.2 sets the policy for when a release is made; this workflow is described here as it runs today.
 
 ### Milestone Targeting Strategy
 
@@ -112,9 +112,9 @@ Releases are **event-driven with a cadence floor**:
 **Version progression:**
 
 - `1.0.0` → bug fix → `1.0.1` (patch, per-package)
-- `1.0.x` → feature batch → `1.1.0` (minor, all packages)
+- `1.0.x` → feature batch → `1.1.0` (minor)
 - The Plugins package follows its own lineage (see the newest `Plugins-v*` tag for the current version) but its minor/patch increments follow the same policy.
-- Extension follows odd/even minor convention (odd = pre-release channel, even = stable).
+- The odd/even minor convention applies to the extension only; see [docs/VERSIONING.md](../docs/VERSIONING.md#1-packages-and-versions) rule 1.5.
 
 ### Branching and Merge Policy
 
@@ -666,6 +666,7 @@ claim. This change does not certify every installed component against all adviso
 
 | Date | Change |
 |------|--------|
+| 2026-11-20 | The versioning rules (what a patch, minor and major may change, per-package majors, odd and even minors for the extension only) now live in `docs/VERSIONING.md`; the release table, version progression and cadence floor point there |
 | 2026-11-19 | Version progression no longer states the Plugins package version; it points at the newest `Plugins-v*` tag. No release policy change |
 | 2026-11-19 | Move the release procedure from the `/release` skill into `docs/runbooks/release.md`; the skill now only directs an agent to the runbook. AC-06, AC-07, AC-13 and AC-16 are verified against the runbook by `tests/test_release_runbook_content.py`. No release policy change |
 | 2026-11-10 | Add source-bound closeout ledger, explicit required/optional gates, scoped evidence reuse and review contracts; preserve active pre-merge evaluation on ready-for-review events (AC-49 through AC-53) |

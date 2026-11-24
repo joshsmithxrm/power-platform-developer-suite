@@ -212,15 +212,12 @@ refname sorting can rank `beta.2` above stable `1.0.0` and misorder
 multi-digit prerelease identifiers such as `beta.10`. Do not copy a version table
 into notes or this runbook; query the current state each time.
 
-Pick the next version per package:
+Pick the next version per package. What a patch, a minor and a major may
+contain, and what counts as a breaking change, is defined in
+[VERSIONING.md](../VERSIONING.md) (sections 2 to 4); do not restate it here. A
+major needs a CHANGELOG entry under Removed, or a `feat!:`/`fix!:` commit, that
+explains what broke.
 
-- **Patch** (`X.Y.Z+1`): bug fixes only; no new features and no behavior change
-  for working code.
-- **Minor** (`X.Y+1.0`): new features and backwards-compatible changes;
-  deprecations allowed.
-- **Major** (`X+1.0.0`): breaking changes such as removed features, renamed APIs
-  or changed defaults that affect existing callers. A major needs a CHANGELOG
-  entry under Removed, or a `feat!:`/`fix!:` commit, that explains what broke.
 - Heuristic: any `feat:` commit in the range means minor; any `feat!:` or
   `fix!:` means major; otherwise patch.
 - Prereleases increment the prerelease number (for example `-beta.N` or
@@ -873,4 +870,4 @@ After every publish verifies:
   `.github/workflows/docs-release.yml`
 - Previous prerelease: PR #785 (2026-04-17), commit `5bb4d5b90`
 - CHANGELOG format: [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)
-- Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html)
+- Versioning policy: [docs/VERSIONING.md](../VERSIONING.md), built on [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html)
