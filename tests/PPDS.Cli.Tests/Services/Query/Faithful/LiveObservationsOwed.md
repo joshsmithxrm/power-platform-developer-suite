@@ -235,3 +235,19 @@ tests (`--filter "FullyQualifiedName~Services.Query"`).
 - **Correct:** 9 rows `[ppds_key]`, keys 2, 4, 5, 18, 21, 28 and 3 more: the parents whose `ppds_num` occurs in C.
 - **Cause (my reading):** `PlanInSubquery` removes the IN predicate and re-plans the outer query (`src/PPDS.Query/Planning/ExecutionPlanBuilder.Join.cs:157`). It then joins the outer rows on `ppds_num` (`:177`, `:190`), but nothing adds `ppds_num` to the outer FetchXML. Each outer row therefore lacks the key, which reads as NULL, and the semi-join skips NULL keys (`src/PPDS.Query/Planning/Nodes/HashSemiJoinNode.cs:82-89`), so every row is dropped.
 - **Live check:** none needed; the record shows it.
+
+## 7. Shapes the DML safety branch (#1698) now sends, not yet observed
+
+The fix for #1616 pairs `<>`, `NOT IN` and `NOT LIKE` with `not-null` on the same column. On a two-option and on a choice
+column that condition was never observed, so the fake refuses it and these cases cannot be replayed
+(`AuditCaseReplayTests.LiveObservationOwed`, `ObservedShapesTests.OwedLiveObservation`):
+
+| Case | SQL | FetchXML to run | Compare |
+|---|---|---|---|
+| W117 (correct) | `SELECT ppds_key FROM P WHERE ppds_flag <> 1` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter type="and"><condition attribute="ppds_flag" operator="ne" value="1" /><condition attribute="ppds_flag" operator="not-null" /></filter></entity></fetch>` | the 23 keys the audit recorded for W117 (is a two-option ever NULL?) |
+| W120 (wrong) | `SELECT ppds_key FROM P WHERE ppds_colorcode <> 374110001` | `<fetch><entity name="ppds_sqlp"><attribute name="ppds_key" /><filter type="and"><condition attribute="ppds_colorcode" operator="ne" value="374110001" /><condition attribute="ppds_colorcode" operator="not-null" /></filter></entity></fetch>` | the 19 keys the audit expects for W120 (the NULL choices excluded) |
+
+Three observed shapes are no longer sent by any replayed case, because the branch refuses those statements before
+anything is sent: `date-time literal @a` (X05), `link with empty from and to` (J08) and `whole-number fault for a value of
+the form @a` (X02, X03, X12). They stay in `ObservedShapes.All` (the fake's rule tests use them) and are listed in
+`ObservedShapesTests.ObservedButNoLongerSent`.

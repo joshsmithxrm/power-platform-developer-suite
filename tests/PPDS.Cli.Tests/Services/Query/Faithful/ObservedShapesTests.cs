@@ -12,13 +12,31 @@ namespace PPDS.Cli.Tests.Services.Query.Faithful;
 [Trait("Category", "Unit")]
 public class ObservedShapesTests(ITestOutputHelper output)
 {
+    /// <summary>
+    /// Shapes a replayed case now sends that no live observation covers, so the fake refuses them and the case cannot be
+    /// replayed (AuditCaseReplayTests.LiveObservationOwed; LiveObservationsOwed.md section 3). They are not guessed.
+    /// </summary>
+    private static readonly string[] OwedLiveObservation = ["condition not-null Boolean", "condition not-null Choice"];
+
+    /// <summary>
+    /// Shapes observed live (the audit's own cases sent them) that no replayed case sends any more, because the engine now
+    /// refuses those statements before anything is sent (#1618, #1627 via #1698): X05 for the variable date literal, J08
+    /// for the empty link, X02/X03/X12 for the variable whole number. They stay accepted: the fake's rule tests use them.
+    /// </summary>
+    private static readonly string[] ObservedButNoLongerSent =
+        ["date-time literal @a", "link with empty from and to", "whole-number fault for a value of the form @a"];
+
     [Fact]
     public async Task TheAcceptedShapesAreExactlyTheShapesTheAuditReplaySends()
     {
         var sent = await DeriveAsync();
 
-        var acceptedButNotSent = ObservedShapes.All.Except(sent).Order(StringComparer.Ordinal).ToList();
-        var sentButNotAccepted = sent.Except(ObservedShapes.All).Order(StringComparer.Ordinal).ToList();
+        var acceptedButNotSent = ObservedShapes.All.Except(sent).Except(ObservedButNoLongerSent).Order(StringComparer.Ordinal).ToList();
+        Assert.All(ObservedButNoLongerSent, shape => Assert.True(ObservedShapes.All.Contains(shape) && !sent.Contains(shape),
+            $"'{shape}' is listed as no longer sent but a replayed case sends it again, or it is not accepted: remove it from ObservedButNoLongerSent."));
+        var sentButNotAccepted = sent.Except(ObservedShapes.All).Except(OwedLiveObservation).Order(StringComparer.Ordinal).ToList();
+        Assert.All(OwedLiveObservation, shape => Assert.True(sent.Contains(shape) && !ObservedShapes.All.Contains(shape),
+            $"'{shape}' is listed as owed a live observation but is no longer sent, or is now accepted: remove it from OwedLiveObservation."));
         foreach (var shape in sent.Order(StringComparer.Ordinal))
             output.WriteLine($"        \"{shape}\",");
         Assert.True(acceptedButNotSent.Count == 0 && sentButNotAccepted.Count == 0,

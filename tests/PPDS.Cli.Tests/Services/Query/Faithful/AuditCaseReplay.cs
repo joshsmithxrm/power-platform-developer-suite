@@ -283,6 +283,36 @@ internal static class AuditCaseReplay
         return Compare(c, c.Actual, run);
     }
 
+    /// <summary>
+    /// Replays <paramref name="c"/> and compares the offline outcome with what the audit says the statement should
+    /// return (<see cref="AuditCase.Expected"/>), by the same rules as the comparison with the live result.
+    /// </summary>
+    /// <remarks>
+    /// The expected value lists only the requested columns, so the columns the audit's verdicts ignore are dropped from the
+    /// offline result first: an auto-added <c>&lt;column&gt;name</c> next to its column, and the unrequested primary key
+    /// (<c>Pid</c>, <c>Cid</c>).
+    /// </remarks>
+    public static Task<ReplayResult> ReplayAgainstExpectedAsync(AuditCase c) => ReplayAgainstAsync(c, c.Expected);
+
+    /// <summary>
+    /// Replays <paramref name="c"/> and compares the offline outcome with <paramref name="recorded"/> (a row result or an
+    /// error in the record's form), dropping the columns the audit's verdicts ignore when <paramref name="recorded"/> does
+    /// not list them.
+    /// </summary>
+    public static async Task<ReplayResult> ReplayAgainstAsync(AuditCase c, string recorded)
+    {
+        var run = await ExecuteAsync(c);
+        if (run.Error is null && ParseRows(recorded) is { } expected)
+        {
+            var extra = run.Columns.Where(col => !expected.Columns.Contains(col)
+                && ((col.EndsWith("name", StringComparison.Ordinal) && run.Columns.Contains(col[..^4]))
+                    || Regex.IsMatch(col, @"\A[A-Z]id\z"))).ToHashSet(StringComparer.Ordinal);
+            if (extra.Count > 0)
+                run = await ExecuteAsync(c, extra);
+        }
+        return Compare(c, recorded, run);
+    }
+
     /// <summary>A recorded row result: its columns, its row count, the rows the report shows in full, and whether it shows all.</summary>
     public sealed record RecordedRows(IReadOnlyList<string> Columns, int Count, IReadOnlyList<string> Shown, bool Complete);
 
@@ -442,6 +472,11 @@ internal static class AuditCaseReplay
                 return new(ReplayClass.Differs, $"live raised {type}; offline returned rows", run.Text);
             var offlineType = run.Text[..run.Text.IndexOf(": ", StringComparison.Ordinal)];
             var offlineMessage = run.Text[(offlineType.Length + 2)..];
+            // The query service reports an error as a PpdsException with an ErrorCodes code (the repository's rule) and
+            // keeps the original as its inner exception: that is the same error, so the inner type is compared.
+            if (offlineType != type && run.Error is PPDS.Cli.Infrastructure.Errors.PpdsException { ErrorCode.Length: > 0, InnerException: { } inner }
+                && inner.GetType().Name == type)
+                offlineType = type;
             if (offlineType != type)
                 return new(ReplayClass.Differs, $"live raised {type}; offline raised {offlineType}", run.Text);
             if (MissingSegment(message, offlineMessage) is { } missing)

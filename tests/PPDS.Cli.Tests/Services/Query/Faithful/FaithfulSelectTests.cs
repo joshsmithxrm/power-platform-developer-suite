@@ -46,10 +46,10 @@ public class FaithfulSelectTests
     [InlineData("numberofemployees != 5", "k2,k4,k5,k6,k8,k10", KnownDefect.NegatedMatchesNull, "k10,k2,k3,k4,k5,k6,k8,k9")]
     [InlineData("description NOT IN ('d2', 'x')", "k3,k6,k7", KnownDefect.NegatedMatchesNull, "k1,k3,k4,k6,k7,k8,k9")]
     [InlineData("name NOT LIKE 'a%'", "k3,k4,k5,k7,k9", KnownDefect.NegatedMatchesNull, "k3,k4,k5,k6,k7,k9")]
-    [InlineData("description <> NULL", "", KnownDefect.NotEqualNull, "k1,k10,k2,k3,k4,k5,k6,k7,k8,k9")]
+    [InlineData("description <> NULL", "", KnownDefect.NotEqualNull, "fault: Comparing with NULL (= NULL, <> NULL, IN (NULL)) is not supported. Use IS NULL or IS NOT NULL.")]
     // NOT (...)
-    [InlineData("NOT (name = 'alpha')", "k3,k4,k5,k7,k8,k9,k10", KnownDefect.NotLost, "k1,k2")]
-    [InlineData("NOT (description IS NULL)", "k2,k3,k5,k6,k7,k10", KnownDefect.NotLost, "k1,k4,k8,k9")]
+    [InlineData("NOT (name = 'alpha')", "k3,k4,k5,k7,k8,k9,k10", KnownDefect.NotLost, "fault: NOT (...) is not supported in a WHERE clause sent to Dataverse. Write the condition without NOT (for example IS NOT NULL, NOT IN, NOT LIKE or NOT BETWEEN).")]
+    [InlineData("NOT (description IS NULL)", "k2,k3,k5,k6,k7,k10", KnownDefect.NotLost, "fault: NOT (...) is not supported in a WHERE clause sent to Dataverse. Write the condition without NOT (for example IS NOT NULL, NOT IN, NOT LIKE or NOT BETWEEN).")]
     // Predicates on an expression
     [InlineData("UPPER(name) LIKE 'A%'", "k1,k2,k8,k10", KnownDefect.ExpressionDropped, "k1,k10,k2,k3,k4,k5,k6,k7,k8,k9")]
     [InlineData("LEN(name) = 4", "k3,k4,k5,k9")]
@@ -71,7 +71,8 @@ public class FaithfulSelectTests
     public async Task Where_WithVariable_ComparesTheVariableValue()
     {
         var sql = $"DECLARE @n nvarchar(10) = 'Beta'; {From} WHERE name = @n";
-        Verdict(sql, "k3", await OutcomeAsync(sql, r => Keys(r, ordered: false)), KnownDefect.VariableAsText, "");
+        Verdict(sql, "k3", await OutcomeAsync(sql, r => Keys(r, ordered: false)), KnownDefect.VariableAsText,
+            "fault: The variable @n cannot be used in a WHERE condition sent to Dataverse. Use a literal value.");
     }
 
     // ───────────── TOP and ORDER BY ─────────────
