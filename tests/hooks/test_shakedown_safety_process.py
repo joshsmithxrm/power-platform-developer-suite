@@ -207,9 +207,19 @@ def _registered_timeout() -> float:
     settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
     for entry in settings["hooks"]["PreToolUse"]:
         for h in entry.get("hooks", []):
-            if "shakedown-safety.py" in h.get("command", ""):
+            if "shakedown-safety" in h.get("command", ""):
                 return float(h["timeout"])
-    raise AssertionError("shakedown-safety.py is not registered")
+    raise AssertionError("shakedown-safety-launcher.py is not registered")
+
+
+def _launcher_timeout() -> float:
+    """``_TIMEOUT_SECONDS`` of the launcher the hook is registered through."""
+    import ast
+    tree = ast.parse((HOOK_PATH.parent / "shakedown-safety-launcher.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "_TIMEOUT_SECONDS" for t in node.targets):
+            return float(ast.literal_eval(node.value))
+    raise AssertionError("_TIMEOUT_SECONDS not found in the launcher")
 
 
 def _load_for_budget():
@@ -223,9 +233,10 @@ def _load_for_budget():
 
 
 def test_the_budget_is_well_inside_the_registered_timeout():
-    """Interpreter start-up plus the hook's budget and the watchdog's grace
-    (the latest the hook answers) must leave at least half of the registered
-    timeout unused."""
+    """The hook's budget plus its start-up stays inside the launcher's limit
+    (the latest the hook is answered for), and the launcher's limit plus two
+    start-ups (its own and the hook's) leaves at least 4 of the registered
+    10 seconds unused."""
     mod = _load_for_budget()
     startups = []
     for _ in range(3):
@@ -235,8 +246,9 @@ def test_the_budget_is_well_inside_the_registered_timeout():
         startups.append(time.monotonic() - start)
     startup = max(startups)
     timeout = _registered_timeout()
-    latest = mod._BUDGET_SECONDS + mod._WATCHDOG_GRACE_SECONDS
-    assert latest + 2 * startup <= timeout / 2, (latest, startup, timeout)
+    latest = _launcher_timeout()
+    assert mod._BUDGET_SECONDS + startup < latest, (mod._BUDGET_SECONDS, startup, latest)
+    assert latest + 2 * startup <= timeout - 4, (latest, startup, timeout)
 
 
 @pytest.mark.parametrize("mode", ["gate", "shakedown"])
@@ -281,14 +293,15 @@ def test_the_budget_override_cannot_raise_the_budget(env_for):
         "program-words-110k", "program-words-131k", "program-words-200k", "dotnet-words"])
 @pytest.mark.parametrize("mode", ["shakedown", "gate"])
 def test_large_inputs_answer_inside_the_budget(env_for, tool, command, mode):
-    """Every input is answered (exit 2 here) within the budget plus start-up
-    and the watchdog's grace, far inside the registered timeout."""
+    """Every input is answered (exit 2 here) by the hook itself within the
+    budget plus start-up, before the launcher's limit, far inside the
+    registered timeout."""
     start = time.monotonic()
     r = _run(_payload(tool, command), env_for(mode))
     elapsed = time.monotonic() - start
     assert r.returncode == 2, r.stderr
     mod = _load_for_budget()
-    assert elapsed < mod._BUDGET_SECONDS + mod._WATCHDOG_GRACE_SECONDS + 1.0, elapsed
+    assert elapsed < _launcher_timeout() + 0.5, elapsed
     assert elapsed < _registered_timeout() / 2, elapsed
 
 

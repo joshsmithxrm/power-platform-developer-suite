@@ -105,9 +105,9 @@ python -m pytest tests/test_hook_paths.py tests/test_snk_protect.py tests/hooks/
 Hooks: `test_hook_paths.py`, `test_snk_protect.py`,
 `hooks/test_shakedown_safety.py`. Skill files: `test_skill_bash_portability.py`.
 
-**Check 2 - Hook scripts:** for `snk-protect.py` and `shakedown-safety.py`
-in `.claude/hooks/` (`_pathfix.py` is a helper):
-`echo '{}' | python .claude/hooks/{hook}.py`. Exit 0 or 2, never 1.
+**Check 2 - Hook scripts:** for `snk-protect.py`, `shakedown-safety.py`
+and `shakedown-safety-launcher.py` in `.claude/hooks/` (`_pathfix.py` is a
+helper): `echo '{}' | python .claude/hooks/{hook}.py`. Exit 0 or 2, never 1.
 Fixture-driven checks: `REFERENCE.md` "§workflow — Workflow Infrastructure".
 
 **Check 3 - settings.json:** parses; every hook `command` resolves to a

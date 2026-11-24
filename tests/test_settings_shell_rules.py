@@ -123,14 +123,14 @@ def test_the_environment_hook_is_registered_for_both_tools():
     hooks = _settings()["hooks"]["PreToolUse"]
     tools = set()
     for entry in hooks:
-        if any("shakedown-safety.py" in h.get("command", "") for h in entry.get("hooks", [])):
+        if any("shakedown-safety" in h.get("command", "") for h in entry.get("hooks", [])):
             tools |= _matcher_tools(entry.get("matcher", ""))
     assert tools == set(SHELL_TOOLS)
 
 
 def test_the_environment_hook_is_a_command_hook():
     found = [h for entry in _settings()["hooks"]["PreToolUse"] for h in entry.get("hooks", [])
-             if "shakedown-safety.py" in h.get("command", "")]
+             if "shakedown-safety" in h.get("command", "")]
     assert found and all(h.get("type") == "command" for h in found), found
 
 

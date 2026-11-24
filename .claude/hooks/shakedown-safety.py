@@ -82,8 +82,9 @@ else is refused (exit 2):
   reader's caps); past a cap the command is an unreadable invocation
   (refused as above). A command longer than the reader's length cap is not
   scanned whole: its length is checked first and ``_decide_oversized``
-  answers with a few byte checks. A watchdog refuses the command if the
-  hook has not answered ``_WATCHDOG_GRACE_SECONDS`` after its budget.
+  answers with a few byte checks. The hook starts no thread: the
+  launcher it is registered through (``shakedown-safety-launcher.py``)
+  kills it and refuses the command if it has not answered in time.
 
 What passes the environment gate with an unlisted (or unknown) active env:
 ``env`` alone, ``env list``, ``env who``, the read forms of ``env config`` /
@@ -138,8 +139,8 @@ option or several words before the verb make the verb unknown.
 **Time and failures.** Claude Code runs a command whose PreToolUse hook
 exceeds its registered timeout or exits 1. The hook therefore answers
 within ``_BUDGET_SECONDS`` (well inside the registered 10 s); past it the
-command is refused, and a watchdog refuses it if no answer is given
-``_WATCHDOG_GRACE_SECONDS`` later. Any internal error refuses the command,
+command is refused, and the launcher refuses it if no answer is given
+by its own limit. Any internal error refuses the command,
 whatever it is (exit 2). The only commands passed without being read are
 those of a session with no allowlist and no shakedown: the hook exits 0
 before it reads its input. Input is read as UTF-8 bytes.
@@ -205,7 +206,6 @@ import os
 import re
 import shlex
 import sys
-import threading
 import time
 from datetime import datetime, timezone
 from typing import Iterable, Optional
@@ -2624,34 +2624,12 @@ def _budget() -> float:
     return max(0.0, min(value, _BUDGET_SECONDS))
 
 
-# A watchdog refuses the command when the hook has not answered this long
-# after the budget: the last line of defence against a slow input or a slow
-# machine (Claude Code runs a command whose hook times out).
-_WATCHDOG_GRACE_SECONDS = 1.0
-
-
 def _refuse(message: str) -> None:
     """Print ``message`` and exit 2. A failure to print still exits 2."""
     try:
         print(message, file=sys.stderr)
     finally:
         sys.exit(2)
-
-
-def _start_watchdog(seconds: float):
-    """A daemon timer that prints a refusal and ends the process with exit
-    code 2 after ``seconds``; the caller cancels it when it answers."""
-    def fire():
-        try:
-            sys.stderr.write("BLOCKED [shakedown-safety]: the hook could not check this command "
-                             "in time, so it is refused.\n")
-            sys.stderr.flush()
-        finally:
-            os._exit(2)
-    timer = threading.Timer(seconds, fire)
-    timer.daemon = True
-    timer.start()
-    return timer
 
 
 def _payload_command(raw: str):
@@ -2725,8 +2703,10 @@ def main() -> None:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, ValueError):
         pass
+    # No thread is started here or anywhere in the hook, so nothing but the
+    # main thread is alive at interpreter shutdown. The time limit beyond
+    # the budget is the launcher's (shakedown-safety-launcher.py).
     budget = _budget()
-    watchdog = _start_watchdog(budget + _WATCHDOG_GRACE_SECONDS)
     try:
         _main(time.monotonic() + budget)
     except SystemExit:
@@ -2735,8 +2715,6 @@ def main() -> None:
         # Any internal error refuses, whatever the command (exit 2).
         _refuse("BLOCKED [shakedown-safety]: the hook could not check this command "
                 "(internal error), so it is refused.")
-    finally:
-        watchdog.cancel()
 
 
 def _main(deadline: float) -> None:

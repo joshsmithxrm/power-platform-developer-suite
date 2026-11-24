@@ -213,3 +213,25 @@ def test_ci_cannot_skip_the_differential_oracles():
     run = next(st for st in steps if st.get("run") == "python -m pytest tests/ -q")
     assert str((run.get("env") or {}).get("PPDS_DIFF_REQUIRE")) == "1", run
     assert steps.index(dotnet[0]) < steps.index(run)
+
+
+@pytest.mark.parametrize("report", ["args_report", "shell_report", "timing_report", "ordinary_report", "raw_report"])
+def test_no_abnormal_hook_exit_lets_a_command_run(request, report):
+    """Every hook run goes through the registered launcher. An abnormal end of the hook (a crash, a
+    signal, a hang, exit 1) is counted in ``hook_exits``; none may end in an exit other than 2, which
+    is the only exit that stops Claude Code from running the command."""
+    tally = request.getfixturevalue(report)["hook_exits"]
+    assert tally["runs"] > 0, tally
+    assert tally["let_through"] == 0, tally
+
+
+def test_a_timed_out_text_the_hook_passes_is_not_judged_correct():
+    """A text that timed out under a shell recorded only what ran before it was killed; a pass of it
+    is reported as unjudged (an integrity failure), a refusal of it is not."""
+    from _harness import HookResult
+    passed, refused = HookResult(0, 0.1, ""), HookResult(2, 0.1, "")
+    by_case = {(0, "gate-unlisted"): {"Bash": refused, "PowerShell": passed},
+               (1, "gate-unlisted"): {"Bash": refused, "PowerShell": refused},
+               (2, "gate-unlisted"): {"Bash": passed, "PowerShell": passed}}
+    assert differential.unjudged_passes(by_case, {0, 1}) == [0]
+    assert differential.unjudged_passes(by_case, set()) == []

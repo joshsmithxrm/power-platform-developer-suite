@@ -29,7 +29,7 @@ by program name (a path ending in `ppds` counts) or through `dotnet`
   an escape that can spell one (and, during a shakedown or with an unlisted
   active env, run-time text such as `$X`); otherwise it passes. Past any
   other cap (nesting 8 levels deep, 4,000,000 characters of reading work,
-  3.5 seconds with a watchdog at 4.5, 500 words naming a guarded program
+  3.5 seconds, the launcher's kill at 5, 500 words naming a guarded program
   per reading, 400 arguments per invocation, and in the original matcher
   500 `ppds` or `dotnet` words with 400 tokens / 4,096 characters after
   each) a command is an unreadable invocation, mention or not: refused
@@ -530,8 +530,9 @@ is descriptive, not a raw exception.
 
 How to test changes to `.claude/` infrastructure: hooks, skills, settings.
 The hooks are `.claude/hooks/snk-protect.py` (Edit|Write) and
-`.claude/hooks/shakedown-safety.py` (Bash and PowerShell); `_pathfix.py`
-and `_shellparse.py` are shared helpers, not hooks.
+`.claude/hooks/shakedown-safety.py` (Bash and PowerShell, registered through
+`shakedown-safety-launcher.py`, which refuses on any exit of the hook other
+than 0 or 2); `_pathfix.py` and `_shellparse.py` are shared helpers, not hooks.
 
 ### Hook testing
 

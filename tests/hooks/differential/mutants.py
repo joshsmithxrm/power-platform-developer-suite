@@ -7,6 +7,7 @@ not silently skipped.
 """
 H = "shakedown-safety.py"
 P = "_shellparse.py"
+L = "shakedown-safety-launcher.py"
 
 M = {}
 
@@ -118,7 +119,7 @@ M["m29_mcp_targets_ignored"] = [(H,
     '        return active_check()')]
 M["m30_watchdog_and_deadline_off"] = [
     (H, '    if deadline is not None and time.monotonic() > deadline:\n        raise _Deadline()', '    return'),
-    (H, '    watchdog = _start_watchdog(budget + _WATCHDOG_GRACE_SECONDS)', '    watchdog = _start_watchdog(600)'),
+    (L, '_TIMEOUT_SECONDS = 5.0', '_TIMEOUT_SECONDS = 600.0'),
     (P, '        if (self.work & 0x3FF) == 0 and time.monotonic() > self.deadline:', '        if False:'),
     (H, '_DOTNET_MAX_OCCURRENCES = 500', '_DOTNET_MAX_OCCURRENCES = 10**9'),
     (H, '_MAX_PROGRAM_WORDS = 500', '_MAX_PROGRAM_WORDS = 10**9'),

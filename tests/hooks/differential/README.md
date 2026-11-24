@@ -45,7 +45,9 @@ A fifth, the **ordinary-mention check** (`gen_ordinary.py`), is the other direct
 
 The timing oracle's property: the hook refuses each text inside its documented budget (`_BUDGET_SECONDS`, read from the hook, plus 0.5 s for interpreter start-up) and never after the timeout registered for it in `.claude/settings.json` (read from the file).
 
-Every hook run is a subprocess with the payload on stdin, in eight modes (`_harness.MODE_SPEC`). Each has a throwaway profile store under its own `HOME` and its own project folder, and, except where noted, a made-up allowlist (`zz-safe-a`, `zz-safe-b`) in `PPDS_SAFE_ENVS`:
+Every hook run is a subprocess with the payload on stdin, started the way it is registered: through `shakedown-safety-launcher.py` next to the hook (the hook itself when no launcher sits next to it). Every run is tallied in the report's `hook_exits`: `abnormal` counts the runs where the launcher reports that the hook crashed, was ended by a signal, exited with a code other than 0 or 2, hung or could not start (and runs where the entry itself ended so); `let_through` counts those of them whose final exit was not 2, so the command would have run. `let_through` above 0 is an integrity failure (`test_no_abnormal_hook_exit_lets_a_command_run`); `abnormal` is reported, with up to five stderr samples (the hook runs with `PYTHONFAULTHANDLER=1`).
+
+The runs are in eight modes (`_harness.MODE_SPEC`). Each has a throwaway profile store under its own `HOME` and its own project folder, and, except where noted, a made-up allowlist (`zz-safe-a`, `zz-safe-b`) in `PPDS_SAFE_ENVS`:
 
 | Mode | Active environment | Allowlist | Shakedown | Judged as |
 |---|---|---|---|---|
@@ -153,6 +155,8 @@ Each oracle run carries an `integrity` record, and a run whose record is not `ok
 | Parse-oracle errors | 0 |
 | Oracle-1 failures whose shell rendering did not hold, or a skipped rendering check | 0 |
 | A write path with no vector judged a write in the shakedown | 0 |
+| An abnormal end of the hook whose final exit is not 2 (`hook_exits.let_through`) | 0 |
+| A text that timed out under a shell (after the retry) and that the hook passed in any mode (`timed_out_texts_passed`): its recorded starts are only what ran before it was killed, so the pass cannot be judged | 0 |
 
 `requirement-approx` failures fail the `differential.py` exit code as well as pytest.
 
@@ -218,7 +222,7 @@ The results at the head this README was last updated against are in the pull req
 | `m27_runtime_program_not_guessed` | 0 | 149 |  | yes |
 | `m28_switch_to_unlisted_passes` | 0 | 0 |  | no: masked: the per-command `--environment` check still refuses every real `env select` target; only a positional target (which the real CLI rejects) tells them apart; caught by the unit test `test_shakedown_ordinary_work.py::test_unplaced_invocation_naming_a_target_is_refused_with_a_listed_env[timeout-quoted-c]` |
 | `m29_mcp_targets_ignored` | 236 | 116 |  | yes |
-| `m30_watchdog_and_deadline_off` | 0 | 0 | 4 | yes |
+| `m30_watchdog_and_deadline_off` (since the launcher: its limit raised to 600 s) | 0 | 0 | 4 | yes |
 | `m31_only_first_invocation_checked` | 14 | 428 |  | yes |
 | `m33_only_the_tools_own_dialect_read` | 0 | 97 |  | yes |
 | `m34_five_write_paths_classified_read` | 17 | 0 |  | yes |

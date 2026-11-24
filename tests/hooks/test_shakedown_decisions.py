@@ -451,16 +451,32 @@ def _run_patched(patch: str, budget: str, command: str = "ppds data list"):
     return r.returncode, r.stderr.decode("utf-8", "replace"), __import__("time").monotonic() - start
 
 
-def test_the_watchdog_refuses_a_hook_that_does_not_answer():
-    # a reading that hangs past the budget: the watchdog ends the hook with exit 2
-    code, err, elapsed = _run_patched(
-        "g['main'].__globals__['find_ppds_invocations'] = lambda *a, **k: time.sleep(30);", "0.2")
-    assert code == 2 and "could not check this command in time" in err, err
-    assert elapsed < 0.2 + hook._WATCHDOG_GRACE_SECONDS + 3, elapsed
+def test_the_launcher_refuses_a_hook_that_does_not_answer(tmp_path):
+    # a reading that hangs past the budget (no deadline check can run): the
+    # launcher the hook is registered through kills it and refuses (exit 2)
+    import shutil
+    launcher = HOOK_PATH.parent / "shakedown-safety-launcher.py"
+    shutil.copy2(launcher, tmp_path / launcher.name)
+    (tmp_path / "shakedown-safety.py").write_text(
+        "import runpy, sys, time\n"
+        f"g = runpy.run_path({str(HOOK_PATH)!r}, run_name='hook')\n"
+        "g['main'].__globals__['find_ppds_invocations'] = lambda *a, **k: time.sleep(30)\n"
+        "g['main']()\n", encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PPDS_")}
+    env.update({"PPDS_SAFE_ENVS": "x", "PPDS_HOOK_BUDGET_SECONDS": "0.2",
+                "PPDS_CONFIG_DIR": str(HOOK_PATH.parent / "no-such-dir")})
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "ppds data list"}})
+    start = time.monotonic()
+    r = subprocess.run([sys.executable, str(tmp_path / launcher.name)], input=payload.encode("utf-8"),
+                       env=env, capture_output=True, timeout=60)
+    elapsed = time.monotonic() - start
+    err = r.stderr.decode("utf-8", "replace")
+    assert r.returncode == 2 and "did not answer within" in err, err
+    assert elapsed < 30, elapsed
 
 
 def test_the_decision_loop_runs_under_the_deadline():
-    # many invocations, each decision slow: the deadline refuses before the watchdog
+    # many invocations, each decision slow: the deadline refuses before the launcher's limit
     code, err, _ = _run_patched(
         "G = g['main'].__globals__;"
         "G['find_ppds_invocations'] = lambda *a, **k: [['ppds', 'data', 'list']] * 50;"

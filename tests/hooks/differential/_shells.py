@@ -149,6 +149,8 @@ class ShellLab:
         import collections
         self.outcomes = collections.Counter()   # "<shell>-finished" / "<shell>-timeout" per run
         self.timed_out = []
+        self.final_outcomes = {}  # shell -> final outcome per position of the last run_all batch
+        self.text_timeouts = {"bash": set(), "pwsh": set()}
         self._count_lock = threading.Lock()
         self.default_store = os.path.normpath(str(sandbox.home / ".ppds"))
         self.bash = shutil.which("bash", path=SYSTEM_PATH)
@@ -344,6 +346,7 @@ class ShellLab:
             for i, r in zip(again, pool.map(lambda i: go(batch[i], self.retry_timeout, count=False), again)):
                 res[i] = r
         again = set(again)
+        self.final_outcomes[name] = [outcome for _, outcome in res]
         with self._count_lock:
             for i, (_, outcome) in enumerate(res):
                 if i in skip:
@@ -376,6 +379,10 @@ class ShellLab:
                     if not self._canary_ok(got, want):
                         self.canary_failures.append((shell, text))
         strip = lambda rs: rs[k:k + mid] + rs[2 * k + mid:2 * k + len(texts)]
+        # Texts whose run timed out under a shell, even after the retry: what they recorded is only
+        # what ran before they were killed, so it is no ground truth for a pass (see differential.py).
+        self.text_timeouts = {sh: {i for i, o in enumerate(strip(self.final_outcomes[sh])) if o == "timeout"}
+                              for sh in ("bash", "pwsh")}
         return strip(bash), strip(pwsh)
 
 

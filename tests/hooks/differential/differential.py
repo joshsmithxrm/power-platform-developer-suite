@@ -25,6 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _harness import MODES, TOOLS, OracleUnavailable, ParseOracle, Sandbox, run_hooks, truth_mode, write_case  # noqa: E402
+import _harness  # noqa: E402
 import _truth  # noqa: E402
 import findings  # noqa: E402
 
@@ -66,6 +67,33 @@ def _blocked(result) -> bool:
     return result.code == 2
 
 
+def unjudged_passes(by_case: dict, timed_out: set) -> list:
+    """Indexes of texts that timed out under a shell (no complete ground truth) and that the hook passed
+    in some mode and tool. ``by_case`` maps (text index, mode) to {tool: HookResult}."""
+    return sorted({i for (i, _mode), res in by_case.items()
+                   if i in timed_out and any(not _blocked(r) for r in res.values())})
+
+
+def _with_exit_tally(run):
+    """Add ``hook_exits`` to an oracle's report: its hook runs, abnormal ends of the hook (a crash, a
+    signal, a hang, exit 1) and how many of those let the command run. One that lets a command run is
+    an integrity failure."""
+    import functools
+
+    @functools.wraps(run)
+    def wrapped(*args, **kwargs):
+        _harness.exit_tally(reset=True)
+        rep = run(*args, **kwargs)
+        tally = rep["hook_exits"] = _harness.exit_tally(reset=True)
+        if tally["let_through"]:
+            integ = rep.setdefault("integrity", {"ok": True, "problems": []})
+            integ.setdefault("problems", []).append(
+                f"{tally['let_through']} abnormal hook exits let the command run ({tally['by_reason']})")
+            integ["ok"] = False
+        return rep
+    return wrapped
+
+
 def _summarise(failures: list, strict: bool) -> dict:
     groups = collections.Counter()
     for f in failures:
@@ -99,6 +127,7 @@ def _save_cases(failures: list, cases_dir, prefix: str, sandbox, per_group: int 
 # Oracle 1
 # --------------------------------------------------------------------------------------------
 
+@_with_exit_tally
 def run_argument_oracle(size: int = CI_SIZE_ARGS, seed: int = 1814, cases_dir=None, strict: bool = False,
                         confirm: bool = True) -> dict:
     import gen_args
@@ -258,6 +287,7 @@ def _confirm_rendering(sandbox, oracle, failures: list) -> dict:
 CI_FEED_LIMIT = 500
 
 
+@_with_exit_tally
 def run_statement_oracle(size: int = CI_SIZE_SHELL, seed: int = 1780, cases_dir=None, strict: bool = False,
                          feed_limit=CI_FEED_LIMIT, only_round4: bool = False) -> dict:
     import gen_shell
@@ -353,6 +383,16 @@ def run_statement_oracle(size: int = CI_SIZE_SHELL, seed: int = 1780, cases_dir=
         req_fail = [f for f in failures if f["severity"] == "requirement"]
         saved = _save_cases(failures, cases_dir, "shell", sandbox, per_group=4)
         problems, info = _shell_integrity(lab, len(texts), unconfirmed)
+        # A text that timed out under a shell (after the retry) has no complete ground truth: a stand-in
+        # it would have started later was never recorded. Its refusals are safe; a pass of it cannot be
+        # judged, so it fails the run instead of counting as a correct pass.
+        timed_out = lab.text_timeouts["bash"] | lab.text_timeouts["pwsh"]
+        unjudged = unjudged_passes(by_case, timed_out)
+        info["timed_out_texts"] = len(timed_out)
+        info["timed_out_texts_passed"] = len(unjudged)
+        if unjudged:
+            problems.append(f"{len(unjudged)} texts timed out under a shell and were passed by the hook: "
+                            f"no complete ground truth to judge the pass ({texts[unjudged[0]].text[:120]!r})")
         oracle_errors = sum(1 for f in failures if f["cause"] == "oracle-error")
         if oracle_errors > MAX_ORACLE_ERRORS:
             problems.append(f"{oracle_errors} parse-oracle errors")
@@ -408,6 +448,7 @@ CI_TIMING_LENGTHS = (50_000, 110_000)
 LONG_TIMING_LENGTHS = (20_000, 50_000, 80_000, 110_000, 150_000, 200_000)
 
 
+@_with_exit_tally
 def run_timing_oracle(lengths=CI_TIMING_LENGTHS, modes=("shakedown",), seed: int = 110, cases_dir=None,
                       workers: int = 2) -> dict:
     """Long inputs valid in both shells: the hook must refuse inside its documented budget (plus a
@@ -466,6 +507,7 @@ CI_RAW_LENGTHS = (200_000,)
 LONG_RAW_LENGTHS = (1_000_000, 10_000_000, 30_000_000)
 
 
+@_with_exit_tally
 def run_raw_timing_oracle(lengths=CI_RAW_LENGTHS, seed: int = 0, cases_dir=None, workers: int = 2) -> dict:
     """Raw text far above the caps: the hook must answer inside its registered timeout."""
     import gen_timing
@@ -503,6 +545,7 @@ def run_raw_timing_oracle(lengths=CI_RAW_LENGTHS, seed: int = 0, cases_dir=None,
         sandbox.cleanup()
 
 
+@_with_exit_tally
 def run_ordinary_oracle(limit=None, seed: int = 7, cases_dir=None) -> dict:
     """The cost rule: with a listed environment and no shakedown, an ordinary command that starts no
     stand-in and names no switch or target must pass."""

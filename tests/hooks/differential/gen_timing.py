@@ -40,7 +40,7 @@ def registered_timeout(settings: Path = REPO / ".claude" / "settings.json") -> f
     for entries in (data.get("hooks") or {}).values():
         for entry in entries:
             for h in entry.get("hooks", []):
-                if "shakedown-safety.py" in h.get("command", ""):
+                if "shakedown-safety" in h.get("command", ""):
                     found.append(float(h.get("timeout", 60)))  # Claude Code's default hook timeout is 60 s
     if not found:
         raise AssertionError("the hook is not registered in .claude/settings.json")

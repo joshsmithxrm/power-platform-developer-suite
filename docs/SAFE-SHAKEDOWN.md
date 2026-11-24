@@ -121,7 +121,8 @@ anything not listed there is refused while that gate applies.
 
 **Trigger:** every Bash tool or PowerShell tool invocation that mentions
 `ppds`, `ppds-mcp-server`, `dotnet` or `dnx`, or runs a program the hook
-cannot identify (below). The hook is registered for both shell tools and
+cannot identify (below). The hook is registered for both shell tools,
+through its launcher (see "Abnormal ends refuse" below), and
 reads every command twice, whatever the tool: with PowerShell's rules
 (backtick escapes and line continuations, `''` and `""` inside quotes, the
 call operator `&`, script blocks, also glued to the word before them,
@@ -237,7 +238,7 @@ guarded program.
 | Command length (above it: the byte checks above) | 200,000 characters |
 | Nesting (substitutions, blocks, quoted strings read again) | 8 levels |
 | Reading work | 4,000,000 characters read, counting every nested reading |
-| Time | 3.5 seconds per command; a watchdog refuses at 4.5 seconds (the hook is registered with 10) |
+| Time | 3.5 seconds per command; the launcher kills the hook and refuses at 5 seconds (the hook is registered with 10) |
 | Words naming `ppds`, `ppds-mcp-server`, `dotnet` or `dnx`, per reading | 500 |
 | Arguments kept per invocation | 400 |
 | Argument words produced by all readings together | 200,000 |
@@ -248,17 +249,34 @@ guarded program.
 Real commands are far below all of them. Claude Code runs a command whose
 hook exceeds its registered timeout or exits 1, in both shell tools. So
 every loop over the input runs under the 3.5-second budget, the work per
-input is capped, and a watchdog ends the hook with exit 2 one second after
-the budget if it has not answered; the watchdog cannot interrupt one long
-step of the Python runtime, which is why the length is checked first. On
+input is capped, and the launcher kills the hook and refuses (exit 2) if
+it has not answered 5 seconds after the launcher started. Inside the hook
+only the budget checks between steps can stop it, which is why the length
+is checked first. On
 an idle Linux machine a 110,000-character command of about 8,800 words
 naming `ppds` is answered in under a second, the slowest input of the
 timing tests (200,000 characters) in about 1.5 seconds, and a
 120,000,000-character command, from a file, in about 1.4 seconds (timing
 on Windows is not measured). Under heavy machine load the timing tests can
-fail and a slow input can be refused by the watchdog. Any internal error refuses the command, whatever
+fail and a slow input can be refused by the launcher. Any internal error refuses the command, whatever
 it is (exit 2). With no allowlist and no shakedown, the hook exits 0 for
 every command before reading it.
+
+**Abnormal ends refuse.** Claude Code runs the command when its hook ends
+with any exit code but 2. The hook is therefore registered as
+`python "$CLAUDE_PROJECT_DIR/.claude/hooks/shakedown-safety-launcher.py" || exit 2`.
+The launcher runs `shakedown-safety.py` as a child that reads the
+launcher's own input, passes on exit 0 and exit 2, and turns every other
+end into a refusal (exit 2) that names it: a signal or crash, exit 1 or
+any other code, a missing hook file, a hook that could not be started,
+and a hook that has not answered within 5 seconds (it is killed). The
+hook and the launcher start no thread, so none can be running when the
+interpreter shuts down. The shell's `|| exit 2` refuses when the launcher
+itself cannot run: no `python` on the path, or the launcher ended by a
+signal. What is left: if the launcher has not ended when the registered
+timeout (10 seconds) passes, for example on a machine so loaded that it
+cannot run the launcher for 5 seconds, Claude Code runs the command; and
+a shell that cannot start at all is Claude Code's to report.
 
 **Statements led by a variable.** The POSIX reading of a PowerShell
 statement such as `$x = 1` or `$env:FOO = 'bar'` is a program only known at
@@ -716,6 +734,11 @@ Either:
 - `tests/hooks/test_shakedown_safety_process.py` — the hook as a process:
   input shapes, caps, the time budget against the registered timeout, and
   internal errors.
+- `tests/hooks/test_shakedown_safety_launcher.py` — the launcher and the
+  registered command: each abnormal end of the hook (a signal, a crash,
+  exit 1 or another code, a hang, a missing file, the hook killed while it
+  runs, no interpreter, the launcher killed) refuses, and no thread is
+  alive when the hook ends.
 - `tests/hooks/test_shakedown_cli_commands.py` — the write-block's command
   table against the command tree derived from `src/PPDS.Cli`
   (`tests/hooks/cli_command_tree.py`).

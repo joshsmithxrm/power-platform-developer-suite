@@ -3,7 +3,9 @@
 * ``Sandbox``: a throwaway folder with two made-up profile stores (active environment listed or not),
   a project folder with an empty ``.claude/settings.json``, and response files. Nothing here reads or
   writes the real profile store, the real home folder or the real project settings.
-* ``run_hook`` / ``run_hooks``: the hook as a subprocess with a payload on stdin, in one of three modes.
+* ``run_hook`` / ``run_hooks``: the hook as a subprocess with a payload on stdin, in one of three modes,
+  through its launcher (``shakedown-safety-launcher.py`` next to it) as it is registered. Every run
+  is tallied (``exit_tally``): abnormal ends of the hook, and how many of them let the command run.
 * ``ParseOracle``: a client for the parse-only .NET helper in ``ParseOracle/`` (ground truth from the
   CLI's own parser, the MCP server's own option parser and the product's SQL parser).
 """
@@ -28,6 +30,7 @@ REPO = HERE.parents[2]
 HOOK = Path(os.environ.get("PPDS_DIFF_HOOK") or str(REPO / ".claude" / "hooks" / "shakedown-safety.py"))
 if not HOOK.is_file():
     raise SystemExit(f"PPDS_DIFF_HOOK does not name a file: {HOOK}")
+LAUNCHER_NAME = "shakedown-safety-launcher.py"
 
 TOOLS = ("Bash", "PowerShell")
 # Made-up environment names. LISTED are on the allowlist, UNLISTED are not.
@@ -173,15 +176,57 @@ class HookResult:
     stderr: str
 
 
+# What the launcher prints when the hook itself ended abnormally (it then refuses, exit 2).
+ABNORMAL_MARKERS = ("the hook ended abnormally", "the hook did not answer within", "the hook could not be started",
+                    "the launcher was interrupted", "the launcher failed")
+_TALLY_LOCK = threading.Lock()
+_TALLY = {"runs": 0, "abnormal": 0, "let_through": 0, "by_reason": {}, "samples": []}
+
+
+def _entry(hook: Path) -> Path:
+    """The registered entry for ``hook``: its launcher when one sits next to it, else the hook."""
+    launcher = Path(hook).parent / LAUNCHER_NAME
+    return launcher if launcher.is_file() else Path(hook)
+
+
+def _tally(code, stderr: str) -> None:
+    """Count one run. Abnormal: the launcher reports that the hook crashed, was killed, hung or could
+    not start, or the entry itself ended with anything but 0 or 2. Let through: abnormal, and the exit
+    Claude Code sees is not 2 (so the command would run)."""
+    reason = next((m for m in ABNORMAL_MARKERS if m in stderr), None)
+    if reason is None and code not in (0, 2):
+        reason = f"entry exit {code}"
+    with _TALLY_LOCK:
+        _TALLY["runs"] += 1
+        if reason is None:
+            return
+        _TALLY["abnormal"] += 1
+        _TALLY["let_through"] += code != 2
+        _TALLY["by_reason"][reason] = _TALLY["by_reason"].get(reason, 0) + 1
+        if len(_TALLY["samples"]) < 5:
+            _TALLY["samples"].append({"exit": code, "stderr": stderr[-3000:]})
+
+
+def exit_tally(reset: bool = False) -> dict:
+    """A copy of the run tally since the last reset."""
+    with _TALLY_LOCK:
+        out = json.loads(json.dumps(_TALLY))
+        if reset:
+            _TALLY.update({"runs": 0, "abnormal": 0, "let_through": 0, "by_reason": {}, "samples": []})
+    return out
+
+
 def run_hook(sandbox: Sandbox, tool: str, command: str, mode: str, timeout: float = 30.0, hook=None) -> HookResult:
     data = json.dumps(payload(tool, command, str(sandbox.work)), ensure_ascii=False).encode("utf-8", "surrogatepass")
     t0 = time.monotonic()
     try:
-        r = subprocess.run([sys.executable, str(hook or HOOK)], input=data, capture_output=True,
+        r = subprocess.run([sys.executable, str(_entry(hook or HOOK))], input=data, capture_output=True,
                            timeout=timeout, env=sandbox.hook_env(mode), cwd=str(sandbox.work))
-        return HookResult(r.returncode, time.monotonic() - t0, r.stderr.decode("utf-8", "replace"))
+        result = HookResult(r.returncode, time.monotonic() - t0, r.stderr.decode("utf-8", "replace"))
     except subprocess.TimeoutExpired:
-        return HookResult("TIMEOUT", time.monotonic() - t0, "")
+        result = HookResult("TIMEOUT", time.monotonic() - t0, "")
+    _tally(result.code, result.stderr)
+    return result
 
 
 def run_hooks(sandbox: Sandbox, jobs: Iterable[tuple], workers: Optional[int] = None, hook=None) -> list:
