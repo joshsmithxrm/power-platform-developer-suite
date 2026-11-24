@@ -42,6 +42,10 @@ public static class KnownDifferences
 
     private static bool NumericallyEqual(string? a, string? b) => Dec(a) is { } x && Dec(b) is { } y && x == y;
 
+    /// <summary>True when <paramref name="asFloat"/> is the whole number <paramref name="whole"/> converted to float.</summary>
+    private static bool IsFloatOf(string? asFloat, string? whole)
+        => Dbl(asFloat) is { } f && Dec(whole) is { } w && f == (double)w; // CodeQL [cs/equality-on-floats] the conversion is exact or it is not this defect
+
     private static int Scale(string? value)
     {
         var dot = value?.IndexOf('.') ?? -1;
@@ -202,7 +206,8 @@ public static class KnownDifferences
                                      && b.Actual.Value is { } value && value != "NULL"
                                      && d.Actual.Value == value
                                      && d.Actual.Family == b.Actual.Family
-                                     && NumericallyEqual(d.Reference.Value, b.Reference.Value)));
+                                     && (NumericallyEqual(d.Reference.Value, b.Reference.Value)
+                                         || (d.Reference.Type?.Family == "float" && IsFloatOf(d.Reference.Value, b.Reference.Value)))));
 
     /// <summary>#1764: ROUND of a whole number returns a float.</summary>
     public static readonly KnownDifference RoundWholeNumberFloat = new(
@@ -215,12 +220,13 @@ public static class KnownDifferences
             new("ROUND(c_int, 0)", 1, "7 : int", "7 : ~float",
                 Rule("ROUND(x, 0)", Col("c_int"))),
         ],
-        // The same number, as a float.
+        // The same number, as a float (exactly, or as the nearest float when the whole number has more digits).
         d => d.Node.Construct.StartsWith("ROUND(", StringComparison.Ordinal)
-             && d.Difference == Difference.Type
+             && !d.Difference.HasFlag(Difference.Error)
+             && d.Difference.HasFlag(Difference.Type)
              && IsWholeNumber(d.Children[0].Reference.Type)
              && d.Actual.Family == "float"
-             && NumericallyEqual(d.Reference.Value, d.Actual.Value));
+             && (NumericallyEqual(d.Reference.Value, d.Actual.Value) || IsFloatOf(d.Actual.Value, d.Reference.Value)));
 
     /// <summary>#1764: currency arithmetic keeps more than 4 places.</summary>
     public static readonly KnownDifference CurrencyFullPrecision = new(

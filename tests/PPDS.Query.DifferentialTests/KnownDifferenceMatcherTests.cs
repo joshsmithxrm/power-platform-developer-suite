@@ -162,6 +162,12 @@ public sealed class KnownDifferenceMatcherTests
             NodeResult money = MoneyColumn("2.0000"), two = IntOperand("2");
             return Cause(Rule("/", Kind.Number, money.Node, two.Node), Sql("1.0000", Money), Ppds("1", "decimal"), money, two);
         },
+        ["COALESCE returns a float that is not the whole number converted"] = () =>
+        {
+            var column = Operand(Leaf("column bigint", "c_bigint"), Sql("9223372036854775807", T("bigint")), Ppds("9223372036854775807", "bigint"));
+            var other = Operand(Leaf("literal float", "1.5E0"), Sql("1.5", Float), Ppds("1.5", "float"));
+            return Cause(Rule("COALESCE", Kind.Number, column.Node, other.Node), Sql("9.2E+18", Float), Ppds("9223372036854775807", "bigint"), column, other);
+        },
         ["ROUND of a whole number with a wrong value"] = () =>
         {
             var seven = IntOperand("7");
@@ -203,6 +209,20 @@ public sealed class KnownDifferenceMatcherTests
             return Cause(Rule("ROUND(x, -1)", Kind.Number, column.Node), Outcome.Failed(ErrorClass.Overflow, "8115"), Outcome.Failed(ErrorClass.Other, "ArgumentOutOfRangeException"), column);
         },
     };
+
+    [Fact]
+    public void A_whole_number_that_loses_digits_as_a_float_is_still_its_entry()
+    {
+        // SQL Server converts the bigint branch to float (9.223372036854776E+18); the engine returns the bigint.
+        var column = Operand(Leaf("column bigint", "c_bigint"), Sql("9223372036854775807", T("bigint")), Ppds("9223372036854775807", "bigint"));
+        var other = Operand(Leaf("literal float", "1.5E0"), Sql("1.5", Float), Ppds("1.5", "float"));
+        var coalesce = Cause(Rule("COALESCE", Kind.Number, column.Node, other.Node), Sql("9.223372036854776E+18", Float), Ppds("9223372036854775807", "bigint"), column, other);
+        Assert.Equal(["conditional-whole-number-unconverted"], KnownDifferences.All.Where(k => k.Explains(coalesce)).Select(k => k.Id));
+
+        // ROUND of the same bigint returns the nearest float.
+        var round = Cause(Rule("ROUND(x, 0)", Kind.Number, column.Node), Sql("9223372036854775807", T("bigint")), Ppds("9.223372036854776E+18", "float"), column);
+        Assert.Equal(["round-whole-number-float"], KnownDifferences.All.Where(k => k.Explains(round)).Select(k => k.Id));
+    }
 
     [Theory]
     [MemberData(nameof(NearMissNames))]
