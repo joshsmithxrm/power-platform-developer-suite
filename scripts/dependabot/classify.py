@@ -8,8 +8,8 @@ Group A — auto-merge eligible (green CI is sufficient evidence to ship):
   - Patch bumps on non-critical paths
   - Tooling/test bumps regardless of patch/minor (eslint, knip, vitest, esbuild,
     @types/*, @playwright/test, Microsoft.NET.Test.Sdk)
-  - github-actions group bumps (patch/minor)
   - Lockfile-only diffs
+  (Never a github-actions bump: see Group C.)
 
 Group B — verify-then-merge (run package-specific tests locally first):
   - Minor bumps on user-visible runtime libraries (Terminal.Gui, etc.)
@@ -21,18 +21,26 @@ Group B — verify-then-merge (run package-specific tests locally first):
 Group C — manual review required (do NOT auto-merge):
   - ANY major-version bump (universal exclusion per v1-prelaunch retro)
   - Bumps with "Breaking" / "BREAKING CHANGE" / removed APIs in the changelog
-  - Bumps to CI/CD pipelines via actions/* major
+  - EVERY github-actions bump (patch, minor, major, grouped or single), and any
+    dependency PR whose diff touches a path under .github/. These change the
+    workflows, so the maintainer goes first on them. This rule is applied last,
+    over whatever group the version rules chose, so nothing else true of the PR
+    can make it auto-merge eligible.
   - Anything in MERGE-POLICY's "When NOT to use auto-merge" list that isn't Group B
 
 The ground truth for the policy is docs/MERGE-POLICY.md. If this file and that
-file disagree, the doc wins and this file needs a patch.
+file disagree, the doc wins and this file needs a patch. One known exception:
+the github-actions rule above follows the maintainer's decision that he goes
+first on Dependabot's GitHub Actions bumps. Until docs/MERGE-POLICY.md and the
+/dependabot-triage skill are updated to match, where they still list GitHub
+Actions group bumps as auto-merge eligible, this file wins for those bumps.
 """
 from __future__ import annotations
 
 import json
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterable, Optional
 
 
@@ -91,6 +99,12 @@ TOOLING_PREFIXES = (
 AUTH_CRITICAL_PATH_PREFIXES = (
     "src/PPDS.Auth/",
     "src/PPDS.Plugins/",  # strong-name signing surface
+)
+
+# Paths the maintainer goes first on. A dependency PR whose diff touches any of
+# them is Group C whatever its ecosystem or version (see is_github_actions_update).
+MAINTAINER_FIRST_PATH_PREFIXES = (
+    ".github/",
 )
 
 # Authors GitHub may report for Dependabot-authored pull requests. A
@@ -407,6 +421,24 @@ def touches_auth_critical_path(files: Iterable[str]) -> bool:
     return False
 
 
+def is_github_actions_update(ecosystem: str, files: Iterable[str]) -> bool:
+    """True if the PR is a GitHub Actions bump, or otherwise changes ``.github/``.
+
+    Either signal is enough: the detected ecosystem is ``github-actions`` (from
+    the label, the ``dependabot/github_actions/`` branch, or a workflow-only
+    diff), or any changed file sits under a ``MAINTAINER_FIRST_PATH_PREFIXES``
+    path. The path check also catches a PR whose ecosystem came out ``unknown``
+    because it mixes a workflow change with a manifest change.
+    """
+    if ecosystem == "github-actions":
+        return True
+    for raw_path in files:
+        path = raw_path.replace("\\", "/").lower()
+        if path.startswith(MAINTAINER_FIRST_PATH_PREFIXES):
+            return True
+    return False
+
+
 _LOCKFILE_BASENAMES = frozenset({
     "package-lock.json",
     "packages.lock.json",
@@ -532,6 +564,37 @@ def classify_pr(pr: dict) -> Classification:
     `pr` is a dict shaped like the output of `gh pr view --json
     number,title,labels,headRefName,files,body`. The classifier is defensive:
     missing fields default to safe (Group C with reason "ambiguous").
+
+    The version rules (``_classify_by_version``) choose a group first. A GitHub
+    Actions bump, or any diff under ``.github/``, is then moved to Group C: the
+    maintainer goes first on those, so no other property of the PR can leave it
+    auto-merge eligible. Only ``group`` and ``reason`` change; ``update_type``
+    and ``ecosystem`` stay as the version rules found them, because
+    scripts/ci/ uses them to decide whether major-version evidence is required.
+    """
+    classification = _classify_by_version(pr)
+    files = [f.get("path", "") for f in pr.get("files", [])]
+    if not is_github_actions_update(classification.ecosystem, files):
+        return classification
+    if classification.group == "C":
+        reason = (
+            f"{classification.reason}; GitHub Actions bump or .github/ change "
+            "— maintainer goes first"
+        )
+    else:
+        reason = (
+            "GitHub Actions bump or .github/ change — maintainer goes first, "
+            f"never auto-merge (version rules alone gave Group "
+            f"{classification.group}: {classification.reason})"
+        )
+    return replace(classification, group="C", reason=reason)
+
+
+def _classify_by_version(pr: dict) -> Classification:
+    """Choose a group from the package, version, body and diff alone.
+
+    Called only by ``classify_pr``, which applies the GitHub Actions rule on
+    top; do not call it directly.
     """
     number = int(pr.get("number", 0))
     title = pr.get("title", "")
@@ -658,19 +721,6 @@ def classify_pr(pr: dict) -> Classification:
             pr_number=number,
             group="A",
             reason="lockfile-only diff — auto-merge eligible",
-            ecosystem=ecosystem,
-            update_type=update_type,
-            package=pkg,
-            from_version=from_v,
-            to_version=to_v,
-        )
-
-    # github-actions patch/minor — Group A (unless it's a major, caught above).
-    if ecosystem == "github-actions" and update_type in ("patch", "minor"):
-        return Classification(
-            pr_number=number,
-            group="A",
-            reason=f"github-actions {update_type} bump — auto-merge eligible",
             ecosystem=ecosystem,
             update_type=update_type,
             package=pkg,
