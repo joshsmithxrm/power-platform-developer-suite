@@ -1139,16 +1139,105 @@ class TestGitHubActionsMaintainerFirst(unittest.TestCase):
         self.assertEqual(c.group, "C")
         self.assertIn("maintainer goes first", c.reason)
 
-    def test_npm_pr_touching_any_github_path_is_group_c(self):
-        c = classify.classify_pr(make_pr(
+    def test_npm_pr_touching_dependabot_yml_is_classified_as_before(self):
+        # .github/dependabot.yml is not a workflow or an action: an npm bump
+        # that also touches it keeps the group the version rules give it.
+        pr = make_pr(
             number=1902,
             title="Bump knip from 6.1.0 to 6.1.1",
             labels=["npm", "dependencies"],
             head_ref="dependabot/npm_and_yarn/knip-6.1.1",
             files=["src/PPDS.Extension/package.json", ".github/dependabot.yml"],
+        )
+        c = classify.classify_pr(pr)
+        self.assertEqual(c.ecosystem, "npm")
+        self.assertEqual(c.group, "A")
+        self.assertEqual(c, classify._classify_by_version(pr))
+
+    def test_nuget_label_beside_actions_label_with_no_files_is_group_c(self):
+        # detect_ecosystem checks nuget before github-actions, so this comes
+        # out as nuget; the Actions label alone must still force Group C.
+        c = classify.classify_pr(self.actions_pr(
+            labels=["nuget", "dependencies", "github-actions"],
+            head_ref="dependabot/github_actions/x",
+            files=[],
+        ))
+        self.assertEqual(c.ecosystem, "nuget")
+        self.assertEqual(c.group, "C")
+
+    def test_npm_label_beside_actions_branch_with_no_files_is_group_c(self):
+        c = classify.classify_pr(self.actions_pr(
+            labels=["npm", "dependencies"],
+            head_ref="dependabot/github_actions/actions/checkout-6.0.1",
+            files=[],
         ))
         self.assertEqual(c.ecosystem, "npm")
         self.assertEqual(c.group, "C")
+
+    def test_hyphenated_actions_branch_with_no_files_is_group_c(self):
+        c = classify.classify_pr(self.actions_pr(
+            labels=["dependencies"],
+            head_ref="dependabot/github-actions/actions/checkout-6.0.1",
+            files=[],
+        ))
+        self.assertEqual(c.ecosystem, "unknown")
+        self.assertEqual(c.group, "C")
+
+    def test_actions_branch_in_other_case_with_no_files_is_group_c(self):
+        c = classify.classify_pr(self.actions_pr(
+            labels=["dependencies"],
+            head_ref="Dependabot/GitHub_Actions/actions/checkout-6.0.1",
+            files=[],
+        ))
+        self.assertEqual(c.group, "C")
+
+    def test_actions_label_in_other_case_with_no_files_is_group_c(self):
+        for label in ("GitHub-Actions", "GITHUB_ACTIONS"):
+            with self.subTest(label=label):
+                c = classify.classify_pr(self.actions_pr(
+                    labels=["dependencies", label], head_ref="human/x", files=[],
+                ))
+                self.assertEqual(c.group, "C")
+
+    def test_workflow_paths_with_leading_dot_slash_or_slash_are_group_c(self):
+        for path in ("./.github/workflows/build.yml",
+                     "/.github/workflows/build.yml",
+                     "./.github/actions/setup/action.yaml",
+                     "/.github/actions/a/b/action.yml"):
+            with self.subTest(path=path):
+                c = classify.classify_pr(make_pr(
+                    number=1905,
+                    title="Bump knip from 6.1.0 to 6.1.1",
+                    labels=["npm", "dependencies"],
+                    head_ref="human/bump-knip",
+                    files=["src/PPDS.Extension/package.json", path],
+                ))
+                self.assertEqual(c.group, "C")
+
+    def test_non_actions_prs_keep_the_version_rules_result(self):
+        # The override changes nothing for a PR with no Actions signal.
+        prs = [
+            make_pr(number=1906, title="Bump knip from 6.1.0 to 6.1.1",
+                    labels=["npm", "dependencies"],
+                    head_ref="dependabot/npm_and_yarn/knip-6.1.1",
+                    files=["src/PPDS.Extension/package.json"]),
+            make_pr(number=1907, title="Bump Newtonsoft.Json from 13.0.1 to 13.1.0",
+                    labels=["nuget", "dependencies"],
+                    head_ref="dependabot/nuget/Newtonsoft.Json-13.1.0",
+                    files=["Directory.Packages.props", ".github/dependabot.yml"]),
+            make_pr(number=1908, title="Bump Azure.Identity from 1.0.0 to 1.0.1",
+                    labels=["nuget", "dependencies"],
+                    head_ref="dependabot/nuget/Azure.Identity-1.0.1",
+                    files=["Directory.Packages.props", ".github/actions/README.md"]),
+            make_pr(number=1909, title="Bump vite from 5.0.0 to 8.0.0",
+                    labels=["npm", "dependencies"],
+                    head_ref="dependabot/npm_and_yarn/vite-8.0.0",
+                    files=["src/PPDS.Extension/package.json",
+                           ".github/pull_request_template.md"]),
+        ]
+        for pr in prs:
+            with self.subTest(title=pr["title"]):
+                self.assertEqual(classify.classify_pr(pr), classify._classify_by_version(pr))
 
     def test_npm_and_nuget_prs_without_github_paths_are_unchanged(self):
         npm = classify.classify_pr(make_pr(
@@ -1175,8 +1264,23 @@ class TestGitHubActionsMaintainerFirst(unittest.TestCase):
         self.assertTrue(f("unknown", [".github/workflows/x.yml"]))
         self.assertTrue(f("npm", [".github\\workflows\\x.yml"]))
         self.assertTrue(f("nuget", [".GitHub/workflows/x.yml"]))
+        self.assertTrue(f("nuget", ["./.github/workflows/x.yml"]))
+        self.assertTrue(f("nuget", ["/.github/workflows/x.yml"]))
+        self.assertTrue(f("nuget", ["././.github/actions/a/action.yml"]))
+        self.assertTrue(f("npm", [".github/actions/a/b/action.yaml"]))
+        self.assertTrue(f("nuget", [], labels=["github-actions"]))
+        self.assertTrue(f("nuget", [], labels=["GitHub_Actions"]))
+        self.assertTrue(f("unknown", [], head_ref="dependabot/github_actions/x"))
+        self.assertTrue(f("unknown", [], head_ref="dependabot/github-actions/x"))
+        self.assertTrue(f("unknown", [], head_ref="DEPENDABOT/GITHUB_ACTIONS/x"))
         self.assertFalse(f("npm", ["src/PPDS.Extension/package.json"]))
-        self.assertFalse(f("nuget", ["docs/.github-notes.md", "x/.github/y"]))
+        self.assertFalse(f("nuget", ["docs/.github-notes.md", "x/.github/workflows/y"]))
+        self.assertFalse(f("npm", [".github/dependabot.yml"]))
+        self.assertFalse(f("npm", [".github/actions/setup/README.md"]))
+        self.assertFalse(f("npm", [".github/pull_request_template.md"]))
+        self.assertFalse(f("nuget", [], labels=["dependencies", "nuget"],
+                           head_ref="dependabot/nuget/x"))
+        self.assertFalse(f("unknown", [], head_ref="human/github_actions/x"))
         self.assertFalse(f("unknown", []))
 
     def test_no_actions_bump_is_ever_auto_merge_eligible(self):
@@ -1184,7 +1288,8 @@ class TestGitHubActionsMaintainerFirst(unittest.TestCase):
         # or Group B: try every combination of the signals the version rules
         # look at (version change, tooling or auth-critical package name,
         # lockfile-only or auth-critical-path files, grouped or multi-package
-        # title, breaking-change body) with every way of detecting the ecosystem.
+        # title, breaking-change body) with every way of detecting an Actions
+        # bump, including an npm or nuget label beside it and no files at all.
         titles = [
             "Bump actions/checkout from 6.0.0 to 6.0.1",
             "ci: bump actions/checkout from 6.0.0 to 6.1.0",
@@ -1212,6 +1317,13 @@ class TestGitHubActionsMaintainerFirst(unittest.TestCase):
             (["dependencies"], "dependabot/github_actions/x", []),
             (["dependencies"], "human/x", [".github/workflows/build.yml"]),
             ([], "dependabot/github_actions/x", []),
+            (["dependencies", "nuget", "github-actions"], "dependabot/github_actions/x", []),
+            (["dependencies", "npm"], "dependabot/github_actions/x", []),
+            (["dependencies"], "dependabot/github-actions/x", []),
+            (["dependencies"], "Dependabot/GitHub_Actions/x", []),
+            (["dependencies", "GitHub-Actions"], "human/x", []),
+            (["dependencies", "npm"], "human/x", ["./.github/workflows/build.yml"]),
+            (["dependencies", "nuget"], "human/x", ["/.github/actions/setup/action.yaml"]),
         ]
         file_sets = [
             [],
