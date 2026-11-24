@@ -114,7 +114,9 @@ SELECT 'Prod' as env, COUNT(*) as total FROM [prod-org].[account]
 ### DML Support
 
 Data modification with safety guards. INSERT, UPDATE and DELETE are planned only when every part of the statement is on
-the DML allowlist (`specs/query.md`, "DML allowlist"); anything else is refused before anything runs:
+the DML allowlist (`specs/query.md`, "DML allowlist"); anything else is refused before anything runs. Until the typed SQL
+value engine proves a construct, a written value is a literal (text, a number, a negative number such as `-5`), NULL,
+`CAST('<guid>' AS uniqueidentifier)` or a column of the statement's table; computed values are refused:
 
 ```sql
 -- Insert with values
