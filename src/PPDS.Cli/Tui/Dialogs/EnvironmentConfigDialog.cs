@@ -222,12 +222,28 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
         try
         {
 #pragma warning disable PPDS012 // Sync-over-async: Terminal.Gui event handler
+            // A type change that lowers write protection is saved only after an explicit yes (#1829);
+            // the service refuses it otherwise.
+            string? confirmLowerProtection = null;
+            if (type != null)
+            {
+                var assessment = _session.EnvironmentConfigService
+                    .AssessConfigChangeAsync(_environmentUrl, type).GetAwaiter().GetResult();
+                if (assessment.LowersProtection)
+                {
+                    if (!ConfirmLowerProtection(assessment))
+                        return;
+                    confirmLowerProtection = _environmentUrl;
+                }
+            }
+
             _session.EnvironmentConfigService.SaveConfigAsync(
                 _environmentUrl,
                 label: string.IsNullOrEmpty(label) ? null : label,
                 type: type,
                 color: color,
-                clearColor: color == null && _colorList.SelectedItem == 0).GetAwaiter().GetResult();
+                clearColor: color == null && _colorList.SelectedItem == 0,
+                confirmLowerProtection: confirmLowerProtection).GetAwaiter().GetResult();
 #pragma warning restore PPDS012
 
             ConfigChanged = true;
@@ -240,6 +256,18 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
 
         Application.RequestStop();
     }
+
+    /// <summary>
+    /// Asks whether to lower the environment's write protection. Cancel is the default button.
+    /// Replaceable in tests, where no Terminal.Gui application runs.
+    /// </summary>
+    internal Func<ProtectionChangeAssessment, bool> ConfirmLowerProtection { get; set; } = assessment =>
+        MessageBox.Query(
+            "Lower write protection?",
+            $"{assessment.Describe()}\n\nWrites to this environment would then run without the confirmation they need now.",
+            defaultButton: 0,
+            "Cancel",
+            "Lower protection") == 1;
 
     /// <inheritdoc />
     protected override void Dispose(bool disposing)

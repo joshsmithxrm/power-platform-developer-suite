@@ -417,9 +417,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
             if (envConfig != null)
             {
                 concrete.EnvironmentSafetySettings = envConfig.SafetySettings;
-                var envType = envConfig.Type ?? EnvironmentType.Unknown;
-                concrete.EnvironmentProtectionLevel = envConfig.Protection
-                    ?? DmlSafetyGuard.DetectProtectionLevel(envType);
+                concrete.EnvironmentProtectionLevel = PPDS.Cli.Services.Environment.WriteProtectionResolver.ResolveForSqlDml(envConfig);
             }
         }
 

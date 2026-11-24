@@ -242,9 +242,7 @@ public static class SqlCommand
                 if (envConfig != null)
                 {
                     concreteSqlService.EnvironmentSafetySettings = envConfig.SafetySettings;
-                    var envType = envConfig.Type ?? EnvironmentType.Unknown;
-                    concreteSqlService.EnvironmentProtectionLevel = envConfig.Protection
-                        ?? DmlSafetyGuard.DetectProtectionLevel(envType);
+                    concreteSqlService.EnvironmentProtectionLevel = PPDS.Cli.Services.Environment.WriteProtectionResolver.ResolveForSqlDml(envConfig);
                 }
             }
 

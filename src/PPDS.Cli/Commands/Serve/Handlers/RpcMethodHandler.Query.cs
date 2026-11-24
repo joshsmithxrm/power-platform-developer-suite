@@ -299,9 +299,7 @@ public partial class RpcMethodHandler
                 if (envConfig != null)
                 {
                     concrete.EnvironmentSafetySettings = envConfig.SafetySettings;
-                    var envType = envConfig.Type ?? PPDS.Auth.Profiles.EnvironmentType.Unknown;
-                    concrete.EnvironmentProtectionLevel = envConfig.Protection
-                        ?? DmlSafetyGuard.DetectProtectionLevel(envType);
+                    concrete.EnvironmentProtectionLevel = PPDS.Cli.Services.Environment.WriteProtectionResolver.ResolveForSqlDml(envConfig);
                 }
             }
 

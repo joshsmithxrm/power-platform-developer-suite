@@ -90,9 +90,10 @@ public sealed class EnvironmentConfirmationService : IEnvironmentConfirmationSer
             throw new PpdsException(EnvironmentConfirmationErrorCodes.Required,
                 $"Confirm '{operation}' against '{target}' (type: {type}, protection: {protection}) " +
                 $"with --confirm-env {target} or confirmEnvironment before writing." +
+                // No command that changes the saved type is named here: a caller refused for a missing
+                // confirmation must not be shown how to switch the protection off (#1829).
                 (type == EnvironmentType.Unknown && config?.Protection is null
-                    ? $" This environment has no saved type, so it is treated as Production; " +
-                      $"record its type with 'ppds env config {target} --type <Production|Sandbox|Development|Test|Trial>'."
+                    ? " This environment has no saved type, so it is treated as Production."
                     : string.Empty));
     }
 

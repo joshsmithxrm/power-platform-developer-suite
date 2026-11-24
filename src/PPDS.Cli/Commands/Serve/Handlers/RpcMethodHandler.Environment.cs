@@ -337,12 +337,18 @@ public partial class RpcMethodHandler
     /// Sets environment configuration (label, type, color).
     /// Maps to: ppds env config set --environment "url" --label "label" --type "type" --color "color"
     /// </summary>
+    /// <remarks>
+    /// A type change that lowers write protection fails with
+    /// <c>Environment.ProtectionLoweringConfirmationRequired</c> unless <paramref name="confirmLowerProtection"/>
+    /// names the environment. The extension sends it only after its own modal confirmation (#1829).
+    /// </remarks>
     [JsonRpcMethod("env/config/set")]
     public async Task<EnvConfigSetResponse> EnvConfigSetAsync(
         string environmentUrl,
         string? label = null,
         string? type = null,
         string? color = null,
+        string? confirmLowerProtection = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(environmentUrl))
@@ -384,8 +390,17 @@ public partial class RpcMethodHandler
             parsedColor = c;
         }
 
-        var saved = await configService.SaveConfigAsync(
-            environmentUrl, label, parsedType, parsedColor, ct: cancellationToken);
+        EnvironmentConfig saved;
+        try
+        {
+            saved = await configService.SaveConfigAsync(
+                environmentUrl, label, parsedType, parsedColor,
+                confirmLowerProtection: confirmLowerProtection, ct: cancellationToken);
+        }
+        catch (PpdsException ex)
+        {
+            throw MapPpdsToRpcException(ex);
+        }
 
         return new EnvConfigSetResponse
         {
@@ -413,8 +428,17 @@ public partial class RpcMethodHandler
                 "The 'environmentUrl' parameter is required");
         }
 
-        var configStore = _authServices.GetRequiredService<EnvironmentConfigStore>();
-        var removed = await configStore.RemoveConfigAsync(environmentUrl, cancellationToken);
+        // Through the service, like env/config/set, so the protection rule applies to every change.
+        var configService = _authServices.GetRequiredService<IEnvironmentConfigService>();
+        bool removed;
+        try
+        {
+            removed = await configService.RemoveConfigAsync(environmentUrl, cancellationToken);
+        }
+        catch (PpdsException ex)
+        {
+            throw MapPpdsToRpcException(ex);
+        }
 
         return new EnvConfigRemoveResponse { Removed = removed };
     }

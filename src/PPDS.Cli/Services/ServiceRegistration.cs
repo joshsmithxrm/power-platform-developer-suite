@@ -163,8 +163,11 @@ public static class ServiceRegistration
         services.AddSingleton<ITuiThemeService, TuiThemeService>();
 
         // Environment configuration
+        // A host that must never lower protection (the MCP server) registers ProtectionLoweringPolicy.Refuse.
         services.AddSingleton<IEnvironmentConfigService>(sp =>
-            new EnvironmentConfigService(sp.GetRequiredService<EnvironmentConfigStore>()));
+            new EnvironmentConfigService(
+                sp.GetRequiredService<EnvironmentConfigStore>(),
+                sp.GetService<ProtectionLoweringPolicy>() ?? ProtectionLoweringPolicy.RequireConfirmation));
 
         // Connection service - requires profile-based token provider and environment ID
         // Registered as factory because it needs runtime values from ResolvedConnectionInfo

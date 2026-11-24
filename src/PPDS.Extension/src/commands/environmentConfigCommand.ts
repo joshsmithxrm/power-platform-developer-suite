@@ -1,7 +1,56 @@
 import * as vscode from 'vscode';
+import { ResponseError } from 'vscode-jsonrpc/node';
 
 import type { DaemonClient } from '../daemonClient.js';
 import { showErrorWithReport } from '../utils/errorNotify.js';
+
+/** Daemon error code for a type change that lowers write protection and was not confirmed (#1829). */
+export const PROTECTION_LOWERING_CONFIRMATION_REQUIRED = 'Environment.ProtectionLoweringConfirmationRequired';
+
+/** The modal's confirming button. Anything else, including dismissing the modal, cancels. */
+export const LOWER_PROTECTION_BUTTON = 'Lower protection';
+
+type EnvConfigSetParams = Parameters<DaemonClient['envConfigSet']>[0];
+
+/** True when the daemon refused a change because it lowers protection and was not confirmed. */
+export function isProtectionLoweringConfirmationRequired(error: unknown): boolean {
+    if (!(error instanceof ResponseError)) return false;
+    const data: unknown = error.data;
+    return !!data && typeof data === 'object'
+        && (data as { code?: unknown }).code === PROTECTION_LOWERING_CONFIRMATION_REQUIRED;
+}
+
+/** Shows the modal warning; resolves true only when the user chose {@link LOWER_PROTECTION_BUTTON}. */
+export async function confirmLowerProtection(serverMessage: string): Promise<boolean> {
+    const choice = await vscode.window.showWarningMessage(
+        'Lower this environment\'s write protection?',
+        { modal: true, detail: serverMessage },
+        LOWER_PROTECTION_BUTTON,
+    );
+    return choice === LOWER_PROTECTION_BUTTON;
+}
+
+/**
+ * Saves the configuration. When the daemon answers that the change lowers write protection, asks the
+ * user in a modal and resends with `confirmLowerProtection` only on an explicit yes. The daemon decides
+ * what lowers protection; the extension never sends the acknowledgement unasked.
+ */
+export async function saveEnvironmentConfig(
+    daemonClient: Pick<DaemonClient, 'envConfigSet'>,
+    params: Omit<EnvConfigSetParams, 'confirmLowerProtection'>,
+    confirm: (serverMessage: string) => Promise<boolean> = confirmLowerProtection,
+): Promise<'saved' | 'cancelled'> {
+    try {
+        await daemonClient.envConfigSet(params);
+        return 'saved';
+    } catch (error) {
+        if (!isProtectionLoweringConfirmationRequired(error)) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        if (!await confirm(message)) return 'cancelled';
+        await daemonClient.envConfigSet({ ...params, confirmLowerProtection: params.environmentUrl });
+        return 'saved';
+    }
+}
 
 /**
  * Available environment types. These map to the EnvironmentType enum
@@ -45,7 +94,7 @@ const ENVIRONMENT_COLORS = [
  * 2. InputBox for Label (free text)
  * 3. QuickPick for Type
  * 4. QuickPick for Color
- * 5. Save via daemon
+ * 5. Save via daemon; a type change that lowers write protection asks in a modal first
  * 6. Refresh environment display
  */
 export function registerEnvironmentConfigCommand(
@@ -173,13 +222,17 @@ export function registerEnvironmentConfigCommand(
                     ? undefined
                     : colorPick.label.replace('$(circle-filled) ', '');
 
-                // Step 5: Save via daemon
-                await daemonClient.envConfigSet({
+                // Step 5: Save via daemon (asks first if the change lowers write protection)
+                const outcome = await saveEnvironmentConfig(daemonClient, {
                     environmentUrl,
                     label: label || undefined,
                     type: selectedType,
                     color: selectedColor,
                 });
+                if (outcome === 'cancelled') {
+                    vscode.window.showInformationMessage('Environment configuration not changed.');
+                    return;
+                }
 
                 // Step 6: Refresh environment display
                 onConfigChanged();

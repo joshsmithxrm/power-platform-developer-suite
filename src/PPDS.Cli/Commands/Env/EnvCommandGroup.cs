@@ -553,9 +553,16 @@ public static class EnvCommandGroup
             Description = "Remove configuration for the environment"
         };
 
+        var confirmLowerProtectionOption = new Option<string?>(ConfirmLowerProtectionOptionName)
+        {
+            Description = "Acknowledge, for a non-interactive run, a --type change that lowers this environment's write protection " +
+                "(for example Production to Development). The value must be the environment URL being configured."
+        };
+
         var command = new Command("config", "Configure environment display settings (label, type, color)")
         {
-            urlArgument, labelOption, typeOption, colorOption, showOption, listOption, removeOption
+            urlArgument, labelOption, typeOption, colorOption, showOption, listOption, removeOption,
+            confirmLowerProtectionOption
         };
 
         command.SetAction(async (parseResult, cancellationToken) =>
@@ -567,6 +574,7 @@ public static class EnvCommandGroup
             var show = parseResult.GetValue(showOption);
             var list = parseResult.GetValue(listOption);
             var remove = parseResult.GetValue(removeOption);
+            var confirmLowerProtection = parseResult.GetValue(confirmLowerProtectionOption);
 
             await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
             var service = localProvider.GetRequiredService<IEnvironmentConfigService>();
@@ -608,22 +616,71 @@ public static class EnvCommandGroup
             if (label == null && type == null && color == null)
                 return await ExecuteConfigShowAsync(service, url, cancellationToken);
 
-            return await ExecuteConfigSetAsync(service, url, label, type, color, cancellationToken);
+            return await ExecuteConfigSetAsync(
+                service, url, label, type, color, confirmLowerProtection,
+                interactive: !Console.IsInputRedirected, Console.In, Console.Error, cancellationToken);
         });
 
         return command;
     }
 
-    private static async Task<int> ExecuteConfigSetAsync(
+    /// <summary>Option that acknowledges a type change lowering write protection (#1829).</summary>
+    internal const string ConfirmLowerProtectionOptionName = "--confirm-lower-protection";
+
+    /// <summary>
+    /// Saves the configuration. A change that lowers write protection is saved only after the user types
+    /// the environment URL (interactive run) or with <c>--confirm-lower-protection &lt;url&gt;</c>; the
+    /// service enforces this, the command only asks.
+    /// </summary>
+    internal static async Task<int> ExecuteConfigSetAsync(
         IEnvironmentConfigService service, string url,
         string? label, EnvironmentType? type, EnvironmentColor? color,
+        string? confirmLowerProtection, bool interactive, TextReader input, TextWriter error,
         CancellationToken ct)
     {
-        var config = await service.SaveConfigAsync(url, label, type, color, ct: ct);
+        var confirmation = confirmLowerProtection;
+        ProtectionChangeAssessment? assessment = null;
+        if (type is not null)
+        {
+            assessment = await service.AssessConfigChangeAsync(url, type, ct);
+            if (assessment.LowersProtection && confirmation is null && interactive)
+            {
+                error.WriteLine($"WARNING: {assessment.Describe()}");
+                error.WriteLine("Writes to this environment would then run without the confirmation they need now.");
+                error.Write($"Type the environment URL ({url}) to confirm, or press Enter to cancel: ");
+                var answer = input.ReadLine()?.Trim();
+                if (string.IsNullOrEmpty(answer))
+                {
+                    error.WriteLine("Cancelled. No change was saved.");
+                    return ExitCodes.Success;
+                }
+
+                // The service compares the typed URL with the environment and refuses a mismatch.
+                confirmation = answer;
+            }
+        }
+
+        EnvironmentConfig config;
+        try
+        {
+            config = await service.SaveConfigAsync(url, label, type, color, confirmLowerProtection: confirmation, ct: ct);
+        }
+        catch (PpdsException ex) when (ex.ErrorCode is EnvironmentConfirmationErrorCodes.ProtectionLoweringConfirmationRequired
+            or EnvironmentConfirmationErrorCodes.ProtectionLoweringRefused
+            or EnvironmentConfirmationErrorCodes.TargetMismatch
+            or EnvironmentConfirmationErrorCodes.InvalidUrl)
+        {
+            error.WriteLine($"Error: {ex.UserMessage}");
+            if (ex.ErrorCode == EnvironmentConfirmationErrorCodes.ProtectionLoweringConfirmationRequired)
+                error.WriteLine($"Run the command in an interactive terminal to confirm, or acknowledge the change with {ConfirmLowerProtectionOptionName} {url}.");
+            return ExceptionMapper.ToExitCode(ex);
+        }
 
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.Error.WriteLine("Environment configuration saved.");
+        error.WriteLine("Environment configuration saved.");
         Console.ResetColor();
+        if (assessment?.DiscoveredTypeWarning is { } warning)
+            error.WriteLine($"Warning: {warning}");
 
         WriteConfigDetails(config);
         return ExitCodes.Success;
