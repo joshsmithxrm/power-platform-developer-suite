@@ -67,6 +67,35 @@ internal static class DmlStatementSupport
     }
 
     /// <summary>
+    /// Throws a <see cref="DmlSafetyRefusalException"/> when any INSERT, UPDATE, DELETE, MERGE, EXECUTE AS or REVERT
+    /// inside <paramref name="fragment"/> (a script, block, IF, WHILE or TRY) is not on the allowlist.
+    /// </summary>
+    public static void ThrowIfAnyUnsupported(TSqlFragment fragment)
+    {
+        var collector = new DataStatementCollector();
+        fragment.Accept(collector);
+        foreach (var statement in collector.Statements)
+            ThrowIfUnsupported(statement);
+    }
+
+    private sealed class DataStatementCollector : TSqlFragmentVisitor
+    {
+        public List<TSqlStatement> Statements { get; } = new();
+
+        public override void Visit(InsertStatement node) => Statements.Add(node);
+
+        public override void Visit(UpdateStatement node) => Statements.Add(node);
+
+        public override void Visit(DeleteStatement node) => Statements.Add(node);
+
+        public override void Visit(MergeStatement node) => Statements.Add(node);
+
+        public override void Visit(ExecuteAsStatement node) => Statements.Add(node);
+
+        public override void Visit(RevertStatement node) => Statements.Add(node);
+    }
+
+    /// <summary>
     /// The base table an UPDATE/DELETE writes to, after <see cref="FindUnsupported"/> accepted it: the FROM table when the
     /// target is its alias or name, otherwise the target itself.
     /// </summary>

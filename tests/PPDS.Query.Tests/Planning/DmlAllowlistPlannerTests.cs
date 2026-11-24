@@ -27,7 +27,8 @@ public class DmlAllowlistPlannerTests
     [InlineData("UPDATE account SET name = GETDATE() WHERE name = 'x'", "GETDATE")]
     [InlineData("UPDATE account SET name = 'y' FROM account JOIN contact ON contact.parentcustomerid = account.accountid", "FROM is supported only")]
     [InlineData("DELETE account FROM (SELECT accountid FROM account) AS account", "FROM is supported only")]
-    [InlineData("INSERT INTO account (name) SELECT UPPER(name) FROM account", "needs an alias")]
+    [InlineData("INSERT INTO account (name) SELECT 'x' FROM account", "needs an alias")]
+    [InlineData("INSERT INTO account (name) SELECT UPPER(name) AS n FROM account", "the function UPPER")]
     [InlineData("INSERT INTO [QA].dbo.account (name) VALUES ('a')", "another environment")]
     [InlineData("MERGE account AS t USING contact AS s ON t.name = s.lastname WHEN NOT MATCHED THEN INSERT (name) VALUES (s.lastname);", "MERGE")]
     [InlineData("BEGIN TRY DELETE TOP (1) FROM account WHERE name = 'x' END TRY BEGIN CATCH END CATCH", "TOP")]
@@ -58,17 +59,17 @@ public class DmlAllowlistPlannerTests
     [Fact]
     public void AliasTarget_IsPlannedAgainstTheAliasedTable()
     {
-        var result = Plan("UPDATE a SET name = UPPER(a.name) FROM account a WHERE a.name = 'x'");
+        var result = Plan("UPDATE a SET name = a.description FROM account a WHERE a.name = 'x'");
 
         var node = result.RootNode.Should().BeOfType<DmlExecuteNode>().Subject;
         node.EntityLogicalName.Should().Be("account");
-        result.FetchXml.Should().Contain("<attribute name=\"accountid\"").And.Contain("<attribute name=\"name\"");
+        result.FetchXml.Should().Contain("<attribute name=\"accountid\"").And.Contain("<attribute name=\"description\"");
     }
 
     [Fact]
-    public void SetExpression_FetchesEveryColumnItReads()
+    public void SetColumns_FetchEveryColumnTheyRead()
     {
-        var result = Plan("UPDATE account SET name = COALESCE(description, NULLIF(name, 'x'), CASE revenue WHEN 1 THEN 'a' END) WHERE name = 'x'");
+        var result = Plan("UPDATE account SET name = description, description = name, revenue = revenue WHERE name = 'x'");
 
         foreach (var column in new[] { "description", "name", "revenue" })
             result.FetchXml.Should().Contain($"<attribute name=\"{column}\"");
@@ -88,21 +89,21 @@ public class DmlAllowlistPlannerTests
     [InlineData("UPDATE account SET name = 'x' WHERE name = 'y' OPTION (MAXDOP 1)", "OPTION")]
     [InlineData("DELETE FROM account WHERE revenue = 2.5E0", "floating-point literal")]
     [InlineData("UPDATE account SET revenue = 2.5E0 WHERE name = 'y'", "floating-point literal")]
-    [InlineData("UPDATE account SET name = CAST(name AS nvarchar) WHERE name = 'y'", "nvarchar(n) with a length")]
-    [InlineData("UPDATE account SET name = CAST(name AS nvarchar(max)) WHERE name = 'y'", "nvarchar(n) with a length")]
-    [InlineData("UPDATE account SET name = CONVERT(nvarchar, revenue) WHERE name = 'y'", "nvarchar(n) with a length")]
-    [InlineData("UPDATE account SET revenue = CAST(revenue AS decimal) WHERE name = 'y'", "decimal(p, s)")]
-    [InlineData("UPDATE account SET revenue = CAST(revenue AS decimal(10)) WHERE name = 'y'", "decimal(p, s)")]
-    [InlineData("UPDATE account SET revenue = CAST(revenue AS numeric(10, 2)) WHERE name = 'y'", "decimal(p, s)")]
-    [InlineData("UPDATE account SET revenue = TRY_CAST(revenue AS decimal) WHERE name = 'y'", "int or decimal(p, s)")]
-    [InlineData("UPDATE account SET name = TRIM(TRAILING FROM name) WHERE name = 'y'", "LEADING, TRAILING, BOTH or FROM")]
-    [InlineData("UPDATE account SET name = TRIM('x' FROM name) WHERE name = 'y'", "LEADING, TRAILING, BOTH or FROM")]
-    [InlineData("UPDATE account SET name = LTRIM(name, 'x') WHERE name = 'y'", "takes one argument")]
-    [InlineData("UPDATE account SET name = SUBSTRING(name, 1, -1) WHERE name = 'y'", "SUBSTRING a start of 1")]
-    [InlineData("UPDATE account SET name = SUBSTRING(name, 0, 3) WHERE name = 'y'", "SUBSTRING a start of 1")]
-    [InlineData("UPDATE account SET name = SUBSTRING(name, revenue, 3) WHERE name = 'y'", "SUBSTRING a start of 1")]
-    [InlineData("UPDATE account SET revenue = ROUND(revenue, -1) WHERE name = 'y'", "number of decimal places from 0 to 10")]
-    [InlineData("UPDATE account SET revenue = ROUND(revenue, 1, 1) WHERE name = 'y'", "number of decimal places from 0 to 10")]
+    [InlineData("UPDATE account SET name = CAST(name AS nvarchar) WHERE name = 'y'", "a CAST other than")]
+    [InlineData("UPDATE account SET name = CAST(name AS nvarchar(max)) WHERE name = 'y'", "a CAST other than")]
+    [InlineData("UPDATE account SET name = CONVERT(nvarchar, revenue) WHERE name = 'y'", "(CONVERT)")]
+    [InlineData("UPDATE account SET revenue = CAST(revenue AS decimal) WHERE name = 'y'", "a CAST other than")]
+    [InlineData("UPDATE account SET revenue = CAST(revenue AS decimal(10)) WHERE name = 'y'", "a CAST other than")]
+    [InlineData("UPDATE account SET revenue = CAST(revenue AS numeric(10, 2)) WHERE name = 'y'", "a CAST other than")]
+    [InlineData("UPDATE account SET revenue = TRY_CAST(revenue AS decimal) WHERE name = 'y'", "(TRY_CAST)")]
+    [InlineData("UPDATE account SET name = TRIM(TRAILING FROM name) WHERE name = 'y'", "the function TRIM")]
+    [InlineData("UPDATE account SET name = TRIM('x' FROM name) WHERE name = 'y'", "the function TRIM")]
+    [InlineData("UPDATE account SET name = LTRIM(name, 'x') WHERE name = 'y'", "the function LTRIM")]
+    [InlineData("UPDATE account SET name = SUBSTRING(name, 1, -1) WHERE name = 'y'", "the function SUBSTRING")]
+    [InlineData("UPDATE account SET name = SUBSTRING(name, 0, 3) WHERE name = 'y'", "the function SUBSTRING")]
+    [InlineData("UPDATE account SET name = SUBSTRING(name, revenue, 3) WHERE name = 'y'", "the function SUBSTRING")]
+    [InlineData("UPDATE account SET revenue = ROUND(revenue, -1) WHERE name = 'y'", "the function ROUND")]
+    [InlineData("UPDATE account SET revenue = ROUND(revenue, 1, 1) WHERE name = 'y'", "the function ROUND")]
     [InlineData("INSERT INTO account (name) VALUES (UPPER('a'))", "literal values only")]
     [InlineData("INSERT INTO account (numberofemployees) VALUES (1 + 2)", "literal values only")]
     [InlineData("INSERT INTO account (name) VALUES (CONCAT('b', 1))", "literal values only")]
@@ -110,9 +111,9 @@ public class DmlAllowlistPlannerTests
     [InlineData("INSERT INTO account (name) SELECT TOP 2 name FROM account", "TOP without ORDER BY")]
     [InlineData("INSERT INTO account (name) SELECT TOP 5001 name FROM account ORDER BY name", "at most 5000")]
     [InlineData("INSERT INTO account (name) SELECT name FROM contact", "from another table")]
-    [InlineData("UPDATE account SET revenue = TRY_CAST(revenue AS decimal(38, 30)) WHERE name = 'y'", "precision at most 28")]
-    [InlineData("UPDATE account SET revenue = CAST(revenue AS decimal(29, 0)) WHERE name = 'y'", "at most 28")]
-    [InlineData("UPDATE account SET revenue = ROUND(revenue, 11) WHERE name = 'y'", "from 0 to 10")]
+    [InlineData("UPDATE account SET revenue = TRY_CAST(revenue AS decimal(38, 30)) WHERE name = 'y'", "(TRY_CAST)")]
+    [InlineData("UPDATE account SET revenue = CAST(revenue AS decimal(29, 0)) WHERE name = 'y'", "a CAST other than")]
+    [InlineData("UPDATE account SET revenue = ROUND(revenue, 11) WHERE name = 'y'", "the function ROUND")]
     [InlineData("INSERT INTO account (name) SELECT name FROM account ORDER BY name", "ORDER BY without TOP")]
     [InlineData("INSERT INTO account (description, name) SELECT name AS description, UPPER(description) AS u FROM account", "also the name of a column")]
     public void NotProvenLive_IsRefusedByThePlanner(string sql, string named)
@@ -155,9 +156,9 @@ public class DmlAllowlistPlannerTests
     [InlineData("INSERT INTO account (name, revenue, accountid) VALUES ('a', -2.5, CAST('00000000-0000-0000-0000-000000000001' AS uniqueidentifier))")]
     [InlineData("INSERT INTO account (name) SELECT TOP (0) name FROM account ORDER BY name")]
     [InlineData("INSERT INTO account (name) SELECT TOP 5000 name FROM account ORDER BY name")]
-    [InlineData("INSERT INTO account (name, description) SELECT TOP 10 s.name, CONCAT(s.name, '!') AS c FROM account s WHERE s.name LIKE 'a%' OR s.revenue BETWEEN 1 AND 2 ORDER BY s.name, s.revenue")]
-    [InlineData("UPDATE account SET name = SUBSTRING(name, 1, 0), revenue = ROUND(revenue, 2) WHERE name = 'y'")]
-    [InlineData("UPDATE account SET name = CAST(name AS nvarchar(3)), revenue = TRY_CONVERT(decimal(3, 2), revenue) WHERE name = 'y'")]
+    [InlineData("INSERT INTO account (name, description) SELECT TOP 10 s.name, s.description AS c FROM account s WHERE s.name LIKE 'a%' OR s.revenue BETWEEN 1 AND 2 ORDER BY s.name, s.revenue")]
+    [InlineData("UPDATE account SET name = description, revenue = -2.5, description = NULL WHERE name = 'y'")]
+    [InlineData("UPDATE account SET name = N'x', numberofemployees = -7, parentaccountid = CAST('{00000000-0000-0000-0000-000000000001}' AS uniqueidentifier) WHERE name = 'y'")]
     public void ProvenShapes_ArePlanned(string sql)
     {
         PlanAndPlanInner(sql);

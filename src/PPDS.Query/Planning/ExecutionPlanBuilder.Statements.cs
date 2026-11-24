@@ -502,6 +502,11 @@ public sealed partial class ExecutionPlanBuilder
     private QueryPlanResult PlanScript(
         IReadOnlyList<TSqlStatement> statements, QueryPlanOptions options)
     {
+        // The statements of a script are planned one by one as they run, so every data statement in it (in any block,
+        // IF branch, loop or TRY) is checked against the allowlist first: a refused statement cannot follow writes.
+        foreach (var statement in statements)
+            DmlStatementSupport.ThrowIfAnyUnsupported(statement);
+
         var scriptNode = new ScriptExecutionNode(statements, this, _expressionCompiler, _sessionContext, options);
 
         return new QueryPlanResult
