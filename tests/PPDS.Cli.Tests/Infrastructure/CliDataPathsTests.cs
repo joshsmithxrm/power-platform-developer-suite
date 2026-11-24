@@ -141,7 +141,7 @@ public sealed class CliDataPathsTests : IDisposable
         // Write the file as the script would, then let the next CLI start consume it.
         File.WriteAllText(statusPath, "{\"success\":false,\"exitCode\":1,\"targetVersion\":\"9.9.9\"}");
         var originalError = Console.Error;
-        var error = new StringWriter();
+        using var error = new StringWriter();
         Console.SetError(error);
         try
         {
@@ -248,7 +248,7 @@ public sealed class CliDataPathsTests : IDisposable
         var statusFile = Path.Combine(_configDir, "update-status.json");
         await File.WriteAllTextAsync(statusFile, "{\"success\":true,\"targetVersion\":\"9.9.9\"}");
         var originalError = Console.Error;
-        var error = new StringWriter();
+        using var error = new StringWriter();
         Console.SetError(error);
         try
         {
