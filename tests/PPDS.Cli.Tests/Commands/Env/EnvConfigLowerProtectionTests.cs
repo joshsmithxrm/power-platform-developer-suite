@@ -46,7 +46,10 @@ public sealed class EnvConfigLowerProtectionTests : IDisposable
         exit.Should().Be(ExitCodes.ConfirmationRequired);
         (await _store.GetConfigAsync(Url))!.Type.Should().Be(EnvironmentType.Production);
         _error.ToString().Should().Contain("lowers write protection")
-            .And.Contain($"{EnvCommandGroup.ConfirmLowerProtectionOptionName} {Url}");
+            .And.Contain(EnvCommandGroup.ConfirmLowerProtectionOptionName);
+        // The option is named, but no ready-made command with the address filled in is printed.
+        _error.ToString().Should().NotContain($"{EnvCommandGroup.ConfirmLowerProtectionOptionName} {Url}")
+            .And.NotContain($"{EnvCommandGroup.ConfirmLowerProtectionOptionName} https://");
     }
 
     [Fact]
@@ -60,12 +63,16 @@ public sealed class EnvConfigLowerProtectionTests : IDisposable
         (await _store.GetConfigAsync(Url))!.Type.Should().Be(EnvironmentType.Development);
     }
 
-    [Fact]
-    public async Task Acknowledgement_NamingAnotherEnvironment_IsRefused()
+    [Theory]
+    [InlineData("https://other.crm.dynamics.com")]
+    [InlineData("https://org")]                              // a prefix of the address
+    [InlineData("https://org.crm.dynamics.com.example.test")] // the address as a prefix
+    [InlineData("https://org.crm.dynamics.com/extra")]
+    public async Task Acknowledgement_NamingAnotherEnvironment_IsRefused(string acknowledgement)
     {
         await _store.SaveConfigAsync(Url, type: EnvironmentType.Production);
 
-        var exit = await RunAsync(EnvironmentType.Development, acknowledgement: "https://other.crm.dynamics.com",
+        var exit = await RunAsync(EnvironmentType.Development, acknowledgement: acknowledgement,
             interactive: false, input: "");
 
         exit.Should().NotBe(ExitCodes.Success);
@@ -92,18 +99,21 @@ public sealed class EnvConfigLowerProtectionTests : IDisposable
 
         var exit = await RunAsync(EnvironmentType.Development, acknowledgement: null, interactive: true, input: "\n");
 
-        exit.Should().Be(ExitCodes.Success);
+        // A cancel exits like a refusal: the requested change was not made.
+        exit.Should().Be(ExitCodes.ConfirmationRequired);
         (await _store.GetConfigAsync(Url))!.Type.Should().Be(EnvironmentType.Production);
         _error.ToString().Should().Contain("Cancelled. No change was saved.");
     }
 
-    [Fact]
-    public async Task Interactive_TypingAnotherUrl_IsRefused()
+    [Theory]
+    [InlineData("https://other.crm.dynamics.com")]
+    [InlineData("https://org")]
+    public async Task Interactive_TypingAnotherUrl_IsRefused(string typed)
     {
         await _store.SaveConfigAsync(Url, type: EnvironmentType.Production);
 
         var exit = await RunAsync(EnvironmentType.Development, acknowledgement: null, interactive: true,
-            input: "https://other.crm.dynamics.com\n");
+            input: typed + "\n");
 
         exit.Should().NotBe(ExitCodes.Success);
         (await _store.GetConfigAsync(Url))!.Type.Should().Be(EnvironmentType.Production);

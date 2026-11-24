@@ -171,6 +171,10 @@ public sealed class EnvironmentProtectionLoweringTests : IDisposable
     [Theory]
     [InlineData("https://other.crm.dynamics.com")]
     [InlineData("http://org.crm.dynamics.com")]
+    [InlineData("https://org")]                                // a prefix of the address
+    [InlineData("https://org.crm.dynamics.co")]                // a shorter prefix ending inside the host
+    [InlineData("https://org.crm.dynamics.com.example.test")]  // the address as a prefix
+    [InlineData("https://org.crm.dynamics.com/extra")]
     public async Task Confirmation_ForAnotherEnvironment_IsRefusedAndNothingIsSaved(string confirmation)
     {
         await _store.SaveConfigAsync(Url, type: EnvironmentType.Production);

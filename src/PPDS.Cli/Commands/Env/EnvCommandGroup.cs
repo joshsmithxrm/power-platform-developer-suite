@@ -618,7 +618,7 @@ public static class EnvCommandGroup
 
             return await ExecuteConfigSetAsync(
                 service, url, label, type, color, confirmLowerProtection,
-                interactive: !Console.IsInputRedirected, Console.In, Console.Error, cancellationToken);
+                interactive: !IsInputRedirected(), Console.In, Console.Error, cancellationToken);
         });
 
         return command;
@@ -626,6 +626,13 @@ public static class EnvCommandGroup
 
     /// <summary>Option that acknowledges a type change lowering write protection (#1829).</summary>
     internal const string ConfirmLowerProtectionOptionName = "--confirm-lower-protection";
+
+    /// <summary>
+    /// Whether standard input is redirected. <c>env config</c> prompts for a confirmation only when it is
+    /// not: piped or empty input is a non-interactive run, which needs the acknowledgement option.
+    /// Replaceable in tests.
+    /// </summary>
+    internal static Func<bool> IsInputRedirected { get; set; } = () => Console.IsInputRedirected;
 
     /// <summary>
     /// Saves the configuration. A change that lowers write protection is saved only after the user types
@@ -651,8 +658,9 @@ public static class EnvCommandGroup
                 var answer = input.ReadLine()?.Trim();
                 if (string.IsNullOrEmpty(answer))
                 {
+                    // Same exit code as an unconfirmed lowering: the requested change was not made.
                     error.WriteLine("Cancelled. No change was saved.");
-                    return ExitCodes.Success;
+                    return ExitCodes.ConfirmationRequired;
                 }
 
                 // The service compares the typed URL with the environment and refuses a mismatch.
@@ -671,8 +679,10 @@ public static class EnvCommandGroup
             or EnvironmentConfirmationErrorCodes.InvalidUrl)
         {
             error.WriteLine($"Error: {ex.UserMessage}");
+            // Names the option but not a ready-made command with the address filled in: whoever acknowledges
+            // the change should have read why it was refused (#1829).
             if (ex.ErrorCode == EnvironmentConfirmationErrorCodes.ProtectionLoweringConfirmationRequired)
-                error.WriteLine($"Run the command in an interactive terminal to confirm, or acknowledge the change with {ConfirmLowerProtectionOptionName} {url}.");
+                error.WriteLine($"Run the command in an interactive terminal to confirm, or acknowledge the change with {ConfirmLowerProtectionOptionName} followed by the environment URL.");
             return ExceptionMapper.ToExitCode(ex);
         }
 

@@ -1,5 +1,7 @@
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
+using PPDS.Auth.Credentials;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services;
@@ -60,6 +62,24 @@ public sealed class McpSafetyPoliciesTests : IDisposable
     public void McpRegistration_RegistersTheRefusePolicy()
     {
         using var provider = BuildLikeMcp();
+
+        provider.GetRequiredService<ProtectionLoweringPolicy>().Should().BeSameAs(ProtectionLoweringPolicy.Refuse);
+    }
+
+    [Fact]
+    public async Task PerCallProvider_FromToolContext_CarriesTheRefusePolicy()
+    {
+        // The provider each tool call gets (McpToolContext.CreateServiceProviderAsync, production path,
+        // no factory override) registers the CLI services again, so it must register the policy again.
+        // Only the policy is resolved: nothing here reads or writes a configuration file.
+        var profile = new AuthProfile { Index = 1, Name = "fixture", Username = "user@invalid.test", Environment = new() { Url = "https://org.example.test" } };
+        using var profiles = new ProfileStore(Path.Combine(_tempDir, "profiles.json"));
+        await profiles.SaveAsync(new ProfileCollection { Profiles = [profile], ActiveProfileIndex = 1 });
+        using var context = new McpToolContext(
+            Mock.Of<IMcpConnectionPoolManager>(), profiles, Mock.Of<ISecureCredentialStore>(), new McpSessionOptions());
+        await context.InitializeAsync();
+
+        await using var provider = await context.CreateServiceProviderAsync();
 
         provider.GetRequiredService<ProtectionLoweringPolicy>().Should().BeSameAs(ProtectionLoweringPolicy.Refuse);
     }
