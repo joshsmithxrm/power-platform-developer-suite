@@ -1,3 +1,5 @@
 #nullable enable
 PPDS.Auth.Profiles.EnvironmentConfigStore.SaveConfigAsync(string! url, string? label, PPDS.Auth.Profiles.EnvironmentType? type, PPDS.Auth.Profiles.EnvironmentColor? color, bool clearColor, string? discoveredType, string? profileName, System.Action<PPDS.Auth.Profiles.EnvironmentConfig?, PPDS.Auth.Profiles.EnvironmentConfig!>! validate, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Profiles.EnvironmentConfig!>!
 PPDS.Auth.Profiles.EnvironmentConfigStore.UpdateAsync(System.Func<PPDS.Auth.Profiles.EnvironmentConfigCollection!, bool>! update, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+PPDS.Auth.Profiles.EnvironmentConfigStore.ReloadAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Profiles.EnvironmentConfigCollection!>!
+static readonly PPDS.Auth.Profiles.EnvironmentConfigStore.DefaultLockTimeout -> System.TimeSpan
