@@ -6,6 +6,7 @@ using Moq;
 using Moq.Protected;
 using PPDS.Cli.Services.UpdateCheck;
 using Xunit;
+using PPDS.Tests.Shared;
 
 namespace PPDS.Cli.Tests.Services.UpdateCheck;
 
@@ -389,7 +390,7 @@ public class UpdateCheckServiceTests : IDisposable
         var svc = new UpdateCheckService(handler: handler, cachePath: _cacheFile) { Clock = clock };
 
         svc.RefreshCacheInBackgroundIfStale("1.0.0");
-        await svc.BackgroundRefreshTask.WaitAsync(TimeSpan.FromSeconds(10));
+        await HangBackstop.WaitAsync(svc.BackgroundRefreshTask, "the background cache refresh");
 
         var cached = svc.GetCachedResult();
         Assert.NotNull(cached);
@@ -430,14 +431,14 @@ public class UpdateCheckServiceTests : IDisposable
         var svc = new UpdateCheckService(handler.Object, _cacheFile) { Clock = new TestClock() };
 
         svc.RefreshCacheInBackgroundIfStale("1.0.0");
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await HangBackstop.WaitAsync(started.Task, "the background refresh to send its request");
         Assert.False(svc.BackgroundRefreshTask.IsCompleted);
         Assert.False(File.Exists(_cacheFile));
         response.SetResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(MakeVersionsJson("2.0.0"), Encoding.UTF8, "application/json")
         });
-        await svc.BackgroundRefreshTask.WaitAsync(TimeSpan.FromSeconds(10));
+        await HangBackstop.WaitAsync(svc.BackgroundRefreshTask, "the background cache refresh");
         Assert.Equal("2.0.0", svc.GetCachedResult()!.LatestStableVersion);
     }
 
@@ -446,7 +447,7 @@ public class UpdateCheckServiceTests : IDisposable
     {
         var svc = new UpdateCheckService(BuildThrowingHandler(), _cacheFile) { Clock = new TestClock() };
         svc.RefreshCacheInBackgroundIfStale("1.0.0");
-        await svc.BackgroundRefreshTask.WaitAsync(TimeSpan.FromSeconds(10));
+        await HangBackstop.WaitAsync(svc.BackgroundRefreshTask, "the background cache refresh");
         Assert.Null(svc.GetCachedResult());
         Assert.False(File.Exists(_cacheFile));
     }
