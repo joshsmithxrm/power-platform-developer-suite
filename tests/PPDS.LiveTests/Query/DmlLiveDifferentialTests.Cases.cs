@@ -52,16 +52,18 @@ public sealed partial class DmlLiveDifferentialTests
     {
         await WhereCasesAsync();
         await WriteCasesAsync();
-        await ValueCasesAsync();
-        await ArithmeticCasesAsync();
-        await ChoiceFunctionCasesAsync();
-        await ConversionCasesAsync();
+        // Computed values: refused under the interim rule (see ComputedAsync).
+        await ComputedAsync(ValueCasesAsync);
+        await ComputedAsync(ArithmeticCasesAsync);
+        await ComputedAsync(ChoiceFunctionCasesAsync);
+        await ComputedAsync(ConversionCasesAsync);
         await InsertCasesAsync();
         await HintAndCapCasesAsync();
         await ErrorCasesAsync();
         await SelectChecksAsync();
         await RefusedCasesAsync();
         await ScriptCasesAsync();
+        await RefusedScriptCaseAsync();
         await DeleteCasesAsync(); // last: deleting a seed row gives it a new id when it is recreated
     }
 
@@ -310,7 +312,7 @@ public sealed partial class DmlLiveDifferentialTests
         await Upd($"UPDATE {t} SET ppds_note = 'F' FROM {t} WHERE {t}.ppds_num = 2", Num1(2), r => r.With(Note, "F"));
         await Upd($"UPDATE dbo.{t} SET ppds_note = 'F' FROM {t} WHERE ppds_num = 4", Num1(4), r => r.With(Note, "F"));
         await Upd($"UPDATE [{t.ToUpperInvariant()}] SET [PPDS_NOTE] = 'UP' WHERE [PPDS_NUM] = 1", Num1(1), r => r.With(Note, "UP"));
-        await Upd($"UPDATE {t.ToUpperInvariant()} SET PPDS_NOTE = UPPER(PPDS_NAME) WHERE PPDS_NUM = 2", Num1(2), r => r.With(Note, S(r, N)?.ToUpperInvariant()));
+        await Upd($"UPDATE {t.ToUpperInvariant()} SET PPDS_NOTE = PPDS_NAME WHERE PPDS_NUM = 2", Num1(2), r => r.With(Note, S(r, N)));
 
         // no WHERE, with the environment's no-WHERE prevention switched off
         await WithSettingsAsync(new QuerySafetySettings { PreventUpdateWithoutWhere = false },
@@ -346,15 +348,18 @@ public sealed partial class DmlLiveDifferentialTests
         await Set($"ppds_parent = CAST('{id4}' AS uniqueidentifier)", r => r.With(Parent, 4), "ppds_num = 4", r => I(r, Num) == 4);
         await Set("ppds_parent = NULL", r => r.With(Parent, null));
         await Set("ppds_money = 12.34", r => r.With(MoneyCol, 12.34m));
-        await Set("ppds_money = ppds_money * 2", r => r.With(MoneyCol, M(r, MoneyCol) * 2));
-        await Set("ppds_money = ppds_money + 1", r => r.With(MoneyCol, M(r, MoneyCol) + 1));
+        await ComputedAsync(async () =>
+        {
+            await Set("ppds_money = ppds_money * 2", r => r.With(MoneyCol, M(r, MoneyCol) * 2));
+            await Set("ppds_money = ppds_money + 1", r => r.With(MoneyCol, M(r, MoneyCol) + 1));
+            await Set("ppds_float = ppds_float + 1", r => r.With(FloatCol, M(r, FloatCol) + 1));
+            await Set("ppds_float = ppds_float * 2", r => r.With(FloatCol, M(r, FloatCol) * 2));
+            await Set("ppds_memo = CONCAT(ppds_memo, '!')", r => r.With(Memo, (S(r, Memo) ?? "") + "!"));
+        });
         await Set("ppds_money = NULL", r => r.With(MoneyCol, null));
         await Set("ppds_float = 3.5", r => r.With(FloatCol, 3.5m));
-        await Set("ppds_float = ppds_float + 1", r => r.With(FloatCol, M(r, FloatCol) + 1));
-        await Set("ppds_float = ppds_float * 2", r => r.With(FloatCol, M(r, FloatCol) * 2));
         await Set("ppds_float = NULL", r => r.With(FloatCol, null));
         await Set("ppds_memo = 'new memo'", r => r.With(Memo, "new memo"));
-        await Set("ppds_memo = CONCAT(ppds_memo, '!')", r => r.With(Memo, (S(r, Memo) ?? "") + "!"));
         await Set("ppds_memo = NULL", r => r.With(Memo, null));
         await Set("ppds_num = NULL", r => r.With(Num, null));
         await Set("ppds_amount = NULL", r => r.With(Amount, null));
@@ -374,6 +379,17 @@ public sealed partial class DmlLiveDifferentialTests
             r => r.With(FloatCol, I(r, Num)).With(Amount, 1m).With(MoneyCol, -1m));
         await SetAll("ppds_float = -1, ppds_memo = N'ň memo', ppds_note = '2024-01-01'",
             r => r.With(FloatCol, -1m).With(Memo, "ň memo").With(Note, "2024-01-01"));
+        await SetAll("ppds_note = 'lit'", r => r.With(Note, "lit"));
+
+        // implicit conversions of a decimal or floating-point value to a whole number truncate toward zero, as in SQL
+        await SetAll("ppds_num = ppds_amount", r => r.With(Num, Trunc(M(r, Amount))));
+        await SetAll("ppds_num = ppds_float", r => r.With(Num, Trunc(M(r, FloatCol))));
+        await SetAll("ppds_num = 2.7", r => r.With(Num, 2));
+        await SetAll("ppds_num = -2.7", r => r.With(Num, -2));
+
+        // the GUID cast in each admitted spelling (braces, lower case)
+        await Set($"ppds_parent = CAST('{{{id4.ToString().ToUpperInvariant()}}}' AS uniqueidentifier)", r => r.With(Parent, 4), "ppds_num = 4", r => I(r, Num) == 4);
+        await Set($"ppds_parent = CAST('{id0.ToString().ToLowerInvariant()}' AS uniqueidentifier)", r => r.With(Parent, 0), "ppds_num = 4", r => I(r, Num) == 4);
     }
 
     // ── values the engine computes ───────────────────────────────────────────────────────────
@@ -418,7 +434,6 @@ public sealed partial class DmlLiveDifferentialTests
             ("CAST(ppds_memo AS nvarchar(4000))", r => S(r, Memo)),
             ("CONVERT(nvarchar(4000), ppds_name)", r => S(r, N)),
             ("CAST('lit' AS nvarchar(2))", _ => "li"),
-            ("'lit'", _ => "lit"),
             ("CONCAT(ppds_name, ppds_num)", r => (S(r, N) ?? "") + (I(r, Num)?.ToString(CultureInfo.InvariantCulture) ?? "")),
             ("CONCAT(ppds_name, '#', CONVERT(nvarchar(10), ppds_num * 2))", r => (S(r, N) ?? "") + "#" + ((I(r, Num) * 2)?.ToString(CultureInfo.InvariantCulture) ?? "")),
             ("CONCAT(ppds_name, CAST(ppds_amount AS int))", r => (S(r, N) ?? "") + (Trunc(M(r, Amount))?.ToString(CultureInfo.InvariantCulture) ?? "")),
@@ -450,11 +465,6 @@ public sealed partial class DmlLiveDifferentialTests
             // D-2: currency to a whole number only through decimal(19, 4), which truncates as SQL Server truncates a decimal
             ("CAST(CAST(ppds_money AS decimal(19, 4)) AS int)", r => Trunc(M(r, MoneyCol))),
             ("TRY_CAST(CAST(ppds_money AS decimal(19, 4)) AS int)", r => Trunc(M(r, MoneyCol))),
-            // implicit conversions of a decimal or floating-point value to a whole number truncate toward zero, as in SQL
-            ("ppds_amount", r => Trunc(M(r, Amount))),
-            ("ppds_float", r => Trunc(M(r, FloatCol))),
-            ("2.7", _ => 2),
-            ("-2.7", _ => -2),
         };
         foreach (var (expr, value) in nums)
             await SetAll($"ppds_num = {expr}", r => r.With(Num, value(r)));
@@ -678,12 +688,19 @@ public sealed partial class DmlLiveDifferentialTests
         await Ins($"INSERT INTO {t} (ppds_name) SELECT TOP (0) ppds_name FROM {t} ORDER BY ppds_name", _ => []);
         // the largest TOP (every row of this table)
         await Ins($"INSERT INTO {t} (ppds_name, ppds_num) SELECT TOP 5000 ppds_name, ppds_num FROM {t} ORDER BY ppds_num", rows => rows.Select(r => Copy(r, N, Num)));
-        await Ins($"INSERT INTO {t} (ppds_name, ppds_note) SELECT ppds_name AS n, UPPER(ppds_name) AS u FROM {t} WHERE ppds_num = 1",
-            rows => rows.Where(r => I(r, Num) == 1).Select(r => Inserted((N, S(r, N)), (Note, S(r, N)?.ToUpperInvariant()))));
-        await Ins($"INSERT INTO {t} (ppds_note, ppds_name) SELECT ppds_name, COALESCE(ppds_note, 'none') AS c FROM {t} WHERE ppds_num >= 4",
-            rows => rows.Where(r => I(r, Num) >= 4).Select(r => Inserted((Note, S(r, N)), (N, S(r, Note) ?? "none"))));
-        await Ins($"INSERT INTO {t} (ppds_name, ppds_num) SELECT CONCAT(ppds_name, '!') AS c, ppds_num * 2 AS d FROM {t} WHERE ppds_num BETWEEN 1 AND 2",
-            rows => rows.Where(r => I(r, Num) is >= 1 and <= 2).Select(r => Inserted((N, (S(r, N) ?? "") + "!"), (Num, I(r, Num) * 2))));
+        await ComputedAsync(async () =>
+        {
+            await Ins($"INSERT INTO {t} (ppds_name, ppds_note) SELECT ppds_name AS n, UPPER(ppds_name) AS u FROM {t} WHERE ppds_num = 1",
+                rows => rows.Where(r => I(r, Num) == 1).Select(r => Inserted((N, S(r, N)), (Note, S(r, N)?.ToUpperInvariant()))));
+            await Ins($"INSERT INTO {t} (ppds_note, ppds_name) SELECT ppds_name, COALESCE(ppds_note, 'none') AS c FROM {t} WHERE ppds_num >= 4",
+                rows => rows.Where(r => I(r, Num) >= 4).Select(r => Inserted((Note, S(r, N)), (N, S(r, Note) ?? "none"))));
+            await Ins($"INSERT INTO {t} (ppds_name, ppds_num) SELECT CONCAT(ppds_name, '!') AS c, ppds_num * 2 AS d FROM {t} WHERE ppds_num BETWEEN 1 AND 2",
+                rows => rows.Where(r => I(r, Num) is >= 1 and <= 2).Select(r => Inserted((N, (S(r, N) ?? "") + "!"), (Num, I(r, Num) * 2))));
+        });
+        await Ins($"INSERT INTO {t} (ppds_name, ppds_note) SELECT ppds_name AS n, ppds_name AS u FROM {t} WHERE ppds_num = 1",
+            rows => rows.Where(r => I(r, Num) == 1).Select(r => Inserted((N, S(r, N)), (Note, S(r, N)))));
+        await Ins($"INSERT INTO {t} (ppds_name, ppds_note, ppds_num) SELECT ppds_name, 'copy' AS c, -1 AS d FROM {t} WHERE ppds_num >= 4",
+            rows => rows.Where(r => I(r, Num) >= 4).Select(r => Inserted((N, S(r, N)), (Note, "copy"), (Num, -1))));
         await Ins($"INSERT INTO {t} (ppds_name, ppds_num) SELECT ppds_name, ppds_num FROM {t} WHERE ppds_name LIKE 'ca%' OR ppds_num BETWEEN 1 AND 2",
             rows => rows.Where(r => TLike(S(r, N), "ca%") || I(r, Num) is >= 1 and <= 2).Select(r => Copy(r, N, Num)));
         await Ins($"INSERT INTO {t} (ppds_name, ppds_num) SELECT s.ppds_name, s.ppds_num FROM {t} s WHERE s.ppds_num = 1",
@@ -741,31 +758,33 @@ public sealed partial class DmlLiveDifferentialTests
         await RefusedAsync($"UPDATE {t} SET ppds_note = 'CAP' WHERE ppds_num IS NOT NULL", ErrorCodes.Query.DmlRowCapExceeded, rowCap: notNull - 1);
     }
 
-    // ── values T-SQL refuses while running: the statement fails, nothing is written ────────────
+    // ── values T-SQL refuses while running: computed values, so refused before anything runs ─────────
 
+    /// <summary>
+    /// Divide by zero, overflow and a conversion that does not fit come only from computed values, which the interim rule
+    /// refuses at the gate: each statement must be refused with nothing written. (When the typed engine admits these
+    /// constructs, they return to failing while running, and the one-row-per-batch forms show the batches before it.)
+    /// </summary>
     private async Task ErrorCasesAsync()
     {
         var t = _table;
-        await RefusedAsync($"UPDATE {t} SET ppds_num = ppds_num / 0 WHERE ppds_num IS NOT NULL", ExecutionFailed);
-        await RefusedAsync($"UPDATE {t} SET ppds_num = 10 / ppds_num WHERE {All}", ExecutionFailed);
-        await RefusedAsync($"UPDATE {t} SET ppds_amount = CAST(ppds_amount AS decimal(2, 1)) WHERE {All}", ExecutionFailed);
-        await RefusedAsync($"UPDATE {t} SET ppds_note = CAST(ppds_num AS nvarchar(1)) WHERE {All}", ExecutionFailed);
-        await RefusedAsync($"UPDATE {t} SET ppds_num = ppds_num * 1000000000 WHERE {All}", ExecutionFailed);
+        await RefusedAsync($"UPDATE {t} SET ppds_num = ppds_num / 0 WHERE ppds_num IS NOT NULL");
+        await RefusedAsync($"UPDATE {t} SET ppds_num = 10 / ppds_num WHERE {All}");
+        await RefusedAsync($"UPDATE {t} SET ppds_amount = CAST(ppds_amount AS decimal(2, 1)) WHERE {All}");
+        await RefusedAsync($"UPDATE {t} SET ppds_note = CAST(ppds_num AS nvarchar(1)) WHERE {All}");
+        await RefusedAsync($"UPDATE {t} SET ppds_num = ppds_num * 1000000000 WHERE {All}");
         // B-F2: int / int is int, so the multiplication after it overflows int
-        await RefusedAsync($"UPDATE {t} SET ppds_amount = ppds_num / 2 * 1000000000 WHERE {All}", ExecutionFailed);
-        // C-S1: the same errors with one row per bulk batch, so batches before the failing row exist
-        await RefusedAsync($"-- ppds:BATCH_SIZE 1\nUPDATE {t} SET ppds_num = 10 / ppds_num WHERE {All}", ExecutionFailed);
-        await RefusedAsync($"-- ppds:BATCH_SIZE 1\nUPDATE {t} SET ppds_num = ppds_num * 1000000000 WHERE {All}", ExecutionFailed);
-        await RefusedAsync($"-- ppds:BATCH_SIZE 1\nUPDATE {t} SET ppds_amount = CAST(ppds_amount AS decimal(2, 1)) WHERE {All}", ExecutionFailed);
+        await RefusedAsync($"UPDATE {t} SET ppds_amount = ppds_num / 2 * 1000000000 WHERE {All}");
+        await RefusedAsync($"-- ppds:BATCH_SIZE 1\nUPDATE {t} SET ppds_num = 10 / ppds_num WHERE {All}");
+        await RefusedAsync($"-- ppds:BATCH_SIZE 1\nUPDATE {t} SET ppds_num = ppds_num * 1000000000 WHERE {All}");
+        await RefusedAsync($"-- ppds:BATCH_SIZE 1\nUPDATE {t} SET ppds_amount = CAST(ppds_amount AS decimal(2, 1)) WHERE {All}");
         await RefusedAsync($"-- ppds:BATCH_SIZE 1\nDELETE FROM {t} WHERE ppds_num IS NOT NULL", ErrorCodes.Query.DmlRowCapExceeded, rowCap: 2);
-        if (_catalogue == null)
-        {
-            // Which row fails is the order Dataverse returns them in; it is shown so the batches before it can be seen.
-            await ResetAsync();
-            var order = await ReadAsync();
-            _output.WriteLine($"OBSERVED default row order (one row per batch): [{string.Join(", ", order.Select(r => $"{Label(r)} num={I(r, Num)?.ToString(CultureInfo.InvariantCulture) ?? "NULL"}"))}]");
-        }
     }
+
+    // ── a script whose later statement is refused: none of it runs ──────────────────────────────
+
+    private async Task RefusedScriptCaseAsync()
+        => await RefusedAsync($"UPDATE {_table} SET ppds_note = 'S1' WHERE ppds_num = 1; UPDATE {_table} SET ppds_note = UPPER(ppds_name) WHERE ppds_num = 2");
 
     // ── SELECT checks (read only) ────────────────────────────────────────────────────────────
 

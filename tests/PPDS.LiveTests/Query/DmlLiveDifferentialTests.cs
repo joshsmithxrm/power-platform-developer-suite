@@ -242,6 +242,11 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
     /// </summary>
     private async Task CaseAsync(string sql, Func<List<Row>, List<Row>> expected, Func<Row, bool>? selects = null, bool observe = false, int? rowCap = null)
     {
+        if (_computed)
+        {
+            await RefusedAsync(sql);
+            return;
+        }
         if (_catalogue != null)
         {
             _catalogue.Add(new LiveCase(sql, Proves: true, ExpectedCode: null));
@@ -305,6 +310,27 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
         }
     }
 
+    /// <summary>True while <see cref="ComputedAsync"/> runs its cases.</summary>
+    private bool _computed;
+
+    /// <summary>
+    /// Cases that write a computed value. Until the typed SQL value engine (#1764) proves a construct, DML writes only
+    /// literals, columns and NULL, so each of these statements must be refused before anything changes. Their expected
+    /// values are kept for when the typed path admits the construct again and they move back out of this wrapper.
+    /// </summary>
+    private async Task ComputedAsync(Func<Task> cases)
+    {
+        _computed = true;
+        try
+        {
+            await cases();
+        }
+        finally
+        {
+            _computed = false;
+        }
+    }
+
     private static string Verb(string sql)
         => Regex.Match(Regex.Replace(sql, "--[^\n]*", ""), @"\b(UPDATE|DELETE|INSERT)\b", RegexOptions.IgnoreCase).Value.ToUpperInvariant();
 
@@ -347,7 +373,6 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
     }
 
     private const string Blocked = ErrorCodes.Query.DmlBlocked;
-    private const string ExecutionFailed = ErrorCodes.Query.ExecutionFailed;
 
     private void Fail(string sql, string what)
     {
