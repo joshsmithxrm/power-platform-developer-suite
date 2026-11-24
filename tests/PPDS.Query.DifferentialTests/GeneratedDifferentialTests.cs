@@ -57,17 +57,28 @@ public sealed class GeneratedDifferentialTests(ReferenceDatabase database, ITest
         Assert.Equal(evaluations.Count, runner.ActualCalls);
 
         var snapshotPath = Path.Combine(AppContext.BaseDirectory, "Snapshots", DifferenceSnapshot.FileName);
-        var snapshot = File.Exists(snapshotPath) ? DifferenceSnapshot.Parse(File.ReadAllText(snapshotPath)) : [];
+        var snapshotText = File.Exists(snapshotPath) ? File.ReadAllText(snapshotPath) : null;
+        var snapshot = snapshotText is null ? [] : DifferenceSnapshot.Parse(snapshotText);
+        var fingerprint = RunFingerprint.Of(evaluations);
         var found = DifferenceSnapshot.FromRun(evaluations, snapshot);
         output.WriteLine($"Reference: SQL Server {database.ServerDescription}. Default run: {evaluations.Count} evaluations, {found.Count} differ; the snapshot records {snapshot.Count}.");
 
         if (Environment.GetEnvironmentVariable(WriteSnapshotVariable) is { Length: > 0 } target)
         {
-            File.WriteAllText(target, DifferenceSnapshot.Format(found), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.WriteAllText(target, DifferenceSnapshot.Format(found, fingerprint), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             Assert.Fail($"Snapshot of {found.Count} rows written to {target}. Review its diff, cite the issue of each change, commit it, and unset {WriteSnapshotVariable}: a run that writes the snapshot never passes.");
         }
 
-        Assert.True(File.Exists(snapshotPath), $"The snapshot {DifferenceSnapshot.FileName} is missing beside the test assembly; see README.md, \"Updating the snapshot\".");
+        Assert.True(snapshotText is not null, $"The snapshot {DifferenceSnapshot.FileName} is missing beside the test assembly; see README.md, \"Updating the snapshot\".");
+
+        // The run evaluated exactly the expressions the snapshot was recorded from, equal ones included, so coverage
+        // cannot shrink (or change) without the snapshot being regenerated.
+        var recorded = RunFingerprint.Read(snapshotText!);
+        Assert.True(
+            recorded == fingerprint,
+            $"The default run evaluated a different list from the one the snapshot was recorded from: now {fingerprint.Evaluations} evaluations, "
+            + $"SHA-256 {fingerprint.Sha256}; recorded {recorded.Evaluations}, SHA-256 {recorded.Sha256}. The generator, the rule table or the operand rows changed: regenerate the snapshot (README.md, \"Updating the snapshot\").");
+
         var (added, changed, gone) = DifferenceSnapshot.Compare(snapshot, found);
         if (added.Count + changed.Count + gone.Count == 0)
             return;
@@ -75,8 +86,8 @@ public sealed class GeneratedDifferentialTests(ReferenceDatabase database, ITest
         var message = new StringBuilder();
         message.AppendLine(CultureInfo.InvariantCulture, $"The default run does not match the snapshot: {added.Count} new, {changed.Count} changed, {gone.Count} no longer differing (of {snapshot.Count} recorded).");
         Section(message, "NEW (not in the snapshot)", added.Select(r => $"{r}   first seen: {r.FirstSeen}"));
-        Section(message, "CHANGED (either side's outcome)", changed.Select(c => $"row {c.Now.RowId}: {c.Now.Expression}\n      was  SQL Server: {c.Was.SqlServer}   PPDS: {c.Was.Ppds}\n      now  SQL Server: {c.Now.SqlServer}   PPDS: {c.Now.Ppds}"));
-        Section(message, "GONE (recorded, no longer differing or no longer generated)", gone.Select(r => r.ToString()));
+        Section(message, "CHANGED (either side's outcome)", changed.Select(c => $"row {c.Now.RowId}: {c.Now.Expression}   first seen: {c.Now.FirstSeen}\n      was  SQL Server: {c.Was.SqlServer}   PPDS: {c.Was.Ppds}\n      now  SQL Server: {c.Now.SqlServer}   PPDS: {c.Now.Ppds}"));
+        Section(message, "GONE (recorded, no longer differing or no longer generated)", gone.Select(r => $"{r}   first seen: {r.FirstSeen}"));
         message.AppendLine("A change that is right (an engine fix) updates the snapshot: see README.md, \"Updating the snapshot\".");
         output.WriteLine(message.ToString());
         Assert.Fail(message.ToString());
@@ -97,13 +108,27 @@ public sealed class GeneratedDifferentialTests(ReferenceDatabase database, ITest
     [ReportRunFact]
     public void Report_of_the_configured_seeds()
     {
+        // A setting that is set must be well formed: a malformed one is an error, never a silent default or an empty run.
         static int Setting(string name, int fallback)
-            => int.TryParse(Environment.GetEnvironmentVariable(name), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : fallback;
+        {
+            var text = Environment.GetEnvironmentVariable(name);
+            if (string.IsNullOrWhiteSpace(text))
+                return fallback;
+            if (!int.TryParse(text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var value) || value < 1)
+                throw new HarnessException($"{name} must be a positive whole number, not [{text}].");
+            return value;
+        }
         var count = Setting("PPDS_SQLDIFF_COUNT", DifferenceSnapshot.DefaultRun.Count);
         var depth = Setting("PPDS_SQLDIFF_DEPTH", DifferenceSnapshot.DefaultRun.Depth);
-        var seeds = Environment.GetEnvironmentVariable("PPDS_SQLDIFF_SEEDS")!
+        var seedsText = Environment.GetEnvironmentVariable("PPDS_SQLDIFF_SEEDS")!;
+        var seeds = seedsText
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(s => int.Parse(s, CultureInfo.InvariantCulture));
+            .Select(s => int.TryParse(s, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var seed)
+                ? seed
+                : throw new HarnessException($"PPDS_SQLDIFF_SEEDS must list whole numbers separated by commas, not [{seedsText}]."))
+            .ToList();
+        if (seeds.Count == 0)
+            throw new HarnessException($"PPDS_SQLDIFF_SEEDS lists no seed: [{seedsText}].");
 
         foreach (var seed in seeds)
         {

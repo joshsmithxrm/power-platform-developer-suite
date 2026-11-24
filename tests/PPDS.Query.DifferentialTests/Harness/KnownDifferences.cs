@@ -19,6 +19,12 @@ namespace PPDS.Query.DifferentialTests.Harness;
 /// <item>"The same expressions in a SELECT return the same wrong values": every case here is evaluated on the path a
 /// SELECT uses, so each one is also that bullet.</item>
 /// </list>
+/// <para>
+/// #1851 also remarks that PATINDEX is always case-insensitive, whatever the collation. Under the reference collation
+/// (case-insensitive) SQL Server agrees, so there is no case for it here; reference observation R26 records SQL Server
+/// under a case-sensitive collation. That part belongs to the collation rules of #1764 and to COLLATE being ignored
+/// (#1631).
+/// </para>
 /// </remarks>
 public static class KnownDifferences
 {

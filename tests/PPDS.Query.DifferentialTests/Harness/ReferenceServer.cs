@@ -85,8 +85,10 @@ public sealed class ReferenceServerTheoryAttribute : TheoryAttribute
 
 /// <summary>
 /// The harness's own database on the reference server, created for one test run and dropped at its end. Its name is
-/// <c>ppds_sqldiff_</c> followed by the UTC time and a random suffix. The harness creates nothing outside it, reads no
-/// other database, and drops only the database it created in this run, by the name it created it with.
+/// <c>ppds_sqldiff_</c> followed by the UTC time and a random suffix. It changes no other database and drops only the
+/// database it created in this run, by the name it created it with. The one object it creates outside that database is
+/// the temporary table <c>#t</c> that reference observation R04e creates in tempdb, reads back from tempdb's catalog
+/// and drops in the same batch.
 /// </summary>
 public sealed partial class ReferenceDatabase : IDisposable
 {

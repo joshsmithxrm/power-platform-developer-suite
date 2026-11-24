@@ -30,6 +30,14 @@ public sealed class HarnessFaultTests(ReferenceDatabase database)
     }
 
     [ReferenceServerFact]
+    public void A_resource_error_of_severity_17_to_19_stops_the_run()
+    {
+        // Severity 17 to 19 is the server running out of a resource (errors 701, 1105, 9002), not the statement.
+        Assert.Throws<HarnessException>(() => ReferenceBatch.Run(database.Connection, "RAISERROR(N'insufficient resources (test)', 17, 1);"));
+        ReferenceSettings.Verify(database.Connection);
+    }
+
+    [ReferenceServerFact]
     public void A_missing_operand_row_stops_the_run()
         => Assert.Throws<HarnessException>(() => new SqlServerEngine(database.Connection).Evaluate("1", 99));
 }

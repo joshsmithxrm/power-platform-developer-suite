@@ -1,5 +1,6 @@
 # Every evaluation of the default differential run that differs from SQL Server, exactly. Regenerate with the command in tests/PPDS.Query.DifferentialTests/README.md.
 # Run: seeds 1,2,3, 300 expressions per seed, depth up to 3. Rows: 1171.
+# Evaluations: 3162. Evaluation list SHA-256: 1143688cc90e6704141f6136f6b47ff686d8173a3f7f1be4fc37d2e4e7c7b40b.
 expression	row	sql_server	ppds	first_seen	note
 (((c_dec / 748.58) + RTRIM(c_text)) * c_dec)	2	error Conversion (8114)	0.000000000000000000 : ~decimal	seed 2 expression 17	
 ((0.1 * (c_money / 1.005)) / (2147483647 * CASE WHEN '' IS NULL THEN 1E-1 ELSE c_dec2 END))	1	2.288106663100471E-10 : float	0.0000000002288106663189433254 : ~decimal	seed 2 expression 238	

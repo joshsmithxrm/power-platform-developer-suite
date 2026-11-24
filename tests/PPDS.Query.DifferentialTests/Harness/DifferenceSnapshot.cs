@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace PPDS.Query.DifferentialTests.Harness;
@@ -15,6 +16,42 @@ public sealed record SnapshotRow(string Expression, int RowId, string SqlServer,
 
     /// <inheritdoc />
     public override string ToString() => $"row {RowId}: {Expression}   SQL Server: {SqlServer}   PPDS: {Ppds}";
+}
+
+/// <summary>
+/// What the run evaluated: how many evaluations, and the SHA-256 of the list of them (seed, index, row and expression
+/// text, one per line, equal ones included). The snapshot's header pins it, so the run cannot evaluate fewer or other
+/// expressions than it recorded and still pass.
+/// </summary>
+public sealed record RunFingerprint(int Evaluations, string Sha256)
+{
+    /// <summary>The header line that records it.</summary>
+    public string HeaderLine => string.Create(CultureInfo.InvariantCulture, $"# Evaluations: {Evaluations}. Evaluation list SHA-256: {Sha256}.");
+
+    /// <summary>The fingerprint of a run's evaluations.</summary>
+    public static RunFingerprint Of(IEnumerable<(int Seed, int Index, Evaluation Evaluation)> evaluations)
+    {
+        var list = new StringBuilder();
+        var count = 0;
+        foreach (var (seed, index, evaluation) in evaluations)
+        {
+            count++;
+            list.Append(CultureInfo.InvariantCulture, $"{seed}\t{index}\t{evaluation.RowId}\t{evaluation.Expression.ScalarSql}\n");
+        }
+        return new RunFingerprint(count, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(list.ToString()))).ToLowerInvariant());
+    }
+
+    /// <summary>Reads the fingerprint from a snapshot's text.</summary>
+    public static RunFingerprint Read(string snapshot)
+    {
+        const string prefix = "# Evaluations: ";
+        var line = snapshot.Split('\n').SingleOrDefault(l => l.StartsWith(prefix, StringComparison.Ordinal))
+                   ?? throw new HarnessException("The snapshot does not record its evaluation count and list hash.");
+        var parts = line[prefix.Length..].Split(". Evaluation list SHA-256: ");
+        if (parts.Length != 2 || !parts[1].EndsWith('.') || !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var count))
+            throw new HarnessException($"The snapshot's evaluation line is malformed: {line}");
+        return new RunFingerprint(count, parts[1][..^1]);
+    }
 }
 
 /// <summary>
@@ -36,32 +73,42 @@ public static class DifferenceSnapshot
     public static IReadOnlyList<SnapshotRow> FromRun(IEnumerable<(int Seed, int Index, Evaluation Evaluation)> evaluations, IReadOnlyList<SnapshotRow>? earlier = null)
     {
         var notes = (earlier ?? []).ToDictionary(r => (r.Key, r.SqlServer, r.Ppds), r => r.Note);
+        var seen = new Dictionary<(string, int), (string SqlServer, string Ppds, string FirstSeen)>();
         var rows = new Dictionary<(string, int), SnapshotRow>();
         foreach (var (seed, index, evaluation) in evaluations)
         {
-            if (evaluation.IsEqual)
-                continue;
-            var row = new SnapshotRow(
-                evaluation.Expression.ScalarSql, evaluation.RowId, evaluation.Reference.ToString(), evaluation.Actual.ToString(),
-                $"seed {seed} expression {index}", "");
-            if (rows.TryGetValue(row.Key, out var existing))
+            var key = (evaluation.Expression.ScalarSql, evaluation.RowId);
+            var outcomes = (evaluation.Reference.ToString(), evaluation.Actual.ToString(), $"seed {seed} expression {index}");
+
+            // The same expression generated again gives the same outcomes, equal or not, or the engines are not
+            // deterministic: checked before equal evaluations are left out.
+            if (seen.TryGetValue(key, out var first))
             {
-                // The same expression generated again gives the same outcomes, or the engines are not deterministic.
-                if (existing.SqlServer != row.SqlServer || existing.Ppds != row.Ppds)
-                    throw new HarnessException($"The same evaluation gave two outcomes in one run: {existing} and {row}.");
+                if (first.SqlServer != outcomes.Item1 || first.Ppds != outcomes.Item2)
+                {
+                    throw new HarnessException(
+                        $"The same evaluation gave two outcomes in one run: row {key.RowId}: {key.ScalarSql}: "
+                        + $"SQL Server [{first.SqlServer}] / PPDS [{first.Ppds}] ({first.FirstSeen}), then SQL Server [{outcomes.Item1}] / PPDS [{outcomes.Item2}] ({outcomes.Item3}).");
+                }
                 continue;
             }
+            seen[key] = outcomes;
+
+            if (evaluation.IsEqual)
+                continue;
+            var row = new SnapshotRow(key.ScalarSql, key.RowId, outcomes.Item1, outcomes.Item2, outcomes.Item3, "");
             rows[row.Key] = row with { Note = notes.GetValueOrDefault((row.Key, row.SqlServer, row.Ppds), "") };
         }
         return rows.Values.OrderBy(r => r.Expression, StringComparer.Ordinal).ThenBy(r => r.RowId).ToList();
     }
 
-    /// <summary>The file's text for <paramref name="rows"/>.</summary>
-    public static string Format(IReadOnlyList<SnapshotRow> rows)
+    /// <summary>The file's text for <paramref name="rows"/> of the run with <paramref name="fingerprint"/>.</summary>
+    public static string Format(IReadOnlyList<SnapshotRow> rows, RunFingerprint fingerprint)
     {
         var text = new StringBuilder();
         text.Append("# Every evaluation of the default differential run that differs from SQL Server, exactly. Regenerate with the command in tests/PPDS.Query.DifferentialTests/README.md.\n");
         text.Append(CultureInfo.InvariantCulture, $"# Run: seeds {string.Join(",", DefaultRun.Seeds)}, {DefaultRun.Count} expressions per seed, depth up to {DefaultRun.Depth}. Rows: {rows.Count}.\n");
+        text.Append(fingerprint.HeaderLine).Append('\n');
         text.Append(Header).Append('\n');
         foreach (var row in rows)
         {
@@ -103,8 +150,9 @@ public static class DifferenceSnapshot
         }
         if (!sawHeader)
             throw new HarnessException("The snapshot has no header line.");
-        if (rows.Select(r => r.Key).Distinct().Count() != rows.Count)
-            throw new HarnessException("The snapshot has two rows with the same expression and row.");
+        var duplicate = rows.GroupBy(r => r.Key).FirstOrDefault(g => g.Count() > 1);
+        if (duplicate is not null)
+            throw new HarnessException($"The snapshot has {duplicate.Count()} rows for row {duplicate.Key.RowId}: {duplicate.Key.Expression}");
         return rows;
     }
 

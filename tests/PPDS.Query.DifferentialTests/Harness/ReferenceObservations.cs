@@ -41,6 +41,7 @@ public static class ReferenceObservations
     private const string Trim = "TRIM, LTRIM, RTRIM remove only char(32) (TRIM, LTRIM, RTRIM)";
     private const string Len = "LEN keeps trailing white space other than spaces; LEN of a max type is bigint (LEN)";
     private const string FloatCompare = "float compared at full binary precision (float and real; comparison operators)";
+    private const string PatIndexCase = "PATINDEX and case: case-insensitive under a case-insensitive collation, sensitive under a case-sensitive one (PATINDEX; #1851)";
     private const string Settings = "The settings the harness runs under (SET statements)";
 
     /// <summary>Every observation, in list order.</summary>
@@ -146,6 +147,8 @@ public static class ReferenceObservations
         E("R22a", FloatCompare, "IIF(CAST(0.1 AS float) + CAST(0.2 AS float) = 0.3, 'eq', 'ne')", "'ne' : varchar(2)"),
         E("R22b", FloatCompare, "IIF(CAST(0.1 AS float) + CAST(0.2 AS float) = CAST(0.3 AS float), 'eq', 'ne')", "'ne' : varchar(2)"),
         E("R22c", FloatCompare, "CASE WHEN CAST(1.0000000000000002 AS float) > 1.0 THEN 'gt' ELSE 'not' END", "'gt' : varchar(3)"),
+        E("R26a", PatIndexCase, "PATINDEX('%A%', N'xa')", "2 : int"),
+        E("R26b", PatIndexCase, "PATINDEX('%A%', N'xa' COLLATE Latin1_General_CS_AS)", "0 : int"),
         B("R24", Settings, "SELECT SESSIONPROPERTY('ANSI_WARNINGS') AS aw, SESSIONPROPERTY('ARITHABORT') AS ab, SESSIONPROPERTY('NUMERIC_ROUNDABORT') AS nra, SESSIONPROPERTY('CONCAT_NULL_YIELDS_NULL') AS cnyn, SESSIONPROPERTY('ANSI_NULLS') AS an, @@LANGUAGE AS lang, (SELECT date_format FROM sys.dm_exec_sessions WHERE session_id = @@SPID) AS datefmt, (SELECT compatibility_level FROM sys.databases WHERE name = DB_NAME()) AS compat;", "aw=1, ab=1, nra=0, cnyn=1, an=1, lang='us_english', datefmt='ymd', compat=160"),
         B("R25", Settings, "DECLARE @v nvarchar(3) = N'abcdef'; SELECT @v AS truncated_var;", "truncated_var='abc'"),
         E("W11", "ISNULL truncates its replacement to the first value's length (ISNULL)", "ISNULL(CAST(NULL AS nvarchar(3)), N'a longer default')", "'a l' : nvarchar(3)"),
