@@ -38,7 +38,7 @@ the [maintainer merge checklist](MERGE-POLICY.md#maintainer-merge-checklist).
 | # | Rule |
 |---|---|
 | W1 | No turn ends with uncommitted work in a worktree. A branch is pushed at least at every review. Its pull request is opened ready for review, not as a draft, by the first review. |
-| W2 | A side-effects ledger is kept as it happens: every change to a Dataverse environment, the tenant, the maintainer's user settings, the maintainer's machine, and anything posted under the maintainer's account, with how to undo it. The ledger is a comment thread on the tracking issue, written without addresses or names. |
+| W2 | A side-effects ledger is kept as it happens: every change to a Dataverse environment, the tenant, the maintainer's user settings, and the maintainer's machine, with how to undo it. Nothing is posted under the maintainer's account by an agent (see "What needs the maintainer" below). The ledger is a comment thread on the tracking issue, written without addresses or names. |
 | W3 | A test that redirects a tool's home directory must not let it write to the user environment. |
 | W4 | A permission denial ends that attempt. Report it and ask; do not reach the same result another way, unless the maintainer, told of the denial, allows another route for that one target. |
 
@@ -58,7 +58,8 @@ the [maintainer merge checklist](MERGE-POLICY.md#maintainer-merge-checklist).
 | Needs the maintainer | How |
 |---|---|
 | Any decision (D1) | The list of decisions waiting (D5); the answer is quoted on the issue. |
-| A merge of a pull request that is maintainer first ([Who merges](MERGE-POLICY.md#who-merges)) | The list of decisions waiting (D5), as "How an agent asks" in Who merges says. The answer is recorded in the pull request's review record. The repository's settings do not ask before `gh pr merge`; the agent does not merge until the maintainer has answered. |
+| A merge of a pull request that is maintainer first ([Who merges](MERGE-POLICY.md#who-merges)) | The list of decisions waiting (D5), as "How an agent asks" in Who merges says. The answer is recorded in the pull request's review record. No fixed approval prompt stands before a merge: the written rule is the guard. The repository's settings do not ask before `gh pr merge`, and the agent does not merge until the maintainer has answered. |
+| A change under `.github/workflows/` | The agents' account cannot push it. The agent prepares it as a patch file (`git format-patch`) for the maintainer to push. If a push is refused for this reason, the agent stops there and does not look for another way ([Who merges](MERGE-POLICY.md#who-merges), category 1). |
 | Anything posted under the maintainer's account | Not done by an agent: agents act on GitHub under their own account. The repository's settings also ask before closing a pull request or an issue. |
 | A change that persists in an environment or on the maintainer's machine | Asked before, with what cannot be undone (P7 in [specs/test-gates.md](../specs/test-gates.md)). |
 | Tags, publication, release creation, signing policy, production keys, advisories, NuGet deprecation | Never done by an agent. The agent prepares the text and the checklist. |

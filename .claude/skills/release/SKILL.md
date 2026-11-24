@@ -33,9 +33,7 @@ of one tag or wave does not cover the next.
   `gh run rerun` of a publish or docs workflow
 - **Branches and PRs:** pushing a `release/prerelease-*`, `release/vX.Y.Z` or
   `release/X.Y` branch or `main`; deleting a remote branch
-  (`git push origin :release/X.Y`); `gh pr create`, `gh pr ready`, merging (this
-  skill asks even where [Who merges](../../../docs/MERGE-POLICY.md#who-merges)
-  would let an agent merge)
+  (`git push origin :release/X.Y`); `gh pr create`, `gh pr ready`, merging
 - **Issues and contributors:** commenting on or closing any issue (the
   co-release issue is the durable opt-out record), filing follow-up issues,
   sending a contributor reply, closing a contributor's original PR

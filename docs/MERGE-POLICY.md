@@ -11,7 +11,8 @@ does not waive the checklist or grant communication permission.
 
 Every pull request to `main` is in one of two tiers. Before an agent session merges a pull request,
 it decides the tier from the diff, the labels, the issues the pull request closes and its author.
-If the tier is unclear, the pull request is **maintainer first**.
+If the tier is unclear, the pull request is **maintainer first**. No fixed approval prompt stands
+before a merge: this written rule is the guard.
 
 ### Agents merge
 
@@ -25,25 +26,38 @@ these hold:
 - it is a squash pinned to the reviewed commit:
   `gh pr merge <n> --squash --delete-branch --match-head-commit <reviewed sha>`.
 
-Agents do not enable auto-merge, because auto-merge can merge before the code-scanning result is in.
+The code-scanning result must be in before the merge, so the agent waits for it and then merges.
+Auto-merge does not wait for that result, so agents do not enable auto-merge.
 
 Dependabot pull requests follow the same rule. `scripts/dependabot/classify.py` sorts each one into
 a group:
 
-- **Group A:** one short fresh review, then an agent merges it as above.
-- **Group B:** the area's tests run first, then one short fresh review, then an agent merges it. An auth-critical package bump is the exception: it is maintainer first (category 5).
-- **Group C:** the maintainer decides. This group includes every GitHub Actions bump.
+- **Group A (routine):** one short fresh review, then an agent merges it as above. This group
+  includes patch bumps, lockfile-only changes, and tooling and test packages at any non-major
+  version (`TOOLING_PACKAGES` and `TOOLING_PREFIXES` in the classifier).
+- **Group B (routine):** the area's tests run first, then one short fresh review, then an agent
+  merges it. One exception: it has not been decided whether a bump of an
+  [auth-critical package](#auth-critical-packages) counts as sign-in and crypto code (category 5).
+  Until it is, the tier of such a bump is not clear, so it is maintainer first under the rule at the
+  top of this section.
+- **Group C (not routine):** the maintainer decides. Major bumps stay his under the existing
+  universal exclusion of major bumps ([Grouped Dependabot PRs](#grouped-dependabot-prs)). A bump
+  whose notes signal a breaking change stays his under the classifier's existing Group C rule.
+  Every GitHub Actions bump stays his as well (category 9). The agent comments on the pull request with the group and the classifier's reason,
+  and puts it on the list of decisions waiting (D5).
 
 A Dependabot pull request that falls in any maintainer-first category below is maintainer first,
-whatever its group.
+whatever its group. The classifier's docstring and reason strings still call Group A "auto-merge
+eligible". That wording is older than this section, and this section wins.
 
-If `main` goes red after an agent merge, agents merge nothing until `main` is green again, by a fix
-or a revert.
+If `main` goes red after a merge, whoever made it, agents merge nothing until `main` is green
+again, by a fix or a revert.
 
-**Daily list.** The coordinating session writes one comment a day on the release tracking issue (for
-2.0, #1812). It lists every pull request an agent merged since the previous comment. For each one it
-gives the number and title, the reviewer's verdict (the converged round and the commit it reviewed),
-and how to revert it (`git revert <squash sha>`).
+**Daily list.** At the end of its day (by UTC date), the coordinating session writes one comment on
+the release tracking issue (for 2.0, #1812). It lists every pull request an agent merged that day.
+For each one it gives the number and title, the reviewer's verdict (the converged round and the
+commit it reviewed), and how to revert it (`git revert <squash sha>`). A day with no agent merge
+has no comment.
 
 ### Maintainer first
 
@@ -52,7 +66,10 @@ the maintainer has answered for it. For categories 1 to 5 and 8, a pull request 
 when its diff changes anything the category names, in any way, comments and renames included.
 
 1. **Workflows and the rest of `.github/`.** This covers workflows, composite actions,
-   `dependabot.yml`, and the pull request and issue templates.
+   `dependabot.yml`, and the pull request and issue templates. The agents' account cannot push
+   anything under `.github/workflows/`. An agent prepares such a change as a patch file
+   (`git format-patch`) for the maintainer to push. If a push is refused for this reason, the agent
+   stops there and does not look for another way.
 2. **Agent rules, settings and hooks.** This covers everything under `.claude/`, plus `AGENTS.md`,
    `CLAUDE.md`, `CONTRIBUTING.md`, `docs/MERGE-POLICY.md`, `docs/MAINTAINER-SESSION-RULES.md`,
    `docs/CONTRIBUTOR-LIFECYCLE.md` and `specs/test-gates.md`.
@@ -64,11 +81,10 @@ when its diff changes anything the category names, in any way, comments and rena
    - the properties `SignAssembly`, `PublicSign`, `DelaySign` and `AssemblyOriginatorKeyFile` in any
      `.csproj`, `.props` or `.targets` file;
    - the signing workflows and scripts, which categories 1 and 3 already cover.
-5. **Sign-in and crypto code.** This covers:
-   - `src/PPDS.Auth/`;
-   - code anywhere else that encrypts, decrypts or stores credentials or tokens;
-   - a change to the version of an [auth-critical package](#auth-critical-packages), whether
-     Dependabot or anyone else makes it.
+5. **Sign-in and crypto code.** This covers `src/PPDS.Auth/`. Code elsewhere that encrypts,
+   decrypts or stores credentials or tokens has no folder of its own. Whether a change to it is in
+   this category is not clear, so it is maintainer first under the rule at the top of this section.
+   For a version bump of an auth-critical package, see Group B above.
 6. **Data safety.** This covers a pull request labelled `data-safety`, and one that closes or fixes
    an issue labelled `data-safety`, label or not. The label means wrong data, lost data, an unguarded
    or wrong-target write, or a silently wrong result, so some read paths belong here. Whoever finds
@@ -76,10 +92,21 @@ when its diff changes anything the category names, in any way, comments and rena
 7. **Write paths.** This covers any change to code that runs when PPDS creates, changes or deletes
    records or metadata in an environment:
    - code that builds or sends the request;
-   - code that chooses the target environment;
+   - code that chooses the target environment for a write;
    - code that decides whether to ask for confirmation.
 
-   Refactors count, even when no behaviour is meant to change. A change only to help text or a
+   Most of this code lives in:
+   - `src/PPDS.Dataverse/BulkOperations/` and `src/PPDS.Dataverse/Metadata/Authoring/`;
+   - `src/PPDS.Dataverse/Query/Planning/Nodes/DmlExecuteNode.cs` and
+     `src/PPDS.Query/Planning/ExecutionPlanBuilder.Dml.cs`;
+   - `src/PPDS.Migration/Import/`;
+   - `src/PPDS.Cli/Services/Metadata/Authoring/` and `src/PPDS.Cli/Plugins/Registration/`;
+   - the write commands under `src/PPDS.Cli/Commands/`, the write tools under `src/PPDS.Mcp/Tools/`,
+     and the write methods of the services under `src/PPDS.Cli/Services/`.
+
+   Write code outside these paths is still in this category. Where it is not clear whether code runs
+   during a write, the rule at the top of this section applies. Refactors count, even when no
+   behaviour is meant to change. A change only to help text or a
    description in a write command is not in this category, unless the text says whether a write
    happens or is confirmed.
 8. **The environment-safety checks.** These are:
@@ -91,11 +118,12 @@ when its diff changes anything the category names, in any way, comments and rena
    - `src/PPDS.Auth/Profiles/EnvironmentType.cs` and `QuerySafetySettings.cs`;
    - `src/PPDS.Extension/src/utils/dmlSafety.ts`;
    - `.claude/hooks/shakedown-safety.py`;
-   - the work for issue #1814.
+   - any pull request that closes or fixes issue #1814.
 9. **Dependabot's GitHub Actions bumps**, whatever any skill or list says. The classifier puts
    every one in Group C.
 10. **Outside contributions.** This covers any pull request whose author is not the maintainer, the
-    agents' account or Dependabot. If the change needs a live run (P1 in
+    agents' account or Dependabot. It also covers any pull request, whoever opened it, that carries
+    a commit authored by someone else (an outside contributor's work). If the change needs a live run (P1 in
     [specs/test-gates.md](../specs/test-gates.md)), the maintainer or one of his sessions does it
     before the merge and records it in the pull request. The contributor is never asked to.
 
@@ -112,19 +140,18 @@ carries that record. After the answer, the agent merges under the same condition
 
 Auto-merge is **enabled at the repo level** (`allow_auto_merge: true`). It does not bypass branch protection or skip required reviews — it only removes the "human clicks merge when CI goes green" step.
 
-Only the maintainer enables auto-merge. Agents merge directly, as [Who merges](#who-merges) says. He enables it with:
+Agents do not enable auto-merge: the code-scanning result must be in before the merge
+([Agents merge](#agents-merge)). The maintainer enables it with:
 
 ```bash
 gh pr merge <num> --squash --delete-branch --auto
 ```
 
-Auto-merge is for pull requests where green CI is enough evidence to ship. It is not for these:
+The maintainer uses auto-merge only where green CI is enough evidence to ship, so not for these:
 
 - a pull request with manual verification steps in its runbook (for example, "spot-check `npm run package`" or "run TUI snapshots locally");
 - a release-branch change;
 - a change whose runtime behaviour the reviewer wants to inspect, not only its diff.
-
-Dependabot's tooling and test packages (Group A at any non-major version) are listed in `scripts/dependabot/classify.py` (`TOOLING_PACKAGES` / `TOOLING_PREFIXES`, matched via `is_tooling_package()`).
 
 ## Grouped Dependabot PRs
 
@@ -253,4 +280,4 @@ This keeps `main` linear and gives one commit per PR for clean `git log` and `gi
 
 Dependabot config lives in `.github/dependabot.yml`. Each Dependabot pull request is classified, reviewed and merged one at a time, as [Who merges](#who-merges) says. None is enabled for auto-merge in batch. Group C bumps (majors, breaking changes, GitHub Actions) wait for the maintainer, with the verification steps documented in the relevant spec or commit message.
 
-For roll-up branches consolidating many bumps into one PR: avoid unless auto-merge is unavailable. Per-bump squash commits give better `git bisect` granularity and clearer attribution than a single roll-up commit.
+For roll-up branches consolidating many bumps into one PR: avoid them. Per-bump squash commits give better `git bisect` granularity and clearer attribution than a single roll-up commit.
