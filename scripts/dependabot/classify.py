@@ -8,8 +8,8 @@ Group A — auto-merge eligible (green CI is sufficient evidence to ship):
   - Patch bumps on non-critical paths
   - Tooling/test bumps regardless of patch/minor (eslint, knip, vitest, esbuild,
     @types/*, @playwright/test, Microsoft.NET.Test.Sdk)
-  - github-actions group bumps (patch/minor)
   - Lockfile-only diffs
+  (Never a github-actions bump: see Group C.)
 
 Group B — verify-then-merge (run package-specific tests locally first):
   - Minor bumps on user-visible runtime libraries (Terminal.Gui, etc.)
@@ -21,18 +21,29 @@ Group B — verify-then-merge (run package-specific tests locally first):
 Group C — manual review required (do NOT auto-merge):
   - ANY major-version bump (universal exclusion per v1-prelaunch retro)
   - Bumps with "Breaking" / "BREAKING CHANGE" / removed APIs in the changelog
-  - Bumps to CI/CD pipelines via actions/* major
+  - EVERY github-actions bump (patch, minor, major, grouped or single). These
+    change the workflows, so the maintainer goes first on them. A PR is an
+    Actions bump if its detected ecosystem is github-actions, it carries the
+    github-actions label, its branch starts dependabot/github_actions/, or its
+    diff touches .github/workflows/ or a .github/actions/**/action.yml|yaml
+    file. This rule is applied last, over whatever group the version rules
+    chose, so nothing else true of the PR can make it auto-merge eligible.
+    Other ecosystems are classified as before.
   - Anything in MERGE-POLICY's "When NOT to use auto-merge" list that isn't Group B
 
 The ground truth for the policy is docs/MERGE-POLICY.md. If this file and that
-file disagree, the doc wins and this file needs a patch.
+file disagree, the doc wins and this file needs a patch. One known exception:
+the github-actions rule above follows the maintainer's decision that he goes
+first on Dependabot's GitHub Actions bumps. Until docs/MERGE-POLICY.md and the
+/dependabot-triage skill are updated to match, where they still list GitHub
+Actions group bumps as auto-merge eligible, this file wins for those bumps.
 """
 from __future__ import annotations
 
 import json
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterable, Optional
 
 
@@ -92,6 +103,12 @@ AUTH_CRITICAL_PATH_PREFIXES = (
     "src/PPDS.Auth/",
     "src/PPDS.Plugins/",  # strong-name signing surface
 )
+
+# Signals that identify a GitHub Actions bump directly, whatever other labels
+# or ecosystem the PR carries (see is_github_actions_update). Compared
+# case-insensitively.
+_ACTIONS_LABELS = frozenset({"github-actions", "github_actions"})
+_ACTIONS_BRANCH_PREFIXES = ("dependabot/github_actions/", "dependabot/github-actions/")
 
 # Authors GitHub may report for Dependabot-authored pull requests. A
 # ``dependencies`` label also opts a human-authored PR into the policy.
@@ -407,6 +424,61 @@ def touches_auth_critical_path(files: Iterable[str]) -> bool:
     return False
 
 
+def _normalise_path(raw_path: str) -> str:
+    """Lower-case a repository path, use forward slashes, drop leading ``./`` and ``/``."""
+    path = raw_path.replace("\\", "/").lower()
+    while True:
+        if path.startswith("./"):
+            path = path[2:]
+        elif path.startswith("/"):
+            path = path[1:]
+        else:
+            return path
+
+
+def is_actions_path(raw_path: str) -> bool:
+    """True if the path is a workflow or a composite action definition.
+
+    The same paths ``detect_ecosystem`` treats as the github-actions surface:
+    anything under ``.github/workflows/``, and an ``action.yml`` or
+    ``action.yaml`` at any depth under ``.github/actions/``.
+    """
+    path = _normalise_path(raw_path)
+    if path.startswith(".github/workflows/"):
+        return True
+    basename = path.rsplit("/", 1)[-1]
+    return path.startswith(".github/actions/") and basename in {"action.yml", "action.yaml"}
+
+
+def is_github_actions_update(
+    ecosystem: str,
+    files: Iterable[str],
+    labels: Iterable[str] = (),
+    head_ref: str = "",
+) -> bool:
+    """True if the PR is a GitHub Actions bump.
+
+    Any one signal is enough, so a PR that also carries an npm or nuget label,
+    or whose ``files`` list is empty, still counts:
+      - the detected ecosystem is ``github-actions``;
+      - a ``github-actions`` or ``github_actions`` label (any case);
+      - a ``dependabot/github_actions/`` or ``dependabot/github-actions/``
+        branch (any case);
+      - a changed file for which ``is_actions_path`` is true. This also
+        catches a PR whose ecosystem came out ``unknown`` because it mixes a
+        workflow change with a manifest change.
+    Other paths under ``.github/`` (for example ``dependabot.yml``) do not
+    count: they do not change what Actions run.
+    """
+    if ecosystem == "github-actions":
+        return True
+    if any((label or "").lower() in _ACTIONS_LABELS for label in labels):
+        return True
+    if (head_ref or "").lower().startswith(_ACTIONS_BRANCH_PREFIXES):
+        return True
+    return any(is_actions_path(f) for f in files)
+
+
 _LOCKFILE_BASENAMES = frozenset({
     "package-lock.json",
     "packages.lock.json",
@@ -532,6 +604,37 @@ def classify_pr(pr: dict) -> Classification:
     `pr` is a dict shaped like the output of `gh pr view --json
     number,title,labels,headRefName,files,body`. The classifier is defensive:
     missing fields default to safe (Group C with reason "ambiguous").
+
+    The version rules (``_classify_by_version``) choose a group first. A GitHub
+    Actions bump (``is_github_actions_update``) is then moved to Group C: the
+    maintainer goes first on those, so no other property of the PR can leave it
+    auto-merge eligible. Every other PR keeps the version rules' result. For an
+    Actions bump only ``group`` and ``reason`` change; ``update_type`` and
+    ``ecosystem`` stay as the version rules found them, because scripts/ci/
+    uses them to decide whether major-version evidence is required.
+    """
+    classification = _classify_by_version(pr)
+    files = [f.get("path", "") for f in pr.get("files", [])]
+    labels = [lbl.get("name", "") for lbl in pr.get("labels", [])]
+    head_ref = pr.get("headRefName", "") or ""
+    if not is_github_actions_update(classification.ecosystem, files, labels, head_ref):
+        return classification
+    if classification.group == "C":
+        reason = f"{classification.reason}; GitHub Actions bump — maintainer goes first"
+    else:
+        reason = (
+            "GitHub Actions bump — maintainer goes first, "
+            f"never auto-merge (version rules alone gave Group "
+            f"{classification.group}: {classification.reason})"
+        )
+    return replace(classification, group="C", reason=reason)
+
+
+def _classify_by_version(pr: dict) -> Classification:
+    """Choose a group from the package, version, body and diff alone.
+
+    Called only by ``classify_pr``, which applies the GitHub Actions rule on
+    top; do not call it directly.
     """
     number = int(pr.get("number", 0))
     title = pr.get("title", "")
@@ -658,19 +761,6 @@ def classify_pr(pr: dict) -> Classification:
             pr_number=number,
             group="A",
             reason="lockfile-only diff — auto-merge eligible",
-            ecosystem=ecosystem,
-            update_type=update_type,
-            package=pkg,
-            from_version=from_v,
-            to_version=to_v,
-        )
-
-    # github-actions patch/minor — Group A (unless it's a major, caught above).
-    if ecosystem == "github-actions" and update_type in ("patch", "minor"):
-        return Classification(
-            pr_number=number,
-            group="A",
-            reason=f"github-actions {update_type} bump — auto-merge eligible",
             ecosystem=ecosystem,
             update_type=update_type,
             package=pkg,
