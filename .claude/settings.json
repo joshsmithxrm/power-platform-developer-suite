@@ -158,7 +158,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/shakedown-safety.py\"",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/shakedown-safety-launcher.py\" || exit 2",
             "timeout": 10
           }
         ]
