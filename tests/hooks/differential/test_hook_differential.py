@@ -221,6 +221,8 @@ def test_no_abnormal_hook_exit_lets_a_command_run(request, report):
     signal, a hang, exit 1) is counted in ``hook_exits``; none may end in an exit other than 2, which
     is the only exit that stops Claude Code from running the command."""
     tally = request.getfixturevalue(report)["hook_exits"]
+    print(f"hook_exits {report}: runs {tally['runs']} abnormal {tally['abnormal']} "
+          f"let_through {tally['let_through']} {tally['by_reason']}")
     assert tally["runs"] > 0, tally
     assert tally["let_through"] == 0, tally
 
