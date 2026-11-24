@@ -90,13 +90,45 @@ after the release PR merges.
 Run the read-only release model against the exact release range:
 
 ```bash
+gh pr list --state merged --base main --label breaking-change --limit 1000 \
+  --json number,title,mergeCommit > breaking-prs.json
+```
+
+```bash
 python scripts/ci/release_plan.py \
   --base <base-commit> \
   --head HEAD \
   --release-kind <patch|minor|major> \
   --channel <stable|prerelease> \
+  --breaking-prs-file breaking-prs.json \
   --format markdown
 ```
+
+If the plan has a **Refused** section (exit 1), stop:
+
+- a `breaking-change` pull request is in the range and the release kind is
+  not major, or the package's planned version (its `## [X.Y.Z] - Unreleased`
+  CHANGELOG section) is not a new major: plan a major for that package, or
+  take the pull request out of the range;
+- or the breaking data was not supplied: run the `gh pr list` command above.
+  `--breaking-checked-elsewhere "<how>"` records that it was checked another
+  way.
+
+`gh pr list --base main` does not list pull requests merged straight into a
+`release/X.Y` branch. When releasing from a stabilization branch, also run it
+with `--base release/X.Y` and merge the two lists:
+
+```bash
+gh pr list --state merged --base release/X.Y --label breaking-change --limit 1000 \
+  --json number,title,mergeCommit > breaking-prs-release.json
+jq -s 'add' breaking-prs.json breaking-prs-release.json > breaking-prs-all.json
+```
+
+Pull requests in the file whose merge commit is not in the range are listed
+under "Breaking Pull Requests Outside the Range". On a
+[stabilization branch](#stabilization-branch), a fix picked with
+`git cherry-pick -x` counts by its `(cherry picked from commit …)` line; a pick
+without `-x` is listed as outside the range.
 
 Review all five lists before drafting CHANGELOGs: **direct product changes**,
 **internal build changes**, **downstream deliverables**, **same-commit delivery
@@ -138,6 +170,12 @@ Placement:
   `## [<version>] - YYYY-MM-DD`.
 - **Always leave the `## [Unreleased]` heading empty at the top** for the next
   release.
+- **Open the next version.** In the same release PR, add the next
+  `## [X.Y.Z] - Unreleased` section (the next patch version unless the next
+  release is already known) below `## [Unreleased]` in every package you
+  release. Pull requests add their entries there; until it exists the
+  Changelog Check fails every pull request that changes the package, with a
+  message that names this step.
 - Update the link references at the bottom of the file to the
   `compare/<Prefix>-v<previous>...<Prefix>-v<new>` form the files already use,
   and point `[Unreleased]` at `compare/<Prefix>-v<new>...HEAD`.
