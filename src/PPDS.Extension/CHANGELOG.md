@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Breaking: SQL writes on an environment with no saved type ask for confirmation.** The query panel and notebooks treated an environment whose saved entry had no type (every environment the extension lists or adds, until you choose a type) as Development, so `INSERT`, `UPDATE` and `DELETE` ran without confirmation. They are now Production, as an environment with no entry already was: the write asks for confirmation. To keep unrestricted DML on a development environment, choose its type once in Configure Environment and confirm **Lower protection** (#1829).
 - **Configure Environment asks before lowering write protection.** A type change that weakens an environment's protection (for example Production to Development) shows a modal that says what changes; only **Lower protection** saves it, and dismissing the modal saves nothing. Breaking for other clients of the daemon: `env/config/set` now refuses such a change unless `confirmLowerProtection` names the environment (#1829).
 - Bundle the self-contained .NET 10.0.15 CLI on the existing four VSIX targets. No separate runtime install is needed; native OS dependencies still apply. Candidate validation executes the actual archived CLI on matching native hosts without contacting Dataverse or publishing a package.
 
