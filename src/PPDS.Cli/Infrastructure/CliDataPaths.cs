@@ -5,6 +5,7 @@ namespace PPDS.Cli.Infrastructure;
 /// <summary>
 /// The one place that resolves where the CLI keeps its own non-credential files:
 /// query history, log files and update-check state.
+/// The self-update lock (<see cref="UpdateLockFile"/>) is the one exception to the folder rule below.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -52,11 +53,16 @@ internal static class CliDataPaths
                 return ProfilePaths.DataDirectory;
             }
 
-            return Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".ppds");
+            return DefaultDataDirectory;
         }
     }
+
+    /// <summary>
+    /// <c>&lt;user profile&gt;/.ppds</c>, whatever <c>PPDS_CONFIG_DIR</c> says.
+    /// </summary>
+    public static string DefaultDataDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".ppds");
 
     /// <summary>Folder holding one query-history file per environment.</summary>
     public static string HistoryDirectory => Path.Combine(DataDirectory, HistoryDirectoryName);
@@ -70,6 +76,14 @@ internal static class CliDataPaths
     /// <summary>Full path of the post-update status file.</summary>
     public static string UpdateStatusFile => Path.Combine(DataDirectory, UpdateStatusFileName);
 
-    /// <summary>Full path of the self-update lock file.</summary>
-    public static string UpdateLockFile => Path.Combine(DataDirectory, UpdateLockFileName);
+    /// <summary>
+    /// Full path of the self-update lock file. Always under <see cref="DefaultDataDirectory"/>,
+    /// not <c>PPDS_CONFIG_DIR</c>.
+    /// </summary>
+    /// <remarks>
+    /// The lock guards <c>dotnet tool update -g</c>, which replaces the one global-tool install in
+    /// the user profile folder. Every configuration folder shares that install, so they must share
+    /// one lock; a lock per configuration folder would let two shells update it at the same time.
+    /// </remarks>
+    public static string UpdateLockFile => Path.Combine(DefaultDataDirectory, UpdateLockFileName);
 }

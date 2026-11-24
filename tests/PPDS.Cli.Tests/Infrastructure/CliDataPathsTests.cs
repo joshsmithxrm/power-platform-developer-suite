@@ -27,6 +27,7 @@ namespace PPDS.Cli.Tests.Infrastructure;
 public sealed class CliDataPathsTests : IDisposable
 {
     private const string HomeVariable = "HOME";
+    private const string UpdateInProgressMessage = "An update is already in progress. Try again later.";
 
     private readonly string? _originalConfigDir;
     private readonly string? _originalHome;
@@ -124,9 +125,78 @@ public sealed class CliDataPathsTests : IDisposable
         Assert.Equal(Path.Combine(_configDir, "tui-debug.log"), CliDataPaths.TuiDebugLogFile);
         Assert.Equal(Path.Combine(_configDir, "update-check.json"), CliDataPaths.UpdateCheckFile);
         Assert.Equal(Path.Combine(_configDir, "update-status.json"), CliDataPaths.UpdateStatusFile);
-        Assert.Equal(Path.Combine(_configDir, "update.lock"), CliDataPaths.UpdateLockFile);
         Assert.Equal(Path.Combine(_configDir, "tui-debug.log"), TuiDebugLog.LogPath);
         Assert.Equal(_configDir, LogsTailCommand.GetPpdsDirectory());
+    }
+
+    [Fact]
+    public void VariableSet_UpdaterWritesStatusWhereNextStartReadsIt()
+    {
+        Environment.SetEnvironmentVariable(ProfilePaths.ConfigDirEnvVar, _configDir);
+
+        // The path the service hands to the detached update script (UpdateScriptWriter).
+        var statusPath = new UpdateCheckService().StatusPath;
+        Assert.Equal(Path.Combine(_configDir, "update-status.json"), statusPath);
+
+        // Write the file as the script would, then let the next CLI start consume it.
+        File.WriteAllText(statusPath, "{\"success\":false,\"exitCode\":1,\"targetVersion\":\"9.9.9\"}");
+        var originalError = Console.Error;
+        var error = new StringWriter();
+        Console.SetError(error);
+        try
+        {
+            Program.ReadAndDeleteUpdateStatus();
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
+
+        Assert.Contains("Update failed.", error.ToString());
+        Assert.False(File.Exists(statusPath));
+    }
+
+    [Fact]
+    public void VariableSet_UpdateLockStaysInDefaultFolder()
+    {
+        // The lock guards the one global-tool install, which every configuration folder shares.
+        Environment.SetEnvironmentVariable(ProfilePaths.ConfigDirEnvVar, _configDir);
+
+        Assert.Equal(Path.Combine(DefaultFolder, "update.lock"), CliDataPaths.UpdateLockFile);
+        Assert.Equal(Path.Combine(DefaultFolder, "update.lock"), new UpdateCheckService().LockPath);
+    }
+
+    [Fact]
+    public async Task VariableSet_LockInDefaultFolderBlocksUpdate_LockInConfigFolderDoesNot()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            // The user profile folder cannot be redirected on Windows, and this test writes a lock
+            // file into it. VariableSet_UpdateLockStaysInDefaultFolder covers the path there.
+            return;
+        }
+
+        Environment.SetEnvironmentVariable(ProfilePaths.ConfigDirEnvVar, _configDir);
+        var livePid = Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        // Every NuGet version is older than the running build, so an update that gets past the
+        // lock check returns "Already up to date" and never starts the detached updater. (Were the
+        // version unreadable, the test build is not a global-tool install, which also stops it.)
+        var service = new UpdateCheckService(
+            handler: new VersionsHandler("{\"versions\":[\"0.0.1\"]}"),
+            cachePath: Path.Combine(_root, "update-check.json"));
+
+        // A lock held by a running process in the configuration folder is not the update lock.
+        await File.WriteAllTextAsync(Path.Combine(_configDir, "update.lock"), livePid);
+        var notBlocked = await service.UpdateAsync(UpdateChannel.Stable);
+        Assert.NotEqual(UpdateInProgressMessage, notBlocked.ErrorMessage);
+
+        // The same lock in the default folder blocks the update, whatever PPDS_CONFIG_DIR says.
+        Directory.CreateDirectory(FakeHomePpds);
+        await File.WriteAllTextAsync(Path.Combine(FakeHomePpds, "update.lock"), livePid);
+        var blocked = await service.UpdateAsync(UpdateChannel.Stable);
+        Assert.False(blocked.Success);
+        Assert.Equal(UpdateInProgressMessage, blocked.ErrorMessage);
     }
 
     [Fact]
@@ -201,15 +271,14 @@ public sealed class CliDataPathsTests : IDisposable
     }
 
     /// <summary>Answers every request with a fixed NuGet version list; nothing leaves the process.</summary>
-    private sealed class VersionsHandler : HttpMessageHandler
+    private sealed class VersionsHandler(string json = "{\"versions\":[\"1.0.0\",\"1.1.0\"]}") : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(
-                    "{\"versions\":[\"1.0.0\",\"1.1.0\"]}", Encoding.UTF8, "application/json")
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
             });
         }
     }

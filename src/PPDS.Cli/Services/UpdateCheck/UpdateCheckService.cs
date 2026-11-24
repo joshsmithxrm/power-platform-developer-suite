@@ -41,6 +41,12 @@ public sealed class UpdateCheckService : IUpdateCheckService
     private readonly string _statusPath;
     private readonly string _lockPath;
 
+    /// <summary>Post-update status file the detached updater writes; <c>Program</c> reads it at the next start.</summary>
+    internal string StatusPath => _statusPath;
+
+    /// <summary>Self-update lock file; see <see cref="CliDataPaths.UpdateLockFile"/>.</summary>
+    internal string LockPath => _lockPath;
+
     // Test seams preserve production scheduling while allowing deterministic
     // cache-age and completion assertions instead of wall-clock sleeps.
     internal TimeProvider Clock { get; init; } = TimeProvider.System;
