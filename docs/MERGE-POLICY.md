@@ -26,8 +26,8 @@ these hold:
 - it is a squash pinned to the reviewed commit:
   `gh pr merge <n> --squash --delete-branch --match-head-commit <reviewed sha>`.
 
-The code-scanning result must be in before the merge, so the agent waits for it and then merges.
-Auto-merge does not wait for that result, so agents do not enable auto-merge.
+Because of the fourth condition, the agent waits for the code-scanning result and then merges
+itself; it does not use auto-merge, which does not wait for that result.
 
 Dependabot pull requests follow the same rule. `scripts/dependabot/classify.py` sorts each one into
 a group:
@@ -50,8 +50,10 @@ A Dependabot pull request that falls in any maintainer-first category below is m
 whatever its group. The classifier's docstring and reason strings still call Group A "auto-merge
 eligible". That wording is older than this section, and this section wins.
 
-If `main` goes red after a merge, whoever made it, agents merge nothing until `main` is green
-again, by a fix or a revert.
+If `main` goes red after a merge, whoever made it, the fix or the revert comes first, and agents
+merge nothing else until `main` is green again. The fix or revert is merged under the same tiers as
+any change: an agent merges it when it is ordinary and its review converged, and it is the
+maintainer's when it falls in his tier.
 
 **Daily list.** At the end of its day (by UTC date), the coordinating session writes one comment on
 the release tracking issue (for 2.0, #1812). It lists every pull request an agent merged that day.
@@ -62,8 +64,10 @@ has no comment.
 ### Maintainer first
 
 No agent merges a pull request in any of the categories below, or enables auto-merge on it, until
-the maintainer has answered for it. For categories 1 to 5 and 8, a pull request is in the category
-when its diff changes anything the category names, in any way, comments and renames included.
+the maintainer has answered for it. For categories 1 to 5, 7 and 8, a pull request is in the
+category when its diff changes anything the category names, in any way, comments and renames
+included. The one exception is in category 7: a change only to help text or a description that does
+not say whether a write happens or is confirmed.
 
 1. **Workflows and the rest of `.github/`.** This covers workflows, composite actions,
    `dependabot.yml`, and the pull request and issue templates. The agents' account cannot push
@@ -87,8 +91,7 @@ when its diff changes anything the category names, in any way, comments and rena
    For a version bump of an auth-critical package, see Group B above.
 6. **Data safety.** This covers a pull request labelled `data-safety`, and one that closes or fixes
    an issue labelled `data-safety`, label or not. The label means wrong data, lost data, an unguarded
-   or wrong-target write, or a silently wrong result, so some read paths belong here. Whoever finds
-   that a pull request meets that description applies the label, the author or the reviewer.
+   or wrong-target write, or a silently wrong result, so some read paths belong here.
 7. **Write paths.** This covers any change to code that runs when PPDS creates, changes or deletes
    records or metadata in an environment:
    - code that builds or sends the request;
@@ -130,8 +133,9 @@ when its diff changes anything the category names, in any way, comments and rena
 **How an agent asks.** The agent puts the pull request on the list of decisions waiting
 (D5 in [MAINTAINER-SESSION-RULES.md](MAINTAINER-SESSION-RULES.md)). It gives the pull request, its
 head commit, the category that applies and the review verdict. The answer is the maintainer's own
-words, or the maintainer merging it himself. D1 and D3 apply: the answer covers that pull request
-at that head commit, and a later commit needs a new answer. The agent records the answer, quoted and
+words, or the maintainer merging it himself. D1 and D3 apply. Because the merge is pinned to the
+reviewed commit, the answer is recorded for that head commit, and a new head commit has no recorded
+answer. The agent records the answer, quoted and
 dated, in the pull request's "Review record" before it merges, and the squash commit message
 carries that record. After the answer, the agent merges under the same conditions as in
 [Agents merge](#agents-merge).
@@ -140,8 +144,8 @@ carries that record. After the answer, the agent merges under the same condition
 
 Auto-merge is **enabled at the repo level** (`allow_auto_merge: true`). It does not bypass branch protection or skip required reviews — it only removes the "human clicks merge when CI goes green" step.
 
-Agents do not enable auto-merge: the code-scanning result must be in before the merge
-([Agents merge](#agents-merge)). The maintainer enables it with:
+Agents merge directly, after the code-scanning result is in ([Agents merge](#agents-merge)). The
+maintainer enables auto-merge with:
 
 ```bash
 gh pr merge <num> --squash --delete-branch --auto
@@ -160,9 +164,9 @@ Dependabot can roll multiple updates into a single grouped PR (titled `Bump the 
 Classify a grouped PR by **most-conservative-wins** — the whole group inherits the most conservative classification of any member:
 
 - Group contains **any major bump** -> Group C (manual review required)
-- Group contains **any minor bump** (no majors) -> Group B (verify-then-merge)
+- Group contains **any minor bump** (no majors) -> Group B (the area's tests, one fresh review, then agents merge; for the auth-critical exception see [Who merges](#who-merges))
 - Group contains **only patch bumps** -> Group A (one fresh review, then agents merge)
-- If any member is an auth-critical package (per the Auth-Critical Packages list below), the group is Group B regardless of update type, unless any member is major (then Group C).
+- If any member is an auth-critical package (per the Auth-Critical Packages list below), the group is Group B regardless of update type, unless any member is major (then Group C). While the tier of an auth-critical bump is undecided, such a group goes to the maintainer ([Who merges](#who-merges), Group B).
 - A GitHub Actions group is Group C whatever its members.
 
 Reasoning: simplest to enforce, hardest to misinterpret, and consistent with the universal-exclusion-of-major-bumps decision from the v1-prelaunch retro. If a single risky member exists, the whole group gets the safer treatment — splitting the group to land safe members earlier is not worth the complexity.
@@ -171,7 +175,7 @@ The classifier in `scripts/dependabot/classify.py` implements this rule by parsi
 
 ## Auth-Critical Packages
 
-The following packages are flagged as **auth-critical** — bumps to them at any non-major version go through Group B (verify-then-merge), and major bumps go through Group C (manual review). This list is the **single source of truth**; the classifier in `scripts/dependabot/classify.py` mirrors it as `AUTH_CRITICAL_PACKAGES`, and a unit test (`TestAuthCriticalDocCodeDrift.test_doc_list_matches_code_list`) fails if the two diverge.
+The following packages are flagged as **auth-critical** — bumps to them at any non-major version are Group B in the classifier, but go to the maintainer while their tier is undecided ([Who merges](#who-merges), Group B), and major bumps go through Group C (manual review). This list is the **single source of truth**; the classifier in `scripts/dependabot/classify.py` mirrors it as `AUTH_CRITICAL_PACKAGES`, and a unit test (`TestAuthCriticalDocCodeDrift.test_doc_list_matches_code_list`) fails if the two diverge.
 
 <!-- AUTH_CRITICAL_PACKAGES:BEGIN -->
 - `Microsoft.Identity.Client`
@@ -234,7 +238,7 @@ The rules below bind agent sessions that work for the maintainer (the coordinati
 
 ## Pre-Merge Gate Rules
 
-The [`pre-merge-gate.yml`](../.github/workflows/pre-merge-gate.yml) workflow runs on every PR. It evaluates one rule (Rule 3, below) and reports PR size for information. Each check is its own job in the PR Checks tab; the aggregate `Pre-Merge Gate` check succeeds iff Rule 3 passes. The aggregate is not a required status check, so GitHub does not block a merge on it: neither the maintainer nor an agent merges, or enables auto-merge on, a PR whose `Pre-Merge Gate` has failed.
+The [`pre-merge-gate.yml`](../.github/workflows/pre-merge-gate.yml) workflow runs on every PR. It evaluates one rule (Rule 3, below) and reports PR size for information. Each check is its own job in the PR Checks tab; the aggregate `Pre-Merge Gate` check succeeds iff Rule 3 passes. The aggregate is not a required status check, so GitHub does not block a merge on it: whoever merges must not merge, or enable auto-merge on, a PR whose `Pre-Merge Gate` has failed.
 
 The gate runs again when a PR is opened, reopened, pushed to, marked ready for review, or edited (title, description or base branch: Rule 3 reads the title and description). Only one run per PR is active. A new commit cancels the run in progress, because that run evaluates a superseded head. Marking ready and editing do not cancel: the new run waits until the run in progress ends, then evaluates the PR as it is at that time, so its result is the newest. A later event replaces a run that is still waiting. Read the result of the newest run: while a run is waiting, the result shown can be from before the latest edit.
 
