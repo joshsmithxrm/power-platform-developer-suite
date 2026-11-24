@@ -52,16 +52,22 @@ public sealed class EnvironmentConfigService : IEnvironmentConfigService
         string? confirmLowerProtection = null,
         CancellationToken ct = default)
     {
-        var assessment = await AssessConfigChangeAsync(url, type, ct).ConfigureAwait(false);
-        EnsureLoweringAllowed(assessment, confirmLowerProtection);
-        return await _store.SaveConfigAsync(url, label, type, color, clearColor, ct: ct).ConfigureAwait(false);
+        ArgumentException.ThrowIfNullOrWhiteSpace(url);
+
+        // The store re-reads the file under its lock and calls the check with the entry as it is on disk
+        // and the entry it is about to write, so the decision is made on the state the save replaces, not
+        // on a cache another process may have outdated (#1829).
+        return await _store.SaveConfigAsync(
+            url, label, type, color, clearColor, discoveredType: null, profileName: null,
+            validate: (before, after) => EnsureLoweringAllowed(Assess(url, before, after), confirmLowerProtection),
+            ct).ConfigureAwait(false);
     }
 
     public async Task<ProtectionChangeAssessment> AssessConfigChangeAsync(
         string url, EnvironmentType? type, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(url);
-        var before = await _store.GetConfigAsync(url, ct).ConfigureAwait(false);
+        var before = await ReadFreshAsync(url, ct).ConfigureAwait(false);
 
         // Label and colour never affect protection; only the type does (an explicit protection value
         // cannot be set through this service). Creating an entry without a type changes nothing either:
@@ -74,21 +80,34 @@ public sealed class EnvironmentConfigService : IEnvironmentConfigService
             DiscoveredType = before?.DiscoveredType
         };
 
-        var lowering = WriteProtectionResolver.FindLowering(before, after);
-        return new ProtectionChangeAssessment(
-            url, before?.Type, after.Type, lowering, DescribeDiscoveryContradiction(before, after));
+        return Assess(url, before, after);
     }
 
     public async Task<bool> RemoveConfigAsync(string url, CancellationToken ct = default)
     {
         // Every writer treats a missing entry as Production, so removal never lowers protection.
         // The check stays so that a future resolver rule cannot make removal a silent way round it.
-        var before = await _store.GetConfigAsync(url, ct).ConfigureAwait(false);
-        var lowering = WriteProtectionResolver.FindLowering(before, after: null);
-        EnsureLoweringAllowed(
-            new ProtectionChangeAssessment(url, before?.Type, null, lowering, null),
-            confirmLowerProtection: null);
+        // The store re-reads the file before removing, so the rest of the file is kept as it is on disk.
+        var before = await ReadFreshAsync(url, ct).ConfigureAwait(false);
+        EnsureLoweringAllowed(Assess(url, before, after: null), confirmLowerProtection: null);
         return await _store.RemoveConfigAsync(url, ct).ConfigureAwait(false);
+    }
+
+    private static ProtectionChangeAssessment Assess(string url, EnvironmentConfig? before, EnvironmentConfig? after)
+        => new(url, before?.Type, after?.Type, WriteProtectionResolver.FindLowering(before, after),
+            after is null ? null : DescribeDiscoveryContradiction(before, after));
+
+    /// <summary>The entry as it is in the file now, not as this store's cache last saw it.</summary>
+    private async Task<EnvironmentConfig?> ReadFreshAsync(string url, CancellationToken ct)
+    {
+        var normalized = EnvironmentConfig.NormalizeUrl(url);
+        EnvironmentConfig? found = null;
+        await _store.UpdateAsync(collection =>
+        {
+            found = collection.Environments.FirstOrDefault(e => EnvironmentConfig.NormalizeUrl(e.Url) == normalized);
+            return false; // read only: nothing is written
+        }, ct).ConfigureAwait(false);
+        return found;
     }
 
     private void EnsureLoweringAllowed(ProtectionChangeAssessment assessment, string? confirmLowerProtection)
@@ -132,23 +151,17 @@ public sealed class EnvironmentConfigService : IEnvironmentConfigService
             : null;
     }
 
+    // Type defaults are colours only, but writing the whole collection from the cache would also write
+    // back stale environment entries (and their types); UpdateAsync changes the freshly read file.
     public async Task SaveTypeDefaultAsync(EnvironmentType typeName, EnvironmentColor color, CancellationToken ct = default)
-    {
-        var collection = await _store.LoadAsync(ct).ConfigureAwait(false);
-        collection.TypeDefaults[typeName] = color;
-        await _store.SaveAsync(collection, ct).ConfigureAwait(false);
-    }
+        => await _store.UpdateAsync(collection =>
+        {
+            collection.TypeDefaults[typeName] = color;
+            return true;
+        }, ct).ConfigureAwait(false);
 
     public async Task<bool> RemoveTypeDefaultAsync(EnvironmentType typeName, CancellationToken ct = default)
-    {
-        var collection = await _store.LoadAsync(ct).ConfigureAwait(false);
-        if (collection.TypeDefaults.Remove(typeName))
-        {
-            await _store.SaveAsync(collection, ct).ConfigureAwait(false);
-            return true;
-        }
-        return false;
-    }
+        => await _store.UpdateAsync(collection => collection.TypeDefaults.Remove(typeName), ct).ConfigureAwait(false);
 
     public async Task<IReadOnlyDictionary<EnvironmentType, EnvironmentColor>> GetAllTypeDefaultsAsync(CancellationToken ct = default)
     {

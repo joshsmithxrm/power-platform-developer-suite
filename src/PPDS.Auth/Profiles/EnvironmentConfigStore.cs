@@ -40,60 +40,76 @@ public sealed class EnvironmentConfigStore : IDisposable
     public string FilePath => _filePath;
 
     /// <summary>Loads the environment config collection, using cache if available.</summary>
+    /// <remarks>
+    /// The cache can be older than the file when another process (or another store instance) has saved
+    /// since. Reads tolerate that; every change (<see cref="SaveConfigAsync(string, string?, EnvironmentType?, EnvironmentColor?, bool, string?, string?, CancellationToken)"/>,
+    /// <see cref="RemoveConfigAsync"/>, <see cref="UpdateAsync"/>) re-reads the file first, so a stale cache is
+    /// never written back.
+    /// </remarks>
     public async Task<EnvironmentConfigCollection> LoadAsync(CancellationToken ct = default)
     {
         ThrowIfDisposed();
         await _lock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (_cached != null) return _cached;
-
-            if (!File.Exists(_filePath))
-            {
-                _cached = new EnvironmentConfigCollection();
-                return _cached;
-            }
-
-            var json = await File.ReadAllTextAsync(_filePath, ct).ConfigureAwait(false);
-            _cached = JsonSerializer.Deserialize<EnvironmentConfigCollection>(json, JsonOptions)
-                ?? new EnvironmentConfigCollection();
-
-            // Dedup environments by normalized URL (keep first occurrence, merge profiles)
-            var seen = new Dictionary<string, EnvironmentConfig>();
-            foreach (var env in _cached.Environments)
-            {
-                var key = EnvironmentConfig.NormalizeUrl(env.Url);
-                if (seen.TryGetValue(key, out var existing))
-                {
-                    // Merge profiles from duplicate into the kept entry
-                    foreach (var p in env.Profiles)
-                    {
-                        if (!existing.Profiles.Contains(p, StringComparer.OrdinalIgnoreCase))
-                            existing.Profiles.Add(p);
-                    }
-                }
-                else
-                {
-                    env.Url = key; // Ensure stored URL is normalized
-                    seen[key] = env;
-                }
-            }
-            if (seen.Count != _cached.Environments.Count)
-            {
-                _cached.Environments = seen.Values.ToList();
-                // Persist the deduped version (fire-and-forget within the lock)
-                ProfilePaths.EnsureDirectoryExists();
-                _cached.Version = 1;
-                var cleanJson = JsonSerializer.Serialize(_cached, JsonOptions);
-                await File.WriteAllTextAsync(_filePath, cleanJson, ct).ConfigureAwait(false);
-            }
-
+            _cached ??= await ReadFromDiskAsync(ct).ConfigureAwait(false);
             return _cached;
         }
         finally
         {
             _lock.Release();
         }
+    }
+
+    /// <summary>
+    /// Reads and normalises the file, ignoring the cache. The caller holds <see cref="_lock"/>.
+    /// </summary>
+    private async Task<EnvironmentConfigCollection> ReadFromDiskAsync(CancellationToken ct)
+    {
+        if (!File.Exists(_filePath))
+            return new EnvironmentConfigCollection();
+
+        var json = await File.ReadAllTextAsync(_filePath, ct).ConfigureAwait(false);
+        var collection = JsonSerializer.Deserialize<EnvironmentConfigCollection>(json, JsonOptions)
+            ?? new EnvironmentConfigCollection();
+
+        // Dedup environments by normalized URL (keep first occurrence, merge profiles)
+        var seen = new Dictionary<string, EnvironmentConfig>();
+        foreach (var env in collection.Environments)
+        {
+            var key = EnvironmentConfig.NormalizeUrl(env.Url);
+            if (seen.TryGetValue(key, out var existing))
+            {
+                // Merge profiles from duplicate into the kept entry
+                foreach (var p in env.Profiles)
+                {
+                    if (!existing.Profiles.Contains(p, StringComparer.OrdinalIgnoreCase))
+                        existing.Profiles.Add(p);
+                }
+            }
+            else
+            {
+                env.Url = key; // Ensure stored URL is normalized
+                seen[key] = env;
+            }
+        }
+        if (seen.Count != collection.Environments.Count)
+        {
+            collection.Environments = seen.Values.ToList();
+            // Persist the deduped version (within the lock)
+            await WriteToDiskAsync(collection, ct).ConfigureAwait(false);
+        }
+
+        return collection;
+    }
+
+    /// <summary>Writes the collection. The caller holds <see cref="_lock"/>.</summary>
+    private async Task WriteToDiskAsync(EnvironmentConfigCollection collection, CancellationToken ct)
+    {
+        ProfilePaths.EnsureDirectoryExists();
+        collection.Version = 1;
+        var json = JsonSerializer.Serialize(collection, JsonOptions);
+        await File.WriteAllTextAsync(_filePath, json, ct).ConfigureAwait(false);
     }
 
     /// <summary>Persists the environment config collection to disk.</summary>
@@ -105,11 +121,36 @@ public sealed class EnvironmentConfigStore : IDisposable
         await _lock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            ProfilePaths.EnsureDirectoryExists();
-            collection.Version = 1;
-            var json = JsonSerializer.Serialize(collection, JsonOptions);
-            await File.WriteAllTextAsync(_filePath, json, ct).ConfigureAwait(false);
+            await WriteToDiskAsync(collection, ct).ConfigureAwait(false);
             _cached = collection;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Re-reads the file, lets <paramref name="update"/> change the fresh collection, and writes it when
+    /// <paramref name="update"/> returns true, all under this store's lock. Use it instead of
+    /// <see cref="LoadAsync"/> followed by <see cref="SaveAsync"/>, which writes back whatever the cache held.
+    /// </summary>
+    /// <returns>The value <paramref name="update"/> returned: whether the collection was written.</returns>
+    public async Task<bool> UpdateAsync(Func<EnvironmentConfigCollection, bool> update, CancellationToken ct = default)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(update);
+
+        await _lock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var collection = await ReadFromDiskAsync(ct).ConfigureAwait(false);
+            _cached = null; // update may throw after changing the fresh collection
+            var changed = update(collection);
+            if (changed)
+                await WriteToDiskAsync(collection, ct).ConfigureAwait(false);
+            _cached = collection;
+            return changed;
         }
         finally
         {
@@ -133,68 +174,125 @@ public sealed class EnvironmentConfigStore : IDisposable
     /// Saves or updates config for a specific environment. Merges non-null fields.
     /// Optionally links the environment to a profile name.
     /// </summary>
-    public async Task<EnvironmentConfig> SaveConfigAsync(
+    /// <remarks>
+    /// Re-reads the file under this store's lock and changes only the fields given here on the freshly
+    /// read entry, so a change another process saved meanwhile is kept, not overwritten from the cache.
+    /// </remarks>
+    public Task<EnvironmentConfig> SaveConfigAsync(
         string url, string? label = null, EnvironmentType? type = null, EnvironmentColor? color = null,
         bool clearColor = false, string? discoveredType = null, string? profileName = null,
         CancellationToken ct = default)
+        => SaveConfigAsync(url, label, type, color, clearColor, discoveredType, profileName,
+            validate: static (_, _) => { }, ct);
+
+    /// <summary>
+    /// Saves or updates config for a specific environment like the other overload, and calls
+    /// <paramref name="validate"/> with the entry as freshly read from the file (null when there is none)
+    /// and the entry about to be written, before writing. If <paramref name="validate"/> throws, nothing is
+    /// written.
+    /// </summary>
+    /// <remarks>
+    /// The read, the check and the write happen under this store's lock, so no other caller of this store
+    /// instance can change the entry in between. The lock is in-process only: another process that saves
+    /// the same file in the same moment is not excluded, and the later write wins.
+    /// </remarks>
+    public async Task<EnvironmentConfig> SaveConfigAsync(
+        string url, string? label, EnvironmentType? type, EnvironmentColor? color,
+        bool clearColor, string? discoveredType, string? profileName,
+        Action<EnvironmentConfig?, EnvironmentConfig> validate,
+        CancellationToken ct = default)
     {
         ThrowIfDisposed();
-        var collection = await LoadAsync(ct).ConfigureAwait(false);
-        var normalized = EnvironmentConfig.NormalizeUrl(url);
+        ArgumentNullException.ThrowIfNull(validate);
 
-        var existing = collection.Environments.FirstOrDefault(
-            e => EnvironmentConfig.NormalizeUrl(e.Url) == normalized);
+        await _lock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var collection = await ReadFromDiskAsync(ct).ConfigureAwait(false);
+            _cached = null; // validate may throw after the fresh collection was changed below
+            var normalized = EnvironmentConfig.NormalizeUrl(url);
 
-        if (existing != null)
-        {
-            if (label != null) existing.Label = label == "" ? null : label;
-            if (type != null) existing.Type = type;
-            if (color != null) existing.Color = color;
-            else if (clearColor) existing.Color = null;
-            if (discoveredType != null) existing.DiscoveredType = discoveredType;
-        }
-        else
-        {
-            existing = new EnvironmentConfig
+            var existing = collection.Environments.FirstOrDefault(
+                e => EnvironmentConfig.NormalizeUrl(e.Url) == normalized);
+            var before = existing is null ? null : Copy(existing);
+
+            if (existing != null)
             {
-                Url = normalized,
-                Label = label,
-                Type = type,
-                Color = color,
-                DiscoveredType = discoveredType
-            };
-            collection.Environments.Add(existing);
-        }
+                if (label != null) existing.Label = label == "" ? null : label;
+                if (type != null) existing.Type = type;
+                if (color != null) existing.Color = color;
+                else if (clearColor) existing.Color = null;
+                if (discoveredType != null) existing.DiscoveredType = discoveredType;
+            }
+            else
+            {
+                existing = new EnvironmentConfig
+                {
+                    Url = normalized,
+                    Label = label,
+                    Type = type,
+                    Color = color,
+                    DiscoveredType = discoveredType
+                };
+                collection.Environments.Add(existing);
+            }
 
-        // Link to profile if specified
-        if (!string.IsNullOrWhiteSpace(profileName) &&
-            !existing.Profiles.Contains(profileName, StringComparer.OrdinalIgnoreCase))
+            // Link to profile if specified
+            if (!string.IsNullOrWhiteSpace(profileName) &&
+                !existing.Profiles.Contains(profileName, StringComparer.OrdinalIgnoreCase))
+            {
+                existing.Profiles.Add(profileName);
+            }
+
+            validate(before, Copy(existing));
+
+            await WriteToDiskAsync(collection, ct).ConfigureAwait(false);
+            _cached = collection;
+            return existing;
+        }
+        finally
         {
-            existing.Profiles.Add(profileName);
+            _lock.Release();
         }
-
-        await SaveAsync(collection, ct).ConfigureAwait(false);
-        return existing;
     }
 
     /// <summary>
-    /// Removes config for a specific environment URL.
+    /// Removes config for a specific environment URL. Re-reads the file under this store's lock first, so
+    /// the rest of the file is written back as it is on disk, not from the cache.
     /// </summary>
     public async Task<bool> RemoveConfigAsync(string url, CancellationToken ct = default)
     {
         ThrowIfDisposed();
-        var collection = await LoadAsync(ct).ConfigureAwait(false);
-        var normalized = EnvironmentConfig.NormalizeUrl(url);
-        var removed = collection.Environments.RemoveAll(
-            e => EnvironmentConfig.NormalizeUrl(e.Url) == normalized);
-
-        if (removed > 0)
+        await _lock.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            await SaveAsync(collection, ct).ConfigureAwait(false);
-            return true;
+            var collection = await ReadFromDiskAsync(ct).ConfigureAwait(false);
+            var normalized = EnvironmentConfig.NormalizeUrl(url);
+            var removed = collection.Environments.RemoveAll(
+                e => EnvironmentConfig.NormalizeUrl(e.Url) == normalized);
+
+            if (removed > 0)
+                await WriteToDiskAsync(collection, ct).ConfigureAwait(false);
+            _cached = collection;
+            return removed > 0;
         }
-        return false;
+        finally
+        {
+            _lock.Release();
+        }
     }
+
+    private static EnvironmentConfig Copy(EnvironmentConfig source) => new()
+    {
+        Url = source.Url,
+        Label = source.Label,
+        Type = source.Type,
+        DiscoveredType = source.DiscoveredType,
+        Color = source.Color,
+        SafetySettings = source.SafetySettings,
+        Protection = source.Protection,
+        Profiles = new List<string>(source.Profiles)
+    };
 
     /// <summary>Clears the in-memory cache, forcing a reload from disk on next access.</summary>
     public void ClearCache()

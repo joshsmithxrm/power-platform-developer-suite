@@ -678,12 +678,15 @@ public static class EnvCommandGroup
             or EnvironmentConfirmationErrorCodes.TargetMismatch
             or EnvironmentConfirmationErrorCodes.InvalidUrl)
         {
+            // Every refusal of a lowering exits 11 (ConfirmationRequired), like a cancel at the prompt:
+            // a missing acknowledgement, one naming another environment, one that is not an address,
+            // and a mistyped address at the prompt. Only the lowering check raises these codes here.
             error.WriteLine($"Error: {ex.UserMessage}");
             // Names the option but not a ready-made command with the address filled in: whoever acknowledges
             // the change should have read why it was refused (#1829).
             if (ex.ErrorCode == EnvironmentConfirmationErrorCodes.ProtectionLoweringConfirmationRequired)
                 error.WriteLine($"Run the command in an interactive terminal to confirm, or acknowledge the change with {ConfirmLowerProtectionOptionName} followed by the environment URL.");
-            return ExceptionMapper.ToExitCode(ex);
+            return ExitCodes.ConfirmationRequired;
         }
 
         Console.ForegroundColor = ConsoleColor.Green;

@@ -68,6 +68,8 @@ public sealed class EnvConfigLowerProtectionTests : IDisposable
     [InlineData("https://org")]                              // a prefix of the address
     [InlineData("https://org.crm.dynamics.com.example.test")] // the address as a prefix
     [InlineData("https://org.crm.dynamics.com/extra")]
+    [InlineData("not-a-url")]                                 // not an address at all
+    [InlineData("*")]
     public async Task Acknowledgement_NamingAnotherEnvironment_IsRefused(string acknowledgement)
     {
         await _store.SaveConfigAsync(Url, type: EnvironmentType.Production);
@@ -75,9 +77,9 @@ public sealed class EnvConfigLowerProtectionTests : IDisposable
         var exit = await RunAsync(EnvironmentType.Development, acknowledgement: acknowledgement,
             interactive: false, input: "");
 
-        exit.Should().NotBe(ExitCodes.Success);
+        exit.Should().Be(ExitCodes.ConfirmationRequired);
         (await _store.GetConfigAsync(Url))!.Type.Should().Be(EnvironmentType.Production);
-        _error.ToString().Should().Contain("does not name the environment");
+        _error.ToString().Should().Contain("Error: ");
     }
 
     [Fact]
@@ -108,6 +110,7 @@ public sealed class EnvConfigLowerProtectionTests : IDisposable
     [Theory]
     [InlineData("https://other.crm.dynamics.com")]
     [InlineData("https://org")]
+    [InlineData("yes")] // not an address
     public async Task Interactive_TypingAnotherUrl_IsRefused(string typed)
     {
         await _store.SaveConfigAsync(Url, type: EnvironmentType.Production);
@@ -115,7 +118,7 @@ public sealed class EnvConfigLowerProtectionTests : IDisposable
         var exit = await RunAsync(EnvironmentType.Development, acknowledgement: null, interactive: true,
             input: typed + "\n");
 
-        exit.Should().NotBe(ExitCodes.Success);
+        exit.Should().Be(ExitCodes.ConfirmationRequired);
         (await _store.GetConfigAsync(Url))!.Type.Should().Be(EnvironmentType.Production);
     }
 
