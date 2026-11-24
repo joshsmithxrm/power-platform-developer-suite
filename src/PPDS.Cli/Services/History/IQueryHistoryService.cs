@@ -5,7 +5,8 @@ namespace PPDS.Cli.Services.History;
 /// </summary>
 /// <remarks>
 /// This service provides per-environment query history persistence.
-/// History is stored in ~/.ppds/history/{environment-hash}.json.
+/// History is stored in history/{environment-hash}.json under the PPDS_CONFIG_DIR folder
+/// when that is set, otherwise under ~/.ppds.
 /// </remarks>
 public interface IQueryHistoryService
 {
