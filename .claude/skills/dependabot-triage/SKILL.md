@@ -12,7 +12,7 @@ The policy is `docs/MERGE-POLICY.md` ("Who merges", grouped PRs, the auth-critic
 Stop and tell the user if any of these hold:
 
 - A release is in progress (a `release/*` branch exists or release tags are being pushed).
-- `main` CI is red (every PR will fail the same checks; drain nothing). After any merge, a red `main` also stops all agent merges until it is fixed or reverted.
+- `main` CI is red (every PR will fail the same checks; drain nothing). After any merge, a red `main` stops merging, for whoever merges, until it is fixed or reverted; the fix or revert is merged under the same tiers as any change.
 
 ## Procedure
 

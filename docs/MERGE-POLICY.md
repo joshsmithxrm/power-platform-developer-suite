@@ -12,7 +12,9 @@ does not waive the checklist or grant communication permission.
 Every pull request to `main` is in one of two tiers. Before an agent session merges a pull request,
 it decides the tier from the diff, the labels, the issues the pull request closes and its author.
 If the tier is unclear, the pull request is **maintainer first**. No fixed approval prompt stands
-before a merge: this written rule is the guard.
+before a merge: this written rule is the guard. A release is led by the maintainer, who is present
+when the release skill runs; the skill's confirmations are the steps of that procedure, not a prompt
+that stands before an agent's ordinary merge.
 
 ### Agents merge
 
@@ -42,7 +44,9 @@ a group:
   top of this section.
 - **Group C (not routine):** the maintainer decides. Major bumps stay his under the existing
   universal exclusion of major bumps ([Grouped Dependabot PRs](#grouped-dependabot-prs)). A bump
-  whose notes signal a breaking change stays his under the classifier's existing Group C rule.
+  whose notes signal a breaking change stays his under the classifier's existing Group C rule. A
+  reviewer who finds a breaking change the classifier did not detect treats the bump as Group C: its
+  tier is not clear.
   Every GitHub Actions bump stays his as well (category 9). The agent comments on the pull request with the group and the classifier's reason,
   and puts it on the list of decisions waiting (D5).
 
@@ -50,9 +54,8 @@ A Dependabot pull request that falls in any maintainer-first category below is m
 whatever its group. The classifier's docstring and reason strings still call Group A "auto-merge
 eligible". That wording is older than this section, and this section wins.
 
-If `main` goes red after a merge, whoever made it, the fix or the revert comes first, and agents
-merge nothing else until `main` is green again. The fix or revert is merged under the same tiers as
-any change: an agent merges it when it is ordinary and its review converged, and it is the
+If `main` goes red after a merge, whoever made it, merging stops, for whoever merges, until it is
+fixed or reverted. The fix or revert is merged under the same tiers as any change: an agent merges it when it is ordinary and its review converged, and it is the
 maintainer's when it falls in his tier.
 
 **Daily list.** At the end of its day (by UTC date), the coordinating session writes one comment on
@@ -91,9 +94,13 @@ not say whether a write happens or is confirmed.
    For a version bump of an auth-critical package, see Group B above.
 6. **Data safety.** This covers a pull request labelled `data-safety`, and one that closes or fixes
    an issue labelled `data-safety`, label or not. The label means wrong data, lost data, an unguarded
-   or wrong-target write, or a silently wrong result, so some read paths belong here.
-7. **Write paths.** This covers any change to code that runs when PPDS creates, changes or deletes
-   records or metadata in an environment:
+   or wrong-target write, or a silently wrong result. A pull request that only reads is in this
+   category through the label, or because it closes or fixes a `data-safety` issue, and not
+   otherwise.
+7. **Write paths.** This covers any file that contains code that runs when PPDS creates, changes or
+   deletes records or metadata in an environment. A pull request that changes such a file is in this
+   category whatever part of the file the diff changes (a read method, a comment, a rename). Write
+   code is:
    - code that builds or sends the request;
    - code that chooses the target environment for a write;
    - code that decides whether to ask for confirmation.
@@ -105,9 +112,9 @@ not say whether a write happens or is confirmed.
    - `src/PPDS.Migration/Import/`;
    - `src/PPDS.Cli/Services/Metadata/Authoring/` and `src/PPDS.Cli/Plugins/Registration/`;
    - the write commands under `src/PPDS.Cli/Commands/`, the write tools under `src/PPDS.Mcp/Tools/`,
-     and the write methods of the services under `src/PPDS.Cli/Services/`.
+     and the service files under `src/PPDS.Cli/Services/` that contain write code.
 
-   Write code outside these paths is still in this category. Where it is not clear whether code runs
+   A file with write code outside these paths is still in this category. Where it is not clear whether code runs
    during a write, the rule at the top of this section applies. Refactors count, even when no
    behaviour is meant to change. A change only to help text or a
    description in a write command is not in this category, unless the text says whether a write
@@ -126,18 +133,19 @@ not say whether a write happens or is confirmed.
    every one in Group C.
 10. **Outside contributions.** This covers any pull request whose author is not the maintainer, the
     agents' account or Dependabot. It also covers any pull request, whoever opened it, that carries
-    a commit authored by someone else (an outside contributor's work). If the change needs a live run (P1 in
+    a commit authored by anyone other than the maintainer, the agents' account or Dependabot (an
+    outside contributor's work). If the change needs a live run (P1 in
     [specs/test-gates.md](../specs/test-gates.md)), the maintainer or one of his sessions does it
     before the merge and records it in the pull request. The contributor is never asked to.
 
 **How an agent asks.** The agent puts the pull request on the list of decisions waiting
 (D5 in [MAINTAINER-SESSION-RULES.md](MAINTAINER-SESSION-RULES.md)). It gives the pull request, its
 head commit, the category that applies and the review verdict. The answer is the maintainer's own
-words, or the maintainer merging it himself. D1 and D3 apply. Because the merge is pinned to the
+words, or the maintainer merging it himself. D3 applies. The place of record for a go-first answer
+is the pull request's "Review record": the agent records the answer there, quoted and dated, before
+it merges, and the squash commit message carries that record. Because the merge is pinned to the
 reviewed commit, the answer is recorded for that head commit, and a new head commit has no recorded
-answer. The agent records the answer, quoted and
-dated, in the pull request's "Review record" before it merges, and the squash commit message
-carries that record. After the answer, the agent merges under the same conditions as in
+answer. After the answer, the agent merges under the same conditions as in
 [Agents merge](#agents-merge).
 
 ## Auto-Merge
