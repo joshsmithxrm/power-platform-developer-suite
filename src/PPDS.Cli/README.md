@@ -1109,7 +1109,7 @@ Secrets are encrypted using platform-native encryption (DPAPI on Windows).
 
 Query history (`history/`), log files (`*.log`) and update-check state are kept in `~/.ppds` (`%USERPROFILE%\.ppds` on Windows).
 
-Set `PPDS_CONFIG_DIR` to a folder to keep profiles, query history, logs and update-check state there instead, for example to isolate a second configuration or a test run.
+Set `PPDS_CONFIG_DIR` to a folder to keep profiles, query history, logs and update-check state there instead, for example to isolate a second configuration or a test run. The self-update lock (`update.lock`) always stays in `~/.ppds`, since every configuration shares the one installed tool.
 
 ---
 
