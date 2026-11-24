@@ -14,7 +14,9 @@ Group A — routine: one short fresh review, then an agent merges it on green CI
 Group B — verify-then-merge (run package-specific tests locally first):
   - Minor bumps on user-visible runtime libraries (Terminal.Gui, etc.)
   - Bumps to auth-critical packages (Microsoft.Identity.Client, Azure.Identity,
-    Microsoft.PowerPlatform.Dataverse.Client) at minor
+    Microsoft.PowerPlatform.Dataverse.Client) at minor. These are maintainer
+    first: after the tests and one fresh review, they wait for the
+    maintainer's yes (docs/MERGE-POLICY.md "Who merges", category 5).
   - Anything bumping security-flagged packages
   - Bumps that touch src/PPDS.Auth/** at any version
 
@@ -578,6 +580,7 @@ def _classify_member_set(
         reason += (
             f"; auth-critical override "
             f"({trigger[0]} {trigger[1]} -> {trigger[2]}, {trigger[3]})"
+            f" — maintainer first: the area's tests and one fresh review, then the maintainer's yes"
         )
 
     # Safety guards the single-package path also applies — a member-set PR must
@@ -748,7 +751,7 @@ def _classify_by_version(pr: dict) -> Classification:
         return Classification(
             pr_number=number,
             group="B",
-            reason=f"auth-critical package {pkg} {update_type} bump ({from_v} -> {to_v}) — verify-then-merge",
+            reason=f"auth-critical package {pkg} {update_type} bump ({from_v} -> {to_v}) — maintainer first: the area's tests and one fresh review, then the maintainer's yes",
             ecosystem=ecosystem,
             update_type=update_type,
             package=pkg,
