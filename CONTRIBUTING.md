@@ -255,8 +255,13 @@ extension's typecheck, lint, build, unit and end-to-end tests) and `test-status`
 Python checks). Everything else is advisory: Codecov, CodeQL, the Pre-Merge Gate
 (PR size reporting and a rule for Dependabot major updates), the TUI end-to-end
 workflow, and any automated review comments. No approving review is required by
-branch protection, but a maintainer reviews every outside contribution before
-merging.
+branch protection, but the maintainer reviews every outside contribution and
+decides it before it merges. Agent sessions that work for him merge ordinary
+changes to the project; they never merge an outside contribution without his
+answer ([docs/MERGE-POLICY.md](docs/MERGE-POLICY.md#who-merges)). If your change
+needs a run against a real Dataverse environment, the maintainer or one of his
+sessions does it before the merge and records it in the PR. You are never asked
+to.
 
 ### Process
 
@@ -274,7 +279,8 @@ merging.
    the release process keeps it empty. Do not change version numbers; versions
    come from git tags (MinVer).
 3. Wait for CI, then respond to review comments.
-4. A maintainer squash-merges the PR. Merge mechanics are in
+4. Once the maintainer has decided, the PR is squash-merged, by him or by one of
+   his agent sessions after his answer. Merge mechanics are in
    [docs/MERGE-POLICY.md](docs/MERGE-POLICY.md).
 
 Workflow changes must follow the [Actions token permission policy](docs/CI-PERMISSIONS.md).

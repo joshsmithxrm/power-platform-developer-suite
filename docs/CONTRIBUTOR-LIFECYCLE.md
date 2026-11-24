@@ -2,7 +2,9 @@
 
 Maintainers own a contribution through landing, credit, communication and source-PR
 disposition. This policy applies with any development tool, including no AI tool.
-It grants no authority to merge, publish, send a reply or close someone else's PR.
+It grants no authority to merge, publish, send a reply or close someone else's PR. Who may merge
+is in [MERGE-POLICY.md](MERGE-POLICY.md#who-merges); an outside contributor's pull request is
+maintainer first.
 
 ## Choose the landing route early
 

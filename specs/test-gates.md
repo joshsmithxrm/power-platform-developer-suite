@@ -42,8 +42,10 @@ the new hold does not revoke or cancel them.
 These rules bind agent sessions that work for the maintainer (the coordinating
 session and its worker sessions); the contributor process in
 [CONTRIBUTING.md](../CONTRIBUTING.md) is unchanged for everyone else. They say
-what must be observed before such a session's pull request merges. They are
-separate from the suites above, which gate CI.
+what must be observed before such a session's pull request merges. Who may merge
+which pull request is in
+[docs/MERGE-POLICY.md](../docs/MERGE-POLICY.md#who-merges). They are separate from
+the suites above, which gate CI.
 
 | # | Rule |
 |---|---|
@@ -55,7 +57,8 @@ separate from the suites above, which gate CI.
 | P6 | One schema-changing session per test environment at a time. The coordinating session assigns an environment to a worker; a worker never picks one. Every run uses its own throwaway solution and ends with a leftovers scan. |
 | P7 | A change that persists in an environment or in the maintainer's user settings (a provisioned language, an organisation setting, the maintainer's interface language) is made from the main session, after the maintainer's yes, with what cannot be undone stated first. |
 
-The pull request template has a required line for the live run (P1). Review rules
+The pull request template has a required line for the live run (P1). The merge
+tiers are in [docs/MERGE-POLICY.md](../docs/MERGE-POLICY.md#who-merges). Review rules
 are in [docs/MERGE-POLICY.md](../docs/MERGE-POLICY.md#maintainer-merge-checklist);
 rules for decisions, triage and sessions are in
 [docs/MAINTAINER-SESSION-RULES.md](../docs/MAINTAINER-SESSION-RULES.md).
