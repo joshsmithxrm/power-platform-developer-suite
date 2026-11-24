@@ -86,3 +86,45 @@ are not passed to the test process. The goldens describe the signed-out state.
 CI runs `npm test` to compare committed goldens; it does not regenerate them.
 Use `npm run test:update` only after reviewing an intentional UI change, then
 review every changed snapshot and rerun `npm test` before committing.
+
+`npm test` fails on obsolete snapshots, in two forms:
+
+- **A snapshot file with no spec**: `tests/__snapshots__/<name>.spec.ts.snap`
+  with no `tests/<name>.spec.ts`, left behind when a spec is removed or
+  renamed. It fails every test run, whatever else happened. tui-test does not
+  report it and `test:update` does not remove it; delete it with `git rm`.
+- **An unused entry** in the snapshot file of a spec that ran. When every test
+  ran and passed, it is obsolete: remove it with `npm run test:update`. When a
+  test was skipped (`test.skip`), did not run (`test.only`, a filter) or failed,
+  the unused entries may be those tests' snapshots, so the run cannot tell
+  which are obsolete. Run every test to decide, and do not run `test:update`
+  then, because tui-test would delete those snapshots. A skipped or unrun test
+  with unused entries fails the run; a failed run keeps its own status and
+  prints the count as a note.
+
+A run in which no test ran (a filter that matches no spec, or every selected
+test skipped) also fails. The
+commands that run no test, `--help`, `--version`, `help` and `show-trace`,
+pass through with tui-test's own exit code.
+
+## Launch failures
+
+A test can fail before the application starts: on a Windows runner the
+pseudo-terminal launch has failed with `Cannot create process, error code: 87`.
+`npm test` preloads `tools/launch-retry-preload.mjs` into tui-test and its
+workers, which retries only that launch call, at most 3 attempts per test
+(pauses of 250 ms and 1 s). A launch that still fails fails the test with
+`TUI launch failure: the application under test did not start after 3 attempts`.
+No assertion is retried and tui-test's own test retry stays at 0. At the end
+of the run, `npm test` prints how many launch attempts were retried and how
+many tests failed to launch.
+
+## Tool tests
+
+`npm run test:tools` runs the `node:test` tests of `tools/`, including an end
+to end check that injects launch failures into a real run of
+`tests/startup.spec.ts` (it needs the CLI built; CI runs it before the
+snapshot suite). On Windows it also makes the first launch in each worker a
+real call with a working directory that does not exist, so process creation
+fails in the native code, and checks that the next launch in the same worker
+starts the TUI. Every test has a 2-minute limit (the end-to-end ones, 5).

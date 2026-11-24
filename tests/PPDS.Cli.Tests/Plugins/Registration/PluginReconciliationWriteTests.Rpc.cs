@@ -9,6 +9,7 @@ using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Plugins.Registration;
 using PPDS.Cli.Services.Plugins;
+using PPDS.Tests.Shared;
 using Xunit;
 using System.Text;
 using System.Text.Json;
@@ -111,33 +112,8 @@ public partial class PluginReconciliationWriteTests
                 It.Is<StepUpdateRequest>(request => request.InvocationSource == "Parent"), It.IsAny<CancellationToken>()))
             .Callback(() => cancellation.Cancel()).ThrowsAsync(failure);
         using var fixture = await RpcFixture.CreateAsync(registration.Object);
-        var (clientStream, serverStream) = FullDuplexStream.CreatePair();
-        using var client = clientStream;
-        using var server = serverStream;
-        using var rpc = new JsonRpc(new HeaderDelimitedMessageHandler(server, server, new SystemTextJsonFormatter()));
-        rpc.AddLocalRpcTarget(fixture.Handler);
-        rpc.StartListening();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var payload = JsonSerializer.SerializeToUtf8Bytes(new
-        {
-            jsonrpc = "2.0", id = 1, method = "plugins/updateStep",
-            @params = new { id = stepId.ToString(), invocationSource = "Parent" }
-        });
-        await client.WriteAsync(Encoding.ASCII.GetBytes($"Content-Length: {payload.Length}\r\n\r\n"), timeout.Token);
-        await client.WriteAsync(payload, timeout.Token);
-        await client.FlushAsync(timeout.Token);
-
-        var header = new StringBuilder();
-        var one = new byte[1];
-        while (!header.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal))
-        {
-            await client.ReadExactlyAsync(one, timeout.Token);
-            header.Append((char)one[0]);
-            Assert.True(header.Length < 4096);
-        }
-        var lengthLine = header.ToString().Split("\r\n").Single(line => line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase));
-        var response = new byte[int.Parse(lengthLine.Split(':')[1].Trim(), System.Globalization.CultureInfo.InvariantCulture)];
-        await client.ReadExactlyAsync(response, timeout.Token);
+        var response = await InvokeWireAsync(fixture.Handler, "plugins/updateStep",
+            new { id = stepId.ToString(), invocationSource = "Parent" });
         using var json = JsonDocument.Parse(response);
         Assert.False(json.RootElement.TryGetProperty("result", out _));
         Assert.Equal(-32800, json.RootElement.GetProperty("error").GetProperty("code").GetInt32());
@@ -169,28 +145,7 @@ public partial class PluginReconciliationWriteTests
             "updateImage" => [_existing.Id.ToString(), "name", "pre", target, profile],
             _ => throw new InvalidOperationException()
         };
-        var (clientStream, serverStream) = FullDuplexStream.CreatePair();
-        using var client = clientStream;
-        using var server = serverStream;
-        using var rpc = new JsonRpc(new HeaderDelimitedMessageHandler(server, server, new SystemTextJsonFormatter()));
-        rpc.AddLocalRpcTarget(fixture.Handler);
-        rpc.StartListening();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var payload = JsonSerializer.SerializeToUtf8Bytes(new { jsonrpc = "2.0", id = 1, method = "plugins/" + method, @params = args });
-        await client.WriteAsync(Encoding.ASCII.GetBytes($"Content-Length: {payload.Length}\r\n\r\n"), timeout.Token);
-        await client.WriteAsync(payload, timeout.Token);
-        await client.FlushAsync(timeout.Token);
-
-        var header = new StringBuilder(); var one = new byte[1];
-        while (!header.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal))
-        {
-            await client.ReadExactlyAsync(one, timeout.Token);
-            header.Append((char)one[0]);
-            Assert.True(header.Length < 4096);
-        }
-        var lengthLine = header.ToString().Split("\r\n").Single(l => l.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase));
-        var response = new byte[int.Parse(lengthLine.Split(':')[1].Trim(), System.Globalization.CultureInfo.InvariantCulture)];
-        await client.ReadExactlyAsync(response, timeout.Token);
+        var response = await InvokeWireAsync(fixture.Handler, "plugins/" + method, args);
         using var json = JsonDocument.Parse(response);
         Assert.False(json.RootElement.TryGetProperty("error", out _), Encoding.UTF8.GetString(response));
         Assert.Equal(_existing.Id.ToString(), json.RootElement.GetProperty("result").GetProperty("id").GetString());
@@ -241,6 +196,42 @@ public partial class PluginReconciliationWriteTests
         Assert.Equal(0, created.GetAttributeValue<OptionSetValue>("mode").Value);
         Assert.Equal(20, created.GetAttributeValue<OptionSetValue>("stage").Value);
         fixture.AssertNoProfileSaved();
+    }
+
+    // Sends one JSON-RPC request over an in-memory, header-delimited stream, the daemon's wire format, and
+    // returns the raw response body. The test waits for the response itself; HangBackstop bounds only a hang.
+    private static async Task<byte[]> InvokeWireAsync(RpcMethodHandler handler, string method, object parameters)
+    {
+        var (clientStream, serverStream) = FullDuplexStream.CreatePair();
+        using var client = clientStream;
+        using var server = serverStream;
+        using var rpc = new JsonRpc(new HeaderDelimitedMessageHandler(server, server, new SystemTextJsonFormatter()));
+        rpc.AddLocalRpcTarget(handler);
+        rpc.StartListening();
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new { jsonrpc = "2.0", id = 1, method, @params = parameters });
+
+        return await HangBackstop.WaitAsync(async token =>
+        {
+            await client.WriteAsync(Encoding.ASCII.GetBytes($"Content-Length: {payload.Length}\r\n\r\n"), token);
+            await client.WriteAsync(payload, token);
+            await client.FlushAsync(token);
+
+            var header = new StringBuilder();
+            var one = new byte[1];
+            while (!header.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal))
+            {
+                await client.ReadExactlyAsync(one, token);
+                header.Append((char)one[0]);
+                Assert.True(header.Length < 4096);
+            }
+            var lengthLine = header.ToString().Split("\r\n")
+                .Single(line => line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase));
+            var length = int.Parse(lengthLine.Split(':')[1].Trim(), System.Globalization.CultureInfo.InvariantCulture);
+            Assert.InRange(length, 1, 16384);
+            var response = new byte[length];
+            await client.ReadExactlyAsync(response, token);
+            return response;
+        }, $"the JSON-RPC response to '{method}'");
     }
 
     // Explicit private path, cached synthetic metadata only; no saved profiles or credential provider.

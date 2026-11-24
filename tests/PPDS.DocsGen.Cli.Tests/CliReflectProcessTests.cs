@@ -3,6 +3,7 @@ using FluentAssertions;
 using PPDS.DocsGen.Cli;
 using PPDS.DocsGen.Common;
 using Xunit;
+using PPDS.Tests.Shared;
 
 namespace PPDS.DocsGen.Cli.Tests;
 
@@ -81,10 +82,10 @@ public sealed class CliReflectProcessTests : IDisposable
         using var process = Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         try
         {
-            await process.WaitForExitAsync(timeout.Token);
+            // A cold dotnet start of the generator; the bound only catches a hang and names it.
+            await HangBackstop.WaitAsync(token => process.WaitForExitAsync(token), "the cli-reflect generator process to exit");
         }
         catch
         {

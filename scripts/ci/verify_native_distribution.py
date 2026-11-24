@@ -17,12 +17,13 @@ import uuid
 import xml.etree.ElementTree as ET
 import zipfile
 
+import ci_images
 import verify_public_release as public
 
 ROOT = Path(__file__).resolve().parents[2]
 TARGETS = {"win32-x64": "win-x64", "linux-x64": "linux-x64", "darwin-x64": "osx-x64", "darwin-arm64": "osx-arm64"}
 RIDS = set(TARGETS.values()) | {"win-arm64"}
-IMAGE = "registry.access.redhat.com/ubi8/dotnet-80-runtime:latest"
+IMAGE = ci_images.UBI8_DOTNET8_RUNTIME
 OS_KEYS = {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "SYSTEMDRIVE", "PROGRAMFILES",
            "PROGRAMFILES(X86)", "PROGRAMDATA", "DOTNET_ROOT", "DOTNET_ROOT_X64", "DOTNET_ROOT_ARM64"}
 
@@ -30,6 +31,10 @@ OS_KEYS = {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "SYSTEMDRIVE", 
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+class InfrastructureFailure(Exception):
+    """CI infrastructure, not the product, failed; the product was not tested."""
 
 
 def plain(path):
@@ -275,6 +280,11 @@ exit 1
 
 
 WINDOWS_READ_MASK = 0xA01200A9
+# Bound on one powershell.exe security read. It exists to catch a hung reader;
+# a timeout fails the check as an incomplete read and is never a measurement.
+# One windows-11-arm failure was consistent with a first start slower than the
+# earlier 15 s bound; that cause was not confirmed (#1749).
+WINDOWS_SECURITY_TIMEOUT_SECONDS = 60
 WINDOWS_ANCESTOR_MASK = WINDOWS_READ_MASK | 0x6
 WINDOWS_SYSTEM_SID = "S-1-5-18"
 WINDOWS_ADMIN_SID = "S-1-5-32-544"
@@ -330,7 +340,7 @@ def security_reader_diagnostics(stderr, stdout, count, *, timed_out=False):
               "complete" if success_count == len(phases) and not failure_count and not tail else
               "partial" if observed or tail else "not_observed")
     return {"status": status, "eventCount": len(observed), "lastObservedPhase": observed[-1] if observed else "not_observed",
-            "failureCaught": bool(failure_count), "incompleteTail": tail, "timedOut": timed_out, "timeoutSeconds": 15,
+            "failureCaught": bool(failure_count), "incompleteTail": tail, "timedOut": timed_out, "timeoutSeconds": WINDOWS_SECURITY_TIMEOUT_SECONDS,
             "stderrBytes": min(len(data), 16385), "stdoutBytes": min(len(stdout), 131073) if isinstance(stdout, bytes) else 0}
 
 
@@ -351,7 +361,7 @@ def read_windows_security(paths):
     env = {k: v for k, v in os.environ.items() if k.upper() in OS_KEYS}
     try:
         result = subprocess.run(command, input=json.dumps({"paths": names}, ensure_ascii=True).encode("ascii"),
-                                env=env, stdin=None, capture_output=True, timeout=15, check=False,
+                                env=env, stdin=None, capture_output=True, timeout=WINDOWS_SECURITY_TIMEOUT_SECONDS, check=False,
                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired as error:
         return security_reader_failure(paths, "TimeoutExpired", security_reader_diagnostics(error.stderr, error.output, len(paths), timed_out=True))
@@ -429,7 +439,7 @@ def security_evidence_metadata(snapshot):
     diagnostics = snapshot.get("readerDiagnostics")
     if isinstance(diagnostics, dict):
         safe = {key: diagnostics.get(key) if type(diagnostics.get(key)) is bool else None for key in ["incompleteTail", "timedOut", "failureCaught"]}
-        for key, maximum in [("eventCount", 47), ("timeoutSeconds", 15), ("stderrBytes", 16385), ("stdoutBytes", 131073)]:
+        for key, maximum in [("eventCount", 47), ("timeoutSeconds", WINDOWS_SECURITY_TIMEOUT_SECONDS), ("stderrBytes", 16385), ("stdoutBytes", 131073)]:
             value = diagnostics.get(key)
             safe[key] = value if type(value) is int and 0 <= value <= maximum else None
         status, phase = diagnostics.get("status"), diagnostics.get("lastObservedPhase")
@@ -469,6 +479,27 @@ def security_evidence_metadata(snapshot):
     return result
 
 
+def security_failure_details(evidence):
+    """Name each failure reason from the retained evidence, so the log says which applied."""
+    details = []
+    for reason in evidence["reasons"]:
+        if reason == "incomplete_security_read":
+            snapshot = evidence["snapshot"]
+            diagnostics = snapshot.get("readerDiagnostics") or {}
+            cause = snapshot.get("errorType") or f"reader did not report a complete read; phase trace {diagnostics.get('status', 'not_observed')}"
+            if diagnostics.get("timedOut") is True:
+                cause += (f" after {WINDOWS_SECURITY_TIMEOUT_SECONDS} s; last phase "
+                          f"{diagnostics.get('lastObservedPhase', 'not_observed')}")
+            details.append(f"{reason} ({cause})")
+        elif reason == "unsafe_security_descriptor":
+            rejected = [f"{policy['path']}: {', '.join(policy['reasons'])}"
+                        for policy in evidence["policies"] if not policy["accepted"]]
+            details.append(f"{reason} ({'; '.join(rejected)})")
+        else:
+            details.append(reason)
+    return details
+
+
 def inspect_windows_paths(paths, destination, *, ancestor):
     snapshot = read_windows_security(paths)
     evidence = {"ancestor": ancestor, "snapshot": security_evidence_metadata(snapshot), "policies": []}
@@ -493,11 +524,15 @@ def inspect_windows_paths(paths, destination, *, ancestor):
                 if not policy["accepted"]:
                     reasons.append("unsafe_security_descriptor")
     evidence.update({"accepted": not reasons, "reasons": sorted(set(reasons))})
+    details = security_failure_details(evidence) if reasons else []
     if len(json.dumps(evidence, ensure_ascii=True).encode("ascii")) > 131072:
         evidence = {"accepted": False, "reasons": ["security_evidence_bound"], "metadataIncomplete": True,
                     "requestedCount": len(names), "observedCount": len(evidence["snapshot"].get("rows", []))}
+        details.append("security_evidence_bound")
     save(destination, evidence)
-    require(evidence["accepted"], "Windows runtime security metadata is unsafe or incomplete; retained diagnostics")
+    retained = re.split(r"[\\/]", str(destination))[-1]
+    require(evidence["accepted"], "Windows runtime security metadata is unsafe or incomplete: "
+            f"{'; '.join(details)}; retained diagnostics in {retained}")
 
 
 def private_environment(root):
@@ -548,6 +583,15 @@ def run(command, env, evidence, label, timeout=120, cwd=None):
     (evidence / f"{label}.stderr.log").write_bytes(result.stderr)
     require(result.returncode == 0, f"{label} failed (exit {result.returncode}); retained raw logs")
     return result.stdout.decode("utf-8")
+
+
+def pull_image(image, env, evidence):
+    try:
+        run(["docker", "pull", image], env, evidence, "image-pull", 180)
+    except (ValueError, subprocess.TimeoutExpired, OSError) as error:
+        raise InfrastructureFailure(
+            f"Infrastructure failure: could not pull {image} from {ci_images.registry(image)} ({error}). "
+            "The product was not tested; this is not a product failure.") from error
 
 
 def read_frame(stream):
@@ -705,7 +749,7 @@ def main():
             save(binary.parent / "ppds.version.json", bundle_manifest(value))
         elif args.mode == "glibc":
             require(sys.platform == "linux" and args.rid == "linux-x64" and os.getenv("GITHUB_ACTIONS") == "true", "Public image pull is CI-only")
-            run(["docker", "pull", IMAGE], env, evidence, "image-pull", 180)
+            pull_image(IMAGE, env, evidence)
             value["containerImage"] = run(["docker", "image", "inspect", "--format", "{{json .RepoDigests}}", IMAGE], env, evidence, "image-digest", 15).strip()
             output = run(docker_command(binary, ROOT / "tests/fixtures/SingleFilePlugin/bin/Release/net462",
                                         ROOT / "scripts/ci/check_native_glibc.sh"), env, evidence, "glibc", 120)
@@ -748,6 +792,8 @@ def main():
         return 0
     except Exception as error:
         save(evidence / "failure.json", {"passed": False, "type": type(error).__name__, "message": str(error)})
+        if isinstance(error, InfrastructureFailure):
+            print(f"::error title=Infrastructure failure::{str(error).removeprefix('Infrastructure failure: ')}", flush=True)
         raise
 
 

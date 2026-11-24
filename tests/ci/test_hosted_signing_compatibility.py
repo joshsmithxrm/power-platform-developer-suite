@@ -17,12 +17,9 @@ h = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(h)
 
 
-# Hang guard for child processes whose work is start-up plus trivial I/O (pwsh with every external command
-# stubbed, node running offline fixtures); not a speed assertion. Idle start-up is well under a second, but on a
-# loaded hosted runner it can stretch to many seconds, and a tight wall-clock budget would fail the test with the
-# behaviour still correct. 300 s is ~1000x the idle time yet still ends a genuinely wedged child well inside the
-# job timeout.
-CHILD_PROCESS_HANG_BOUND_SECONDS = 300
+# Hang guard for child processes (pwsh with every external command stubbed, node running offline
+# fixtures): shared with the other Python tests, see tests/hang_bound.py.
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # noqa: E402  tests/conftest.py puts tests/ on sys.path
 
 
 @pytest.fixture(autouse=True)
@@ -166,7 +163,7 @@ def test_pwsh_needs_pathext_to_launch_a_native_tool_under_the_driver_environment
     for native in (False, True):
         result = subprocess.run([pwsh, "-NoProfile", "-File", str(script)], cwd=tmp_path,
                                 env=driver.environment(plan, tmp_path, native=native), stdin=subprocess.DEVNULL,
-                                capture_output=True, text=True, timeout=60, check=False)
+                                capture_output=True, text=True, timeout=CHILD_PROCESS_HANG_BOUND_SECONDS, check=False)
         outcomes[native] = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
     assert outcomes[True] == "code=3"
     if outcomes[False] == "code=3":

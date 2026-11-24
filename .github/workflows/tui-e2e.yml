@@ -75,6 +75,12 @@ jobs:
       working-directory: tests/PPDS.Tui.E2eTests
       run: npx playwright install --with-deps chromium
 
+    # The runner's own tests: launch retry, obsolete-snapshot enforcement, and an
+    # end-to-end check that injects launch failures into a real TUI run.
+    - name: Test the TUI test tools
+      working-directory: tests/PPDS.Tui.E2eTests
+      run: npm run test:tools
+
     - name: Run TUI E2E tests
       working-directory: tests/PPDS.Tui.E2eTests
       run: npm test
@@ -96,5 +102,5 @@ jobs:
       if: failure()
       with:
         name: tui-e2e-snapshot-diff
-        path: tests/PPDS.Tui.E2eTests/__snapshots__/
+        path: tests/PPDS.Tui.E2eTests/tests/__snapshots__/
         retention-days: 7

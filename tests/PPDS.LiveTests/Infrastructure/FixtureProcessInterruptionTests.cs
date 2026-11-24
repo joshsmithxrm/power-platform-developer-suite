@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using FluentAssertions;
 using Xunit;
+using PPDS.Tests.Shared;
 
 namespace PPDS.LiveTests.Infrastructure;
 
@@ -46,7 +47,7 @@ public sealed class FixtureProcessInterruptionTests
         clock.DueTime.Should().Be(TimeSpan.FromSeconds(30));
         clock.ExpireDeadline();
 
-        var actual = await Assert.ThrowsAsync<OperationCanceledException>(() => pending.WaitAsync(TimeSpan.FromSeconds(10)));
+        var actual = await Assert.ThrowsAsync<OperationCanceledException>(() => HangBackstop.WaitAsync(pending, "the interrupted fixture operation to report its cancellation"));
         actual.Should().BeSameAs(primary);
         interruption.RequiresManualReview.Should().BeTrue();
         interruption.Evidence!.ExitConfirmed.Should().BeFalse();
@@ -124,7 +125,7 @@ public sealed class FixtureProcessInterruptionTests
         finally
         {
             if (!process.HasExited) process.Kill(entireProcessTree: true);
-            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            await HangBackstop.WaitAsync(token => process.WaitForExitAsync(token), "the child process to exit");
         }
     }
 

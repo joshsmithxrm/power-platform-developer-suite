@@ -9,6 +9,13 @@ public sealed class FakeQueryHistoryService : IQueryHistoryService
 {
     private readonly List<QueryHistoryEntry> _entries = new();
     private int _nextId = 1;
+    private TaskCompletionSource<QueryHistoryEntry> _firstAdded = NewAddedSignal();
+
+    /// <summary>
+    /// Completes with the first entry added since construction or the last <see cref="Reset"/>,
+    /// so a test can wait for a fire-and-forget history save instead of sleeping.
+    /// </summary>
+    public Task<QueryHistoryEntry> FirstAdded => _firstAdded.Task;
 
     /// <summary>
     /// Gets all entries added to history.
@@ -32,6 +39,7 @@ public sealed class FakeQueryHistoryService : IQueryHistoryService
             ExecutedAt = DateTimeOffset.UtcNow
         };
         _entries.Add(entry);
+        _firstAdded.TrySetResult(entry);
         return Task.FromResult(entry);
     }
 
@@ -102,5 +110,9 @@ public sealed class FakeQueryHistoryService : IQueryHistoryService
     {
         _entries.Clear();
         _nextId = 1;
+        _firstAdded = NewAddedSignal();
     }
+
+    private static TaskCompletionSource<QueryHistoryEntry> NewAddedSignal()
+        => new(TaskCreationOptions.RunContinuationsAsynchronously);
 }

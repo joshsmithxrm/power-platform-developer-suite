@@ -11,6 +11,7 @@ using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.PowerPlatform.Dataverse.Client.Model;
 using PPDS.Auth.Cloud;
 using PPDS.Auth.Profiles;
+using PPDS.Internal;
 
 namespace PPDS.Auth.Credentials;
 
@@ -285,6 +286,7 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
             }
         }
 
+        InteractiveSignInGuard.ThrowIfBlocked("browser");
         AuthenticationOutput.WriteLine();
         AuthenticationOutput.WriteLine("Opening browser for authentication...");
 
@@ -329,6 +331,7 @@ public sealed class InteractiveBrowserCredentialProvider : ICredentialProvider
 
         var scopes = new[] { $"{environmentUrl}/.default" };
 
+        InteractiveSignInGuard.ThrowIfBlocked("device code");
         AuthDebugLog.WriteLine("  Starting device code authentication (fallback)...");
 
         // Use device code flow with the provided callback

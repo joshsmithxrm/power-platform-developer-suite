@@ -1,4 +1,4 @@
-using System.Diagnostics;
+using PPDS.Tests.Shared;
 using PPDS.Cli.Tui.Infrastructure;
 using Xunit;
 
@@ -12,10 +12,11 @@ public sealed class AsyncHelperTests
     {
         var errorService = new TuiErrorService();
         var faultedTask = Task.FromException(new InvalidOperationException("test error"));
+        var reported = NextReportedError(errorService);
 
         errorService.FireAndForget(faultedTask, "TestContext");
 
-        await WaitForErrors(errorService, count: 1);
+        await HangBackstop.WaitAsync(reported, "the error service to report the faulted task");
 
         Assert.Single(errorService.RecentErrors);
         Assert.Contains("TestContext", errorService.RecentErrors[0].Context);
@@ -28,7 +29,9 @@ public sealed class AsyncHelperTests
 
         errorService.FireAndForget(Task.CompletedTask, "TestContext");
 
-        // No error expected — short delay is sufficient for the successful path
+        // No signal exists for "the continuation ran and reported nothing", so this delay cannot make the
+        // test fail on a slow runner; at worst the assertion runs before the continuation and passes
+        // without having checked it. A deterministic check needs FireAndForget to expose its continuation.
         await Task.Delay(50);
 
         Assert.Empty(errorService.RecentErrors);
@@ -40,10 +43,11 @@ public sealed class AsyncHelperTests
         var errorService = new TuiErrorService();
         var inner = new InvalidOperationException("inner");
         var faultedTask = Task.FromException(new AggregateException(inner));
+        var reported = NextReportedError(errorService);
 
         errorService.FireAndForget(faultedTask, "AggregateTest");
 
-        await WaitForErrors(errorService, count: 1);
+        await HangBackstop.WaitAsync(reported, "the error service to report the faulted task");
 
         Assert.Single(errorService.RecentErrors);
     }
@@ -58,17 +62,12 @@ public sealed class AsyncHelperTests
         Assert.Null(exception);
     }
 
-    private static async Task WaitForErrors(TuiErrorService errorService, int count, int timeoutMs = 2000)
+    // Completes when the service raises ErrorOccurred, which it does after recording the error, so
+    // RecentErrors is populated by then. Subscribe before starting the work so the event cannot be missed.
+    private static Task<TuiError> NextReportedError(TuiErrorService errorService)
     {
-        var stopwatch = Stopwatch.StartNew();
-        while (errorService.RecentErrors.Count < count && stopwatch.ElapsedMilliseconds < timeoutMs)
-        {
-            await Task.Delay(25);
-        }
-
-        if (errorService.RecentErrors.Count < count)
-        {
-            Assert.Fail($"Timed out after {timeoutMs}ms waiting for {count} error(s), but only found {errorService.RecentErrors.Count}.");
-        }
+        var reported = new TaskCompletionSource<TuiError>(TaskCreationOptions.RunContinuationsAsynchronously);
+        errorService.ErrorOccurred += error => reported.TrySetResult(error);
+        return reported.Task;
     }
 }

@@ -45,6 +45,11 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
     private readonly Func<Action<DeviceCodeInfo>?, PreAuthDialogResult>? _beforeInteractiveAuth;
     private int _disposed;
 
+    // Lets cache and identity tests replace only the DataverseConnectionPool, which otherwise
+    // authenticates and connects in the background. Profile resolution, the connection sources and
+    // the service provider are still built by the production code; the factory receives the sources.
+    internal Func<IConnectionSource[], IDataverseConnectionPool>? PoolFactory { get; init; }
+
     /// <summary>
     /// Initializes a new instance of the <see cref="DaemonConnectionPoolManager"/> class.
     /// </summary>
@@ -480,11 +485,13 @@ public sealed class DaemonConnectionPoolManager : IDaemonConnectionPoolManager
 
         // Connection pool with factory delegate
         services.AddSingleton<IDataverseConnectionPool>(sp =>
-            new DataverseConnectionPool(
-                sources,
-                sp.GetRequiredService<IThrottleTracker>(),
-                poolOptions,
-                sp.GetRequiredService<ILogger<DataverseConnectionPool>>()));
+            PoolFactory is not null
+                ? PoolFactory(sources)
+                : new DataverseConnectionPool(
+                    sources,
+                    sp.GetRequiredService<IThrottleTracker>(),
+                    poolOptions,
+                    sp.GetRequiredService<ILogger<DataverseConnectionPool>>()));
 
         return services.BuildServiceProvider();
     }

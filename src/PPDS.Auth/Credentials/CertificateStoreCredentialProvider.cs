@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using PPDS.Auth.Cloud;
 using PPDS.Auth.Profiles;
+using PPDS.Internal;
 
 namespace PPDS.Auth.Credentials;
 
@@ -154,6 +155,7 @@ public sealed class CertificateStoreCredentialProvider : ICredentialProvider
         var connectionString = BuildConnectionString(environmentUrl);
 
         // Create ServiceClient
+        InteractiveSignInGuard.ThrowIfInteractiveConnectionString(connectionString);
         ServiceClient client;
         try
         {

@@ -7,8 +7,10 @@ using PPDS.Cli.Commands.Serve.Handlers;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.History;
+using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Query;
 using Xunit;
+using PPDS.Tests.Shared;
 
 namespace PPDS.Cli.Tests.Commands.Serve.Handlers;
 
@@ -116,11 +118,23 @@ public sealed class RpcProfileIdentityTests
     public async Task CapturedProvider_DoesNotReloadMutableProfileName_AndSeparatesIdentities()
     {
         var loads = 0;
+        var poolsBuilt = new List<(string? ObjectId, string Url)>();
+        // Only the pool is a fake (a real one would authenticate and connect). Profile resolution,
+        // the connection sources and the service provider are the production code, so this records
+        // which profile each source was really built from.
         await using var manager = new DaemonConnectionPoolManager(loadProfilesAsync: _ =>
         {
             loads++;
             throw new InvalidOperationException("Captured profiles must not be looked up again.");
-        });
+        })
+        {
+            PoolFactory = sources =>
+            {
+                var source = Assert.IsType<ProfileConnectionSourceAdapter>(Assert.Single(sources)).Source;
+                lock (poolsBuilt) poolsBuilt.Add((source.Profile.ObjectId, source.EnvironmentUrl));
+                return Mock.Of<IDataverseConnectionPool>();
+            }
+        };
         var profile = Profile();
         var first = await manager.GetOrCreateCapturedServiceProviderAsync(profile, "https://target.crm.dynamics.com");
         var again = await manager.GetOrCreateCapturedServiceProviderAsync(profile.Clone(), "https://target.crm.dynamics.com/");
@@ -132,6 +146,12 @@ public sealed class RpcProfileIdentityTests
         manager.InvalidateProfile("first");
         var invalidated = await manager.GetOrCreateCapturedServiceProviderAsync(profile, "https://target.crm.dynamics.com");
         Assert.NotSame(different, invalidated);
+        Assert.Equal(new (string?, string)[]
+        {
+            ("principal", "https://target.crm.dynamics.com"),
+            ("different-principal", "https://target.crm.dynamics.com"),
+            ("different-principal", "https://target.crm.dynamics.com"),
+        }, poolsBuilt);
     }
 
     [Fact]
@@ -165,7 +185,7 @@ public sealed class RpcProfileIdentityTests
             "https://explicit.crm.dynamics.com", It.IsAny<Action<DeviceCodeInfo>?>(), It.IsAny<CancellationToken>()), Times.Once);
         fixture.Pools.Verify(p => p.GetOrCreateServiceProviderAsync(
             It.IsAny<IReadOnlyList<string>>(), It.IsAny<string>(), It.IsAny<Action<DeviceCodeInfo>?>(), It.IsAny<CancellationToken>()), Times.Never);
-        Assert.Equal("https://explicit.crm.dynamics.com", await historySaved.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal("https://explicit.crm.dynamics.com", await HangBackstop.WaitAsync(historySaved.Task, "the background query-history save"));
     }
 
     [Fact]
@@ -219,6 +239,8 @@ public sealed class RpcProfileIdentityTests
         {
             _directory = directory;
             Collection = collection;
+            // Not on the faithful fake (#1639): these tests assert that a request is refused before any pool access, so no
+            // query reaches this executor (Pools.Invocations stays empty); it only satisfies the service registration.
             var executor = new Mock<IQueryExecutor>();
             executor.Setup(e => e.ExecuteFetchXmlAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new QueryResult { EntityLogicalName = "account", Columns = Array.Empty<QueryColumn>(), Records = Array.Empty<IReadOnlyDictionary<string, QueryValue>>(), Count = 0 });

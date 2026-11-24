@@ -3,6 +3,10 @@
 
 # Byte-for-byte generated documentation fixtures must retain the generator's LF output.
 tests/PPDS.DocsGen.Extension.Tests/fixtures/ext-reflect/expected/*.md text eol=lf
+# The embedded audit record of the faithful query harness is the audit document byte for byte.
+tests/PPDS.Cli.Tests/Services/Query/Faithful/AuditRecords/*.txt text eol=lf
+# The differential harness compares its committed snapshot byte for byte (#1798).
+tests/PPDS.Query.DifferentialTests/Snapshots/*.tsv text eol=lf
 
 # Linux-targeted files - MUST be LF (executed in containers)
 *.sh text eol=lf

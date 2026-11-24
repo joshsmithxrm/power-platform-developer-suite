@@ -50,6 +50,7 @@ public sealed class SelfUpdateTests
             Assert.Contains("tool update PPDS.Cli -g", content);
             Assert.Contains("12345", content); // parent PID
             Assert.Contains(statusPath, content);
+            Assert.Contains(lockPath, content);
 
             if (OperatingSystem.IsWindows())
                 Assert.EndsWith(".cmd", scriptPath);

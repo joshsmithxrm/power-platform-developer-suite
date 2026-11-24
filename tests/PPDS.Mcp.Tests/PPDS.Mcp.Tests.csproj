@@ -29,4 +29,9 @@
     <ProjectReference Include="..\..\src\PPDS.Mcp\PPDS.Mcp.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Shared hang guard for tests that wait on a completion signal (#1684). -->
+    <Compile Include="..\Shared\HangBackstop.cs" Link="Shared\HangBackstop.cs" />
+  </ItemGroup>
+
 </Project>

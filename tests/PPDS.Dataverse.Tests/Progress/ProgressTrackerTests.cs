@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FluentAssertions;
 using PPDS.Dataverse.Progress;
 using Xunit;
@@ -296,15 +297,17 @@ public class ProgressTrackerTests
     {
         // Arrange
         var tracker = new ProgressTracker(100);
-        Thread.Sleep(100);
-        var beforeReset = tracker.GetSnapshot().Elapsed;
+        Thread.Sleep(100); // Lower bound only: the timer has run at least this long before the reset.
 
         // Act
+        var sinceReset = Stopwatch.StartNew();
         tracker.Reset();
         var afterReset = tracker.GetSnapshot().Elapsed;
+        sinceReset.Stop();
 
-        // Assert
-        afterReset.Should().BeLessThan(beforeReset);
+        // Assert: a restarted timer started after sinceReset, so it cannot show more time than sinceReset.
+        // Without a restart it would show the 100 ms before the reset as well, however loaded the runner.
+        afterReset.Should().BeLessThanOrEqualTo(sinceReset.Elapsed);
     }
 
     #endregion

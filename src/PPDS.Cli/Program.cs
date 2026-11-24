@@ -212,13 +212,11 @@ public static class Program
     /// Reads the post-update status file written by the detached wrapper script,
     /// displays the result to the user, and deletes the file.
     /// </summary>
-    private static void ReadAndDeleteUpdateStatus()
+    internal static void ReadAndDeleteUpdateStatus()
     {
         try
         {
-            var statusPath = Path.Combine(
-                System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile),
-                ".ppds", "update-status.json");
+            var statusPath = CliDataPaths.UpdateStatusFile;
 
             if (!File.Exists(statusPath))
                 return;

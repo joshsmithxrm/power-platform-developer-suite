@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FluentAssertions;
 using PPDS.Migration.Progress;
 using Xunit;
@@ -23,7 +24,7 @@ public class OperationClockTests
         OperationClock.Start();
         var elapsed1 = OperationClock.Elapsed;
 
-        // Wait a bit
+        // Lower bound only: the clock has run at least this long before the restart.
         Thread.Sleep(50);
         var elapsed2 = OperationClock.Elapsed;
 
@@ -31,11 +32,14 @@ public class OperationClockTests
         elapsed2.Should().BeGreaterThan(elapsed1);
 
         // Restart the clock
+        var sinceRestart = Stopwatch.StartNew();
         OperationClock.Start();
         var elapsed3 = OperationClock.Elapsed;
+        sinceRestart.Stop();
 
-        // Elapsed should be reset to near zero (less than what it was before restart)
-        elapsed3.Should().BeLessThan(elapsed2);
+        // A restarted clock started after sinceRestart, so it cannot show more time than sinceRestart.
+        // Without a restart it would also show the 50 ms before it, however loaded the runner (#1838).
+        elapsed3.Should().BeLessThanOrEqualTo(sinceRestart.Elapsed);
     }
 
     [Fact]

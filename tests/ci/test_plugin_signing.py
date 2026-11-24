@@ -19,6 +19,7 @@ import yaml
 
 from scripts.ci import verify_nuget_handoff as h
 from scripts.ci import verify_plugin_signing as p
+from hang_bound import CHILD_PROCESS_HANG_BOUND_SECONDS  # tests/conftest.py puts tests/ on sys.path
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = "b" * 40
@@ -290,7 +291,7 @@ def test_signer_process_preserves_common_data_without_inheriting_secrets(tmp_pat
            'PPDS_TEST_SECRET': 'synthetic-marker', 'PPDS_TEST_EXE': sys.executable,
            'PPDS_TEST_ARGS': json.dumps(['-I', '-c', probe, str(report)]), 'PPDS_TEST_CWD': str(tmp_path)}
     result = subprocess.run([shutil.which('pwsh'), '-NoProfile', '-NonInteractive', '-File', str(script)],
-                            env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+                            env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=CHILD_PROCESS_HANG_BOUND_SECONDS)
     assert result.returncode == 0, result.stderr
     observed = json.loads(report.read_text())
     assert observed['common'] == observed['alias'] == str(tmp_path)
