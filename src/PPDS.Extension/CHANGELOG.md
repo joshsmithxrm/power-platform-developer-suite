@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Configure Environment asks before lowering write protection.** A type change that weakens an environment's protection (for example Production to Development) shows a modal that says what changes; only **Lower protection** saves it, and dismissing the modal saves nothing. Breaking for other clients of the daemon: `env/config/set` now refuses such a change unless `confirmLowerProtection` names the environment (#1829).
 - Bundle the self-contained .NET 10.0.15 CLI on the existing four VSIX targets. No separate runtime install is needed; native OS dependencies still apply. Candidate validation executes the actual archived CLI on matching native hosts without contacting Dataverse or publishing a package.
 
 - Bundled the matching CLI 1.5.0 release, including bounded flow activation, form-write safeguards and plugin/web-resource reliability fixes. Update the Extension and bundled daemon together; missing or mismatched captured identity fails closed with recovery guidance.

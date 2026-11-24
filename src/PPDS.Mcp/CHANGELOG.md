@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The MCP server never lowers an environment's write protection.** No MCP tool changes environment configuration; the shared service now refuses a change that weakens protection on the MCP host with `Environment.ProtectionLoweringRefused`, acknowledged or not, so no future tool can. The refusal for an unconfirmed write (`Environment.ConfirmationRequired`) no longer names the `ppds env config ... --type` command. Not breaking: no tool's inputs or results change (#1829).
 - `ppds_metadata_update_choice` and `ppds_metadata_add_option_value` report a global choice name that exists in no spelling with `errorCode` `Operation.NotFound` and the message `Global choice '<name>' not found.`; before they returned `Operation.Internal`. Other failures keep their codes (#1759).
 - Captured startup authentication/target defaults. Allowed switches affect future calls in that session without changing global defaults; creating or replacing startup authentication requires a server restart.
 - Form writes require `confirmEnvironment` when effective protection requires acknowledgement. `--allowed-env` permits switching but does not authorize writes; `--read-only` rejects covered form mutations. Publication separately requires `confirmPublishEntity`, publishes all pending customizations for that table and verifies only the selected form (#1015, partial).

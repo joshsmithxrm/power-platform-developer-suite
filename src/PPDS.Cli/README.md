@@ -169,6 +169,7 @@ Discover and select Dataverse environments.
 | `ppds env list` | List available environments via Global Discovery |
 | `ppds env select` | Select environment for the current profile |
 | `ppds env who` | Verify connection and show environment info |
+| `ppds env config` | Set an environment's label, type and colour |
 
 ```bash
 # List environments accessible to current profile
@@ -182,7 +183,12 @@ ppds env select --environment "https://myorg.crm.dynamics.com"
 
 # Verify connection
 ppds env who
+
+# Label and colour an environment
+ppds env config https://myorg.crm.dynamics.com --label "Contoso Dev" --color Green
 ```
+
+The saved type decides whether writes to the environment need a confirmation (`--confirm-env`): Production, and an environment with no saved type, are protected. A `--type` change that lowers that protection, for example Production to Development, is itself protected: an interactive run asks you to type the environment URL, and a non-interactive run needs `--confirm-lower-protection <url>`; without it nothing is saved and the command exits 11. The MCP server never lowers protection, and the VS Code extension asks in a modal.
 
 ### `ppds data`
 
