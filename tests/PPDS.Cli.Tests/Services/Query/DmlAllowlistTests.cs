@@ -35,45 +35,65 @@ public class DmlAllowlistTests
         _ => value
     };
 
-    // ---- M2: SET expressions see the row's real values ------------------------------------------
+    // ---- M2: SET values see the row's real values (interim rule: literals, columns and NULL) ----------
 
     [Theory]
-    [InlineData("COALESCE(description, name)", "n0|d1|n2|d3")]
-    [InlineData("ISNULL(description, 'none')", "none|d1|none|d3")]
-    [InlineData("IIF(revenue > 1000, 'big', name)", "n0|n1|big|big")]
-    [InlineData("CASE WHEN revenue > 1000 THEN 'big' ELSE 'small' END", "small|small|big|big")]
-    [InlineData("CASE WHEN description IS NULL THEN 'none' ELSE description END", "none|d1|none|d3")]
-    [InlineData("UPPER(name)", "N0|N1|N2|N3")]
-    [InlineData("LOWER(UPPER(name))", "n0|n1|n2|n3")]
-    [InlineData("LTRIM(RTRIM(name))", "n0|n1|n2|n3")]
-    [InlineData("TRIM(name)", "n0|n1|n2|n3")]
-    [InlineData("CONCAT(name, '-', description)", "n0-|n1-d1|n2-|n3-d3")]
-    [InlineData("SUBSTRING(name, 2, 1)", "0|1|2|3")]
-    [InlineData("(name)", "n0|n1|n2|n3")]
-    public async Task SetExpression_ReadsTheRowsRealValues(string expression, string expected)
+    [InlineData("name", "n0|n1|n2|n3")]
+    [InlineData("description", "<null>|d1|<null>|d3")]
+    [InlineData("'lit'", "lit|lit|lit|lit")]
+    [InlineData("N'naïve'", "naïve|naïve|naïve|naïve")]
+    [InlineData("NULL", "<null>|<null>|<null>|<null>")]
+    public async Task SetValue_ReadsTheRowsRealValues(string value, string expected)
     {
-        var h = await Run($"UPDATE account SET description = {expression} WHERE name IS NOT NULL");
+        var h = await Run($"UPDATE account SET description = {value} WHERE name IS NOT NULL");
 
         Assert.Equal(expected.Split('|').Select(v => v == "<null>" ? null : v), Values(h, "description"));
     }
 
     [Theory]
-    [InlineData("LEN(name)", "2|2|2|2")]
-    [InlineData("revenue * 2", "1000|2000|3000|4000")]
-    [InlineData("ABS(0 - revenue)", "500|1000|1500|2000")]
-    [InlineData("-revenue", "-500|-1000|-1500|-2000")]
-    public async Task SetNumericExpression_ReadsTheRowsRealValues(string expression, string expected)
+    [InlineData("revenue", "500|1000|1500|2000")]
+    [InlineData("-2.5", "-2.5|-2.5|-2.5|-2.5")]
+    [InlineData("-7", "-7|-7|-7|-7")]
+    public async Task SetNumericValue_ReadsTheRowsRealValues(string value, string expected)
     {
-        var h = await Run($"UPDATE account SET revenue = {expression} WHERE name IS NOT NULL");
+        var h = await Run($"UPDATE account SET revenue = {value} WHERE name IS NOT NULL");
 
         var actual = Values(h, "revenue").Select(v => v is string s && s.Contains('.') ? s.TrimEnd('0').TrimEnd('.') : v);
         Assert.Equal(expected.Split('|').Select(v => v == "<null>" ? null : v), actual);
     }
 
-    [Fact]
-    public async Task SetExpression_RequestsEveryColumnItReads()
+    /// <summary>The expressions these tests used to write are computed values, refused until the typed engine proves them.</summary>
+    [Theory]
+    [InlineData("COALESCE(description, name)")]
+    [InlineData("ISNULL(description, 'none')")]
+    [InlineData("IIF(revenue > 1000, 'big', name)")]
+    [InlineData("CASE WHEN revenue > 1000 THEN 'big' ELSE 'small' END")]
+    [InlineData("UPPER(name)")]
+    [InlineData("LTRIM(RTRIM(name))")]
+    [InlineData("CONCAT(name, '-', description)")]
+    [InlineData("SUBSTRING(name, 2, 1)")]
+    [InlineData("(name)")]
+    [InlineData("LEN(name)")]
+    [InlineData("revenue * 2")]
+    [InlineData("ABS(0 - revenue)")]
+    [InlineData("-revenue")]
+    public async Task SetComputedValue_IsRefusedBeforeAnythingIsRead(string expression)
     {
-        var h = await Run("UPDATE account SET name = COALESCE(description, IIF(revenue > 1, name, NULL)) WHERE name IS NOT NULL");
+        var h = DmlTestHarness.Create(rows: 4);
+
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(
+            new SqlQueryRequest { Sql = $"UPDATE account SET description = {expression} WHERE name IS NOT NULL", DmlSafety = Confirmed }));
+
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        Assert.Contains("Nothing was executed", ex.Message);
+        h.AssertNothingChanged();
+        Assert.Empty(h.Reads);
+    }
+
+    [Fact]
+    public async Task SetColumns_RequestEveryColumnTheyRead()
+    {
+        var h = await Run("UPDATE account SET name = description, description = name, revenue = revenue WHERE name IS NOT NULL");
 
         var fetch = h.Reads.Single().FetchXml;
         foreach (var column in new[] { "accountid", "description", "revenue", "name" })
@@ -83,16 +103,16 @@ public class DmlAllowlistTests
     // ---- supported target forms ---------------------------------------------------------------
 
     [Theory]
-    [InlineData("UPDATE a SET name = UPPER(a.name) FROM account a WHERE a.name = 'x'")]
-    [InlineData("UPDATE account SET name = UPPER(name) FROM account WHERE account.name = 'x'")]
+    [InlineData("UPDATE a SET name = a.description FROM account a WHERE a.name = 'x'")]
+    [InlineData("UPDATE account SET name = description FROM account WHERE account.name = 'x'")]
     // T-SQL: the target names the FROM alias, so the aliased table (account) is written, not a table called contact.
-    [InlineData("UPDATE contact SET name = UPPER(contact.name) FROM account contact WHERE contact.name = 'x'")]
+    [InlineData("UPDATE contact SET name = contact.description FROM account contact WHERE contact.name = 'x'")]
     public async Task Update_TheTargetOrItsAliasInFrom_WritesTheTargetTable(string sql)
     {
         var h = await Run(sql);
 
         Assert.Equal(new[] { ("Update", "account", 4) }, h.Writes);
-        Assert.Equal(new object?[] { "N0", "N1", "N2", "N3" }, Values(h, "name"));
+        Assert.Equal(new object?[] { null, "d1", null, "d3" }, Values(h, "name"));
         Assert.Contains("attribute=\"name\" operator=\"eq\" value=\"x\"", h.Reads.Single().FetchXml);
     }
 
@@ -110,12 +130,13 @@ public class DmlAllowlistTests
     // ---- M3: INSERT ... SELECT maps by position -----------------------------------------------
 
     [Fact]
-    public async Task InsertSelect_MapsValuesByPosition_IncludingAliasedExpressions()
+    public async Task InsertSelect_MapsValuesByPosition_IncludingAliasedColumnsAndLiterals()
     {
-        var h = await Run("INSERT INTO account (description, name) SELECT UPPER(name) AS n, COALESCE(description, name) AS d FROM account WHERE name IS NOT NULL");
+        var h = await Run("INSERT INTO account (description, name, revenue) SELECT name AS n, description AS d, -1 AS r FROM account WHERE name IS NOT NULL");
 
-        Assert.Equal(new object?[] { "N0", "N1", "N2", "N3" }, Values(h, "description"));
-        Assert.Equal(new object?[] { "n0", "d1", "n2", "d3" }, Values(h, "name"));
+        Assert.Equal(new object?[] { "n0", "n1", "n2", "n3" }, Values(h, "description"));
+        Assert.Equal(new object?[] { null, "d1", null, "d3" }, Values(h, "name"));
+        Assert.Equal(new object?[] { "-1", "-1", "-1", "-1" }, Values(h, "revenue"));
     }
 
     [Fact]
@@ -127,7 +148,7 @@ public class DmlAllowlistTests
         Assert.Equal(new object?[] { null, "d1", null, "d3" }, Values(h, "name"));
     }
 
-    // D-M2: only literals and NULL were proven live in VALUES; an expression is refused.
+    // D-M2: only literals and NULL were proven live in VALUES; an expression is refused (and is outside the interim rule).
     [Theory]
     [InlineData("INSERT INTO account (name, description) VALUES (UPPER('a'), 'b')")]
     [InlineData("INSERT INTO account (name, description) VALUES ('a', CONCAT('b', 1 + 2))")]
@@ -187,8 +208,9 @@ public class DmlAllowlistTests
     [InlineData("UPDATE account SET name = q.name FROM account JOIN [QA].account q ON account.accountid = q.accountid", "FROM is supported only")]
     [InlineData("DELETE FROM #temp WHERE name = 'x'", "not a valid Dataverse table name")]
     // INSERT ... SELECT (M3)
-    [InlineData("INSERT INTO account (name) SELECT UPPER(name) FROM account WHERE name = 'x'", "needs an alias")]
-    [InlineData("INSERT INTO account (name, description) SELECT UPPER(name) AS n, name AS n FROM account", "Two SELECT items are named n")]
+    [InlineData("INSERT INTO account (name) SELECT 'x' FROM account WHERE name = 'x'", "needs an alias")]
+    [InlineData("INSERT INTO account (name, description) SELECT 'x' AS n, name AS n FROM account", "Two SELECT items are named n")]
+    [InlineData("INSERT INTO account (name) SELECT UPPER(name) AS n FROM account WHERE name = 'x'", "(the function UPPER)")]
     [InlineData("INSERT INTO account (name, description) SELECT a.name, b.name FROM account a JOIN account b ON a.parentaccountid = b.accountid", "single table")]
     [InlineData("INSERT INTO account (name) SELECT name FROM [QA].account", "another environment")]
     [InlineData("INSERT INTO account (name) SELECT name FROM account WHERE UPPER(name) = 'X'", "UPPER(name)")]

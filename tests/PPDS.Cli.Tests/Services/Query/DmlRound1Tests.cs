@@ -134,12 +134,8 @@ public sealed class DmlFaithfulRowsTests : IDisposable
     // ---- C-M6: the shapes the live run proved write exactly these values -------------------------------
 
     [Theory]
-    [InlineData("UPDATE account SET revenue = revenue / 4 WHERE name = 'n1'", "revenue", "250")]
-    [InlineData("UPDATE account SET numberofemployees = CAST(revenue AS int) WHERE name = 'n1'", "numberofemployees", "1000")]
-    [InlineData("UPDATE account SET numberofemployees = TRY_CONVERT(int, revenue) WHERE name = 'n2'", "numberofemployees", "1500")]
     [InlineData("UPDATE dbo.account SET name = 'x' WHERE name = 'n1'", "name", "x")]
     [InlineData("UPDATE ACCOUNT SET [NAME] = 'x' WHERE [Name] = 'n1'", "name", "x")]
-    [InlineData("UPDATE account SET description = IIF(revenue > 1 AND revenue < 900, 'a', 'b') WHERE name = 'n0' OR name = 'n1'", "description", "a|b")]
     [InlineData("UPDATE account SET creditlimit = 5 WHERE name = 'n1'", "creditlimit", "5")]
     [InlineData("UPDATE account SET notes = 'x' WHERE name = 'n1'", "notes", "x")]
     [InlineData("UPDATE account SET followupby = '2024-01-01T00:00:00+02:00' WHERE name = 'n1'", "followupby", "2023-12-31T22:00:00Z")]
@@ -150,24 +146,47 @@ public sealed class DmlFaithfulRowsTests : IDisposable
     [InlineData("UPDATE account SET donotemail = 0 WHERE name = 'n0'", "donotemail", "0")]
     [InlineData("UPDATE account SET parentaccountid = '00000000-0000-0000-0000-000000000001' WHERE name = 'n1'", "parentaccountid", "00000000-0000-0000-0000-000000000001")]
     [InlineData("UPDATE account SET parentaccountid = CAST('00000000-0000-0000-0000-000000000001' AS uniqueidentifier) WHERE name = 'n1'", "parentaccountid", "00000000-0000-0000-0000-000000000001")]
-    [InlineData("UPDATE account SET description = CONCAT(name, numberofemployees) WHERE name = 'n1'", "description", "n120")]
-    [InlineData("UPDATE account SET description = CAST(numberofemployees AS nvarchar(10)) WHERE name = 'n1'", "description", "20")]
-    [InlineData("UPDATE account SET description = CONCAT(name, '#', CONVERT(nvarchar(10), numberofemployees * 2)) WHERE name = 'n1'", "description", "n1#40")]
     [InlineData("UPDATE account SET numberofemployees = revenue WHERE name = 'n1'", "numberofemployees", "1000")]
     [InlineData("UPDATE account SET numberofemployees = 2.7 WHERE name = 'n1'", "numberofemployees", "2")]
-    [InlineData("UPDATE account SET description = CAST(name AS nvarchar(1)) WHERE name = 'n1'", "description", "n")]
-    [InlineData("UPDATE account SET description = SUBSTRING(name, 2, 5) WHERE name = 'n1'", "description", "1")]
-    [InlineData("UPDATE account SET revenue = TRY_CAST(revenue AS decimal(4, 1)) WHERE revenue IS NOT NULL", "revenue", "500|<null>|<null>|<null>")]
-    [InlineData("UPDATE account SET revenue = CAST(revenue AS decimal(10, 2)) / 3 WHERE name = 'n2'", "revenue", "500")]
-    [InlineData("UPDATE account SET numberofemployees = NULLIF(numberofemployees, 20) WHERE name = 'n0' OR name = 'n1'", "numberofemployees", "10|<null>")]
-    [InlineData("UPDATE account SET numberofemployees = CASE numberofemployees WHEN 10 THEN 1 WHEN 20 THEN 2 ELSE 0 END WHERE revenue > 0", "numberofemployees", "1|2|0|0")]
     [InlineData("INSERT INTO account (name) SELECT TOP 2 name FROM account WHERE revenue > 0 ORDER BY name DESC", "name", "n3|n2")]
     [InlineData("INSERT INTO account (name, numberofemployees) VALUES ('a', -5)", "numberofemployees", "-5")]
+    [InlineData("UPDATE account SET revenue = -2.5 WHERE name = 'n1'", "revenue", "-2.5")]
+    [InlineData("UPDATE account SET description = name WHERE name = 'n1'", "description", "n1")]
+    [InlineData("UPDATE account SET parentaccountid = CAST('{00000000-0000-0000-0000-00000000000A}' AS uniqueidentifier) WHERE name = 'n1'", "parentaccountid", "00000000-0000-0000-0000-00000000000a")]
     public async Task ProvenShape_WritesExactlyTheseValues(string sql, string attribute, string expected)
     {
         var h = await Run(sql);
 
         Assert.Equal(expected, Values(h, attribute));
+    }
+
+    /// <summary>
+    /// Computed values the live run proved before the interim rule; until the typed SQL value engine proves each construct,
+    /// they are refused before anything is read or written.
+    /// </summary>
+    [Theory]
+    [InlineData("UPDATE account SET revenue = revenue / 4 WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET numberofemployees = CAST(revenue AS int) WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET numberofemployees = TRY_CONVERT(int, revenue) WHERE name = 'n2'")]
+    [InlineData("UPDATE account SET description = IIF(revenue > 1 AND revenue < 900, 'a', 'b') WHERE name = 'n0' OR name = 'n1'")]
+    [InlineData("UPDATE account SET description = CONCAT(name, numberofemployees) WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET description = CAST(numberofemployees AS nvarchar(10)) WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET description = CONCAT(name, '#', CONVERT(nvarchar(10), numberofemployees * 2)) WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET description = CAST(name AS nvarchar(1)) WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET description = SUBSTRING(name, 2, 5) WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET revenue = TRY_CAST(revenue AS decimal(4, 1)) WHERE revenue IS NOT NULL")]
+    [InlineData("UPDATE account SET revenue = CAST(revenue AS decimal(10, 2)) / 3 WHERE name = 'n2'")]
+    [InlineData("UPDATE account SET numberofemployees = NULLIF(numberofemployees, 20) WHERE name = 'n0' OR name = 'n1'")]
+    [InlineData("UPDATE account SET numberofemployees = CASE numberofemployees WHEN 10 THEN 1 WHEN 20 THEN 2 ELSE 0 END WHERE revenue > 0")]
+    public async Task ComputedShapeTheLiveRunProved_IsRefusedUnderTheInterimRule(string sql)
+    {
+        var h = DmlTestHarness.Create(rows: 4);
+
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
+
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        h.AssertNothingChanged();
+        Assert.Empty(h.Reads);
     }
 
     // ---- B-M2 / B-S10: a value T-SQL cannot produce is an error, and nothing is written ------------------
@@ -218,9 +237,9 @@ public sealed class DmlRound1RefusalTests
     [InlineData("INSERT INTO account (name) SELECT TOP 2 name FROM account ORDER BY revenue", "not supported in ORDER BY")]
     // D-M7, B-M2, D-M2, B-S1 (no change: [ ] still refused), floating-point literals, big whole numbers
     [InlineData("INSERT INTO account (name) SELECT TOP 2 name FROM account", "TOP without ORDER BY")]
-    [InlineData("UPDATE account SET revenue = CAST(revenue AS decimal) WHERE name = 'n1'", "decimal(p, s)")]
-    [InlineData("UPDATE account SET description = CAST(name AS nvarchar) WHERE name = 'n1'", "nvarchar(n)")]
-    [InlineData("UPDATE account SET description = CAST(name AS nvarchar(max)) WHERE name = 'n1'", "nvarchar(n)")]
+    [InlineData("UPDATE account SET revenue = CAST(revenue AS decimal) WHERE name = 'n1'", "(a CAST other than")]
+    [InlineData("UPDATE account SET description = CAST(name AS nvarchar) WHERE name = 'n1'", "(a CAST other than")]
+    [InlineData("UPDATE account SET description = CAST(name AS nvarchar(max)) WHERE name = 'n1'", "(a CAST other than")]
     [InlineData("INSERT INTO account (name) VALUES (UPPER('a'))", "literal values only")]
     [InlineData("DELETE FROM account WHERE revenue = 2.5E0", "floating-point literal")]
     [InlineData("UPDATE account SET aging30 = 5 WHERE name = 'n1'", "big whole number")]

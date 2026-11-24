@@ -206,15 +206,15 @@ internal static class DmlColumnValidator
         {
             if (!IsText(value, readColumns))
             {
-                throw Refuse($"{column} is a text column; the value {Sql(value)} is not text. Write text, or convert a whole number " +
-                             "with CAST(... AS nvarchar(n)).");
+                throw Refuse($"{column} is a text column; the value {Sql(value)} is not text. Write text in quotes (for example '5') " +
+                             "or a text column.");
             }
             return;
         }
         if (NumericTypes.Contains(type))
         {
             if (!IsNumeric(value, readColumns))
-                throw Refuse($"{column} is a number column; the value {Sql(value)} is not a number. Write a number, or CAST(... AS int) or CAST(... AS decimal(p, s)) of a number column.");
+                throw Refuse($"{column} is a number column; the value {Sql(value)} is not a number. Write a number without quotes (for example 5) or a number column.");
             var category = Category(value, readColumns);
             // SQL Server rounds currency converted to a whole number; the engine would truncate it.
             if (WholeNumberTypes.Contains(type) && category == Money)
@@ -689,10 +689,10 @@ internal static class DmlColumnValidator
         _ => category ?? "unknown"
     };
 
-    private static string CurrencyToWholeNumber(ScalarExpression currency, string where, bool tryForm = false)
+    private static string CurrencyToWholeNumber(ScalarExpression currency, string where)
         => $"Converting the currency value {Sql(currency)} to a whole number ({where}) is not supported: SQL Server rounds currency " +
-           "converted to a whole number, and the query engine would truncate it. To truncate it as SQL Server truncates a decimal, " +
-           $"write this instead: {(tryForm ? "TRY_CAST" : "CAST")}(CAST({Sql(currency)} AS decimal(19, 4)) AS int).";
+           "converted to a whole number, and the query engine would truncate it. Write the whole number as a literal, or write " +
+           "the currency value to a currency or decimal column.";
 
     /// <summary>
     /// Type rules the engine could not honour as T-SQL does, refused before anything runs: currency converted to a whole
@@ -705,20 +705,20 @@ internal static class DmlColumnValidator
     {
         public string? Problem { get; private set; }
 
-        public override void Visit(CastCall node) => Conversion(node, node.DataType, node.Parameter, tryForm: false);
+        public override void Visit(CastCall node) => Conversion(node, node.DataType, node.Parameter);
 
-        public override void Visit(ConvertCall node) => Conversion(node, node.DataType, node.Parameter, tryForm: false);
+        public override void Visit(ConvertCall node) => Conversion(node, node.DataType, node.Parameter);
 
-        public override void Visit(TryCastCall node) => Conversion(node, node.DataType, node.Parameter, tryForm: true);
+        public override void Visit(TryCastCall node) => Conversion(node, node.DataType, node.Parameter);
 
-        public override void Visit(TryConvertCall node) => Conversion(node, node.DataType, node.Parameter, tryForm: true);
+        public override void Visit(TryConvertCall node) => Conversion(node, node.DataType, node.Parameter);
 
-        private void Conversion(TSqlFragment node, DataTypeReference type, ScalarExpression parameter, bool tryForm)
+        private void Conversion(TSqlFragment node, DataTypeReference type, ScalarExpression parameter)
         {
             var from = Category(parameter, columns);
             var to = TargetCategory(type);
             if (to == Whole && from == Money)
-                Problem ??= CurrencyToWholeNumber(parameter, Sql(node), tryForm);
+                Problem ??= CurrencyToWholeNumber(parameter, Sql(node));
             else if (to == Exact && from == Float)
                 Problem ??= FloatToDecimal(parameter, "a decimal in " + Sql(node));
         }
@@ -814,7 +814,7 @@ internal static class DmlColumnValidator
     private static string FloatToDecimal(ScalarExpression value, string where)
         => $"Converting the floating-point value {Sql(value)} to {where} is not supported: SQL Server keeps 17 significant digits " +
            "of a floating-point value converted to a decimal or currency and the query engine keeps 15, so the stored digits could " +
-           "differ. Write it to a floating-point or whole-number column, or compute it from decimal columns.";
+           "differ. Write it to a floating-point or whole-number column, or write the value as a decimal literal.";
 
     private static string? TypeOf(ColumnReferenceExpression column, Dictionary<string, AttributeMetadataDto> columns)
         => columns.TryGetValue(column.MultiPartIdentifier.Identifiers.Last().Value, out var a) ? a.AttributeType : null;

@@ -64,12 +64,12 @@ public sealed class DmlFaithfulTests : IDisposable
     }
 
     [Fact]
-    public async Task InsertSelect_HonoursItsWhereAndOrderBy_WithComputedItems()
+    public async Task InsertSelect_HonoursItsWhere_WithAliasedItems()
     {
-        var h = await Run("INSERT INTO account (name, description) SELECT name AS n, UPPER(name) AS d FROM account WHERE name = 'n1'");
+        var h = await Run("INSERT INTO account (name, description) SELECT name AS n, description AS d FROM account WHERE name = 'n1'");
 
         Assert.Equal(new object?[] { "n1" }, Values(h, "name"));
-        Assert.Equal(new object?[] { "N1" }, Values(h, "description"));
+        Assert.Equal(new object?[] { "d1" }, Values(h, "description"));
     }
 
     [Fact]
@@ -98,21 +98,21 @@ public sealed class DmlFaithfulTests : IDisposable
     // Shapes the live differential run did not prove, or proved wrong (specs/query.md "DML allowlist"), are refused
     // with what to write instead.
     [Theory]
-    [InlineData("UPDATE account SET revenue = TRY_CAST(name AS int) WHERE name = 'n1'", "is not a number")]
-    [InlineData("UPDATE account SET revenue = CAST(description AS int) WHERE name = 'n1'", "is not a number")]
-    [InlineData("UPDATE account SET description = CAST(CAST(name AS int) AS nvarchar(10)) WHERE name = 'n1'", "converts a value that is not a number")]
-    [InlineData("UPDATE account SET name = TRY_CONVERT(nvarchar(10), revenue) WHERE name = 'n1'", "TRY_CAST and TRY_CONVERT are supported to int or decimal(p, s)")]
-    [InlineData("UPDATE account SET followupby = CAST('2024-01-01T00:00:00Z' AS datetime) WHERE name = 'n1'", "CAST to DATETIME")]
-    [InlineData("UPDATE account SET description = LEFT(name, 1) WHERE name = 'n1'", "SUBSTRING")]
-    [InlineData("UPDATE account SET followupby = GETDATE() WHERE name = 'n1'", "once per statement")]
-    [InlineData("UPDATE account SET followupby = GETUTCDATE() WHERE name = 'n1'", "once per statement")]
+    [InlineData("UPDATE account SET revenue = TRY_CAST(name AS int) WHERE name = 'n1'", "(TRY_CAST)")]
+    [InlineData("UPDATE account SET revenue = CAST(description AS int) WHERE name = 'n1'", "(a CAST other than")]
+    [InlineData("UPDATE account SET description = CAST(CAST(name AS int) AS nvarchar(10)) WHERE name = 'n1'", "(a CAST other than")]
+    [InlineData("UPDATE account SET name = TRY_CONVERT(nvarchar(10), revenue) WHERE name = 'n1'", "(TRY_CONVERT)")]
+    [InlineData("UPDATE account SET followupby = CAST('2024-01-01T00:00:00Z' AS datetime) WHERE name = 'n1'", "(a CAST other than")]
+    [InlineData("UPDATE account SET description = LEFT(name, 1) WHERE name = 'n1'", "(the function LEFT)")]
+    [InlineData("UPDATE account SET followupby = GETDATE() WHERE name = 'n1'", "(the function GETDATE)")]
+    [InlineData("UPDATE account SET followupby = GETUTCDATE() WHERE name = 'n1'", "(the function GETUTCDATE)")]
     [InlineData("INSERT INTO account (accountid, name) VALUES (NEWID(), 'x')", "Dataverse generates row ids")]
     [InlineData("INSERT INTO account (accountid, name) VALUES ('00000000-0000-0000-0000-000000000001', 'x')", "Dataverse generates row ids")]
     [InlineData("UPDATE account SET description = REPLACE(name, 'n', 'm') WHERE name = 'n1'", "the function REPLACE")]
-    [InlineData("UPDATE account SET description = NULLIF(name, 'n1') WHERE name = 'n1'", "Comparing text inside a value")]
-    [InlineData("UPDATE account SET description = CASE name WHEN 'n0' THEN 'a' END WHERE name = 'n1'", "Comparing text inside a value")]
-    [InlineData("UPDATE account SET description = IIF(name = 'n0', 'a', 'b') WHERE name = 'n1'", "Comparing text inside a value")]
-    [InlineData("UPDATE account SET description = IIF(UPPER(name) > 'N', 'a', 'b') WHERE name = 'n1'", "Comparing text inside a value")]
+    [InlineData("UPDATE account SET description = NULLIF(name, 'n1') WHERE name = 'n1'", "(NULLIF)")]
+    [InlineData("UPDATE account SET description = CASE name WHEN 'n0' THEN 'a' END WHERE name = 'n1'", "(CASE)")]
+    [InlineData("UPDATE account SET description = IIF(name = 'n0', 'a', 'b') WHERE name = 'n1'", "(IIF)")]
+    [InlineData("UPDATE account SET description = IIF(UPPER(name) > 'N', 'a', 'b') WHERE name = 'n1'", "(IIF)")]
     [InlineData("DELETE FROM account WHERE name > 'n1'", "text column, which is not supported in a WHERE comparison with < > <= >=")]
     [InlineData("DELETE FROM account WHERE name BETWEEN 'a' AND 'z'", "text column, which is not supported in BETWEEN")]
     [InlineData("DELETE FROM account WHERE accountid = 'not-a-guid'", "holds row ids")]
@@ -232,24 +232,24 @@ public sealed class DmlFaithfulTests : IDisposable
         Assert.Equal(2, result.Result.Count);
     }
 
-    // ---- M3: aliased plain columns next to computed items ------------------------------------
+    // ---- M3: aliased plain columns next to other items (a literal is a projected constant) --------------
 
     [Fact]
-    public async Task InsertSelect_AliasedColumnNextToAComputedOne_MapsBothByPosition()
+    public async Task InsertSelect_AliasedColumnNextToALiteral_MapsBothByPosition()
     {
-        var h = await Run("INSERT INTO account (name, description) SELECT name AS n, UPPER(description) AS d FROM account WHERE revenue > 0");
+        var h = await Run("INSERT INTO account (name, description) SELECT name AS n, 'k' AS d FROM account WHERE revenue > 0");
 
         Assert.Equal(new object?[] { "n0", "n1", "n2", "n3" }, Values(h, "name"));
-        Assert.Equal(new object?[] { null, "D1", null, "D3" }, Values(h, "description"));
+        Assert.Equal(new object?[] { "k", "k", "k", "k" }, Values(h, "description"));
     }
 
     [Fact]
-    public async Task InsertSelect_AliasedColumnAndAComputedItemOfTheSameColumn_BothRead()
+    public async Task InsertSelect_TheSameColumnUnderTwoAliases_IsReadForBoth()
     {
-        var h = await Run("INSERT INTO account (name, description) SELECT name AS n, UPPER(name) AS d FROM account WHERE revenue > 0");
+        var h = await Run("INSERT INTO account (name, description) SELECT name AS n, name AS d FROM account WHERE revenue > 0");
 
         Assert.Equal(new object?[] { "n0", "n1", "n2", "n3" }, Values(h, "name"));
-        Assert.Equal(new object?[] { "N0", "N1", "N2", "N3" }, Values(h, "description"));
+        Assert.Equal(new object?[] { "n0", "n1", "n2", "n3" }, Values(h, "description"));
     }
 
     [Fact]
@@ -266,7 +266,7 @@ public sealed class DmlFaithfulTests : IDisposable
 
     [Theory]
     [InlineData("UPDATE account SET description = owneridname WHERE revenue > 0", "display column")]
-    [InlineData("UPDATE account SET description = CONCAT('Owner: ', owneridname) WHERE revenue > 0", "display column")]
+    [InlineData("UPDATE account SET description = CONCAT('Owner: ', owneridname) WHERE revenue > 0", "(the function CONCAT)")]
     [InlineData("INSERT INTO account (name, description) SELECT name, owneridname FROM account WHERE revenue > 0", "display column")]
     [InlineData("UPDATE account SET description = nosuchcolumn WHERE revenue > 0", "has no column 'nosuchcolumn'")]
     [InlineData("UPDATE account SET nosuchcolumn = 'x' WHERE revenue > 0", "has no column 'nosuchcolumn'")]
@@ -274,8 +274,8 @@ public sealed class DmlFaithfulTests : IDisposable
     [InlineData("INSERT INTO account (createdon) VALUES ('2024-01-01')", "cannot be set by INSERT")]
     [InlineData("UPDATE account SET accountid = 'x' WHERE revenue > 0", "Dataverse generates row ids")]
     [InlineData("UPDATE account SET revenue = revenue + '100' WHERE revenue > 0", "+ with text")]
-    [InlineData("UPDATE account SET revenue = revenue + description WHERE revenue > 0", "Arithmetic")]
-    [InlineData("UPDATE account SET description = name * 2 WHERE revenue > 0", "Arithmetic")]
+    [InlineData("UPDATE account SET revenue = revenue + description WHERE revenue > 0", "(arithmetic)")]
+    [InlineData("UPDATE account SET description = name * 2 WHERE revenue > 0", "(arithmetic)")]
     public async Task ColumnsNotProvenToReadOrWriteCorrectly_AreRefused(string sql, string named)
     {
         var h = DmlTestHarness.Create(rows: 4);
@@ -310,13 +310,13 @@ public sealed class DmlFaithfulTests : IDisposable
     [InlineData("DELETE FROM account WHERE name COLLATE Latin1_General_CS_AS = 'ABC'", "COLLATE")]
     [InlineData("UPDATE account SET name = 'x' WHERE name LIKE 'A%' COLLATE Latin1_General_CS_AS", "COLLATE")]
     [InlineData("UPDATE account SET description = name COLLATE Latin1_General_CS_AS WHERE revenue > 0", "COLLATE")]
-    [InlineData("UPDATE account SET description = COALESCE([name]] FROM account --], 'x') WHERE name = 'never'", "not a valid Dataverse column name")]
+    [InlineData("UPDATE account SET description = COALESCE([name]] FROM account --], 'x') WHERE name = 'never'", "(COALESCE)")]
     [InlineData("DELETE FROM account WHERE [accountid\" operator=\"not-null\"/><!--] = 'x'", "not a valid Dataverse column name")]
     [InlineData("DELETE FROM [account'x] WHERE name = 'x'", "not a valid Dataverse table name")]
     [InlineData("INSERT INTO account ([na me]) VALUES ('x')", "plain column name")]
     [InlineData("INSERT INTO account (name) SELECT name AS [n x] FROM account", "not a valid name")]
     [InlineData("UPDATE account SET revenue = +revenue WHERE revenue > 0", "+revenue")]
-    [InlineData("UPDATE account SET description = CONVERT(varchar(8), revenue, 112) WHERE revenue > 0", "CONVERT style")]
+    [InlineData("UPDATE account SET description = CONVERT(varchar(8), revenue, 112) WHERE revenue > 0", "(CONVERT)")]
     [InlineData("UPDATE account SET description = IIF(NOT (revenue > 1000), 'a', 'b') WHERE revenue > 0", "NOT")]
     [InlineData("UPDATE account SET name = 'a', name = 'b' WHERE revenue > 0", "more than once")]
     [InlineData("INSERT INTO account (contact.name) VALUES ('x')", "plain column name")]
@@ -336,9 +336,12 @@ public sealed class DmlFaithfulTests : IDisposable
     [Fact]
     public async Task RTrim_RemovesTrailingSpacesOnly_LikeTsql()
     {
-        var h = await Run("UPDATE account SET description = RTRIM(CONCAT('a', '\t  ')) WHERE name = 'n1'");
+        // DML no longer computes values (interim rule), so the evaluator's RTRIM is checked through SELECT.
+        var h = DmlTestHarness.Create(rows: 4);
 
-        Assert.Equal(new object?[] { "a\t" }, Values(h, "description"));
+        var result = await h.Service.ExecuteAsync(new SqlQueryRequest { Sql = "SELECT RTRIM(CONCAT('a', '\t  ')) AS v FROM account WHERE name = 'n1'" });
+
+        Assert.Equal(new object?[] { "a\t" }, result.Result.Records.Select(r => r["v"].Value));
     }
 }
 

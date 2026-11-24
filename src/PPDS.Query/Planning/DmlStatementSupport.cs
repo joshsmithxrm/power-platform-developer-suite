@@ -118,7 +118,7 @@ internal static class DmlStatementSupport
                 case AssignmentSetClause assignment when assignment.AssignmentKind != AssignmentKind.Equals:
                     var column = assignment.Column.MultiPartIdentifier.Identifiers.Last().Value;
                     return $"UPDATE ... SET {column} {Operator(assignment.AssignmentKind)} is not supported; only 'column = value' " +
-                           "assignments are." + NothingExecuted + $" Write it as SET {column} = {column} ... instead.";
+                           "assignments are." + NothingExecuted + $" Write the new value instead: SET {column} = <value>, where the value is a literal or a column.";
                 case AssignmentSetClause assignment:
                     problem = CheckColumn(assignment.Column, names, "the SET column")
                         ?? CheckValue(assignment.NewValue, names, "UPDATE ... SET");
@@ -590,7 +590,14 @@ internal static class DmlStatementSupport
             };
         }
 
-        return Unsupported($"{Sql(expression)} ({Construct(expression)})", context, HowTo(expression));
+        var part = expression is VariableReference or GlobalVariableExpression
+            ? $"the variable {Sql(expression)}"
+            : $"{Sql(expression)} ({Construct(expression)})";
+        var howTo = HowTo(expression);
+        if (columns == null && expression is not (VariableReference or GlobalVariableExpression or RealLiteral))
+            howTo = " VALUES takes literal values only (text, numbers, NULL, or CAST('<guid>' AS uniqueidentifier)); write the value you want stored as a literal." +
+                    (expression is FunctionCall { FunctionName.Value: var f } && f.Equals("NEWID", StringComparison.OrdinalIgnoreCase) ? howTo : string.Empty);
+        return Unsupported(part, context, howTo);
     }
 
     /// <summary>The kind of construct a refused written value is, named in the refusal.</summary>
@@ -632,6 +639,9 @@ internal static class DmlStatementSupport
         VariableReference or GlobalVariableExpression => " Use a literal value instead.",
         FunctionCall function when function.FunctionName.Value.Equals("NEWID", StringComparison.OrdinalIgnoreCase) =>
             " Dataverse generates row ids; leave the id column out.",
+        FunctionCall function when function.FunctionName.Value.ToUpperInvariant() is "GETDATE" or "GETUTCDATE" or "SYSDATETIME"
+            or "SYSUTCDATETIME" or "SYSDATETIMEOFFSET" or "CURRENT_TIMESTAMP" =>
+            " Write the time as a literal with Z, for example '2024-01-15T09:30:00Z'.",
         _ => " Compute the value first (for example with a SELECT) and write the result as a literal." + InterimRule
     };
 

@@ -15,49 +15,49 @@ public sealed class DmlRound2Tests
 
     [Theory]
     // B-F1: decimal(p, s) above 28 digits (TRY_CAST wrote NULL, CAST failed with a raw exception)
-    [InlineData("UPDATE account SET revenue = TRY_CAST(revenue AS decimal(38, 30)) WHERE name = 'n1'", "precision at most 28")]
-    [InlineData("UPDATE account SET revenue = TRY_CONVERT(decimal(30, 29), revenue) WHERE name = 'n1'", "precision at most 28")]
-    [InlineData("UPDATE account SET revenue = CAST(revenue AS decimal(29, 2)) WHERE name = 'n1'", "at most 28")]
-    [InlineData("UPDATE account SET revenue = CONVERT(decimal(38, 30), revenue) WHERE name = 'n1'", "at most 28")]
+    [InlineData("UPDATE account SET revenue = TRY_CAST(revenue AS decimal(38, 30)) WHERE name = 'n1'", "(TRY_CAST)")]
+    [InlineData("UPDATE account SET revenue = TRY_CONVERT(decimal(30, 29), revenue) WHERE name = 'n1'", "(TRY_CONVERT)")]
+    [InlineData("UPDATE account SET revenue = CAST(revenue AS decimal(29, 2)) WHERE name = 'n1'", "(a CAST other than")]
+    [InlineData("UPDATE account SET revenue = CONVERT(decimal(38, 30), revenue) WHERE name = 'n1'", "(CONVERT)")]
     // ROUND with more places than the live run proved
-    [InlineData("UPDATE account SET revenue = ROUND(revenue, 11) WHERE name = 'n1'", "from 0 to 10")]
-    [InlineData("UPDATE account SET revenue = ROUND(revenue, 29) WHERE name = 'n1'", "from 0 to 10")]
+    [InlineData("UPDATE account SET revenue = ROUND(revenue, 11) WHERE name = 'n1'", "(the function ROUND)")]
+    [InlineData("UPDATE account SET revenue = ROUND(revenue, 29) WHERE name = 'n1'", "(the function ROUND)")]
     // D-2: currency to a whole number (SQL Server rounds, the engine truncated)
     [InlineData("UPDATE account SET numberofemployees = creditlimit WHERE name = 'n1'", "SQL Server rounds currency")]
-    [InlineData("UPDATE account SET numberofemployees = creditlimit * 2 WHERE name = 'n1'", "SQL Server rounds currency")]
-    [InlineData("UPDATE account SET numberofemployees = CAST(creditlimit AS int) WHERE name = 'n1'", "SQL Server rounds currency")]
-    [InlineData("UPDATE account SET numberofemployees = CONVERT(int, creditlimit) WHERE name = 'n1'", "SQL Server rounds currency")]
-    [InlineData("UPDATE account SET numberofemployees = TRY_CAST(creditlimit AS int) WHERE name = 'n1'", "SQL Server rounds currency")]
-    [InlineData("UPDATE account SET numberofemployees = TRY_CONVERT(int, creditlimit) WHERE name = 'n1'", "SQL Server rounds currency")]
-    [InlineData("UPDATE account SET description = CAST(CAST(creditlimit AS int) AS nvarchar(20)) WHERE name = 'n1'", "SQL Server rounds currency")]
+    [InlineData("UPDATE account SET numberofemployees = creditlimit * 2 WHERE name = 'n1'", "(arithmetic)")]
+    [InlineData("UPDATE account SET numberofemployees = CAST(creditlimit AS int) WHERE name = 'n1'", "(a CAST other than")]
+    [InlineData("UPDATE account SET numberofemployees = CONVERT(int, creditlimit) WHERE name = 'n1'", "(CONVERT)")]
+    [InlineData("UPDATE account SET numberofemployees = TRY_CAST(creditlimit AS int) WHERE name = 'n1'", "(TRY_CAST)")]
+    [InlineData("UPDATE account SET numberofemployees = TRY_CONVERT(int, creditlimit) WHERE name = 'n1'", "(TRY_CONVERT)")]
+    [InlineData("UPDATE account SET description = CAST(CAST(creditlimit AS int) AS nvarchar(20)) WHERE name = 'n1'", "(a CAST other than")]
     [InlineData("INSERT INTO account (name, numberofemployees) SELECT TOP 1 name, creditlimit FROM account ORDER BY name", "SQL Server rounds currency")]
     // floating point to decimal or currency (digits kept differ)
     [InlineData("UPDATE account SET revenue = address1_latitude WHERE name = 'n1'", "17 significant digits")]
-    [InlineData("UPDATE account SET creditlimit = address1_latitude * 2 WHERE name = 'n1'", "17 significant digits")]
-    [InlineData("UPDATE account SET revenue = CAST(address1_latitude AS decimal(10, 2)) WHERE name = 'n1'", "17 significant digits")]
+    [InlineData("UPDATE account SET creditlimit = address1_latitude * 2 WHERE name = 'n1'", "(arithmetic)")]
+    [InlineData("UPDATE account SET revenue = CAST(address1_latitude AS decimal(10, 2)) WHERE name = 'n1'", "(a CAST other than")]
     // C-M1: % on floating point (SQL Server refuses it) and on currency (not proven)
-    [InlineData("UPDATE account SET address1_latitude = address1_latitude % 2 WHERE name = 'n1'", "% on a floating-point value")]
-    [InlineData("UPDATE account SET creditlimit = creditlimit % 2 WHERE name = 'n1'", "% on a currency value")]
-    [InlineData("UPDATE account SET numberofemployees = numberofemployees % address1_latitude WHERE name = 'n1'", "% on a floating-point value")]
+    [InlineData("UPDATE account SET address1_latitude = address1_latitude % 2 WHERE name = 'n1'", "(arithmetic)")]
+    [InlineData("UPDATE account SET creditlimit = creditlimit % 2 WHERE name = 'n1'", "(arithmetic)")]
+    [InlineData("UPDATE account SET numberofemployees = numberofemployees % address1_latitude WHERE name = 'n1'", "(arithmetic)")]
     // ISNULL narrowing its second value to the first's type
-    [InlineData("UPDATE account SET revenue = ISNULL(numberofemployees, 2.5) WHERE name = 'n1'", "ISNULL gives the type of its first value")]
-    [InlineData("UPDATE account SET revenue = ISNULL(revenue, creditlimit) WHERE name = 'n1'", "ISNULL gives the type of its first value")]
-    [InlineData("UPDATE account SET revenue = ISNULL(NULL, revenue) WHERE name = 'n1'", "NULL as its first value")]
+    [InlineData("UPDATE account SET revenue = ISNULL(numberofemployees, 2.5) WHERE name = 'n1'", "(the function ISNULL)")]
+    [InlineData("UPDATE account SET revenue = ISNULL(revenue, creditlimit) WHERE name = 'n1'", "(the function ISNULL)")]
+    [InlineData("UPDATE account SET revenue = ISNULL(NULL, revenue) WHERE name = 'n1'", "(the function ISNULL)")]
     // mixing decimal, currency and floating point (only whole numbers mix with the other number types)
-    [InlineData("UPDATE account SET revenue = revenue + creditlimit WHERE name = 'n1'", "combining a decimal and a currency value")]
-    [InlineData("UPDATE account SET revenue = COALESCE(revenue, creditlimit) WHERE name = 'n1'", "combining a decimal and a currency value")]
-    [InlineData("UPDATE account SET address1_latitude = address1_latitude * revenue WHERE name = 'n1'", "combining a floating-point and a decimal value")]
-    [InlineData("UPDATE account SET revenue = IIF(numberofemployees > 2, revenue, creditlimit) WHERE name = 'n1'", "combining a decimal and a currency value")]
+    [InlineData("UPDATE account SET revenue = revenue + creditlimit WHERE name = 'n1'", "(arithmetic)")]
+    [InlineData("UPDATE account SET revenue = COALESCE(revenue, creditlimit) WHERE name = 'n1'", "(COALESCE)")]
+    [InlineData("UPDATE account SET address1_latitude = address1_latitude * revenue WHERE name = 'n1'", "(arithmetic)")]
+    [InlineData("UPDATE account SET revenue = IIF(numberofemployees > 2, revenue, creditlimit) WHERE name = 'n1'", "(IIF)")]
     // found by the admission matrix: the NULL constant where SQL Server refuses it, or where no case proved it
-    [InlineData("UPDATE account SET description = UPPER(NULL) WHERE name = 'n1'", "UPPER of NULL is NULL")]
-    [InlineData("UPDATE account SET description = CONCAT(name, NULL) WHERE name = 'n1'", "leave the NULL out")]
-    [InlineData("UPDATE account SET numberofemployees = CAST(NULL AS int) WHERE name = 'n1'", "The conversion of NULL is NULL")]
-    [InlineData("UPDATE account SET numberofemployees = TRY_CONVERT(int, NULL) WHERE name = 'n1'", "The conversion of NULL is NULL")]
-    [InlineData("UPDATE account SET description = COALESCE(NULL, NULL) WHERE name = 'n1'", "every result is NULL")]
-    [InlineData("UPDATE account SET description = IIF(numberofemployees > 2, NULL, NULL) WHERE name = 'n1'", "every result is NULL")]
-    [InlineData("UPDATE account SET description = CASE WHEN numberofemployees > 2 THEN NULL END WHERE name = 'n1'", "every result is NULL")]
-    [InlineData("UPDATE account SET revenue = NULLIF(revenue, NULL) WHERE name = 'n1'", "Comparing with NULL inside a value")]
-    [InlineData("UPDATE account SET numberofemployees = NULLIF(numberofemployees, revenue) WHERE name = 'n1'", "NULLIF comparing a whole-number and a decimal")]
+    [InlineData("UPDATE account SET description = UPPER(NULL) WHERE name = 'n1'", "(the function UPPER)")]
+    [InlineData("UPDATE account SET description = CONCAT(name, NULL) WHERE name = 'n1'", "(the function CONCAT)")]
+    [InlineData("UPDATE account SET numberofemployees = CAST(NULL AS int) WHERE name = 'n1'", "(a CAST other than")]
+    [InlineData("UPDATE account SET numberofemployees = TRY_CONVERT(int, NULL) WHERE name = 'n1'", "(TRY_CONVERT)")]
+    [InlineData("UPDATE account SET description = COALESCE(NULL, NULL) WHERE name = 'n1'", "(COALESCE)")]
+    [InlineData("UPDATE account SET description = IIF(numberofemployees > 2, NULL, NULL) WHERE name = 'n1'", "(IIF)")]
+    [InlineData("UPDATE account SET description = CASE WHEN numberofemployees > 2 THEN NULL END WHERE name = 'n1'", "(CASE)")]
+    [InlineData("UPDATE account SET revenue = NULLIF(revenue, NULL) WHERE name = 'n1'", "(NULLIF)")]
+    [InlineData("UPDATE account SET numberofemployees = NULLIF(numberofemployees, revenue) WHERE name = 'n1'", "(NULLIF)")]
     // B-F4: ORDER BY without TOP does not say which rows are copied, and paging over it was not proven
     [InlineData("INSERT INTO account (name) SELECT name FROM account ORDER BY name", "ORDER BY without TOP")]
     // D-3: the id column is named from metadata (activity tables use activityid)
@@ -78,6 +78,7 @@ public sealed class DmlRound2Tests
         }
     }
 
+    /// <summary>The forms that used to run next to the refused ones are computed values too, refused under the interim rule.</summary>
     [Theory]
     [InlineData("UPDATE account SET numberofemployees = CAST(CAST(creditlimit AS decimal(19, 4)) AS int) WHERE name = 'n1'")]
     [InlineData("UPDATE account SET numberofemployees = TRY_CAST(CAST(creditlimit AS decimal(19, 4)) AS int) WHERE name = 'n1'")]
@@ -88,6 +89,21 @@ public sealed class DmlRound2Tests
     [InlineData("UPDATE account SET revenue = ROUND(revenue, 10) WHERE name = 'n1'")]
     [InlineData("UPDATE account SET creditlimit = creditlimit * numberofemployees WHERE name = 'n1'")]
     [InlineData("UPDATE account SET numberofemployees = numberofemployees % 3 WHERE name = 'n1'")]
+    public async Task TheComputedFormsNextToThem_AreRefusedToo(string sql)
+    {
+        var h = DmlTestHarness.Create(rows: 4);
+
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
+
+        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        h.AssertNothingChanged();
+    }
+
+    [Theory]
+    [InlineData("UPDATE account SET revenue = numberofemployees WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET creditlimit = numberofemployees WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET revenue = -2.5 WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET revenue = NULL WHERE name = 'n1'")]
     [InlineData("INSERT INTO account (name) SELECT TOP 2 name FROM account ORDER BY name")]
     public async Task TheFormsNextToThem_StillRun(string sql)
     {
