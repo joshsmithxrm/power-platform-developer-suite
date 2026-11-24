@@ -90,7 +90,7 @@ public sealed class HarnessSelfTests
     [InlineData("abc ", "'abc '")]
     [InlineData("a\nb", "'a{U+000A}b'")]
     [InlineData("{x}", "'{U+007B}x{U+007D}'")]
-    [InlineData("ā", "'{U+0101}'")]
+    [InlineData("\u0101", "'{U+0101}'")]
     public void Text_renders_with_every_invisible_or_lookalike_character_spelled_out(string? value, string expected)
         => Assert.Equal(expected, Outcome.Render(value));
 

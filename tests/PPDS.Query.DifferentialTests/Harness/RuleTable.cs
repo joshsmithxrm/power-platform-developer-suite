@@ -50,6 +50,7 @@ public static class RuleTable
         new("literal decimal", Kind.Number, "9.99"),
         new("literal float", Kind.Number, "1.5E0"),
         new("literal float", Kind.Number, "1E-1"),
+        // A bare NULL is an int to SQL Server; a NULL of a text type comes from the all-NULL operand row.
         new("NULL", Kind.Number, "NULL"),
 
         new("literal nvarchar", Kind.Text, "N'Abc'"),
@@ -59,8 +60,8 @@ public static class RuleTable
         new("literal varchar", Kind.Text, "'abc '"),
         new("literal varchar", Kind.Text, "''"),
         new("literal varchar", Kind.Text, "'2.5'"),
-        new("literal varchar outside the code page", Kind.Text, "'ā'"),
-        new("NULL", Kind.Text, "NULL"),
+        new("literal varchar outside the code page", Kind.Text, "'\u0101'"),
+        new("literal nvarchar without a case pair in the collation", Kind.Text, "N'\uA794'"),
     ];
 
     /// <summary>The operators and functions.</summary>

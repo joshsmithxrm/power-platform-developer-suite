@@ -26,6 +26,9 @@ public sealed record NodeDifference(Expr Node, int RowId, Outcome Reference, Out
         }
     }
 
+    /// <summary>The coarser group a new difference is reported under: the construct and what differs.</summary>
+    public string Group => $"{Node.Construct}: {Describe(Reference, Actual, Difference)}";
+
     /// <summary>What differs, in words.</summary>
     public static string Describe(Outcome reference, Outcome actual, Difference difference)
     {
@@ -123,7 +126,10 @@ public sealed class DifferentialRunner(IExpressionEngine reference, IExpressionE
         return [new NodeDifference(node, rowId, self.Reference, self.Actual, self.Difference, children)];
     }
 
-    /// <summary>Generates <paramref name="count"/> expressions from <paramref name="seed"/> and checks each over every row.</summary>
+    /// <summary>
+    /// Generates <paramref name="count"/> expressions from <paramref name="seed"/> and checks each over every row; an
+    /// expression that reads no column does not depend on the row and is checked over the first row only.
+    /// </summary>
     public RunReport Run(int seed, int count, int maxDepth, IReadOnlyList<int> rowIds)
     {
         var report = new RunReport(seed, count, maxDepth);
@@ -131,7 +137,8 @@ public sealed class DifferentialRunner(IExpressionEngine reference, IExpressionE
         for (var i = 0; i < count; i++)
         {
             var expression = generator.Next();
-            foreach (var rowId in rowIds)
+            var readsColumn = expression.Nodes().Any(n => n.IsLeaf && n.Construct.StartsWith("column ", StringComparison.Ordinal));
+            foreach (var rowId in readsColumn ? rowIds : rowIds.Take(1))
                 report.Add(i, Check(expression, rowId));
         }
         return report;
@@ -168,8 +175,8 @@ public sealed class RunReport(int seed, int expressions, int maxDepth)
     /// <summary>Known differences by id, counted once per evaluation they explain.</summary>
     public IReadOnlyDictionary<string, int> ExpectedById => _expected;
 
-    /// <summary>The new differences, grouped by <see cref="NodeDifference.Signature"/>, most frequent first.</summary>
-    public IReadOnlyList<NewDifferenceGroup> NewGroups => _new.Values.OrderByDescending(g => g.Count).ThenBy(g => g.Signature, StringComparer.Ordinal).ToList();
+    /// <summary>The new differences, grouped by <see cref="NodeDifference.Group"/>, most frequent first.</summary>
+    public IReadOnlyList<NewDifferenceGroup> NewGroups => _new.Values.OrderByDescending(g => g.Count).ThenBy(g => g.Group, StringComparer.Ordinal).ToList();
 
     /// <summary>Adds one verdict.</summary>
     public void Add(int index, CaseVerdict verdict)
@@ -192,9 +199,10 @@ public sealed class RunReport(int seed, int expressions, int maxDepth)
                 _expected[known.Id] = _expected.GetValueOrDefault(known.Id) + 1;
                 continue;
             }
-            if (!_new.TryGetValue(difference.Signature, out var group))
-                _new[difference.Signature] = group = new NewDifferenceGroup(difference.Signature, Seed, index, verdict, difference);
+            if (!_new.TryGetValue(difference.Group, out var group))
+                _new[difference.Group] = group = new NewDifferenceGroup(difference.Group, Seed, index, verdict, difference);
             group.Count++;
+            group.Signatures.Add(difference.Signature);
         }
     }
 
@@ -202,7 +210,7 @@ public sealed class RunReport(int seed, int expressions, int maxDepth)
     public override string ToString()
     {
         var text = new StringBuilder();
-        text.AppendLine(CultureInfo.InvariantCulture, $"Seed {Seed}, depth up to {MaxDepth}: {Expressions} expressions over {Operands.Rows.Count} rows = {Evaluations} evaluations.");
+        text.AppendLine(CultureInfo.InvariantCulture, $"Seed {Seed}, depth up to {MaxDepth}: {Expressions} expressions, {Evaluations} evaluations (an expression that reads a column is evaluated over each of the {Operands.Rows.Count} rows).");
         text.AppendLine(CultureInfo.InvariantCulture, $"  equal {Equal}, expected differences {Expected}, new differences {New}.");
         foreach (var (id, n) in _expected)
             text.AppendLine(CultureInfo.InvariantCulture, $"  expected {id}: {n}");
@@ -212,11 +220,14 @@ public sealed class RunReport(int seed, int expressions, int maxDepth)
     }
 }
 
-/// <summary>New differences that share a signature, with the first example found.</summary>
-public sealed class NewDifferenceGroup(string signature, int seed, int index, CaseVerdict example, NodeDifference cause)
+/// <summary>New differences of one construct and one kind, with the first example found.</summary>
+public sealed class NewDifferenceGroup(string group, int seed, int index, CaseVerdict example, NodeDifference cause)
 {
-    /// <summary>The signature.</summary>
-    public string Signature { get; } = signature;
+    /// <summary>The construct and what differs.</summary>
+    public string Group { get; } = group;
+
+    /// <summary>The operand shapes it was seen with (<see cref="NodeDifference.Signature"/>).</summary>
+    public SortedSet<string> Signatures { get; } = new(StringComparer.Ordinal);
 
     /// <summary>How many causes had it.</summary>
     public int Count { get; set; }
@@ -237,7 +248,8 @@ public sealed class NewDifferenceGroup(string signature, int seed, int index, Ca
     public override string ToString()
     {
         var text = new StringBuilder();
-        text.AppendLine(CultureInfo.InvariantCulture, $"  NEW [{Count}x] {Signature}");
+        text.AppendLine(CultureInfo.InvariantCulture, $"  NEW [{Count}x] {Group}");
+        text.AppendLine(CultureInfo.InvariantCulture, $"      seen as: {string.Join("; ", Signatures.Take(6).Select(s => s[..s.IndexOf(": ", StringComparison.Ordinal)]))}{(Signatures.Count > 6 ? $"; and {Signatures.Count - 6} more" : "")}");
         text.AppendLine(CultureInfo.InvariantCulture, $"      cause:  {Cause.Node.ScalarSql}   (row {Cause.RowId})");
         text.AppendLine(CultureInfo.InvariantCulture, $"        SQL Server: {Cause.Reference}");
         text.AppendLine(CultureInfo.InvariantCulture, $"        PPDS:       {Cause.Actual}");

@@ -128,10 +128,10 @@ public sealed class SqlServerEngine(SqlConnection connection) : IExpressionEngin
         var errorClass = number switch
         {
             8134 => ErrorClass.DivideByZero,
-            220 or 232 or 3606 or 8115 => ErrorClass.Overflow,
-            241 or 245 or 248 or 293 or 295 or 8114 or 8169 => ErrorClass.Conversion,
+            220 or 232 or 237 or 3606 or 8115 => ErrorClass.Overflow,
+            235 or 241 or 245 or 248 or 293 or 295 or 8114 or 8169 => ErrorClass.Conversion,
             2628 or 8152 => ErrorClass.Truncation,
-            206 or 402 or 529 or 8116 or 8117 => ErrorClass.TypeClash,
+            206 or 402 or 529 or 4151 or 8116 or 8117 => ErrorClass.TypeClash,
             102 or 156 or 174 or 189 or 195 or 207 or 208 or 4145 =>
                 throw new HarnessException($"SQL Server rejected the harness's SQL (error {number}): {expression}: {ReferenceServer.Redact(ex.Message)}"),
             _ => ErrorClass.Other,

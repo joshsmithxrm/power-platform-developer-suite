@@ -126,8 +126,8 @@ public static class KnownDifferences
         "#1764, seventh known case",
         "A text literal without the N prefix keeps characters its code page cannot hold; SQL Server converts them.",
         [
-            new("'ā'", 1, "'a' : varchar(1)", "'{U+0101}' : ~text"),
-            new("UPPER('ā')", 1, "'A' : varchar(1)", "'{U+0100}' : ~text"),
+            new("'\u0101'", 1, "'a' : varchar(1)", "'{U+0101}' : ~text"),
+            new("UPPER('\u0101')", 1, "'A' : varchar(1)", "'{U+0100}' : ~text"),
         ],
         d => d.Node.IsLeaf
              && d.Node.Construct == "literal varchar outside the code page"
@@ -153,8 +153,8 @@ public static class KnownDifferences
         "#1764, eleventh known case",
         "UPPER and LOWER use .NET's casing rules, not the collation's: a letter the collation has no case pair for is changed.",
         [
-            new("UPPER(N'ꞔ')", 1, "'{U+A794}' : nvarchar(1)", "'{U+A7C4}' : ~text"),
-            new("LOWER(N'Ꞔ')", 1, "'{U+A7C4}' : nvarchar(1)", "'{U+A794}' : ~text"),
+            new("UPPER(N'\uA794')", 1, "'{U+A794}' : nvarchar(1)", "'{U+A7C4}' : ~text"),
+            new("LOWER(N'\uA7C4')", 1, "'{U+A7C4}' : nvarchar(1)", "'{U+A794}' : ~text"),
         ],
         d => d.Node.Construct is "UPPER" or "LOWER" && d.Difference == Difference.Value);
 

@@ -11,13 +11,13 @@ public enum ErrorClass
     None,
     /// <summary>Division or modulo by zero (SQL Server error 8134).</summary>
     DivideByZero,
-    /// <summary>Arithmetic overflow (SQL Server errors 220, 232, 3606, 8115).</summary>
+    /// <summary>Arithmetic overflow (SQL Server errors 220, 232, 237, 3606, 8115).</summary>
     Overflow,
-    /// <summary>A value could not be converted (SQL Server errors 241, 245, 248, 293, 295, 8114, 8169).</summary>
+    /// <summary>A value could not be converted (SQL Server errors 235, 241, 245, 248, 293, 295, 8114, 8169).</summary>
     Conversion,
     /// <summary>Text or binary data would be truncated (SQL Server errors 2628, 8152).</summary>
     Truncation,
-    /// <summary>The operand types are not allowed together (SQL Server errors 206, 402, 529, 8116, 8117).</summary>
+    /// <summary>The operand types are not allowed together (SQL Server errors 206, 402, 529, 4151, 8116, 8117).</summary>
     TypeClash,
     /// <summary>The engine refused the expression before evaluating it (PPDS parse or compile refusal).</summary>
     Refused,
