@@ -71,6 +71,17 @@ jobs:
       - name: Ensure workflow-owned release labels
         run: python automation/scripts/ci/sync_release_labels.py --repo "$GITHUB_REPOSITORY"
 
+      # The breaking-change label reaches the release plan through the event
+      # payload: a merged PR labelled both release:patch and breaking-change
+      # makes the patch plan refuse (exit 1), so no patch record is opened (#1789).
+      - name: Record the breaking-change label for the release plan
+        run: |
+          jq '[.pull_request
+               | select(any(.labels[]?; .name == "breaking-change"))
+               | {number, title, mergeCommit: {oid: .merge_commit_sha}}]' \
+            "$GITHUB_EVENT_PATH" > breaking-prs.json
+          cat breaking-prs.json
+
       - name: Build explained release advisory
         id: evaluate
         env:
@@ -83,6 +94,7 @@ jobs:
             --head "${MERGE_SHA}" \
             --release-kind patch \
             --channel stable \
+            --breaking-prs-file breaking-prs.json \
             --format json > release-plan.json
           python automation/scripts/ci/release_plan.py \
             --repo-root analyzed \
@@ -91,6 +103,7 @@ jobs:
             --head "${MERGE_SHA}" \
             --release-kind patch \
             --channel stable \
+            --breaking-prs-file breaking-prs.json \
             --format markdown > release-plan.md
           echo "release_needed=$(jq -r '.release_needed' release-plan.json)" >> "$GITHUB_OUTPUT"
           echo "Release advisory:"
