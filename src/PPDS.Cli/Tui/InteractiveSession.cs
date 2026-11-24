@@ -54,7 +54,7 @@ internal sealed class InteractiveSession : IAsyncDisposable
     private readonly EnvironmentConfigStore _envConfigStore;
     private readonly EnvironmentConfigService _envConfigService;
     private readonly TuiStateStore _tuiStateStore;
-    private ProfileResolutionService? _profileResolutionService;
+    private bool _queryProfileLoaded;
     private readonly Lazy<ITuiErrorService> _errorService;
     private readonly Lazy<IHotkeyRegistry> _hotkeyRegistry;
     private readonly Lazy<IProfileService> _profileService;
@@ -159,8 +159,8 @@ internal sealed class InteractiveSession : IAsyncDisposable
     {
         TuiDebugLog.Log($"Initializing session with profile filter: '{_profileName}'");
 
-        // Pre-load environment config so sync-over-async calls in UI thread are cache hits
-        var envConfigs = await _envConfigStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+        // Pre-load environment config for display (labels, colours). Protection decisions read the file per query.
+        _ = await _envConfigStore.LoadAsync(cancellationToken).ConfigureAwait(false);
 
         var collection = await _profileStore.LoadAsync(cancellationToken).ConfigureAwait(false);
         var profile = string.IsNullOrEmpty(_profileName)
@@ -175,9 +175,10 @@ internal sealed class InteractiveSession : IAsyncDisposable
             return;
         }
 
-        // Build label resolver for cross-environment queries ([LABEL].entity syntax)
-        // Only needed when we have a profile that can actually execute queries
-        _profileResolutionService = new ProfileResolutionService(envConfigs.Environments);
+        // Cross-environment queries ([LABEL].entity syntax) are wired only when there is a profile that can run
+        // queries. The labels and protection are read from the file for each query (GetSqlQueryServiceAsync), not
+        // from this startup snapshot (#1829).
+        _queryProfileLoaded = true;
 
         // Set the identity for status bar display
         _displayedProfileIdentity = profile.IdentityDisplay;
@@ -397,12 +398,18 @@ internal sealed class InteractiveSession : IAsyncDisposable
         var service = provider.GetRequiredService<ISqlQueryService>();
 
         // Wire cross-environment support: [LABEL].entity resolves via profile labels
-        if (service is SqlQueryService concrete && _profileResolutionService != null)
+        if (service is SqlQueryService concrete && _queryProfileLoaded)
         {
+            // Every protection decision of this query is made from the file as it is now, not from what the session
+            // read at startup: the CLI, the extension's daemon or this TUI's own Environment Config dialog may have
+            // raised an environment since (#1829). That covers SQL DML on this environment and the target of a
+            // cross-environment write.
+            var envConfigs = await _envConfigStore.ReloadAsync(cancellationToken).ConfigureAwait(false);
+            var resolver = new ProfileResolutionService(envConfigs.Environments);
             var capturedProfile = profileName;
             concrete.RemoteExecutorFactory = label =>
             {
-                var config = _profileResolutionService.ResolveByLabel(label);
+                var config = resolver.ResolveByLabel(label);
                 if (config?.Url == null) return null;
 #pragma warning disable PPDS012 // Planner is synchronous; provider cache makes this effectively instant
                 var remoteProvider = GetServiceProviderAsync(config.Url, capturedProfile, CancellationToken.None).GetAwaiter().GetResult();
@@ -410,15 +417,13 @@ internal sealed class InteractiveSession : IAsyncDisposable
                 return remoteProvider.GetRequiredService<IQueryExecutor>();
             };
 
-            // Wire environment-specific DML safety settings
-            concrete.ProfileResolver = _profileResolutionService;
-            var envConfig = await _envConfigStore.GetConfigAsync(environmentUrl, cancellationToken)
-                .ConfigureAwait(false);
-            if (envConfig != null)
-            {
-                concrete.EnvironmentSafetySettings = envConfig.SafetySettings;
-                concrete.EnvironmentProtectionLevel = PPDS.Cli.Services.Environment.WriteProtectionResolver.ResolveForSqlDml(envConfig);
-            }
+            // Wire environment-specific DML safety settings. Always set, so an entry removed since the last query (no
+            // entry: Production) does not keep the level the service had before.
+            concrete.ProfileResolver = resolver;
+            var normalized = EnvironmentConfig.NormalizeUrl(environmentUrl);
+            var envConfig = envConfigs.Environments.FirstOrDefault(e => EnvironmentConfig.NormalizeUrl(e.Url) == normalized);
+            concrete.EnvironmentSafetySettings = envConfig?.SafetySettings;
+            concrete.EnvironmentProtectionLevel = WriteProtectionResolver.ResolveForSqlDml(envConfig);
         }
 
         return service;

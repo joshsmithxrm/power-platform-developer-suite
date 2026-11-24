@@ -44,13 +44,30 @@ public sealed class EnvironmentConfigStaleCacheTests : IDisposable
     {
         await _daemonStore.SaveConfigAsync(Url, type: EnvironmentType.Development);
         await _daemonStore.SaveConfigAsync(Other, label: "Other", type: EnvironmentType.Development);
-        (await _daemonStore.GetConfigAsync(Url))!.Type.Should().Be(EnvironmentType.Development); // cached
+        (await _daemonStore.LoadAsync()).Environments.Single(e => e.Label == null).Type.Should().Be(EnvironmentType.Development); // cached
 
         await new EnvironmentConfigService(_cliStore).SaveConfigAsync(Url, type: EnvironmentType.Production);
 
-        // The daemon's cache still says Development; the file says Production.
-        (await _daemonStore.GetConfigAsync(Url))!.Type.Should().Be(EnvironmentType.Development);
+        // Precondition of the tests below: the daemon's display cache (LoadAsync) still says Development; the file says
+        // Production. No protection decision reads that cache (next test).
+        (await _daemonStore.LoadAsync()).Environments.Single(e => e.Label == null).Type.Should().Be(EnvironmentType.Development);
         (await FileStateAsync(Url))!.Type.Should().Be(EnvironmentType.Production);
+    }
+
+    /// <summary>
+    /// Review round 3: a protection lookup on the long-lived store sees the raise at once. GetConfigAsync reads the
+    /// file; it never answers from the stale cache.
+    /// </summary>
+    [Fact]
+    public async Task ProtectionLookup_OnTheStaleStore_SeesTheRaise()
+    {
+        await ArrangeStaleDevelopmentThenRaiseAsync();
+
+        var config = await _daemonStore.GetConfigAsync(Url);
+
+        config!.Type.Should().Be(EnvironmentType.Production);
+        WriteProtectionResolver.ResolveForSqlDml(config).Should().Be(ProtectionLevel.Production);
+        (await new EnvironmentConfigService(_daemonStore).GetConfigAsync(Url))!.Type.Should().Be(EnvironmentType.Production);
     }
 
     [Fact]
