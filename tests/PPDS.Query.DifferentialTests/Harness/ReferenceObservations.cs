@@ -6,7 +6,7 @@ namespace PPDS.Query.DifferentialTests.Harness;
 /// a different server or setting fails the case. A scalar expression also runs through the engine, and the run reports
 /// whether the engine agrees; a difference found here is a finding to file, not a pass or fail of this case.
 /// </summary>
-/// <param name="Id">The observation's id (the run number of the list it came from, with a letter per statement).</param>
+/// <param name="Id">A short stable id, with a letter per statement of the same question.</param>
 /// <param name="Question">What it settles, and the Microsoft page that leaves it open.</param>
 /// <param name="Sql">A scalar expression (evaluated over operand row 1), or a batch when <paramref name="IsBatch"/>.</param>
 /// <param name="SqlServer">The pinned reference outcome: <see cref="Outcome.ToString"/> for an expression, <see cref="ReferenceBatch.Run"/> for a batch.</param>
