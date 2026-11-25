@@ -292,11 +292,13 @@ The schema `<entity>` element supports an optional `importMode` attribute:
 | `upsert` | Create or update (default) |
 | `skip` | Do not import this entity |
 
-When not specified, falls back to `ImportOptions.Mode`. The `skip` mode is a PPDS extension not present in CMT (CMT uses `skipupdate` and `forcecreate` boolean attributes; we normalize to a single enum).
+When not specified, falls back to `ImportOptions.Mode`. The `skip` mode is a PPDS extension not present in CMT. CMT's `skipupdate` and `forcecreate` entity attributes are not applied and have no exact PPDS equivalent: a schema whose table sets either to anything but false (`false`, `0`, `no`) is refused with `InvalidDataException` naming the table, so that the table is not imported with the import's mode instead; set `importMode` on the table. The `importMode` value is read in any case with surrounding spaces ignored, and any value other than the four modes refuses the schema.
 
 `skip` is a per-table mode only. As `ImportOptions.Mode`, the mode of the whole import, it would import nothing, and it used to fall through to Upsert and overwrite every existing record (#1914). It is refused with `ImportRefusedException` (reason `Import.SkipIsPerTable`) before the data file is read or anything is written; the CLI's `--mode` refuses it at parse time, and the TUI Migration screen does not offer it. No mode falls through to Upsert: each of Create, Update and Upsert sends its own operation, in the bulk and the individual-request paths.
 
-A table with `importMode="skip"` writes nothing in any phase, has no plug-in steps disabled, and is listed in `ImportResult.EntityResults` with all its records in `SkippedCount`.
+A table with `importMode="skip"` writes nothing in any phase (its file data is not sent and is not a failure), has no plug-in steps disabled, and is listed in `ImportResult.EntityResults` with all its records in `SkippedCount`.
+
+**Later phases follow only records proven written.** The entity phase maps a record (source id to target id) only when the write result proves it was written: every failure must name its record id (the bulk executor's error index is per batch, so it is not used), and the successes and failures must add up to the records sent. A record that failed (in Create mode, one that already exists in the target; or the second copy of a duplicate id in the file, which leaves that id unmapped), a record a record filter left out, and every record of a skipped table get no mapping and no state transition, so the deferred-field, state, many-to-many and file phases send nothing to them. When the result cannot say which records were written, none of the table's records is mapped, its later phases are not run, the table's result is not a success, and a `LATER_PHASES_SKIPPED` warning says so. A deferred lookup that points at a record of the file that was not written is not set.
 
 **Result counts.** `ImportResult` reports `CreatedCount`, `UpdatedCount`, `SkippedCount` and `FailureCount` for the entity phase, per table in `EntityImportResult`, and in `MigrationResult` for the progress reporters. Create counts every success as created; Update counts every success as updated; Upsert takes both from the responses (`RecordCreated` for individual requests), and a total is null when a table's responses did not report it. Records a record filter leaves out count as skipped.
 
@@ -306,8 +308,11 @@ A table marked `disableplugins="true"` (with `ImportOptions.RespectDisablePlugin
 
 1. Each such table, except one with `importMode="skip"`, is resolved in the target environment by its logical name (`RetrieveEntityRequest`). The schema's `etc` is never used: it is the source environment's object type code, and custom tables have different codes in each environment. If a table cannot be resolved, the import is refused with `ImportRefusedException` (`Import.PluginTableNotResolved`) before any step is disabled or any record written.
 2. The steps are selected by the target's codes, reading every page of the query.
-3. Each step is recorded before its disable update is sent. A step that cannot be disabled refuses the import (`Import.PluginStepNotDisabled`) after the recorded steps are re-enabled.
-4. Every recorded step is re-enabled when the import ends, fails or is cancelled, including a cancel while the steps are being disabled. A step that cannot be re-enabled is named (name and id) in `ImportResult.Warnings` (`PLUGIN_REENABLE_FAILED`) and through the progress reporter, which is the only output of a cancelled import.
+   A metadata failure other than "the table does not exist" (throttling, sign-in, a missing privilege, an outage) is refused with its own reason, `Import.PluginTableMetadataUnavailable`, and a short description of the failure.
+3. Only enabled, visible (not hidden), custom (customization level 1) steps are selected; a step that was already disabled is not touched and stays disabled. Steps registered on "any entity", or whose table is the secondary entity of the message, and many-to-many (Associate, Disassociate) steps are not selected: they stay enabled during the import.
+4. Before the first disable, the progress output names every step to be disabled (name and id), so a run that is killed before it re-enables them leaves a record of what to re-enable. Recovery: re-enable those steps in the target, for example in the Plug-in Registration Tool. No recovery file is written.
+5. Each step is recorded before its disable update is sent. A step that cannot be disabled refuses the import (`Import.PluginStepNotDisabled`); the refusal names that step, is thrown after the recorded steps were re-enabled, and says "re-enabled" only if all were: otherwise it names the steps left disabled (`ImportRefusedException.PluginStepsLeftDisabled` has their ids).
+6. Every recorded step is re-enabled when the import ends, fails or is cancelled, including a cancel while the steps are being disabled. A step that cannot be re-enabled is named (name and id) in `ImportResult.Warnings` (`PLUGIN_REENABLE_FAILED`), listed in `ImportResult.PluginStepsLeftDisabled`, and reported through the progress reporter; the import is then not a success (`Success` false, the CLI exits non-zero). A cancelled import returns no result: it throws `ImportCancelledException` (an `OperationCanceledException`) carrying the steps left disabled. The CLI lists them with their ids; the TUI names them in its final status and results.
 
 ### Owner Impersonation
 
@@ -436,8 +441,10 @@ The `MigrationScreen` provides an interactive Terminal.Gui interface for configu
 | Target environment | Must have entities defined | `SchemaMismatchException` |
 | `importMode` attribute | Must be `create`, `update`, `upsert`, or `skip` | `InvalidDataException` |
 | `ImportOptions.Mode` | Must be `Create`, `Update` or `Upsert` (`Skip` is per table) | `ImportRefusedException` (`Import.SkipIsPerTable`) |
-| `disableplugins` table | Must exist in the target (by logical name) | `ImportRefusedException` (`Import.PluginTableNotResolved`) |
-| `dateMode` attribute | Must be `absolute`, `relative`, `relativeDaily`, or `relativeExact` | `InvalidDataException` |
+| `disableplugins` table | Must exist in the target (by logical name) | `ImportRefusedException` (`Import.PluginTableNotResolved`; other metadata failures `Import.PluginTableMetadataUnavailable`) |
+| `disableplugins` attribute | `true`, `false`, `1`, `0`, `yes` or `no` (any case, spaces ignored) | `InvalidDataException` |
+| `skipupdate`, `forcecreate` attributes | Absent or false | `InvalidDataException` |
+| `dateMode` attribute | Must be `absolute`, `relative`, `relativeDaily`, or `relativeExact` (any case, spaces ignored) | `InvalidDataException` |
 | `ImpersonateOwners` | Requires `UserMappings` to be set | `InvalidOperationException` |
 
 ---
@@ -502,6 +509,8 @@ The `MigrationScreen` provides an interactive Terminal.Gui interface for configu
 | AC-54 | A global import mode of Skip is refused before anything is read or written, in the bulk and individual paths; no mode falls through to Upsert; the CLI and TUI do not offer Skip as a whole-import mode | `TieredImporterWriteSafetyTests.GlobalSkip_IsRefused_AndNothingIsReadOrWritten`, `GlobalSkip_FromAFile_IsRefusedBeforeTheFileIsRead`, `ToBulkOperationType_Skip_NeverFallsThroughToUpsert`; `ImportCommandTests.Parse_WithSkipMode_IsRefused_BeforeAnythingRuns`; `MigrationScreenImportModeTests.ImportModes_DoNotOfferSkip` | ✅ |
 | AC-55 | Import results report created, updated, skipped and failed records; a per-table skip is reported as skipped | `TieredImporterWriteSafetyTests.PerTableSkip_WritesNothingForThatTable_AndReportsItsRecordsAsSkipped`, `CreateAndUpdate_SendTheirOwnOperation_AndReportCreatedAndUpdated`, `IndividualUpsert_ReportsCreatedAndUpdatedFromTheResponses`, `RecordsLeftOutByAFilter_AreReportedAsSkipped` | ✅ |
 | AC-56 | `disableplugins` steps are selected by the target's code for the table's logical name; an unresolved table refuses the import before anything is disabled; the step query pages; every step that may have been disabled is re-enabled on end, failure and cancel; a step that cannot be re-enabled is named | `TieredImporterWriteSafetyTests.DisablePlugins_*`; `PluginStepManagerTests.GetActivePluginStepsAsync_*`, `DisablePluginStepsAsync_*` | ✅ |
+| AC-57 | Only records proven written receive the later phases' writes: a failed create of an existing record, a filtered record, a duplicate id and every record of a skipped table get nothing more, on the bulk and individual paths; a result that cannot name its failures runs no later phase for the table and says so | `TieredImporterLaterPhaseTests.*`; `StateTransitionProcessorTests.UnwrittenRecord_HasNoStateChangeSent` | ✅ |
+| AC-58 | Plug-in steps left disabled are named in the refusal, the result, a cancelled import and the TUI's final status; the import is then not a success | `TieredImporterWriteSafetyTests.StepNotDisabled_*`, `ReenableFailsWithoutDetail_*`; `MigrationScreenImportModeTests.FinalStatus_*`; `ImportCommandTests.WritePluginStepsLeftDisabled_*` | ✅ |
 
 ### Edge Cases
 
