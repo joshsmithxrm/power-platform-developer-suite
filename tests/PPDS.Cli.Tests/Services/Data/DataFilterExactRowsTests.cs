@@ -246,6 +246,22 @@ public class DataFilterExactRowsTests
     }
 
     [Fact]
+    public async Task MetadataForATableThatDoesNotExist_IsARefusal_AndKeepsTheCause()
+    {
+        var fake = new FakeFetchXmlDataverse("nosuchtable");
+        var cause = new TimeoutException("metadata timed out");
+        var metadata = new Mock<ICachedMetadataProvider>();
+        metadata.Setup(m => m.GetAttributesAsync("nosuchtable", It.IsAny<CancellationToken>())).ThrowsAsync(cause);
+
+        var act = () => Service(fake, metadata.Object).QueryIdsByFilterAsync("nosuchtable", "name = 'x'", limit: null);
+
+        var ex = (await act.Should().ThrowAsync<PpdsException>()).Which;
+        ex.ErrorCode.Should().Be(ErrorCodes.Query.FilterMetadataUnavailable);
+        ex.InnerException.Should().BeSameAs(cause);
+        fake.AnythingRead.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task MetadataWithNoColumns_IsARefusal()
     {
         var fake = SixAccounts();
