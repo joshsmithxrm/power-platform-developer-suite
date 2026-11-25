@@ -47,6 +47,8 @@ public sealed class MetadataUpdateRelationshipCascadeTests
     [InlineData("mixed", null, "NoCascade", false)]
     [InlineData("mixed", "Cascade", "Active", false)]
     [InlineData("mixed", "Cascade", "UserOwned", false)] // assign already UserOwned: only delete changes
+    [InlineData("mixed", "Restrict", "UserOwned", false)] // both already current: nothing to change, nothing sent
+    [InlineData("mixed", "restrict", null, true)]
     public async Task GivenSettings_ChangeOnly_TheOthersAreSentAsRead(string kind, string? cascadeDelete, string? cascadeAssign, bool dryRun)
     {
         using var fx = await Fixture.CreateAsync(Kinds[kind]);
