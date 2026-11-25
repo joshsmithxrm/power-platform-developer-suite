@@ -510,7 +510,7 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
         var cancel = new Button("Cancel", is_default: true);
         var width = Math.Max(40, Math.Min(110, (Application.Driver?.Cols ?? 100) - 4));
         var height = Math.Max(12, Math.Min(34, (Application.Driver?.Rows ?? 30) - 2));
-        var dialog = new Dialog("Confirm DML Operation", width, height, execute, cancel) { ColorScheme = TuiColorPalette.Default };
+        using var dialog = new Dialog("Confirm DML Operation", width, height, execute, cancel) { ColorScheme = TuiColorPalette.Default };
         var text = new TextView
         {
             X = 0,

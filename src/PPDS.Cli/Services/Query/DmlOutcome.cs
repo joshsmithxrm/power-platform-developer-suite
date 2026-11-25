@@ -69,7 +69,7 @@ public sealed class DmlOutcome
     {
         try { exception.Data[ExceptionDataKey] = outcome; }
         catch (ArgumentException) { /* Data rejects non-serializable values on some runtimes; the outcome is best-effort. */ }
-        catch (NotSupportedException) { }
+        catch (NotSupportedException) { /* Data is read-only on some exception types; the outcome is best-effort. */ }
     }
 
     /// <summary>The outcomes of statements that ran before <paramref name="exception"/> interrupted the script, if any.</summary>

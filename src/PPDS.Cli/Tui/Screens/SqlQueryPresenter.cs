@@ -194,7 +194,8 @@ internal sealed class SqlQueryPresenter : IDisposable
     internal static IReadOnlyList<string>? DataChangingStatements(string sql)
     {
         var parser = new Microsoft.SqlServer.TransactSql.ScriptDom.TSql160Parser(initialQuotedIdentifiers: false);
-        var fragment = parser.Parse(new StringReader(sql), out var errors);
+        using var reader = new StringReader(sql);
+        var fragment = parser.Parse(reader, out var errors);
         if (errors.Count > 0 || fragment is null)
             return null;
         var collector = new DataChangeCollector();

@@ -43,7 +43,7 @@ public class HistoryExecuteCommandTests : IDisposable
     public void Dispose()
     {
         _store.Dispose();
-        try { File.Delete(_configPath); } catch (IOException) { }
+        try { File.Delete(_configPath); } catch (IOException) { /* Clean-up of a temporary file is best-effort. */ }
     }
 
     private void WriteEnvConfig(EnvironmentType? type = null, ProtectionLevel? protection = null)
@@ -363,7 +363,7 @@ public class HistoryExecuteCommandTests : IDisposable
         WriteEnvConfig();
         var (service, _, _) = Service();
         var history = new Mock<IQueryHistoryService>();
-        history.Setup(h => h.GetEntryByIdAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((QueryHistoryEntry?)null);
+        history.Setup(h => h.GetEntryByIdAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(default(QueryHistoryEntry));
         using var stdout = new StringWriter();
 
         var exit = await ExecuteCommand.ExecuteEntryAsync(

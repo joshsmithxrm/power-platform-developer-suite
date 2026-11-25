@@ -370,6 +370,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
             while (value > (current = Interlocked.Read(ref target))
                 && Interlocked.CompareExchange(ref target, value, current) != current)
             {
+                // Another thread changed the value between the read and the exchange: read it again and retry.
             }
         }
     }

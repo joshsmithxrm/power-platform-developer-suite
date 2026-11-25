@@ -63,13 +63,13 @@ public static class TerminalText
     }
 
     private static bool NeedsEscape(char c)
-        => (c < 0x20 && c != '\n' && c != '\t')
-           || c == 0x7F
-           || (c >= 0x80 && c <= 0x9F)
-           || c == 0x2028 || c == 0x2029          // line / paragraph separators
-           || (c >= 0x202A && c <= 0x202E)        // bidirectional embeddings and overrides
-           || (c >= 0x2066 && c <= 0x2069)        // bidirectional isolates
-           || c == 0x200E || c == 0x200F || c == 0x061C // left-to-right, right-to-left and Arabic letter marks
-           || (c >= 0x200B && c <= 0x200D)        // zero-width space, non-joiner, joiner
-           || c == 0x2060 || c == 0xFEFF;         // word joiner, zero-width no-break space
+    {
+        var control = (c < 0x20 && c != '\n' && c != '\t') || c == 0x7F || (c >= 0x80 && c <= 0x9F);
+        var separator = c == 0x2028 || c == 0x2029;                            // line / paragraph separators
+        var bidiOverride = c >= 0x202A && c <= 0x202E;                         // bidirectional embeddings and overrides
+        var bidiIsolate = c >= 0x2066 && c <= 0x2069;                          // bidirectional isolates
+        var directionMark = c == 0x200E || c == 0x200F || c == 0x061C;         // left-to-right, right-to-left and Arabic letter marks
+        var zeroWidth = (c >= 0x200B && c <= 0x200D) || c == 0x2060 || c == 0xFEFF; // zero-width space, non-joiner, joiner, word joiner, zero-width no-break space
+        return control || separator || bidiOverride || bidiIsolate || directionMark || zeroWidth;
+    }
 }

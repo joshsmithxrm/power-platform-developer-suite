@@ -459,6 +459,7 @@ public class SqlQueryServiceTests
         {
             await foreach (var _ in service.ExecuteStreamingAsync(request))
             {
+                // Drain the stream: only the exception it throws is asserted.
             }
         });
 
@@ -1661,6 +1662,7 @@ public class SqlQueryServiceTests
             {
                 await foreach (var _ in service.ExecuteStreamingAsync(request))
                 {
+                    // Drain the stream: only the exception it throws is asserted.
                 }
             }
             else
@@ -1706,6 +1708,7 @@ public class SqlQueryServiceTests
             {
                 await foreach (var _ in service.ExecuteStreamingAsync(request))
                 {
+                    // Drain the stream: only the exception it throws is asserted.
                 }
             }
             else

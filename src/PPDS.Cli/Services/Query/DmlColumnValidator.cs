@@ -576,7 +576,7 @@ internal static class DmlColumnValidator
                     _ => null
                 };
             case CoalesceExpression coalesce:
-                return coalesce.Expressions.Select(e => Category(e, columns)).Aggregate((string?)Null, Higher);
+                return coalesce.Expressions.Select(e => Category(e, columns)).Aggregate<string?, string?>(Null, Higher);
             case NullIfExpression nullIf:
                 return Category(nullIf.FirstExpression, columns);
             case IIfCall iif:
@@ -584,11 +584,11 @@ internal static class DmlColumnValidator
             case SearchedCaseExpression searched:
                 return searched.WhenClauses.Select(w => Category(w.ThenExpression, columns))
                     .Append(searched.ElseExpression is null ? Null : Category(searched.ElseExpression, columns))
-                    .Aggregate((string?)Null, Higher);
+                    .Aggregate<string?, string?>(Null, Higher);
             case SimpleCaseExpression simple:
                 return simple.WhenClauses.Select(w => Category(w.ThenExpression, columns))
                     .Append(simple.ElseExpression is null ? Null : Category(simple.ElseExpression, columns))
-                    .Aggregate((string?)Null, Higher);
+                    .Aggregate<string?, string?>(Null, Higher);
             default:
                 return null;
         }

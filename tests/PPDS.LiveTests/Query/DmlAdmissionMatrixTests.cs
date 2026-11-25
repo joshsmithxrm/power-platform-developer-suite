@@ -458,7 +458,8 @@ public sealed class DmlAdmissionMatrixTests
     private static ScalarExpression Parse(string expression)
     {
         var parser = new TSql160Parser(initialQuotedIdentifiers: false);
-        var parsed = parser.ParseExpression(new StringReader(expression), out var errors);
+        using var reader = new StringReader(expression);
+        var parsed = parser.ParseExpression(reader, out var errors);
         if (errors.Count > 0)
             throw new InvalidOperationException($"'{expression}' does not parse: {errors[0].Message}");
         return parsed;
@@ -468,7 +469,8 @@ public sealed class DmlAdmissionMatrixTests
     internal static HashSet<string> Keys(string sql)
     {
         var parser = new TSql160Parser(initialQuotedIdentifiers: false);
-        var fragment = parser.Parse(new StringReader(sql), out var errors);
+        using var reader = new StringReader(sql);
+        var fragment = parser.Parse(reader, out var errors);
         var keys = new HashSet<string>(StringComparer.Ordinal);
         if (errors.Count > 0)
             return keys;
