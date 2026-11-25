@@ -53,6 +53,6 @@ public sealed class CsvRecordParser
     /// </summary>
     public static bool IsGuid(string? value)
     {
-        return ColumnValueConverter.TryReadExactGuid(value, out _);
+        return RecordIdText.TryParse(value, out _);
     }
 }

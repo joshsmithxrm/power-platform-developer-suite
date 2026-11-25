@@ -720,7 +720,7 @@ public sealed class CsvDataLoader
     }
 
     private static List<Entity> BuildEntities(
-        StrictCsvTable table,
+        StrictCsvFileTable table,
         CsvLoadOptions options,
         Dictionary<string, ColumnMappingEntry> mappings,
         Dictionary<string, AttributeMetadata> attributesByName,

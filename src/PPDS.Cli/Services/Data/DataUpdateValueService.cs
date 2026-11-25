@@ -178,10 +178,10 @@ public sealed class DataUpdateValueService : IDataUpdateValueService
             var row = index + 1;
             var values = table.Rows[index];
 
-            if (!ColumnValueConverter.TryReadExactGuid(values[idIndex], out var recordId) || recordId == Guid.Empty)
+            if (!RecordIdText.TryParse(values[idIndex], out var recordId))
             {
                 problems.Add(new DataValueProblem(row, headers[idIndex],
-                    "The record id is not a GUID with dashes (8-4-4-4-12), optionally in braces, with nothing around it."));
+                    $"The cell is not a record id: {RecordIdText.Rule}; and not the empty (all-zero) GUID."));
                 continue;
             }
 

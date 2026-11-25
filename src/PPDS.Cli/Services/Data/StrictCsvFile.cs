@@ -14,7 +14,7 @@ namespace PPDS.Cli.Services.Data;
 /// <summary>A CSV file read exactly: its header and every record, each with the header's number of fields.</summary>
 /// <param name="Headers">The header's names, as written.</param>
 /// <param name="Rows">The records in file order; <c>Rows[i]</c> is data row <c>i + 1</c>.</param>
-public sealed record StrictCsvTable(IReadOnlyList<string> Headers, IReadOnlyList<IReadOnlyList<string>> Rows);
+public sealed record StrictCsvFileTable(IReadOnlyList<string> Headers, IReadOnlyList<IReadOnlyList<string>> Rows);
 
 /// <summary>
 /// Reads the CSV files of <c>data load</c> and <c>data update</c> with one rule (#1916, #1917): comma-separated, RFC 4180
@@ -28,7 +28,7 @@ public static class StrictCsvFile
     /// <summary>
     /// Reads <paramref name="path"/> whole, or throws <see cref="DataValuesRefusedException"/> listing every problem.
     /// </summary>
-    public static async Task<StrictCsvTable> ReadAsync(string path, CancellationToken cancellationToken = default)
+    public static async Task<StrictCsvFileTable> ReadAsync(string path, CancellationToken cancellationToken = default)
     {
         var configuration = new CsvConfiguration(CultureInfo.InvariantCulture)
         {
@@ -103,7 +103,7 @@ public static class StrictCsvFile
             throw new DataValuesRefusedException(problems);
         }
 
-        return new StrictCsvTable(headers, rows);
+        return new StrictCsvFileTable(headers, rows);
     }
 
     private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);

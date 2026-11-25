@@ -161,21 +161,13 @@ public class ColumnValueConverterTests
     [InlineData("double5", "0.30000", "double:0.3")]
     // Round 1: a choice column with no options in its metadata, white space around a GUID, and pinned forms.
     [InlineData("choice-no-options", "1", Refused)]
-    // Damaged ids that .NET's exact parser reads as another id (+ or 0x inside a block), and other spellings.
+    // Ids: the spellings are tested once, in RecordIdTextTests (main's rule, #1915); these show that both column kinds
+    // use it, including its refusal of the empty (all-zero) GUID.
     [InlineData("guid", "+ccccccc-0000-0000-0000-000000000001", Refused)]
-    [InlineData("guid", "0x0f6c2e-3c1d-4a5b-9e7f-0123456789ab", Refused)]
-    [InlineData("guid", "8b0f6c2e-+c1d-4a5b-9e7f-0123456789ab", Refused)]
-    [InlineData("guid", "8b0f6c2e-0x1d-4a5b-9e7f-0123456789ab", Refused)]
-    [InlineData("lookup", "+ccccccc-0000-0000-0000-000000000001", Refused)]
     [InlineData("lookup", "8b0f6c2e-0x1d-4a5b-9e7f-0123456789ab", Refused)]
-    [InlineData("guid", "(" + AccountId + ")", Refused)]
-    [InlineData("guid", "{" + AccountId + ")", Refused)]
-    [InlineData("guid", "{0x8b0f6c2e,0x3c1d,0x4a5b,{0x9e,0x7f,0x01,0x23,0x45,0x67,0x89,0xab}}", Refused)]
     [InlineData("guid", "8B0F6C2E-3C1D-4A5B-9E7F-0123456789AB", "guid:" + AccountId)]
-    [InlineData("guid", " " + AccountId, Refused)]
-    [InlineData("guid", AccountId + " ", Refused)]
-    [InlineData("lookup", " " + AccountId, Refused)]
-    [InlineData("lookup", AccountId + "\t", Refused)]
+    [InlineData("guid", "00000000-0000-0000-0000-000000000000", Refused)]
+    [InlineData("lookup", "00000000-0000-0000-0000-000000000000", Refused)]
     [InlineData("bool", "on", Refused)]
     [InlineData("bool", "off", Refused)]
     [InlineData("bool", " true", Refused)]

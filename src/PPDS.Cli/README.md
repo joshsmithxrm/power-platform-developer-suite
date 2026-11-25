@@ -345,7 +345,7 @@ The files that `data load` loads and `data update --file` updates are UTF-8 (wit
 | Text | the text exactly as given (`123` is text in a text column); no control characters other than tab and line breaks |
 | Yes/no | `true`/`false`, `yes`/`no`, `y`/`n`, `1`/`0` |
 | Choice, status, status reason | the option's integer value, or a label from the mapping file's `optionsetMap` |
-| Lookup to one table | the record's GUID (`8-4-4-4-12`) |
+| Lookup to one table, unique identifier | the record's GUID (`8-4-4-4-12`, optionally in braces; not all zeros) |
 | Lookup to several tables (customer, owner) | refused, unless a `data load` mapping file names the table in `lookup.entity` |
 | Lookup matched by a key field (`data load` mapping, `matchBy: field`) | the key field's text; the key field must be a text column of the lookup's table, and the text must match exactly one record (a GUID-shaped cell is text here) |
 | Date and time (user local) | `2024-01-15T09:30:00Z` or `2024-01-15T09:30:00+01:00` |
@@ -356,7 +356,7 @@ A mapping file's `dateFormat` replaces the date forms for its column, read in th
 
 In `data load`, the mapping file's column names match the header ignoring case, and two entries that differ only in case are refused. A column that takes no value when a record is created or when it is updated (such as `createdon`, the primary id column, or `statecode` in many tables) is refused, because a load may do either: skip it in the mapping file. Auto-mapping refuses a header whose name matches two columns once case, spaces, underscores and hyphens are ignored. An empty cell is not sent, except in an alternate key column (`--key`), where it refuses the row.
 
-`data update --set` takes `field=value` pairs separated by commas. Write a value unquoted when it holds no comma and no double quote; otherwise wrap the whole value in double quotes and double each quote in it: `--set 'name="Smith, ""Jr""",rate=1.5'`. Unquoted `null` clears a column, and a column named twice is refused. In `data update --file`, the id column is the table's primary id column from metadata (for example `accountid`) unless `--id-column` names another, and an empty cell clears its column (sends null). `data update --id` takes a GUID written 8-4-4-4-12, optionally in braces. A column that cannot be updated is refused.
+`data update --set` takes `field=value` pairs separated by commas. Write a value unquoted when it holds no comma and no double quote; otherwise wrap the whole value in double quotes and double each quote in it: `--set 'name="Smith, ""Jr""",rate=1.5'`. Unquoted `null` clears a column, and a column named twice is refused. In `data update --file`, the id column is the table's primary id column from metadata (for example `accountid`) unless `--id-column` names another, and an empty cell clears its column (sends null). `data update --id` takes a GUID written 8-4-4-4-12, optionally in braces, not all zeros (the same rule as `data delete`). A column that cannot be updated is refused.
 
 #### Update
 

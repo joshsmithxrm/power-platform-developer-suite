@@ -79,16 +79,16 @@ public sealed class LookupResolver
             return null;
         }
 
-        // matchBy guid: the record's GUID, read by the one exact GUID rule of data load and data update (#1916).
+        // matchBy guid: the record's GUID, read by the record id rule of the data commands (#1915, #1916).
         if (config.MatchBy == "guid")
         {
-            if (ColumnValueConverter.TryReadExactGuid(value, out var guid))
+            if (RecordIdText.TryParse(value, out var guid))
             {
                 return new EntityReference(config.Entity, guid);
             }
 
             return Fail(rowNumber, columnName, LoadErrorCodes.LookupNotResolved,
-                $"The lookup to '{config.Entity}' takes the record's GUID, with dashes (8-4-4-4-12), optionally in braces. " +
+                $"The lookup to '{config.Entity}' takes the record's GUID: {RecordIdText.Rule}; not the empty (all-zero) GUID. " +
                 "To match by another column, set matchBy: 'field' and keyField in the mapping file.");
         }
 

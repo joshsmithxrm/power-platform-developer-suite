@@ -45,17 +45,17 @@ public static class UpdateCommand
 
         var idOption = new Option<Guid?>("--id")
         {
-            Description = "Record ID (GUID) to update, written 8-4-4-4-12 with hyphens (optionally in braces)",
-            // The exact GUID rule of the value path, not the lenient parser, which reads a damaged id as another id.
+            Description = $"Record ID to update: {RecordIdText.Rule}",
+            // The record id rule of the data commands, not the lenient parser, which reads a damaged id as another id.
             CustomParser = result =>
             {
                 var token = result.Tokens.Count > 0 ? result.Tokens[^1].Value : null;
-                if (ColumnValueConverter.TryReadExactGuid(token, out var id))
+                if (RecordIdText.TryParse(token, out var id))
                 {
                     return id;
                 }
 
-                result.AddError("--id takes a GUID written 8-4-4-4-12 with hyphens (optionally in braces), nothing else.");
+                result.AddError($"--id is not a record id: {RecordIdText.Rule}. Nothing was updated.");
                 return null;
             }
         };

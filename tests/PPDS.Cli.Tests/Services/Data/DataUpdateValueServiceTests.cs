@@ -18,6 +18,8 @@ public sealed class DataUpdateValueServiceTests : IDisposable
     private const string Table = "account";
     private const string ParentId = "8b0f6c2e-3c1d-4a5b-9e7f-0123456789ab";
     private const string RecordId = "11111111-2222-3333-4444-555555555555";
+    private static readonly string NotAnId = $"The cell is not a record id: {RecordIdText.Rule}; and not the empty (all-zero) GUID.";
+
     private const string OtherId = "66666666-7777-8888-9999-000000000000";
 
     private readonly string _directory = Directory.CreateTempSubdirectory("ppds-update-values-").FullName;
@@ -221,9 +223,9 @@ public sealed class DataUpdateValueServiceTests : IDisposable
         var outcomes = await InEveryCultureAsync(() => FileOutcomeAsync(path));
         Assert.All(outcomes, o => Assert.Equal(
             "refused: Row 2, column 'rate': A decimal column takes digits with an optional sign and an optional point and digits (1234.75): no thousands separator, no comma, no exponent." +
-            " / Row 3, column 'accountid': The record id is not a GUID with dashes (8-4-4-4-12), optionally in braces, with nothing around it." +
+            " / Row 3, column 'accountid': " + NotAnId + "" +
             " / Row 4, column 'accountid': The record id is also on row 1." +
-            " / Row 5, column 'accountid': The record id is not a GUID with dashes (8-4-4-4-12), optionally in braces, with nothing around it.",
+            " / Row 5, column 'accountid': " + NotAnId + "",
             o));
     }
 
@@ -236,8 +238,8 @@ public sealed class DataUpdateValueServiceTests : IDisposable
     [InlineData("accountid,nosuch\n{0},1\n", "Column 'nosuch': 'nosuch' is not a column of the table")]
     [InlineData("accountid,createdon\n{0},2024-01-15T09:30:00Z\n", "Column 'createdon': 'createdon' cannot be updated")]
     [InlineData("id,name\n{0},a\n", "The file has no column 'accountid' (the table's primary id column)")]
-    [InlineData("accountid,name\n+ccccccc-0000-0000-0000-000000000001,a\n", "Row 1, column 'accountid': The record id is not a GUID")]
-    [InlineData("accountid,name\n11111111-0x22-3333-4444-555555555555,a\n", "Row 1, column 'accountid': The record id is not a GUID")]
+    [InlineData("accountid,name\n+ccccccc-0000-0000-0000-000000000001,a\n", "Row 1, column 'accountid': The cell is not a record id")]
+    [InlineData("accountid,name\n11111111-0x22-3333-4444-555555555555,a\n", "Row 1, column 'accountid': The cell is not a record id")]
     public async Task A_file_that_is_not_exact_is_refused_before_any_row_is_converted(string content, string expected)
     {
         var outcome = await FileOutcomeAsync(File(string.Format(content, RecordId)));

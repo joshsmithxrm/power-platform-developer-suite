@@ -48,10 +48,11 @@ public class UpdateCommandValuePathTests
     [InlineData("8b0f6c2e-0x1d-4a5b-9e7f-0123456789ab")]
     [InlineData(" 8b0f6c2e-3c1d-4a5b-9e7f-0123456789ab")]
     [InlineData("8b0f6c2e3c1d4a5b9e7f0123456789ab")]
+    [InlineData("00000000-0000-0000-0000-000000000000")] // main's rule (#1915) refuses the empty id
     public void A_damaged_id_is_refused_instead_of_read_as_another_id(string id)
     {
         var result = PPDS.Cli.Commands.Data.UpdateCommand.Create().Parse(["--entity", "account", "--id", id, "--set", "name=x"]);
-        Assert.Contains(result.Errors, e => e.Message.Contains("--id takes a GUID", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, e => e.Message.Contains("--id is not a record id", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -68,6 +69,8 @@ public class UpdateCommandValuePathTests
     [InlineData("File.ReadAllText")]
     public void The_command_parses_no_value_and_reads_no_file_itself(string call)
     {
-        Assert.DoesNotContain(call, Source(), StringComparison.Ordinal);
+        // The one parse the command does is of --id, by the shared record id rule.
+        Assert.DoesNotContain(call, Source().Replace("RecordIdText.TryParse(", "", StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.Single(Source().Split("RecordIdText.TryParse(").Skip(1));
     }
 }
