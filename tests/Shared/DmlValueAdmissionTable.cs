@@ -58,6 +58,7 @@ public static class DmlValueAdmissionTable
     [
         .. Targets,
         new("currency, 2 places", "ppds_amount2", "decimal(19, 2)", A("ppds_amount2", "Money", precision: 2)),
+        new("row id", "accountid", "uniqueidentifier", A("accountid", "Uniqueidentifier")),
     ];
 
     /// <summary>The target of a compare case's kind.</summary>
@@ -250,6 +251,19 @@ public static class DmlValueAdmissionTable
         All("'" + Guid + " '", S),
         new("CAST('" + Guid + "' AS uniqueidentifier)", [U, U, U, U, U, U, U, U, U, GuidLower]),
         All("CAST('6F9619FF8B86D011B42D00C04FC964FF' AS uniqueidentifier)", U),
+        // Damaged ids that .NET's GUID parser reads as other ids, also in its exact "D" and "B" modes: a '+' or '0x' inside a
+        // block, a leading '0X' ('+ccccccc-...' is read as 0ccccccc-..., a block '0x12' as 0012). Refused for a lookup by the
+        // character rule, never by the parser's verdict.
+        T("'+CCCCCCC-0000-0000-0000-000000000001'", "=+CCCCCCC-0000-0000-0000-000000000001"),
+        T("'00000000-+000-0000-0000-000000000001'", "=00000000-+000-0000-0000-000000000001"),
+        T("'0x000000-0000-0000-0000-000000000001'", "=0x000000-0000-0000-0000-000000000001"),
+        T("'00000000-0x12-0000-0000-000000000001'", "=00000000-0x12-0000-0000-000000000001"),
+        T("'0X000000-0000-0000-0000-000000000001'", "=0X000000-0000-0000-0000-000000000001"),
+        T("'00000000-0000-0000-0000-+00000000001'", "=00000000-0000-0000-0000-+00000000001"),
+        T("'00000000-0000-0000-0000-0x0000000001'", "=00000000-0000-0000-0000-0x0000000001"),
+        T("'{+CCCCCCC-0000-0000-0000-000000000001}'", "={+CCCCCCC-0000-0000-0000-000000000001}"),
+        All("CAST('+CCCCCCC-0000-0000-0000-000000000001' AS uniqueidentifier)", U),
+        All("CAST('00000000-0x12-0000-0000-000000000001' AS uniqueidentifier)", U),
         // \u2500\u2500 NULL \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
         All("NULL", "=null"),
     ];
@@ -373,6 +387,26 @@ public static class DmlValueAdmissionTable
         new("text", "N'a\tb'", "=a\tb", "IN"),
         new("text", "N'a&<>\"''b'", "=a&<>\"'b", "IN"),
         new("whole number", "-5", "=-5", "IN"),
+        // Damaged ids the GUID parser reads as other ids (a '+' or '0x' in a block, a leading '0X'), compared with a lookup and
+        // with the row id: refused by the character rule before anything is read.
+        new("lookup", "'+CCCCCCC-0000-0000-0000-000000000001'", "U"),
+        new("lookup", "'00000000-+000-0000-0000-000000000001'", "U", "IN"),
+        new("lookup", "'0x000000-0000-0000-0000-000000000001'", "U"),
+        new("lookup", "'00000000-0x12-0000-0000-000000000001'", "U", "IN"),
+        new("lookup", "'0X000000-0000-0000-0000-000000000001'", "U"),
+        new("lookup", "'00000000-0000-0000-0000-+00000000001'", "U"),
+        new("lookup", "'00000000-0000-0000-0000-0x0000000001'", "U", "<>"),
+        new("row id", "'+CCCCCCC-0000-0000-0000-000000000001'", "U"),
+        new("row id", "'00000000-+000-0000-0000-000000000001'", "U", "IN"),
+        new("row id", "'0x000000-0000-0000-0000-000000000001'", "U"),
+        new("row id", "'00000000-0x12-0000-0000-000000000001'", "U", "IN"),
+        new("row id", "'0X000000-0000-0000-0000-000000000001'", "U"),
+        new("row id", "'00000000-0000-0000-0000-+00000000001'", "U"),
+        new("row id", "'00000000-0000-0000-0000-0x0000000001'", "U", "<>"),
+        new("lookup", "'{+CCCCCCC-0000-0000-0000-000000000001}'", "U"),
+        new("row id", "N'{+CCCCCCC-0000-0000-0000-000000000001}'", "U", "IN"),
+        new("lookup", "'6F9619FF-8B86-D011-B42D-00C04FC964FF'", "=6F9619FF-8B86-D011-B42D-00C04FC964FF"),
+        new("row id", "'6F9619FF-8B86-D011-B42D-00C04FC964FF'", "=6F9619FF-8B86-D011-B42D-00C04FC964FF"),
         // The bounds of a written number hold for a compared one (MF4): places the column keeps, digits a double holds.
         new("currency", "1.2345", "=1.2345"),
         new("currency", "1.23450", "=1.23450"),
