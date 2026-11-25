@@ -39,6 +39,7 @@ public class DataTruncateServiceTests
         public bool RestartEveryRead { get; set; }
         public string PrimaryId { get; set; } = "accountid";
         public bool EmptyPagesClaimMore { get; set; }
+        public bool RepeatTheCookieReadWith { get; set; }
         public bool FailCounts { get; set; }
         public int? ThrowOnRead { get; set; }
         public Action<int>? AfterDelete { get; set; }
@@ -80,7 +81,9 @@ public class DataTruncateServiceTests
             return new EntityCollection(page.Select(id => new Entity("account", id) { [PrimaryId] = id }).ToList())
             {
                 MoreRecords = more,
-                PagingCookie = ReturnCookies && page.Count > 0 ? page[^1].ToString() : null
+                PagingCookie = RepeatTheCookieReadWith && query.PageInfo.PagingCookie is { } readWith
+                    ? readWith
+                    : ReturnCookies && page.Count > 0 ? page[^1].ToString() : null
             };
         }
 
@@ -371,6 +374,27 @@ public class DataTruncateServiceTests
         result.StopReason.Should().Be(DataTruncateStopReason.PagingUnavailable);
         result.Passes.Should().Be(1);
         result.RemainingCount.Should().Be(3);
+        TruncateCommand.ToExitCode(result).Should().Be(ExitCodes.PartialSuccess);
+    }
+
+    [Fact]
+    public async Task PageReturnsTheCookieItWasReadWith_StopsAsPagingUnavailable_AfterDeletingThatPage()
+    {
+        // Page 1 gives cookie A; page 2, read with A, returns new records and A again: following A would not move on.
+        var table = new FakeTable { RepeatTheCookieReadWith = true }.Add(6);
+        var cookieA = table.Rows.ElementAt(1).ToString();
+        var secondPage = table.Rows.Skip(2).Take(2).ToList();
+
+        var result = await Truncate(table);
+
+        result.StopReason.Should().Be(DataTruncateStopReason.PagingUnavailable);
+        result.DeletedCount.Should().Be(4);
+        result.Passes.Should().Be(2);
+        table.Reads.Should().HaveCount(2);
+        table.Reads[1].PageInfo.PagingCookie.Should().Be(cookieA);
+        table.Rows.Should().NotIntersectWith(secondPage);
+        result.RemainingCount.Should().Be(2);
+        result.IsSuccess.Should().BeFalse();
         TruncateCommand.ToExitCode(result).Should().Be(ExitCodes.PartialSuccess);
     }
 
