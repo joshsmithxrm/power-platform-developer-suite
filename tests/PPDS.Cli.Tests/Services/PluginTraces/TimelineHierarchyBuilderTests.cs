@@ -6,6 +6,9 @@ namespace PPDS.Cli.Tests.Services.PluginTraces;
 
 public class TimelineHierarchyBuilderTests
 {
+    // A fixed instant: the builder orders by these values, and no test reads the machine's clock.
+    private static readonly DateTime BaseTime = new(2026, 11, 25, 5, 38, 27, DateTimeKind.Utc);
+
     #region Build Tests
 
     [Fact]
@@ -42,8 +45,8 @@ public class TimelineHierarchyBuilderTests
     public void Build_TwoRootTraces_ReturnsTwoRootNodes()
     {
         // Arrange
-        var trace1 = CreateTraceInfo(depth: 1, createdOn: DateTime.UtcNow);
-        var trace2 = CreateTraceInfo(depth: 1, createdOn: DateTime.UtcNow.AddSeconds(1));
+        var trace1 = CreateTraceInfo(depth: 1, createdOn: BaseTime);
+        var trace2 = CreateTraceInfo(depth: 1, createdOn: BaseTime.AddSeconds(1));
         var traces = new[] { trace1, trace2 };
 
         // Act
@@ -59,7 +62,7 @@ public class TimelineHierarchyBuilderTests
     public void Build_ParentWithChild_BuildsHierarchy()
     {
         // Arrange
-        var baseTime = DateTime.UtcNow;
+        var baseTime = BaseTime;
         var parent = CreateTraceInfo(depth: 1, createdOn: baseTime);
         var child = CreateTraceInfo(depth: 2, createdOn: baseTime.AddMilliseconds(10));
         var traces = new[] { parent, child };
@@ -78,7 +81,7 @@ public class TimelineHierarchyBuilderTests
     public void Build_ThreeLevelHierarchy_BuildsCorrectly()
     {
         // Arrange
-        var baseTime = DateTime.UtcNow;
+        var baseTime = BaseTime;
         var root = CreateTraceInfo(depth: 1, createdOn: baseTime);
         var child = CreateTraceInfo(depth: 2, createdOn: baseTime.AddMilliseconds(10));
         var grandchild = CreateTraceInfo(depth: 3, createdOn: baseTime.AddMilliseconds(20));
@@ -105,7 +108,7 @@ public class TimelineHierarchyBuilderTests
     public void Build_MultipleSiblings_GroupsUnderParent()
     {
         // Arrange
-        var baseTime = DateTime.UtcNow;
+        var baseTime = BaseTime;
         var parent = CreateTraceInfo(depth: 1, createdOn: baseTime);
         var child1 = CreateTraceInfo(depth: 2, createdOn: baseTime.AddMilliseconds(10));
         var child2 = CreateTraceInfo(depth: 2, createdOn: baseTime.AddMilliseconds(20));
@@ -127,7 +130,7 @@ public class TimelineHierarchyBuilderTests
         // Arrange
         // Tree: root -> child1 -> grandchild
         //            -> child2
-        var baseTime = DateTime.UtcNow;
+        var baseTime = BaseTime;
         var root = CreateTraceInfo(depth: 1, createdOn: baseTime);
         var child1 = CreateTraceInfo(depth: 2, createdOn: baseTime.AddMilliseconds(10));
         var grandchild = CreateTraceInfo(depth: 3, createdOn: baseTime.AddMilliseconds(20));
@@ -148,7 +151,7 @@ public class TimelineHierarchyBuilderTests
     public void Build_UnsortedTraces_SortsChronologically()
     {
         // Arrange
-        var baseTime = DateTime.UtcNow;
+        var baseTime = BaseTime;
         var trace3 = CreateTraceInfo(depth: 1, createdOn: baseTime.AddSeconds(2));
         var trace1 = CreateTraceInfo(depth: 1, createdOn: baseTime);
         var trace2 = CreateTraceInfo(depth: 1, createdOn: baseTime.AddSeconds(1));
@@ -188,7 +191,7 @@ public class TimelineHierarchyBuilderTests
     public void BuildWithPositioning_TwoSequentialTraces_CalculatesOffsets()
     {
         // Arrange
-        var baseTime = DateTime.UtcNow;
+        var baseTime = BaseTime;
         var trace1 = CreateTraceInfo(depth: 1, createdOn: baseTime, durationMs: 50);
         var trace2 = CreateTraceInfo(depth: 1, createdOn: baseTime.AddMilliseconds(50), durationMs: 50);
         var traces = new[] { trace1, trace2 };
@@ -250,7 +253,7 @@ public class TimelineHierarchyBuilderTests
     public void GetTotalDuration_SequentialTraces_ReturnsSpan()
     {
         // Arrange
-        var baseTime = DateTime.UtcNow;
+        var baseTime = BaseTime;
         var trace1 = CreateTraceInfo(depth: 1, createdOn: baseTime, durationMs: 50);
         var trace2 = CreateTraceInfo(depth: 1, createdOn: baseTime.AddMilliseconds(50), durationMs: 50);
         var traces = new[] { trace1, trace2 };
@@ -266,7 +269,7 @@ public class TimelineHierarchyBuilderTests
     public void GetTotalDuration_OverlappingTraces_ReturnsMaxSpan()
     {
         // Arrange
-        var baseTime = DateTime.UtcNow;
+        var baseTime = BaseTime;
         var trace1 = CreateTraceInfo(depth: 1, createdOn: baseTime, durationMs: 100);
         var trace2 = CreateTraceInfo(depth: 2, createdOn: baseTime.AddMilliseconds(10), durationMs: 20);
         var traces = new[] { trace1, trace2 };
@@ -385,7 +388,7 @@ public class TimelineHierarchyBuilderTests
             Id = Guid.NewGuid(),
             TypeName = "TestPlugin",
             Depth = depth,
-            CreatedOn = createdOn ?? DateTime.UtcNow,
+            CreatedOn = createdOn ?? BaseTime,
             DurationMs = durationMs,
             Mode = PluginTraceMode.Synchronous,
             OperationType = PluginTraceOperationType.Plugin
