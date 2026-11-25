@@ -10,6 +10,7 @@ internal sealed record MetadataDryRunScope(string ValidationScope, bool Publishe
     internal const string PublisherHelp = "Validate inputs and solution publisher information only. Target existence, dependencies and server feasibility are not checked. No changes persisted.";
     internal const string OptionHelp = "Validate target option existence only. Dependencies and server feasibility are not checked. No changes persisted.";
     internal const string DraftValueHelp = "Read option metadata and validate inputs; any derived option value is provisional. Dependencies and server feasibility are not checked. No changes persisted.";
+    internal const string CurrentSettingsHelp = "Read the relationship's current cascade settings and show each setting before and after. Dependencies and server feasibility are not checked. No changes persisted.";
     internal const string RequestedValueHelp = "Validate required inputs only. Any supplied option value is requested; Dataverse assigns the final value only when changes are applied. Target existence, dependencies and server feasibility are not checked. No changes persisted.";
 
     internal static MetadataDryRunScope Inputs { get; } = new("required-inputs", false, false, "not-performed");
@@ -17,6 +18,8 @@ internal sealed record MetadataDryRunScope(string ValidationScope, bool Publishe
     internal static MetadataDryRunScope PublisherProvisional { get; } = new("input-and-publisher", true, false, "provisional");
     internal static MetadataDryRunScope Option { get; } = new("option-existence", false, true, "not-performed");
     internal static MetadataDryRunScope DraftValue { get; } = new("option-data-and-draft-value", false, false, "provisional");
+    /// <summary>The relationship was read; each cascade setting is shown before and after (#1919).</summary>
+    internal static MetadataDryRunScope CurrentSettings { get; } = new("current-settings", false, true, "not-performed");
     internal static MetadataDryRunScope RequestedValue { get; } = new("required-inputs", false, false, "requested-only; SDK assignment occurs on write");
     /// <summary>No value was supplied: it is unallocated until Dataverse assigns it on write (#1530).</summary>
     internal static MetadataDryRunScope ServerAssignedValue { get; } = new("required-inputs", false, false, "unallocated; Dataverse assigns the value on write");

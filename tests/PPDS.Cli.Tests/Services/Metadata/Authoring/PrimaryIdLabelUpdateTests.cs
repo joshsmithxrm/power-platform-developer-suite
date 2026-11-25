@@ -260,12 +260,12 @@ public sealed class PrimaryIdLabelUpdateTests : IDisposable
     }
 
     [Theory]
-    [InlineData(nameof(UpdateColumnRequest.RequiredLevel), "")]
+    [InlineData(nameof(UpdateColumnRequest.RequiredLevel), "Required")]
     [InlineData(nameof(UpdateColumnRequest.MaxLength), 0)]
     [InlineData(nameof(UpdateColumnRequest.MinValue), 0d)]
     [InlineData(nameof(UpdateColumnRequest.MaxValue), 0d)]
     [InlineData(nameof(UpdateColumnRequest.Precision), 0)]
-    [InlineData(nameof(UpdateColumnRequest.Format), "")]
+    [InlineData(nameof(UpdateColumnRequest.Format), "Text")]
     [InlineData(nameof(UpdateColumnRequest.IsAuditEnabled), false)]
     [InlineData(nameof(UpdateColumnRequest.IsSecured), false)]
     [InlineData(nameof(UpdateColumnRequest.IsValidForAdvancedFind), false)]

@@ -378,6 +378,9 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         ArgumentNullException.ThrowIfNull(request);
         _guard.EnsureCanMutate("metadata.column.create");
 
+        // Text that names no required level or format is refused before anything is read (#1919).
+        ValidateCreateColumnText(request);
+
         reporter?.ReportPhase("Resolving publisher prefix");
         var prefix = await ResolvePublisherPrefixAsync(request.SolutionUniqueName, ct).ConfigureAwait(false);
 
@@ -465,6 +468,10 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _validator.ValidateRequiredString(request.ColumnLogicalName, "ColumnLogicalName");
         ct.ThrowIfCancellationRequested();
 
+        // Text that names no required level or format is refused before anything is read, dry run included (#1919).
+        ValidateGivenRequiredLevel(request.RequiredLevel);
+        ValidateGivenFormat(request.Format);
+
         // A dry-run is input-only (MetadataDryRunScope.Inputs): it reads nothing and computes no notices.
         var columnLabelsRequested = request.DisplayName != null || request.Description != null;
         if (request.DryRun)
@@ -508,6 +515,9 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         // changes on the wire. Build a fresh, minimal attribute of the same SDK type
         // and copy only the fields the caller explicitly asked to change.
         var updateAttr = primaryIdLabels ? new AttributeMetadata() : CreateUpdateAttribute(existingAttr);
+        // Some SDK constructors set a required level of their own (FileAttributeMetadata sets None); only a level the
+        // caller gave is sent (#1919).
+        updateAttr.RequiredLevel = null;
         updateAttr.LogicalName = existingAttr.LogicalName;
         updateAttr.SchemaName = existingAttr.SchemaName;
 
@@ -752,7 +762,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     }
 
     /// <inheritdoc />
-    public async Task UpdateRelationshipAsync(
+    public async Task<UpdateRelationshipResult> UpdateRelationshipAsync(
         PPDS.Dataverse.Metadata.Authoring.UpdateRelationshipRequest request,
         IMetadataAuthoringProgressReporter? reporter = null,
         CancellationToken ct = default)
@@ -764,42 +774,119 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _validator.ValidateRequiredString(request.SolutionUniqueName, "SolutionUniqueName");
         _validator.ValidateRequiredString(request.SchemaName, "SchemaName");
 
+        // #1919: an update changes only the settings the caller gave. Each given value is checked against the values
+        // Microsoft documents for its action before anything is read.
+        var given = GivenCascadeSettings(request.CascadeConfiguration);
+        if (given.Count == 0 && !request.IsHierarchical.HasValue)
+            throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
+                "Nothing to update: give at least one cascade setting (Assign, Delete, Merge, Reparent, Share or Unshare) or the hierarchical flag.",
+                "CascadeConfiguration");
+
+        // The dry run reads the relationship too, so that it can show each setting before and after.
+        reporter?.ReportPhase("Retrieving existing relationship", request.SchemaName);
+        var existingRel = await ReadRelationshipForUpdateAsync(request.SchemaName, ct).ConfigureAwait(false);
+
+        // The definition sent is the one read, so it must be the relationship asked for: a response that names another
+        // relationship, or carries no metadata id, is not written back.
+        if (!string.Equals(existingRel.SchemaName, request.SchemaName, StringComparison.OrdinalIgnoreCase)
+            || existingRel.MetadataId is not { } metadataId || metadataId == Guid.Empty)
+            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                "Dataverse did not return the relationship asked for (another schema name, or no metadata id), so nothing was changed. Check the schema name and try again.");
+
+        if (existingRel is not OneToManyRelationshipMetadata o2m)
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                "Cascade settings and the hierarchical flag apply only to a one-to-many relationship; this relationship is many-to-many. Nothing was changed.",
+                "SchemaName");
+
+        // Every setting not given is sent exactly as read, so it must have been read. A relationship whose current
+        // settings are not all known is refused rather than written with a guess.
+        var cascade = o2m.CascadeConfiguration;
+        var before = new Dictionary<string, CascadeBehavior>(StringComparer.Ordinal);
+        foreach (var (name, read, _) in CascadeSettingAccessors)
+        {
+            var current = cascade == null ? null : read(cascade);
+            if (current is not { } currentValue || ToCascadeBehavior(currentValue) is not { } value)
+                throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                    "Could not read all six cascade settings of the relationship, so it was not updated: a setting that is not given is sent as read, never guessed. Check the relationship in the maker portal and try again.");
+            before[name] = value;
+        }
+        var hierarchicalBefore = o2m.IsHierarchical;
+
+        // Only the given settings are written, on the object that was read.
+        foreach (var (name, _, write) in CascadeSettingAccessors)
+            if (given.TryGetValue(name, out var value))
+                write(cascade!, ToSdkCascadeType(value));
+        if (request.IsHierarchical.HasValue)
+            o2m.IsHierarchical = request.IsHierarchical.Value;
+
+        // The result is read back from the configuration that will be sent, not from the request, so it reports what
+        // is actually sent.
+        var settings = CascadeSettingAccessors.Select(accessor =>
+        {
+            var sent = accessor.Read(cascade!) is { } raw ? ToCascadeBehavior(raw) : null;
+            return new CascadeSettingChange
+            {
+                Setting = accessor.Name,
+                Before = before[accessor.Name],
+                After = sent ?? throw new InvalidOperationException("A cascade setting was cleared while it was applied."),
+                Requested = given.ContainsKey(accessor.Name)
+            };
+        }).ToList();
+
+        var hasChanges = settings.Any(s => s.Changed) || hierarchicalBefore != o2m.IsHierarchical;
+        var send = !request.DryRun && hasChanges;
+        var result = new UpdateRelationshipResult
+        {
+            SchemaName = o2m.SchemaName ?? request.SchemaName,
+            WasDryRun = request.DryRun,
+            WasSent = send,
+            HasChanges = hasChanges,
+            CascadeSettings = settings,
+            IsHierarchicalBefore = hierarchicalBefore,
+            IsHierarchicalAfter = o2m.IsHierarchical,
+            // Microsoft: when Reparent or Share is changed to Cascade None, Dataverse starts the inherited access
+            // rights cleanup job ("Create and edit relationships between tables", "Inherited access rights cleanup").
+            RemovesInheritedAccess = settings.Any(s => s.Setting is "Reparent" or "Share"
+                && s.Changed && s.After == CascadeBehavior.NoCascade)
+        };
+
         if (request.DryRun)
         {
-            _logger?.LogInformation("Dry-run: UpdateRelationship {SchemaName} validated", request.SchemaName);
-            return;
+            _logger?.LogInformation("Dry-run: UpdateRelationship {SchemaName} computed", request.SchemaName);
+            return result;
         }
 
-        reporter?.ReportPhase("Retrieving existing relationship");
-
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-
-        // Retrieve existing relationship
-        var retrieveRequest = new RetrieveRelationshipRequest
+        // Every value given already equals the current one: nothing is sent, and the result says so.
+        if (!send)
         {
-            Name = request.SchemaName
-        };
-        var retrieveResponse = (RetrieveRelationshipResponse)await client.ExecuteAsync(retrieveRequest, ct).ConfigureAwait(false);
+            reporter?.ReportInfo($"Relationship '{request.SchemaName}' already has every value given; nothing was sent.");
+            _logger?.LogInformation("UpdateRelationship {SchemaName}: nothing to change, nothing sent", request.SchemaName);
+            return result;
+        }
 
         reporter?.ReportPhase("Updating relationship", request.SchemaName);
 
-        var existingRel = retrieveResponse.RelationshipMetadata;
-
-        if (existingRel is OneToManyRelationshipMetadata o2m)
-        {
-            if (request.CascadeConfiguration != null)
-                o2m.CascadeConfiguration = MapCascadeConfiguration(request.CascadeConfiguration);
-            if (request.IsHierarchical.HasValue)
-                o2m.IsHierarchical = request.IsHierarchical.Value;
-        }
-
+        // The update is safe only because it sends the object it read: UpdateRelationship writes every property of
+        // the definition it is given (menu behaviour, labels, navigation names, customizability...), so a definition
+        // built here would reset whatever it left out. Do not replace o2m with a new object.
+        // Last writer wins: the request has no concurrency option, so a change made to the relationship between the
+        // read above and this write is overwritten with the value read.
         var sdkRequest = new SdkUpdateRelationshipRequest
         {
-            Relationship = existingRel,
+            Relationship = o2m,
+            MergeLabels = true, // The labels are sent as read; this keeps any language not in them (#1767).
             SolutionUniqueName = request.SolutionUniqueName
         };
 
-        await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        try
+        {
+            await using var client = await GetMetadataClientAsync(ct).ConfigureAwait(false);
+            await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+        {
+            throw RelationshipWriteFailure(ex);
+        }
 
         // UpdateRelationshipRequest doesn't carry entity logical names, so we must
         // invalidate all entity caches to ensure stale relationship data is cleared.
@@ -807,7 +894,127 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         reporter?.ReportInfo($"Relationship '{request.SchemaName}' updated. Changes must be published to take effect.");
         _logger?.LogInformation("Updated relationship {SchemaName}", request.SchemaName);
+        return result;
     }
+
+    /// <summary>
+    /// Reads the relationship to update on its own lease, as if published, so that unpublished changes to the settings
+    /// the caller did not give are sent back unchanged (#1767). SDK failures keep the mapper's classification; a
+    /// response without a relationship stops the update.
+    /// </summary>
+    private async Task<RelationshipMetadataBase> ReadRelationshipForUpdateAsync(string schemaName, CancellationToken ct)
+    {
+        const string message = "Could not read the relationship before updating it, so it was not updated. Check the schema name and that your account can read the relationship's definition, then try again.";
+        await using var client = await GetMetadataClientAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var response = await client.ExecuteAsync(new RetrieveRelationshipRequest
+            {
+                Name = schemaName,
+                RetrieveAsIfPublished = true
+            }, ct).ConfigureAwait(false);
+            return (response as RetrieveRelationshipResponse)?.RelationshipMetadata
+                ?? throw new PpdsException(MetadataErrorCodes.SdkOperationFailed, message);
+        }
+        catch (System.ServiceModel.FaultException<OrganizationServiceFault> fault) when (fault.Detail?.ErrorCode == ObjectDoesNotExistErrorCode)
+        {
+            // Dataverse's object-not-found code. Which code RetrieveRelationship returns for an unknown name is not
+            // documented; this is the code the other metadata reads return (see ObjectDoesNotExistErrorCode).
+            throw new PpdsNotFoundException("Relationship", schemaName,
+                "No relationship with that schema name was found, so nothing was changed. Check the schema name (it is the relationship's SchemaName, not its display name).",
+                fault);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not PpdsException and not MetadataValidationException)
+        {
+            throw NormalizeColumnLabelSdkFailure(ex, message);
+        }
+    }
+
+    /// <summary>
+    /// The relationship write failed. A Dataverse fault is a refusal: the single request was not applied, so nothing
+    /// was changed, and only Dataverse's typed fault code is shown (its message can carry ids). A timeout or a
+    /// cancellation leaves the outcome unknown, and so may a failure with no answer from Dataverse; the message says
+    /// so. The mapper's classification (sign-in, connection) is kept.
+    /// </summary>
+    private static PpdsException RelationshipWriteFailure(Exception ex)
+    {
+        if (!IsIndeterminate(ex) && FindTypedFault(ex) is not null)
+            return new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                AppendDataverseFaultCode("Dataverse refused the relationship update, so nothing was changed.", ex), ex);
+
+        var interruption = IsIndeterminate(ex) ? Interruption(ex) : "failed without an answer from Dataverse";
+        return NormalizeColumnLabelSdkFailure(ex,
+            $"The relationship update {interruption}, so whether it was applied is unknown. Read the relationship's current settings (a dry run of the same update shows them) before trying again.");
+    }
+
+    /// <summary>
+    /// The six cascade settings an update can change, in the order of <see cref="CascadeActionRules.Actions"/>. The
+    /// values valid for each are in <see cref="CascadeActionRules"/>.
+    /// </summary>
+    private static readonly (string Name, Func<CascadeConfiguration, SdkCascadeType?> Read, Action<CascadeConfiguration, SdkCascadeType> Write)[] CascadeSettingAccessors =
+    [
+        ("Assign", c => c.Assign, (c, v) => c.Assign = v),
+        ("Delete", c => c.Delete, (c, v) => c.Delete = v),
+        ("Merge", c => c.Merge, (c, v) => c.Merge = v),
+        ("Reparent", c => c.Reparent, (c, v) => c.Reparent = v),
+        ("Share", c => c.Share, (c, v) => c.Share = v),
+        ("Unshare", c => c.Unshare, (c, v) => c.Unshare = v),
+    ];
+
+    /// <summary>
+    /// The cascade settings the caller gave, by name. A value Microsoft does not document for its action is refused
+    /// before anything is read.
+    /// </summary>
+    private static Dictionary<string, CascadeBehavior> GivenCascadeSettings(CascadeConfigurationDto? dto)
+    {
+        var given = new Dictionary<string, CascadeBehavior>(StringComparer.Ordinal);
+        if (dto == null)
+            return given;
+
+        foreach (var (name, value) in new (string, CascadeBehavior?)[]
+                 {
+                     ("Assign", dto.Assign), ("Delete", dto.Delete), ("Merge", dto.Merge),
+                     ("Reparent", dto.Reparent), ("Share", dto.Share), ("Unshare", dto.Unshare)
+                 })
+        {
+            if (value is not { } behavior)
+                continue;
+            if (!CascadeActionRules.IsValid(name, behavior))
+                throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                    $"Cascade {name} cannot be {(Enum.IsDefined(behavior) ? behavior.ToString() : "that value")}. Give {CascadeActionRules.Describe(name)}. Nothing was changed.",
+                    $"CascadeConfiguration.{name}");
+            given[name] = behavior;
+        }
+
+        return given;
+    }
+
+    /// <summary>
+    /// Maps a cascade value to the SDK's. A value that is not a defined member is refused, never written as a
+    /// default; the values given are checked before this, so this is the last guard.
+    /// </summary>
+    private static SdkCascadeType ToSdkCascadeType(CascadeBehavior behavior) => behavior switch
+    {
+        CascadeBehavior.Cascade => SdkCascadeType.Cascade,
+        CascadeBehavior.Active => SdkCascadeType.Active,
+        CascadeBehavior.NoCascade => SdkCascadeType.NoCascade,
+        CascadeBehavior.UserOwned => SdkCascadeType.UserOwned,
+        CascadeBehavior.RemoveLink => SdkCascadeType.RemoveLink,
+        CascadeBehavior.Restrict => SdkCascadeType.Restrict,
+        _ => throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+            "A cascade value is not one Dataverse accepts. Nothing was changed.", "CascadeConfiguration")
+    };
+
+    private static CascadeBehavior? ToCascadeBehavior(SdkCascadeType value) => value switch
+    {
+        SdkCascadeType.Cascade => CascadeBehavior.Cascade,
+        SdkCascadeType.Active => CascadeBehavior.Active,
+        SdkCascadeType.NoCascade => CascadeBehavior.NoCascade,
+        SdkCascadeType.UserOwned => CascadeBehavior.UserOwned,
+        SdkCascadeType.RemoveLink => CascadeBehavior.RemoveLink,
+        SdkCascadeType.Restrict => CascadeBehavior.Restrict,
+        _ => null
+    };
 
     /// <inheritdoc />
     public async Task DeleteRelationshipAsync(
@@ -2778,66 +2985,128 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         };
     }
 
+    // Create: a setting not given is NoCascade (a separate issue); an undefined value is refused.
     private static SdkCascadeType MapCascadeType(CascadeBehavior? behavior)
+        => behavior is { } value ? ToSdkCascadeType(value) : SdkCascadeType.NoCascade;
+
+    // #1919: the text given for a required level or a format must name one of these (any letter case, surrounding
+    // white space ignored). Unknown text is refused, never read as a default: a typo must not make a required column
+    // optional or set a format nobody asked for.
+    private static readonly (string Name, AttributeRequiredLevel Value)[] RequiredLevelNames =
+    [
+        ("None", AttributeRequiredLevel.None),
+        ("Recommended", AttributeRequiredLevel.Recommended),
+        ("Required", AttributeRequiredLevel.ApplicationRequired),
+        ("ApplicationRequired", AttributeRequiredLevel.ApplicationRequired),
+        ("SystemRequired", AttributeRequiredLevel.SystemRequired),
+    ];
+
+    private static readonly (string Name, StringFormatName Value)[] StringFormatNames =
+    [
+        ("Text", StringFormatName.Text), ("Email", StringFormatName.Email), ("Url", StringFormatName.Url),
+        ("Phone", StringFormatName.Phone), ("TickerSymbol", StringFormatName.TickerSymbol),
+        ("Phonetic", StringFormatName.PhoneticGuide), ("VersionNumber", StringFormatName.VersionNumber),
+        ("Json", StringFormatName.Json), ("RichText", StringFormatName.RichText),
+    ];
+
+    private static readonly (string Name, IntegerFormat Value)[] IntegerFormatNames =
+    [
+        ("None", IntegerFormat.None), ("Duration", IntegerFormat.Duration), ("TimeZone", IntegerFormat.TimeZone),
+        ("Language", IntegerFormat.Language), ("Locale", IntegerFormat.Locale),
+    ];
+
+    private static readonly (string Name, DateTimeFormat Value)[] DateTimeFormatNames =
+    [
+        ("DateAndTime", DateTimeFormat.DateAndTime), ("DateOnly", DateTimeFormat.DateOnly),
+    ];
+
+    private static bool TryName<T>((string Name, T Value)[] names, string? text, out T value)
     {
-        return behavior switch
+        var trimmed = text?.Trim();
+        foreach (var (name, candidate) in names)
         {
-            CascadeBehavior.Cascade => SdkCascadeType.Cascade,
-            CascadeBehavior.Active => SdkCascadeType.Active,
-            CascadeBehavior.NoCascade => SdkCascadeType.NoCascade,
-            CascadeBehavior.UserOwned => SdkCascadeType.UserOwned,
-            CascadeBehavior.RemoveLink => SdkCascadeType.RemoveLink,
-            CascadeBehavior.Restrict => SdkCascadeType.Restrict,
-            _ => SdkCascadeType.NoCascade
+            if (string.Equals(name, trimmed, StringComparison.OrdinalIgnoreCase))
+            {
+                value = candidate;
+                return true;
+            }
+        }
+
+        value = default!;
+        return false;
+    }
+
+    private static string NameList<T>((string Name, T Value)[] names)
+        => string.Join(", ", names[..^1].Select(n => n.Name)) + " or " + names[^1].Name;
+
+    private static MetadataValidationException RequiredLevelNotKnown()
+        => new(MetadataErrorCodes.InvalidConstraint,
+            $"The required level is not one PPDS knows. Give {NameList(RequiredLevelNames)}. Nothing was changed.",
+            "RequiredLevel");
+
+    private static MetadataValidationException FormatNotKnown(string columnType, string names)
+        => new(MetadataErrorCodes.InvalidConstraint,
+            $"The format is not one a {columnType} column takes. Give {names}. Nothing was changed.",
+            "Format");
+
+    /// <summary>A required level that was given (update): any text, blank included, must name a level.</summary>
+    private static void ValidateGivenRequiredLevel(string? level)
+    {
+        if (level != null && !TryName(RequiredLevelNames, level, out _))
+            throw RequiredLevelNotKnown();
+    }
+
+    /// <summary>
+    /// Create: blank text is not given (the default applies); other text must name a level, and a format given for a
+    /// String, Integer or DateTime column must name one that type takes. Checked before anything is read.
+    /// </summary>
+    private static void ValidateCreateColumnText(CreateColumnRequest request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.RequiredLevel))
+            ValidateGivenRequiredLevel(request.RequiredLevel);
+        if (string.IsNullOrWhiteSpace(request.Format))
+            return;
+        _ = request.ColumnType switch
+        {
+            SchemaColumnType.String => ParseStringFormat(request.Format),
+            SchemaColumnType.Integer => ParseIntegerFormat(request.Format),
+            SchemaColumnType.DateTime => (object?)ParseDateTimeFormat(request.Format),
+            _ => null
         };
+    }
+
+    /// <summary>
+    /// Update, before the read: a format given (blank included) must name a format of some column type. After the
+    /// read, <see cref="ApplyTypeSpecificUpdates"/> refuses one the column's own type does not take.
+    /// </summary>
+    private static void ValidateGivenFormat(string? format)
+    {
+        if (format != null && !TryName(StringFormatNames, format, out _) && !TryName(IntegerFormatNames, format, out _)
+            && !TryName(DateTimeFormatNames, format, out _))
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                $"The format is not one any column type takes. String: {NameList(StringFormatNames)}. Integer: {NameList(IntegerFormatNames)}. DateTime: {NameList(DateTimeFormatNames)}. Nothing was changed.",
+                "Format");
     }
 
     private static AttributeRequiredLevel ParseRequiredLevel(string? level)
     {
         if (string.IsNullOrWhiteSpace(level))
             return AttributeRequiredLevel.None;
-
-        return level.ToLowerInvariant() switch
-        {
-            "required" or "applicationrequired" => AttributeRequiredLevel.ApplicationRequired,
-            "recommended" => AttributeRequiredLevel.Recommended,
-            "systemrequired" => AttributeRequiredLevel.SystemRequired,
-            _ => AttributeRequiredLevel.None
-        };
+        return TryName(RequiredLevelNames, level, out var value) ? value : throw RequiredLevelNotKnown();
     }
 
     private static StringFormatName? ParseStringFormat(string? format)
     {
         if (string.IsNullOrWhiteSpace(format))
             return StringFormatName.Text;
-
-        return format.ToLowerInvariant() switch
-        {
-            "email" => StringFormatName.Email,
-            "url" => StringFormatName.Url,
-            "phone" => StringFormatName.Phone,
-            "tickersymbol" => StringFormatName.TickerSymbol,
-            "phonetic" => StringFormatName.PhoneticGuide,
-            "versionnumber" => StringFormatName.VersionNumber,
-            "json" => StringFormatName.Json,
-            "richtext" => StringFormatName.RichText,
-            _ => StringFormatName.Text
-        };
+        return TryName(StringFormatNames, format, out var value) ? value : throw FormatNotKnown("String", NameList(StringFormatNames));
     }
 
     private static IntegerFormat? ParseIntegerFormat(string? format)
     {
         if (string.IsNullOrWhiteSpace(format))
             return IntegerFormat.None;
-
-        return format.ToLowerInvariant() switch
-        {
-            "duration" => IntegerFormat.Duration,
-            "timezone" => IntegerFormat.TimeZone,
-            "language" => IntegerFormat.Language,
-            "locale" => IntegerFormat.Locale,
-            _ => IntegerFormat.None
-        };
+        return TryName(IntegerFormatNames, format, out var value) ? value : throw FormatNotKnown("Integer", NameList(IntegerFormatNames));
     }
 
     private static ImeMode? ParseImeMode(string? mode)
@@ -2882,12 +3151,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     {
         if (string.IsNullOrWhiteSpace(format))
             return DateTimeFormat.DateAndTime;
-
-        return format.ToLowerInvariant() switch
-        {
-            "dateonly" => DateTimeFormat.DateOnly,
-            _ => DateTimeFormat.DateAndTime
-        };
+        return TryName(DateTimeFormatNames, format, out var value) ? value : throw FormatNotKnown("DateTime", NameList(DateTimeFormatNames));
     }
 
     private async Task<int> ResolvePublisherOptionValuePrefixAsync(string solutionUniqueName, CancellationToken ct)

@@ -178,4 +178,15 @@ public class PpdsNotFoundException : PpdsException
         ResourceType = resourceType;
         ResourceId = resourceId;
     }
+
+    /// <summary>
+    /// Creates a new not found exception with a message of its own, for a message that must not repeat the
+    /// identifier the caller gave.
+    /// </summary>
+    public PpdsNotFoundException(string resourceType, string resourceId, string userMessage, Exception? inner = null)
+        : base(ErrorCodes.Operation.NotFound, userMessage, inner)
+    {
+        ResourceType = resourceType;
+        ResourceId = resourceId;
+    }
 }

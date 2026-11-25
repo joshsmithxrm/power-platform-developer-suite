@@ -44,6 +44,7 @@ public sealed class MetadataOtherDryRunContractTests
     [InlineData("option-update")]
     [InlineData("option-remove")]
     [InlineData("key-create")]
+    [InlineData("relationship-update")]
     [InlineData("status-add")]
     [InlineData("local-add")]
     [InlineData("local-update")]
@@ -77,7 +78,9 @@ public sealed class MetadataOtherDryRunContractTests
             "status-add" => ["statuscode:True", "solution", "publisher"],
             "local-add" => ["new_column:True", "solution", "publisher"],
             "local-update" or "local-remove" => ["new_column:True"], // #1531: target resolution reads drafts.
-            "option-update" or "option-remove" => ["new_choice:True"], _ => []
+            "option-update" or "option-remove" => ["new_choice:True"],
+            "relationship-update" => ["new_rel:True"], // #1919: the dry run reads the current cascade settings.
+            _ => []
         };
         internal Fixture(string operation, bool cancel = false)
         {
@@ -110,6 +113,17 @@ public sealed class MetadataOtherDryRunContractTests
                     client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
                         .Returns<OrganizationRequest, CancellationToken>((request, ct) =>
                         {
+                            if (request is RetrieveRelationshipRequest relationship)
+                            {
+                                Assert.Equal("new_rel", relationship.Name); Begin(relationship.Name + ":" + relationship.RetrieveAsIfPublished, ct);
+                                var response = new RetrieveRelationshipResponse();
+                                response.Results["RelationshipMetadata"] = new OneToManyRelationshipMetadata
+                                {
+                                    SchemaName = "new_rel", MetadataId = new Guid("6f1d7c3e-2a4b-4c5d-8e9f-0a1b2c3d4e5f"),
+                                    CascadeConfiguration = new CascadeConfiguration { Assign = CascadeType.NoCascade, Delete = CascadeType.RemoveLink, Merge = CascadeType.NoCascade, Reparent = CascadeType.NoCascade, Share = CascadeType.NoCascade, Unshare = CascadeType.NoCascade }
+                                };
+                                return Task.FromResult<OrganizationResponse>(response);
+                            }
                             if (request is RetrieveOptionSetRequest choice)
                             {
                                 Assert.Equal("new_choice", choice.Name); Begin(choice.Name + ":" + choice.RetrieveAsIfPublished, ct);
@@ -137,7 +151,7 @@ public sealed class MetadataOtherDryRunContractTests
                 case "column-update": await _service.UpdateColumnAsync(new UpdateColumnRequest { SolutionUniqueName = "SyntheticSolution", EntityLogicalName = "new_table", ColumnLogicalName = "new_column", DryRun = true }, ct: Token); break;
                 case "one-to-many": await _service.CreateOneToManyAsync(new PPDS.Dataverse.Metadata.Authoring.CreateOneToManyRequest { SolutionUniqueName = "SyntheticSolution", ReferencedEntity = "new_table", ReferencingEntity = "new_child", SchemaName = "new_rel", LookupSchemaName = "new_parent", LookupDisplayName = "Parent", DryRun = true }, ct: Token); break;
                 case "many-to-many": await _service.CreateManyToManyAsync(new PPDS.Dataverse.Metadata.Authoring.CreateManyToManyRequest { SolutionUniqueName = "SyntheticSolution", Entity1LogicalName = "new_table", Entity2LogicalName = "new_child", SchemaName = "new_rel", DryRun = true }, ct: Token); break;
-                case "relationship-update": await _service.UpdateRelationshipAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateRelationshipRequest { SolutionUniqueName = "SyntheticSolution", SchemaName = "new_rel", DryRun = true }, ct: Token); break;
+                case "relationship-update": await _service.UpdateRelationshipAsync(new PPDS.Dataverse.Metadata.Authoring.UpdateRelationshipRequest { SolutionUniqueName = "SyntheticSolution", SchemaName = "new_rel", CascadeConfiguration = new CascadeConfigurationDto { Delete = CascadeBehavior.Restrict }, DryRun = true }, ct: Token); break;
                 case "choice-create": await _service.CreateGlobalChoiceAsync(new CreateGlobalChoiceRequest { SolutionUniqueName = "SyntheticSolution", SchemaName = "new_choice", DisplayName = "Choice", DryRun = true }, ct: Token); break;
                 case "choice-update": await _service.UpdateGlobalChoiceAsync(new UpdateGlobalChoiceRequest { SolutionUniqueName = "SyntheticSolution", Name = "new_choice", DryRun = true }, ct: Token); break;
                 case "option-add": return await _service.AddOptionValueAsync(new AddOptionValueRequest { OptionSetName = "new_choice", Label = "Label", DryRun = true }, Token);

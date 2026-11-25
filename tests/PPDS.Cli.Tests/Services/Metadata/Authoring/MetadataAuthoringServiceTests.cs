@@ -469,6 +469,46 @@ public class MetadataAuthoringServiceTests
             "the caller did not request a Description change, so it must not appear on the update payload");
     }
 
+    // #1919 sibling: the SDK's FileAttributeMetadata constructor sets RequiredLevel to None, so a file column update
+    // that did not ask for a required level would have sent None and could make a required file column optional.
+    [Fact]
+    public async Task UpdateColumnAsync_FileColumn_DoesNotSendARequiredLevelThatWasNotGiven()
+    {
+        var existingAttr = new FileAttributeMetadata
+        {
+            LogicalName = "new_document",
+            SchemaName = "new_document",
+            RequiredLevel = new AttributeRequiredLevelManagedProperty(AttributeRequiredLevel.ApplicationRequired)
+        };
+        var retrieveResponse = new RetrieveAttributeResponse();
+        retrieveResponse.Results["AttributeMetadata"] = existingAttr;
+
+        UpdateAttributeRequest? capturedRequest = null;
+        _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<OrganizationRequest, CancellationToken>((req, _) =>
+            {
+                if (req is RetrieveAttributeRequest)
+                    return Task.FromResult<OrganizationResponse>(retrieveResponse);
+                if (req is UpdateAttributeRequest ua)
+                    capturedRequest = ua;
+                return Task.FromResult(new OrganizationResponse());
+            });
+        LabelWriteStore.Attach(_client);
+
+        await _service.UpdateColumnAsync(new UpdateColumnRequest
+        {
+            SolutionUniqueName = "TestSolution",
+            EntityLogicalName = "account",
+            ColumnLogicalName = "new_document",
+            IsAuditEnabled = true
+        });
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.Attribute.Should().BeOfType<FileAttributeMetadata>();
+        capturedRequest.Attribute.RequiredLevel.Should().BeNull(
+            "the caller did not give a required level, so none may be sent");
+    }
+
     // Same silent-no-op class as #1009: --format on a DateTime column was being dropped
     // because ApplyTypeSpecificUpdates had no DateTimeAttributeMetadata case.
     [Fact]
@@ -600,8 +640,8 @@ public class MetadataAuthoringServiceTests
     {
         var existingRel = new OneToManyRelationshipMetadata
         {
-            SchemaName = "new_account_contact",
-            CascadeConfiguration = new CascadeConfiguration()
+            SchemaName = "new_account_contact", MetadataId = new Guid("6f1d7c3e-2a4b-4c5d-8e9f-0a1b2c3d4e5f"),
+            CascadeConfiguration = ReferentialCascade()
         };
         var retrieveResponse = new RetrieveRelationshipResponse();
         retrieveResponse.Results["RelationshipMetadata"] = existingRel;
@@ -674,14 +714,25 @@ public class MetadataAuthoringServiceTests
 
     #region UpdateRelationshipAsync
 
+    /// <summary>The settings Dataverse gives a new relationship: every setting is read, as a real read returns them (#1919).</summary>
+    private static CascadeConfiguration ReferentialCascade() => new()
+    {
+        Assign = CascadeType.NoCascade,
+        Delete = CascadeType.RemoveLink,
+        Merge = CascadeType.NoCascade,
+        Reparent = CascadeType.NoCascade,
+        Share = CascadeType.NoCascade,
+        Unshare = CascadeType.NoCascade
+    };
+
     [Fact]
     public async Task UpdateRelationshipAsync_ChangesCascadeConfig()
     {
         // Setup retrieve existing relationship
         var existingRel = new OneToManyRelationshipMetadata
         {
-            SchemaName = "new_account_contact",
-            CascadeConfiguration = new CascadeConfiguration()
+            SchemaName = "new_account_contact", MetadataId = new Guid("6f1d7c3e-2a4b-4c5d-8e9f-0a1b2c3d4e5f"),
+            CascadeConfiguration = ReferentialCascade()
         };
         var retrieveResponse = new RetrieveRelationshipResponse();
         retrieveResponse.Results["RelationshipMetadata"] = existingRel;

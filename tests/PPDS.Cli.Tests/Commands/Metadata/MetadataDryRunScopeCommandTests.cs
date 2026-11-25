@@ -32,7 +32,7 @@ public sealed class MetadataDryRunScopeCommandTests(ITestOutputHelper output)
             ("column update", "UpdateColumnAsync", "required-inputs", "--entity new_table --column new_column --display-name Renamed"),
             ("relationship create", "CreateOneToManyAsync", "input-and-publisher", "--from new_table --to new_child --type one-to-many --name new_rel --lookup-name new_parent --lookup-display-name Parent"),
             ("relationship create", "CreateManyToManyAsync", "input-and-publisher", "--from new_table --to new_child --type many-to-many --name new_rel"),
-            ("relationship update", "UpdateRelationshipAsync", "required-inputs", "--name new_rel --cascade-delete Restrict"),
+            ("relationship update", "UpdateRelationshipAsync", "current-settings", "--name new_rel --cascade-delete Restrict"),
             ("optionset create", "CreateGlobalChoiceAsync", "input-and-publisher", "--name new_choice --display-name Choice --options Label=17"),
             ("choice create", "CreateGlobalChoiceAsync", "input-and-publisher", "--name new_choice --display-name Choice --options Label=17"),
             ("optionset update", "UpdateGlobalChoiceAsync", "required-inputs", "--name new_choice --display-name Renamed"),
@@ -89,6 +89,10 @@ public sealed class MetadataDryRunScopeCommandTests(ITestOutputHelper output)
                 Assert.Contains("Read option metadata", help);
                 Assert.Contains("provisional", help);
                 break;
+            case "current-settings":
+                Assert.Contains("current cascade settings", help);
+                Assert.Contains("before and after", help);
+                break;
             default:
                 throw new InvalidOperationException($"Unrecognized preview scope: {scope}");
         }
@@ -125,7 +129,7 @@ public sealed class MetadataDryRunScopeCommandTests(ITestOutputHelper output)
         service.Setup(s => s.CreateManyToManyAsync(It.IsAny<CreateManyToManyRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))
             .Returns((CreateManyToManyRequest r, IMetadataAuthoringProgressReporter? _, CancellationToken t) => Reply(r, t, new CreateRelationshipResult { SchemaName = "new_rel", WasDryRun = true, ValidationMessages = [] }));
         service.Setup(s => s.UpdateRelationshipAsync(It.IsAny<UpdateRelationshipRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))
-            .Returns((UpdateRelationshipRequest r, IMetadataAuthoringProgressReporter? _, CancellationToken t) => Done(r, t));
+            .Returns((UpdateRelationshipRequest r, IMetadataAuthoringProgressReporter? _, CancellationToken t) => Reply(r, t, new UpdateRelationshipResult { SchemaName = "new_rel", WasDryRun = true }));
         service.Setup(s => s.CreateGlobalChoiceAsync(It.IsAny<CreateGlobalChoiceRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))
             .Returns((CreateGlobalChoiceRequest r, IMetadataAuthoringProgressReporter? _, CancellationToken t) => Reply(r, t, new CreateChoiceResult { Name = "new_choice", WasDryRun = true, ValidationMessages = [] }));
         service.Setup(s => s.UpdateGlobalChoiceAsync(It.IsAny<UpdateGlobalChoiceRequest>(), It.IsAny<IMetadataAuthoringProgressReporter?>(), It.IsAny<CancellationToken>()))

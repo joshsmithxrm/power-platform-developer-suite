@@ -87,7 +87,10 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
         var request = Request("both", publish: true);
         object value = setting switch
         {
-            "RequiredLevel" or "Format" or "AutoNumberFormat" => "",
+            // A valid name: the shape refuses any supplied setting (blank text is refused earlier, for its own reason).
+            "RequiredLevel" => "Required",
+            "Format" => "Text",
+            "AutoNumberFormat" => "",
             "IsAuditEnabled" or "IsSecured" or "IsValidForAdvancedFind" => false,
             "MinValue" or "MaxValue" => 0d,
             _ => 0
@@ -343,6 +346,7 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
         Assert.True(update.MergeLabels);
         var expected = ColumnLabelHarness.Fresh(type);
         expected.LogicalName = ColumnLabelHarness.Column; expected.SchemaName = ColumnLabelHarness.Schema;
+        expected.RequiredLevel = null; // #1919: the file type's constructor sets None; a level not asked for is not sent.
         RequestedLabels(expected, request);
         Assert.True(XNode.DeepEquals(ColumnLabelHarness.Serialize(expected), ColumnLabelHarness.Serialize(update.Attribute)));
         Assert.Equal(original, h.SourceXml());
