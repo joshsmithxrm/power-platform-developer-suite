@@ -322,6 +322,11 @@ public static class LoadCommand
                 WriteTextResult(result, dryRun);
             }
 
+            if (result.Refused)
+            {
+                return ExitCodes.ValidationError;
+            }
+
             return result.Success ? ExitCodes.Success : ExitCodes.PartialSuccess;
         }
         catch (MappingIncompleteException ex)
@@ -543,6 +548,12 @@ public static class LoadCommand
 
     private static void WriteTextResult(LoadResult result, bool dryRun)
     {
+        if (result.Refused)
+        {
+            WriteTextRefusal(result);
+            return;
+        }
+
         if (dryRun)
         {
             Console.Error.WriteLine("Dry-run complete (no records written)");
@@ -620,11 +631,31 @@ public static class LoadCommand
         }
     }
 
+    private static void WriteTextRefusal(LoadResult result)
+    {
+        const int shown = 20;
+        Console.Error.WriteLine(
+            $"Load refused: {result.FailureCount:N0} row(s) have a value that is not valid for its column. Nothing was written.");
+        Console.Error.WriteLine("Every cell is checked before any row is written; correct these and run the load again.");
+        Console.Error.WriteLine();
+        foreach (var error in result.Errors.Take(shown))
+        {
+            var column = string.IsNullOrEmpty(error.Column) ? "" : $", column '{error.Column}'";
+            Console.Error.WriteLine($"  Row {error.RowNumber}{column}: {error.Message}");
+        }
+
+        if (result.Errors.Count > shown)
+        {
+            Console.Error.WriteLine($"  ... and {result.Errors.Count - shown:N0} more");
+        }
+    }
+
     private static void WriteJsonResult(LoadResult result)
     {
         var output = new
         {
             success = result.Success,
+            refused = result.Refused,
             totalRows = result.TotalRows,
             successCount = result.SuccessCount,
             failureCount = result.FailureCount,

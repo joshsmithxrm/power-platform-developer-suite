@@ -311,6 +311,10 @@ public static class ServiceRegistration
             sp.GetService<ICachedMetadataProvider>(),
             sp.GetRequiredService<IOrganizationBaseLanguageProvider>()));
 
+        // Values of data update, converted by each column's type from metadata (#1917).
+        services.AddTransient<IDataUpdateValueService>(sp => new DataUpdateValueService(
+            sp.GetRequiredService<IDataverseConnectionPool>()));
+
         services.AddTransient<IRoleService>(sp => new RoleService(
             sp.GetRequiredService<IDataverseConnectionPool>(),
             sp.GetRequiredService<IShakedownGuard>(),

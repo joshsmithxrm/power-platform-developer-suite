@@ -8,7 +8,13 @@ public sealed record LoadResult
     /// <summary>
     /// Whether the load completed without errors.
     /// </summary>
-    public bool Success => FailureCount == 0;
+    public bool Success => FailureCount == 0 && !Refused;
+
+    /// <summary>
+    /// Whether the load was refused before anything was written: a cell is not exact for its column, a column is not
+    /// in the table, or a lookup does not resolve. <see cref="Errors"/> names each row and column; no row was written.
+    /// </summary>
+    public bool Refused { get; init; }
 
     /// <summary>
     /// Total number of rows in the CSV file.
@@ -36,7 +42,8 @@ public sealed record LoadResult
     public int? UpdatedCount { get; init; }
 
     /// <summary>
-    /// Number of rows skipped due to validation errors.
+    /// Number of rows not written because of validation errors. On a refusal (<see cref="Refused"/>) it counts the
+    /// valid rows, which are not written either.
     /// </summary>
     public int SkippedCount { get; init; }
 

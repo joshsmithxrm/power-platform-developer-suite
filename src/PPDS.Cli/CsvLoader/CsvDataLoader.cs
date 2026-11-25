@@ -303,7 +303,26 @@ public sealed class CsvDataLoader
 
         _logger?.LogInformation("Built {Count} entities from CSV", entities.Count);
 
-        // 6. Dry-run mode - just return validation results
+        // 6. The whole file is checked before anything is written: a cell that is not exact for its column, a column
+        // the table does not have or a lookup that does not resolve refuses the load, and no row is written (#1916).
+        if (errors.Count > 0)
+        {
+            stopwatch.Stop();
+            var rowsWithErrors = errors.Select(e => e.RowNumber).Distinct().Count();
+            return new LoadResult
+            {
+                Refused = true,
+                TotalRows = rowsWithErrors + entities.Count,
+                SuccessCount = 0,
+                FailureCount = rowsWithErrors,
+                SkippedCount = entities.Count,
+                Duration = stopwatch.Elapsed,
+                Errors = errors,
+                Warnings = warnings
+            };
+        }
+
+        // 7. Dry-run mode - just return validation results
         if (options.DryRun)
         {
             stopwatch.Stop();
@@ -319,7 +338,7 @@ public sealed class CsvDataLoader
             };
         }
 
-        // 7. Execute bulk upsert
+        // 8. Execute bulk upsert
         if (entities.Count == 0)
         {
             stopwatch.Stop();
@@ -349,7 +368,7 @@ public sealed class CsvDataLoader
             progress: progress,
             cancellationToken: cancellationToken);
 
-        // 8. Map bulk operation errors
+        // 9. Map bulk operation errors
         foreach (var bulkError in bulkResult.Errors)
         {
             errors.Add(new LoadError
@@ -597,32 +616,42 @@ public sealed class CsvDataLoader
                                 }
                                 else
                                 {
-                                    // Non-lookup key field - use standard coercion
-                                    var coercedKey = parser.CoerceValue(keyValue, keyAttr, mappings.GetValueOrDefault(keyHeader));
-                                    if (coercedKey != null)
+                                    // Non-lookup key field: the same conversion as every other cell (#1916)
+                                    var (keyConverted, coercedKey, keyRefusal) =
+                                        parser.TryCoerceValue(keyValue, keyAttr, mappings.GetValueOrDefault(keyHeader));
+                                    if (keyConverted && coercedKey != null)
                                     {
                                         entity.KeyAttributes[trimmedKey] = coercedKey;
                                         processedKeyFields.Add(trimmedKey);
                                     }
                                     else
                                     {
-                                        // Key coercion failed - this is a critical error
                                         errors.Add(new LoadError
                                         {
                                             RowNumber = rowNumber,
                                             Column = keyHeader,
                                             ErrorCode = LoadErrorCodes.TypeCoercionFailed,
-                                            Message = $"Cannot convert key value '{keyValue}' to {keyAttr.AttributeType}",
+                                            Message = $"Alternate key '{trimmedKey}': {keyRefusal}",
                                             Value = keyValue
                                         });
                                         hasError = true;
+                                        processedKeyFields.Add(trimmedKey); // reported once, as the key
                                     }
                                 }
                             }
                             else
                             {
-                                entity.KeyAttributes[trimmedKey] = keyValue;
-                                processedKeyFields.Add(trimmedKey);
+                                // A key column the table does not have: its value's type cannot be known, so it is not
+                                // sent as text on a guess.
+                                errors.Add(new LoadError
+                                {
+                                    RowNumber = rowNumber,
+                                    Column = keyHeader,
+                                    ErrorCode = LoadErrorCodes.ColumnNotFound,
+                                    Message = $"The alternate key field '{trimmedKey}' is not a column of the table.",
+                                    Value = keyValue
+                                });
+                                hasError = true;
                             }
                         }
                     }
@@ -663,7 +692,12 @@ public sealed class CsvDataLoader
                     {
                         entity[fieldName] = entityRef;
                     }
-                    // Errors are collected in lookupResolver.Errors
+                    else
+                    {
+                        // The error is collected in lookupResolver.Errors. The row is not written without the
+                        // lookup it names.
+                        hasError = true;
+                    }
                     continue;
                 }
 
@@ -691,7 +725,7 @@ public sealed class CsvDataLoader
                         RowNumber = rowNumber,
                         Column = header,
                         ErrorCode = LoadErrorCodes.TypeCoercionFailed,
-                        Message = errorMessage ?? $"Cannot convert value",
+                        Message = errorMessage ?? "The value is not valid for the column.",
                         Value = rawValue
                     });
                     hasError = true;

@@ -284,6 +284,12 @@ public static class UpdateCommand
 
             var dataQueryService = serviceProvider.GetRequiredService<IDataQueryService>();
             var bulkExecutor = serviceProvider.GetRequiredService<IBulkOperationExecutor>();
+            var valueService = serviceProvider.GetRequiredService<IDataUpdateValueService>();
+
+            // The --set values are converted by each column's type from metadata before any record is read (#1917).
+            var setValues = file == null
+                ? await valueService.ConvertSetValuesAsync(entity, set!, cancellationToken)
+                : null;
 
             // Build entities to update based on input mode
             List<Entity> entitiesToUpdate;
@@ -291,7 +297,7 @@ public static class UpdateCommand
             if (id.HasValue)
             {
                 var updateEntity = new Entity(entity, id.Value);
-                ApplySetValues(updateEntity, set!);
+                ApplySetValues(updateEntity, setValues!);
                 entitiesToUpdate = [updateEntity];
             }
             else if (!string.IsNullOrEmpty(key))
@@ -303,12 +309,13 @@ public static class UpdateCommand
                     return ExitCodes.NotFoundError;
                 }
                 var updateEntity = new Entity(entity, resolvedId.Value);
-                ApplySetValues(updateEntity, set!);
+                ApplySetValues(updateEntity, setValues!);
                 entitiesToUpdate = [updateEntity];
             }
             else if (file != null)
             {
-                entitiesToUpdate = await LoadEntitiesFromFileAsync(file, idColumn, entity, mapping, cancellationToken);
+                entitiesToUpdate = (await valueService.ReadUpdateFileAsync(
+                    entity, file.FullName, idColumn, mapping?.FullName, cancellationToken)).ToList();
                 if (entitiesToUpdate.Count == 0)
                 {
                     WriteError(globalOptions, "NO_RECORDS", "No records found in file");
@@ -339,7 +346,7 @@ public static class UpdateCommand
                 entitiesToUpdate = ids.Select(recordId =>
                 {
                     var updateEntity = new Entity(entity, recordId);
-                    ApplySetValues(updateEntity, set!);
+                    ApplySetValues(updateEntity, setValues!);
                     return updateEntity;
                 }).ToList();
             }
@@ -522,249 +529,12 @@ public static class UpdateCommand
         }
     }
 
-    private static void ApplySetValues(Entity entity, string setString)
+    private static void ApplySetValues(Entity entity, IReadOnlyDictionary<string, object?> values)
     {
-        // Parse field=value pairs from --set option, respecting quoted values
-        // Format: field1=value1,field2="value with, comma",field3=value3
-        foreach (var pair in ParseSetPairs(setString))
+        foreach (var (field, value) in values)
         {
-            var eqIndex = pair.IndexOf('=');
-            if (eqIndex < 0)
-            {
-                throw new ArgumentException($"Invalid --set format: {pair}. Expected field=value.");
-            }
-
-            var field = pair[..eqIndex].Trim();
-            var value = pair[(eqIndex + 1)..].Trim();
-
-            // Handle special values
-            if (value.Equals("null", StringComparison.OrdinalIgnoreCase))
-            {
-                entity[field] = null;
-            }
-            else if (value.Equals("true", StringComparison.OrdinalIgnoreCase))
-            {
-                entity[field] = true;
-            }
-            else if (value.Equals("false", StringComparison.OrdinalIgnoreCase))
-            {
-                entity[field] = false;
-            }
-            else if (int.TryParse(value, out var intValue))
-            {
-                entity[field] = intValue;
-            }
-            else if (decimal.TryParse(value, out var decimalValue))
-            {
-                entity[field] = decimalValue;
-            }
-            else if (Guid.TryParse(value, out var guidValue))
-            {
-                entity[field] = guidValue;
-            }
-            else if (DateTime.TryParse(value, out var dateValue))
-            {
-                entity[field] = dateValue;
-            }
-            else
-            {
-                // Default to string
-                entity[field] = value;
-            }
+            entity[field] = value;
         }
-    }
-
-    /// <summary>
-    /// Parses field=value pairs, respecting quoted values that may contain commas.
-    /// </summary>
-    private static List<string> ParseSetPairs(string setString)
-    {
-        var pairs = new List<string>();
-        var current = new System.Text.StringBuilder();
-        var inQuotes = false;
-
-        foreach (var c in setString)
-        {
-            if (c == '"')
-            {
-                inQuotes = !inQuotes;
-                // Don't include quotes in output
-            }
-            else if (c == ',' && !inQuotes)
-            {
-                var pair = current.ToString().Trim();
-                if (!string.IsNullOrEmpty(pair))
-                {
-                    pairs.Add(pair);
-                }
-                current.Clear();
-            }
-            else
-            {
-                current.Append(c);
-            }
-        }
-
-        // Add final pair
-        var finalPair = current.ToString().Trim();
-        if (!string.IsNullOrEmpty(finalPair))
-        {
-            pairs.Add(finalPair);
-        }
-
-        return pairs;
-    }
-
-    private static async Task<List<Entity>> LoadEntitiesFromFileAsync(
-        FileInfo file,
-        string? idColumn,
-        string entity,
-        FileInfo? mappingFile,
-        CancellationToken cancellationToken)
-    {
-        var content = await File.ReadAllTextAsync(file.FullName, cancellationToken);
-        content = content.Trim();
-
-        // Load mapping if provided
-        Dictionary<string, string>? columnMappings = null;
-        if (mappingFile != null)
-        {
-            var mappingContent = await File.ReadAllTextAsync(mappingFile.FullName, cancellationToken);
-            var mappingDoc = JsonDocument.Parse(mappingContent);
-            if (mappingDoc.RootElement.TryGetProperty("columns", out var columns))
-            {
-                columnMappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var col in columns.EnumerateObject())
-                {
-                    if (col.Value.TryGetProperty("field", out var field))
-                    {
-                        columnMappings[col.Name] = field.GetString()!;
-                    }
-                }
-            }
-        }
-
-        // Parse CSV
-        var lines = content.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
-        if (lines.Length == 0) return new List<Entity>();
-
-        // Parse header using same CSV parser as data rows for consistency
-        var headers = ParseCsvLine(lines[0]).Select(h => h.Trim()).ToList();
-
-        // Find ID column
-        var idColIndex = -1;
-        var actualIdColumn = idColumn ?? $"{entity}id";
-
-        idColIndex = headers.FindIndex(h => h.Equals(actualIdColumn, StringComparison.OrdinalIgnoreCase));
-        if (idColIndex < 0)
-        {
-            // Try common alternatives
-            idColIndex = headers.FindIndex(h => h.Equals("id", StringComparison.OrdinalIgnoreCase));
-        }
-
-        if (idColIndex < 0)
-        {
-            throw new ArgumentException($"Could not find ID column '{actualIdColumn}'. Specify --id-column. Available: {string.Join(", ", headers)}");
-        }
-
-        var entities = new List<Entity>();
-
-        // Parse data rows
-        for (var i = 1; i < lines.Length; i++)
-        {
-            var line = lines[i].Trim();
-            if (string.IsNullOrEmpty(line)) continue;
-
-            var values = ParseCsvLine(line);
-            if (values.Count <= idColIndex) continue;
-
-            if (!Guid.TryParse(values[idColIndex].Trim().Trim('"'), out var recordId))
-            {
-                continue; // Skip rows with invalid IDs
-            }
-
-            var updateEntity = new Entity(entity, recordId);
-
-            // Add all columns except the ID column
-            for (var j = 0; j < Math.Min(headers.Count, values.Count); j++)
-            {
-                if (j == idColIndex) continue;
-
-                var header = headers[j];
-                var value = values[j].Trim().Trim('"');
-
-                // Apply mapping if available
-                var fieldName = columnMappings != null && columnMappings.TryGetValue(header, out var mapped)
-                    ? mapped
-                    : header;
-
-                // Set the value (basic type inference)
-                if (string.IsNullOrEmpty(value))
-                {
-                    updateEntity[fieldName] = null;
-                }
-                else if (value.Equals("true", StringComparison.OrdinalIgnoreCase))
-                {
-                    updateEntity[fieldName] = true;
-                }
-                else if (value.Equals("false", StringComparison.OrdinalIgnoreCase))
-                {
-                    updateEntity[fieldName] = false;
-                }
-                else if (int.TryParse(value, out var intVal))
-                {
-                    updateEntity[fieldName] = intVal;
-                }
-                else if (decimal.TryParse(value, out var decVal))
-                {
-                    updateEntity[fieldName] = decVal;
-                }
-                else if (Guid.TryParse(value, out var guidVal))
-                {
-                    updateEntity[fieldName] = guidVal;
-                }
-                else if (DateTime.TryParse(value, out var dateVal))
-                {
-                    updateEntity[fieldName] = dateVal;
-                }
-                else
-                {
-                    updateEntity[fieldName] = value;
-                }
-            }
-
-            entities.Add(updateEntity);
-        }
-
-        return entities;
-    }
-
-    private static List<string> ParseCsvLine(string line)
-    {
-        var values = new List<string>();
-        var current = new System.Text.StringBuilder();
-        var inQuotes = false;
-
-        foreach (var c in line)
-        {
-            if (c == '"')
-            {
-                inQuotes = !inQuotes;
-                // Don't append quotes - just toggle state
-            }
-            else if (c == ',' && !inQuotes)
-            {
-                values.Add(current.ToString());
-                current.Clear();
-            }
-            else
-            {
-                current.Append(c);
-            }
-        }
-
-        values.Add(current.ToString());
-        return values;
     }
 
     private static void WriteTextResult(BulkOperationResult result)
