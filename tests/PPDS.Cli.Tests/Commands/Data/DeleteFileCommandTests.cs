@@ -10,6 +10,7 @@ using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Models;
 using PPDS.Dataverse.Progress;
+using PPDS.Cli.Tests.TestHelpers;
 using Xunit;
 
 namespace PPDS.Cli.Tests.Commands.Data;
@@ -19,6 +20,7 @@ namespace PPDS.Cli.Tests.Commands.Data;
 /// table's ids leads to no delete call at all; an exact file deletes exactly its ids (#1915).
 /// </summary>
 [Trait("Category", "Unit")]
+[Collection(nameof(ConsoleCaptureCollection))]
 public sealed class DeleteFileCommandTests : IDisposable
 {
     private static readonly Guid Parent = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
