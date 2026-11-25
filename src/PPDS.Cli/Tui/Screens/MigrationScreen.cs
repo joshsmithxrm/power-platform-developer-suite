@@ -373,29 +373,20 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
                 _recordsPerSecond = result.RecordsPerSecond;
                 _resultsLabel.Text = FormatImportResults(result);
 
-                if (linkedCts.IsCancellationRequested)
-                    CompleteOperation(MigrationOperationState.Cancelled, stepsLeftDisabled: result.PluginStepsLeftDisabled);
-                else if (result.Success)
-                    CompleteOperation(MigrationOperationState.Completed);
-                else
-                    CompleteOperation(MigrationOperationState.Failed, "Import completed with errors.", result.PluginStepsLeftDisabled);
+                var outcome = ImportOutcomeOf(result, null, linkedCts.IsCancellationRequested);
+                CompleteOperation(outcome.State, outcome.Error, outcome.StepsLeftDisabled);
             });
-        }
-        catch (ImportCancelledException ex)
-        {
-            Application.MainLoop?.Invoke(() => CompleteOperation(MigrationOperationState.Cancelled, stepsLeftDisabled: ex.PluginStepsLeftDisabled));
-        }
-        catch (OperationCanceledException)
-        {
-            Application.MainLoop?.Invoke(() => CompleteOperation(MigrationOperationState.Cancelled));
         }
         catch (Exception ex)
         {
+            var outcome = ImportOutcomeOf(null, ex, cancelRequested: false);
             Application.MainLoop?.Invoke(() =>
             {
-                ErrorService.ReportError("Import failed", ex, "Migration.Import");
-                CompleteOperation(MigrationOperationState.Failed, ex.Message,
-                    (ex as ImportRefusedException)?.PluginStepsLeftDisabled);
+                if (outcome.State == MigrationOperationState.Failed)
+                {
+                    ErrorService.ReportError("Import failed", ex, "Migration.Import");
+                }
+                CompleteOperation(outcome.State, outcome.Error, outcome.StepsLeftDisabled);
             });
         }
     }
@@ -501,6 +492,33 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
         _errorMessage = error;
 
         _statusLabel.Text = FinalStatusText(_mode, state, FormatTimeSpan(_elapsed.Elapsed), error, stepsLeftDisabled);
+    }
+
+    /// <summary>
+    /// The final state, message and plug-in steps left disabled for an import that returned
+    /// <paramref name="result"/> or threw <paramref name="exception"/>. Every path keeps the steps
+    /// left disabled, so the final status names them (#1934 r2 MF6).
+    /// </summary>
+    internal static (MigrationOperationState State, string? Error, IReadOnlyList<PluginStepInfo>? StepsLeftDisabled) ImportOutcomeOf(
+        ImportResult? result, Exception? exception, bool cancelRequested)
+    {
+        if (result != null)
+        {
+            if (cancelRequested)
+                return (MigrationOperationState.Cancelled, null, result.PluginStepsLeftDisabled);
+            return result.Success
+                ? (MigrationOperationState.Completed, null, result.PluginStepsLeftDisabled)
+                : (MigrationOperationState.Failed, "Import completed with errors.", result.PluginStepsLeftDisabled);
+        }
+
+        return exception switch
+        {
+            ImportCancelledException cancelled => (MigrationOperationState.Cancelled, null, cancelled.PluginStepsLeftDisabled),
+            OperationCanceledException => (MigrationOperationState.Cancelled, null, null),
+            ImportRefusedException refused => (MigrationOperationState.Failed, refused.Message, refused.PluginStepsLeftDisabled),
+            null => (MigrationOperationState.Failed, "The import returned no result.", null),
+            _ => (MigrationOperationState.Failed, exception.Message, null)
+        };
     }
 
     /// <summary>

@@ -591,6 +591,46 @@ public class TieredImporterWriteSafetyTests
     }
 
     [Fact]
+    public async Task ImportThatFails_ThenAFailedReenable_TheFailureResultKeepsTheStep()
+    {
+        // #1934 r2 MF6: the failure result (an exception during the import) must carry the steps left disabled.
+        var (sut, _, step) = ReenableAlwaysFails();
+        var data = Data((Table("account", disablePlugins: true), Accounts(1)));
+        _bulk.Setup(x => x.UpsertMultipleAsync(It.IsAny<string>(), It.IsAny<IEnumerable<Entity>>(), It.IsAny<BulkOperationOptions>(), It.IsAny<DataverseClientOptions>(), It.IsAny<IProgress<ProgressSnapshot>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("the service went away"));
+
+        var result = await sut.ImportAsync(data, Plan("account"), new ImportOptions());
+
+        result.Success.Should().BeFalse();
+        result.PluginStepsLeftDisabled.Should().Equal(step);
+    }
+
+    [Fact]
+    public async Task StepNeitherDisabledNorReenabled_IsReportedAsStateUnknown_NotAsDisabled()
+    {
+        // #1934 r2 should-fix 1: no privilege on step registrations fails both updates.
+        var (sut, target, widgetStep, _) = WidgetAndGadget();
+        var second = Guid.NewGuid();
+        target.Steps.Add((second, "widget step 2", 10051));
+        target.OnUpdate = (id, state) =>
+        {
+            if (id == second) throw new InvalidOperationException("no privilege");
+        };
+        var messages = new List<string>();
+        var progress = new Mock<IProgressReporter>();
+        progress.Setup(p => p.Report(It.IsAny<ProgressEventArgs>())).Callback<ProgressEventArgs>(a => messages.Add(a.Message ?? ""));
+
+        var act = () => sut.ImportAsync(Widgets(), Plan("new_widget"), new ImportOptions(), progress.Object);
+
+        var ex = (await act.Should().ThrowAsync<ImportRefusedException>()).Which;
+        ex.PluginStepInUnknownState.Should().Be(new PluginStepInfo(second, "widget step 2"));
+        ex.PluginStepsLeftDisabled.Should().BeEmpty("the step that was disabled, widget step, was re-enabled");
+        ex.Message.Should().Contain("its state is unknown").And.NotContain("remain disabled");
+        messages.Should().Contain(m => m.Contains("'widget step 2'") && m.Contains("could not be disabled and could not be re-enabled: its state is unknown"));
+        messages.Should().NotContain(m => m.Contains("'widget step 2'") && m.Contains("remains disabled"));
+    }
+
+    [Fact]
     public async Task EveryStepReenabled_TheImportSucceeds_AndSaysReenabled()
     {
         var (sut, _, _, _) = WidgetAndGadget();

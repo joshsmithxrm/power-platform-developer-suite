@@ -24,6 +24,12 @@ namespace PPDS.Migration.Import
         public IReadOnlyList<PluginStepInfo> PluginStepsLeftDisabled { get; init; } = Array.Empty<PluginStepInfo>();
 
         /// <summary>
+        /// Gets the plug-in step that could not be disabled and whose re-enable also failed: it may or
+        /// may not be disabled, so its state must be checked in the target. Null when none.
+        /// </summary>
+        public PluginStepInfo? PluginStepInUnknownState { get; init; }
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="ImportRefusedException"/> class.
         /// </summary>
         /// <param name="reason">One of <see cref="ImportRefusalReasons"/>.</param>

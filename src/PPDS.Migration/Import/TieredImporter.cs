@@ -295,9 +295,11 @@ namespace PPDS.Migration.Import
             {
                 // A step could not be disabled: re-enable what was recorded first, then refuse
                 // with a message that says what is actually true afterwards (#1921 review MF3).
-                var leftDisabled = await EnablePluginsAfterImportAsync(disabledPluginSteps, pluginStepsToDisable, progress, warnings).ConfigureAwait(false);
+                // Each step is recorded before its update is sent, so the one that failed is the last.
+                Guid? notDisabled = disabledPluginSteps.Count > 0 ? disabledPluginSteps[^1] : null;
+                var leftDisabled = await EnablePluginsAfterImportAsync(disabledPluginSteps, pluginStepsToDisable, progress, warnings, notDisabled).ConfigureAwait(false);
                 pluginsReenabled = true;
-                throw StepNotDisabledRefusal(refused, disabledPluginSteps, pluginStepsToDisable, leftDisabled);
+                throw StepNotDisabledRefusal(refused, notDisabled, pluginStepsToDisable, leftDisabled);
             }
             catch (OperationCanceledException cancelled)
             {
@@ -498,7 +500,8 @@ namespace PPDS.Migration.Import
             IReadOnlyList<Guid> disabledPluginSteps,
             IReadOnlyList<PluginStepInfo> stepInfo,
             IProgressReporter progress,
-            IWarningCollector warnings)
+            IWarningCollector warnings,
+            Guid? notDisabledStep = null)
         {
             if (disabledPluginSteps.Count == 0 || _pluginStepManager == null)
             {
@@ -554,7 +557,8 @@ namespace PPDS.Migration.Import
                 .Select(id => stepInfo.FirstOrDefault(st => st.Id == id) ?? new PluginStepInfo(id, null))
                 .ToList();
             var reenabled = disabledPluginSteps.Distinct().Count() - leftDisabled.Count;
-            var names = string.Join(", ", leftDisabled.Select(st => DescribeStep(st.Id, stepInfo)));
+            var names = string.Join(", ", leftDisabled.Select(st => DescribeStep(st.Id, stepInfo) +
+                (st.Id == notDisabledStep ? " (state unknown: it may never have been disabled)" : "")));
 
             warnings.AddWarning(new ImportWarning
             {
@@ -566,13 +570,16 @@ namespace PPDS.Migration.Import
             });
 
             // Also through the progress reporter: a cancelled import returns no result, and a
-            // killed run has only this output.
+            // killed run has only this output. The step whose disable failed was perhaps never
+            // disabled: its state is unknown, not "disabled" (#1934 r2 should-fix 1).
             foreach (var step in leftDisabled)
             {
                 progress.Report(new ProgressEventArgs
                 {
                     Phase = MigrationPhase.Complete,
-                    Message = $"Warning: plugin step {DescribeStep(step.Id, stepInfo)} could not be re-enabled and remains disabled. Re-enable it manually."
+                    Message = step.Id == notDisabledStep
+                        ? $"Warning: plugin step {DescribeStep(step.Id, stepInfo)} could not be disabled and could not be re-enabled: its state is unknown. Check it in the target."
+                        : $"Warning: plugin step {DescribeStep(step.Id, stepInfo)} could not be re-enabled and remains disabled. Re-enable it manually."
                 });
             }
 
@@ -593,28 +600,43 @@ namespace PPDS.Migration.Import
         /// </summary>
         private static ImportRefusedException StepNotDisabledRefusal(
             ImportRefusedException original,
-            IReadOnlyList<Guid> disabledPluginSteps,
+            Guid? notDisabled,
             IReadOnlyList<PluginStepInfo> stepInfo,
-            IReadOnlyList<PluginStepInfo> leftDisabled)
+            IReadOnlyList<PluginStepInfo> notReenabled)
         {
-            // Each step is recorded before its update is sent, so the one that failed is the last.
-            var failed = disabledPluginSteps.Count > 0
-                ? stepInfo.FirstOrDefault(st => st.Id == disabledPluginSteps[^1])?.Name
-                : null;
-            var which = string.IsNullOrEmpty(failed) ? "A plug-in step" : $"Plug-in step '{failed}'";
-            var outcome = leftDisabled.Count == 0
-                ? "Every step this import disabled has been re-enabled."
-                : $"{leftDisabled.Count} step(s) could not be re-enabled and remain disabled: " +
-                  string.Join(", ", leftDisabled.Select(st => string.IsNullOrEmpty(st.Name) ? "(unnamed step)" : $"'{st.Name}'")) +
-                  ". Re-enable them in the target.";
+            static string Named(PluginStepInfo st) => string.IsNullOrEmpty(st.Name) ? "(unnamed step)" : $"'{st.Name}'";
+
+            var failedName = notDisabled.HasValue ? stepInfo.FirstOrDefault(st => st.Id == notDisabled.Value)?.Name : null;
+            var which = string.IsNullOrEmpty(failedName) ? "A plug-in step" : $"Plug-in step '{failedName}'";
+
+            // The step whose disable failed may or may not have been disabled; if its re-enable
+            // failed too, its state is unknown (#1934 r2 should-fix 1). Only the others were
+            // certainly disabled and are left disabled.
+            var stateUnknown = notReenabled.FirstOrDefault(st => st.Id == notDisabled);
+            var leftDisabled = notReenabled.Where(st => st.Id != notDisabled).ToList();
+
+            var outcome = new List<string>();
+            if (leftDisabled.Count == 0 && stateUnknown == null)
+            {
+                outcome.Add("Every step this import disabled has been re-enabled.");
+            }
+            if (leftDisabled.Count > 0)
+            {
+                outcome.Add($"{leftDisabled.Count} step(s) could not be re-enabled and remain disabled: {string.Join(", ", leftDisabled.Select(Named))}. Re-enable them in the target.");
+            }
+            if (stateUnknown != null)
+            {
+                outcome.Add($"The re-enable of {Named(stateUnknown)} also failed, so its state is unknown: check it in the target.");
+            }
 
             return new ImportRefusedException(
                 ImportRefusalReasons.PluginStepNotDisabled,
-                $"{which} could not be disabled, so the import was not run and no record was written. {outcome} " +
+                $"{which} could not be disabled, so the import was not run and no record was written. {string.Join(" ", outcome)} " +
                 "Check that you can change plug-in step registrations in the target, or remove disableplugins from the schema.",
                 original.InnerException ?? original)
             {
-                PluginStepsLeftDisabled = leftDisabled
+                PluginStepsLeftDisabled = leftDisabled,
+                PluginStepInUnknownState = stateUnknown
             };
         }
 

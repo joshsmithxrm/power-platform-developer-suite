@@ -98,4 +98,81 @@ public sealed class MigrationScreenImportModeTests
         Assert.Contains("Plug-in steps left disabled (1)", text);
         Assert.Contains($"audit step ({id})", text);
     }
+
+    // #1934 r2 MF6: every way an import ends keeps the steps left disabled for the final status.
+    private static readonly PluginStepInfo Step = new(Guid.NewGuid(), "audit step");
+
+    [Fact]
+    public void Outcome_SuccessfulResult_IsCompleted()
+    {
+        var (state, error, steps) = MigrationScreen.ImportOutcomeOf(new ImportResult { Success = true }, null, cancelRequested: false);
+
+        Assert.Equal(MigrationOperationState.Completed, state);
+        Assert.Null(error);
+        Assert.Empty(steps!);
+    }
+
+    [Fact]
+    public void Outcome_FailedResult_KeepsTheSteps()
+    {
+        var (state, error, steps) = MigrationScreen.ImportOutcomeOf(
+            new ImportResult { Success = false, PluginStepsLeftDisabled = new[] { Step } }, null, cancelRequested: false);
+
+        Assert.Equal(MigrationOperationState.Failed, state);
+        Assert.Equal("Import completed with errors.", error);
+        Assert.Equal(new[] { Step }, steps);
+    }
+
+    [Fact]
+    public void Outcome_ResultAfterACancel_IsCancelled_AndKeepsTheSteps()
+    {
+        var (state, _, steps) = MigrationScreen.ImportOutcomeOf(
+            new ImportResult { Success = false, PluginStepsLeftDisabled = new[] { Step } }, null, cancelRequested: true);
+
+        Assert.Equal(MigrationOperationState.Cancelled, state);
+        Assert.Equal(new[] { Step }, steps);
+    }
+
+    [Fact]
+    public void Outcome_CancelledImport_KeepsTheSteps()
+    {
+        var (state, _, steps) = MigrationScreen.ImportOutcomeOf(
+            null, new ImportCancelledException(new[] { Step }, new OperationCanceledException()), cancelRequested: false);
+
+        Assert.Equal(MigrationOperationState.Cancelled, state);
+        Assert.Equal(new[] { Step }, steps);
+    }
+
+    [Fact]
+    public void Outcome_PlainCancel_IsCancelled()
+    {
+        var (state, _, steps) = MigrationScreen.ImportOutcomeOf(null, new OperationCanceledException(), cancelRequested: false);
+
+        Assert.Equal(MigrationOperationState.Cancelled, state);
+        Assert.Null(steps);
+    }
+
+    [Fact]
+    public void Outcome_Refusal_IsFailed_WithItsMessage_AndKeepsTheSteps()
+    {
+        var refused = new ImportRefusedException(ImportRefusalReasons.PluginStepNotDisabled, "Plug-in step 'x' could not be disabled.")
+        {
+            PluginStepsLeftDisabled = new[] { Step }
+        };
+
+        var (state, error, steps) = MigrationScreen.ImportOutcomeOf(null, refused, cancelRequested: false);
+
+        Assert.Equal(MigrationOperationState.Failed, state);
+        Assert.Equal(refused.Message, error);
+        Assert.Equal(new[] { Step }, steps);
+    }
+
+    [Fact]
+    public void Outcome_OtherException_IsFailed_WithItsMessage()
+    {
+        var (state, error, _) = MigrationScreen.ImportOutcomeOf(null, new InvalidOperationException("boom"), cancelRequested: false);
+
+        Assert.Equal(MigrationOperationState.Failed, state);
+        Assert.Equal("boom", error);
+    }
 }

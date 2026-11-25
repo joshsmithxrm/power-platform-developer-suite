@@ -21,26 +21,6 @@ namespace PPDS.Cli.Commands.Data;
 public static class ImportCommand
 {
     /// <summary>
-    /// Writes the plug-in steps an import disabled and could not re-enable, each with its id, so
-    /// they can be re-enabled by hand (#1921 review MF3). Writes nothing when there are none.
-    /// </summary>
-    internal static void WritePluginStepsLeftDisabled(TextWriter error, IReadOnlyList<PluginStepInfo> steps)
-    {
-        if (steps.Count == 0)
-        {
-            return;
-        }
-
-        error.WriteLine();
-        error.WriteLine($"Warning: {steps.Count} plug-in step(s) that this import disabled could not be re-enabled and remain disabled in the target:");
-        foreach (var step in steps)
-        {
-            error.WriteLine($"  - {(string.IsNullOrEmpty(step.Name) ? "(unnamed step)" : step.Name)} ({step.Id})");
-        }
-        error.WriteLine("Re-enable them in the target (for example in the Plug-in Registration Tool).");
-    }
-
-    /// <summary>
     /// Parses <c>--mode</c> by name only (Create, Update or Upsert, any case). Skip is a per-table
     /// schema setting and as the mode of the whole import used to upsert every record (#1914); a
     /// number or any other text is refused with its own message (#1914 review should-fix 9 and 13).
@@ -361,43 +341,45 @@ public static class ImportCommand
                     OutputManager = outputManager
                 };
 
-                var result = await importer.ImportAsync(
-                    data.FullName,
-                    importOptions,
-                    progressReporter,
-                    cancellationToken);
-
-                // Write summary if output manager is active
-                if (outputManager != null)
+                return await ImportOutcome.RunAsync(async () =>
                 {
-                    var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-                    var executionContext = new ImportExecutionContext
-                    {
-                        CliVersion = ErrorOutput.Version,
-                        SdkVersion = ErrorOutput.SdkVersion,
-                        RuntimeVersion = Environment.Version.ToString(),
-                        Platform = RuntimeInformation.OSDescription,
-                        ImportMode = importOptions.Mode.ToString(),
-                        StripOwnerFields = importOptions.StripOwnerFields,
-                        BypassPlugins = importOptions.BypassCustomPlugins != CustomLogicBypass.None,
-                        UserMappingProvided = userMappingFile != null
-                    };
-
-                    await outputManager.WriteSummaryAsync(
-                        result,
+                    var result = await importer.ImportAsync(
                         data.FullName,
-                        connectionInfo.EnvironmentUrl,
-                        executionContext,
+                        importOptions,
+                        progressReporter,
                         cancellationToken);
 
-                    Console.Error.WriteLine($"Output written to:");
-                    Console.Error.WriteLine($"  Errors: {outputManager.ErrorsPath}");
-                    Console.Error.WriteLine($"  Progress: {outputManager.ProgressPath}");
-                    Console.Error.WriteLine($"  Summary: {outputManager.SummaryPath}");
-                }
+                    // Write summary if output manager is active
+                    if (outputManager != null)
+                    {
+                        var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
+                        var executionContext = new ImportExecutionContext
+                        {
+                            CliVersion = ErrorOutput.Version,
+                            SdkVersion = ErrorOutput.SdkVersion,
+                            RuntimeVersion = Environment.Version.ToString(),
+                            Platform = RuntimeInformation.OSDescription,
+                            ImportMode = importOptions.Mode.ToString(),
+                            StripOwnerFields = importOptions.StripOwnerFields,
+                            BypassPlugins = importOptions.BypassCustomPlugins != CustomLogicBypass.None,
+                            UserMappingProvided = userMappingFile != null
+                        };
 
-                WritePluginStepsLeftDisabled(Console.Error, result.PluginStepsLeftDisabled);
-                return result.Success ? ExitCodes.Success : ExitCodes.Failure;
+                        await outputManager.WriteSummaryAsync(
+                            result,
+                            data.FullName,
+                            connectionInfo.EnvironmentUrl,
+                            executionContext,
+                            cancellationToken);
+
+                        Console.Error.WriteLine($"Output written to:");
+                        Console.Error.WriteLine($"  Errors: {outputManager.ErrorsPath}");
+                        Console.Error.WriteLine($"  Progress: {outputManager.ProgressPath}");
+                        Console.Error.WriteLine($"  Summary: {outputManager.SummaryPath}");
+                    }
+
+                    return result;
+                }, "Import", progressReporter, Console.Error, debug);
             }
             finally
             {
@@ -408,39 +390,11 @@ public static class ImportCommand
                 }
             }
         }
-        catch (ImportCancelledException ex)
-        {
-            progressReporter.Error(new OperationCanceledException(), "Import cancelled by user.");
-            WritePluginStepsLeftDisabled(Console.Error, ex.PluginStepsLeftDisabled);
-            return ExitCodes.Failure;
-        }
-        catch (OperationCanceledException)
-        {
-            progressReporter.Error(new OperationCanceledException(), "Import cancelled by user.");
-            return ExitCodes.Failure;
-        }
-        catch (SchemaMismatchException ex)
-        {
-            // Schema mismatch gets special handling - display the detailed message
-            Console.Error.WriteLine();
-            Console.Error.WriteLine(ex.Message);
-            return ExitCodes.Failure;
-        }
-        catch (ImportRefusedException ex)
-        {
-            Console.Error.WriteLine();
-            Console.Error.WriteLine($"Error: {ex.Message}");
-            WritePluginStepsLeftDisabled(Console.Error, ex.PluginStepsLeftDisabled);
-            return ExceptionMapper.ToExitCode(ex);
-        }
         catch (Exception ex)
         {
-            progressReporter.Error(ex, "Import failed");
-            if (debug)
-            {
-                Console.Error.WriteLine(ex.StackTrace);
-            }
-            return ExitCodes.Failure;
+            // Connection, read and import failures alike: one tested place decides the text and
+            // the exit code (#1934 r2 MF6).
+            return ImportOutcome.Report(ex, "Import", progressReporter, Console.Error, debug);
         }
     }
 }

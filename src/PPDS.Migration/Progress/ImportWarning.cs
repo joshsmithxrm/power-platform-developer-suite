@@ -69,5 +69,11 @@ namespace PPDS.Migration.Progress
         /// were not run for it.
         /// </summary>
         public const string LaterPhasesSkipped = "LATER_PHASES_SKIPPED";
+
+        /// <summary>
+        /// Lookups or many-to-many associations were not sent because the record they point at is in
+        /// the data file but was not written by this import and is not known to exist in the target.
+        /// </summary>
+        public const string ReferencesNotSent = "REFERENCES_NOT_SENT";
     }
 }

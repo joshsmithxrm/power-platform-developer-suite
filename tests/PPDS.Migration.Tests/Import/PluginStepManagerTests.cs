@@ -95,6 +95,43 @@ public class PluginStepManagerTests
     }
 
     [Fact]
+    public async Task GetActivePluginStepsAsync_QueryStructure_IsPinned()
+    {
+        // #1934 r2 MF5: the link must be inner (outer would select every custom step of every table);
+        // the step conditions must be ANDed (OR would select already-disabled steps and then switch them
+        // on); the table conditions must be ORed (AND would select nothing for two tables).
+        var target = new FakePluginTarget();
+        target.Codes["new_widget"] = 10051;
+        target.Codes["new_gadget"] = 10050;
+        target.Attach(_pooledClient);
+
+        await _sut.GetActivePluginStepsAsync(new[] { "new_widget", "new_gadget" });
+
+        var doc = System.Xml.Linq.XDocument.Parse(target.FetchXml.Single());
+        var entity = doc.Root!.Elements("entity").Single();
+        entity.Attribute("name")!.Value.Should().Be("sdkmessageprocessingstep");
+
+        var stepFilter = entity.Elements("filter").Single();
+        stepFilter.Attribute("type")!.Value.Should().Be("and");
+        stepFilter.Elements().Should().OnlyContain(e => e.Name.LocalName == "condition");
+        stepFilter.Elements("condition").Select(c => ((string)c.Attribute("attribute")!, (string)c.Attribute("operator")!, (string)c.Attribute("value")!))
+            .Should().BeEquivalentTo(new[] { ("statecode", "eq", "0"), ("ishidden", "eq", "0"), ("customizationlevel", "eq", "1") });
+
+        var link = entity.Elements("link-entity").Single();
+        link.Attribute("name")!.Value.Should().Be("sdkmessagefilter");
+        link.Attribute("from")!.Value.Should().Be("sdkmessagefilterid");
+        link.Attribute("to")!.Value.Should().Be("sdkmessagefilterid");
+        link.Attribute("link-type")!.Value.Should().Be("inner");
+
+        var tableFilter = link.Elements("filter").Single();
+        tableFilter.Attribute("type")!.Value.Should().Be("or");
+        tableFilter.Elements().Should().OnlyContain(e => e.Name.LocalName == "condition");
+        tableFilter.Elements("condition").Select(c => ((string)c.Attribute("attribute")!, (string)c.Attribute("operator")!, (string)c.Attribute("value")!))
+            .Should().BeEquivalentTo(new[] { ("primaryobjecttypecode", "eq", "10051"), ("primaryobjecttypecode", "eq", "10050") });
+        entity.Descendants("filter").Should().HaveCount(2, "no other filter may narrow or widen the selection");
+    }
+
+    [Fact]
     public async Task GetActivePluginStepsAsync_MetadataForAnotherTable_Refuses()
     {
         var target = new FakePluginTarget { MetadataAnswersWith = "new_gadget" };

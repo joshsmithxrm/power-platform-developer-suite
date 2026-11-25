@@ -320,48 +320,15 @@ public static class CopyCommand
                 UserMappings = userMappings
             };
 
-            var importResult = await importer.ImportAsync(
-                tempDataFile,
-                importOptions,
-                progressReporter,
-                cancellationToken);
-
-            ImportCommand.WritePluginStepsLeftDisabled(Console.Error, importResult.PluginStepsLeftDisabled);
-            return importResult.Success ? ExitCodes.Success : ExitCodes.Failure;
-        }
-        catch (ImportCancelledException ex)
-        {
-            progressReporter.Error(new OperationCanceledException(), "Copy cancelled by user.");
-            ImportCommand.WritePluginStepsLeftDisabled(Console.Error, ex.PluginStepsLeftDisabled);
-            return ExitCodes.Failure;
-        }
-        catch (OperationCanceledException)
-        {
-            progressReporter.Error(new OperationCanceledException(), "Copy cancelled by user.");
-            return ExitCodes.Failure;
-        }
-        catch (SchemaMismatchException ex)
-        {
-            // Schema mismatch gets special handling - display the detailed message
-            Console.Error.WriteLine();
-            Console.Error.WriteLine(ex.Message);
-            return ExitCodes.Failure;
-        }
-        catch (ImportRefusedException ex)
-        {
-            Console.Error.WriteLine();
-            Console.Error.WriteLine($"Error: {ex.Message}");
-            ImportCommand.WritePluginStepsLeftDisabled(Console.Error, ex.PluginStepsLeftDisabled);
-            return ExceptionMapper.ToExitCode(ex);
+            return await ImportOutcome.RunAsync(
+                () => importer.ImportAsync(tempDataFile, importOptions, progressReporter, cancellationToken),
+                "Copy", progressReporter, Console.Error, debug);
         }
         catch (Exception ex)
         {
-            progressReporter.Error(ex, "Copy failed");
-            if (debug)
-            {
-                Console.Error.WriteLine(ex.StackTrace);
-            }
-            return ExitCodes.Failure;
+            // Connection, read and import failures alike: one tested place decides the text and
+            // the exit code (#1934 r2 MF6).
+            return ImportOutcome.Report(ex, "Copy", progressReporter, Console.Error, debug);
         }
         finally
         {
