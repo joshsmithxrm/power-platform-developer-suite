@@ -1633,14 +1633,8 @@ namespace PPDS.Migration.Import
                 // Remap entity references
                 if (attr.Value is EntityReference er)
                 {
-                    var mappedRef = RemapEntityReference(er, idMappings, options, references);
-                    if (mappedRef == null)
-                    {
-                        // RemapEntityReference returns null only when the guard decided NotSent: the
-                        // target is a record of the file this import did not write and it is not in
-                        // the target. The lookup is not sent, and is reported (#1934 r2 MF2).
-                        references?.CountLookupNotSent(record.LogicalName, attr.Key);
-                    }
+                    // Null when the guard decided NotSent; the remap has then counted it (#1934 r2 MF2).
+                    var mappedRef = RemapEntityReference(er, idMappings, options, references, record.LogicalName, attr.Key);
                     if (mappedRef != null)
                     {
                         prepared[attr.Key] = mappedRef;
@@ -1684,7 +1678,9 @@ namespace PPDS.Migration.Import
             EntityReference er,
             IdMappingCollection idMappings,
             ImportOptions options,
-            UnwrittenReferenceGuard? references = null)
+            UnwrittenReferenceGuard? references,
+            string sourceTable,
+            string field)
         {
             // Check if this is a user reference that should use user mapping
             if (IsUserReference(er.LogicalName) && options.UserMappings != null)
@@ -1720,6 +1716,9 @@ namespace PPDS.Migration.Import
                     case ReferenceDecision.Send:
                         return new EntityReference(er.LogicalName, targetId);
                     case ReferenceDecision.NotSent:
+                        // The target is a record of the file this import did not write and it is
+                        // not in the target: the lookup is not sent, and is counted for the report.
+                        references.CountLookupNotSent(sourceTable, field);
                         return null;
                 }
             }
