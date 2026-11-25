@@ -331,6 +331,24 @@ Options:
 - `--environment`, `-env` - Override environment URL
 - `--output-format`, `-o` - Output format (Text or Json)
 
+##### Values in `data load` and `data update`
+
+Each value is converted by its column's type, read from the table's metadata, and never guessed from its text or read in the machine's culture. A value that is not in its column's form is refused before anything is written: `data load` checks the whole file first and writes no row if any cell is refused, naming each row and column.
+
+| Column type | Write |
+|---|---|
+| Whole number, big integer | `-12`: an optional sign and digits |
+| Decimal, floating point, currency | `1234.5`: an optional sign, digits, a point and digits; no thousands separator, comma, exponent or currency symbol; no more decimal places than the column keeps |
+| Text | the text as given (`123` is text in a text column) |
+| Yes/no | `true`/`false`, `yes`/`no`, `y`/`n`, `1`/`0` |
+| Choice, status, status reason | the option's integer value, or a label from the mapping file's `optionsetMap` |
+| Lookup to one table | the record's GUID; a lookup to several tables (customer, owner) is refused |
+| Date and time (user local) | `2024-01-15T09:30:00Z` or `2024-01-15T09:30:00+01:00` |
+| Date only | `2024-01-15` |
+| Date and time (time-zone independent) | `2024-01-15T09:30:00Z`, stored as written |
+
+A mapping file's `dateFormat` replaces the date forms for its column (read in the invariant culture); for a user-local column it must include a time zone (`K` or `zzz`).
+
 #### Update
 
 Update records in a Dataverse entity. Unlike load (upsert), update fails if the record doesn't exist.
