@@ -25,6 +25,15 @@ public static class PluginTraceAge
     /// <summary>The longest age accepted (100 years of 365 days).</summary>
     public static readonly TimeSpan MaxAge = TimeSpan.FromDays(36500);
 
+    /// <summary>The longest age accepted, in days.</summary>
+    public const int MaxAgeDays = 36500;
+
+    /// <summary>
+    /// The shortest age the form can express (<c>1m</c>). A cut-off handed to the service directly must
+    /// be at least this far in the past.
+    /// </summary>
+    public static readonly TimeSpan MinAge = TimeSpan.FromMinutes(1);
+
     // \A and \z: `$` would also match before a trailing newline.
     private static readonly Regex Form = new(
         @"\A(?<n>[1-9][0-9]{0,7})(?<unit>[dhm])\z",
@@ -57,6 +66,27 @@ public static class PluginTraceAge
         };
         EnsureValid(age);
         return age;
+    }
+
+    /// <summary>
+    /// An age given as a whole number of days (the daemon, the MCP tool and the TUI), checked before it
+    /// is converted, so a value too large for a <see cref="TimeSpan"/> is refused like any other.
+    /// </summary>
+    /// <param name="days">The age in days, from 1 to <see cref="MaxAgeDays"/>.</param>
+    /// <returns>The age.</returns>
+    /// <exception cref="PpdsException">
+    /// <see cref="ErrorCodes.Validation.InvalidValue"/> for 0, a negative number or more than <see cref="MaxAgeDays"/>.
+    /// </exception>
+    public static TimeSpan FromDays(int days)
+    {
+        if (days < 1 || days > MaxAgeDays)
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.InvalidValue,
+                $"The age to delete plug-in traces by must be a whole number of days from 1 to {MaxAgeDays}.");
+        }
+
+        return TimeSpan.FromDays(days);
     }
 
     /// <summary>

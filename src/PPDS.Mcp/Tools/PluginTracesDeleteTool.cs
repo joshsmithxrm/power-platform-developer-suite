@@ -140,7 +140,7 @@ public sealed class PluginTracesDeleteTool : McpToolBase
             throw new ArgumentException("The 'olderThanDays' parameter must be at least 1.", nameof(olderThanDays));
         }
 
-        var olderThan = TimeSpan.FromDays(olderThanDays);
+        var olderThan = PluginTraceAge.FromDays(olderThanDays);
         var deletedCount = await traceService.DeleteOlderThanAsync(olderThan, progress: null, cancellationToken).ConfigureAwait(false);
 
         return new PluginTracesDeleteResult

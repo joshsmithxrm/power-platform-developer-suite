@@ -26,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Plugin traces "delete older than N days" deletes only traces created strictly before now (UTC) less N days, compared on the full date and time; before, the daemon compared with `on-or-before`, which Microsoft documents as comparing with a date, so it could also delete traces from later the same day. N must be from 1 to 36500; the daemon refuses anything else with `Validation.InvalidValue` before connecting (#1920).
 - Plugin registration form payloads use the daemon's actual parent/field names and preserve intentional clear/false versus untouched settings. Shared form adapters hydrate actual image/configuration DTO fields; this does not add a step/image edit launcher.
 - Bound notebook runs independently to the selected environment and captured authentication identity during concurrent SQL/FetchXML runs, cancellation, queued execution, completion and conversion. Profile rename/reorder cannot redirect captured queries.
 - When the maximum number of Data Explorer panels is open and the oldest one, which a notebook query would reuse, is bound to a different environment or profile, opening the query now shows a warning and leaves that panel unchanged instead of loading the query into it.

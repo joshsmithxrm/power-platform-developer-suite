@@ -28,7 +28,7 @@ public static class DeleteCommand
 
         var olderThanOption = new Option<string?>("--older-than")
         {
-            Description = "Delete traces created before now minus this age: a whole number from 1 followed by d, h or m (7d, 24h, 30m); nothing else is accepted. Shows the cut-off (UTC) and the count, then asks to confirm unless --force"
+            Description = "Delete traces created before now minus this age, with now read from this machine's clock in UTC: a whole number from 1 followed by d, h or m (7d, 24h, 30m); nothing else is accepted. Shows the cut-off and the count, then asks to confirm unless --force"
         };
 
         var allOption = new Option<bool>("--all")
@@ -80,7 +80,12 @@ public static class DeleteCommand
         return command;
     }
 
-    private static async Task<int> ExecuteAsync(
+    /// <summary>
+    /// Runs the command. <paramref name="connect"/>, <paramref name="clock"/> and
+    /// <paramref name="inputRedirected"/> replace the profile connection, the system clock and
+    /// <see cref="Console.IsInputRedirected"/> in tests.
+    /// </summary>
+    internal static async Task<int> ExecuteAsync(
         Guid? traceId,
         string? ids,
         string? olderThan,
@@ -90,9 +95,20 @@ public static class DeleteCommand
         string? profile,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<ServiceProvider>>? connect = null,
+        TimeProvider? clock = null,
+        bool? inputRedirected = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
+        var redirected = inputRedirected ?? Console.IsInputRedirected;
+        connect ??= ct => ProfileServiceFactory.CreateFromProfilesAsync(
+            profile,
+            environment,
+            globalOptions.Verbose,
+            globalOptions.Debug,
+            ProfileServiceFactory.DefaultDeviceCodeCallback,
+            ct);
 
         // Validate: exactly one delete mode must be specified
         var modeCount = (traceId.HasValue ? 1 : 0) +
@@ -167,7 +183,7 @@ public static class DeleteCommand
                 problem = ex.UserMessage;
             }
 
-            problem ??= OlderThanConfirmationProblem(force, dryRun, globalOptions.IsJsonMode, Console.IsInputRedirected);
+            problem ??= PluginTraceOlderThanDeletion.ConfirmationProblem(force, dryRun, globalOptions.IsJsonMode, redirected);
             if (problem != null)
             {
                 var error = new StructuredError(
@@ -189,13 +205,7 @@ public static class DeleteCommand
 
         try
         {
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profile,
-                environment,
-                globalOptions.Verbose,
-                globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+            await using var serviceProvider = await connect(cancellationToken);
 
             var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
 
@@ -239,7 +249,9 @@ public static class DeleteCommand
             // Handle older-than deletion
             if (olderThanAge.HasValue)
             {
-                return await DeleteOlderThanAsync(traceService, olderThanAge.Value, dryRun, force, globalOptions, writer, cancellationToken);
+                return await DeleteOlderThanAsync(
+                    traceService, clock ?? TimeProvider.System, olderThanAge.Value, dryRun, force, redirected,
+                    globalOptions, writer, cancellationToken);
             }
 
             // Handle delete all
@@ -361,58 +373,28 @@ public static class DeleteCommand
 
     private static async Task<int> DeleteOlderThanAsync(
         IPluginTraceService traceService,
+        TimeProvider clock,
         TimeSpan duration,
         bool dryRun,
         bool force,
+        bool inputRedirected,
         GlobalOptionValues globalOptions,
         IOutputWriter writer,
         CancellationToken cancellationToken)
     {
-        // The cut-off is computed once, in UTC; the count, the prompt and the delete all use it.
-        var cutoff = PluginTraceAge.CutoffUtc(duration, DateTime.UtcNow);
-        var shownCutoff = PluginTraceAge.Format(cutoff);
-        var filter = new PluginTraceFilter { CreatedBefore = cutoff };
-        var count = await traceService.CountAsync(filter, cancellationToken);
+        var age = FormatDuration(duration);
 
-        if (dryRun)
+        bool Confirm(DateTime cutoff, int count)
         {
-            if (globalOptions.IsJsonMode)
-            {
-                writer.WriteSuccess(new DryRunOutput { WouldDelete = count, Cutoff = shownCutoff });
-            }
-            else
-            {
-                Console.Error.WriteLine($"Would delete {count} trace(s) created before {shownCutoff} (older than {FormatDuration(duration)}).");
-            }
-            return ExitCodes.Success;
-        }
-
-        if (count == 0)
-        {
-            if (globalOptions.IsJsonMode)
-            {
-                writer.WriteSuccess(new DeleteOutput { Deleted = 0, Cutoff = shownCutoff });
-            }
-            else
-            {
-                Console.Error.WriteLine($"No traces created before {shownCutoff} (older than {FormatDuration(duration)}) found.");
-            }
-            return ExitCodes.Success;
-        }
-
-        // Confirm if not forced (a run that cannot be confirmed was refused before connecting).
-        if (!force)
-        {
-            Console.Error.Write($"Delete {count} trace(s) created before {shownCutoff} (older than {FormatDuration(duration)})? [y/N] ");
+            Console.Error.Write($"Delete {count} trace(s) created before {PluginTraceAge.Format(cutoff)} (older than {age})? [y/N] ");
             var response = Console.ReadLine()?.Trim().ToLowerInvariant();
-            if (response != "y" && response != "yes")
-            {
-                Console.Error.WriteLine("Cancelled.");
-                return ExitCodes.Failure;
-            }
+            return response == "y" || response == "yes";
         }
 
-        // Create progress reporter
+        // Shown on every run that deletes, a forced one too, before the delete starts.
+        void Deleting(DateTime cutoff, int count)
+            => Console.Error.WriteLine($"Deleting {count} trace(s) created before {PluginTraceAge.Format(cutoff)} (older than {age}; cut-off from this machine's clock, UTC)...");
+
         var progress = new Progress<int>(current =>
         {
             if (!globalOptions.IsJsonMode)
@@ -421,19 +403,56 @@ public static class DeleteCommand
             }
         });
 
-        var deleted = await traceService.DeleteCreatedBeforeAsync(cutoff, progress, cancellationToken);
+        var result = await PluginTraceOlderThanDeletion.RunAsync(
+            traceService,
+            clock,
+            new OlderThanDeletionRequest(duration, dryRun, force, globalOptions.IsJsonMode, inputRedirected),
+            Confirm,
+            Deleting,
+            progress,
+            cancellationToken);
+        var shownCutoff = PluginTraceAge.Format(result.CutoffUtc);
 
-        if (globalOptions.IsJsonMode)
+        switch (result.Status)
         {
-            writer.WriteSuccess(new DeleteOutput { Deleted = deleted, Cutoff = shownCutoff });
-        }
-        else
-        {
-            Console.Error.WriteLine();
-            Console.Error.WriteLine($"Deleted {deleted} trace(s).");
-        }
+            case OlderThanDeletionStatus.Previewed:
+                if (globalOptions.IsJsonMode)
+                {
+                    writer.WriteSuccess(new DryRunOutput { WouldDelete = result.Count, Cutoff = shownCutoff });
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Would delete {result.Count} trace(s) created before {shownCutoff} (older than {age}).");
+                }
+                return ExitCodes.Success;
 
-        return ExitCodes.Success;
+            case OlderThanDeletionStatus.NothingToDelete:
+                if (globalOptions.IsJsonMode)
+                {
+                    writer.WriteSuccess(new DeleteOutput { Deleted = 0, Cutoff = shownCutoff });
+                }
+                else
+                {
+                    Console.Error.WriteLine($"No traces created before {shownCutoff} (older than {age}) found.");
+                }
+                return ExitCodes.Success;
+
+            case OlderThanDeletionStatus.Declined:
+                Console.Error.WriteLine("Cancelled.");
+                return ExitCodes.Failure;
+
+            default:
+                if (globalOptions.IsJsonMode)
+                {
+                    writer.WriteSuccess(new DeleteOutput { Deleted = result.Deleted, Cutoff = shownCutoff });
+                }
+                else
+                {
+                    Console.Error.WriteLine();
+                    Console.Error.WriteLine($"Deleted {result.Deleted} trace(s).");
+                }
+                return ExitCodes.Success;
+        }
     }
 
     private static async Task<int> DeleteAllAsync(
@@ -510,22 +529,6 @@ public static class DeleteCommand
         }
 
         return result;
-    }
-
-    /// <summary>
-    /// Why a <c>--older-than</c> run cannot go ahead, or null: without <c>--force</c> or
-    /// <c>--dry-run</c> it needs the confirmation prompt, which JSON output and redirected input
-    /// cannot give.
-    /// </summary>
-    internal static string? OlderThanConfirmationProblem(bool force, bool dryRun, bool jsonMode, bool inputRedirected)
-    {
-        if (force || dryRun || (!jsonMode && !inputRedirected))
-        {
-            return null;
-        }
-
-        return "--older-than asks to confirm the cut-off and the count before deleting, which is not possible " +
-               "with JSON output or redirected input. Add --force to delete without asking, or --dry-run to see the count.";
     }
 
     private static string FormatDuration(TimeSpan duration)

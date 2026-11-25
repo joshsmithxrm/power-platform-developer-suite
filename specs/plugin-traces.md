@@ -514,7 +514,7 @@ Deletes plugin trace logs with multiple modes.
 | `--older-than` | Delete traces created before now (UTC) minus this age (7d, 24h, 30m; see Validation Rules) |
 | `--all` | Delete ALL traces (requires --force) |
 | `--dry-run` | Preview count without deleting |
-| `--force` | Skip confirmation for --all |
+| `--force` | Delete without asking: required for `--all`, and for `--older-than` with JSON output or redirected input; a forced `--older-than` still shows the cut-off and the count on stderr before deleting |
 
 ---
 

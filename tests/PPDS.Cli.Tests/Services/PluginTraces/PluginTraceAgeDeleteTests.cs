@@ -1,10 +1,14 @@
 using System.Xml.Linq;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
+using PPDS.Cli.Commands;
 using PPDS.Cli.Commands.PluginTraces;
+using PPDS.Cli.Commands.Serve.Handlers;
+using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.PluginTraces;
 using PPDS.Cli.Tests.Services.Shared;
@@ -17,12 +21,16 @@ namespace PPDS.Cli.Tests.Services.PluginTraces;
 
 /// <summary>
 /// Issue 1920: deleting plug-in traces by age. The age is parsed in one exact form and must be
-/// positive; the cut-off is computed once, in UTC, and compared with <c>lt</c> (not the
-/// date-worded <c>on-or-before</c>), so a clean-up cannot delete more than was asked.
+/// positive; the cut-off is computed once, from the clock in UTC, and compared with <c>lt</c> (not the
+/// date-worded <c>on-or-before</c>), so a clean-up cannot delete more than was asked. Every test reads
+/// an injected clock, never the machine's.
 /// </summary>
 [Trait("Category", "Unit")]
 public class PluginTraceAgeDeleteTests
 {
+    // 05:38 UTC: far enough from midnight that a date-only reading and an exact one differ for 30m.
+    private static readonly DateTime Now = new(2026, 11, 25, 5, 38, 27, DateTimeKind.Utc);
+
     // ─── The one accepted form ──────────────────────────────────────────────────
 
     [Theory]
@@ -81,12 +89,31 @@ public class PluginTraceAgeDeleteTests
         ex.UserMessage.Should().Contain("7d, 24h or 30m");
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(36500)]
+    public void FromDays_AcceptsOneToTheMaximum(int days)
+    {
+        PluginTraceAge.FromDays(days).Should().Be(TimeSpan.FromDays(days));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(36501)]
+    [InlineData(int.MaxValue)] // too large for a TimeSpan: refused, not a raw exception
+    [InlineData(int.MinValue)]
+    public void FromDays_RefusesOutOfRangeWithACode(int days)
+    {
+        var act = () => PluginTraceAge.FromDays(days);
+
+        act.Should().Throw<PpdsException>().Which.ErrorCode.Should().Be(ErrorCodes.Validation.InvalidValue);
+    }
+
     [Fact]
     public void CutoffUtc_IsNowLessTheAge()
     {
-        var now = new DateTime(2026, 11, 25, 5, 38, 27, DateTimeKind.Utc);
-
-        var cutoff = PluginTraceAge.CutoffUtc(TimeSpan.FromMinutes(30), now);
+        var cutoff = PluginTraceAge.CutoffUtc(TimeSpan.FromMinutes(30), Now);
 
         cutoff.Should().Be(new DateTime(2026, 11, 25, 5, 8, 27, DateTimeKind.Utc));
         cutoff.Kind.Should().Be(DateTimeKind.Utc);
@@ -94,9 +121,11 @@ public class PluginTraceAgeDeleteTests
     }
 
     [Fact]
-    public void CutoffUtc_RefusesALocalClock()
+    public void CutoffUtc_RefusesALocalTime()
     {
-        var act = () => PluginTraceAge.CutoffUtc(TimeSpan.FromDays(1), DateTime.Now);
+        var local = DateTime.SpecifyKind(Now, DateTimeKind.Local);
+
+        var act = () => PluginTraceAge.CutoffUtc(TimeSpan.FromDays(1), local);
 
         act.Should().Throw<ArgumentException>();
     }
@@ -110,7 +139,7 @@ public class PluginTraceAgeDeleteTests
     public async Task DeleteOlderThanAsync_RefusesZeroAndNegativeAges_BeforeReadingAnything(int minutes)
     {
         var store = new TraceStore(TenTracesFromTheLastHours());
-        var service = store.CreateService();
+        var service = store.CreateService(new TestClock(Now));
 
         var act = () => service.DeleteOlderThanAsync(TimeSpan.FromMinutes(minutes));
 
@@ -120,13 +149,17 @@ public class PluginTraceAgeDeleteTests
         store.Remaining.Should().Be(10);
     }
 
-    [Fact]
-    public async Task DeleteCreatedBeforeAsync_RefusesACutoffInTheFuture_BeforeReadingAnything()
+    [Theory]
+    [InlineData(0L)]                                     // now
+    [InlineData(1L)]                                     // one tick before now
+    [InlineData(TimeSpan.TicksPerMinute - 1)]            // just under the shortest age
+    [InlineData(-7 * TimeSpan.TicksPerDay)]              // seven days in the future
+    public async Task DeleteCreatedBeforeAsync_RefusesACutoffLessThanOneMinuteInThePast(long ticksBeforeNow)
     {
         var store = new TraceStore(TenTracesFromTheLastHours());
-        var service = store.CreateService();
+        var service = store.CreateService(new TestClock(Now));
 
-        var act = () => service.DeleteCreatedBeforeAsync(DateTime.UtcNow.AddDays(7));
+        var act = () => service.DeleteCreatedBeforeAsync(Now - TimeSpan.FromTicks(ticksBeforeNow));
 
         (await act.Should().ThrowAsync<PpdsException>()).Which.ErrorCode.Should().Be(ErrorCodes.Validation.InvalidValue);
         store.ClientsTaken.Should().Be(0);
@@ -134,11 +167,23 @@ public class PluginTraceAgeDeleteTests
     }
 
     [Fact]
+    public async Task DeleteCreatedBeforeAsync_AcceptsACutoffExactlyOneMinuteInThePast()
+    {
+        var store = new TraceStore(TenTracesFromTheLastHours());
+        var service = store.CreateService(new TestClock(Now));
+
+        var deleted = await service.DeleteCreatedBeforeAsync(Now - PluginTraceAge.MinAge);
+
+        deleted.Should().Be(9); // the trace created exactly at Now is not older
+        store.Remaining.Should().Be(1);
+    }
+
+    [Fact]
     public async Task DeleteCreatedBeforeAsync_RefusesACutoffThatIsNotUtc()
     {
         var store = new TraceStore(TenTracesFromTheLastHours());
-        var service = store.CreateService();
-        var unspecified = DateTime.SpecifyKind(DateTime.UtcNow.AddDays(-1), DateTimeKind.Unspecified);
+        var service = store.CreateService(new TestClock(Now));
+        var unspecified = DateTime.SpecifyKind(Now.AddDays(-1), DateTimeKind.Unspecified);
 
         var act = () => service.DeleteCreatedBeforeAsync(unspecified);
 
@@ -152,8 +197,8 @@ public class PluginTraceAgeDeleteTests
     public async Task DeleteCreatedBeforeAsync_SendsLessThanOnTheExactCutoff()
     {
         var store = new TraceStore(TenTracesFromTheLastHours());
-        var service = store.CreateService();
-        var cutoff = DateTime.UtcNow.AddHours(-2);
+        var service = store.CreateService(new TestClock(Now));
+        var cutoff = Now.AddHours(-2);
 
         await service.DeleteCreatedBeforeAsync(cutoff);
 
@@ -163,10 +208,23 @@ public class PluginTraceAgeDeleteTests
     }
 
     [Fact]
+    public async Task DeleteOlderThanAsync_UsesTheServiceClockInUtc()
+    {
+        var store = new TraceStore(TenTracesFromTheLastHours());
+        var service = store.CreateService(new TestClock(Now, zone: PlusTen));
+
+        await service.DeleteOlderThanAsync(TimeSpan.FromHours(2));
+
+        store.CreatedOnConditions.Should().NotBeEmpty();
+        store.CreatedOnConditions.Should().OnlyContain(c =>
+            (DateTime)c.Values[0] == Now.AddHours(-2) && ((DateTime)c.Values[0]).Kind == DateTimeKind.Utc);
+    }
+
+    [Fact]
     public async Task CountAsync_SendsLtAndGeOnTheFullTimestamp()
     {
         var store = new TraceStore(TenTracesFromTheLastHours());
-        var service = store.CreateService();
+        var service = store.CreateService(new TestClock(Now));
         var before = new DateTime(2026, 11, 25, 5, 8, 27, DateTimeKind.Utc);
         var after = new DateTime(2026, 11, 20, 1, 2, 3, DateTimeKind.Utc);
 
@@ -182,16 +240,15 @@ public class PluginTraceAgeDeleteTests
     public async Task ListAsync_SendsGreaterEqualForCreatedAfter()
     {
         var store = new TraceStore(TenTracesFromTheLastHours());
-        var service = store.CreateService();
-        var after = DateTime.UtcNow.AddHours(-1);
+        var service = store.CreateService(new TestClock(Now));
 
-        await service.ListAsync(new PluginTraceFilter { CreatedAfter = after });
+        await service.ListAsync(new PluginTraceFilter { CreatedAfter = Now.AddHours(-1) });
 
         store.CreatedOnConditions.Should().ContainSingle()
             .Which.Operator.Should().Be(ConditionOperator.GreaterEqual);
     }
 
-    // ─── What gets deleted (the issue's two examples) ───────────────────────────
+    // ─── What gets deleted (the issue's two examples, and paging) ───────────────
 
     [Fact]
     public async Task DeleteOlderThanAsync_ThirtyMinutes_DeletesOnlyTheTracesOlderThanThirtyMinutes()
@@ -199,12 +256,11 @@ public class PluginTraceAgeDeleteTests
         // Traces aged 10 minutes, 20 minutes, 3 days and 4 days. The fake compares `on-or-before`
         // by date only, as its documented wording ("on or before a specified date") allows; `lt`
         // compares the full value.
-        var now = DateTime.UtcNow;
         var store = new TraceStore(new[]
         {
-            now.AddMinutes(-10), now.AddMinutes(-20), now.AddDays(-3), now.AddDays(-4),
+            Now.AddMinutes(-10), Now.AddMinutes(-20), Now.AddDays(-3), Now.AddDays(-4),
         });
-        var service = store.CreateService();
+        var service = store.CreateService(new TestClock(Now));
 
         var deleted = await service.DeleteOlderThanAsync(TimeSpan.FromMinutes(30));
 
@@ -217,7 +273,7 @@ public class PluginTraceAgeDeleteTests
     public async Task DeleteOlderThanAsync_NegativeSevenDays_DeletesNothing()
     {
         var store = new TraceStore(TenTracesFromTheLastHours());
-        var service = store.CreateService();
+        var service = store.CreateService(new TestClock(Now));
 
         var act = () => service.DeleteOlderThanAsync(TimeSpan.FromDays(-7));
 
@@ -226,37 +282,299 @@ public class PluginTraceAgeDeleteTests
         store.Remaining.Should().Be(10);
     }
 
-    // ─── The command's confirmation rule ────────────────────────────────────────
+    [Fact]
+    public async Task DeleteOlderThanAsync_MoreMatchesThanOnePage_DeletesThemAll()
+    {
+        // One page is 5000 rows: 5003 old traces need a second page; two recent ones stay.
+        var old = Enumerable.Range(0, 5003).Select(i => Now.AddDays(-2).AddSeconds(-i));
+        var store = new TraceStore(old.Concat(new[] { Now.AddMinutes(-5), Now.AddMinutes(-1) }));
+        var service = store.CreateService(new TestClock(Now));
+
+        var deleted = await service.DeleteOlderThanAsync(TimeSpan.FromDays(1));
+
+        deleted.Should().Be(5003);
+        store.Remaining.Should().Be(2);
+        store.ListPages.Should().BeGreaterThan(1);
+    }
+
+    // ─── The command's flow (PluginTraceOlderThanDeletion) ──────────────────────
+
+    [Fact]
+    public async Task Flow_CountGetsNowLessTheAge_InUtc_FromTheClock()
+    {
+        var traces = new FlowFake(count: 4);
+        var clock = new TestClock(Now, zone: PlusTen); // local time is ten hours ahead of UTC
+
+        await PluginTraceOlderThanDeletion.RunAsync(
+            traces.Object, clock, Request(TimeSpan.FromDays(7), force: true), (_, _) => true);
+
+        traces.CountFilters.Should().ContainSingle();
+        var before = traces.CountFilters[0].CreatedBefore!.Value;
+        before.Should().Be(Now.AddDays(-7));
+        before.Kind.Should().Be(DateTimeKind.Utc);
+    }
+
+    [Fact]
+    public async Task Flow_ForcedRun_DeletesOnceWithTheSameInstantTheCountUsed()
+    {
+        var traces = new FlowFake(count: 4);
+        var clock = new TestClock(Now, step: TimeSpan.FromSeconds(1)); // each read is a second later
+
+        var result = await PluginTraceOlderThanDeletion.RunAsync(
+            traces.Object, clock, Request(TimeSpan.FromDays(7), force: true), (_, _) => throw new InvalidOperationException("no prompt when forced"));
+
+        traces.DeleteCutoffs.Should().ContainSingle().Which.Should().Be(Now.AddDays(-7));
+        traces.DeleteCutoffs[0].Should().Be(traces.CountFilters.Single().CreatedBefore!.Value);
+        result.Status.Should().Be(OlderThanDeletionStatus.Deleted);
+        result.CutoffUtc.Should().Be(Now.AddDays(-7));
+        traces.Mock.Verify(t => t.DeleteOlderThanAsync(It.IsAny<TimeSpan>(), It.IsAny<IProgress<int>?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Flow_NotForced_AsksWithTheCutoffAndCount_AndDeclineDeletesNothing()
+    {
+        var traces = new FlowFake(count: 4);
+        var asked = new List<(DateTime Cutoff, int Count)>();
+
+        var result = await PluginTraceOlderThanDeletion.RunAsync(
+            traces.Object, new TestClock(Now), Request(TimeSpan.FromHours(24)),
+            (cutoff, count) => { asked.Add((cutoff, count)); return false; });
+
+        asked.Should().ContainSingle().Which.Should().Be((Now.AddHours(-24), 4));
+        traces.DeleteCutoffs.Should().BeEmpty();
+        result.Status.Should().Be(OlderThanDeletionStatus.Declined);
+    }
+
+    [Fact]
+    public async Task Flow_NotForced_AcceptedPromptDeletesOnce()
+    {
+        var traces = new FlowFake(count: 4);
+        var asked = 0;
+
+        await PluginTraceOlderThanDeletion.RunAsync(
+            traces.Object, new TestClock(Now), Request(TimeSpan.FromHours(24)), (_, _) => { asked++; return true; });
+
+        asked.Should().Be(1);
+        traces.DeleteCutoffs.Should().ContainSingle().Which.Should().Be(Now.AddHours(-24));
+    }
+
+    [Fact]
+    public async Task Flow_ShowsTheCutoffBeforeDeleting_EvenWhenForced()
+    {
+        var traces = new FlowFake(count: 4);
+        var events = new List<string>();
+        traces.OnDelete = () => events.Add("delete");
+
+        await PluginTraceOlderThanDeletion.RunAsync(
+            traces.Object, new TestClock(Now), Request(TimeSpan.FromDays(7), force: true), (_, _) => true,
+            deleting: (cutoff, count) => events.Add($"show {PluginTraceAge.Format(cutoff)} {count}"));
+
+        events.Should().Equal("show 2026-11-18T05:38:27Z 4", "delete");
+    }
+
+    [Fact]
+    public async Task Flow_DryRunAndNothingToDelete_NeitherAskNorDelete()
+    {
+        var dry = new FlowFake(count: 4);
+        var none = new FlowFake(count: 0);
+
+        var preview = await PluginTraceOlderThanDeletion.RunAsync(
+            dry.Object, new TestClock(Now), Request(TimeSpan.FromDays(7), dryRun: true, json: true), (_, _) => throw new InvalidOperationException());
+        var empty = await PluginTraceOlderThanDeletion.RunAsync(
+            none.Object, new TestClock(Now), Request(TimeSpan.FromDays(7)), (_, _) => throw new InvalidOperationException());
+
+        preview.Should().Be(new OlderThanDeletionResult(OlderThanDeletionStatus.Previewed, Now.AddDays(-7), 4, 0));
+        empty.Status.Should().Be(OlderThanDeletionStatus.NothingToDelete);
+        dry.DeleteCutoffs.Should().BeEmpty();
+        none.DeleteCutoffs.Should().BeEmpty();
+    }
 
     [Theory]
-    [InlineData(false, false, true, false)]   // JSON output, no --force
-    [InlineData(false, false, false, true)]   // redirected input, no --force
-    [InlineData(false, false, true, true)]
-    public void OlderThan_WithoutAWayToConfirm_IsRefused(bool force, bool dryRun, bool json, bool redirected)
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task Flow_WithoutAWayToConfirm_IsRefusedBeforeCounting(bool json, bool redirected)
     {
-        DeleteCommand.OlderThanConfirmationProblem(force, dryRun, json, redirected)
-            .Should().NotBeNull().And.Contain("--force");
+        var traces = new FlowFake(count: 4);
+
+        var act = () => PluginTraceOlderThanDeletion.RunAsync(
+            traces.Object, new TestClock(Now), Request(TimeSpan.FromDays(7), json: json, redirected: redirected), (_, _) => true);
+
+        (await act.Should().ThrowAsync<PpdsException>()).Which.ErrorCode.Should().Be(ErrorCodes.Validation.InvalidValue);
+        traces.CountFilters.Should().BeEmpty();
+        traces.DeleteCutoffs.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(-7 * 24 * 60)]
+    public async Task Flow_ZeroOrNegativeAge_IsRefusedBeforeCounting(int minutes)
+    {
+        var traces = new FlowFake(count: 4);
+
+        var act = () => PluginTraceOlderThanDeletion.RunAsync(
+            traces.Object, new TestClock(Now), Request(TimeSpan.FromMinutes(minutes), force: true), (_, _) => true);
+
+        (await act.Should().ThrowAsync<PpdsException>()).Which.ErrorCode.Should().Be(ErrorCodes.Validation.InvalidValue);
+        traces.CountFilters.Should().BeEmpty();
+        traces.DeleteCutoffs.Should().BeEmpty();
     }
 
     [Theory]
     [InlineData(true, false, true, true)]     // --force
     [InlineData(false, true, true, true)]     // --dry-run deletes nothing
     [InlineData(false, false, false, false)]  // a terminal: the prompt shows the cut-off and count
-    public void OlderThan_WithForceDryRunOrATerminal_GoesAhead(bool force, bool dryRun, bool json, bool redirected)
+    public void ConfirmationProblem_WithForceDryRunOrATerminal_IsNone(bool force, bool dryRun, bool json, bool redirected)
     {
-        DeleteCommand.OlderThanConfirmationProblem(force, dryRun, json, redirected).Should().BeNull();
+        PluginTraceOlderThanDeletion.ConfirmationProblem(force, dryRun, json, redirected).Should().BeNull();
     }
 
-    // ─── A recording fake of the trace table ────────────────────────────────────
+    // ─── The command's execute path (no connection is made) ─────────────────────
+
+    [Theory]
+    [InlineData(true, false)]   // JSON output, no --force
+    [InlineData(false, true)]   // redirected input, no --force
+    public async Task Command_WithoutAWayToConfirm_IsRefusedBeforeConnecting(bool json, bool redirected)
+    {
+        var connects = 0;
+
+        var exit = await DeleteCommand.ExecuteAsync(
+            traceId: null, ids: null, olderThan: "7d", all: false, dryRun: false, force: false,
+            profile: null, environment: null, Options(json), CancellationToken.None,
+            connect: _ => { connects++; throw new InvalidOperationException("must not connect"); },
+            clock: new TestClock(Now), inputRedirected: redirected);
+
+        exit.Should().Be(ExitCodes.InvalidArguments);
+        connects.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-7d")]
+    [InlineData("7")]
+    public async Task Command_InvalidAge_IsRefusedBeforeConnecting(string age)
+    {
+        var connects = 0;
+
+        var exit = await DeleteCommand.ExecuteAsync(
+            traceId: null, ids: null, olderThan: age, all: false, dryRun: false, force: true,
+            profile: null, environment: null, Options(json: true), CancellationToken.None,
+            connect: _ => { connects++; throw new InvalidOperationException("must not connect"); },
+            clock: new TestClock(Now), inputRedirected: true);
+
+        exit.Should().Be(ExitCodes.InvalidArguments);
+        connects.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Command_ForcedRun_DeletesWithTheInjectedClocksCutoff()
+    {
+        var traces = new FlowFake(count: 3);
+        var connects = 0;
+
+        var exit = await DeleteCommand.ExecuteAsync(
+            traceId: null, ids: null, olderThan: "7d", all: false, dryRun: false, force: true,
+            profile: null, environment: null, Options(json: true), CancellationToken.None,
+            connect: _ =>
+            {
+                connects++;
+                return Task.FromResult(new ServiceCollection().AddSingleton(traces.Object).BuildServiceProvider());
+            },
+            clock: new TestClock(Now, step: TimeSpan.FromSeconds(1), zone: PlusTen), inputRedirected: true);
+
+        exit.Should().Be(ExitCodes.Success);
+        connects.Should().Be(1);
+        traces.CountFilters.Should().ContainSingle().Which.CreatedBefore.Should().Be(Now.AddDays(-7));
+        traces.DeleteCutoffs.Should().ContainSingle().Which.Should().Be(Now.AddDays(-7));
+    }
+
+    // ─── The daemon's days value ────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(36501)]
+    [InlineData(int.MaxValue)]
+    public async Task Daemon_OlderThanDaysOutOfRange_IsRefusedWithACode_BeforeConnecting(int days)
+    {
+        var poolManager = new Mock<IDaemonConnectionPoolManager>(MockBehavior.Strict);
+        using var authServices = new ServiceCollection().BuildServiceProvider();
+        var handler = new RpcMethodHandler(poolManager.Object, authServices);
+
+        var act = () => handler.PluginTracesDeleteAsync(olderThanDays: days);
+
+        (await act.Should().ThrowAsync<RpcException>()).Which.StructuredErrorCode
+            .Should().Be(ErrorCodes.Validation.InvalidValue);
+        poolManager.Invocations.Should().BeEmpty();
+    }
+
+    // ─── Helpers ────────────────────────────────────────────────────────────────
+
+    private static readonly TimeZoneInfo PlusTen =
+        TimeZoneInfo.CreateCustomTimeZone("test+10", TimeSpan.FromHours(10), "test+10", "test+10");
+
+    private static OlderThanDeletionRequest Request(
+        TimeSpan age, bool force = false, bool dryRun = false, bool json = false, bool redirected = false)
+        => new(age, dryRun, force, json, redirected);
+
+    private static GlobalOptionValues Options(bool json)
+        => new() { OutputFormat = json ? OutputFormat.Json : OutputFormat.Text };
 
     private static DateTime[] TenTracesFromTheLastHours()
+        => Enumerable.Range(0, 10).Select(i => Now.AddMinutes(-30.0 * i)).ToArray();
+
+    /// <summary>A clock fixed at a start time, optionally moving on by a step at every read.</summary>
+    private sealed class TestClock : TimeProvider
     {
-        var now = DateTime.UtcNow;
-        return Enumerable.Range(0, 10).Select(i => now.AddMinutes(-30 * i)).ToArray();
+        private readonly TimeSpan _step;
+        private readonly TimeZoneInfo _zone;
+        private DateTimeOffset _now;
+
+        public TestClock(DateTime startUtc, TimeSpan? step = null, TimeZoneInfo? zone = null)
+        {
+            _now = new DateTimeOffset(startUtc, TimeSpan.Zero);
+            _step = step ?? TimeSpan.Zero;
+            _zone = zone ?? TimeZoneInfo.Utc;
+        }
+
+        public override TimeZoneInfo LocalTimeZone => _zone;
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            var now = _now;
+            _now += _step;
+            return now;
+        }
+    }
+
+    /// <summary>A strict trace service that records the count filters and delete cut-offs.</summary>
+    private sealed class FlowFake
+    {
+        public FlowFake(int count)
+        {
+            Mock = new Mock<IPluginTraceService>(MockBehavior.Strict);
+            Mock.Setup(t => t.CountAsync(It.IsAny<PluginTraceFilter?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((PluginTraceFilter? f, CancellationToken _) => { CountFilters.Add(f!); return count; });
+            Mock.Setup(t => t.DeleteCreatedBeforeAsync(It.IsAny<DateTime>(), It.IsAny<IProgress<int>?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((DateTime cutoff, IProgress<int>? _, CancellationToken _) =>
+                {
+                    OnDelete?.Invoke();
+                    DeleteCutoffs.Add(cutoff);
+                    return count;
+                });
+        }
+
+        public Mock<IPluginTraceService> Mock { get; }
+        public IPluginTraceService Object => Mock.Object;
+        public List<PluginTraceFilter> CountFilters { get; } = new();
+        public List<DateTime> DeleteCutoffs { get; } = new();
+        public Action? OnDelete { get; set; }
     }
 
     private sealed record FetchCondition(string Attribute, string Operator, string Value);
 
+    /// <summary>A recording fake of the trace table behind a pooled client.</summary>
     private sealed class TraceStore
     {
         private readonly object _gate = new();
@@ -268,6 +586,7 @@ public class PluginTraceAgeDeleteTests
         }
 
         public int ClientsTaken;
+        public int ListPages;
         public List<Guid> Deleted { get; } = new();
         public List<ConditionExpression> CreatedOnConditions { get; } = new();
         public List<FetchCondition> FetchConditions { get; } = new();
@@ -277,7 +596,7 @@ public class PluginTraceAgeDeleteTests
             get { lock (_gate) return _rows.Count; }
         }
 
-        public PluginTraceService CreateService()
+        public PluginTraceService CreateService(TimeProvider clock)
         {
             var client = new Mock<IPooledClient>(MockBehavior.Loose);
             client
@@ -302,9 +621,9 @@ public class PluginTraceAgeDeleteTests
                     Interlocked.Increment(ref ClientsTaken);
                     return client.Object;
                 });
-            pool.Setup(p => p.GetTotalRecommendedParallelism()).Returns(4);
+            pool.Setup(p => p.GetTotalRecommendedParallelism()).Returns(8);
 
-            return new PluginTraceService(pool.Object, new InactiveFakeShakedownGuard(), NullLogger<PluginTraceService>.Instance);
+            return new PluginTraceService(pool.Object, new InactiveFakeShakedownGuard(), NullLogger<PluginTraceService>.Instance, clock);
         }
 
         private EntityCollection Retrieve(QueryBase query)
@@ -329,6 +648,7 @@ public class PluginTraceAgeDeleteTests
                     return new EntityCollection(new List<Entity> { row });
                 }
 
+                ListPages++;
                 var expression = (QueryExpression)query;
                 var dateConditions = expression.Criteria.Conditions
                     .Where(c => c.AttributeName == "createdon").ToList();

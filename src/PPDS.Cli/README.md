@@ -909,7 +909,7 @@ ppds plugin-traces delete --older-than 24h --dry-run
 
 Options:
 - `--ids` - Comma-separated list of trace IDs
-- `--older-than` - Delete traces created before now (UTC) minus this age. The age is a whole number from 1 followed by `d` (days), `h` (hours) or `m` (minutes), such as `7d`, `24h` or `30m`, at most 36500 days; anything else, `0` and negative values included, is refused. Without `--force` it asks to confirm the cut-off and the count, so JSON output or redirected input needs `--force` (or `--dry-run`)
+- `--older-than` - Delete traces created before now minus this age, with now read from this machine's clock in UTC (the cut-off is shown before anything is deleted, a forced run included). The age is a whole number from 1 followed by `d` (days), `h` (hours) or `m` (minutes), such as `7d`, `24h` or `30m`, at most 36500 days; anything else, `0` and negative values included, is refused. Without `--force` it asks to confirm the cut-off and the count, so JSON output or redirected input needs `--force` (or `--dry-run`)
 - `--all` - Delete all traces
 - `--dry-run` - Preview without deleting
 - `--force` - Skip confirmation prompt

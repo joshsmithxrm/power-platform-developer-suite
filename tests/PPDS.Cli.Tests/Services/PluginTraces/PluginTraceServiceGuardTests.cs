@@ -35,7 +35,7 @@ public class PluginTraceServiceGuardTests
         var guard = new ActiveFakeShakedownGuard();
         var pool = Mock.Of<IDataverseConnectionPool>();
         var logger = NullLogger<PluginTraceService>.Instance;
-        var svc = new PluginTraceService(pool, guard, logger);
+        var svc = new PluginTraceService(pool, guard, logger, new FixedClock());
 
         // Act + Assert
         var ex = await Assert.ThrowsAsync<PpdsException>(() => InvokeAsync(svc, methodName));
@@ -49,8 +49,16 @@ public class PluginTraceServiceGuardTests
         "DeleteByFilterAsync" => svc.DeleteByFilterAsync(new PluginTraceFilter(), null, CancellationToken.None),
         "DeleteAllAsync" => svc.DeleteAllAsync(null, CancellationToken.None),
         "DeleteOlderThanAsync" => svc.DeleteOlderThanAsync(TimeSpan.FromDays(1), null, CancellationToken.None),
-        "DeleteCreatedBeforeAsync" => svc.DeleteCreatedBeforeAsync(DateTime.UtcNow.AddDays(-1), null, CancellationToken.None),
+        "DeleteCreatedBeforeAsync" => svc.DeleteCreatedBeforeAsync(FixedClock.Now.AddDays(-1), null, CancellationToken.None),
         "SetSettingsAsync" => svc.SetSettingsAsync(PluginTraceLogSetting.Off, CancellationToken.None),
         _ => throw new ArgumentOutOfRangeException(nameof(methodName), methodName, null),
     };
+
+    /// <summary>A clock fixed at one instant, so no test reads the machine's clock.</summary>
+    private sealed class FixedClock : TimeProvider
+    {
+        public static readonly DateTime Now = new(2026, 11, 25, 5, 38, 27, DateTimeKind.Utc);
+
+        public override DateTimeOffset GetUtcNow() => new(Now, TimeSpan.Zero);
+    }
 }

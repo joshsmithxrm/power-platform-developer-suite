@@ -23,9 +23,11 @@ public class PluginTraceService : IPluginTraceService
     private readonly IDataverseConnectionPool _pool;
     private readonly IShakedownGuard _guard;
     private readonly ILogger<PluginTraceService> _logger;
+    private readonly TimeProvider _clock;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="PluginTraceService"/> class.
+    /// Initializes a new instance of the <see cref="PluginTraceService"/> class, reading the
+    /// system clock.
     /// </summary>
     /// <param name="pool">The connection pool.</param>
     /// <param name="guard">The shakedown guard gating mutations.</param>
@@ -34,10 +36,27 @@ public class PluginTraceService : IPluginTraceService
         IDataverseConnectionPool pool,
         IShakedownGuard guard,
         ILogger<PluginTraceService> logger)
+        : this(pool, guard, logger, TimeProvider.System)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PluginTraceService"/> class.
+    /// </summary>
+    /// <param name="pool">The connection pool.</param>
+    /// <param name="guard">The shakedown guard gating mutations.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="clock">The clock the age cut-off and its check read (in UTC).</param>
+    public PluginTraceService(
+        IDataverseConnectionPool pool,
+        IShakedownGuard guard,
+        ILogger<PluginTraceService> logger,
+        TimeProvider clock)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
         _guard = guard ?? throw new ArgumentNullException(nameof(guard));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
     }
 
     /// <inheritdoc />
@@ -272,7 +291,7 @@ public class PluginTraceService : IPluginTraceService
     {
         // Refused before anything is read: a zero or negative age would put the cut-off at or
         // after now, and every trace would match.
-        var cutoff = PluginTraceAge.CutoffUtc(olderThan, DateTime.UtcNow);
+        var cutoff = PluginTraceAge.CutoffUtc(olderThan, _clock.GetUtcNow().UtcDateTime);
         return await DeleteCreatedBeforeAsync(cutoff, progress, cancellationToken);
     }
 
@@ -289,11 +308,13 @@ public class PluginTraceService : IPluginTraceService
                 "The cut-off for deleting plug-in traces must be a UTC time.");
         }
 
-        if (cutoffUtc >= DateTime.UtcNow)
+        // At least the shortest age the form can express in the past: a cut-off at or just before
+        // now matches (nearly) every trace.
+        if (cutoffUtc > _clock.GetUtcNow().UtcDateTime - PluginTraceAge.MinAge)
         {
             throw new PpdsException(
                 ErrorCodes.Validation.InvalidValue,
-                "The cut-off for deleting plug-in traces must be in the past; a cut-off at or after now matches every trace. " +
+                "The cut-off for deleting plug-in traces must be at least one minute in the past; a cut-off at or near now matches every trace. " +
                 "To delete every trace, use the separate option that deletes all traces.");
         }
 
