@@ -204,7 +204,7 @@ public sealed class DmlInterimRuleTests : IDisposable
     /// Text without N that is not 7-bit ASCII in the condition of a write (=, &lt;&gt;, IN, LIKE, BETWEEN) is refused
     /// before anything is read or written: SQL Server converts it to the database's code page before comparing, so it
     /// would select other rows than the text says (on a Latin database '<c>Привет</c>' matches the rows whose name is
-    /// '??????'). This is the coordinator's conservative reading of the maintainer's "Refuse it", applied to conditions.
+    /// '??????'). Maintainer decision of 2026-11-25, "Yes, refuse it"; the 7-bit ASCII line is the conservative reading.
     /// </summary>
     [Theory]
     [InlineData("UPDATE account SET description = N'x' WHERE name = '" + Cyrillic + "'", "the WHERE clause of UPDATE")]

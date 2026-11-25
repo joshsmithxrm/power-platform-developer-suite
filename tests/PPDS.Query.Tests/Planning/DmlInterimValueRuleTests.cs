@@ -363,8 +363,8 @@ public class DmlInterimValueRuleTests
         => Refusal(sql).Should().BeNull();
 
     /// <summary>
-    /// Text without N that is not 7-bit ASCII, in the condition of a write (coordinator's conservative reading of the
-    /// maintainer's "Refuse it", applied to conditions): SQL Server converts it to the code page before comparing, so it
+    /// Text without N that is not 7-bit ASCII, in the condition of a write (maintainer decision of
+    /// 2026-11-25, "Yes, refuse it"; the 7-bit ASCII line is the conservative reading): SQL Server converts it to the code page before comparing, so it
     /// would select other rows than the text says.
     /// </summary>
     [Theory]
