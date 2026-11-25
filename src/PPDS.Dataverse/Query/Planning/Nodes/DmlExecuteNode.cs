@@ -596,10 +596,12 @@ public sealed class DmlExecuteNode : IQueryPlanNode
     }
 
     /// <summary>
-    /// Coerces <paramref name="value"/> using metadata for <paramref name="columnName"/>
-    /// when available. Unknown columns and missing maps pass through unchanged.
+    /// Coerces <paramref name="value"/> using metadata for <paramref name="columnName"/>, then applies the per-value rule
+    /// (<see cref="DmlValueAdmission.CheckSentValue"/>) to it. Every value of the statement, from a literal or read from a
+    /// column of the source rows, passes here while the rows are built, before the statement's first bulk write; a value
+    /// the rule refuses ends the statement with nothing of it written (#1698, review round 2).
     /// </summary>
-    private static object? CoerceForColumn(
+    private object? CoerceForColumn(
         string columnName,
         object? value,
         IReadOnlyDictionary<string, AttributeMetadataDto>? attributeMap)
@@ -610,7 +612,14 @@ public sealed class DmlExecuteNode : IQueryPlanNode
                 QueryErrorCode.DmlUnsupportedConstruct,
                 $"The column '{columnName}' is not in the table's metadata, so its value cannot be written with the right type. Nothing was executed.");
         }
-        return DmlValueCoercer.Coerce(value, attr);
+        var sent = DmlValueCoercer.Coerce(value, attr);
+        if (DmlValueAdmission.CheckSentValue(value, sent, attr) is { } refusal)
+        {
+            throw new DmlSafetyRefusalException(
+                refusal.Code!,
+                $"A value to be written to {EntityLogicalName}.{columnName} is refused: {refusal.Reason} This statement wrote nothing.");
+        }
+        return sent;
     }
 
     /// <summary>

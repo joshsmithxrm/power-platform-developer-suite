@@ -80,7 +80,8 @@ internal sealed class DmlTestHarness
         int? contactRows = null,
         int pages = 1,
         ProtectionLevel protection = ProtectionLevel.Development,
-        bool duplicateRows = false)
+        bool duplicateRows = false,
+        Action<int, Dictionary<string, QueryValue>>? shapeRow = null)
     {
         var executor = new Mock<IQueryExecutor>(MockBehavior.Loose);
         var bulk = new Mock<IBulkOperationExecutor>(MockBehavior.Loose);
@@ -99,7 +100,23 @@ internal sealed class DmlTestHarness
             harness.Reads.Add((fetchXml, page, cookie));
             var count = fetchXml.Contains("contact") ? contactRows ?? rows : rows;
             var more = (page ?? 1) < pages;
-            var result = OnlyRequestedAttributes(Rows(count, more, page ?? 1), fetchXml);
+            var source = Rows(count, more, page ?? 1);
+            if (shapeRow != null)
+            {
+                // A test's own source values (for example text with white space at either end), row by row.
+                source = new QueryResult
+                {
+                    PageNumber = source.PageNumber, EntityLogicalName = source.EntityLogicalName, Columns = source.Columns,
+                    Records = source.Records.Select((r, i) =>
+                    {
+                        var shaped = new Dictionary<string, QueryValue>(r, StringComparer.OrdinalIgnoreCase);
+                        shapeRow(i, shaped);
+                        return (IReadOnlyDictionary<string, QueryValue>)shaped;
+                    }).ToArray(),
+                    Count = source.Count, MoreRecords = source.MoreRecords, PagingCookie = source.PagingCookie
+                };
+            }
+            var result = OnlyRequestedAttributes(source, fetchXml);
             if (duplicateRows)
             {
                 // Each record twice (same id), as a one-to-many source would produce.

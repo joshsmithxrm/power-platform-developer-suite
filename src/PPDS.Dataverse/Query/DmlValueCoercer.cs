@@ -103,7 +103,7 @@ public static class DmlValueCoercer
         {
             throw new QueryExecutionException(
                 QueryErrorCode.TypeMismatch,
-                $"Cannot convert value '{value}' of type {value.GetType().Name} to a GUID " +
+                $"Cannot convert a value of type {value.GetType().Name} to a GUID " +
                 $"for lookup attribute '{attribute.LogicalName}'.");
         }
         return new EntityReference(target, guid);
@@ -254,5 +254,5 @@ public static class DmlValueCoercer
 
     private static QueryExecutionException TypeMismatch(object value, string targetType) =>
         new(QueryErrorCode.TypeMismatch,
-            $"Cannot convert value '{value}' of type {value.GetType().Name} to {targetType}.");
+            $"Cannot convert a value of type {value.GetType().Name} to {targetType}.");
 }

@@ -209,8 +209,8 @@ public class DmlInterimValueRuleTests
     [InlineData("PARSE('5' AS int)", "(PARSE)")]
     // subqueries and variables
     [InlineData("(SELECT TOP 1 name FROM account)", "(a subquery)")]
-    [InlineData("@v", "the variable @v")]
-    [InlineData("@@ROWCOUNT", "the variable @@ROWCOUNT")]
+    [InlineData("@v", "variable @v")]
+    [InlineData("@@ROWCOUNT", "variable @@ROWCOUNT")]
     // parentheses and other literal kinds
     [InlineData("(5)", "(parentheses)")]
     [InlineData("('x')", "(parentheses)")]
@@ -347,7 +347,7 @@ public class DmlInterimValueRuleTests
         refusal.Should().Contain("(text without the N prefix that holds characters outside 7-bit ASCII)")
             .And.Contain($"is not supported in {context}.")
             .And.Contain("Nothing was executed.")
-            .And.Contain("Write it with the N prefix: N'");
+            .And.Contain("Write the same text with the N prefix (N'...')");
     }
 
     [Theory]
@@ -381,7 +381,7 @@ public class DmlInterimValueRuleTests
 
         refusal.Should().Contain("(text without the N prefix that holds characters outside 7-bit ASCII)")
             .And.Contain($"is not supported in {context}.")
-            .And.Contain("Write it with the N prefix: N'")
+            .And.Contain("Write the same text with the N prefix (N'...')")
             .And.Contain("before comparing");
     }
 

@@ -104,7 +104,7 @@ public sealed class DmlInterimRuleTests : IDisposable
     [InlineData("UPDATE account SET name = CASE WHEN revenue > 1 THEN 'a' END WHERE name = 'n1'", "(CASE)")]
     [InlineData("UPDATE account SET numberofemployees = CAST(revenue AS int) WHERE name = 'n1'", "(a CAST other than")]
     [InlineData("UPDATE account SET name = (SELECT TOP 1 name FROM account) WHERE name = 'n1'", "(a subquery)")]
-    [InlineData("DECLARE @v nvarchar(10) = 'a'; UPDATE account SET name = @v WHERE name = 'n1'", "the variable @v")]
+    [InlineData("DECLARE @v nvarchar(10) = 'a'; UPDATE account SET name = @v WHERE name = 'n1'", "variable @v")]
     [InlineData("UPDATE account SET revenue = -revenue WHERE name = 'n1'", "(a minus sign on something other than a number literal)")]
     [InlineData("UPDATE account SET revenue = (5) WHERE name = 'n1'", "(parentheses)")]
     [InlineData("INSERT INTO account (name) VALUES (UPPER('a'))", "(the function UPPER)")]
@@ -136,7 +136,8 @@ public sealed class DmlInterimRuleTests : IDisposable
     [InlineData("INSERT INTO account (name) VALUES ('" + Cyrillic + "')", "N'" + Cyrillic + "'")]
     [InlineData("INSERT INTO account (name, description) SELECT name, '" + Cyrillic + "' AS d FROM account WHERE name = 'n1'", "N'" + Cyrillic + "'")]
     public async Task TextWithoutN_InANonLatinScript_IsRefusedBeforeAnythingIsReadOrWritten_AndNamesTheNForm(string sql, string nForm)
-        => await AssertRefusedEverywhere(sql, $"Write it with the N prefix: {nForm}.");
+        // The message names the N form without repeating the text (no literal is repeated).
+        => await AssertRefusedEverywhere(sql, nForm.Length > 0 ? "Write the same text with the N prefix (N'...')" : "");
 
     [Theory]
     [InlineData("UPDATE account SET name = '" + Accented + "' WHERE name = 'n1'")]
@@ -144,7 +145,7 @@ public sealed class DmlInterimRuleTests : IDisposable
     [InlineData("INSERT INTO account (name, description) SELECT name, '" + Accented + "' AS d FROM account WHERE name = 'n1'")]
     public async Task TextWithoutN_WithOneAccentedLatinCharacter_IsRefused_TheConservativeReading(string sql)
         // A Latin code page (1252) would store this character; the engine cannot tell the code page, so it is refused too.
-        => await AssertRefusedEverywhere(sql, $"Write it with the N prefix: N'{Accented}'.");
+        => await AssertRefusedEverywhere(sql, "Write the same text with the N prefix (N'...')");
 
     [Fact]
     public async Task AScriptWithTextWithoutN_RunsNoneOfItsStatements()
@@ -216,7 +217,7 @@ public sealed class DmlInterimRuleTests : IDisposable
     public async Task TextWithoutN_InTheConditionOfAWrite_IsRefusedBeforeAnythingIsReadOrWritten(string sql, string context)
     {
         await AssertRefusedEverywhere(sql, $"is not supported in {context}.");
-        await AssertRefusedEverywhere(sql, "Write it with the N prefix: N'");
+        await AssertRefusedEverywhere(sql, "Write the same text with the N prefix (N'...')");
     }
 
     private static async Task AssertRefusedEverywhere(string sql, string named, string code = ErrorCodes.Query.DmlUnsupportedConstruct)

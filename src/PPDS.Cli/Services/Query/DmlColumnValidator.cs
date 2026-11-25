@@ -4,6 +4,7 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Dataverse.Metadata;
 using PPDS.Dataverse.Metadata.Models;
+using PPDS.Dataverse.Query;
 using PPDS.Query.Planning;
 
 namespace PPDS.Cli.Services.Query;
@@ -35,8 +36,6 @@ internal static class DmlColumnValidator
     private static readonly HashSet<string> IsNullTypes = Set("String", "Memo", "Integer", "Decimal", "Money", "Double", "Picklist", "DateTime", "Lookup");
     private static readonly HashSet<string> OrderByTypes = Set("Integer", "String", "DateTime");
 
-    private static readonly Regex Offset = new(@"(Z|[+-]\d{2}:\d{2})$");
-    private static readonly Regex DateOnlyLiteral = new(@"^\d{4}-\d{2}-\d{2}$");
 
     private static HashSet<string> Set(params string[] values) => new(values, StringComparer.OrdinalIgnoreCase);
 
@@ -190,18 +189,24 @@ internal static class DmlColumnValidator
         return attribute;
     }
 
-    /// <summary>A written value must be of the column's kind, in the form Dataverse was shown to store exactly.</summary>
+    /// <summary>
+    /// A written value. A literal (or NULL, or the GUID cast) is decided by the admission function of the column's kind
+    /// (<see cref="DmlValueAdmission.AdmitLiteral"/>), the one path for a written literal: it admits only an exact form whose
+    /// value is sent without loss. A column of the statement's table must be of a kind the column takes; its values pass the
+    /// same per-value rule in the statement's pass, before its first write (<see cref="DmlValueAdmission.CheckSentValue"/>).
+    /// </summary>
     private static void WrittenValue(AttributeMetadataDto target, string table, ScalarExpression value, Dictionary<string, AttributeMetadataDto> readColumns)
     {
         var column = $"{table}.{target.LogicalName}";
-        var type = target.AttributeType;
-        if (Unwrap(value) is NullLiteral)
+        if (DmlStatementSupport.ToDmlLiteral(value) is { } literal)
         {
-            if (ChoiceTypes.Contains(type) && type != "Picklist")
-                throw Refuse($"{column} cannot be set to NULL: every row has a status.");
+            var admission = DmlValueAdmission.AdmitLiteral(literal, target, DmlValueUse.Write);
+            if (!admission.IsAdmitted)
+                throw Refuse($"The value at {DmlStatementSupport.At(value)} cannot be written to {column}: {admission.Reason}", admission.Code!);
             return;
         }
 
+        var type = target.AttributeType;
         if (TextTypes.Contains(type))
         {
             if (!IsText(value, readColumns))
@@ -226,37 +231,15 @@ internal static class DmlColumnValidator
             return;
         }
 
-        switch (type)
+        // Yes/no, choice, lookup and date columns take a literal only (the forms their admission functions admit).
+        throw Refuse($"{column} takes a literal value only, not {Sql(value)}. " + type switch
         {
-            case "Boolean" when Unwrap(value) is IntegerLiteral { Value: "0" or "1" }:
-                return;
-            case "Boolean":
-                throw Refuse($"{column} is a yes/no column; write 1, 0 or NULL.");
-            case "Picklist" or "State" or "Status" when Unwrap(value) is IntegerLiteral choice:
-                // Dataverse stored a value that is not one of the column's choices without complaint (observed live), so
-                // the value is checked here.
-                // A literal too large for a whole number cannot be a choice (and must not throw a raw exception).
-                if (!int.TryParse(choice.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var number)
-                    || target.Options is not { Count: > 0 } options || options.All(o => o.Value != number))
-                {
-                    var known = target.Options is { Count: > 0 } ? string.Join(", ", target.Options.Select(o => $"{o.Value} ({o.Label})")) : "unknown";
-                    throw Refuse($"{choice.Value} is not a choice of {column}. Its choices are: {known}.");
-                }
-                return;
-            case "Picklist" or "State" or "Status":
-                throw Refuse($"{column} is a choice column; write the choice's whole-number value (for example 1), or NULL.");
-            case "Lookup" when IsGuidValue(value):
-                return;
-            case "Lookup":
-                throw Refuse($"{column} is a lookup; write the row id as a quoted GUID with dashes, with or without braces and without spaces ('00000000-0000-0000-0000-000000000000'), or NULL.");
-            case "DateTime":
-                if (Unwrap(value) is not StringLiteral literal)
-                    throw Refuse($"{column} is a date/time column; write the value as a quoted literal ({DateHint(target)}), or NULL.");
-                CheckDateLiteral(target, column, literal.Value);
-                return;
-            default:
-                throw Refuse($"{column} cannot be set by SQL.");
-        }
+            "Boolean" => "Write 1, 0 or NULL.",
+            "Picklist" or "State" or "Status" => "Write the choice's whole-number value (for example 1).",
+            "Lookup" => "Write the row id as a quoted GUID with dashes and without spaces, or NULL.",
+            "DateTime" => $"Write the value as a quoted literal ({DateHint(target)}), or NULL.",
+            _ => "This column cannot be set by SQL."
+        });
     }
 
     /// <summary>Dataverse checks statecode against statuscode, so they are written together (verified live) or not at all.</summary>
@@ -400,78 +383,17 @@ internal static class DmlColumnValidator
         => IsDateOnly(attribute) ? "a date such as '2024-01-15'" : "with Z (UTC) or an offset, for example '2024-01-15T09:30:00Z'";
 
     /// <summary>
-    /// A date-only column takes 'yyyy-MM-dd'. A user-local date/time column takes a literal with Z or an offset:
-    /// Dataverse reads one without an offset in the calling user's time zone (observed live), while SQL has no time zone.
+    /// The constant a WHERE condition compares a column with: decided by the admission function of the column's kind
+    /// (<see cref="DmlValueAdmission.AdmitLiteral"/> with <see cref="DmlValueUse.Compare"/>), the one path for a compared
+    /// literal. An admitted literal is sent in the FetchXML as written; the grammar leaves it no room for interpretation.
     /// </summary>
-    private static void CheckDateLiteral(AttributeMetadataDto attribute, string column, string literal)
-    {
-        var text = literal.Trim();
-        if (!IsVerifiedDateBehavior(attribute))
-            throw Refuse(UnverifiedDate(column, attribute));
-        if (IsDateOnly(attribute))
-        {
-            if (!DateOnlyLiteral.IsMatch(text) || !DateTime.TryParseExact(text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
-                throw Refuse($"{column} is a date-only column; write the date as 'yyyy-MM-dd' (for example '2024-01-15'), not '{literal}'.");
-            return;
-        }
-
-        if (!Offset.IsMatch(text))
-        {
-            throw Refuse($"The date/time literal '{literal}' has no time zone; Dataverse would read it in your time zone. " +
-                         "Add Z (UTC) or an offset such as +01:00.");
-        }
-        if (!DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
-            throw Refuse($"'{literal}' is not a date/time; write it as, for example, '2024-01-15T09:30:00Z'.");
-    }
-
-    /// <summary>The constant a WHERE condition compares a column with must have the form the column's type needs.</summary>
     private static void CheckFilterLiteral(AttributeMetadataDto attribute, string column, ScalarExpression value)
     {
-        var type = attribute.AttributeType;
-        var literal = Unwrap(value);
-        if (TextTypes.Contains(type))
-        {
-            if (literal is not StringLiteral)
-                throw Refuse($"{column} is a text column; compare it with a quoted string, not {Sql(value)}.");
-            return;
-        }
-        if (WholeNumberTypes.Contains(type) || ChoiceTypes.Contains(type))
-        {
-            if (!IsLiteral<IntegerLiteral>(value))
-                throw Refuse($"{column} holds whole numbers; compare it with a whole number, not {Sql(value)}.");
-            var digits = (literal as IntegerLiteral ?? (IntegerLiteral)((UnaryExpression)literal).Expression).Value;
-            if (!long.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var magnitude) || magnitude > int.MaxValue + 1L
-                || (magnitude == int.MaxValue + 1L && literal is IntegerLiteral))
-            {
-                throw Refuse($"{Sql(value)} is outside the range of the whole-number column {column} (-2,147,483,648 to 2,147,483,647).");
-            }
-            return;
-        }
-        if (NumericTypes.Contains(type))
-        {
-            if (!IsLiteral<IntegerLiteral>(value) && !IsLiteral<NumericLiteral>(value) && !IsLiteral<RealLiteral>(value))
-                throw Refuse($"{column} is a number column; compare it with a number, not {Sql(value)}.");
-            return;
-        }
-        switch (type)
-        {
-            case "Boolean" when literal is IntegerLiteral { Value: "0" or "1" }:
-                return;
-            case "Boolean":
-                throw Refuse($"{column} is a yes/no column; compare it with 1 or 0.");
-            // The spelling written values use: SQL Server refuses a GUID with surrounding white space (error 8169), which
-            // .NET's parser would trim.
-            case "Uniqueidentifier" or "Lookup" or "Owner" when literal is StringLiteral s && DmlStatementSupport.IsCanonicalGuidText(s.Value):
-                return;
-            case "Uniqueidentifier" or "Lookup" or "Owner":
-                throw Refuse($"{column} holds row ids; compare it with a quoted GUID such as '00000000-0000-0000-0000-000000000000' " +
-                             $"(or in braces), with dashes and without spaces, not {Sql(value)}.");
-            case "DateTime" when literal is StringLiteral s:
-                CheckDateLiteral(attribute, column, s.Value);
-                return;
-            case "DateTime":
-                throw Refuse($"{column} is a date/time column; compare it with a quoted literal ({DateHint(attribute)}).");
-        }
+        if (DmlStatementSupport.ToDmlLiteral(value) is not { } literal)
+            throw Refuse($"{column} is compared with {Sql(value)}; compare it with a literal.");
+        var admission = DmlValueAdmission.AdmitLiteral(literal, attribute, DmlValueUse.Compare);
+        if (!admission.IsAdmitted)
+            throw Refuse($"The value at {DmlStatementSupport.At(value)} cannot be compared with {column}: {admission.Reason}", admission.Code!);
     }
 
     private static bool IsLiteral<T>(ScalarExpression value) where T : Literal => Unwrap(value) switch
@@ -824,11 +746,8 @@ internal static class DmlColumnValidator
         SqlDataTypeOption: SqlDataTypeOption.Int or SqlDataTypeOption.BigInt or SqlDataTypeOption.Decimal or SqlDataTypeOption.Numeric
     };
 
-    private static string Sql(TSqlFragment fragment)
-    {
-        new Sql160ScriptGenerator().GenerateScript(fragment, out var text);
-        return text.Trim();
-    }
+    /// <summary>A name (a column) as written; anything else by its kind and position, never its text (no literal is repeated).</summary>
+    private static string Sql(TSqlFragment fragment) => DmlStatementSupport.Describe(fragment);
 
     // ── visitors ───────────────────────────────────────────────────────
 

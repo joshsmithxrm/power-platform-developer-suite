@@ -160,7 +160,9 @@ public sealed class DmlFaithfulTests : IDisposable
 
         var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = "DELETE FROM account WHERE NOT (name = 'n1')", DmlSafety = Confirmed }));
 
-        Assert.StartsWith("NOT (name = 'n1') is not supported", ex.Message);
+        // Named by its kind and position once, never by its text (no literal is repeated).
+        Assert.StartsWith("The condition at line 1, column 27 (NOT) is not supported", ex.Message);
+        Assert.DoesNotContain("n1", ex.Message);
         h.AssertNothingChanged();
     }
 
@@ -315,9 +317,9 @@ public sealed class DmlFaithfulTests : IDisposable
     [InlineData("DELETE FROM [account'x] WHERE name = 'x'", "not a valid Dataverse table name")]
     [InlineData("INSERT INTO account ([na me]) VALUES ('x')", "plain column name")]
     [InlineData("INSERT INTO account (name) SELECT name AS [n x] FROM account", "not a valid name")]
-    [InlineData("UPDATE account SET revenue = +revenue WHERE revenue > 0", "+revenue")]
+    [InlineData("UPDATE account SET revenue = +revenue WHERE revenue > 0", "(a unary operator)")]
     [InlineData("UPDATE account SET description = CONVERT(varchar(8), revenue, 112) WHERE revenue > 0", "(CONVERT)")]
-    [InlineData("UPDATE account SET description = IIF(NOT (revenue > 1000), 'a', 'b') WHERE revenue > 0", "NOT")]
+    [InlineData("UPDATE account SET description = IIF(NOT (revenue > 1000), 'a', 'b') WHERE revenue > 0", "(IIF)")]
     [InlineData("UPDATE account SET name = 'a', name = 'b' WHERE revenue > 0", "more than once")]
     [InlineData("INSERT INTO account (contact.name) VALUES ('x')", "plain column name")]
     [InlineData("INSERT INTO account (name, description) SELECT TOP 5 description AS name, name AS description FROM account ORDER BY name", "also the name of a column")]

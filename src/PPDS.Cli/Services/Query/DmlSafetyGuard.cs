@@ -50,6 +50,18 @@ public sealed class DmlSafetyGuard
     {
         // A clause the engine cannot honour (TOP on UPDATE/DELETE, OUTPUT, MERGE, impersonation, ...) would be dropped
         // and change what the statement affects, so it is refused here, before any confirmation is asked for.
+        // The guard's own refusals come first (specs/sql-values.md, "Order of refusals before the first statement"): a
+        // DELETE or UPDATE without WHERE is Query.DmlBlocked whatever else it contains (DELETE TOP (1) FROM account,
+        // UPDATE account SET name = '').
+        var own = statement switch
+        {
+            DeleteStatement delete => CheckDelete(delete, options, settings),
+            UpdateStatement update => CheckUpdate(update, options, settings),
+            _ => null
+        };
+        if (own is { IsBlocked: true })
+            return own;
+
         // Its code is the refusal's class: a value Dataverse stores differently, or anything not on the allowlist.
         var refusal = PPDS.Query.Planning.DmlStatementSupport.FindRefusal(statement);
         if (refusal != null)

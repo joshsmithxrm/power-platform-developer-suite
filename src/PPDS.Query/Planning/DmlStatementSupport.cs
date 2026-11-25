@@ -211,7 +211,7 @@ internal static class DmlStatementSupport
     /// Whether text made only of white space, or with white space at either end, is written. False until rows B25 and
     /// B26 of the admission table (sql-values, core requirement 4) come into force; then set it to true.
     /// </summary>
-    internal const bool WhiteSpaceEdgedTextIsWritten = false;
+    internal const bool WhiteSpaceEdgedTextIsWritten = PPDS.Dataverse.Query.DmlValueAdmission.WhiteSpaceEdgedTextIsWritten;
 
     /// <summary>
     /// A written text literal (UPDATE SET, INSERT VALUES, INSERT ... SELECT list) that Dataverse stores, or may store,
@@ -226,12 +226,12 @@ internal static class DmlStatementSupport
                 continue;
             if (text.Value.Length == 0)
             {
-                return $"{Sql(text)} (empty text) is not written in {context}: Dataverse stores empty text as NULL, so the " +
+                return $"Empty text at {At(text)} is not written in {context}: Dataverse stores empty text as NULL, so the " +
                        "column would not hold what the statement says." + NothingExecuted + " Write NULL instead.";
             }
             if (!WhiteSpaceEdgedTextIsWritten && IsWhiteSpaceEdged(text.Value))
             {
-                return $"Text that is only white space, or that begins or ends with a white-space character, is not written in {context} yet: " +
+                return $"The text at {At(text)} is only white space, or begins or ends with a white-space character, and is not written in {context} yet: " +
                        "Dataverse has not been shown to store such text unchanged." + NothingExecuted +
                        " Remove the white space at either end, or write NULL.";
             }
@@ -269,11 +269,7 @@ internal static class DmlStatementSupport
     /// it is only white space): U+0009 to U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000 to U+200A, U+2028, U+2029,
     /// U+202F, U+205F, U+3000 (sql-values, core requirement 4).
     /// </summary>
-    public static bool IsWhiteSpaceEdged(string text)
-        => text.Length > 0 && (IsUnicodeWhiteSpace(text[0]) || IsUnicodeWhiteSpace(text[^1]));
-
-    private static bool IsUnicodeWhiteSpace(char c) => c is >= '\u0009' and <= '\u000D' or '\u0020' or '\u0085' or '\u00A0'
-        or '\u1680' or >= '\u2000' and <= '\u200A' or '\u2028' or '\u2029' or '\u202F' or '\u205F' or '\u3000';
+    public static bool IsWhiteSpaceEdged(string text) => PPDS.Dataverse.Query.DmlValueAdmission.IsWhiteSpaceEdged(text);
 
     private sealed class DataStatementCollector : TSqlFragmentVisitor
     {
@@ -456,7 +452,7 @@ internal static class DmlStatementSupport
             if (top.Percent || top.WithTies || (top.Expression is ParenthesisExpression p ? p.Expression : top.Expression) is not IntegerLiteral topValue)
                 return Unsupported("TOP other than TOP (number)", context);
             if (!int.TryParse(topValue.Value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) || n > MaxInsertSelectTop)
-                return Unsupported($"TOP {topValue.Value}", context, $" TOP can be at most {MaxInsertSelectTop} here; insert the rows in several statements.");
+                return Unsupported($"The TOP at {At(top)}, more than {MaxInsertSelectTop} rows,", context, $" TOP can be at most {MaxInsertSelectTop} here; insert the rows in several statements.");
             // Without ORDER BY, SQL does not say which rows TOP takes, so the rows Dataverse returns first could differ.
             if (select.OrderByClause == null)
                 return Unsupported("TOP without ORDER BY", context, " Add ORDER BY so the statement says which rows TOP takes.");
@@ -505,7 +501,7 @@ internal static class DmlStatementSupport
         foreach (var element in select.SelectElements)
         {
             if (element is not SelectScalarExpression scalar)
-                return Unsupported(Sql(element), context);
+                return Unsupported($"The SELECT item at {At(element)}", context);
 
             problem = CheckValue(scalar.Expression, names, context);
             if (problem != null)
@@ -515,7 +511,7 @@ internal static class DmlStatementSupport
                 ?? (scalar.Expression as ColumnReferenceExpression)?.MultiPartIdentifier.Identifiers.Last().Value;
             if (outputName == null)
             {
-                return $"The SELECT item {Sql(scalar.Expression)} needs an alias (AS name): INSERT ... SELECT maps values by " +
+                return $"The SELECT item at {At(scalar.Expression)} needs an alias (AS name): INSERT ... SELECT maps values by " +
                        "position, and an unnamed expression cannot be mapped reliably." + NothingExecuted;
             }
 
@@ -539,7 +535,7 @@ internal static class DmlStatementSupport
             foreach (var order in select.OrderByClause.OrderByElements)
             {
                 if (order.Expression is not ColumnReferenceExpression orderColumn || CheckColumn(orderColumn, names, "ORDER BY") != null)
-                    return Unsupported($"ORDER BY {Sql(order.Expression)}", context);
+                    return Unsupported($"ORDER BY of the expression at {At(order.Expression)}", context);
                 // T-SQL orders by a same-named SELECT alias; Dataverse would order by the table's column.
                 var orderName = orderColumn.MultiPartIdentifier.Identifiers.Last().Value;
                 var shadowing = select.SelectElements.OfType<SelectScalarExpression>().FirstOrDefault(e =>
@@ -657,13 +653,13 @@ internal static class DmlStatementSupport
         var context = $"the WHERE clause of {verb}";
         var real = RealLiteralIn(condition);
         if (real != null)
-            return Unsupported($"{Sql(real)} (a floating-point literal)", context, RealLiteralHowTo);
+            return Unsupported($"The number at {At(real)} (a floating-point literal)", context, RealLiteralHowTo);
         var number = Operands(condition).OfType<ScalarExpression>().FirstOrDefault(o => !NumberFits(o));
         if (number != null)
-            return Unsupported($"{Sql(number)} ({NumberTooLarge})", context, NumberTooLargeHowTo);
+            return Unsupported($"The number at {At(number)} ({NumberTooLarge})", context, NumberTooLargeHowTo);
         var text = Operands(condition).OfType<StringLiteral>().FirstOrDefault(s => !s.IsNational && !IsSevenBitAscii(s.Value));
         if (text != null)
-            return Unsupported($"{Sql(text)} (text without the N prefix that holds characters outside 7-bit ASCII)", context, WhereTextHowTo(text));
+            return Unsupported($"The text at {At(text)} (text without the N prefix that holds characters outside 7-bit ASCII)", context, WhereTextHowTo(text));
         switch (condition)
         {
             case InPredicate { Subquery: null } tooLong when tooLong.Values.Count > MaxInValues:
@@ -674,14 +670,14 @@ internal static class DmlStatementSupport
             case BooleanParenthesisExpression paren:
                 return CheckCondition(paren.Expression, names, verb);
             case BooleanNotExpression:
-                return Unsupported(Sql(condition), context, " Write the opposite condition instead (for example <> instead of NOT =).");
+                return Unsupported($"The condition at {At(condition)} (NOT)", context, " Write the opposite condition instead (for example <> instead of NOT =).");
             case BooleanComparisonExpression comparison when IsComparison(comparison.ComparisonType):
                 if (comparison.FirstExpression is not ColumnReferenceExpression compared)
-                    return Unsupported(Sql(condition), context, " Put the column on the left and a constant on the right.");
+                    return Unsupported($"The condition at {At(condition)} ({ConditionPart(condition)})", context, " Put the column on the left and a constant on the right.");
                 if (comparison.SecondExpression is NullLiteral)
-                    return Unsupported($"{Sql(condition)} (comparing with NULL)", context, " Use IS NULL or IS NOT NULL.");
+                    return Unsupported($"The condition at {At(condition)} (comparing with NULL)", context, " Use IS NULL or IS NOT NULL.");
                 if (!IsConstant(comparison.SecondExpression))
-                    return Unsupported(Sql(condition), context, " Compare the column with a string or number literal.");
+                    return Unsupported($"The condition at {At(condition)} ({ConditionPart(condition)})", context, " Compare the column with a string or number literal.");
                 return CheckColumn(compared, names, context);
             case BooleanIsNullExpression { Expression: ColumnReferenceExpression column }:
                 return CheckColumn(column, names, context);
@@ -695,7 +691,7 @@ internal static class DmlStatementSupport
                 when IsConstant(between.SecondExpression) && IsConstant(between.ThirdExpression):
                 return CheckColumn(column, names, context);
             default:
-                return Unsupported(Sql(condition), context,
+                return Unsupported($"The condition at {At(condition)} ({ConditionPart(condition)})", context,
                     " Supported conditions: column = constant (and <>, <, >, <=, >=), IN (constants), LIKE 'pattern', " +
                     "BETWEEN, IS [NOT] NULL, combined with AND, OR and parentheses.");
         }
@@ -723,7 +719,7 @@ internal static class DmlStatementSupport
     /// before comparing, so characters the code page lacks become question marks and other rows match.
     /// </summary>
     private static string WhereTextHowTo(StringLiteral text) =>
-        $" Write it with the N prefix: {Sql(new StringLiteral { Value = text.Value, IsNational = true })}. Without N, SQL Server " +
+        " Write the same text with the N prefix (N'...'). Without N, SQL Server " +
         "converts the text to the database's code page before comparing, so characters the code page does not have become " +
         "question marks and other rows match; the engine cannot tell which code page that is, so text without N is compared " +
         "only when it is 7-bit ASCII.";
@@ -827,15 +823,34 @@ internal static class DmlStatementSupport
     /// literal to the database's code page and stores the characters the code page lacks as question marks, and the engine
     /// cannot tell which code page (collation) that is, so only the characters every code page shares are admitted.
     /// </summary>
-    public static bool IsSevenBitAscii(string text)
+    public static bool IsSevenBitAscii(string text) => PPDS.Dataverse.Query.DmlValueAdmission.IsSevenBitAscii(text);
+
+    /// <summary>
+    /// The literal <paramref name="expression"/> is, for the admission functions (<see cref="PPDS.Dataverse.Query.DmlValueAdmission"/>),
+    /// or null when it is not a literal of an admitted form: a text, whole-number or decimal literal, a minus sign written
+    /// directly on a number literal, NULL, or <c>CAST('&lt;guid&gt;' AS uniqueidentifier)</c> (its text is checked there).
+    /// </summary>
+    public static PPDS.Dataverse.Query.DmlLiteral? ToDmlLiteral(ScalarExpression expression) => expression switch
     {
-        foreach (var c in text)
-        {
-            if (c > '\u007F')
-                return false;
-        }
-        return true;
-    }
+        StringLiteral text when expression.GetType() == typeof(StringLiteral)
+            => new(text.IsNational ? PPDS.Dataverse.Query.DmlLiteralKind.NationalText : PPDS.Dataverse.Query.DmlLiteralKind.Text, text.Value),
+        IntegerLiteral whole when expression.GetType() == typeof(IntegerLiteral) => new(PPDS.Dataverse.Query.DmlLiteralKind.WholeNumber, whole.Value),
+        // ScriptDom parses a whole number beyond Int32 (2147483648) as a NumericLiteral, as SQL Server types it numeric(10, 0):
+        // by its text it is a whole number.
+        NumericLiteral number when expression.GetType() == typeof(NumericLiteral)
+            => new(number.Value.Contains('.') ? PPDS.Dataverse.Query.DmlLiteralKind.DecimalNumber : PPDS.Dataverse.Query.DmlLiteralKind.WholeNumber, number.Value),
+        NullLiteral when expression.GetType() == typeof(NullLiteral) => new(PPDS.Dataverse.Query.DmlLiteralKind.Null, ""),
+        UnaryExpression unary when expression.GetType() == typeof(UnaryExpression) && IsNegativeNumber(unary)
+            => unary.Expression is IntegerLiteral i
+                ? new(PPDS.Dataverse.Query.DmlLiteralKind.WholeNumber, i.Value, Negative: true)
+                : new(((NumericLiteral)unary.Expression).Value.Contains('.') ? PPDS.Dataverse.Query.DmlLiteralKind.DecimalNumber : PPDS.Dataverse.Query.DmlLiteralKind.WholeNumber,
+                    ((NumericLiteral)unary.Expression).Value, Negative: true),
+        CastCall cast when expression.GetType() == typeof(CastCall)
+                           && cast.DataType is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.UniqueIdentifier, Parameters.Count: 0 }
+                           && cast.Parameter?.GetType() == typeof(StringLiteral)
+            => new(PPDS.Dataverse.Query.DmlLiteralKind.GuidCast, ((StringLiteral)cast.Parameter).Value),
+        _ => null
+    };
 
     /// <summary>A minus sign written directly on a whole-number or decimal literal, such as <c>-5</c> or <c>-2.5</c>.</summary>
     private static bool IsNegativeNumber(UnaryExpression unary)
@@ -872,8 +887,8 @@ internal static class DmlStatementSupport
         }
 
         var part = expression is VariableReference or GlobalVariableExpression
-            ? $"the variable {Sql(expression)}"
-            : $"{Sql(expression)} ({Construct(expression)})";
+            ? $"The variable {Sql(expression)} at {At(expression)}"
+            : $"The value at {At(expression)} ({Construct(expression)})";
         var howTo = HowTo(expression);
         if (columns == null && expression is not (VariableReference or GlobalVariableExpression or RealLiteral or StringLiteral) && NumberFits(expression))
             howTo = " VALUES takes literal values only (text, numbers, NULL, or CAST('<guid>' AS uniqueidentifier)); write the value you want stored as a literal." +
@@ -914,7 +929,7 @@ internal static class DmlStatementSupport
     private static string HowTo(ScalarExpression expression) => expression switch
     {
         StringLiteral text =>
-            $" Write it with the N prefix: {Sql(new StringLiteral { Value = text.Value, IsNational = true })}. Without N, SQL Server " +
+            " Write the same text with the N prefix (N'...'). Without N, SQL Server " +
             "stores the characters that the database's code page does not have as question marks; the engine cannot tell " +
             "which code page that is, so text without N is written only when it is 7-bit ASCII.",
         RealLiteral or UnaryExpression { Expression: RealLiteral } => RealLiteralHowTo,
@@ -1023,11 +1038,93 @@ internal static class DmlStatementSupport
     private static string Unsupported(string part, string context, string? howTo = null)
         => $"{part} is not supported in {context}." + NothingExecuted + (howTo ?? string.Empty);
 
+    /// <summary>
+    /// The text of a name (a column, a table, a variable), as written. Anything else is described by its position: a refusal
+    /// message never repeats a literal from the script (specs/sql-values.md, core requirement 1).
+    /// </summary>
     private static string Sql(TSqlFragment fragment)
     {
-        Generator.GenerateScript(fragment, out var sql);
-        return sql.Trim();
+        switch (fragment)
+        {
+            case ColumnReferenceExpression or VariableReference or GlobalVariableExpression or SchemaObjectName or Identifier:
+                Generator.GenerateScript(fragment, out var sql);
+                return sql.Trim();
+            case NamedTableReference table:
+                Generator.GenerateScript(table.SchemaObject, out var name);
+                return table.Alias is null ? name.Trim() : $"{name.Trim()} {table.Alias.Value}";
+            default:
+                return $"the {Kind(fragment)} at {At(fragment)}";
+        }
     }
+
+    /// <summary>A name as written, or anything else by its kind and position (for messages that must not repeat a literal).</summary>
+    internal static string Describe(TSqlFragment fragment) => Sql(fragment);
+
+    /// <summary>
+    /// What a refused condition contains, named by kind (and a function by its name), never by its text: the first
+    /// function, variable, subquery, EXISTS, LIKE set or column-to-column comparison in it.
+    /// </summary>
+    private static string ConditionPart(BooleanExpression condition)
+    {
+        var finder = new ConditionPartFinder();
+        condition.Accept(finder);
+        return finder.Part ?? condition switch
+        {
+            BooleanComparisonExpression { FirstExpression: ColumnReferenceExpression, SecondExpression: ColumnReferenceExpression } => "a comparison of two columns",
+            BooleanComparisonExpression { FirstExpression: not ColumnReferenceExpression } => "a value on the left of the comparison",
+            LikePredicate => "a LIKE pattern with [ ] or a pattern that is not a text literal",
+            _ => "a condition of a kind not supported"
+        };
+    }
+
+    private sealed class ConditionPartFinder : TSqlFragmentVisitor
+    {
+        public string? Part { get; private set; }
+
+        public override void Visit(FunctionCall node) => Part ??= $"the function {node.FunctionName.Value.ToUpperInvariant()}";
+
+        public override void Visit(LeftFunctionCall node) => Part ??= "the function LEFT";
+
+        public override void Visit(RightFunctionCall node) => Part ??= "the function RIGHT";
+
+        public override void Visit(VariableReference node) => Part ??= $"the variable {node.Name}";
+
+        public override void Visit(GlobalVariableExpression node) => Part ??= $"the variable {node.Name}";
+
+        public override void Visit(ScalarSubquery node) => Part ??= "a subquery";
+
+        public override void Visit(ExistsPredicate node) => Part ??= "EXISTS (a subquery)";
+
+        public override void Visit(InPredicate node)
+        {
+            if (node.Subquery != null)
+                Part ??= "IN with a subquery (SELECT)";
+        }
+
+        public override void Visit(BinaryExpression node) => Part ??= "arithmetic";
+
+        public override void Visit(CastCall node) => Part ??= "CAST";
+
+        public override void Visit(ConvertCall node) => Part ??= "CONVERT";
+
+        public override void Visit(SearchedCaseExpression node) => Part ??= "CASE";
+
+        public override void Visit(SimpleCaseExpression node) => Part ??= "CASE";
+    }
+
+    /// <summary>Where a part of the script is: its line and column.</summary>
+    internal static string At(TSqlFragment fragment)
+        => fragment.StartLine > 0 ? $"line {fragment.StartLine}, column {fragment.StartColumn}" : "this statement";
+
+    private static string Kind(TSqlFragment fragment) => fragment switch
+    {
+        StringLiteral => "text",
+        Literal => "literal",
+        BooleanExpression => "condition",
+        SelectElement => "SELECT item",
+        TableReference => "table reference",
+        _ => "expression"
+    };
 
     private static string Operator(AssignmentKind kind) => kind switch
     {
