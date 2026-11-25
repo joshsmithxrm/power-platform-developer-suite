@@ -195,6 +195,16 @@ public sealed partial class ExecutionPlanBuilder
         var ctes = selectStmt.WithCtesAndXmlNamespaces.CommonTableExpressions;
         var cteNames = new List<string>();
 
+        // TOP ... WITH TIES or PERCENT is refused wherever it appears (maintainer decision, "Refuse all seven"); inside a
+        // CTE it would otherwise pass without the check the FetchXML translation makes.
+        foreach (CommonTableExpression cte in ctes)
+        {
+            var top = new TopRowFilterFinder();
+            cte.QueryExpression.Accept(top);
+            if (top.Found)
+                throw new PPDS.Query.Parsing.QueryParseException(PPDS.Query.Transpilation.FetchXmlGenerator.TopFormMessage);
+        }
+
         foreach (CommonTableExpression cte in ctes)
         {
             cteNames.Add(cte.ExpressionName.Value);
@@ -502,6 +512,11 @@ public sealed partial class ExecutionPlanBuilder
     private QueryPlanResult PlanScript(
         IReadOnlyList<TSqlStatement> statements, QueryPlanOptions options)
     {
+        // The statements of a script are planned one by one as they run, so every data statement in it (in any block,
+        // IF branch, loop or TRY) is checked against the allowlist first: a refused statement cannot follow writes.
+        foreach (var statement in statements)
+            DmlStatementSupport.ThrowIfAnyUnsupported(statement);
+
         var scriptNode = new ScriptExecutionNode(statements, this, _expressionCompiler, _sessionContext, options);
 
         return new QueryPlanResult
@@ -979,5 +994,17 @@ public sealed partial class ExecutionPlanBuilder
             NullLiteral => "",
             _ => expr.ToString() ?? ""
         };
+    }
+
+    /// <summary>Finds a TOP with PERCENT or WITH TIES anywhere in a fragment.</summary>
+    private sealed class TopRowFilterFinder : TSqlFragmentVisitor
+    {
+        public bool Found { get; private set; }
+
+        public override void Visit(TopRowFilter node)
+        {
+            if (node.Percent || node.WithTies)
+                Found = true;
+        }
     }
 }

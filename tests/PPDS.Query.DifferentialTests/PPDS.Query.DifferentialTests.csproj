@@ -31,4 +31,8 @@
     <ProjectReference Include="..\..\src\PPDS.Dataverse\PPDS.Dataverse.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\Shared\DmlValueAdmissionTable.cs" Link="Shared\DmlValueAdmissionTable.cs" />
+  </ItemGroup>
+
 </Project>

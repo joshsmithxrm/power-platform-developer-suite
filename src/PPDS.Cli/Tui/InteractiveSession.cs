@@ -417,13 +417,13 @@ internal sealed class InteractiveSession : IAsyncDisposable
                 return remoteProvider.GetRequiredService<IQueryExecutor>();
             };
 
-            // Wire environment-specific DML safety settings. Always set, so an entry removed since the last query (no
-            // entry: Production) does not keep the level the service had before.
+            // Wire environment-specific DML safety settings from the file as read above (#1829). ConfigureEnvironment always
+            // sets them, so an entry removed since the last query (no entry: Production) does not keep the level the
+            // service had before.
             concrete.ProfileResolver = resolver;
             var normalized = EnvironmentConfig.NormalizeUrl(environmentUrl);
             var envConfig = envConfigs.Environments.FirstOrDefault(e => EnvironmentConfig.NormalizeUrl(e.Url) == normalized);
-            concrete.EnvironmentSafetySettings = envConfig?.SafetySettings;
-            concrete.EnvironmentProtectionLevel = WriteProtectionResolver.ResolveForSqlDml(envConfig);
+            concrete.ConfigureEnvironment(environmentUrl, envConfig);
         }
 
         return service;

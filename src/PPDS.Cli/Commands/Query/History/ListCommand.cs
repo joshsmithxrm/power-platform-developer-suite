@@ -154,7 +154,7 @@ public static class ListCommand
     private static string GetQueryPreview(string sql, int maxLength)
     {
         // Efficiently collapse all whitespace to single spaces using regex
-        var normalized = System.Text.RegularExpressions.Regex.Replace(sql, @"\s+", " ").Trim();
+        var normalized = System.Text.RegularExpressions.Regex.Replace(TerminalText.Sanitize(sql), @"\s+", " ").Trim();
 
         if (normalized.Length <= maxLength)
         {

@@ -65,4 +65,8 @@ public static class CustomizationLockRetry
             }
         }
     }
+
+    /// <summary>As <see cref="RunAsync{T}"/>, for an operation without a result.</summary>
+    public static Task RunAsync(Func<Task> operation, string what, Action<string>? log)
+        => RunAsync(async () => { await operation(); return true; }, what, log);
 }

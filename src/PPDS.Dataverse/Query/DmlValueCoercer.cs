@@ -72,7 +72,7 @@ public static class DmlValueCoercer
 
             case "String":
             case "Memo":
-                return value is string ? value : value.ToString();
+                return value is string ? value : Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture);
 
             case "Virtual":
                 // MultiSelectPicklist is modeled as Virtual with AttributeTypeName="MultiSelectPicklistType".
@@ -103,7 +103,7 @@ public static class DmlValueCoercer
         {
             throw new QueryExecutionException(
                 QueryErrorCode.TypeMismatch,
-                $"Cannot convert value '{value}' of type {value.GetType().Name} to a GUID " +
+                $"Cannot convert a value of type {value.GetType().Name} to a GUID " +
                 $"for lookup attribute '{attribute.LogicalName}'.");
         }
         return new EntityReference(target, guid);
@@ -167,8 +167,8 @@ public static class DmlValueCoercer
         {
             long l => l,
             int i => i,
-            decimal d => (long)d,
-            double dbl => (long)dbl,
+            decimal d when d >= long.MinValue && d <= long.MaxValue => (long)d,
+            double dbl when dbl >= long.MinValue && dbl < long.MaxValue => (long)dbl,
             string s when long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l) => l,
             _ => throw TypeMismatch(value, "Int64")
         };
@@ -178,7 +178,7 @@ public static class DmlValueCoercer
 
     private static double CoerceDouble(object value)
     {
-        return value switch
+        var result = value switch
         {
             double d => d,
             int i => i,
@@ -187,6 +187,8 @@ public static class DmlValueCoercer
             string s when double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) => d,
             _ => throw TypeMismatch(value, "Double")
         };
+        // Negative zero (from -0.0, or a decimal -0.0) is sent as +0, as SQL Server stores it.
+        return result == 0 ? 0d : result;
     }
 
     /// <summary>
@@ -204,10 +206,16 @@ public static class DmlValueCoercer
         {
             DateTime dt => dt,
             DateTimeOffset dto => dto.UtcDateTime,
+            // A literal with Z or an offset is one instant: send it as UTC. RoundtripKind would turn '+02:00' into the
+            // machine's local time, which the SDK then sent hours off (observed live, 2026-11-17).
+            string s when HasZone(s) && DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out var zoned) => zoned.UtcDateTime,
             string s when DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt) => dt,
             _ => throw TypeMismatch(value, "DateTime")
         };
     }
+
+    private static bool HasZone(string text)
+        => System.Text.RegularExpressions.Regex.IsMatch(text.Trim(), @"(Z|[+-]\d{2}:?\d{2})$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     private static object CoerceGuid(object value)
     {
@@ -239,7 +247,8 @@ public static class DmlValueCoercer
             decimal d => d,
             int i => i,
             long l => l,
-            double dbl => (decimal)dbl,
+            // Outside decimal's range (or NaN) the cast would throw a raw OverflowException.
+            double dbl when !double.IsNaN(dbl) && Math.Abs(dbl) < 7.9e28 => (decimal)dbl,
             string s when decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var d) => d,
             _ => throw TypeMismatch(value, "Decimal")
         };
@@ -247,5 +256,5 @@ public static class DmlValueCoercer
 
     private static QueryExecutionException TypeMismatch(object value, string targetType) =>
         new(QueryErrorCode.TypeMismatch,
-            $"Cannot convert value '{value}' of type {value.GetType().Name} to {targetType}.");
+            $"Cannot convert a value of type {value.GetType().Name} to {targetType}.");
 }

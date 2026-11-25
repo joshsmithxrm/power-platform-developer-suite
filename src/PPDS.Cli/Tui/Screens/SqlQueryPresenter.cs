@@ -34,7 +34,11 @@ internal sealed class SqlQueryPresenter : IDisposable
     private bool _useTdsEndpoint;
     private bool _useFetchXmlMode;
     private bool _lastExecutionUsedFetchXml;
-    private bool _confirmedDml;
+
+    // A confirmation is bound to the exact statement text it was asked for and the environment it was asked in; it is
+    // taken (and cleared) at the start of the next execution of any kind, whatever happens after that.
+    private string? _awaitingConfirmationSql;
+    private (string Sql, string EnvironmentUrl)? _confirmation;
 
     // Read-only properties
     public string? LastSql => _lastSql;
@@ -122,9 +126,103 @@ internal sealed class SqlQueryPresenter : IDisposable
             : "Input: SQL");
     }
 
-    public void ConfirmDml()
+    /// <summary>The statement the last DmlConfirmationRequired was raised for, until it is confirmed, declined or replaced.</summary>
+    public string? AwaitingConfirmationSql => _awaitingConfirmationSql;
+
+    /// <summary>
+    /// Confirms the statement the last confirmation request was raised for, in this presenter's environment, and returns
+    /// that statement (run it with <see cref="ExecuteAsync"/>); null when nothing is awaiting confirmation. The
+    /// confirmation applies only to the next execution, and only when it is that exact statement.
+    /// </summary>
+    public string? ConfirmDml()
     {
-        _confirmedDml = true;
+        var sql = _awaitingConfirmationSql;
+        _awaitingConfirmationSql = null;
+        _confirmation = sql == null ? null : (sql, _environmentUrl);
+        return sql;
+    }
+
+    /// <summary>Drops a pending confirmation request (the user cancelled the dialog).</summary>
+    public void DeclineDml()
+    {
+        _awaitingConfirmationSql = null;
+        _confirmation = null;
+    }
+
+    /// <summary>Takes the confirmation for <paramref name="sql"/>: true only for the statement and environment it was given for.</summary>
+    private bool TakeConfirmation(string? sql)
+    {
+        var confirmation = _confirmation;
+        _confirmation = null;
+        _awaitingConfirmationSql = null;
+        return confirmation is { } c && sql != null
+            && string.Equals(c.Sql, sql, StringComparison.Ordinal)
+            && string.Equals(c.EnvironmentUrl, _environmentUrl, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The text of the confirmation dialog: the service's message, the environment(s) the statement would change, every
+    /// statement that changes data (verb and table), the whole statement text (control characters escaped, never
+    /// shortened: the dialog scrolls), then the question.
+    /// </summary>
+    public string ConfirmationPrompt(PpdsException confirmation)
+    {
+        var targets = (confirmation as PpdsDmlConfirmationRequiredException)?.Targets;
+        var lines = new List<string> { confirmation.Message, "" };
+        if (targets is { Count: > 0 })
+        {
+            foreach (var t in targets)
+                lines.Add($"Environment: {(t.Label != null ? t.Label + " " : "")}{t.Url ?? _environmentUrl} ({t.Protection} protection)");
+        }
+        else
+        {
+            lines.Add($"Environment: {_environmentUrl}");
+        }
+
+        var statement = PPDS.Cli.Infrastructure.Output.TerminalText.Sanitize(_awaitingConfirmationSql ?? "");
+        var changes = DataChangingStatements(_awaitingConfirmationSql ?? "");
+        lines.Add(changes is null
+            ? "Statements that change data: could not be listed; read the whole text below."
+            : $"Statements that change data ({changes.Count}): {string.Join("; ", changes)}");
+        lines.Add("Statement: " + statement);
+        lines.Add("");
+        lines.Add("Do you want to proceed?");
+        return string.Join("\n", lines);
+    }
+
+    /// <summary>Each INSERT, UPDATE, DELETE and MERGE in <paramref name="sql"/> as "VERB table" (null when it does not parse).</summary>
+    internal static IReadOnlyList<string>? DataChangingStatements(string sql)
+    {
+        var parser = new Microsoft.SqlServer.TransactSql.ScriptDom.TSql160Parser(initialQuotedIdentifiers: false);
+        using var reader = new StringReader(sql);
+        var fragment = parser.Parse(reader, out var errors);
+        if (errors.Count > 0 || fragment is null)
+            return null;
+        var collector = new DataChangeCollector();
+        fragment.Accept(collector);
+        return collector.Statements;
+    }
+
+    private sealed class DataChangeCollector : Microsoft.SqlServer.TransactSql.ScriptDom.TSqlFragmentVisitor
+    {
+        public List<string> Statements { get; } = new();
+
+        private static string Name(Microsoft.SqlServer.TransactSql.ScriptDom.TableReference? table)
+            => table is Microsoft.SqlServer.TransactSql.ScriptDom.NamedTableReference named
+                ? string.Join(".", named.SchemaObject.Identifiers.Select(i => i.Value))
+                : "(a table expression)";
+
+        public override void Visit(Microsoft.SqlServer.TransactSql.ScriptDom.InsertStatement node)
+            => Statements.Add("INSERT " + Name(node.InsertSpecification.Target));
+
+        public override void Visit(Microsoft.SqlServer.TransactSql.ScriptDom.UpdateStatement node)
+            => Statements.Add("UPDATE " + Name(node.UpdateSpecification.Target));
+
+        public override void Visit(Microsoft.SqlServer.TransactSql.ScriptDom.DeleteStatement node)
+            => Statements.Add("DELETE " + Name(node.DeleteSpecification.Target));
+
+        public override void Visit(Microsoft.SqlServer.TransactSql.ScriptDom.MergeStatement node)
+            => Statements.Add("MERGE " + Name(node.MergeSpecification.Target));
     }
 
     public void CancelQuery()
@@ -139,6 +237,9 @@ internal sealed class SqlQueryPresenter : IDisposable
     /// </summary>
     public async Task ExecuteAsync(string sql, CancellationToken screenCancellation)
     {
+        // Taken before anything else (and before any await), so no failure, cancellation or retry can leave it set.
+        var isConfirmed = TakeConfirmation(sql);
+
         // Validation
         if (string.IsNullOrWhiteSpace(sql))
         {
@@ -166,10 +267,6 @@ internal sealed class SqlQueryPresenter : IDisposable
             var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, _profileName, queryCt);
             TuiDebugLog.Log("Got service, executing streaming query...");
 
-            // AC-13: capture and reset DML confirmation flag
-            var isConfirmed = _confirmedDml;
-            _confirmedDml = false;
-
             var request = new SqlQueryRequest
             {
                 Sql = sql,
@@ -188,6 +285,7 @@ internal sealed class SqlQueryPresenter : IDisposable
             var totalRows = 0;
             var isFirstChunk = true;
             QueryExecutionMode? executionMode = null;
+            DmlOutcome? dmlOutcome = null;
 
             await foreach (var chunk in service.ExecuteStreamingAsync(request, StreamingChunkSize, queryCt))
             {
@@ -215,6 +313,11 @@ internal sealed class SqlQueryPresenter : IDisposable
                     executionMode = chunk.ExecutionMode;
                 }
 
+                if (chunk.IsComplete)
+                {
+                    dmlOutcome = chunk.DmlOutcome;
+                }
+
                 isFirstChunk = false;
             }
 
@@ -231,7 +334,7 @@ internal sealed class SqlQueryPresenter : IDisposable
             _isExecuting = false;
 
             var modeText = executionMode == QueryExecutionMode.Tds ? " via TDS" : " via Dataverse";
-            var statusText = $"Returned {totalRows:N0} rows in {elapsedMs}ms{modeText}";
+            var statusText = FormatCompletionStatus(totalRows, elapsedMs, modeText, dmlOutcome);
 
             ExecutionComplete?.Invoke(statusText, elapsedMs, executionMode);
 
@@ -250,10 +353,27 @@ internal sealed class SqlQueryPresenter : IDisposable
             _isExecuting = false;
             AuthenticationRequired?.Invoke(authEx);
         }
-        catch (OperationCanceledException) when (_queryCts?.IsCancellationRequested == true && !screenCancellation.IsCancellationRequested)
+        catch (PpdsAuthException ppdsAuth) when (ppdsAuth.RequiresReauthentication)
+        {
+            // The service wraps sign-in failures (before any data changed) in a PpdsAuthException.
+            _isExecuting = false;
+            AuthenticationRequired?.Invoke(ppdsAuth.InnerException as DataverseAuthenticationException
+                ?? new DataverseAuthenticationException(ppdsAuth.UserMessage, requiresReauthentication: true));
+        }
+        catch (OperationCanceledException cancelled) when (_queryCts?.IsCancellationRequested == true && !screenCancellation.IsCancellationRequested)
         {
             _isExecuting = false;
-            QueryCancelled?.Invoke();
+            // Cancelling after DML ran must say what already changed (not rolled back) and what may be partly applied.
+            var committed = DmlOutcome.From(cancelled)?.DescribeCommitted();
+            if (committed == null)
+            {
+                QueryCancelled?.Invoke();
+            }
+            else
+            {
+                _lastErrorMessage = $"Query cancelled. {committed}";
+                ErrorOccurred?.Invoke(_lastErrorMessage);
+            }
         }
         catch (OperationCanceledException) when (screenCancellation.IsCancellationRequested)
         {
@@ -263,18 +383,60 @@ internal sealed class SqlQueryPresenter : IDisposable
         catch (PpdsException dmlEx) when (dmlEx.ErrorCode == ErrorCodes.Query.DmlConfirmationRequired)
         {
             _isExecuting = false;
+            _awaitingConfirmationSql = sql;
             DmlConfirmationRequired?.Invoke(dmlEx);
         }
         catch (Exception ex)
         {
-            _lastErrorMessage = ex.Message;
+            // A script interrupted after some DML ran must say what already ran (not rolled back).
+            var committed = DmlOutcome.From(ex)?.DescribeCommitted();
+            var refusal = ex is PpdsDmlRowCapExceededException ? ex.Message + RowCapRemedy : ex.Message;
+            var message = committed == null ? refusal : $"{refusal} {committed}";
+            _lastErrorMessage = message;
             _isExecuting = false;
-            ErrorOccurred?.Invoke(ex.Message);
+            ErrorOccurred?.Invoke(message);
         }
+    }
+
+    /// <summary>What the TUI adds to a row-cap refusal: the cap cannot be removed here, so it says where it can.</summary>
+    internal const string RowCapRemedy =
+        " The row cap cannot be removed in the TUI; to change every matching row, run the statement with 'ppds query sql --no-limit'.";
+
+    /// <summary>
+    /// Load-more re-reads the last statement; it must never run DML. It always asks for page 2 or later, and the
+    /// service refuses DML on a request for a further page (Query.DmlBlocked), confirmed or not.
+    /// </summary>
+    internal static SqlQueryRequest BuildLoadMoreRequest(string sql, int pageNumber, string? pagingCookie) => new()
+    {
+        Sql = sql,
+        PageNumber = pageNumber,
+        PagingCookie = pagingCookie,
+        EnablePrefetch = true,
+        DmlSafety = new DmlSafetyOptions()
+    };
+
+    /// <summary>
+    /// Status line for a finished streaming query. Failed DML rows are reported instead of a plain
+    /// "Returned N rows" (a DML result is one summary row, which read as success). When a script stopped at a statement
+    /// with failed rows, the sentence naming the statements that were not run is kept whole after the shortened message.
+    /// </summary>
+    internal static string FormatCompletionStatus(int totalRows, long elapsedMs, string modeText, DmlOutcome? dmlOutcome)
+        => dmlOutcome is { HasFailures: true }
+            ? dmlOutcome.NotRunNote is { } notRun
+                ? $"{OneLine(dmlOutcome.MessageWithoutNotRunNote!, 160)} {OneLine(notRun, int.MaxValue)} ({elapsedMs}ms{modeText})"
+                : $"{OneLine(dmlOutcome.Message!, 160)} ({elapsedMs}ms{modeText})"
+            : $"Returned {totalRows:N0} rows in {elapsedMs}ms{modeText}";
+
+    // The status line is a single line; server error text can contain newlines and be long.
+    private static string OneLine(string text, int maxLength)
+    {
+        var collapsed = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
+        return collapsed.Length <= maxLength ? collapsed : collapsed[..(maxLength - 3)] + "...";
     }
 
     public async Task ExecuteFetchXmlAsync(string fetchXml, CancellationToken screenCancellation)
     {
+        TakeConfirmation(null); // any execution ends a pending confirmation
         if (string.IsNullOrWhiteSpace(fetchXml))
         {
             ErrorOccurred?.Invoke("FetchXML cannot be empty.");
@@ -350,6 +512,7 @@ internal sealed class SqlQueryPresenter : IDisposable
     /// </summary>
     public async Task LoadMoreAsync(CancellationToken cancellationToken)
     {
+        TakeConfirmation(null); // any execution ends a pending confirmation
         if (_lastSql == null) return;
 
         try
@@ -374,13 +537,7 @@ internal sealed class SqlQueryPresenter : IDisposable
             {
                 var service = await _session.GetSqlQueryServiceAsync(_environmentUrl, _profileName, cancellationToken);
 
-                var request = new SqlQueryRequest
-                {
-                    Sql = _lastSql,
-                    PageNumber = _lastPageNumber + 1,
-                    PagingCookie = _lastPagingCookie,
-                    EnablePrefetch = true
-                };
+                var request = BuildLoadMoreRequest(_lastSql, _lastPageNumber + 1, _lastPagingCookie);
 
                 var result = await service.ExecuteAsync(request, cancellationToken);
 

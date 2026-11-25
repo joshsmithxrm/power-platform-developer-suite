@@ -211,7 +211,7 @@ public sealed class ExpressionCompiler
 
     private static CompiledScalarExpression CompileNumericLiteral(NumericLiteral lit)
     {
-        var value = decimal.Parse(lit.Value, CultureInfo.InvariantCulture);
+        var value = ParseDecimalLiteral(lit.Value);
         return _ => value;
     }
 
@@ -830,11 +830,23 @@ public sealed class ExpressionCompiler
                 BinaryExpressionType.BitwiseXor => (long)ld ^ (long)rd,
                 _ => throw new NotSupportedException($"Operator {op} is not supported for arithmetic.")
             },
-            (long ld, long rd) => op switch
+            // T-SQL int (and bigint) arithmetic that overflows is an error, never a wrapped or widened value. int / int
+            // and int % int are int too, so the next operation sees an int (int.MinValue / -1 is an overflow).
+            (long ld, long rd) when left is int && right is int && op is BinaryExpressionType.Add
+                or BinaryExpressionType.Subtract or BinaryExpressionType.Multiply
+                or BinaryExpressionType.Divide or BinaryExpressionType.Modulo => IntResult(op switch
             {
                 BinaryExpressionType.Add => ld + rd,
                 BinaryExpressionType.Subtract => ld - rd,
                 BinaryExpressionType.Multiply => ld * rd,
+                BinaryExpressionType.Divide => rd == 0 ? throw new DivideByZeroException() : ld / rd,
+                _ => rd == 0 ? throw new DivideByZeroException() : ld % rd
+            }),
+            (long ld, long rd) => op switch
+            {
+                BinaryExpressionType.Add => checked(ld + rd),
+                BinaryExpressionType.Subtract => checked(ld - rd),
+                BinaryExpressionType.Multiply => checked(ld * rd),
                 BinaryExpressionType.Divide => rd == 0 ? throw new DivideByZeroException() : ld / rd,
                 BinaryExpressionType.Modulo => rd == 0 ? throw new DivideByZeroException() : ld % rd,
                 BinaryExpressionType.BitwiseAnd => ld & rd,
@@ -849,6 +861,12 @@ public sealed class ExpressionCompiler
         };
     }
 
+    /// <summary>The result of int-by-int arithmetic, which T-SQL types as int: outside its range it is an overflow error.</summary>
+    private static object IntResult(long value)
+        => value is < int.MinValue or > int.MaxValue
+            ? throw new OverflowException($"Arithmetic overflow error converting expression to data type int ({value.ToString(CultureInfo.InvariantCulture)}).")
+            : (int)value;
+
     /// <summary>
     /// Negates a numeric value.
     /// </summary>
@@ -856,8 +874,11 @@ public sealed class ExpressionCompiler
     {
         return value switch
         {
-            int i => -i,
-            long l => -l,
+            // -int.MinValue does not fit an int: an overflow error in T-SQL, never the same value back.
+            int i => i == int.MinValue
+                ? throw new OverflowException("Arithmetic overflow error converting expression to data type int.")
+                : -i,
+            long l => checked(-l),
             decimal d => -d,
             double d => -d,
             float f => -f,
@@ -873,7 +894,7 @@ public sealed class ExpressionCompiler
     internal static object ParseNumber(string value)
     {
         if (value.Contains('.'))
-            return decimal.Parse(value, CultureInfo.InvariantCulture);
+            return ParseDecimalLiteral(value);
 
         if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l))
         {
@@ -883,7 +904,22 @@ public sealed class ExpressionCompiler
             return l;
         }
 
-        return decimal.Parse(value, CultureInfo.InvariantCulture);
+        return ParseDecimalLiteral(value);
+    }
+
+    /// <summary>
+    /// A number literal as a decimal. SQL Server reads a literal of up to 38 digits as numeric(38); System.Decimal holds
+    /// at most 28 to 29 significant digits, so a larger literal is refused with a code (before anything is read, since
+    /// literals are compiled when the statement is planned) instead of failing with a raw overflow.
+    /// </summary>
+    internal static decimal ParseDecimalLiteral(string value)
+    {
+        if (decimal.TryParse(value, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var parsed))
+            return parsed;
+        throw new QueryExecutionException(
+            QueryErrorCode.ExecutionFailed,
+            $"The number {value} has more digits than PPDS can hold (at most 28 significant digits, up to " +
+            "79,228,162,514,264,337,593,543,950,335), so nothing was executed. Write a number within that range.");
     }
 
     /// <summary>

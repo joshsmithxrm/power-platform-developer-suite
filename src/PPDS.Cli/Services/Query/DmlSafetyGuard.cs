@@ -48,12 +48,38 @@ public sealed class DmlSafetyGuard
         DmlSafetyOptions options,
         QuerySafetySettings settings)
     {
+        // A clause the engine cannot honour (TOP on UPDATE/DELETE, OUTPUT, MERGE, impersonation, ...) would be dropped
+        // and change what the statement affects, so it is refused here, before any confirmation is asked for.
+        // The guard's own refusals come first (specs/sql-values.md, "Order of refusals before the first statement"): a
+        // DELETE or UPDATE without WHERE is Query.DmlBlocked whatever else it contains (DELETE TOP (1) FROM account,
+        // UPDATE account SET name = '').
+        var own = statement switch
+        {
+            DeleteStatement delete => CheckDelete(delete, options, settings),
+            UpdateStatement update => CheckUpdate(update, options, settings),
+            _ => null
+        };
+        if (own is { IsBlocked: true })
+            return own;
+
+        // Its code is the refusal's class: a value Dataverse stores differently, or anything not on the allowlist.
+        var refusal = PPDS.Query.Planning.DmlStatementSupport.FindRefusal(statement);
+        if (refusal != null)
+        {
+            return new DmlSafetyResult
+            {
+                IsBlocked = true,
+                ContainsDml = statement is not (ExecuteAsStatement or RevertStatement),
+                BlockReason = refusal.Message,
+                ErrorCode = refusal.Code
+            };
+        }
+
         return statement switch
         {
             DeleteStatement delete => CheckDelete(delete, options, settings),
             UpdateStatement update => CheckUpdate(update, options, settings),
             InsertStatement => CheckRowCap(options),
-            MergeStatement => CheckRowCap(options),
             SelectStatement => new DmlSafetyResult { IsBlocked = false },
             BeginEndBlockStatement block => CheckStatements(block.StatementList.Statements, options, settings),
             IfStatement ifStmt => CheckIf(ifStmt, options, settings),
@@ -109,7 +135,7 @@ public sealed class DmlSafetyGuard
             {
                 IsBlocked = true,
                 ContainsDml = true,
-                BlockReason = $"Cross-environment DML is set to read-only. Source: [{sourceLabel}], Target: [{targetLabel}]. Change cross_env_dml_policy to 'Prompt' or 'Allow' to enable.",
+                BlockReason = $"Cross-environment DML is set to read-only. Source: [{sourceLabel}], Target: [{targetLabel}]. Nothing was executed.",
                 ErrorCode = ErrorCodes.Query.DmlBlocked
             };
         }
@@ -222,7 +248,7 @@ public sealed class DmlSafetyGuard
                 {
                     IsBlocked = true,
                     ContainsDml = true,
-                    BlockReason = $"DELETE without WHERE is not allowed. Use 'ppds truncate {targetName}' for bulk deletion.",
+                    BlockReason = $"DELETE without WHERE is not allowed. Use 'ppds data truncate --entity {targetName}' for bulk deletion.",
                     ErrorCode = ErrorCodes.Query.DmlBlocked
                 };
             }
@@ -333,7 +359,7 @@ public sealed class DmlSafetyGuard
             // gate that will apply when the caller later requests actual execution.
             RequiresConfirmation = options.IsDryRun || !options.IsConfirmed,
             RowCap = rowCap,
-            ExceedsRowCap = false, // Set during execution when actual count is known
+            ExceedsRowCap = false, // The matching row count is unknown at check time; see ExceedsRowCap
             IsDryRun = options.IsDryRun
         };
     }
@@ -355,6 +381,29 @@ public sealed class DmlSafetyOptions
 
     /// <summary>Custom row cap (default: 10,000).</summary>
     public int? RowCap { get; init; }
+
+    /// <summary>
+    /// When true (RPC), a confirmed request that contains DML must name, in <see cref="ConfirmedEnvironmentUrl"/>, the
+    /// environment it was confirmed for, and that must be the environment it runs against; otherwise it is refused, so a
+    /// confirmation cannot be applied to an environment the user did not see.
+    /// </summary>
+    public bool RequireConfirmedTarget { get; init; }
+
+    /// <summary>The environment URL the caller named for a confirmed request (RPC <c>environmentUrl</c>).</summary>
+    public string? ConfirmedEnvironmentUrl { get; init; }
+
+    /// <summary>
+    /// When true (RPC), a confirmed request that contains DML must name, in <see cref="ConfirmedProfileIdentity"/>, the
+    /// profile it was confirmed for, and that must be the profile it runs as (<see cref="ExecutingProfileIdentity"/>);
+    /// otherwise it is refused, so a confirmation cannot run as whichever profile happens to be active.
+    /// </summary>
+    public bool RequireConfirmedProfile { get; init; }
+
+    /// <summary>The profile identity the caller named for a confirmed request (RPC <c>profileIdentity</c>).</summary>
+    public string? ConfirmedProfileIdentity { get; init; }
+
+    /// <summary>The identity of the profile the request executes as (set by the daemon from the resolved profile).</summary>
+    public string? ExecutingProfileIdentity { get; init; }
 }
 
 /// <summary>
@@ -389,7 +438,11 @@ public sealed class DmlSafetyResult
     /// <summary>Active row cap.</summary>
     public int RowCap { get; init; } = DmlSafetyGuard.DefaultRowCap;
 
-    /// <summary>Whether the estimated rows exceed the cap.</summary>
+    /// <summary>
+    /// Always false at check time: the number of matching rows is unknown until the statement runs. A statement
+    /// that would exceed <see cref="RowCap"/> is refused during execution, before anything changes, with
+    /// <c>Query.DmlRowCapExceeded</c>.
+    /// </summary>
     public bool ExceedsRowCap { get; init; }
 
     /// <summary>Whether this is a dry run (no execution).</summary>

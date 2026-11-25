@@ -55,7 +55,11 @@ public interface IOutputWriter
     /// <typeparam name="T">The type of the data.</typeparam>
     /// <param name="data">The partial result data.</param>
     /// <param name="results">The individual item results.</param>
-    void WritePartialSuccess<T>(T data, IEnumerable<ItemResult> results);
+    /// <param name="error">
+    /// Optional summary error. The JSON writer emits it as the standard top-level <c>error</c> so consumers that
+    /// read <c>.error</c> on <c>success: false</c> keep working.
+    /// </param>
+    void WritePartialSuccess<T>(T data, IEnumerable<ItemResult> results, StructuredError? error = null);
 
     /// <summary>
     /// Writes a simple message. In JSON mode, this becomes a structured message object.

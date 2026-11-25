@@ -70,6 +70,11 @@ public sealed class ProjectNode : IQueryPlanNode
                     {
                         outputValues[col.OutputName] = qv;
                     }
+                    else if (inputRow.Values.TryGetValue(col.OutputName, out var aliased))
+                    {
+                        // The scan already returned the column under its alias (FetchXML alias=).
+                        outputValues[col.OutputName] = aliased;
+                    }
                     else
                     {
                         // Case-insensitive fallback

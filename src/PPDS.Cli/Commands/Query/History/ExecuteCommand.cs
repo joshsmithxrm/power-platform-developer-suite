@@ -28,10 +28,15 @@ public static class ExecuteCommand
 
         var topOption = new Option<int?>("--top", "-t")
         {
-            Description = "Limit the number of results returned (overrides query TOP)"
+            Description = "Limit the number of rows returned (overrides query TOP). Refused for INSERT, UPDATE and DELETE entries."
         };
 
-        var command = new Command("execute", "Re-execute a query from history")
+        // Same DML guard options as 'ppds query sql' (defined once in DmlSafetyOptionSet).
+        var dmlSafety = new DmlSafetyOptionSet();
+
+        var command = new Command("execute",
+            "Re-execute a query from history. DML (INSERT/UPDATE/DELETE) is guarded exactly like 'ppds query sql': " +
+            "it needs --confirm, honours the row cap and environment protection, and --dry-run previews the plan.")
         {
             idArgument,
             HistoryCommandGroup.ProfileOption,
@@ -39,7 +44,26 @@ public static class ExecuteCommand
             topOption
         };
 
+        dmlSafety.AddTo(command);
+
         GlobalOptions.AddToCommand(command, supportsCsv: true);
+
+        // --dry-run renders a plan, not a result set (same rule as 'query sql').
+        command.Validators.Add(result =>
+        {
+            if (!result.GetValue(dmlSafety.DryRun))
+                return;
+
+            try
+            {
+                if (GlobalOptions.GetOutputFormat(result) == OutputFormat.Csv)
+                    result.AddError(DmlSafetyOptionSet.DryRunCsvError);
+            }
+            catch (InvalidOperationException)
+            {
+                // --output-format failed to parse; its own error is already reported.
+            }
+        });
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
@@ -49,7 +73,8 @@ public static class ExecuteCommand
             var top = parseResult.GetValue(topOption);
             var globalOptions = GlobalOptions.GetValues(parseResult);
 
-            return await ExecuteAsync(id, profile, environment, top, globalOptions, cancellationToken);
+            return await ExecuteAsync(
+                id, profile, environment, top, DmlSafetyOptionSet.Read(command, parseResult), globalOptions, cancellationToken);
         });
 
         return command;
@@ -60,6 +85,7 @@ public static class ExecuteCommand
         string? profile,
         string? environment,
         int? top,
+        DmlSafetyOptions dmlSafety,
         GlobalOptionValues globalOptions,
         CancellationToken cancellationToken)
     {
@@ -76,44 +102,18 @@ public static class ExecuteCommand
                 ProfileServiceFactory.DefaultDeviceCodeCallback,
                 cancellationToken: cancellationToken);
 
-            var historyService = serviceProvider.GetRequiredService<IQueryHistoryService>();
             var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-            var environmentUrl = connectionInfo.EnvironmentUrl;
 
-            // Get the history entry
-            var entry = await historyService.GetEntryByIdAsync(environmentUrl, id, cancellationToken);
-
-            if (entry == null)
-            {
-                var error = new StructuredError(
-                    ErrorCodes.Operation.NotFound,
-                    $"History entry '{id}' not found.",
-                    null,
-                    "id");
-
-                writer.WriteError(error);
-                return ExitCodes.NotFoundError;
-            }
-
-            // Execute the query
-            if (!globalOptions.IsJsonMode)
-            {
-                ConsoleHeader.WriteConnectedAs(connectionInfo);
-                Console.Error.WriteLine();
-                Console.Error.WriteLine($"Executing query from history: {id}");
-                Console.Error.WriteLine();
-            }
-
-            var sqlQueryService = serviceProvider.GetRequiredService<ISqlQueryService>();
-
-            // Wire cross-environment support: [LABEL].entity resolves via profile labels
-            if (sqlQueryService is SqlQueryService concreteSqlService)
-            {
-                var envConfigStore = serviceProvider.GetRequiredService<EnvironmentConfigStore>();
-                var envConfigs = await envConfigStore.LoadAsync(cancellationToken);
-                var resolver = new ProfileResolutionService(envConfigs.Environments);
-
-                concreteSqlService.RemoteExecutorFactory = label =>
+            return await ExecuteEntryAsync(
+                id,
+                top,
+                dmlSafety,
+                connectionInfo.EnvironmentUrl,
+                serviceProvider.GetRequiredService<IQueryHistoryService>(),
+                serviceProvider.GetRequiredService<ISqlQueryService>(),
+                serviceProvider.GetRequiredService<EnvironmentConfigStore>(),
+                // Cross-environment support: [LABEL].entity resolves via profile labels
+                (service, resolver) => service.RemoteExecutorFactory = label =>
                 {
                     var config = resolver.ResolveByLabel(label);
                     if (config?.Url == null) return null;
@@ -129,35 +129,11 @@ public static class ExecuteCommand
 
                     remoteProviders.Add(remoteProvider);
                     return remoteProvider.GetRequiredService<IQueryExecutor>();
-                };
-            }
-
-            var request = new SqlQueryRequest
-            {
-                Sql = entry.Sql,
-                TopOverride = top
-            };
-
-            var queryResult = await sqlQueryService.ExecuteAsync(request, cancellationToken);
-
-            switch (globalOptions.OutputFormat)
-            {
-                case Commands.OutputFormat.Json:
-                    writer.WriteSuccess(queryResult.Result);
-                    break;
-                case Commands.OutputFormat.Csv:
-                    QueryResultFormatter.WriteCsvOutput(queryResult.Result);
-                    break;
-                default:
-                    QueryResultFormatter.WriteTableOutput(
-                        queryResult.Result,
-                        globalOptions.Verbose,
-                        fetchXml: null,
-                        pagingHint: "More records available (use 'ppds query sql' with --page for continuation)");
-                    break;
-            }
-
-            return ExitCodes.Success;
+                },
+                () => ConsoleHeader.WriteConnectedAs(connectionInfo),
+                globalOptions,
+                writer,
+                cancellationToken);
         }
         catch (Exception ex)
         {
@@ -172,4 +148,108 @@ public static class ExecuteCommand
         }
     }
 
+    /// <summary>
+    /// Replays one history entry: looks it up, shows the statement on stderr, applies the same DML guard
+    /// configuration as 'ppds query sql', executes with the caller's guard options and writes the result.
+    /// Everything except profile/service creation lives here so it can be tested without a Dataverse profile.
+    /// </summary>
+    internal static async Task<int> ExecuteEntryAsync(
+        string id,
+        int? top,
+        DmlSafetyOptions dmlSafety,
+        string environmentUrl,
+        IQueryHistoryService historyService,
+        ISqlQueryService sqlQueryService,
+        EnvironmentConfigStore envConfigStore,
+        Action<SqlQueryService, ProfileResolutionService>? wireRemoteExecutors,
+        Action? writeHeader,
+        GlobalOptionValues globalOptions,
+        IOutputWriter writer,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var entry = await historyService.GetEntryByIdAsync(environmentUrl, id, cancellationToken);
+
+            if (entry == null)
+            {
+                var error = new StructuredError(
+                    ErrorCodes.Operation.NotFound,
+                    $"History entry '{id}' not found.",
+                    null,
+                    "id");
+
+                writer.WriteError(error);
+                return ExitCodes.NotFoundError;
+            }
+
+            if (!globalOptions.IsJsonMode)
+            {
+                writeHeader?.Invoke();
+                Console.Error.WriteLine();
+            }
+
+            // Show exactly what is about to run before any guard refusal or execution ('query sql' echoes
+            // nothing because the user just typed the statement; here they did not). Control characters are
+            // escaped so the terminal cannot display something different from what runs.
+            Console.Error.WriteLine(dmlSafety.IsDryRun
+                ? $"Previewing history entry {id} (--dry-run: DML is not executed):"
+                : $"Executing query from history entry {id}:");
+            Console.Error.WriteLine(TerminalText.Sanitize(entry.Sql));
+            Console.Error.WriteLine();
+
+            // The guard configuration is mandatory: a service that cannot be configured must not run DML.
+            if (sqlQueryService is not SqlQueryService concreteSqlService)
+            {
+                throw new PpdsException(
+                    ErrorCodes.Query.ExecutionFailed,
+                    "The SQL query service cannot apply DML safety settings, so the history entry was not executed.");
+            }
+
+            var envConfigs = await envConfigStore.LoadAsync(cancellationToken);
+            var resolver = new ProfileResolutionService(envConfigs.Environments);
+            wireRemoteExecutors?.Invoke(concreteSqlService, resolver);
+            await SqlCommand.ConfigureDmlSafetyAsync(
+                concreteSqlService, envConfigStore, resolver, environmentUrl, cancellationToken);
+
+            var request = BuildRequest(entry.Sql, top, dmlSafety);
+
+            var queryResult = await sqlQueryService.ExecuteAsync(request, cancellationToken);
+
+            if (queryResult.DmlSafetyResult?.IsDryRun == true)
+            {
+                SqlCommand.WriteDryRunOutput(queryResult, globalOptions.OutputFormat, writer);
+                return ExitCodes.Success;
+            }
+
+            return SqlCommand.WriteResult(
+                queryResult,
+                globalOptions.OutputFormat,
+                globalOptions.Verbose,
+                writer,
+                fetchXml: null,
+                pagingHint: "More records available (use 'ppds query sql' with --page for continuation)");
+        }
+        catch (Exception ex)
+        {
+            var error = DmlSafetyOptionSet.WithCliWording(
+                ExceptionMapper.Map(ex, context: "executing query from history", debug: globalOptions.Debug), ex)
+                with { DmlCommitted = DmlOutcome.From(ex)?.DescribeCommitted() };
+            writer.WriteError(error);
+            SqlCommand.WriteCommittedNote(ex);
+            return ExceptionMapper.ToExitCode(ex);
+        }
+    }
+
+    /// <summary>
+    /// Builds the replay request. DmlSafety is always set (a null value would skip every DML check), carrying
+    /// the same options 'ppds query sql' builds from --confirm/--dry-run/--no-limit.
+    /// </summary>
+    internal static SqlQueryRequest BuildRequest(string sql, int? top, DmlSafetyOptions dmlSafety) => new()
+    {
+        Sql = sql,
+        TopOverride = top,
+        TopIsUserSpecified = top.HasValue,
+        DmlSafety = dmlSafety
+    };
 }

@@ -264,6 +264,7 @@ public partial class RpcMethodHandler
             MinValue = a.MinValue,
             MaxValue = a.MaxValue,
             Precision = a.Precision,
+            PrecisionSource = a.PrecisionSource,
             Targets = a.Targets,
             OptionSetName = a.OptionSetName,
             IsGlobalOptionSet = a.IsGlobalOptionSet,
@@ -651,6 +652,11 @@ public class MetadataAttributeDto
     [JsonPropertyName("precision")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? Precision { get; set; }
+
+    /// <summary>Where a money column's precision comes from: 0 the column, 1 the pricing setting, 2 the currency.</summary>
+    [JsonPropertyName("precisionSource")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? PrecisionSource { get; set; }
 
     [JsonPropertyName("targets")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

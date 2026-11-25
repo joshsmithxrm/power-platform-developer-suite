@@ -94,7 +94,7 @@ public sealed class TextOutputWriter : IOutputWriter
     }
 
     /// <inheritdoc />
-    public void WritePartialSuccess<T>(T data, IEnumerable<ItemResult> results)
+    public void WritePartialSuccess<T>(T data, IEnumerable<ItemResult> results, StructuredError? error = null)
     {
         var resultsList = results.ToList();
         var successCount = resultsList.Count(r => r.Success);

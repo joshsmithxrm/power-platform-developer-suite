@@ -9,6 +9,7 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Dataverse.Query;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning.Partitioning;
 using PPDS.Dataverse.Sql.Transpilation;
 using PPDS.Query.Execution;
@@ -28,8 +29,10 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private QueryPlanResult PlanInsert(InsertStatement insert, QueryPlanOptions options)
     {
-        var targetEntity = GetInsertTargetEntity(insert);
-        var columns = GetInsertColumns(insert);
+        RefuseRowLimits(options, "INSERT");
+        // Dataverse logical names are lower case; the allowlist admits only plain names, so lower-casing is exact.
+        var targetEntity = GetInsertTargetEntity(insert).ToLowerInvariant();
+        var columns = GetInsertColumns(insert).Select(c => c.ToLowerInvariant()).ToList();
 
         IQueryPlanNode rootNode;
 
@@ -38,9 +41,9 @@ public sealed partial class ExecutionPlanBuilder
         if (selectSource != null)
         {
             // INSERT SELECT: render the source SELECT as SQL, parse, and plan via ScriptDom path
-            var generator = s_scriptGenerator;
-            generator.GenerateScript(selectSource, out var selectSql);
-            var sourceResult = ParseAndPlanSyntheticSelect(selectSql, options);
+            // Planned from the parsed tree: re-rendering the SELECT to text and parsing it again lost its WHERE and ORDER BY.
+            var sourceResult = PlanSelect(new SelectStatement { QueryExpression = selectSource }, selectSource, options);
+            EnsureDataverseEvaluatesTheSource(sourceResult.RootNode, "INSERT ... SELECT", allowProjection: true);
 
             var sourceColumns = ExtractSelectColumnNamesFromQuerySpec(selectSource);
             rootNode = DmlExecuteNode.InsertSelect(
@@ -94,11 +97,15 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private QueryPlanResult PlanUpdate(UpdateStatement update, QueryPlanOptions options)
     {
+        RefuseRowLimits(options, "UPDATE");
         // Extract entity name directly from ScriptDom
         if (update.UpdateSpecification.Target is not NamedTableReference targetNamed)
             throw new QueryParseException("UPDATE target must be a named table.");
-        var entityName = GetMultiPartName(targetNamed.SchemaObject);
-        var baseName = targetNamed.SchemaObject.BaseIdentifier?.Value ?? entityName;
+        // The target may be the alias of the FROM table (UPDATE a ... FROM account a): write to that table.
+        var resolved = DmlStatementSupport.ResolveTarget(targetNamed, update.UpdateSpecification.FromClause);
+        // Dataverse logical names are lower case; the allowlist admits only plain names, so lower-casing is exact.
+        var entityName = GetMultiPartName(resolved.SchemaObject).ToLowerInvariant();
+        var baseName = (resolved.SchemaObject.BaseIdentifier?.Value ?? entityName).ToLowerInvariant();
 
         // Compile SET clauses directly from ScriptDom AST to delegates
         var compiledClauses = new List<CompiledSetClause>();
@@ -110,7 +117,7 @@ public sealed partial class ExecutionPlanBuilder
             {
                 var colName = assignment.Column?.MultiPartIdentifier?.Identifiers?.Count > 0
                     ? assignment.Column.MultiPartIdentifier.Identifiers[
-                        assignment.Column.MultiPartIdentifier.Identifiers.Count - 1].Value
+                        assignment.Column.MultiPartIdentifier.Identifiers.Count - 1].Value.ToLowerInvariant()
                     : "unknown";
                 var compiled = _expressionCompiler.CompileScalar(assignment.NewValue);
                 compiledClauses.Add(new CompiledSetClause(colName, compiled));
@@ -129,7 +136,7 @@ public sealed partial class ExecutionPlanBuilder
         {
             if (!selectCols.Contains($"[{colName}]", StringComparer.OrdinalIgnoreCase)
                 && !selectCols.Contains(colName, StringComparer.OrdinalIgnoreCase))
-                selectCols.Add($"[{colName}]");
+                selectCols.Add($"[{colName.Replace("]", "]]")}]");
         }
 
         var sb = new StringBuilder();
@@ -159,12 +166,14 @@ public sealed partial class ExecutionPlanBuilder
 
         // Parse and plan through normal ScriptDom path
         var selectResult = ParseAndPlanSyntheticSelect(sb.ToString(), options);
+        EnsureDataverseEvaluatesTheSource(selectResult.RootNode, "UPDATE", allowProjection: false);
 
         var rootNode = DmlExecuteNode.Update(
             entityName,
             selectResult.RootNode,
             compiledClauses,
-            rowCap: options.DmlRowCap ?? int.MaxValue);
+            rowCap: options.DmlRowCap ?? int.MaxValue,
+            requiredColumns: referencedColumnNames.Distinct(StringComparer.OrdinalIgnoreCase).ToList());
 
         return new QueryPlanResult
         {
@@ -186,16 +195,20 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private QueryPlanResult PlanDelete(DeleteStatement delete, QueryPlanOptions options)
     {
+        RefuseRowLimits(options, "DELETE");
         // Extract entity name directly from ScriptDom
         if (delete.DeleteSpecification.Target is not NamedTableReference targetNamed)
             throw new QueryParseException("DELETE target must be a named table.");
-        var entityName = GetMultiPartName(targetNamed.SchemaObject);
-        var baseName = targetNamed.SchemaObject.BaseIdentifier?.Value ?? entityName;
+        // The target may be the alias of the FROM table (DELETE a FROM account a): delete from that table.
+        var resolved = DmlStatementSupport.ResolveTarget(targetNamed, delete.DeleteSpecification.FromClause);
+        // Dataverse logical names are lower case; the allowlist admits only plain names, so lower-casing is exact.
+        var entityName = GetMultiPartName(resolved.SchemaObject).ToLowerInvariant();
+        var baseName = (resolved.SchemaObject.BaseIdentifier?.Value ?? entityName).ToLowerInvariant();
 
         // Build a synthetic SELECT SQL string: SELECT [entityid] FROM target [JOINs] [WHERE ...]
         // Use baseName for columns (simple identifiers), ScriptDom for FROM (preserves multi-part names).
         var sb = new StringBuilder();
-        sb.Append("SELECT [").Append(baseName).Append("id]");
+        sb.Append("SELECT [").Append(baseName.Replace("]", "]]")).Append("id]");
 
         // Render FROM clause — use the DELETE's FROM clause if present (it may contain JOINs),
         // otherwise render the target table via ScriptDom (preserves multi-part names like [ENV].entity).
@@ -221,6 +234,7 @@ public sealed partial class ExecutionPlanBuilder
 
         // Parse and plan through normal ScriptDom path
         var selectResult = ParseAndPlanSyntheticSelect(sb.ToString(), options);
+        EnsureDataverseEvaluatesTheSource(selectResult.RootNode, "DELETE", allowProjection: false);
 
         var rootNode = DmlExecuteNode.Delete(
             entityName,
@@ -234,6 +248,43 @@ public sealed partial class ExecutionPlanBuilder
             VirtualColumns = new Dictionary<string, VirtualColumnInfo>(),
             EntityLogicalName = entityName
         };
+    }
+
+    /// <summary>
+    /// Row limits, page numbers and paging cookies select returned rows; applied to the scan that selects the rows a DML
+    /// statement changes, they would change only some of them. The service never passes them for DML; any other caller
+    /// that does is refused here.
+    /// </summary>
+    private static void RefuseRowLimits(QueryPlanOptions options, string verb)
+    {
+        if (options.MaxRows.HasValue || options.PageNumber.HasValue || options.PagingCookie != null)
+        {
+            throw new DmlSafetyRefusalException(
+                QueryErrorCode.DmlBlocked,
+                $"{verb} cannot be planned with a row limit, page number or paging cookie: they select returned rows only, " +
+                "and would change only some of the rows the statement selects. Nothing was executed. Plan it without them.");
+        }
+    }
+
+    /// <summary>
+    /// The rows a DML statement changes must be selected entirely by Dataverse (one FetchXML scan of the target, with the
+    /// WHERE as FetchXML conditions). Any client-side node (filter, join, semi-join, remote scan) would evaluate the WHERE
+    /// against rows that lack its columns, or read another environment, so the statement is refused instead.
+    /// </summary>
+    internal static void EnsureDataverseEvaluatesTheSource(IQueryPlanNode node, string verb, bool allowProjection)
+    {
+        var current = node;
+        if (allowProjection && current is ProjectNode project)
+            current = project.Children[0];
+        if (current is PrefetchScanNode prefetch)
+            current = prefetch.Children[0];
+        if (current is not FetchXmlScanNode)
+        {
+            throw new DmlSafetyRefusalException(
+                QueryErrorCode.DmlUnsupportedConstruct,
+                $"The rows of this {verb} cannot be selected by Dataverse alone (the plan needs {node.Description}), so " +
+                "nothing was executed. Use only conditions on the table's own columns.");
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════

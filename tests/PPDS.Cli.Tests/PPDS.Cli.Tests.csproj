@@ -59,4 +59,8 @@
     <Compile Include="..\Shared\HangBackstop.cs" Link="Shared\HangBackstop.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\Shared\DmlValueAdmissionTable.cs" Link="Shared\DmlValueAdmissionTable.cs" />
+  </ItemGroup>
+
 </Project>

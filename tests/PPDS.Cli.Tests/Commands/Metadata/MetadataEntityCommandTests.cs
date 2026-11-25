@@ -276,4 +276,19 @@ public class MetadataEntityCommandTests
 
         Assert.Empty(result.Errors);
     }
+
+    [Theory]
+    [MemberData(nameof(AuthoringVerbs))]
+    public void AuthoringVerb_NameBeforeVerb_ErrorExplainsWhichFormToUse(string verb, string extraFlags)
+    {
+        // 'entity <name> <verb>' binds <name> to the parent's read-lookup argument, so the verb
+        // never sees an entity. The error must say so instead of implying the positional was ignored.
+        var result = _command.Parse($"hsl_veterinarian {verb} {extraFlags}".Trim());
+
+        Assert.Equal(verb, result.CommandResult.Command.Name);
+        var error = Assert.Single(result.Errors, e => e.Message.Contains("entity logical name is required"));
+        Assert.Contains($"entity {verb} <entity>", error.Message);
+        Assert.Contains("--entity", error.Message);
+        Assert.Contains("before the verb", error.Message);
+    }
 }

@@ -795,7 +795,11 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private static int? ExtractTopFromQuerySpec(QuerySpecification querySpec)
     {
-        if (querySpec.TopRowFilter?.Expression is IntegerLiteral lit
+        // TOP 5 and TOP (5) are the same; other forms are refused by the FetchXML generator.
+        var expression = querySpec.TopRowFilter?.Expression;
+        while (expression is ParenthesisExpression paren)
+            expression = paren.Expression;
+        if (expression is IntegerLiteral lit
             && int.TryParse(lit.Value, out var top))
         {
             return top;
@@ -1147,45 +1151,7 @@ public sealed partial class ExecutionPlanBuilder
     /// Used for UPDATE SET clause dependency detection without converting to legacy AST.
     /// </summary>
     private static List<string> ExtractColumnNamesFromScriptDom(ScalarExpression expr)
-    {
-        var columns = new List<string>();
-        ExtractColumnNamesFromScriptDomRecursive(expr, columns);
-        return columns;
-    }
-
-    private static void ExtractColumnNamesFromScriptDomRecursive(ScalarExpression expr, List<string> columns)
-    {
-        switch (expr)
-        {
-            case ColumnReferenceExpression col:
-                columns.Add(GetScriptDomColumnName(col));
-                break;
-            case BinaryExpression bin:
-                ExtractColumnNamesFromScriptDomRecursive(bin.FirstExpression, columns);
-                ExtractColumnNamesFromScriptDomRecursive(bin.SecondExpression, columns);
-                break;
-            case UnaryExpression unary:
-                ExtractColumnNamesFromScriptDomRecursive(unary.Expression, columns);
-                break;
-            case ParenthesisExpression paren:
-                ExtractColumnNamesFromScriptDomRecursive(paren.Expression, columns);
-                break;
-            case FunctionCall func:
-                if (func.Parameters != null)
-                    foreach (var p in func.Parameters)
-                        ExtractColumnNamesFromScriptDomRecursive(p, columns);
-                break;
-            case CastCall cast:
-                ExtractColumnNamesFromScriptDomRecursive(cast.Parameter, columns);
-                break;
-            case SearchedCaseExpression caseExpr:
-                foreach (var w in caseExpr.WhenClauses)
-                    ExtractColumnNamesFromScriptDomRecursive(w.ThenExpression, columns);
-                if (caseExpr.ElseExpression != null)
-                    ExtractColumnNamesFromScriptDomRecursive(caseExpr.ElseExpression, columns);
-                break;
-        }
-    }
+        => ScalarColumnCollector.Collect(expr).Select(GetScriptDomColumnName).ToList();
 
     // ═══════════════════════════════════════════════════════════════════
     //  Aggregate partitioning helpers (ported from legacy planner
@@ -1234,6 +1200,21 @@ public sealed partial class ExecutionPlanBuilder
     // ═══════════════════════════════════════════════════════════════════
     //  DML property extraction helpers
     // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// The operation and target entity of an INSERT, UPDATE or DELETE, named as its plan names them (so a statement that
+    /// did not run is named like one that did); null for any other statement.
+    /// </summary>
+    internal static (DmlOperation Operation, string EntityLogicalName)? DescribeDmlTarget(TSqlStatement statement) => statement switch
+    {
+        InsertStatement { InsertSpecification.Target: NamedTableReference target }
+            => (DmlOperation.Insert, GetMultiPartName(target.SchemaObject).ToLowerInvariant()),
+        UpdateStatement { UpdateSpecification: { Target: NamedTableReference target } update }
+            => (DmlOperation.Update, GetMultiPartName(DmlStatementSupport.ResolveTarget(target, update.FromClause).SchemaObject).ToLowerInvariant()),
+        DeleteStatement { DeleteSpecification: { Target: NamedTableReference target } delete }
+            => (DmlOperation.Delete, GetMultiPartName(DmlStatementSupport.ResolveTarget(target, delete.FromClause).SchemaObject).ToLowerInvariant()),
+        _ => null
+    };
 
     private static string GetInsertTargetEntity(InsertStatement insert)
     {

@@ -51,7 +51,7 @@ public class SqlQueryServiceGuardTests
             bulkOperationExecutor: null,
             metadataQueryExecutor: null,
             poolCapacity: 1,
-            metadataProvider: null,
+            metadataProvider: TestMetadata.Provider,
             guard: guard)
         {
             // Use Development so confirmed DML proceeds past RequiresConfirmation
@@ -93,7 +93,8 @@ public class SqlQueryServiceGuardTests
         var guard = new RecordingShakedownGuard();
         var service = new SqlQueryService(
             Mock.Of<IQueryExecutor>(),
-            guard: guard)
+            guard: guard,
+            metadataProvider: TestMetadata.Provider)
         {
             EnvironmentProtectionLevel = PPDS.Auth.Profiles.ProtectionLevel.Development
         };

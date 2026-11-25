@@ -427,24 +427,23 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
                 _statusSpinner.Stop();
                 _statusLabel.Visible = true;
 
-                var result = MessageBox.Query(
-                    "Confirm DML Operation",
-                    dmlEx.Message + "\n\nDo you want to proceed?",
-                    "Execute", "Cancel");
+                // The dialog names the environment, lists every statement that changes data and shows the whole text in a
+                // scrollable read-only view (never shortened); the confirmation applies to that text only.
+                var result = ConfirmDmlDialog(_presenter.ConfirmationPrompt(dmlEx));
 
                 if (result == 0) // "Execute" button
                 {
                     TuiDebugLog.Log("User confirmed DML operation, retrying with IsConfirmed=true");
-                    _statusLabel.Visible = false;
-                    _presenter.ConfirmDml();
-                    var queryText = _queryInput.Text.ToString() ?? string.Empty;
-                    var task = _presenter.UseFetchXmlMode
-                        ? _presenter.ExecuteFetchXmlAsync(queryText, ScreenCancellation)
-                        : _presenter.ExecuteAsync(queryText, ScreenCancellation);
-                    ErrorService.FireAndForget(task, "RetryDmlConfirmed");
+                    var confirmedSql = _presenter.ConfirmDml();
+                    if (confirmedSql != null)
+                    {
+                        _statusLabel.Visible = false;
+                        ErrorService.FireAndForget(_presenter.ExecuteAsync(confirmedSql, ScreenCancellation), "RetryDmlConfirmed");
+                    }
                 }
                 else
                 {
+                    _presenter.DeclineDml();
                     TuiDebugLog.Log("User cancelled DML operation");
                     _statusText = "DML operation cancelled.";
                     _statusLabel.Text = _statusText;
@@ -500,6 +499,36 @@ internal sealed class SqlQueryScreen : TuiScreenBase, ITuiStateCapture<SqlQueryS
     /// Subscribes to all presenter events using stored handler fields for R3-compliant
     /// unsubscription in <see cref="OnDispose"/>.
     /// </summary>
+    /// <summary>
+    /// The DML confirmation: the whole prompt in a read-only, scrollable text view (a message box would clip long text),
+    /// with Execute and Cancel. Returns 0 for Execute, 1 for Cancel (Escape cancels).
+    /// </summary>
+    private static int ConfirmDmlDialog(string prompt)
+    {
+        var choice = 1;
+        var execute = new Button("Execute");
+        var cancel = new Button("Cancel", is_default: true);
+        var width = Math.Max(40, Math.Min(110, (Application.Driver?.Cols ?? 100) - 4));
+        var height = Math.Max(12, Math.Min(34, (Application.Driver?.Rows ?? 30) - 2));
+        using var dialog = new Dialog("Confirm DML Operation", width, height, execute, cancel) { ColorScheme = TuiColorPalette.Default };
+        var text = new TextView
+        {
+            X = 0,
+            Y = 0,
+            Width = Dim.Fill(),
+            Height = Dim.Fill(1),
+            ReadOnly = true,
+            WordWrap = true,
+            Text = prompt
+        };
+        var hint = new Label("Scroll to read the whole statement before choosing Execute.") { X = 0, Y = Pos.Bottom(text) };
+        dialog.Add(text, hint);
+        execute.Clicked += () => { choice = 0; Application.RequestStop(); };
+        cancel.Clicked += () => { choice = 1; Application.RequestStop(); };
+        Application.Run(dialog);
+        return choice;
+    }
+
     private void SubscribeToPresenterEvents()
     {
         _presenter.StreamingColumnsReady += _onStreamingColumnsReady;

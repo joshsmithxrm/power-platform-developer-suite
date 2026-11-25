@@ -104,7 +104,7 @@ public sealed class JsonOutputWriter : IOutputWriter
     }
 
     /// <inheritdoc />
-    public void WritePartialSuccess<T>(T data, IEnumerable<ItemResult> results)
+    public void WritePartialSuccess<T>(T data, IEnumerable<ItemResult> results, StructuredError? error = null)
     {
         var resultsList = results.ToList();
         var output = new JsonResultEnvelope
@@ -112,6 +112,7 @@ public sealed class JsonOutputWriter : IOutputWriter
             Version = SchemaVersion,
             Success = false,
             Data = data,
+            Error = error == null ? null : ToJsonError(error),
             Results = resultsList.Select(ToJsonItemResult).ToList(),
             Timestamp = DateTime.UtcNow.ToString("O")
         };
@@ -154,7 +155,8 @@ public sealed class JsonOutputWriter : IOutputWriter
             Code = error.Code,
             Message = error.Message,
             Details = error.Details,
-            Target = error.Target
+            Target = error.Target,
+            DmlCommitted = error.DmlCommitted
         };
     }
 
@@ -194,6 +196,7 @@ public sealed class JsonOutputWriter : IOutputWriter
         public string? Message { get; set; }
         public string? Details { get; set; }
         public string? Target { get; set; }
+        public string? DmlCommitted { get; set; }
     }
 
     private sealed class JsonItemResultDto

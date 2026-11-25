@@ -214,12 +214,13 @@ public class MergeNodeTests
 
         var fragment = parser.Parse(sql);
         var act = () => builder.Plan(fragment);
-        act.Should().Throw<QueryParseException>()
-            .WithMessage("*WHEN MATCHED*not yet supported*");
+        // The planner refuses every MERGE (it would not change any rows), before WHEN MATCHED is considered.
+        act.Should().Throw<DmlSafetyRefusalException>()
+            .WithMessage("MERGE is not supported*");
     }
 
     [Fact]
-    public void Plan_MergeStatement_ProducesMergeNode()
+    public void Plan_MergeStatement_IsRefused_BecauseItWouldNotChangeAnyRows()
     {
         var parser = new QueryParser();
         var mockFetchXmlService = new Mock<IFetchXmlGeneratorService>();
@@ -238,9 +239,9 @@ public class MergeNodeTests
                 INSERT (name) VALUES (src.name);";
 
         var fragment = parser.Parse(sql);
-        var result = builder.Plan(fragment);
+        var act = () => builder.Plan(fragment);
 
-        result.RootNode.Should().BeOfType<MergeNode>();
-        result.EntityLogicalName.Should().Be("account");
+        act.Should().Throw<DmlSafetyRefusalException>()
+            .Which.ErrorCode.Should().Be(QueryErrorCode.DmlUnsupportedConstruct);
     }
 }

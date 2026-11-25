@@ -113,21 +113,24 @@ SELECT 'Prod' as env, COUNT(*) as total FROM [prod-org].[account]
 
 ### DML Support
 
-Data modification with safety guards:
+Data modification with safety guards. INSERT, UPDATE and DELETE are planned only when every part of the statement is on
+the DML allowlist (`specs/query.md`, "DML allowlist"); anything else is refused before anything runs. Until the typed SQL
+value engine proves a construct, a written value is a literal (text, a number, a negative number such as `-5`), NULL,
+`CAST('<guid>' AS uniqueidentifier)` or a column of the statement's table; computed values are refused:
 
 ```sql
 -- Insert with values
 INSERT INTO account (name, revenue) VALUES ('Contoso', 1000000)
 
--- Insert from query
+-- Insert from a query of the same table (TOP needs ORDER BY)
 INSERT INTO account (name, revenue)
-SELECT name, revenue FROM #staged_accounts
+SELECT TOP 10 name, revenue FROM account WHERE statecode = 0 ORDER BY name
 
 -- Update with filter
 UPDATE contact SET jobtitle = 'Senior Developer' WHERE jobtitle = 'Developer'
 
--- Delete with filter
-DELETE FROM account WHERE statecode = 1 AND modifiedon < '2024-01-01'
+-- Delete with filter (a date/time literal needs Z or an offset)
+DELETE FROM account WHERE statecode = 1 AND modifiedon < '2024-01-01T00:00:00Z'
 ```
 
 ### Safety Features
@@ -135,7 +138,7 @@ DELETE FROM account WHERE statecode = 1 AND modifiedon < '2024-01-01'
 All DML operations are protected by configurable safety guards:
 
 - **Environment protection levels** — Prevent accidental writes to production environments
-- **Row caps** — Configurable maximum rows affected per DML statement
+- **Row caps** — A statement that would affect more rows than the cap is refused before anything changes (never truncated)
 - **Structured error codes** — QueryExecutionException with error codes for programmatic handling
 - **@@ERROR / ERROR_MESSAGE()** — Error state tracking within script sessions
 

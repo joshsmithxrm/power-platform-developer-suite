@@ -35,7 +35,7 @@ public static class CastConverter
             "decimal" or "numeric" => ConvertToDecimal(value, precision, scale),
             "float" => ConvertToFloat(value),
             "real" => ConvertToFloat(value),
-            "nvarchar" or "varchar" or "nchar" or "char" => ConvertToString(value, maxLength, style),
+            "nvarchar" or "varchar" or "nchar" or "char" => ConvertToString(value, maxLength, style, unicode: baseType is "nvarchar" or "nchar"),
             "datetime" => ConvertToDateTime(value, style),
             "date" => ConvertToDate(value, style),
             "bit" => ConvertToBit(value),
@@ -140,6 +140,9 @@ public static class CastConverter
         };
     }
 
+    /// <summary>The largest decimal precision the engine computes exactly (System.Decimal holds 28 digits).</summary>
+    public const int MaxExactDecimalPrecision = 28;
+
     private static decimal ConvertToDecimal(object value, int? precision, int? scale)
     {
         decimal result = value switch
@@ -156,13 +159,59 @@ public static class CastConverter
             _ => System.Convert.ToDecimal(value, CultureInfo.InvariantCulture)
         };
 
+        // A scale above 28 cannot be held at all (System.Decimal keeps at most 28 places), so the value as SQL Server
+        // types it does not fit. That is a limitation of the engine, not a value that does not fit decimal(p, s), so it
+        // is not an error TRY_CAST / TRY_CONVERT may turn into NULL.
+        if (scale > MaxExactDecimalPrecision)
+            throw NotExact(result, precision, scale);
+
         // Apply scale if specified
         if (scale.HasValue)
         {
             result = Math.Round(result, scale.Value, MidpointRounding.AwayFromZero);
         }
 
+        // decimal(p, s) holds p - s digits before the point; a larger value is an arithmetic overflow in T-SQL (an error,
+        // or NULL from TRY_CAST / TRY_CONVERT), never a wider value.
+        if (precision.HasValue && Math.Abs(result) >= Pow10(precision.Value - (scale ?? 0)))
+        {
+            throw new OverflowException(
+                $"Arithmetic overflow error converting {result.ToString(CultureInfo.InvariantCulture)} to data type decimal({precision}, {scale ?? 0}).");
+        }
+
+        // decimal(p, s) wider than 28 digits (maintainer decision, 2026-11-24, "Value when it fits"): the value is
+        // returned when its digits before the point plus the s places fit in 28 digits, which System.Decimal holds
+        // exactly; otherwise the engine cannot hold it as SQL Server does and refuses.
+        if (precision > MaxExactDecimalPrecision && IntegerDigits(result) + (scale ?? 0) > MaxExactDecimalPrecision)
+            throw NotExact(result, precision, scale);
+
         return result;
+    }
+
+    /// <summary>The number of digits before the decimal point (0 for a value below 1).</summary>
+    private static int IntegerDigits(decimal value)
+    {
+        var whole = decimal.Truncate(Math.Abs(value));
+        var digits = 0;
+        while (whole >= 1m)
+        {
+            whole = decimal.Truncate(whole / 10m);
+            digits++;
+        }
+        return digits;
+    }
+
+    private static NotSupportedException NotExact(decimal value, int? precision, int? scale)
+        => new($"The value {value.ToString(CultureInfo.InvariantCulture)} as decimal({precision}, {scale ?? 0}) needs more than " +
+               $"{MaxExactDecimalPrecision} digits, which the query engine cannot hold exactly, so it is refused. " +
+               $"Use a precision of at most {MaxExactDecimalPrecision}, or a smaller scale.");
+
+    private static decimal Pow10(int exponent)
+    {
+        var value = 1m;
+        for (var i = 0; i < exponent && i < 28; i++)
+            value *= 10m;
+        return exponent > 28 ? decimal.MaxValue : value;
     }
 
     private static double ConvertToFloat(object value)
@@ -182,7 +231,7 @@ public static class CastConverter
         };
     }
 
-    private static string ConvertToString(object value, int? maxLength, int? style)
+    private static string ConvertToString(object value, int? maxLength, int? style, bool unicode = true)
     {
         string result;
 
@@ -208,6 +257,15 @@ public static class CastConverter
         // Truncate to max length if specified
         if (maxLength.HasValue && maxLength.Value != int.MaxValue && result.Length > maxLength.Value)
         {
+            // T-SQL truncates text, but a number that does not fit is an error (an integer into char/varchar gives '*').
+            if (value is int or long or short or byte)
+            {
+                if (!unicode)
+                    return "*";
+                throw new OverflowException($"Arithmetic overflow error converting {result} to data type nvarchar({maxLength}).");
+            }
+            if (value is decimal or double or float)
+                throw new OverflowException($"Arithmetic overflow error converting {result} to data type {(unicode ? "nvarchar" : "varchar")}({maxLength}).");
             result = result.Substring(0, maxLength.Value);
         }
 

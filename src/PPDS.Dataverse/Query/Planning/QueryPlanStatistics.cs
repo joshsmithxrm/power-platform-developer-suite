@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading;
 
 namespace PPDS.Dataverse.Query.Planning;
@@ -28,6 +29,35 @@ public sealed class QueryPlanStatistics
 
     /// <summary>Per-node statistics keyed by node description.</summary>
     public ConcurrentDictionary<string, NodeStatistics> NodeStats { get; } = new();
+
+    private readonly ConcurrentQueue<DmlStatementOutcome> _dmlOutcomes = new();
+
+    /// <summary>
+    /// One outcome per executed DML statement, in execution order. Unlike the paging metadata
+    /// below, this is safe to append to from concurrent nodes.
+    /// </summary>
+    public IReadOnlyList<DmlStatementOutcome> DmlOutcomes => _dmlOutcomes.ToArray();
+
+    /// <summary>Records the outcome of one executed DML statement.</summary>
+    public void AddDmlOutcome(DmlStatementOutcome outcome) => _dmlOutcomes.Enqueue(outcome);
+
+    // Script statements run sequentially, so the position stack needs no synchronisation.
+    private readonly List<int> _statementPath = new();
+
+    /// <summary>Enters statement <paramref name="position"/> (1-based) of the script block being executed.</summary>
+    public void PushStatement(int position) => _statementPath.Add(position);
+
+    /// <summary>Leaves the statement entered by the matching <see cref="PushStatement"/>.</summary>
+    public void PopStatement()
+    {
+        if (_statementPath.Count > 0) _statementPath.RemoveAt(_statementPath.Count - 1);
+    }
+
+    /// <summary>
+    /// Position of the executing statement within its script ("3", or "2.1" inside a block), or null when
+    /// the plan is not a script.
+    /// </summary>
+    public string? CurrentStatementPosition => _statementPath.Count == 0 ? null : string.Join(".", _statementPath);
 
     // Paging metadata: only valid for single-scan-node plans (Phase 0).
     // Phase 4 parallel partitioning will need a different approach since each
@@ -90,3 +120,33 @@ public sealed class NodeStatistics
     /// <summary>Adds <paramref name="ms"/> to <see cref="TimeMs"/>.</summary>
     public void AddTimeMs(long ms) => Interlocked.Add(ref _timeMs, ms);
 }
+
+/// <summary>
+/// Result of one executed DML statement (INSERT, UPDATE or DELETE).
+/// </summary>
+/// <param name="Operation">The DML operation.</param>
+/// <param name="EntityLogicalName">The target entity.</param>
+/// <param name="AffectedRows">Rows that succeeded.</param>
+/// <param name="FailedRows">Rows that failed.</param>
+/// <param name="ErrorMessage">
+/// A representative error message when <paramref name="FailedRows"/> is greater than zero. Batches may run in
+/// parallel, so this is not necessarily the error of the first row.
+/// </param>
+/// <param name="Position">Position of the statement in its script ("3", "2.1" in a block); null outside scripts.</param>
+/// <param name="Interrupted">
+/// True when the statement's bulk call threw or was cancelled part-way: some of its rows may be committed. The counts
+/// are what had been reported before the interruption (a lower bound), not the final result.
+/// </param>
+/// <param name="NotRun">
+/// True for a statement of a script that was not run because an earlier statement finished with failed rows (the
+/// script stops at that statement, #1698). Its counts are zero and it wrote nothing.
+/// </param>
+public sealed record DmlStatementOutcome(
+    Nodes.DmlOperation Operation,
+    string EntityLogicalName,
+    long AffectedRows,
+    long FailedRows,
+    string? ErrorMessage,
+    string? Position = null,
+    bool Interrupted = false,
+    bool NotRun = false);

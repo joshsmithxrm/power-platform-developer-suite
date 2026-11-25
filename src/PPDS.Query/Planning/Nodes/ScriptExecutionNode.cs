@@ -311,10 +311,19 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
     {
         List<QueryRow>? lastResultRows = null;
 
+        var position = 0;
         foreach (var statement in statements)
         {
+            // Track the statement's position in the script (e.g. "3" or "2.1" inside a block) so DML
+            // outcomes can say which statement they belong to.
+            position++;
+            var outcomesBefore = context.Statistics.DmlOutcomes.Count;
+            try
+            {
             cancellationToken.ThrowIfCancellationRequested();
-
+            context.Statistics.PushStatement(position);
+            try
+            {
             switch (statement)
             {
                 case DeclareVariableStatement declare:
@@ -388,6 +397,15 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
                 case ContinueStatement:
                     throw new ContinueException();
 
+                // Planned as a one-statement script, so the default arm would plan them again forever.
+                case CreateTableStatement createTable:
+                    ExecuteCreateTempTable(createTable);
+                    break;
+
+                case DropTableStatement dropTable:
+                    ExecuteDropTempTable(dropTable);
+                    break;
+
                 case BeginEndBlockStatement block:
                     var blockStatements = block.StatementList.Statements
                         .Cast<TSqlStatement>().ToList();
@@ -407,6 +425,28 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
                         statement, scope, context, cancellationToken);
                     break;
             }
+            }
+            finally
+            {
+                context.Statistics.PopStatement();
+            }
+            }
+            catch (Exception ex) when (ex is not FlowControlException)
+            {
+                // A statement that throws (interrupted, a short bulk result, a cancellation, the row cap, a value refused in
+                // the statement's pass) stops the script too: the statements after it, and this one when it recorded no
+                // outcome, are recorded as not run, so the surfaces say which did not run.
+                RecordNotRunAfterThrow(statements, position, outcomesBefore, context);
+                throw;
+            }
+
+            // Stop at that statement (#1698): a statement that finished with failed rows ends the script; the
+            // statements after it do not run and are recorded as not run. A statement with no failed row goes on.
+            if (HadFailedRows(context, outcomesBefore))
+            {
+                RecordNotRun(statements, position, context);
+                break;
+            }
         }
 
         // Yield rows from the last result-producing statement
@@ -417,6 +457,47 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
                 yield return row;
             }
         }
+    }
+
+    /// <summary>True when a DML statement that ran since <paramref name="outcomesBefore"/> outcomes were recorded had a failed row.</summary>
+    private static bool HadFailedRows(QueryPlanContext context, int outcomesBefore)
+        => context.Statistics.DmlOutcomes.Skip(outcomesBefore).Any(o => o.FailedRows > 0 && !o.NotRun);
+
+    /// <summary>
+    /// Records each INSERT, UPDATE and DELETE after statement <paramref name="stoppedAt"/> of <paramref name="statements"/>
+    /// as not run, at the position it has in the script, so every surface can say which statements did not run.
+    /// </summary>
+    private static void RecordNotRun(IReadOnlyList<TSqlStatement> statements, int stoppedAt, QueryPlanContext context)
+    {
+        for (var index = stoppedAt; index < statements.Count; index++)
+        {
+            if (ExecutionPlanBuilder.DescribeDmlTarget(statements[index]) is not { } target)
+                continue;
+            context.Statistics.PushStatement(index + 1);
+            try
+            {
+                context.Statistics.AddDmlOutcome(new DmlStatementOutcome(
+                    target.Operation, target.EntityLogicalName, 0, 0, null,
+                    context.Statistics.CurrentStatementPosition, NotRun: true));
+            }
+            finally
+            {
+                context.Statistics.PopStatement();
+            }
+        }
+    }
+
+    /// <summary>
+    /// When statement <paramref name="position"/> threw after a DML statement of the request ran, records the statements
+    /// after it, and this one when it recorded no outcome (it wrote nothing), as not run. Before any DML statement ran,
+    /// nothing is recorded: the error already says that nothing was executed.
+    /// </summary>
+    private static void RecordNotRunAfterThrow(IReadOnlyList<TSqlStatement> statements, int position, int outcomesBefore, QueryPlanContext context)
+    {
+        var outcomes = context.Statistics.DmlOutcomes;
+        if (!outcomes.Any(o => !o.NotRun))
+            return;
+        RecordNotRun(statements, outcomes.Count > outcomesBefore ? position : position - 1, context);
     }
 
     private void ExecuteDeclare(
@@ -576,6 +657,10 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         catch (ContinueException)
         {
             throw; // Don't catch CONTINUE — let it propagate to the enclosing WHILE loop
+        }
+        catch (DmlSafetyRefusalException)
+        {
+            throw; // A safety refusal (row cap, unsupported clause) ends the script; script code cannot handle it
         }
         catch (Exception ex)
         {
@@ -754,6 +839,56 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         if (sourceRows.Count > 0)
         {
             session.InsertIntoTempTable(tempTableName, sourceRows);
+        }
+    }
+
+    /// <summary>
+    /// CREATE TABLE #name (...): creates a session temp table. Dataverse tables cannot be created here.
+    /// </summary>
+    private void ExecuteCreateTempTable(CreateTableStatement createTable)
+    {
+        var name = createTable.SchemaObjectName?.BaseIdentifier?.Value ?? string.Empty;
+        if (!name.StartsWith("#", StringComparison.Ordinal))
+        {
+            throw new QueryExecutionException(
+                QueryErrorCode.ExecutionFailed,
+                $"CREATE TABLE {name} is not supported: only temporary tables (#name) can be created.");
+        }
+
+        var session = _session ?? throw new QueryExecutionException(
+            QueryErrorCode.ExecutionFailed,
+            $"CREATE TABLE {name} needs temporary table support, which is not available here.");
+
+        var columns = createTable.Definition?.ColumnDefinitions
+            .Select(c => c.ColumnIdentifier.Value)
+            .ToList() ?? new List<string>();
+        session.CreateTempTable(name, columns);
+    }
+
+    /// <summary>
+    /// DROP TABLE #name: drops session temp tables. Dataverse tables are never dropped here.
+    /// </summary>
+    private void ExecuteDropTempTable(DropTableStatement dropTable)
+    {
+        var names = dropTable.Objects.Select(o => o.BaseIdentifier?.Value ?? string.Empty).ToList();
+        var notTemp = names.FirstOrDefault(n => !n.StartsWith("#", StringComparison.Ordinal));
+        if (notTemp != null)
+        {
+            throw new QueryExecutionException(
+                QueryErrorCode.ExecutionFailed,
+                $"DROP TABLE {notTemp} is not supported: only temporary tables (#name) can be dropped.");
+        }
+
+        var session = _session ?? throw new QueryExecutionException(
+            QueryErrorCode.ExecutionFailed,
+            "DROP TABLE needs temporary table support, which is not available here.");
+
+        foreach (var name in names)
+        {
+            if (session.TempTableExists(name))
+                session.DropTempTable(name);
+            else if (!dropTable.IsIfExists)
+                throw new QueryExecutionException(QueryErrorCode.ExecutionFailed, $"Temporary table {name} does not exist.");
         }
     }
 

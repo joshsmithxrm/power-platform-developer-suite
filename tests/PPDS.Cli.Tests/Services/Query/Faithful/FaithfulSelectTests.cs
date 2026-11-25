@@ -40,16 +40,16 @@ public class FaithfulSelectTests
     [InlineData("followupby = '2024-01-15T00:30:00Z'", "k1")]
     [InlineData("parentaccountid IS NOT NULL", "k3")]
     [InlineData("accountid = '133f5e40-0000-0000-0000-000000000004'", "k4")]
-    [InlineData("description = NULL", "")]
+    [InlineData("description = NULL", "", KnownDefect.NullComparisonRefusedByDecision, "fault: Comparing with NULL (= NULL, <> NULL, IN (NULL)) is not supported. Use IS NULL or IS NOT NULL; in an IN list, leave NULL out, and add OR <column> IS NULL if you mean the rows with no value.")]
     // Negated operators: T-SQL never matches NULL; Dataverse's ne / not-in / not-like do.
     [InlineData("description <> 'd2'", "k3,k5,k6,k7", KnownDefect.NegatedMatchesNull, "k1,k3,k4,k5,k6,k7,k8,k9")]
     [InlineData("numberofemployees != 5", "k2,k4,k5,k6,k8,k10", KnownDefect.NegatedMatchesNull, "k10,k2,k3,k4,k5,k6,k8,k9")]
     [InlineData("description NOT IN ('d2', 'x')", "k3,k6,k7", KnownDefect.NegatedMatchesNull, "k1,k3,k4,k6,k7,k8,k9")]
     [InlineData("name NOT LIKE 'a%'", "k3,k4,k5,k7,k9", KnownDefect.NegatedMatchesNull, "k3,k4,k5,k6,k7,k9")]
-    [InlineData("description <> NULL", "", KnownDefect.NotEqualNull, "k1,k10,k2,k3,k4,k5,k6,k7,k8,k9")]
+    [InlineData("description <> NULL", "", KnownDefect.NotEqualNull, "fault: Comparing with NULL (= NULL, <> NULL, IN (NULL)) is not supported. Use IS NULL or IS NOT NULL; in an IN list, leave NULL out, and add OR <column> IS NULL if you mean the rows with no value.")]
     // NOT (...)
-    [InlineData("NOT (name = 'alpha')", "k3,k4,k5,k7,k8,k9,k10", KnownDefect.NotLost, "k1,k2")]
-    [InlineData("NOT (description IS NULL)", "k2,k3,k5,k6,k7,k10", KnownDefect.NotLost, "k1,k4,k8,k9")]
+    [InlineData("NOT (name = 'alpha')", "k3,k4,k5,k7,k8,k9,k10", KnownDefect.NotLost, "fault: NOT (...) is not supported in a WHERE clause sent to Dataverse. Write the condition without NOT (for example IS NOT NULL, NOT IN, NOT LIKE or NOT BETWEEN).")]
+    [InlineData("NOT (description IS NULL)", "k2,k3,k5,k6,k7,k10", KnownDefect.NotLost, "fault: NOT (...) is not supported in a WHERE clause sent to Dataverse. Write the condition without NOT (for example IS NOT NULL, NOT IN, NOT LIKE or NOT BETWEEN).")]
     // Predicates on an expression
     [InlineData("UPPER(name) LIKE 'A%'", "k1,k2,k8,k10", KnownDefect.ExpressionDropped, "k1,k10,k2,k3,k4,k5,k6,k7,k8,k9")]
     [InlineData("LEN(name) = 4", "k3,k4,k5,k9")]
@@ -71,7 +71,8 @@ public class FaithfulSelectTests
     public async Task Where_WithVariable_ComparesTheVariableValue()
     {
         var sql = $"DECLARE @n nvarchar(10) = 'Beta'; {From} WHERE name = @n";
-        Verdict(sql, "k3", await OutcomeAsync(sql, r => Keys(r, ordered: false)), KnownDefect.VariableAsText, "");
+        Verdict(sql, "k3", await OutcomeAsync(sql, r => Keys(r, ordered: false)), KnownDefect.VariableAsText,
+            "fault: The variable @n cannot be used in a WHERE condition sent to Dataverse. Use a literal value, or IS NULL or IS NOT NULL to test for no value.");
     }
 
     // ───────────── TOP and ORDER BY ─────────────

@@ -279,4 +279,27 @@ public class PpdsDbCommandTests
 
         return (string)result!;
     }
+
+    // ────────────────────────────────────────────
+    //  DML through the ADO.NET provider
+    // ────────────────────────────────────────────
+
+    /// <summary>
+    /// The provider has no bulk executor, guard or metadata, so it must never change data: DML fails before the source
+    /// rows are even read (a strict executor mock would throw on any call). Only SqlQueryService executes DML.
+    /// </summary>
+    [Theory]
+    [InlineData("DELETE FROM account WHERE name = 'x'")]
+    [InlineData("UPDATE account SET name = 'y' WHERE name = 'x'")]
+    [InlineData("INSERT INTO account (name) VALUES ('x')")]
+    public async Task Dml_NeverExecutes_ThroughTheProvider(string sql)
+    {
+        using var conn = CreateOpenConnection();
+        conn.QueryExecutor = new Moq.Mock<PPDS.Dataverse.Query.IQueryExecutor>(Moq.MockBehavior.Strict).Object;
+        using var cmd = new PpdsDbCommand(sql, conn);
+
+        var act = () => cmd.ExecuteNonQueryAsync();
+
+        (await act.Should().ThrowAsync<Exception>()).Which.Message.Should().Contain("BulkOperationExecutor is required");
+    }
 }
