@@ -45,7 +45,19 @@ public static class UpdateCommand
 
         var idOption = new Option<Guid?>("--id")
         {
-            Description = "Record ID (GUID) to update"
+            Description = "Record ID (GUID) to update, written 8-4-4-4-12 with hyphens (optionally in braces)",
+            // The exact GUID rule of the value path, not the lenient parser, which reads a damaged id as another id.
+            CustomParser = result =>
+            {
+                var token = result.Tokens.Count > 0 ? result.Tokens[^1].Value : null;
+                if (ColumnValueConverter.TryReadExactGuid(token, out var id))
+                {
+                    return id;
+                }
+
+                result.AddError("--id takes a GUID written 8-4-4-4-12 with hyphens (optionally in braces), nothing else.");
+                return null;
+            }
         };
 
         var keyOption = new Option<string?>("--key", "-k")
@@ -177,13 +189,14 @@ public static class UpdateCommand
         // Validate input modes and --set requirement
         command.Validators.Add(result =>
         {
-            var id = result.GetValue(idOption);
+            // Whether --id was given, not its value: reading the value of a refused id would throw here.
+            var idGiven = result.GetResult(idOption) is not null;
             var key = result.GetValue(keyOption);
             var file = result.GetValue(fileOption);
             var filter = result.GetValue(filterOption);
             var set = result.GetValue(setOption);
 
-            var modeCount = (id.HasValue ? 1 : 0) +
+            var modeCount = (idGiven ? 1 : 0) +
                            (!string.IsNullOrEmpty(key) ? 1 : 0) +
                            (file != null ? 1 : 0) +
                            (!string.IsNullOrEmpty(filter) ? 1 : 0);

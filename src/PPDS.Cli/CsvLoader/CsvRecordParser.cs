@@ -49,10 +49,10 @@ public sealed class CsvRecordParser
     }
 
     /// <summary>
-    /// Checks if a value appears to be a GUID.
+    /// Checks if a value is a GUID by the exact rule of <see cref="ColumnValueConverter"/>.
     /// </summary>
     public static bool IsGuid(string? value)
     {
-        return !string.IsNullOrEmpty(value) && Guid.TryParse(value, out _);
+        return ColumnValueConverter.TryReadExactGuid(value, out _);
     }
 }

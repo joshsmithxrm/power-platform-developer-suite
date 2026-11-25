@@ -120,6 +120,7 @@ public sealed class DataUpdateValueServiceTests : IDisposable
     [InlineData("industrycode=9", "Column 'industrycode'")]
     [InlineData("parentaccountid=Contoso", "Column 'parentaccountid'")]
     [InlineData("ownerid=" + ParentId, "Column 'ownerid'")]
+    [InlineData("parentaccountid=+ccccccc-0000-0000-0000-000000000001", "Column 'parentaccountid'")]
     [InlineData("donotemail=ja", "Column 'donotemail'")]
     [InlineData("lastcontact=2024-01-15", "Column 'lastcontact'")]
     [InlineData("lastcontact=15.01.2024 09:30", "Column 'lastcontact'")]
@@ -233,6 +234,8 @@ public sealed class DataUpdateValueServiceTests : IDisposable
     [InlineData("accountid,nosuch\n{0},1\n", "Column 'nosuch': 'nosuch' is not a column of the table")]
     [InlineData("accountid,createdon\n{0},2024-01-15T09:30:00Z\n", "Column 'createdon': 'createdon' cannot be updated")]
     [InlineData("id,name\n{0},a\n", "The file has no column 'accountid' (the table's primary id column)")]
+    [InlineData("accountid,name\n+ccccccc-0000-0000-0000-000000000001,a\n", "Row 1, column 'accountid': The record id is not a GUID")]
+    [InlineData("accountid,name\n11111111-0x22-3333-4444-555555555555,a\n", "Row 1, column 'accountid': The record id is not a GUID")]
     public async Task A_file_that_is_not_exact_is_refused_before_any_row_is_converted(string content, string expected)
     {
         var outcome = await FileOutcomeAsync(File(string.Format(content, RecordId)));

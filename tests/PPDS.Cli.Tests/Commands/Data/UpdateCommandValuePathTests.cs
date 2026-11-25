@@ -44,6 +44,25 @@ public class UpdateCommandValuePathTests
     }
 
     [Theory]
+    [InlineData("+ccccccc-0000-0000-0000-000000000001")]
+    [InlineData("8b0f6c2e-0x1d-4a5b-9e7f-0123456789ab")]
+    [InlineData(" 8b0f6c2e-3c1d-4a5b-9e7f-0123456789ab")]
+    [InlineData("8b0f6c2e3c1d4a5b9e7f0123456789ab")]
+    public void A_damaged_id_is_refused_instead_of_read_as_another_id(string id)
+    {
+        var result = PPDS.Cli.Commands.Data.UpdateCommand.Create().Parse(["--entity", "account", "--id", id, "--set", "name=x"]);
+        Assert.Contains(result.Errors, e => e.Message.Contains("--id takes a GUID", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void An_exact_id_is_admitted()
+    {
+        var result = PPDS.Cli.Commands.Data.UpdateCommand.Create()
+            .Parse(["--entity", "account", "--id", "{8B0F6C2E-3C1D-4A5B-9E7F-0123456789AB}", "--set", "name=x"]);
+        Assert.Empty(result.Errors);
+    }
+
+    [Theory]
     [InlineData("TryParse(")]
     [InlineData(".Parse(")]
     [InlineData("File.ReadAllText")]

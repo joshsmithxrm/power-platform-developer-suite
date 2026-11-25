@@ -230,10 +230,11 @@ public sealed class CsvDataLoaderValueTests : IDisposable
     public async Task A_lookup_that_does_not_resolve_refuses_the_file_instead_of_writing_the_row_without_it()
     {
         // Before, the row was written with the lookup left out, and the failure was only reported.
-        var csv = Csv($"test_name,test_accountid\nfirst,{AccountId}\nsecond,Contoso\nthird, {AccountId}\n");
+        var csv = Csv($"test_name,test_accountid\nfirst,{AccountId}\nsecond,Contoso\nthird, {AccountId}\n" +
+                      "fourth,+ccccccc-0000-0000-0000-000000000001\nfifth,8b0f6c2e-0x1d-4a5b-9e7f-0123456789ab\n");
         var run = await LoadAsync(csv);
 
-        AssertRefused(run, "2:test_accountid", "3:test_accountid");
+        AssertRefused(run, "2:test_accountid", "3:test_accountid", "4:test_accountid", "5:test_accountid");
         Assert.All(run.Refusal!.Problems, p => Assert.DoesNotContain("Contoso", p.Message, StringComparison.Ordinal));
     }
 

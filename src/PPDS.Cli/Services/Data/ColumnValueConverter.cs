@@ -533,14 +533,36 @@ public static class ColumnValueConverter
     }
 
     /// <summary>
-    /// Reads a GUID written 8-4-4-4-12 with dashes, optionally in braces, with nothing around it (the parse itself would
-    /// trim white space). The one GUID rule of <c>data load</c> and <c>data update</c>, lookups and record ids included.
+    /// Reads a GUID written 8-4-4-4-12: exactly 32 hexadecimal digits (either case) with hyphens at positions 8, 13, 18 and
+    /// 23, optionally in one pair of braces, nothing else and nothing around it. The characters are checked before .NET's
+    /// parser sees them, because that parser trims white space and, even in its exact "D" and "B" modes, reads a <c>+</c>
+    /// or a <c>0x</c> inside a block as part of a number, so a damaged id would become a different id. The one GUID rule
+    /// of <c>data load</c> and <c>data update</c>: unique-identifier and lookup columns, lookups resolved by GUID, the
+    /// update file's id column and <c>data update --id</c>.
     /// </summary>
     internal static bool TryReadExactGuid(string? text, out Guid id)
     {
         id = Guid.Empty;
-        return !string.IsNullOrEmpty(text)
-            && !char.IsWhiteSpace(text[0]) && !char.IsWhiteSpace(text[^1])
-            && (Guid.TryParseExact(text, "D", out id) || Guid.TryParseExact(text, "B", out id));
+        if (text is null)
+        {
+            return false;
+        }
+
+        var body = text.Length == 38 && text[0] == '{' && text[37] == '}' ? text[1..37] : text;
+        if (body.Length != 36)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < body.Length; i++)
+        {
+            var hyphen = i is 8 or 13 or 18 or 23;
+            if (hyphen ? body[i] != '-' : !char.IsAsciiHexDigit(body[i]))
+            {
+                return false;
+            }
+        }
+
+        return Guid.TryParseExact(body, "D", out id);
     }
 }
