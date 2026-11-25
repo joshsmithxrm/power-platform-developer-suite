@@ -116,8 +116,7 @@ namespace PPDS.Migration.Formats
             var primaryIdField = element.Attribute("primaryidfield")?.Value ?? $"{logicalName}id";
             var primaryNameField = element.Attribute("primarynamefield")?.Value ?? "name";
             var disablePlugins = ParseBool(element.Attribute("disableplugins")?.Value);
-            var importModeAttr = element.Attribute("importMode")?.Value;
-            var importMode = ParseImportMode(importModeAttr);
+            var importMode = ReadImportMode(element, logicalName);
 
             var fields = new List<FieldSchema>();
             var fieldsElement = element.Element("fields");
@@ -302,20 +301,38 @@ namespace PPDS.Migration.Formats
             };
         }
 
-        private static ImportMode? ParseImportMode(string? value)
+        /// <summary>
+        /// Reads the per-table <c>importMode</c> attribute (attribute name in any case, value in any
+        /// case with surrounding spaces ignored). A value that is not a mode is refused: it used to be
+        /// ignored, so the table took the global mode (Upsert by default) and a mistyped "skip"
+        /// overwrote the table's existing records (#1914).
+        /// </summary>
+        private static ImportMode? ReadImportMode(XElement element, string logicalName)
         {
-            if (string.IsNullOrEmpty(value))
+            var attributes = element.Attributes()
+                .Where(a => a.Name.NamespaceName.Length == 0
+                    && string.Equals(a.Name.LocalName, "importMode", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (attributes.Count == 0)
             {
                 return null;
             }
 
-            return value.ToLowerInvariant() switch
+            if (attributes.Count > 1)
+            {
+                throw new InvalidDataException(
+                    $"Table '{logicalName}' in the schema has more than one importMode attribute. Keep one, with create, update, upsert or skip.");
+            }
+
+            return attributes[0].Value.Trim().ToLowerInvariant() switch
             {
                 "create" => ImportMode.Create,
                 "update" => ImportMode.Update,
                 "upsert" => ImportMode.Upsert,
                 "skip" => ImportMode.Skip,
-                _ => null
+                _ => throw new InvalidDataException(
+                    $"Table '{logicalName}' in the schema has an importMode that is not one of create, update, upsert or skip. " +
+                    "Correct it, or remove it to use the import's mode.")
             };
         }
     }
