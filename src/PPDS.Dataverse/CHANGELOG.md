@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `DmlValueAdmission`, `DmlLiteral`, `DmlLiteralKind`, `DmlTargetKind`, `DmlValueUse` and `DmlAdmission`: the admission of DML values, one function per target kind (text, whole number, decimal, currency, floating point, user-local date and time, date only, yes/no, choice, row id). A literal is admitted only when its text matches the kind's exact grammar and the value that will be sent loses nothing (#1698).
+- `DmlValueAdmission`, `DmlLiteral`, `DmlLiteralKind`, `DmlTargetKind`, `DmlValueUse` and `DmlAdmission`: the admission of DML values, one function per target kind (text, whole number, decimal, currency, floating point, user-local date and time, date only, yes/no, choice, row id). A literal is admitted only when its text matches the kind's exact grammar and the value that will be sent loses nothing (#1698). `MaxLiteralDigits` (38), `UtcInstantFormat` (the spelling a compared date and time is sent in) and `HasControlOutsideXml`. `DmlValueCoercer` sends negative zero to a floating-point column as +0.
 
 - `QueryErrorCode.DmlUnsupportedConstruct`, `DmlValueStoredDifferently` and `DmlMetadataUnavailable`: a code for each DML refusal class (the maintainer's "A code per class"); `DmlBlocked` keeps the safety guard's own refusals (#1698).
 
