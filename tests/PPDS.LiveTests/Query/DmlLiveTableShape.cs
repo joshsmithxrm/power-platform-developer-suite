@@ -40,7 +40,7 @@ internal static class DmlLiveTableShape
         A("ppds_amount", "Decimal"),
         // As the live suite creates it: 2 places, from the column itself (precision source 0).
         A("ppds_money", "Money", precision: 2, precisionSource: 0),
-        A("ppds_float", "Double"),
+        A("ppds_float", "Double", precision: 2),
         A("ppds_when", "DateTime", behavior: "UserLocal", format: "DateAndTime"),
         A("ppds_day", "DateTime", behavior: "DateOnly", format: "DateOnly"),
         A("ppds_tzi", "DateTime", behavior: "TimeZoneIndependent", format: "DateAndTime"),
@@ -84,6 +84,8 @@ internal static class DmlLiveTableShape
             Same("AttributeOf", expected.AttributeOf, real.AttributeOf);
             Same("DateTimeBehavior", expected.DateTimeBehavior, real.DateTimeBehavior);
             Same("Format", expected.Format, real.Format);
+            if (expected.AttributeType == "Double")
+                Same("Precision", expected.Precision, real.Precision);
             if (expected.AttributeType == "Money")
             {
                 Same("Precision", expected.Precision, real.Precision);

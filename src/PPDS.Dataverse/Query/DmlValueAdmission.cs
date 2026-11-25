@@ -311,6 +311,8 @@ public static class DmlValueAdmission
                 "the text holds half of a surrogate pair (an unpaired surrogate), which is not a character and would not be stored as " +
                 "written. Remove it, or write the whole character.");
         }
+        if (CharacterOutsideXml(literal.Text) is { } outside)
+            return DmlAdmission.Refuse(Unsupported, OutsideXmlWritten(outside, "the text"));
         return TextRule(literal.Text) ?? Sent(literal, Coerce(literal.Text, "String"), sent => sent is string s && s == literal.Text);
     }
 
@@ -408,6 +410,17 @@ public static class DmlValueAdmission
     {
         if (NumberForm(literal) is { } refusal)
             return refusal;
+        // Dataverse rounds a floating-point value to the column's places on store (live, 2026-11-25: 47.123456 written to a
+        // column of precision 5 was stored as 47.12346). A precision that was not read admits no decimal places.
+        var places = FloatingPointPlacesKept(target);
+        if (Places(literal) > places)
+        {
+            return use == DmlValueUse.Write
+                ? DmlAdmission.Refuse(StoredDifferently, target.Precision is null
+                    ? "the column's decimal places were not read, so a number with decimal places may be stored rounded. Write a whole number."
+                    : $"the number has more decimal places than the column keeps ({places}), so Dataverse would store it rounded. Write at most {places} decimal places.")
+                : DmlAdmission.Refuse(Unsupported, ComparedPlaces(places));
+        }
         var sent = Coerce(CompiledNumber(literal), target);
         if (sent is not double d || !SameDigits(d.ToString("R", CultureInfo.InvariantCulture), literal))
         {
@@ -420,6 +433,9 @@ public static class DmlValueAdmission
         }
         return use == DmlValueUse.Compare ? DmlAdmission.Admit(literal.Text) : Sent(literal, sent, value => value is double);
     }
+
+    /// <summary>The places a floating-point column keeps: its precision, or none when the precision was not read.</summary>
+    private static int FloatingPointPlacesKept(AttributeMetadataDto target) => target.Precision ?? 0;
 
     /// <summary>
     /// The refusal of a compared number with more decimal places than the column keeps: SQL Server compares the column with
@@ -580,7 +596,9 @@ public static class DmlValueAdmission
         switch (KindOf(target))
         {
             case DmlTargetKind.Text when sent is string text:
-                return TextRule(text);
+                return CharacterOutsideXml(text) is { } outside
+                    ? DmlAdmission.Refuse(Unsupported, OutsideXmlWritten(outside, "a value of the source"))
+                    : TextRule(text);
             case DmlTargetKind.WholeNumber when IsNumber(source) && sent is int whole:
                 return Convert.ToDecimal(source, CultureInfo.InvariantCulture) == whole ? null : Lost("a whole-number column");
             case DmlTargetKind.Decimal when sent is decimal exact:
@@ -592,8 +610,12 @@ public static class DmlValueAdmission
                 if (MoneyPlacesKept(target) is not { } moneyPlaces)
                     return Places(money.Value) > 0 ? DmlAdmission.Refuse(Unsupported, PrecisionNotTheColumns(target)) : null;
                 return Places(money.Value) > moneyPlaces ? Lost($"a currency column that keeps {moneyPlaces} places") : null;
-            case DmlTargetKind.FloatingPoint when sent is double d && source is decimal or int or long:
-                return SameDigits(d.ToString("R", CultureInfo.InvariantCulture), Convert.ToString(source, CultureInfo.InvariantCulture)!)
+            case DmlTargetKind.FloatingPoint when sent is double d:
+                var floatPlaces = FloatingPointPlacesKept(target);
+                if (double.IsFinite(d) && Places(Canonical(d.ToString("R", CultureInfo.InvariantCulture), negative: false)) > floatPlaces)
+                    return Lost($"a floating-point column that keeps {floatPlaces} places");
+                return source is not (decimal or int or long)
+                       || SameDigits(d.ToString("R", CultureInfo.InvariantCulture), Convert.ToString(source, CultureInfo.InvariantCulture)!)
                     ? null
                     : Lost("a floating-point column");
             default:
@@ -639,6 +661,36 @@ public static class DmlValueAdmission
     /// <returns>Whether such a character occurs.</returns>
     public static bool HasCharacterOutsideXml(string text)
         => HasUnpairedSurrogate(text) || text.Any(c => c < '\u0020' && c is not ('\t' or '\n' or '\r') || c is '\uFFFE' or '\uFFFF');
+
+    /// <summary>
+    /// The first character of <paramref name="text"/> that XML 1.0 does not allow (as <see cref="HasCharacterOutsideXml"/>),
+    /// as its position (1-based) and code unit, or null.
+    /// </summary>
+    private static (int Position, int CodeUnit)? CharacterOutsideXml(string text)
+    {
+        for (var i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+            {
+                i++;
+                continue;
+            }
+            if (char.IsSurrogate(c) || c < '\u0020' && c is not ('\t' or '\n' or '\r') || c is '\uFFFE' or '\uFFFF')
+                return (i + 1, c);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The refusal of written text with a character XML 1.0 does not allow, which Dataverse refuses as an invalid character
+    /// (live, 2026-11-25: U+0000, U+0001 and U+FFFE were refused and nothing was written). Names the code unit and its position,
+    /// not the text.
+    /// </summary>
+    private static string OutsideXmlWritten((int Position, int CodeUnit) outside, string what)
+        => $"{what} holds U+{outside.CodeUnit:X4} at character {outside.Position}, a character XML 1.0 does not allow (a control " +
+           "character other than tab, line feed and carriage return, U+FFFE or U+FFFF), which Dataverse refuses as an invalid " +
+           "character. Remove it.";
 
     /// <summary>True when <paramref name="text"/> holds a high surrogate not followed by a low one, or a low surrogate not preceded by a high one.</summary>
     /// <param name="text">The text.</param>

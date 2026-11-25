@@ -112,7 +112,7 @@ internal static class TestMetadata
             A("legacydate", "DateTime", behavior: "UserLocal", format: "DateOnly"), A("tzidate", "DateTime", behavior: "TimeZoneIndependent"),
             A("nobehaviordate", "DateTime", behavior: "-"), A("birthday", "DateTime", behavior: "DateOnly", format: "DateOnly"),
             A("stageid", "Uniqueidentifier", primary: false), A("donotemail", "Boolean"), A("aging30", "BigInt"),
-            A("address1_latitude", "Double"), A("ppds_rate", "Decimal", precision: 2), A("ppds_amount2", "Money", precision: 2),
+            A("address1_latitude", "Double", precision: 5), A("ppds_unreadfloat", "Double"), A("ppds_rate", "Decimal", precision: 2), A("ppds_amount2", "Money", precision: 2),
             A("ppds_pricingamount", "Money", precision: 2, precisionSource: 1), A("ppds_currencyamount", "Money", precision: 2, precisionSource: 2),
             A("ppds_unreadamount", "Money", precision: 2, precisionSource: null)
         ],

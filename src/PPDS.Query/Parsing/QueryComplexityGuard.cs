@@ -54,7 +54,8 @@ namespace PPDS.Query.Parsing
         /// <summary>
         /// The most conditions a SELECT may chain with AND or OR at one level of its tree (FetchXML generation recurses once per
         /// condition: 416 overflow 512 KB). One constant, apart from the write limit (<c>DmlStatementSupport.MaxConditionDepth</c>),
-        /// so that it can be changed alone.
+        /// so that it can be changed alone. The maintainer's decision of 2026-11-25: "Yes, 200 for now". Issue #1954 lifts it by
+        /// removing the recursion in FetchXML generation and the DML condition check that makes it necessary.
         /// </summary>
         public const int MaxSelectConditionChain = 200;
 

@@ -41,7 +41,8 @@ public static class DmlValueAdmissionTable
         new("whole number", "numberofemployees", "int", A("numberofemployees", "Integer")),
         new("decimal", "revenue", "decimal(38, 10)", A("revenue", "Decimal")),
         new("currency", "creditlimit", "money", A("creditlimit", "Money")),
-        new("floating point", "address1_latitude", "float", A("address1_latitude", "Double")),
+        // Precision 5, as account.address1_latitude has in Dataverse (live line E49 wrote to it).
+        new("floating point", "address1_latitude", "float", A("address1_latitude", "Double", precision: 5)),
         new("date and time", "followupby", "datetimeoffset(0)", A("followupby", "DateTime", "UserLocal", "DateAndTime")),
         new("date only", "birthday", "date", A("birthday", "DateTime", "DateOnly", "DateOnly")),
         new("yes/no", "donotemail", "bit", A("donotemail", "Boolean")),
@@ -117,8 +118,13 @@ public static class DmlValueAdmissionTable
         N("1.2345", U, "=1.2345", "=1.2345", "=1.2345", U, U),
         N("1.23495", U, "=1.23495", S, "=1.23495", U, U),
         N("0.1", U, "=0.1", "=0.1", "=0.1", U, U),
-        N("0.3333333333", U, "=0.3333333333", S, "=0.3333333333", U, U),
-        N("0.33333333333", U, S, S, "=0.33333333333", U, U),
+        N("0.3333333333", U, "=0.3333333333", S, S, U, U),
+        N("0.33333333333", U, S, S, S, U, U),
+        // The floating-point column keeps 5 places (live line E49: 47.123456 was stored as 47.12346); a trailing zero is not a place.
+        N("47.12345", U, "=47.12345", S, "=47.12345", U, U),
+        N("47.123456", U, "=47.123456", S, S, U, U),
+        N("47.1234560", U, "=47.1234560", S, S, U, U),
+        N("47.123450", U, "=47.123450", S, "=47.12345", U, U),
         // .NET's decimal-to-double conversion does not give the nearest double here (1.0000000000000001E-28), so the round
         // trip refuses it rather than send another number.
         N("0.0000000000000000000000000001", U, S, S, S, U, U),
@@ -251,6 +257,13 @@ public static class DmlValueAdmissionTable
         All("'" + Guid + " '", S),
         new("CAST('" + Guid + "' AS uniqueidentifier)", [U, U, U, U, U, U, U, U, U, GuidLower]),
         All("CAST('6F9619FF8B86D011B42D00C04FC964FF' AS uniqueidentifier)", U),
+        // Characters XML 1.0 does not allow, which Dataverse refuses in written text (live line E73: U+0000, U+0001, U+FFFE were
+        // refused as invalid characters and nothing was written): refused before anything is read.
+        All("N'a<U+0000>b'", U),
+        All("N'a<U+0001>b'", U),
+        All("'a<U+001F>b'", U),
+        All("N'a<U+000B>b'", U),
+        All("N'a<U+FFFE>b'", U),
         // Damaged ids that .NET's GUID parser reads as other ids, also in its exact "D" and "B" modes: a '+' or '0x' inside a
         // block, a leading '0X' ('+ccccccc-...' is read as 0ccccccc-..., a block '0x12' as 0012). Refused for a lookup by the
         // character rule, never by the parser's verdict.
@@ -425,6 +438,12 @@ public static class DmlValueAdmissionTable
         new("decimal", "1.23456789012", "U", "IN"),
         new("floating point", "0.1", "=0.1"),
         new("floating point", "1.23495", "=1.23495"),
+        // The column keeps 5 places: a sixth can never equal a stored value (live line E49).
+        new("floating point", "47.12345", "=47.12345"),
+        new("floating point", "47.123450", "=47.123450"),
+        new("floating point", "47.123456", "U"),
+        new("floating point", "47.123456", "U", "IN"),
+        new("floating point", "47.123456", "U", "<"),
         new("floating point", "0.1234567890123456789", "U"),
         new("floating point", "9007199254740993", "U"),
         new("floating point", "0.1234567890123456789", "U", "<"),
