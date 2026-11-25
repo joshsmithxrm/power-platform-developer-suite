@@ -1201,6 +1201,21 @@ public sealed partial class ExecutionPlanBuilder
     //  DML property extraction helpers
     // ═══════════════════════════════════════════════════════════════════
 
+    /// <summary>
+    /// The operation and target entity of an INSERT, UPDATE or DELETE, named as its plan names them (so a statement that
+    /// did not run is named like one that did); null for any other statement.
+    /// </summary>
+    internal static (DmlOperation Operation, string EntityLogicalName)? DescribeDmlTarget(TSqlStatement statement) => statement switch
+    {
+        InsertStatement { InsertSpecification.Target: NamedTableReference target }
+            => (DmlOperation.Insert, GetMultiPartName(target.SchemaObject).ToLowerInvariant()),
+        UpdateStatement { UpdateSpecification: { Target: NamedTableReference target } update }
+            => (DmlOperation.Update, GetMultiPartName(DmlStatementSupport.ResolveTarget(target, update.FromClause).SchemaObject).ToLowerInvariant()),
+        DeleteStatement { DeleteSpecification: { Target: NamedTableReference target } delete }
+            => (DmlOperation.Delete, GetMultiPartName(DmlStatementSupport.ResolveTarget(target, delete.FromClause).SchemaObject).ToLowerInvariant()),
+        _ => null
+    };
+
     private static string GetInsertTargetEntity(InsertStatement insert)
     {
         if (insert.InsertSpecification.Target is NamedTableReference named)

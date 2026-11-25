@@ -2238,8 +2238,9 @@ public class SqlQueryServiceTests
 
     [Fact]
     [Trait("Category", "PlanUnit")]
-    public async Task ExecuteAsync_Script_FirstStatementFailsLastSucceeds_OutcomeStillFails_AndReasonBelongsToFirst()
+    public async Task ExecuteAsync_Script_FirstStatementFails_SecondIsNotRun_AndReasonBelongsToFirst()
     {
+        // Stop at that statement (#1698): before, the second INSERT ran and the request was a partial success.
         var bulk = new Mock<IBulkOperationExecutor>();
         bulk.Setup(b => b.CreateMultipleAsync("account", It.IsAny<IEnumerable<Microsoft.Xrm.Sdk.Entity>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Failed(0, 1, "account failure"));
@@ -2254,11 +2255,15 @@ public class SqlQueryServiceTests
 
         var outcome = result.DmlOutcome!;
         Assert.Equal(2, outcome.Statements.Count);
+        Assert.True(outcome.Statements[1].NotRun);
         Assert.True(outcome.HasFailures);
-        Assert.Equal(PPDS.Cli.Infrastructure.Errors.ExitCodes.PartialSuccess, outcome.ExitCode);
-        Assert.Contains("#1 INSERT account", outcome.Message);
+        // No row of any statement was written, so it is a failure, not a partial success.
+        Assert.Equal(PPDS.Cli.Infrastructure.Errors.ExitCodes.Failure, outcome.ExitCode);
+        Assert.Contains("INSERT account", outcome.Message);
         Assert.Contains("account failure", outcome.Message);
+        Assert.EndsWith("Statement 2 was not run because statement 1 had failed rows.", outcome.Message);
         Assert.DoesNotContain("contact", outcome.Message);
+        bulk.Verify(b => b.CreateMultipleAsync("contact", It.IsAny<IEnumerable<Microsoft.Xrm.Sdk.Entity>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

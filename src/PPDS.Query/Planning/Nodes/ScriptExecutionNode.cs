@@ -319,6 +319,7 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
             // Track the statement's position in the script (e.g. "3" or "2.1" inside a block) so DML
             // outcomes can say which statement they belong to.
             position++;
+            var outcomesBefore = context.Statistics.DmlOutcomes.Count;
             context.Statistics.PushStatement(position);
             try
             {
@@ -428,6 +429,14 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
             {
                 context.Statistics.PopStatement();
             }
+
+            // Stop at that statement (#1698): a statement that finished with failed rows ends the script; the
+            // statements after it do not run and are recorded as not run. A statement with no failed row goes on.
+            if (HadFailedRows(context, outcomesBefore))
+            {
+                RecordNotRun(statements, position, context);
+                break;
+            }
         }
 
         // Yield rows from the last result-producing statement
@@ -436,6 +445,34 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
             foreach (var row in lastResultRows)
             {
                 yield return row;
+            }
+        }
+    }
+
+    /// <summary>True when a DML statement that ran since <paramref name="outcomesBefore"/> outcomes were recorded had a failed row.</summary>
+    private static bool HadFailedRows(QueryPlanContext context, int outcomesBefore)
+        => context.Statistics.DmlOutcomes.Skip(outcomesBefore).Any(o => o.FailedRows > 0 && !o.NotRun);
+
+    /// <summary>
+    /// Records each INSERT, UPDATE and DELETE after statement <paramref name="stoppedAt"/> of <paramref name="statements"/>
+    /// as not run, at the position it has in the script, so every surface can say which statements did not run.
+    /// </summary>
+    private static void RecordNotRun(IReadOnlyList<TSqlStatement> statements, int stoppedAt, QueryPlanContext context)
+    {
+        for (var index = stoppedAt; index < statements.Count; index++)
+        {
+            if (ExecutionPlanBuilder.DescribeDmlTarget(statements[index]) is not { } target)
+                continue;
+            context.Statistics.PushStatement(index + 1);
+            try
+            {
+                context.Statistics.AddDmlOutcome(new DmlStatementOutcome(
+                    target.Operation, target.EntityLogicalName, 0, 0, null,
+                    context.Statistics.CurrentStatementPosition, NotRun: true));
+            }
+            finally
+            {
+                context.Statistics.PopStatement();
             }
         }
     }

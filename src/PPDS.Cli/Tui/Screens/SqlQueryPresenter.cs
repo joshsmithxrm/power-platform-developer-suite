@@ -417,11 +417,14 @@ internal sealed class SqlQueryPresenter : IDisposable
 
     /// <summary>
     /// Status line for a finished streaming query. Failed DML rows are reported instead of a plain
-    /// "Returned N rows" (a DML result is one summary row, which read as success).
+    /// "Returned N rows" (a DML result is one summary row, which read as success). When a script stopped at a statement
+    /// with failed rows, the sentence naming the statements that were not run is kept whole after the shortened message.
     /// </summary>
     internal static string FormatCompletionStatus(int totalRows, long elapsedMs, string modeText, DmlOutcome? dmlOutcome)
         => dmlOutcome is { HasFailures: true }
-            ? $"{OneLine(dmlOutcome.Message!, 160)} ({elapsedMs}ms{modeText})"
+            ? dmlOutcome.NotRunNote is { } notRun
+                ? $"{OneLine(dmlOutcome.MessageWithoutNotRunNote!, 160)} {OneLine(notRun, int.MaxValue)} ({elapsedMs}ms{modeText})"
+                : $"{OneLine(dmlOutcome.Message!, 160)} ({elapsedMs}ms{modeText})"
             : $"Returned {totalRows:N0} rows in {elapsedMs}ms{modeText}";
 
     // The status line is a single line; server error text can contain newlines and be long.

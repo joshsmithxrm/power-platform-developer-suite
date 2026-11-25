@@ -137,6 +137,10 @@ public sealed class NodeStatistics
 /// True when the statement's bulk call threw or was cancelled part-way: some of its rows may be committed. The counts
 /// are what had been reported before the interruption (a lower bound), not the final result.
 /// </param>
+/// <param name="NotRun">
+/// True for a statement of a script that was not run because an earlier statement finished with failed rows (the
+/// script stops at that statement, #1698). Its counts are zero and it wrote nothing.
+/// </param>
 public sealed record DmlStatementOutcome(
     Nodes.DmlOperation Operation,
     string EntityLogicalName,
@@ -144,4 +148,5 @@ public sealed record DmlStatementOutcome(
     long FailedRows,
     string? ErrorMessage,
     string? Position = null,
-    bool Interrupted = false);
+    bool Interrupted = false,
+    bool NotRun = false);

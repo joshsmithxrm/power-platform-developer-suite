@@ -43,6 +43,12 @@ internal sealed class DmlTestHarness
     /// <summary>Called before each bulk write returns; lets a test throw or cancel mid-statement.</summary>
     public Action<string, int, IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>? OnWrite { get; set; }
 
+    /// <summary>
+    /// The result of a bulk write, given its number (1 for the first write of the request) and its row count; null (the
+    /// default) or a null result reports every row written.
+    /// </summary>
+    public Func<int, int, BulkOperationResult?>? ResultOf { get; set; }
+
     /// <summary>The id of row <paramref name="index"/> of page <paramref name="page"/> (distinct across pages).</summary>
     public static Guid Id(int index, int page = 1) => Guid.Parse($"00000000-0000-0000-{page:D4}-{index + 1:D12}");
 
@@ -150,7 +156,7 @@ internal sealed class DmlTestHarness
         {
             harness.OnWrite?.Invoke(entity, n, progress);
             harness.Writes.Add((operation, entity, n));
-            return new BulkOperationResult { SuccessCount = n };
+            return harness.ResultOf?.Invoke(harness.Writes.Count, n) ?? new BulkOperationResult { SuccessCount = n };
         }
 
         bulk.Setup(b => b.DeleteMultipleAsync(It.IsAny<string>(), It.IsAny<IEnumerable<Guid>>(), It.IsAny<BulkOperationOptions?>(), It.IsAny<PPDS.Dataverse.Client.DataverseClientOptions?>(), It.IsAny<IProgress<PPDS.Dataverse.Progress.ProgressSnapshot>?>(), It.IsAny<CancellationToken>()))
