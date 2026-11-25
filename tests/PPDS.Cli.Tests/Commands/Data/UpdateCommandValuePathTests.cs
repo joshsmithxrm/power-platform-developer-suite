@@ -26,6 +26,23 @@ public class UpdateCommandValuePathTests
         Assert.Contains("valueService.ReadUpdateFileAsync(", source, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Set_beside_file_is_refused_instead_of_ignored()
+    {
+        var file = Path.GetTempFileName();
+        try
+        {
+            var command = PPDS.Cli.Commands.Data.UpdateCommand.Create();
+            var both = command.Parse(["--entity", "account", "--file", file, "--set", "name=x"]);
+            Assert.Contains(both.Errors, e => e.Message.Contains("--set cannot be combined with --file", StringComparison.Ordinal));
+            Assert.Empty(command.Parse(["--entity", "account", "--file", file]).Errors);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
     [Theory]
     [InlineData("TryParse(")]
     [InlineData(".Parse(")]

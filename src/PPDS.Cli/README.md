@@ -333,21 +333,26 @@ Options:
 
 ##### Values in `data load` and `data update`
 
-Each value is converted by its column's type, read from the table's metadata, and never guessed from its text or read in the machine's culture. A value that is not in its column's form is refused before anything is written: `data load` checks the whole file first and writes no row if any cell is refused, naming each row and column.
+Each value is converted by its column's type, read from the table's metadata, and never guessed from its text or read in the machine's culture. Anything that is not exact is refused before anything is written: `data load` checks the whole file first and writes no row if any problem is found, listing each by row and column (exit 3).
+
+CSV files (both commands) are comma-separated with RFC 4180 quoting: a field in double quotes may hold commas, line breaks and doubled quotes. Nothing is trimmed. Every row must have the header's number of fields, and header names must not repeat.
 
 | Column type | Write |
 |---|---|
 | Whole number, big integer | `-12`: an optional sign and digits |
-| Decimal, floating point, currency | `1234.5`: an optional sign, digits, a point and digits; no thousands separator, comma, exponent or currency symbol; no more decimal places than the column keeps |
-| Text | the text as given (`123` is text in a text column) |
+| Decimal, floating point, currency | `1234.5`: an optional sign, digits, a point and digits; no thousands separator, comma, exponent or currency symbol; at most 28 significant digits and no more decimal places than the column keeps. A currency column whose places come from the pricing precision or the record's currency takes whole amounts only |
+| Text | the text exactly as given (`123` is text in a text column); no control characters other than tab and line breaks |
 | Yes/no | `true`/`false`, `yes`/`no`, `y`/`n`, `1`/`0` |
 | Choice, status, status reason | the option's integer value, or a label from the mapping file's `optionsetMap` |
-| Lookup to one table | the record's GUID; a lookup to several tables (customer, owner) is refused |
+| Lookup to one table | the record's GUID (`8-4-4-4-12`) |
+| Lookup to several tables (customer, owner) | refused, unless a `data load` mapping file names the table in `lookup.entity` |
 | Date and time (user local) | `2024-01-15T09:30:00Z` or `2024-01-15T09:30:00+01:00` |
 | Date only | `2024-01-15` |
 | Date and time (time-zone independent) | `2024-01-15T09:30:00Z`, stored as written |
 
 A mapping file's `dateFormat` replaces the date forms for its column (read in the invariant culture); for a user-local column it must include a time zone (`K` or `zzz`).
+
+`data update --set` takes `field=value` pairs separated by commas. Write a value unquoted when it holds no comma and no double quote; otherwise wrap the whole value in double quotes and double each quote in it: `--set 'name="Smith, ""Jr""",rate=1.5'`. Unquoted `null` clears a column. In `data update --file`, the id column is the table's primary id column (for example `accountid`) unless `--id-column` names another.
 
 #### Update
 
@@ -381,7 +386,7 @@ Options:
 - `--id` - Single record GUID to update
 - `--key`, `-k` - Alternate key for lookup (field=value, comma-separated for composite)
 - `--file` - Path to CSV file containing IDs and values to update
-- `--id-column` - Column name for ID in CSV file (default: entity primary key)
+- `--id-column` - Column name for ID in CSV file (default: the table's primary id column from metadata)
 - `--filter` - SQL-like filter expression to match records
 - `--set`, `-s` - Field values to set (field=value, comma-separated)
 - `--mapping`, `-m` - Path to column mapping JSON file (for --file mode)
