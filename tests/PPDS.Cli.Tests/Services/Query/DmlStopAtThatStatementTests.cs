@@ -129,7 +129,7 @@ public sealed class DmlStopAtThatStatementTests
         Assert.Equal(ExitCodes.Failure, outcome.ExitCode);
         Assert.Equal(ErrorCodes.Query.ExecutionFailed, outcome.ErrorCode);
         Assert.Equal(
-            "DML failed (UPDATE account): all 3 row(s) failed. Example error: privilege check failed " +
+            "DML failed (UPDATE account): all 3 row(s) failed. Example error: privilege check failed. " +
             "Statements 2 to 3 were not run because statement 1 had failed rows.",
             outcome.Message);
     }

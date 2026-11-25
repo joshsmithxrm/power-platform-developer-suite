@@ -77,8 +77,10 @@ public sealed class DmlOutcome
 
     /// <summary>
     /// The sentence naming the statements that were not run and the statement the script stopped at, for example
-    /// "Statements 3 to 4 were not run because statement 2 had failed rows; statement 1 ran with no failed rows."; null
-    /// when every statement ran. It is the end of <see cref="Message"/>; a surface that shortens the message keeps it whole.
+    /// "Statements 3 to 4 were not run because statement 2 had failed rows; statement 1 ran with no failed rows.", or after
+    /// a statement that threw, "Statement 3 was not run because statement 2 was interrupted." or "Statements 2 to 3 were not
+    /// run."; null when every statement ran. It is the end of <see cref="Message"/> and of <see cref="DescribeCommitted"/>; a
+    /// surface that shortens the message keeps it whole.
     /// </summary>
     public string? NotRunNote => NotRun.Count == 0 ? null : BuildNotRunNote();
 
@@ -131,11 +133,18 @@ public sealed class DmlOutcome
 
     private string BuildNotRunNote()
     {
-        var stoppedAt = Ran.LastOrDefault(s => s.FailedRows > 0);
+        // The statement the script stopped at: the last that ran, when it had failed rows or was interrupted. A statement that
+        // threw before writing (the row cap, a refusal) is itself among those not run, and the error says why.
+        var last = Ran.LastOrDefault();
         var notRun = Positions(NotRun);
         var verb = NotRun.Count == 1 ? "was" : "were";
-        var because = stoppedAt == null ? string.Empty : $" because statement {PositionOf(stoppedAt)} had failed rows";
-        var clean = Ran.Where(s => s != stoppedAt).ToList();
+        var because = last switch
+        {
+            { Interrupted: true } => $" because statement {PositionOf(last)} was interrupted",
+            { FailedRows: > 0 } => $" because statement {PositionOf(last)} had failed rows",
+            _ => string.Empty
+        };
+        var clean = last is { Interrupted: false, FailedRows: > 0 } ? Ran.Where(s => s != last).ToList() : [];
         var cleanNote = clean.Count == 0 ? string.Empty : $"; {Positions(clean)} ran with no failed rows";
         var sentence = $"{notRun} {verb} not run{because}{cleanNote}.";
         return char.ToUpperInvariant(sentence[0]) + sentence[1..];
@@ -169,7 +178,9 @@ public sealed class DmlOutcome
             : $"statements {string.Join(", ", positions.Take(positions.Count - 1))} and {positions[^1]}";
     }
 
-    private static string JoinSentences(string first, string? second) => second == null ? first : $"{first} {second}";
+    /// <summary>The two sentences, the first ended with a full stop when it has none (an error text may not).</summary>
+    private static string JoinSentences(string first, string? second)
+        => second == null ? first : first.TrimEnd() is var head && head.Length > 0 && head[^1] is '.' or '!' or '?' ? $"{head} {second}" : $"{head}. {second}";
 
     private static string InterruptedCounts(DmlStatementOutcome s)
         => s.AffectedRows + s.FailedRows > 0

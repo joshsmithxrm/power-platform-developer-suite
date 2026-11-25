@@ -73,4 +73,19 @@ public sealed class EntitySummary
     /// </summary>
     [JsonPropertyName("description")]
     public string? Description { get; init; }
+
+    /// <summary>
+    /// Gets the table type Dataverse reports (<c>Standard</c>, <c>Activity</c>, <c>Virtual</c> or <c>Elastic</c>); null when
+    /// it was not read.
+    /// </summary>
+    [JsonPropertyName("tableType")]
+    public string? TableType { get; init; }
+
+    /// <summary>Gets whether the table is an activity table; null when it was not read.</summary>
+    [JsonPropertyName("isActivity")]
+    public bool? IsActivity { get; init; }
+
+    /// <summary>Gets the data provider of a virtual table; null for a table Dataverse stores itself, or when it was not read.</summary>
+    [JsonPropertyName("dataProviderId")]
+    public Guid? DataProviderId { get; init; }
 }

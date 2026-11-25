@@ -244,12 +244,13 @@ public static class DmlValueAdmission
 
     /// <summary>
     /// Admits <paramref name="literal"/> as one value of an IN list in the WHERE of a write, or refuses it: as
-    /// <see cref="AdmitLiteral"/> with <see cref="DmlValueUse.Compare"/>, and text that holds a carriage return, or is
-    /// empty or only white space, is refused. FetchXML carries an IN value as the text of a <c>value</c> element. The
-    /// executor's parse and serialisation of the FetchXML (<see cref="FetchXmlSerialization"/>) writes every line break in
-    /// element text as the machine's line break, which an XML parser reads as a line feed: a carriage return, alone or
-    /// before a line feed, reaches Dataverse as a line feed, and a line feed as itself. It also empties an element that is
-    /// only XML white space; what Dataverse selects for an empty or blank IN value has not been shown, so text that is only
+    /// <see cref="AdmitLiteral"/> with <see cref="DmlValueUse.Compare"/>, and text that holds a line break (a carriage return
+    /// or a line feed), or is empty or only white space, is refused, with or without the N prefix. FetchXML carries an IN
+    /// value as the text of a <c>value</c> element. The executor's serialisation (<see cref="FetchXmlSerialization"/>)
+    /// writes a carriage return there as a character reference and a line feed as itself, the same on every machine, but
+    /// whether Dataverse reads a line break in element text unchanged has not been shown (an XML reader that normalises line
+    /// breaks reads a carriage return written as itself as a line feed). The executor's parse empties an element that is only
+    /// XML white space; what Dataverse selects for an empty or blank IN value has not been shown, so text that is only
     /// Unicode white space is refused with it.
     /// </summary>
     /// <param name="literal">The literal as written.</param>
@@ -260,11 +261,12 @@ public static class DmlValueAdmission
         var admission = AdmitLiteral(literal, target, DmlValueUse.Compare);
         if (!admission.IsAdmitted || literal.Kind is not (DmlLiteralKind.Text or DmlLiteralKind.NationalText) || admission.Value is not string text)
             return admission;
-        if (text.Contains('\r'))
+        if (text.Contains('\r') || text.Contains('\n'))
         {
             return DmlAdmission.Refuse(Unsupported,
-                "an IN value that holds a carriage return is not sent unchanged: the FetchXML carries it as element text, where it " +
-                "reaches Dataverse as a line feed. Compare with = for each such value, combined with OR.");
+                "an IN value that holds a line break (a carriage return or a line feed) is not admitted: the FetchXML carries it " +
+                "as element text, and whether Dataverse reads a line break in element text unchanged has not been shown. Compare " +
+                "with = for each such value, combined with OR.");
         }
         if (text.Length == 0 || text.All(IsUnicodeWhiteSpace))
         {
@@ -372,12 +374,21 @@ public static class DmlValueAdmission
             : Sent(literal, Coerce(CompiledNumber(literal), target), sent => sent is decimal d && SameDigits(d.ToString(CultureInfo.InvariantCulture), literal));
     }
 
-    /// <summary>Currency: as decimal, with at most four places (and no more than the column's precision), within money's range.</summary>
+    /// <summary>
+    /// Currency: as decimal, with at most four places (and no more than the column's precision), within money's range. When
+    /// the column's precision does not come from the column itself (<see cref="AttributeMetadataDto.PrecisionSource"/> is
+    /// not 0), only a whole amount is admitted (#1931, "Prove or refuse").
+    /// </summary>
     private static DmlAdmission AdmitMoney(DmlLiteral literal, AttributeMetadataDto target, DmlValueUse use)
     {
         if (NumberForm(literal) is { } refusal)
             return refusal;
-        var places = Math.Min(target.Precision ?? MoneyPlaces, MoneyPlaces);
+        if (MoneyPlacesKept(target) is not { } places)
+        {
+            if (Places(literal) > 0)
+                return DmlAdmission.Refuse(Unsupported, PrecisionNotTheColumns(target));
+            places = 0;
+        }
         if (Places(literal) > places)
         {
             return use == DmlValueUse.Write
@@ -578,7 +589,8 @@ public static class DmlValueAdmission
                     ? Lost($"a decimal column that keeps {places} places")
                     : null;
             case DmlTargetKind.Money when sent is Money money:
-                var moneyPlaces = Math.Min(target.Precision ?? MoneyPlaces, MoneyPlaces);
+                if (MoneyPlacesKept(target) is not { } moneyPlaces)
+                    return Places(money.Value) > 0 ? DmlAdmission.Refuse(Unsupported, PrecisionNotTheColumns(target)) : null;
                 return Places(money.Value) > moneyPlaces ? Lost($"a currency column that keeps {moneyPlaces} places") : null;
             case DmlTargetKind.FloatingPoint when sent is double d && source is decimal or int or long:
                 return SameDigits(d.ToString("R", CultureInfo.InvariantCulture), Convert.ToString(source, CultureInfo.InvariantCulture)!)
@@ -588,6 +600,22 @@ public static class DmlValueAdmission
                 return null;
         }
     }
+
+    /// <summary>
+    /// The places a currency column keeps: its own precision (at most four) when the precision comes from the column
+    /// (<see cref="AttributeMetadataDto.PrecisionSource"/> 0); null when it comes from the currency or the organisation's
+    /// pricing setting, or was not read, which PPDS cannot establish.
+    /// </summary>
+    private static int? MoneyPlacesKept(AttributeMetadataDto target)
+        => target.PrecisionSource == 0 ? Math.Min(target.Precision ?? MoneyPlaces, MoneyPlaces) : null;
+
+    private static string PrecisionNotTheColumns(AttributeMetadataDto target) => (target.PrecisionSource switch
+    {
+        1 => "the column's decimal places come from the organisation's pricing setting, not from the column",
+        2 => "the column's decimal places come from the currency of each row, not from the column",
+        null => "where the column's decimal places come from (the column, the currency or the pricing setting) was not read",
+        _ => "the column's decimal places come from a source PPDS does not know"
+    }) + ", so how many places Dataverse keeps cannot be established. Write a whole amount, without decimal places.";
 
     private static DmlAdmission Lost(string where) => DmlAdmission.Refuse(StoredDifferently,
         $"a value of the source would be stored as a different value in {where}. Change the source values, or write literals.");

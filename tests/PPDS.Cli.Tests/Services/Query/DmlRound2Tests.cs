@@ -60,8 +60,8 @@ public sealed class DmlRound2Tests
     [InlineData("UPDATE account SET numberofemployees = NULLIF(numberofemployees, revenue) WHERE name = 'n1'", "(NULLIF)")]
     // B-F4: ORDER BY without TOP does not say which rows are copied, and paging over it was not proven
     [InlineData("INSERT INTO account (name) SELECT name FROM account ORDER BY name", "ORDER BY without TOP")]
-    // D-3: the id column is named from metadata (activity tables use activityid)
-    [InlineData("DELETE FROM task WHERE stageid = '00000000-0000-0000-0000-000000000001'", "Filter on the id column activityid")]
+    // D-3 named the id column of an activity table (activityid); a write to an activity table is now refused as such (P2)
+    [InlineData("DELETE FROM task WHERE stageid = '00000000-0000-0000-0000-000000000001'", "'task' is an activity table")]
     public async Task IsRefusedBeforeAnythingIsReadOrWritten(string sql, string named)
     {
         foreach (var options in new[] { Confirmed, new DmlSafetyOptions(), new DmlSafetyOptions { IsDryRun = true } })

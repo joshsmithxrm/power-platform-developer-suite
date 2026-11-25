@@ -1,4 +1,3 @@
-using System.Xml.Linq;
 using Moq;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Query;
@@ -86,68 +85,70 @@ public sealed class DmlReviewRound6FixTests
     // ---- MF2: what the executor sends ------------------------------------------------------------------------
 
     /// <summary>
-    /// The FetchXML of every admitted compared case, passed through the executor's serialisation with the line break of
-    /// Linux and of Windows, carries exactly the case's value: the serialisation changes no admitted condition value.
+    /// The FetchXML of every admitted compared case is sent as the same characters from Linux and from Windows, and carries
+    /// exactly the case's value for a reader that normalises line breaks and for one that does not (MF-A). The harness
+    /// records that text (B08).
     /// </summary>
     [Fact]
-    public async Task TheExecutorsSerialisation_ChangesNoConditionValue_OfAnyAdmittedComparedCase()
+    public async Task EveryAdmittedComparedCase_IsSentAsTheSameCharactersOnEveryMachine_WithExactlyItsValue()
     {
         var checkedCases = 0;
         var wrong = new List<string>();
         foreach (var c in DmlValueAdmissionTable.CompareCases.Where(c => c.Cell.StartsWith('=')))
         {
-            var target = DmlValueAdmissionTable.Targets.Single(t => t.Kind == c.Kind);
+            var target = DmlValueAdmissionTable.CompareTarget(c.Kind);
             var h = await RunAsync(DmlValueAdmissionTable.CompareStatement(c.Literal, target, c.Operator));
-            var generated = Assert.Single(h.Generated);
-
-            // What the generator meant (white space kept), and what each serialisation sends.
-            var meant = ConditionValue(XDocument.Parse(generated, LoadOptions.PreserveWhitespace), target.Column);
-            foreach (var (machine, newLine) in new[] { ("Linux", "\n"), ("Windows", "\r\n") })
-            {
-                var sent = ConditionValue(FetchXmlSerialization.RoundTrip(generated, newLine), target.Column);
-                if (sent != c.Cell[1..] || meant != c.Cell[1..])
-                    wrong.Add($"{c.Operator} {Show(c.Literal)}: case {Show(c.Cell[1..])}, generated {Show(meant)}, sent from {machine} {Show(sent)}");
-            }
+            var sent = SentFetchXml.Sent(Assert.Single(h.Generated));
+            Assert.Equal(sent, Assert.Single(h.Reads).FetchXml);
+            var value = Assert.Single(SentFetchXml.Values(sent, target.Column));
+            if (value != c.Cell[1..])
+                wrong.Add($"{c.Operator} {Show(c.Literal)}: case {Show(c.Cell[1..])}, sent {Show(value)}");
             checkedCases++;
         }
 
         Assert.True(wrong.Count == 0, string.Join(System.Environment.NewLine, wrong));
-        Assert.True(checkedCases >= 35, $"only {checkedCases} admitted cases");
+        Assert.True(checkedCases >= 40, $"only {checkedCases} admitted cases");
     }
 
     /// <summary>
-    /// Every text an IN value may be is either refused by the gate or kept by the serialisation, on Linux and on Windows:
-    /// a carriage return (alone or before a line feed) and text that is only white space are what the serialisation changes,
-    /// and the gate refuses them, with empty text and text that is only other Unicode white space. A line feed is written as
-    /// the machine's line break and read back as a line feed.
+    /// Every text an IN value may be is either refused by the gate or sent as the same characters on every machine and read
+    /// back unchanged by both kinds of reader: a line break (a carriage return or a line feed, MF-A), empty text and text that
+    /// is only white space are refused, with and without N (MF-C).
     /// </summary>
     [Theory]
-    [InlineData("a", true)]
-    [InlineData(" a ", true)]
-    [InlineData("a\tb", true)]
-    [InlineData("\ta", true)]
-    [InlineData("a\u0085b", true)]
-    [InlineData("a\u2028b", true)]
-    [InlineData("a]]>b", true)]
-    [InlineData("&lt;", true)]
-    [InlineData("a\nb", true)]
-    [InlineData("a\nb\n", true)]
-    [InlineData("a\rb", false)]
-    [InlineData("a\r\nb", false)]
-    [InlineData("\n", false)]
-    [InlineData("\r", false)]
-    [InlineData(" ", false)]
-    [InlineData("\t", false)]
-    [InlineData("  \t ", false)]
-    [InlineData("", false)]
-    [InlineData("\u00A0", false)]
-    [InlineData("\u3000", false)]
-    public async Task AnInValue_IsRefused_OrSentUnchanged(string text, bool admitted)
+    [InlineData("N'a'", "a")]
+    [InlineData("N' a '", " a ")]
+    [InlineData("N'a\tb'", "a\tb")]
+    [InlineData("N'\ta'", "\ta")]
+    [InlineData("N'a\u0085b'", "a\u0085b")]
+    [InlineData("N'a\u2028b'", "a\u2028b")]
+    [InlineData("N'a]]>b'", "a]]>b")]
+    [InlineData("N'&lt;'", "&lt;")]
+    [InlineData("'a'", "a")]
+    [InlineData("N'a\nb'", null)]
+    [InlineData("N'a\nb\n'", null)]
+    [InlineData("N'a\rb'", null)]
+    [InlineData("N'a\r\nb'", null)]
+    [InlineData("N'\n'", null)]
+    [InlineData("N'\r'", null)]
+    [InlineData("N' '", null)]
+    [InlineData("N'\t'", null)]
+    [InlineData("N'  \t '", null)]
+    [InlineData("N''", null)]
+    [InlineData("N'\u00A0'", null)]
+    [InlineData("N'\u3000'", null)]
+    [InlineData("'a\nb'", null)]
+    [InlineData("'a\rb'", null)]
+    [InlineData("''", null)]
+    [InlineData("' '", null)]
+    [InlineData("'\t'", null)]
+    public async Task AnInValue_IsRefused_OrSentUnchanged(string escapedLiteral, string? escapedValue)
     {
-        var sql = $"DELETE FROM account WHERE name IN (N'{text}', N'other')";
+        var literal = System.Text.RegularExpressions.Regex.Unescape(escapedLiteral);
+        var sql = $"DELETE FROM account WHERE name IN ({literal}, N'other')";
         var h = DmlTestHarness.Create(rows: 1);
 
-        if (!admitted)
+        if (escapedValue == null)
         {
             var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
             Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
@@ -157,26 +158,43 @@ public sealed class DmlReviewRound6FixTests
         }
 
         await h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed });
-        var generated = Assert.Single(h.Generated);
-        foreach (var newLine in new[] { "\n", "\r\n" })
-        {
-            var values = XDocument.Parse(FetchXmlSerialization.RoundTrip(generated, newLine)).Descendants("value").Select(v => v.Value).ToList();
-            Assert.Equal([text, "other"], values);
-        }
+        var sent = SentFetchXml.Sent(Assert.Single(h.Generated));
+        Assert.Equal([System.Text.RegularExpressions.Regex.Unescape(escapedValue), "other"], SentFetchXml.Values(sent, "name"));
     }
 
     /// <summary>
-    /// The serialisation is the one the executor used before it moved behind one function: the same text as
-    /// <c>XDocument.ToString(SaveOptions.DisableFormatting)</c> on this machine.
+    /// The serialisation writes the same characters with either line break, keeps every line break and tab, in an attribute
+    /// value and in element text, and still empties an element that is only white space (which the gate refuses).
     /// </summary>
     [Fact]
-    public void TheSerialisation_IsTheExecutorsFormerOne()
+    public void TheSerialisation_WritesTheSameCharactersOnEveryMachine_AndKeepsEveryLineBreak()
     {
         const string fetchXml = "<fetch top=\"5\"><entity name=\"account\"><attribute name=\"name\" /><filter><condition attribute=\"name\" operator=\"eq\" value=\"a&#10;b&#13;c&#9;d&apos;&quot;\" />" +
-                                "<condition attribute=\"name\" operator=\"in\"><value>x&#13;&#10;y</value><value> </value><value>&lt;&amp;</value></condition></filter></entity></fetch>";
+                                "<condition attribute=\"name\" operator=\"in\"><value>x&#13;&#10;y</value><value>p&#13;q&#10;r</value><value> </value><value>&lt;&amp;</value></condition></filter></entity></fetch>";
 
-        Assert.Equal(XDocument.Parse(fetchXml).ToString(SaveOptions.DisableFormatting), FetchXmlSerialization.RoundTrip(fetchXml));
-        Assert.Equal(XDocument.Parse(fetchXml).ToString(SaveOptions.DisableFormatting), FetchXmlSerialization.RoundTrip(fetchXml, System.Environment.NewLine));
+        var sent = SentFetchXml.Sent(fetchXml);
+
+        Assert.Equal(
+            "<fetch top=\"5\"><entity name=\"account\"><attribute name=\"name\" /><filter><condition attribute=\"name\" operator=\"eq\" value=\"a&#xA;b&#xD;c&#x9;d'&quot;\" />" +
+            "<condition attribute=\"name\" operator=\"in\"><value>x&#xD;\ny</value><value>p&#xD;q\nr</value><value></value><value>&lt;&amp;</value></condition></filter></entity></fetch>",
+            sent);
+        Assert.Equal(["a\nb\rc\td'\"", "x\r\ny", "p\rq\nr", "", "<&"], SentFetchXml.Values(sent, "name"));
+    }
+
+    /// <summary>
+    /// The harness records the text sent, not the generated text (B08): for a carriage return in an operand the generator
+    /// writes <c>&amp;#13;</c> and the serialisation <c>&amp;#xD;</c>, and the recorded read is the latter.
+    /// </summary>
+    [Fact]
+    public async Task TheHarness_RecordsTheTextSent_NotTheGeneratedText()
+    {
+        var h = await RunAsync("DELETE FROM account WHERE name = N'a\rb'");
+
+        var generated = Assert.Single(h.Generated);
+        var read = Assert.Single(h.Reads).FetchXml;
+        Assert.Contains("a&#13;b", generated);
+        Assert.Contains("a&#xD;b", read);
+        Assert.Equal(SentFetchXml.Sent(generated), read);
     }
 
     // ---- MF3: XML 1.0 characters ------------------------------------------------------------------------------
@@ -327,39 +345,73 @@ public sealed class DmlReviewRound6FixTests
 
     private static string OrChain(int conditions) => string.Join(" OR ", Enumerable.Range(0, conditions).Select(i => $"name = 'n{i}'"));
 
-    /// <summary>A chain of conditions joined by OR is as deep as it is long.</summary>
-    [Fact]
-    public async Task AConditionTree_AtTheDepthLimit_IsRun_AndOneLevelDeeper_IsRefused()
+    /// <summary>
+    /// The WHERE of each kind of write the limits apply to (should-fix 4): DELETE, UPDATE and the WHERE of an INSERT ...
+    /// SELECT. <c>{0}</c> is the condition.
+    /// </summary>
+    public static TheoryData<string> EveryWriteWithAWhere => new()
     {
-        var h = await RunAsync($"DELETE FROM account WHERE {OrChain(DmlStatementSupport.MaxConditionDepth)}");
+        "DELETE FROM account WHERE {0}",
+        "UPDATE account SET description = 'x' WHERE {0}",
+        "INSERT INTO account (description) SELECT description FROM account WHERE {0}",
+    };
+
+    /// <summary>
+    /// A chain of conditions joined by OR is as deep as it is long: 200 levels run, 201 are refused. The limit is pinned by
+    /// its number, not by the constant (should-fix 4).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(EveryWriteWithAWhere))]
+    public async Task AConditionTree_200LevelsDeep_IsRun_And201_IsRefused(string write)
+    {
+        Assert.Equal(200, DmlStatementSupport.MaxConditionDepth);
+        var h = await RunAsync(string.Format(System.Globalization.CultureInfo.InvariantCulture, write, OrChain(200)));
         Assert.Single(h.Reads);
 
-        var ex = await RefusedBeforeAnythingIsReadAsync($"DELETE FROM account WHERE {OrChain(DmlStatementSupport.MaxConditionDepth + 1)}");
-        Assert.Contains($"nested more than {DmlStatementSupport.MaxConditionDepth} levels", ex.Message);
+        var ex = await RefusedBeforeAnythingIsReadAsync(string.Format(System.Globalization.CultureInfo.InvariantCulture, write, OrChain(201)));
+        Assert.Contains("nested more than 200 levels", ex.Message);
     }
 
     /// <summary>Parentheses count as levels.</summary>
     [Fact]
     public async Task NestedParentheses_BeyondTheDepthLimit_AreRefused()
     {
-        var depth = DmlStatementSupport.MaxConditionDepth;
-        await RunAsync($"DELETE FROM account WHERE {new string('(', depth - 1)}name = 'n1'{new string(')', depth - 1)}");
-        await RefusedBeforeAnythingIsReadAsync($"DELETE FROM account WHERE {new string('(', depth)}name = 'n1'{new string(')', depth)}");
+        await RunAsync($"DELETE FROM account WHERE {new string('(', 199)}name = 'n1'{new string(')', 199)}");
+        await RefusedBeforeAnythingIsReadAsync($"DELETE FROM account WHERE {new string('(', 200)}name = 'n1'{new string(')', 200)}");
     }
 
-    /// <summary>A balanced tree is shallow; its width is bounded by the number of conditions.</summary>
-    [Fact]
-    public async Task AConditionTree_AtTheWidthLimit_IsRun_AndOneConditionMore_IsRefused()
-    {
-        static string Balanced(int from, int count) => count == 1
-            ? $"name = 'n{from}'"
-            : $"({Balanced(from, count / 2)} OR {Balanced(from + count / 2, count - count / 2)})";
+    private static string Balanced(int from, int count) => count == 1
+        ? $"name = 'n{from}'"
+        : $"({Balanced(from, count / 2)} OR {Balanced(from + count / 2, count - count / 2)})";
 
-        var h = await RunAsync($"DELETE FROM account WHERE {Balanced(0, DmlStatementSupport.MaxConditions)}");
+    /// <summary>A balanced tree is shallow; its width is bounded by the number of conditions: 1,000 run, 1,001 are refused.</summary>
+    [Theory]
+    [MemberData(nameof(EveryWriteWithAWhere))]
+    public async Task AConditionTree_Of1000Conditions_IsRun_And1001_IsRefused(string write)
+    {
+        Assert.Equal(1000, DmlStatementSupport.MaxConditions);
+        var h = await RunAsync(string.Format(System.Globalization.CultureInfo.InvariantCulture, write, Balanced(0, 1000)));
         Assert.Single(h.Reads);
 
-        var ex = await RefusedBeforeAnythingIsReadAsync($"DELETE FROM account WHERE {Balanced(0, DmlStatementSupport.MaxConditions + 1)}");
-        Assert.Contains($"more than {DmlStatementSupport.MaxConditions} conditions", ex.Message);
+        var ex = await RefusedBeforeAnythingIsReadAsync(string.Format(System.Globalization.CultureInfo.InvariantCulture, write, Balanced(0, 1001)));
+        Assert.Contains("more than 1000 conditions", ex.Message);
+    }
+
+    /// <summary>
+    /// The whole-script check looks at the size of every write's condition tree before anything else (should-fix 4, E03):
+    /// in a script whose first statement is a SELECT, the too-large tree of the second statement is the refusal, not the
+    /// SELECT, because no recursive walk of the script may run before the size is known.
+    /// </summary>
+    [Fact]
+    public void TheWholeScriptCheck_RefusesATreeTooLarge_BeforeAnythingElse()
+    {
+        var script = new PPDS.Query.Parsing.QueryParser().Parse($"SELECT name FROM account; DELETE FROM account WHERE {Balanced(0, 1001)}");
+
+        var refusal = DmlStatementSupport.FindScriptRefusal(script);
+
+        Assert.NotNull(refusal);
+        Assert.StartsWith("Statement 2 (line 1, column 27): ", refusal!.Message);
+        Assert.Contains("more than 1000 conditions", refusal.Message);
     }
 
     /// <summary>
@@ -441,15 +493,11 @@ public sealed class DmlReviewRound6FixTests
     // ---- helpers ------------------------------------------------------------------------------------------------
 
     /// <summary>The value of the condition on <paramref name="column"/>: its value attribute, or the text of its one value element.</summary>
-    internal static string? ConditionValue(string fetchXml, string column) => ConditionValue(XDocument.Parse(fetchXml), column);
+    /// <summary>
+    /// The one value of the condition on <paramref name="column"/> in the text sent (a negation's not-null condition has
+    /// none), read by a reader that normalises line breaks and by one that does not, which must agree.
+    /// </summary>
+    internal static string? ConditionValue(string fetchXml, string column) => Assert.Single(SentFetchXml.Values(fetchXml, column));
 
-    private static string? ConditionValue(XDocument fetchXml, string column)
-    {
-        // A negation is sent with a not-null condition on the same column, which has no value.
-        var condition = Assert.Single(fetchXml.Descendants("condition"),
-            c => (string?)c.Attribute("attribute") == column && (c.Attribute("value") != null || c.Elements("value").Any()));
-        return (string?)condition.Attribute("value") ?? Assert.Single(condition.Elements("value")).Value;
-    }
-
-    private static string Show(string? text) => text is null ? "<null>" : string.Concat(text.Select(c => c is < ' ' or > '~' ? $"<U+{(int)c:X4}>" : c.ToString()));
+    private static string Show(string? text) => SentFetchXml.Show(text);
 }

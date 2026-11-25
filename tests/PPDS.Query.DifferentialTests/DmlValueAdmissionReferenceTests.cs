@@ -179,7 +179,7 @@ public sealed class DmlValueAdmissionReferenceTests(ReferenceDatabase database) 
         var wrong = new List<string>();
         foreach (var c in cases)
         {
-            var target = DmlValueAdmissionTable.Targets.Single(t => t.Kind == c.Kind);
+            var target = DmlValueAdmissionTable.CompareTarget(c.Kind);
             var condition = c.Operator == "IN" ? $"v IN ({c.Literal}, 99)" : $"v = {c.Literal}";
             var sql = $"DECLARE @t TABLE (v {target.ReferenceType}); INSERT INTO @t (v) VALUES ({c.Literal}); SELECT COUNT(*) FROM @t WHERE {condition};";
             using var command = new SqlCommand(sql, database.Connection);

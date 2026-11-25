@@ -21,8 +21,9 @@ internal static class DmlLiveTableShape
 
     private static AttributeMetadataDto A(string name, string type, bool create = true, bool update = true, bool read = true,
         string? behavior = null, string? format = null, bool primary = false, string? attributeOf = null, List<string>? targets = null,
-        List<OptionValueDto>? options = null) => new()
+        List<OptionValueDto>? options = null, int? precision = null, int? precisionSource = null) => new()
     {
+        Precision = precision, PrecisionSource = precisionSource,
         LogicalName = name, DisplayName = name, SchemaName = name, AttributeType = type, IsValidForCreate = create,
         IsValidForUpdate = update, IsValidForRead = read, DateTimeBehavior = behavior, Format = format, IsPrimaryId = primary,
         AttributeOf = attributeOf, Targets = targets, Options = options
@@ -37,7 +38,8 @@ internal static class DmlLiveTableShape
         A("ppds_memo", "Memo"),
         A("ppds_num", "Integer"),
         A("ppds_amount", "Decimal"),
-        A("ppds_money", "Money"),
+        // As the live suite creates it: 2 places, from the column itself (precision source 0).
+        A("ppds_money", "Money", precision: 2, precisionSource: 0),
         A("ppds_float", "Double"),
         A("ppds_when", "DateTime", behavior: "UserLocal", format: "DateAndTime"),
         A("ppds_day", "DateTime", behavior: "DateOnly", format: "DateOnly"),
@@ -82,6 +84,11 @@ internal static class DmlLiveTableShape
             Same("AttributeOf", expected.AttributeOf, real.AttributeOf);
             Same("DateTimeBehavior", expected.DateTimeBehavior, real.DateTimeBehavior);
             Same("Format", expected.Format, real.Format);
+            if (expected.AttributeType == "Money")
+            {
+                Same("Precision", expected.Precision, real.Precision);
+                Same("PrecisionSource", expected.PrecisionSource, real.PrecisionSource);
+            }
             Same("Targets", string.Join(",", expected.Targets ?? []), string.Join(",", real.Targets ?? []));
             Same("Options", string.Join(",", (expected.Options ?? []).Select(o => $"{o.Value}/{o.State}")),
                 string.Join(",", (real.Options ?? []).Select(o => $"{o.Value}/{o.State}")));
@@ -97,7 +104,12 @@ internal static class DmlLiveTableShape
                 ? Columns(table, choices)
                 : (IReadOnlyList<AttributeMetadataDto>)Array.Empty<AttributeMetadataDto>());
 
-        public Task<IReadOnlyList<EntitySummary>> GetEntitiesAsync(CancellationToken ct = default) => throw new NotSupportedException();
+        /// <summary>The table list: this table, a standard table (the live run reads the real kind).</summary>
+        public Task<IReadOnlyList<EntitySummary>> GetEntitiesAsync(CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<EntitySummary>>([new EntitySummary
+            {
+                LogicalName = table, DisplayName = table, SchemaName = table, TableType = "Standard", IsActivity = false
+            }]);
 
         public Task<EntityRelationshipsDto> GetRelationshipsAsync(string entityLogicalName, CancellationToken ct = default) => throw new NotSupportedException();
 

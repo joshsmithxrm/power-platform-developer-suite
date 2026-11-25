@@ -314,12 +314,13 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         var position = 0;
         foreach (var statement in statements)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
             // Track the statement's position in the script (e.g. "3" or "2.1" inside a block) so DML
             // outcomes can say which statement they belong to.
             position++;
             var outcomesBefore = context.Statistics.DmlOutcomes.Count;
+            try
+            {
+            cancellationToken.ThrowIfCancellationRequested();
             context.Statistics.PushStatement(position);
             try
             {
@@ -429,6 +430,15 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
             {
                 context.Statistics.PopStatement();
             }
+            }
+            catch (Exception ex) when (ex is not FlowControlException)
+            {
+                // A statement that throws (interrupted, a short bulk result, a cancellation, the row cap, a value refused in
+                // the statement's pass) stops the script too: the statements after it, and this one when it recorded no
+                // outcome, are recorded as not run, so the surfaces say which did not run.
+                RecordNotRunAfterThrow(statements, position, outcomesBefore, context);
+                throw;
+            }
 
             // Stop at that statement (#1698): a statement that finished with failed rows ends the script; the
             // statements after it do not run and are recorded as not run. A statement with no failed row goes on.
@@ -475,6 +485,19 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
                 context.Statistics.PopStatement();
             }
         }
+    }
+
+    /// <summary>
+    /// When statement <paramref name="position"/> threw after a DML statement of the request ran, records the statements
+    /// after it, and this one when it recorded no outcome (it wrote nothing), as not run. Before any DML statement ran,
+    /// nothing is recorded: the error already says that nothing was executed.
+    /// </summary>
+    private static void RecordNotRunAfterThrow(IReadOnlyList<TSqlStatement> statements, int position, int outcomesBefore, QueryPlanContext context)
+    {
+        var outcomes = context.Statistics.DmlOutcomes;
+        if (!outcomes.Any(o => !o.NotRun))
+            return;
+        RecordNotRun(statements, outcomes.Count > outcomesBefore ? position : position - 1, context);
     }
 
     private void ExecuteDeclare(

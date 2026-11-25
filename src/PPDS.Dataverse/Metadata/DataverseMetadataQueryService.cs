@@ -533,7 +533,10 @@ public class DataverseMetadataQueryService : IMetadataQueryService
             IsManaged = e.IsManaged ?? false,
             OwnershipType = e.OwnershipType?.ToString(),
             LogicalCollectionName = e.LogicalCollectionName,
-            Description = GetLocalizedLabel(e.Description)
+            Description = GetLocalizedLabel(e.Description),
+            TableType = e.TableType,
+            IsActivity = e.IsActivity,
+            DataProviderId = e.DataProviderId
         };
     }
 
@@ -557,6 +560,7 @@ public class DataverseMetadataQueryService : IMetadataQueryService
         decimal? minValue = null;
         decimal? maxValue = null;
         int? precision = null;
+        int? precisionSource = null;
         List<string>? targets = null;
         string? optionSetName = null;
         bool isGlobalOptionSet = false;
@@ -598,6 +602,7 @@ public class DataverseMetadataQueryService : IMetadataQueryService
                 minValue = (decimal?)moneyAttr.MinValue;
                 maxValue = (decimal?)moneyAttr.MaxValue;
                 precision = moneyAttr.Precision;
+                precisionSource = moneyAttr.PrecisionSource;
                 break;
 
             case LookupAttributeMetadata lookupAttr:
@@ -688,6 +693,7 @@ public class DataverseMetadataQueryService : IMetadataQueryService
             MinValue = minValue,
             MaxValue = maxValue,
             Precision = precision,
+            PrecisionSource = precisionSource,
             Targets = targets,
             OptionSetName = optionSetName,
             IsGlobalOptionSet = isGlobalOptionSet,

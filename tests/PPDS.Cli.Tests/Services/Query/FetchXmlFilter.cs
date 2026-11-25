@@ -85,9 +85,11 @@ internal static class TestMetadata
 {
     private static AttributeMetadataDto A(string name, string type, bool create = true, bool update = true, string? attributeOf = null,
         List<OptionValueDto>? options = null, List<string>? targets = null, string? behavior = null, string? format = null, bool? primary = null,
-        int? precision = null) => new()
+        int? precision = null, int? precisionSource = 0) => new()
     {
         Precision = precision,
+        // A currency column's places come from the column itself unless a test says otherwise (P1).
+        PrecisionSource = type == "Money" ? precisionSource : null,
         LogicalName = name, DisplayName = name, SchemaName = name, AttributeType = type,
         IsValidForCreate = create, IsValidForUpdate = update, IsValidForRead = true, AttributeOf = attributeOf,
         Options = options, Targets = targets, IsPrimaryId = primary ?? type == "Uniqueidentifier",
@@ -110,8 +112,15 @@ internal static class TestMetadata
             A("legacydate", "DateTime", behavior: "UserLocal", format: "DateOnly"), A("tzidate", "DateTime", behavior: "TimeZoneIndependent"),
             A("nobehaviordate", "DateTime", behavior: "-"), A("birthday", "DateTime", behavior: "DateOnly", format: "DateOnly"),
             A("stageid", "Uniqueidentifier", primary: false), A("donotemail", "Boolean"), A("aging30", "BigInt"),
-            A("address1_latitude", "Double"), A("ppds_rate", "Decimal", precision: 2)
+            A("address1_latitude", "Double"), A("ppds_rate", "Decimal", precision: 2), A("ppds_amount2", "Money", precision: 2),
+            A("ppds_pricingamount", "Money", precision: 2, precisionSource: 1), A("ppds_currencyamount", "Money", precision: 2, precisionSource: 2),
+            A("ppds_unreadamount", "Money", precision: 2, precisionSource: null)
         ],
+        // Tables of the kinds a write is refused for (P2); the columns let a test show that nothing is read.
+        ["ppds_elastic"] = [A("ppds_elasticid", "Uniqueidentifier", update: false), A("ppds_name", "String")],
+        ["ppds_virtual"] = [A("ppds_virtualid", "Uniqueidentifier", update: false), A("ppds_name", "String")],
+        ["ppds_provided"] = [A("ppds_providedid", "Uniqueidentifier", update: false), A("ppds_name", "String")],
+        ["ppds_untyped"] = [A("ppds_untypedid", "Uniqueidentifier", update: false), A("ppds_name", "String")],
         // An activity table: its primary id is activityid, not taskid.
         ["task"] =
         [
@@ -125,6 +134,20 @@ internal static class TestMetadata
         ]
     };
 
+    private static EntitySummary E(string name, string? tableType, bool? isActivity = false, Guid? dataProviderId = null) => new()
+    {
+        LogicalName = name, DisplayName = name, SchemaName = name, TableType = tableType, IsActivity = isActivity, DataProviderId = dataProviderId
+    };
+
+    /// <summary>The table list: the kind of each table (P2). <c>task</c> is an activity table.</summary>
+    public static readonly IReadOnlyList<EntitySummary> Entities =
+    [
+        E("account", "Standard"), E("contact", "Standard"), E("solution", "Standard"), E("task", "Activity", isActivity: true),
+        E("ppds_elastic", "Elastic"), E("ppds_virtual", "Virtual"),
+        E("ppds_provided", "Standard", dataProviderId: Guid.Parse("7015a531-cc0d-4537-b5f2-c882a1eb65ad")),
+        E("ppds_untyped", null, isActivity: null)
+    ];
+
     public static ICachedMetadataProvider Provider { get; } = Create();
 
     private static ICachedMetadataProvider Create()
@@ -133,6 +156,7 @@ internal static class TestMetadata
         mock.Setup(m => m.GetAttributesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string table, CancellationToken _) =>
                 Tables.TryGetValue(table, out var a) ? a : Array.Empty<AttributeMetadataDto>());
+        mock.Setup(m => m.GetEntitiesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Entities);
         return mock.Object;
     }
 }

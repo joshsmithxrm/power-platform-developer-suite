@@ -24,8 +24,11 @@ public static class DmlValueAdmissionTable
     public sealed record Target(string Kind, string Column, string ReferenceType, AttributeMetadataDto Metadata);
 
     private static AttributeMetadataDto A(string name, string type, string? behavior = null, string? format = null,
-        List<OptionValueDto>? options = null, List<string>? targets = null) => new()
+        List<OptionValueDto>? options = null, List<string>? targets = null, int? precision = null) => new()
     {
+        Precision = precision,
+        // A currency column keeps its own precision (source 0, the column); any other source is refused for places (P1).
+        PrecisionSource = type == "Money" ? 0 : null,
         LogicalName = name, DisplayName = name, SchemaName = name, AttributeType = type,
         IsValidForCreate = true, IsValidForUpdate = true, IsValidForRead = true,
         DateTimeBehavior = behavior, Format = format, Options = options, Targets = targets
@@ -46,6 +49,19 @@ public static class DmlValueAdmissionTable
             options: [new OptionValueDto { Value = 1, Label = "o1" }, new OptionValueDto { Value = 2, Label = "o2" }])),
         new("lookup", "parentaccountid", "uniqueidentifier", A("parentaccountid", "Lookup", targets: ["account"])),
     ];
+
+    /// <summary>
+    /// The targets of <see cref="CompareCases"/>: <see cref="Targets"/>, and a currency column that keeps 2 places (fewer than
+    /// the 4 a currency amount can have), whose SQL Server counterpart is <c>decimal(19, 2)</c>.
+    /// </summary>
+    public static readonly Target[] CompareTargets =
+    [
+        .. Targets,
+        new("currency, 2 places", "ppds_amount2", "decimal(19, 2)", A("ppds_amount2", "Money", precision: 2)),
+    ];
+
+    /// <summary>The target of a compare case's kind.</summary>
+    public static Target CompareTarget(string kind) => CompareTargets.Single(t => t.Kind == kind);
 
     /// <summary>A literal form and its ten cells, in the order of <see cref="Targets"/>.</summary>
     public sealed record Row(string Literal, string[] Cells);
@@ -256,7 +272,8 @@ public static class DmlValueAdmissionTable
     /// A literal compared with a column in a write's WHERE (<see cref="CompareStatement"/>): <c>U</c> (refused,
     /// <c>Query.DmlUnsupportedConstruct</c>, nothing read), or <c>=text</c>, the value the FetchXML condition carries: its
     /// <c>value</c> attribute, or for <c>IN</c> the text of its one <c>value</c> element. <see cref="Operator"/> is <c>=</c>,
-    /// <c>&lt;&gt;</c>, <c>&lt;</c>, <c>LIKE</c> or <c>IN</c> (the literal is the list's one value).
+    /// <c>&lt;&gt;</c>, <c>&lt;</c>, <c>LIKE</c>, <c>IN</c> (the literal is the list's one value) or <c>BETWEEN</c> (the
+    /// literal is the lower bound; only refused cases). The kind names one of <see cref="CompareTargets"/>.
     /// </summary>
     public sealed record CompareCase(string Kind, string Literal, string Cell, string Operator = "=");
 
@@ -319,6 +336,11 @@ public static class DmlValueAdmissionTable
         new("text", "N'abc\\\\\ndef'", "U"),
         new("text", "N'abc\\\ndef'", "U", "IN"),
         new("text", "N'abc\\\n%'", "U", "LIKE"),
+        // At the very end and at the very start of the text (MF-C).
+        new("text", "N'abc\\\n'", "U"),
+        new("text", "'abc\\\r\n'", "U", "LIKE"),
+        new("text", "N'\\\nabc'", "U"),
+        new("text", "N'\\\rabc'", "U", "<>"),
         new("text", "N'abc\\ \ndef'", "=abc\\ \ndef"),
         // Not a sequence of XML 1.0 characters (MF3).
         // (U+FFFF is refused by the parser already, Query.ParseError: DmlReviewRound6FixTests.)
@@ -330,11 +352,18 @@ public static class DmlValueAdmissionTable
         new("text", "N'a<U+FFFE>b'", "U", "IN"),
         new("text", "N'a\uD83D\uDE00b'", "=a\uD83D\uDE00b"),
         new("text", "N'a\uFFFDb'", "=a\uFFFDb"),
-        // An IN value is element text: the executor's serialisation sends a carriage return as a line feed and empties an
-        // element that is only white space (MF2). A line feed is kept.
+        // An IN value is element text: whether Dataverse reads a line break there unchanged is not shown, and the executor's
+        // parse empties an element that is only white space (MF2, MF-A). With and without N (MF-C).
         new("text", "N'line1\r\nline2'", "U", "IN"),
         new("text", "N'c\rd'", "U", "IN"),
-        new("text", "N'c\nd'", "=c\nd", "IN"),
+        new("text", "N'c\nd'", "U", "IN"),
+        new("text", "N'cd\n'", "U", "IN"),
+        new("text", "'c\rd'", "U", "IN"),
+        new("text", "'c\nd'", "U", "IN"),
+        new("text", "''", "U", "IN"),
+        new("text", "' '", "U", "IN"),
+        new("text", "'\t'", "U", "IN"),
+        new("text", "'a'", "=a", "IN"),
         new("text", "N'\t'", "U", "IN"),
         new("text", "N' '", "U", "IN"),
         new("text", "N''", "U", "IN"),
@@ -350,6 +379,13 @@ public static class DmlValueAdmissionTable
         new("currency", "1.23456", "U"),
         new("currency", "1.23456", "U", "IN"),
         new("currency", "1.23456", "U", "<"),
+        // A currency column that keeps 2 places (MF-C): a third place is refused, in =, IN and BETWEEN.
+        new("currency, 2 places", "1.01", "=1.01"),
+        new("currency, 2 places", "1.010", "=1.010"),
+        new("currency, 2 places", "1.005", "U"),
+        new("currency, 2 places", "1.005", "U", "IN"),
+        new("currency, 2 places", "1.005", "U", "BETWEEN"),
+        new("currency, 2 places", "1.01", "=1.01", "IN"),
         new("decimal", "0.0000000001", "=0.0000000001"),
         new("decimal", "0.00000000001", "U"),
         new("decimal", "1.23456789012", "U", "IN"),
@@ -364,7 +400,11 @@ public static class DmlValueAdmissionTable
     public static string CompareStatement(string literal, Target target) => CompareStatement(literal, target, "=");
 
     /// <summary>The statement a compare case with <paramref name="op"/> is checked with.</summary>
-    public static string CompareStatement(string literal, Target target, string op) => op == "IN"
-        ? $"UPDATE account SET description = 'x' WHERE {target.Column} IN ({Sql(literal)})"
-        : $"UPDATE account SET description = 'x' WHERE {target.Column} {op} {Sql(literal)}";
+    public static string CompareStatement(string literal, Target target, string op) => op switch
+    {
+        "IN" => $"UPDATE account SET description = 'x' WHERE {target.Column} IN ({Sql(literal)})",
+        // The literal is the lower bound; the upper bound is a value every target of the kind admits.
+        "BETWEEN" => $"UPDATE account SET description = 'x' WHERE {target.Column} BETWEEN {Sql(literal)} AND 2",
+        _ => $"UPDATE account SET description = 'x' WHERE {target.Column} {op} {Sql(literal)}"
+    };
 }

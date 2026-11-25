@@ -275,6 +275,10 @@ public sealed class DmlRound1RefusalTests
         { "none", "need the table's column metadata" },
         { "throws", "could not be read" },
         { "empty", "was not found, or has no columns" },
+        // The table's kind is read from the table list first (P2).
+        { "list throws", "The table list could not be read" },
+        { "not listed", "is not in the environment's table list" },
+        { "untyped", "(standard, activity, elastic or virtual) could not be read" },
     };
 
     [Theory]
@@ -282,6 +286,19 @@ public sealed class DmlRound1RefusalTests
     public async Task WithoutColumnMetadata_DmlIsRefused_BeforeConfirmation_AndForADryRun(string metadata, string named)
     {
         var provider = new Mock<ICachedMetadataProvider>(MockBehavior.Strict);
+        if (metadata == "list throws")
+            provider.Setup(m => m.GetEntitiesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("list unavailable"));
+        else
+        {
+            var listed = metadata switch
+            {
+                "not listed" => TestMetadata.Entities.Where(e => e.LogicalName != "account").ToList(),
+                "untyped" => [new EntitySummary { LogicalName = "account", DisplayName = "account", SchemaName = "account" }],
+                _ => TestMetadata.Entities
+            };
+            provider.Setup(m => m.GetEntitiesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(listed);
+            provider.Setup(m => m.InvalidateEntityList());
+        }
         if (metadata == "throws")
             provider.Setup(m => m.GetAttributesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("metadata unavailable"));
         else

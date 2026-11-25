@@ -136,6 +136,13 @@ public sealed class AttributeMetadataDto
     public int? Precision { get; init; }
 
     /// <summary>
+    /// Gets where a money attribute's precision comes from: 0 the attribute's own <see cref="Precision"/>, 1 the
+    /// organisation's pricing decimal precision, 2 the currency's precision; null when not read or not a money attribute.
+    /// </summary>
+    [JsonPropertyName("precisionSource")]
+    public int? PrecisionSource { get; init; }
+
+    /// <summary>
     /// Gets the lookup targets for lookup attributes (pipe-delimited for polymorphic).
     /// </summary>
     [JsonPropertyName("targets")]

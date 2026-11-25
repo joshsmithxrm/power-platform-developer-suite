@@ -73,7 +73,7 @@ public sealed class DmlValueAdmissionTableTests
     [MemberData(nameof(CompareCases))]
     public async Task EachComparedLiteral_IsRefusedBeforeAnythingIsRead_OrCarriesExactlyItsText(string kind, string op, string literal, string cell)
     {
-        var target = DmlValueAdmissionTable.Targets.Single(t => t.Kind == kind);
+        var target = DmlValueAdmissionTable.CompareTarget(kind);
         var sql = DmlValueAdmissionTable.CompareStatement(literal, target, op);
         var h = DmlTestHarness.Create(rows: 1);
 

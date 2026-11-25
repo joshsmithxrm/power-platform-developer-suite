@@ -48,6 +48,7 @@ internal static class DmlColumnValidator
                 {
                     var spec = update.UpdateSpecification;
                     var table = TableName(DmlStatementSupport.ResolveTarget(spec.Target, spec.FromClause));
+                    await RefuseTableKindAsync(metadata, table, ct);
                     var columns = await ColumnsAsync(metadata, table, ct);
                     var assignments = spec.SetClauses.OfType<AssignmentSetClause>().ToList();
                     foreach (var set in assignments)
@@ -65,6 +66,7 @@ internal static class DmlColumnValidator
                 {
                     var spec = delete.DeleteSpecification;
                     var table = TableName(DmlStatementSupport.ResolveTarget(spec.Target, spec.FromClause));
+                    await RefuseTableKindAsync(metadata, table, ct);
                     var columns = await ColumnsAsync(metadata, table, ct);
                     if (spec.WhereClause?.SearchCondition != null)
                         ReadFilter(columns, table, spec.WhereClause.SearchCondition);
@@ -74,6 +76,7 @@ internal static class DmlColumnValidator
                 {
                     var spec = insert.InsertSpecification;
                     var table = TableName((NamedTableReference)spec.Target);
+                    await RefuseTableKindAsync(metadata, table, ct);
                     var columns = await ColumnsAsync(metadata, table, ct);
                     var targets = spec.Columns.Select(column => Written(columns, table, column, forCreate: true)).ToList();
                     foreach (var target in targets.Where(t => ChoiceTypes.Contains(t.AttributeType) && t.AttributeType != "Picklist"))
@@ -145,6 +148,57 @@ internal static class DmlColumnValidator
     }
 
     private static string TableName(NamedTableReference table) => table.SchemaObject.BaseIdentifier.Value.ToLowerInvariant();
+
+    /// <summary>
+    /// Refuses a write to a table that is not a standard table ("Prove or refuse", 2026-11-25): an elastic, virtual or
+    /// activity table, by the table's metadata, with <c>Query.DmlUnsupportedConstruct</c>. A table whose kind cannot be read
+    /// is refused with <c>Query.DmlMetadataUnavailable</c>. A table missing from the cached table list is looked up once
+    /// more after the list is read again (it may have been created after the list was read).
+    /// </summary>
+    private static async Task RefuseTableKindAsync(ICachedMetadataProvider metadata, string table, CancellationToken ct)
+    {
+        var entity = await FindTableAsync(metadata, table, ct);
+        if (entity == null)
+        {
+            metadata.InvalidateEntityList();
+            entity = await FindTableAsync(metadata, table, ct);
+        }
+        if (entity == null)
+            throw Refuse($"The table '{table}' is not in the environment's table list, so its kind cannot be checked.", ErrorCodes.Query.DmlMetadataUnavailable);
+        if (entity.TableType == null)
+            throw Refuse($"The kind of the table '{table}' (standard, activity, elastic or virtual) could not be read, so the statement cannot be checked.", ErrorCodes.Query.DmlMetadataUnavailable);
+
+        if (string.Equals(entity.TableType, "Elastic", StringComparison.OrdinalIgnoreCase))
+        {
+            throw Refuse($"'{table}' is an elastic table. SQL writes to elastic tables are not supported: Dataverse stores their rows " +
+                         "apart from other tables, and how it applies these writes there has not been shown. Change its rows in Dataverse instead.");
+        }
+        if (string.Equals(entity.TableType, "Virtual", StringComparison.OrdinalIgnoreCase) || entity.DataProviderId is { } provider && provider != Guid.Empty)
+        {
+            throw Refuse($"'{table}' is a virtual table. SQL writes to virtual tables are not supported: its rows live in an external data " +
+                         "source, and what that source does with these writes has not been shown. Change its rows in the source instead.");
+        }
+        if (entity.IsActivity == true || string.Equals(entity.TableType, "Activity", StringComparison.OrdinalIgnoreCase))
+        {
+            throw Refuse($"'{table}' is an activity table. SQL writes to activity tables are not supported: Dataverse keeps each activity " +
+                         "in the shared activity table too, with its parties, and how it applies these writes there has not been shown. " +
+                         "Change its rows in Dataverse instead.");
+        }
+    }
+
+    private static async Task<EntitySummary?> FindTableAsync(ICachedMetadataProvider metadata, string table, CancellationToken ct)
+    {
+        IReadOnlyList<EntitySummary>? entities;
+        try
+        {
+            entities = await metadata.GetEntitiesAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw Refuse($"The table list could not be read ({ex.Message}), so the kind of '{table}' cannot be checked.", ErrorCodes.Query.DmlMetadataUnavailable);
+        }
+        return entities?.FirstOrDefault(e => string.Equals(e.LogicalName, table, StringComparison.OrdinalIgnoreCase));
+    }
 
     private static async Task<Dictionary<string, AttributeMetadataDto>> ColumnsAsync(
         ICachedMetadataProvider metadata, string table, CancellationToken ct)
