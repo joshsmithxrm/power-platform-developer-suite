@@ -13,7 +13,8 @@ Every pull request to `main` is in one of two tiers. Before an agent session mer
 it decides the tier from the diff, the labels, the issues the pull request closes and its author.
 If the tier is unclear, the pull request is **maintainer first**. No fixed approval prompt stands
 before a merge: this written rule is the guard. A release is the exception (category 11): the
-release skill asks the maintainer before each merge, tag and publish step.
+release skill asks the maintainer before each release pull request merge. Tags and publications are
+his own, and no session runs them ([VERSIONING.md](VERSIONING.md#9-decisions-in-documents), rule 9.2).
 
 ### Agents merge
 
@@ -136,8 +137,11 @@ not say whether a write happens or is confirmed.
     outside contributor's work). If the change needs a live run (P1 in
     [specs/test-gates.md](../specs/test-gates.md)), the maintainer or one of his sessions does it
     before the merge and records it in the pull request. The contributor is never asked to.
-11. **Releases.** A release is the maintainer's end to end: every release pull request's merge, and
-    every tag and publish step, waits for him, whatever tier its files would otherwise be in.
+11. **Releases.** A release pull request (one the release runbook opens: the release PR of its
+    step 7, or the focused CHANGELOG PR of its patch procedure) is merged only after the maintainer's
+    yes, whatever tier its files would otherwise be in. The maintainer creates and pushes every tag
+    and makes every publication himself; no session runs them, even after his yes
+    ([VERSIONING.md](VERSIONING.md#9-decisions-in-documents), rule 9.2).
 
 **How an agent asks.** The agent puts the pull request on the list of decisions waiting
 (D5 in [MAINTAINER-SESSION-RULES.md](MAINTAINER-SESSION-RULES.md)). It gives the pull request, its

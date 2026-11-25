@@ -1,6 +1,6 @@
 ---
 name: dependabot-triage
-description: Drain open dependabot PRs per docs/MERGE-POLICY.md - classify each, run the area's tests for the risky ones, get one short fresh review per bump, merge the routine ones on green, and leave the rest (GitHub Actions bumps, majors, breaking changes, and auth-critical bumps, which wait for his yes after their tests and a review) for the maintainer. Use when dependabot PRs have piled up or as routine housekeeping.
+description: Drain open dependabot PRs per docs/MERGE-POLICY.md - classify each, run the area's tests for the risky ones, get one short fresh review per bump, merge the routine ones on green, and leave the rest (GitHub Actions bumps, majors, breaking changes, and auth-critical bumps, which wait for the maintainer's yes after their tests and a review) for the maintainer. Use when dependabot PRs have piled up or as routine housekeeping.
 ---
 
 # Dependabot Triage

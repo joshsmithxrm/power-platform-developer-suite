@@ -14,11 +14,13 @@ Group A — routine: one short fresh review, then an agent merges it on green CI
 Group B — verify-then-merge (run package-specific tests locally first):
   - Minor bumps on user-visible runtime libraries (Terminal.Gui, etc.)
   - Bumps to auth-critical packages (Microsoft.Identity.Client, Azure.Identity,
-    Microsoft.PowerPlatform.Dataverse.Client) at minor. These are maintainer
+    Microsoft.PowerPlatform.Dataverse.Client) at any non-major version,
+    patch included. These are maintainer
     first: after the tests and one fresh review, they wait for the
     maintainer's yes (docs/MERGE-POLICY.md "Who merges", category 5).
   - Anything bumping security-flagged packages
-  - Bumps that touch src/PPDS.Auth/** at any version
+  - Bumps that touch src/PPDS.Auth/** at any version. These are maintainer
+    first too (category 5).
 
 Group C — maintainer first: no agent merges it until the maintainer has answered:
   - ANY major-version bump (universal exclusion per v1-prelaunch retro)
@@ -36,7 +38,7 @@ Group C — maintainer first: no agent merges it until the maintainer has answer
     github-actions rule, after the version rules.
   - Anything the rules cannot classify (for example an unparseable title)
 
-Nothing is auto-merged. The group does not settle who merges: a PR in any
+No agent enables auto-merge. The group does not settle who merges: a PR in any
 maintainer-first category of docs/MERGE-POLICY.md "Who merges" is maintainer
 first whatever its group, and this module does not check those categories.
 
@@ -580,7 +582,7 @@ def _classify_member_set(
         reason += (
             f"; auth-critical override "
             f"({trigger[0]} {trigger[1]} -> {trigger[2]}, {trigger[3]})"
-            f" — maintainer first: the area's tests and one fresh review, then the maintainer's yes"
+            f" — maintainer first"
         )
 
     # Safety guards the single-package path also applies — a member-set PR must
@@ -590,7 +592,7 @@ def _classify_member_set(
     group = chosen
     if touches_auth_critical_path(files) and _GROUP_RANK[group] < _GROUP_RANK["B"]:
         group = "B"
-        reason += "; escalated to Group B — diff touches auth-critical path (e.g. src/PPDS.Auth)"
+        reason += "; escalated to Group B — diff touches auth-critical path (e.g. src/PPDS.Auth) — maintainer first"
     if changelog_signals_breaking(body):
         reason += (
             "; PR body signals BREAKING CHANGE"
@@ -734,7 +736,7 @@ def _classify_by_version(pr: dict) -> Classification:
         return Classification(
             pr_number=number,
             group="B",
-            reason=f"diff touches auth-critical path (e.g., src/PPDS.Auth) — verify-then-merge",
+            reason=f"diff touches auth-critical path (e.g., src/PPDS.Auth) — maintainer first",
             ecosystem=ecosystem,
             update_type=update_type,
             package=pkg,
