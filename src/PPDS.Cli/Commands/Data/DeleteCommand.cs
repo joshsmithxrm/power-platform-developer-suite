@@ -22,7 +22,11 @@ public static class DeleteCommand
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    public static Command Create()
+    public static Command Create() => Create(null);
+
+    /// <summary>Creates the command; tests pass <paramref name="providerFactory"/> to supply the services.</summary>
+    internal static Command Create(
+        Func<string?, string?, GlobalOptionValues, CancellationToken, Task<ServiceProvider>>? providerFactory)
     {
         var entityOption = new Option<string>("--entity", "-e")
         {
@@ -202,7 +206,7 @@ public static class DeleteCommand
                 force, dryRun, limit, batchSize,
                 bypassPlugins, bypassFlows, continueOnError,
                 profile, environment, globalOptions,
-                cancellationToken);
+                cancellationToken, providerFactory);
         });
 
         return command;
@@ -225,7 +229,8 @@ public static class DeleteCommand
         string? profileName,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string?, string?, GlobalOptionValues, CancellationToken, Task<ServiceProvider>>? providerFactory = null)
     {
         try
         {
@@ -235,13 +240,15 @@ public static class DeleteCommand
                 Console.Error.WriteLine("Connecting to Dataverse...");
             }
 
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profileName,
-                environment,
-                globalOptions.Verbose,
-                globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+            await using var serviceProvider = providerFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
+                    profileName,
+                    environment,
+                    globalOptions.Verbose,
+                    globalOptions.Debug,
+                    ProfileServiceFactory.DefaultDeviceCodeCallback,
+                    cancellationToken)
+                : await providerFactory(profileName, environment, globalOptions, cancellationToken);
 
             if (!globalOptions.IsJsonMode)
             {

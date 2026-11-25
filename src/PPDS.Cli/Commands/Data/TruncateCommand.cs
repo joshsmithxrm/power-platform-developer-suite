@@ -155,11 +155,10 @@ public static class TruncateCommand
                 cancellationToken);
 
             var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-            var dataQueryService = serviceProvider.GetRequiredService<IDataQueryService>();
             var truncateService = serviceProvider.GetRequiredService<IDataTruncateService>();
 
             // Count records
-            var count = await dataQueryService.CountRecordsAsync(entity, cancellationToken);
+            var count = await truncateService.CountRecordsAsync(entity, cancellationToken);
 
             if (count == 0)
             {
@@ -275,6 +274,9 @@ public static class TruncateCommand
                     Entity = entity,
                     DeletedCount = result.DeletedCount,
                     FailedCount = result.FailedCount,
+                    FailedIds = result.FailedIds.Take(MaxFailedIdsInOutput).ToList(),
+                    FailedIdsOmitted = Math.Max(0, result.FailedCount - Math.Min(result.FailedIds.Count, MaxFailedIdsInOutput)),
+                    RemainingCount = result.RemainingCount,
                     Passes = result.Passes,
                     StopReason = result.StopReason.ToString(),
                     DurationMs = result.Duration.TotalMilliseconds
@@ -319,6 +321,9 @@ public static class TruncateCommand
     /// 0 when the table was emptied with no failure; 2 when the counts are not certain; otherwise 1 (records failed or
     /// were not attempted).
     /// </summary>
+    /// <summary>The most failed ids the JSON output lists; <c>failedIdsOmitted</c> counts the rest.</summary>
+    internal const int MaxFailedIdsInOutput = 100;
+
     internal static int ToExitCode(DataTruncateResult result) => result switch
     {
         { IsSuccess: true } => ExitCodes.Success,
@@ -326,18 +331,25 @@ public static class TruncateCommand
         _ => ExitCodes.PartialSuccess
     };
 
-    private static string? DescribeStop(DataTruncateResult result) => result.StopReason switch
+    internal static string? DescribeStop(DataTruncateResult result) => result.StopReason switch
     {
-        DataTruncateStopReason.Completed when result.FailedCount == 0 => null,
-        DataTruncateStopReason.Completed => "No record is left to read, although some deletes failed.",
-        DataTruncateStopReason.OnlyFailedRecordsRemain =>
-            "Stopped: every record left is one that could not be deleted in this run; none was retried.",
+        DataTruncateStopReason.Completed when result.IsSuccess => null,
+        DataTruncateStopReason.Completed when result.FailedCount > 0 =>
+            "Every record of the table was attempted once; the records that failed were not retried and remain.",
+        DataTruncateStopReason.Completed =>
+            "Every record of the table was attempted once, but records remain (for example, created during the run). " +
+            "Run the command again to delete them.",
         DataTruncateStopReason.PassDeletedNothing =>
-            "Stopped: a pass deleted no record. Records remain; fix the cause of the failures and run the command again.",
+            "Stopped: a pass deleted no record, so the records after it were not attempted and remain. Fix the cause " +
+            "of the failures and run the command again.",
         DataTruncateStopReason.StoppedOnError =>
-            "Stopped at the first pass with a failure (--continue-on-error false). Records remain.",
+            "Stopped at the first pass with a failure (--continue-on-error false); the records after it were not " +
+            "attempted and remain.",
         DataTruncateStopReason.DeletedRecordReadAgain =>
-            "Stopped: a record reported as deleted was read again, so the counts above are not certain. Records remain.",
+            "Stopped: a record already attempted was read again, so the counts above are not certain. Records remain.",
+        DataTruncateStopReason.PagingUnavailable =>
+            "Stopped: Dataverse returned no way to read past the last page, so records that were not attempted may " +
+            "remain. Run the command again.",
         _ => null
     };
 
@@ -362,6 +374,9 @@ public static class TruncateCommand
         Console.Error.WriteLine($"  Entity: {entity}");
         Console.Error.WriteLine($"  Deleted: {result.DeletedCount:N0}");
         Console.Error.WriteLine($"  Failed: {result.FailedCount:N0}");
+        Console.Error.WriteLine(result.RemainingCount is { } remaining
+            ? $"  Remaining: {remaining:N0}"
+            : "  Remaining: could not be counted");
 
         Console.Error.WriteLine($"  Duration: {result.Duration:mm\\:ss\\.fff}");
 
@@ -430,6 +445,9 @@ public static class TruncateCommand
         public int RecordCount { get; init; }
         public int DeletedCount { get; init; }
         public int FailedCount { get; init; }
+        public List<Guid>? FailedIds { get; init; }
+        public int FailedIdsOmitted { get; init; }
+        public int? RemainingCount { get; init; }
         public int Passes { get; init; }
         public string? StopReason { get; init; }
         public double DurationMs { get; init; }

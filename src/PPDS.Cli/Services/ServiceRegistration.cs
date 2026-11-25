@@ -351,7 +351,8 @@ public static class ServiceRegistration
             sp.GetRequiredService<IMetadataQueryService>(),
             sp.GetRequiredService<ILogger<RecordIdFileService>>()));
         services.AddTransient<IDataTruncateService>(sp => new DataTruncateService(
-            sp.GetRequiredService<IDataQueryService>(),
+            sp.GetRequiredService<IDataverseConnectionPool>(),
+            sp.GetRequiredService<IMetadataQueryService>(),
             sp.GetRequiredService<IBulkOperationExecutor>(),
             sp.GetRequiredService<ILogger<DataTruncateService>>()));
 

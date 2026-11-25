@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -161,6 +160,13 @@ public sealed class RecordIdFileService : IRecordIdFileService
                 entries = root;
             }
             else if (root.ValueKind == JsonValueKind.Object &&
+                     root.EnumerateObject().Count(p => string.Equals(p.Name, "records", StringComparison.OrdinalIgnoreCase)) > 1)
+            {
+                // JsonDocument keeps every duplicate and TryGetProperty would pick one of them: refuse instead.
+                throw Invalid("The JSON file has the 'records' key more than once, so the ids are not certain. " +
+                              "Nothing was deleted.");
+            }
+            else if (root.ValueKind == JsonValueKind.Object &&
                      root.TryGetProperty("records", out var records) &&
                      records.ValueKind == JsonValueKind.Array)
             {
@@ -198,6 +204,14 @@ public sealed class RecordIdFileService : IRecordIdFileService
                         continue;
                     }
 
+                    // A record that holds any property twice is not well-formed JSON for this purpose: refuse it
+                    // rather than decide which copy the user meant.
+                    if (element.EnumerateObject().GroupBy(p => p.Name, StringComparer.Ordinal).Any(g => g.Count() > 1))
+                    {
+                        problems.RepeatedProperty.Add(position);
+                        continue;
+                    }
+
                     value = matching[0].Value;
                 }
                 else
@@ -227,62 +241,52 @@ public sealed class RecordIdFileService : IRecordIdFileService
 
     private static IReadOnlyList<Guid> ParseCsv(string content, string idColumn)
     {
-        var lines = content.Split('\n');
-        var lineNumber = 0;
-        var idIndex = -1;
-        var headerRead = false;
+        // The file is read by the CSV rules (quoted fields, commas and line breaks inside quotes), and it is refused as a
+        // whole when any record's field count differs from the header's or a quote is malformed: a shifted row could
+        // otherwise put another column's id (a parent's, say) under the id column (#1915).
+        var table = StrictCsvReader.Read(content);
+        if (table.Header is null)
+        {
+            return [];
+        }
+
+        var headers = table.Header.Fields.Select(h => h.Trim()).ToList();
+        var matches = Enumerable.Range(0, headers.Count)
+            .Where(i => string.Equals(headers[i], idColumn, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (matches.Count == 0)
+        {
+            throw Invalid(DescribeMissingHeaderColumn(headers, idColumn));
+        }
+
+        if (matches.Count > 1)
+        {
+            throw Invalid($"The CSV file has the column '{idColumn}' {matches.Count} times, so the ids are not " +
+                          "certain. Nothing was deleted.");
+        }
+
+        if (!table.IsExact)
+        {
+            throw Invalid($"The CSV file cannot be read exactly: {string.Join("; ", table.DescribeProblems())}. " +
+                          "Nothing was deleted. Quote every field that holds a comma, a quote or a line break, and " +
+                          "give every record as many fields as the header.");
+        }
+
+        var idIndex = matches[0];
         var problems = new Problems("line", "lines");
         var ids = new List<Guid>();
         var seen = new HashSet<Guid>();
-
-        foreach (var rawLine in lines)
+        foreach (var row in table.Rows)
         {
-            lineNumber++;
-            var line = rawLine.TrimEnd('\r');
-            if (string.IsNullOrWhiteSpace(line))
+            if (!TryReadId(row.Fields[idIndex].Trim(), out var id))
             {
-                continue;
-            }
-
-            if (!headerRead)
-            {
-                headerRead = true;
-                var headers = ParseCsvLine(line).Select(h => h.Trim()).ToList();
-                var matches = Enumerable.Range(0, headers.Count)
-                    .Where(i => string.Equals(headers[i], idColumn, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-                if (matches.Count == 0)
-                {
-                    throw Invalid($"The CSV file has no column '{idColumn}'. Nothing was deleted. Columns: " +
-                                  $"{string.Join(", ", headers)}. Name the column that holds the ids with --id-column.");
-                }
-
-                if (matches.Count > 1)
-                {
-                    throw Invalid($"The CSV file has the column '{idColumn}' {matches.Count} times, so the ids are not " +
-                                  "certain. Nothing was deleted.");
-                }
-
-                idIndex = matches[0];
-                continue;
-            }
-
-            var values = ParseCsvLine(line);
-            if (values.Count <= idIndex)
-            {
-                problems.Missing.Add(lineNumber);
-                continue;
-            }
-
-            if (!TryReadId(values[idIndex].Trim(), out var id))
-            {
-                problems.NotAnId.Add(lineNumber);
+                problems.NotAnId.Add(row.LineNumber);
                 continue;
             }
 
             if (!seen.Add(id))
             {
-                problems.Duplicate.Add(lineNumber);
+                problems.Duplicate.Add(row.LineNumber);
                 continue;
             }
 
@@ -293,35 +297,30 @@ public sealed class RecordIdFileService : IRecordIdFileService
         return ids;
     }
 
-    private static bool TryReadId(string? text, out Guid id)
-        => Guid.TryParse(text, out id) && id != Guid.Empty;
-
-    private static List<string> ParseCsvLine(string line)
+    /// <summary>
+    /// The refusal for a header without the id column. Header cells are named only when every one looks like a column
+    /// name, so a file without a header (its first line a record) never has its values repeated.
+    /// </summary>
+    private static string DescribeMissingHeaderColumn(IReadOnlyList<string> headers, string idColumn)
     {
-        var values = new List<string>();
-        var current = new StringBuilder();
-        var inQuotes = false;
-
-        foreach (var c in line)
+        var head = $"The first line of the CSV file has no column '{idColumn}' ({headers.Count} " +
+                   $"{(headers.Count == 1 ? "column" : "columns")} found). Nothing was deleted.";
+        var hint = $"The file needs a header row naming the column that holds the ids; name another column with --id-column.";
+        if (headers.All(IsColumnName))
         {
-            if (c == '"')
-            {
-                inQuotes = !inQuotes;
-            }
-            else if (c == ',' && !inQuotes)
-            {
-                values.Add(current.ToString());
-                current.Clear();
-            }
-            else
-            {
-                current.Append(c);
-            }
+            return $"{head} Columns: {string.Join(", ", headers)}. {hint}";
         }
 
-        values.Add(current.ToString());
-        return values;
+        return $"{head} The first line does not look like a header. {hint}";
     }
+
+    private static bool IsColumnName(string text)
+        => text.Length is > 0 and <= 128 &&
+           (char.IsAsciiLetter(text[0]) || text[0] == '_') &&
+           text.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
+
+    private static bool TryReadId(string? text, out Guid id)
+        => Guid.TryParse(text, out id) && id != Guid.Empty;
 
     private static PpdsException Invalid(string message, Exception? inner = null)
         => inner is null
@@ -342,6 +341,7 @@ public sealed class RecordIdFileService : IRecordIdFileService
 
         public List<int> Missing { get; } = [];
         public List<int> Repeated { get; } = [];
+        public List<int> RepeatedProperty { get; } = [];
         public List<int> NotAnId { get; } = [];
         public List<int> Duplicate { get; } = [];
 
@@ -350,6 +350,7 @@ public sealed class RecordIdFileService : IRecordIdFileService
             var parts = new List<string>();
             Add(parts, Missing, $"has no '{idColumn}'", $"have no '{idColumn}'");
             Add(parts, Repeated, $"names '{idColumn}' more than once", $"name '{idColumn}' more than once");
+            Add(parts, RepeatedProperty, "holds another property more than once", "hold another property more than once");
             Add(parts, NotAnId, "holds a value that is not a record id", "hold a value that is not a record id");
             Add(parts, Duplicate, "repeats an id given earlier in the file", "repeat an id given earlier in the file");
             if (parts.Count == 0)
