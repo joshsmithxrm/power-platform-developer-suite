@@ -4,7 +4,7 @@
 The /dependabot-triage skill calls this module either as a CLI (one PR's JSON
 on stdin, single classification on stdout) or imports `classify_pr()` directly.
 
-Group A — auto-merge eligible (green CI is sufficient evidence to ship):
+Group A — routine: one short fresh review, then an agent merges it on green CI:
   - Patch bumps on non-critical paths
   - Tooling/test bumps regardless of patch/minor (eslint, knip, vitest, esbuild,
     @types/*, @playwright/test, Microsoft.NET.Test.Sdk)
@@ -14,11 +14,15 @@ Group A — auto-merge eligible (green CI is sufficient evidence to ship):
 Group B — verify-then-merge (run package-specific tests locally first):
   - Minor bumps on user-visible runtime libraries (Terminal.Gui, etc.)
   - Bumps to auth-critical packages (Microsoft.Identity.Client, Azure.Identity,
-    Microsoft.PowerPlatform.Dataverse.Client) at minor
+    Microsoft.PowerPlatform.Dataverse.Client) at any non-major version,
+    patch included. These are maintainer
+    first: after the tests and one fresh review, they wait for the
+    maintainer's yes (docs/MERGE-POLICY.md "Who merges", category 5).
   - Anything bumping security-flagged packages
-  - Bumps that touch src/PPDS.Auth/** at any version
+  - Bumps that touch src/PPDS.Auth/** at any version. These are maintainer
+    first too (category 5).
 
-Group C — manual review required (do NOT auto-merge):
+Group C — maintainer first: no agent merges it until the maintainer has answered:
   - ANY major-version bump (universal exclusion per v1-prelaunch retro)
   - Bumps with "Breaking" / "BREAKING CHANGE" / removed APIs in the changelog
   - EVERY github-actions bump (patch, minor, major, grouped or single). These
@@ -27,19 +31,19 @@ Group C — manual review required (do NOT auto-merge):
     github-actions label, its branch starts dependabot/github_actions/, or its
     diff touches .github/workflows/ or a .github/actions/**/action.yml|yaml
     file. This rule is applied last, over whatever group the version rules
-    chose, so nothing else true of the PR can make it auto-merge eligible.
+    chose, so nothing else true of the PR can put it in Group A or B.
   - ANY dependency PR whose diff touches a path under .github/ (for example
     .github/dependabot.yml or a template), whatever its ecosystem: the
     maintainer goes first on everything under .github/. Applied with the
     github-actions rule, after the version rules.
-  - Anything in MERGE-POLICY's "When NOT to use auto-merge" list that isn't Group B
+  - Anything the rules cannot classify (for example an unparseable title)
 
-The ground truth for the policy is docs/MERGE-POLICY.md. If this file and that
-file disagree, the doc wins and this file needs a patch. One exception: the
-github-actions and .github/ rules above follow the maintainer's decisions that
-he goes first on Dependabot's GitHub Actions bumps and on anything under
-.github/. Where any text still lists such a PR as auto-merge eligible, this
-file wins for it.
+No agent enables auto-merge. The group does not settle who merges: a PR in any
+maintainer-first category of docs/MERGE-POLICY.md "Who merges" is maintainer
+first whatever its group, and this module does not check those categories.
+
+The ground truth for the policy is docs/MERGE-POLICY.md ("Who merges"). If this
+file and that file disagree, the doc wins and this file needs a patch.
 """
 from __future__ import annotations
 
@@ -51,7 +55,7 @@ from typing import Iterable, Optional
 
 
 # Packages whose bumps go through the verify-then-merge gate at any non-major version.
-# Sourced from docs/MERGE-POLICY.md "When NOT to use auto-merge" plus the v1-prelaunch
+# Sourced from docs/MERGE-POLICY.md "Auth-Critical Packages" plus the v1-prelaunch
 # triage session's discovered list.
 AUTH_CRITICAL_PACKAGES = frozenset({
     "microsoft.identity.client",
@@ -233,7 +237,7 @@ def resolve_member_group(pkg: Optional[str], update_type: Optional[str]) -> str:
         # Auth-critical at any non-major version -> verify-then-merge.
         return "B"
     if is_tooling_package(pkg):
-        # Tooling at any non-major version -> auto-merge eligible.
+        # Tooling at any non-major version -> Group A (routine).
         return "A"
     if t == "minor":
         return "B"
@@ -320,7 +324,7 @@ def classify_update_type(from_v: Optional[str], to_v: Optional[str]) -> str:
     # major-equivalent — requires manual review per docs/MERGE-POLICY.md.
     # Catches not only major downgrades (2.x -> 1.x) but also minor (1.2 -> 1.1)
     # and patch (1.0.2 -> 1.0.1) downgrades that would otherwise be classified
-    # as 'minor'/'patch' and slip through auto-merge gates.
+    # as 'minor'/'patch' and slip through as routine Group A or B bumps.
     if tp < fp:
         return "major"
     if tp[0] > fp[0]:
@@ -539,7 +543,8 @@ def _classify_member_set(
     two safety guards as the single-package path: a ``BREAKING CHANGE`` marker in
     the body forces Group C, and an auth-critical-path diff (e.g. src/PPDS.Auth)
     escalates to at least Group B. Without this, a member-set PR could skip both
-    guards and auto-merge despite them (regression flagged in review of #1311).
+    guards and be treated as routine despite them (regression flagged in review
+    of #1311).
     """
     # Resolve each member's update type and individual group. Null/None update
     # types are coalesced to "unknown" by resolve_member_group, which itself
@@ -577,6 +582,7 @@ def _classify_member_set(
         reason += (
             f"; auth-critical override "
             f"({trigger[0]} {trigger[1]} -> {trigger[2]}, {trigger[3]})"
+            f" — maintainer first"
         )
 
     # Safety guards the single-package path also applies — a member-set PR must
@@ -586,7 +592,7 @@ def _classify_member_set(
     group = chosen
     if touches_auth_critical_path(files) and _GROUP_RANK[group] < _GROUP_RANK["B"]:
         group = "B"
-        reason += "; escalated to Group B — diff touches auth-critical path (e.g. src/PPDS.Auth)"
+        reason += "; escalated to Group B — diff touches auth-critical path (e.g. src/PPDS.Auth) — maintainer first"
     if changelog_signals_breaking(body):
         reason += (
             "; PR body signals BREAKING CHANGE"
@@ -617,7 +623,7 @@ def classify_pr(pr: dict) -> Classification:
     Actions bump (``is_github_actions_update``), or any PR whose diff touches
     ``.github/`` (``touches_github_path``), is then moved to Group C: the
     maintainer goes first on those, so no other property of the PR can leave it
-    auto-merge eligible. Every other PR keeps the version rules' result. For a
+    in Group A or B. Every other PR keeps the version rules' result. For a
     PR moved to Group C only ``group`` and ``reason`` change; ``update_type`` and
     ``ecosystem`` stay as the version rules found them, because scripts/ci/
     uses them to decide whether major-version evidence is required.
@@ -636,8 +642,8 @@ def classify_pr(pr: dict) -> Classification:
         reason = f"{classification.reason}; {why} — maintainer goes first"
     else:
         reason = (
-            f"{why} — maintainer goes first, "
-            f"never auto-merge (version rules alone gave Group "
+            f"{why} — maintainer goes first "
+            f"(version rules alone gave Group "
             f"{classification.group}: {classification.reason})"
         )
     return replace(classification, group="C", reason=reason)
@@ -730,7 +736,7 @@ def _classify_by_version(pr: dict) -> Classification:
         return Classification(
             pr_number=number,
             group="B",
-            reason=f"diff touches auth-critical path (e.g., src/PPDS.Auth) — verify-then-merge",
+            reason=f"diff touches auth-critical path (e.g., src/PPDS.Auth) — maintainer first",
             ecosystem=ecosystem,
             update_type=update_type,
             package=pkg,
@@ -747,7 +753,7 @@ def _classify_by_version(pr: dict) -> Classification:
         return Classification(
             pr_number=number,
             group="B",
-            reason=f"auth-critical package {pkg} {update_type} bump ({from_v} -> {to_v}) — verify-then-merge",
+            reason=f"auth-critical package {pkg} {update_type} bump ({from_v} -> {to_v}) — maintainer first: the area's tests and one fresh review, then the maintainer's yes",
             ecosystem=ecosystem,
             update_type=update_type,
             package=pkg,
@@ -760,7 +766,7 @@ def _classify_by_version(pr: dict) -> Classification:
         return Classification(
             pr_number=number,
             group="A",
-            reason=f"tooling/test package {pkg} {update_type} — auto-merge eligible",
+            reason=f"tooling/test package {pkg} {update_type} — routine: one fresh review, then an agent merges on green",
             ecosystem=ecosystem,
             update_type=update_type,
             package=pkg,
@@ -773,7 +779,7 @@ def _classify_by_version(pr: dict) -> Classification:
         return Classification(
             pr_number=number,
             group="A",
-            reason="lockfile-only diff — auto-merge eligible",
+            reason="lockfile-only diff — routine: one fresh review, then an agent merges on green",
             ecosystem=ecosystem,
             update_type=update_type,
             package=pkg,
@@ -786,7 +792,7 @@ def _classify_by_version(pr: dict) -> Classification:
         return Classification(
             pr_number=number,
             group="A",
-            reason=f"patch bump on non-critical path ({pkg} {from_v} -> {to_v}) — auto-merge eligible",
+            reason=f"patch bump on non-critical path ({pkg} {from_v} -> {to_v}) — routine: one fresh review, then an agent merges on green",
             ecosystem=ecosystem,
             update_type=update_type,
             package=pkg,

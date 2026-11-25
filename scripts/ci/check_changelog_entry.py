@@ -29,9 +29,8 @@ in the description's other sections.
 
 Not checked:
 
-- pull requests labelled ``internal`` (no user-visible change). The label is
-  the maintainer's to create and apply; the failure messages do not assume it
-  exists;
+- pull requests labelled ``internal`` (no user-visible change). The label
+  exists and is the maintainer's to apply;
 - Dependabot pull requests (a bot cannot write the entry or the statement;
   major updates are covered by Rule 3 of the Pre-Merge Gate);
 - files at the known test locations under ``src/`` (``NON_BEHAVIOUR_PATHS``),

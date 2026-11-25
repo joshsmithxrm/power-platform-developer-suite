@@ -12,9 +12,9 @@ does not waive the checklist or grant communication permission.
 Every pull request to `main` is in one of two tiers. Before an agent session merges a pull request,
 it decides the tier from the diff, the labels, the issues the pull request closes and its author.
 If the tier is unclear, the pull request is **maintainer first**. No fixed approval prompt stands
-before a merge: this written rule is the guard. A release is led by the maintainer, who is present
-when the release skill runs; the skill's confirmations are the steps of that procedure, not a prompt
-that stands before an agent's ordinary merge.
+before a merge: this written rule is the guard. A release is the exception (category 11): the
+release skill asks the maintainer before each release pull request merge. Tags and publications are
+his own, and no session runs them ([VERSIONING.md](VERSIONING.md#9-decisions-in-documents), rule 9.2).
 
 ### Agents merge
 
@@ -38,10 +38,9 @@ a group:
   includes patch bumps, lockfile-only changes, and tooling and test packages at any non-major
   version (`TOOLING_PACKAGES` and `TOOLING_PREFIXES` in the classifier).
 - **Group B (routine):** the area's tests run first, then one short fresh review, then an agent
-  merges it. One exception: it has not been decided whether a bump of an
-  [auth-critical package](#auth-critical-packages) counts as sign-in and crypto code (category 5).
-  Until it is, the tier of such a bump is not clear, so it is maintainer first under the rule at the
-  top of this section.
+  merges it. One exception: a bump of an [auth-critical package](#auth-critical-packages) is
+  maintainer first (category 5). After the area's tests and one fresh review, it waits for the
+  maintainer's yes.
 - **Group C (not routine):** the maintainer decides. Major bumps stay his under the existing
   universal exclusion of major bumps ([Grouped Dependabot PRs](#grouped-dependabot-prs)). A bump
   whose notes signal a breaking change stays his under the classifier's existing Group C rule. A
@@ -51,8 +50,7 @@ a group:
   and puts it on the list of decisions waiting (D5).
 
 A Dependabot pull request that falls in any maintainer-first category below is maintainer first,
-whatever its group. The classifier's docstring and reason strings still call Group A "auto-merge
-eligible". That wording is older than this section, and this section wins.
+whatever its group.
 
 If `main` goes red after a merge, whoever made it, merging stops, for whoever merges, until it is
 fixed or reverted. The fix or revert is merged under the same tiers as any change: an agent merges it when it is ordinary and its review converged, and it is the
@@ -91,7 +89,9 @@ not say whether a write happens or is confirmed.
 5. **Sign-in and crypto code.** This covers `src/PPDS.Auth/`. Code elsewhere that encrypts,
    decrypts or stores credentials or tokens has no folder of its own. Whether a change to it is in
    this category is not clear, so it is maintainer first under the rule at the top of this section.
-   For a version bump of an auth-critical package, see Group B above.
+   This category also covers a Dependabot bump of an
+   [auth-critical package](#auth-critical-packages) at any version: after the area's tests and one
+   fresh review, it waits for the maintainer's yes.
 6. **Data safety.** This covers a pull request labelled `data-safety`, and one that closes or fixes
    an issue labelled `data-safety`, label or not. The label means wrong data, lost data, an unguarded
    or wrong-target write, or a silently wrong result. A pull request that only reads is in this
@@ -137,6 +137,11 @@ not say whether a write happens or is confirmed.
     outside contributor's work). If the change needs a live run (P1 in
     [specs/test-gates.md](../specs/test-gates.md)), the maintainer or one of his sessions does it
     before the merge and records it in the pull request. The contributor is never asked to.
+11. **Releases.** A release pull request (one the release runbook opens: the release PR of its
+    step 7, or the focused CHANGELOG PR of its patch procedure) is merged only after the maintainer's
+    yes, whatever tier its files would otherwise be in. The maintainer creates and pushes every tag
+    and makes every publication himself; no session runs them, even after his yes
+    ([VERSIONING.md](VERSIONING.md#9-decisions-in-documents), rule 9.2).
 
 **How an agent asks.** The agent puts the pull request on the list of decisions waiting
 (D5 in [MAINTAINER-SESSION-RULES.md](MAINTAINER-SESSION-RULES.md)). It gives the pull request, its
@@ -174,7 +179,7 @@ Classify a grouped PR by **most-conservative-wins** — the whole group inherits
 - Group contains **any major bump** -> Group C (manual review required)
 - Group contains **any minor bump** (no majors) -> Group B (the area's tests, one fresh review, then agents merge; for the auth-critical exception see [Who merges](#who-merges))
 - Group contains **only patch bumps** -> Group A (one fresh review, then agents merge)
-- If any member is an auth-critical package (per the Auth-Critical Packages list below), the group is Group B regardless of update type, unless any member is major (then Group C). While the tier of an auth-critical bump is undecided, such a group goes to the maintainer ([Who merges](#who-merges), Group B).
+- If any member is an auth-critical package (per the Auth-Critical Packages list below), the group is Group B regardless of update type, unless any member is major (then Group C). Such a group is maintainer first ([Who merges](#who-merges), category 5).
 - A GitHub Actions group is Group C whatever its members.
 
 Reasoning: simplest to enforce, hardest to misinterpret, and consistent with the universal-exclusion-of-major-bumps decision from the v1-prelaunch retro. If a single risky member exists, the whole group gets the safer treatment — splitting the group to land safe members earlier is not worth the complexity.
@@ -183,7 +188,7 @@ The classifier in `scripts/dependabot/classify.py` implements this rule by parsi
 
 ## Auth-Critical Packages
 
-The following packages are flagged as **auth-critical** — bumps to them at any non-major version are Group B in the classifier, but go to the maintainer while their tier is undecided ([Who merges](#who-merges), Group B), and major bumps go through Group C (manual review). This list is the **single source of truth**; the classifier in `scripts/dependabot/classify.py` mirrors it as `AUTH_CRITICAL_PACKAGES`, and a unit test (`TestAuthCriticalDocCodeDrift.test_doc_list_matches_code_list`) fails if the two diverge.
+The following packages are flagged as **auth-critical** — bumps to them at any non-major version are Group B in the classifier and are maintainer first ([Who merges](#who-merges), category 5), and major bumps go through Group C (manual review). This list is the **single source of truth**; the classifier in `scripts/dependabot/classify.py` mirrors it as `AUTH_CRITICAL_PACKAGES`, and a unit test (`TestAuthCriticalDocCodeDrift.test_doc_list_matches_code_list`) fails if the two diverge.
 
 <!-- AUTH_CRITICAL_PACKAGES:BEGIN -->
 - `Microsoft.Identity.Client`
@@ -199,7 +204,7 @@ To add or remove a package: edit the list above (between the `BEGIN`/`END` marke
 
 ## Branch Protection
 
-`main` is protected. A pull request must pass the two required status checks, `build-status` and `test-status`. It does not have to be up to date with `main`.
+`main` is protected. A pull request must pass the two required status checks, `build-status` and `test-status`. It does not have to be up to date with `main`, so a branch is not updated only in order to merge it.
 
 No approving review is required by branch protection. Every other check (Codecov, CodeQL, the Pre-Merge Gate, the TUI end-to-end workflow, automated review comments) is advisory: read it before merging, but GitHub does not block on it.
 
@@ -340,9 +345,8 @@ section, with HTML comments and a trailing "Generated with …" footer removed.
   package ([Release Scope Analysis](RELEASE.md#breaking-changes-refuse-a-non-major-plan)).
 
 **Not checked:**
-- Pull requests labelled `internal` (nothing user-visible changed). The
-  label does not exist yet; the maintainer creates it. `internal` together
-  with `breaking-change` fails.
+- Pull requests labelled `internal` (nothing user-visible changed).
+  `internal` together with `breaking-change` fails.
 - Dependabot pull requests, by author; major updates are covered by Rule 3.
 - These files under `src/`, which the check knows by location:
   - `src/PPDS.Extension/src/**/__tests__/`;
@@ -360,5 +364,5 @@ says so; it needs the `internal` exemption.
 
 To make the check required, the maintainer adds the check `Changelog entry and
 breaking statement` to the required status checks of `main`. Before that, the
-`internal` label must exist, and the check should have run on open pull
-requests long enough to show it does not fail correct ones.
+check should have run on open pull requests long enough to show it does not
+fail correct ones.
