@@ -1483,9 +1483,7 @@ public sealed class SqlQueryService : ISqlQueryService
             }
 
             var targetConfig = ProfileResolver?.ResolveByLabel(targetLabel);
-            var targetType = targetConfig?.Type ?? EnvironmentType.Production;
-            var targetProtection = targetConfig?.Protection
-                ?? DmlSafetyGuard.DetectProtectionLevel(targetType);
+            var targetProtection = PPDS.Cli.Services.Environment.WriteProtectionResolver.ResolveForCrossEnvironmentTarget(targetConfig);
 
             var crossEnvResult = _dmlSafetyGuard.CheckCrossEnvironmentDml(
                 plannedStatement,

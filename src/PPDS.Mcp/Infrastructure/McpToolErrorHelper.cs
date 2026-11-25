@@ -60,6 +60,13 @@ public static class McpToolErrorHelper
         if (ex is MetadataValidationException validation)
             ThrowMetadataValidationError(validation);
 
+        // The environments file holds a value PPDS cannot read: the message names the file, entry and field (#1829).
+        if (ex is PPDS.Auth.Profiles.EnvironmentConfigFileException file)
+        {
+            var filePayload = new StructuredErrorPayload { ErrorCode = file.ErrorCode, UserMessage = file.Message };
+            throw new McpException(JsonSerializer.Serialize(filePayload, SerializerOptions), McpErrorCode.InternalError);
+        }
+
         var payload = new StructuredErrorPayload
         {
             ErrorCode = ErrorCodes.Operation.Internal,

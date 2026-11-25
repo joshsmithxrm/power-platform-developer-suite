@@ -59,6 +59,7 @@ public static class ExceptionMapper
             OptionSetNotFoundException => ExitCodes.NotFoundError,
 
             // Validation/argument errors
+            PPDS.Auth.Profiles.EnvironmentConfigFileException => ExitCodes.InvalidArguments,
             ArgumentException => ExitCodes.InvalidArguments,
             ConfigurationException => ExitCodes.InvalidArguments,
 
@@ -80,6 +81,7 @@ public static class ExceptionMapper
             PpdsAuthException => ExitCodes.AuthError,
             PpdsThrottleException => ExitCodes.ConnectionError,
             PpdsException { ErrorCode: ErrorCodes.Query.DmlConfirmationRequired } => ExitCodes.ConfirmationRequired,
+            PpdsException { ErrorCode: PPDS.Cli.Services.Environment.EnvironmentConfirmationErrorCodes.ProtectionLoweringConfirmationRequired } => ExitCodes.ConfirmationRequired,
             PpdsException { ErrorCode: ErrorCodes.Operation.Timeout } => ExitCodes.ConnectionError,
             PpdsException { ErrorCode: var code } when code.StartsWith("Plugin.") => ExitCodes.Failure,
             PpdsException { ErrorCode: var code } when code.StartsWith("Validation.") => ExitCodes.InvalidArguments,
@@ -129,6 +131,10 @@ public static class ExceptionMapper
 
             TimeoutException =>
                 (ErrorCodes.Connection.Timeout, null),
+
+            // The environments file holds a value PPDS cannot read (#1829)
+            PPDS.Auth.Profiles.EnvironmentConfigFileException fileEx =>
+                (fileEx.ErrorCode, fileEx.Field),
 
             // Configuration exceptions
             ConfigurationException configEx =>

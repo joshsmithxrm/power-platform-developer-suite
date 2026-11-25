@@ -73,6 +73,9 @@ builder.Services.RegisterDataverseServices();
 // EnvironmentConfigStore, ISecureCredentialStore), so we don't call it separately here.
 builder.Services.AddCliApplicationServices();
 
+// MCP-only safety policies (an agent never lowers an environment's write protection, #1829).
+builder.Services.AddMcpSafetyPolicies();
+
 using var host = builder.Build();
 await host.Services.GetRequiredService<McpToolContext>().InitializeAsync();
 await host.RunAsync();

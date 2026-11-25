@@ -222,13 +222,17 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
         try
         {
 #pragma warning disable PPDS012 // Sync-over-async: Terminal.Gui event handler
-            _session.EnvironmentConfigService.SaveConfigAsync(
+            var saved = SaveAsync(
+                _session.EnvironmentConfigService,
                 _environmentUrl,
                 label: string.IsNullOrEmpty(label) ? null : label,
                 type: type,
                 color: color,
-                clearColor: color == null && _colorList.SelectedItem == 0).GetAwaiter().GetResult();
+                clearColor: color == null && _colorList.SelectedItem == 0,
+                ConfirmLowerProtection).GetAwaiter().GetResult();
 #pragma warning restore PPDS012
+            if (!saved)
+                return; // The user kept the current protection; the dialog stays open.
 
             ConfigChanged = true;
         }
@@ -240,6 +244,46 @@ internal sealed class EnvironmentConfigDialog : TuiDialog, ITuiStateCapture<Envi
 
         Application.RequestStop();
     }
+
+    /// <summary>
+    /// Saves the dialog's values. A type change that lowers write protection is saved only after
+    /// <paramref name="confirm"/> says yes (#1829); the service refuses it otherwise.
+    /// </summary>
+    /// <returns>False when the user declined to lower protection and nothing was saved.</returns>
+    internal static async Task<bool> SaveAsync(
+        IEnvironmentConfigService service, string environmentUrl,
+        string? label, EnvironmentType? type, EnvironmentColor? color, bool clearColor,
+        Func<ProtectionChangeAssessment, bool> confirm, CancellationToken ct = default)
+    {
+        string? confirmLowerProtection = null;
+        if (type != null)
+        {
+            var assessment = await service.AssessConfigChangeAsync(environmentUrl, type, ct).ConfigureAwait(false);
+            if (assessment.LowersProtection)
+            {
+                if (!confirm(assessment))
+                    return false;
+                confirmLowerProtection = environmentUrl;
+            }
+        }
+
+        await service.SaveConfigAsync(
+            environmentUrl, label, type, color, clearColor,
+            confirmLowerProtection: confirmLowerProtection, ct: ct).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
+    /// Asks whether to lower the environment's write protection. Cancel is the default button.
+    /// Replaceable in tests, where no Terminal.Gui application runs.
+    /// </summary>
+    internal Func<ProtectionChangeAssessment, bool> ConfirmLowerProtection { get; set; } = assessment =>
+        MessageBox.Query(
+            "Lower write protection?",
+            $"{assessment.Describe()}\n\nWrites to this environment would then run without the confirmation they need now.",
+            defaultButton: 0,
+            "Cancel",
+            "Lower protection") == 1;
 
     /// <inheritdoc />
     protected override void Dispose(bool disposing)

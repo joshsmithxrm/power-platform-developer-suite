@@ -71,7 +71,9 @@ public class EnvironmentConfigServiceTests : IDisposable
     [Fact]
     public async Task ResolveTypeAsync_UserConfig_WinsOverDiscovery()
     {
-        await _service.SaveConfigAsync("https://org.crm.dynamics.com", type: EnvironmentType.Test);
+        // Test lowers protection from the unconfigured default (Production), so it is acknowledged (#1829).
+        await _service.SaveConfigAsync("https://org.crm.dynamics.com", type: EnvironmentType.Test,
+            confirmLowerProtection: "https://org.crm.dynamics.com");
         var type = await _service.ResolveTypeAsync("https://org.crm.dynamics.com", discoveredType: "Sandbox");
         Assert.Equal(EnvironmentType.Test, type);
     }

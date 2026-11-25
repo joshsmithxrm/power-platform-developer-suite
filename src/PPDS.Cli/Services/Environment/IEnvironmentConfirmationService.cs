@@ -47,5 +47,11 @@ public static class EnvironmentConfirmationErrorCodes
     public const string Unresolved = "Environment.TargetUnresolved";
     public const string InvalidUrl = "Environment.InvalidConfirmationUrl";
     public const string PolicyUnavailable = "Environment.ConfirmationPolicyUnavailable";
+
+    /// <summary>A configuration change would lower write protection and was not confirmed (#1829).</summary>
+    public const string ProtectionLoweringConfirmationRequired = "Environment.ProtectionLoweringConfirmationRequired";
+
+    /// <summary>A configuration change would lower write protection, and this host never allows that (the MCP server).</summary>
+    public const string ProtectionLoweringRefused = "Environment.ProtectionLoweringRefused";
 }
 

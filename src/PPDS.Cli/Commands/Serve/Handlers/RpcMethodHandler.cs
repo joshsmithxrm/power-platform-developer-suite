@@ -404,6 +404,13 @@ public partial class RpcMethodHandler : IDisposable
         return new RpcException(ex.ErrorCode, ex.UserMessage, data);
     }
 
+    /// <summary>
+    /// The user's own environments file holds a value PPDS cannot read. Its message names that file, the entry and the
+    /// field and says how to repair it, so it is passed on with its code rather than redacted (#1829).
+    /// </summary>
+    internal static RpcException ToRpcException(EnvironmentConfigFileException ex)
+        => new(ex.ErrorCode, ex.Message, new RpcErrorData { Code = ex.ErrorCode, Message = ex.Message });
+
     // The workspace root used to constrain RPC-exposed filesystem paths. Captured once at daemon
     // startup because the extension launches ppds serve with the workspace folder as the working
     // directory. Using a snapshot avoids TOCTOU issues if code elsewhere mutates CurrentDirectory.
@@ -459,6 +466,17 @@ public partial class RpcMethodHandler : IDisposable
                 Environment.TickCount64 - startTicks,
                 rpcEx.StructuredErrorCode);
             throw;
+        }
+        catch (EnvironmentConfigFileException fileEx)
+        {
+            // Passed on with its code and message, not redacted (see ToRpcException, #1829).
+            _logger.LogDebug(
+                "rpc.end method={Method} correlationId={CorrelationId} durationMs={DurationMs} outcome=rpc-error code={Code}",
+                methodName,
+                correlationId,
+                Environment.TickCount64 - startTicks,
+                fileEx.ErrorCode);
+            throw ToRpcException(fileEx);
         }
         catch (OperationCanceledException)
         {

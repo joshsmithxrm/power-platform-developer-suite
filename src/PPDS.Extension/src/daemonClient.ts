@@ -600,6 +600,12 @@ export class DaemonClient implements vscode.Disposable {
         type?: string;
         color?: string;
         profileName?: string;
+        /**
+         * The environment URL, sent only after the user confirmed in a modal that the change lowers
+         * write protection. Without it the daemon refuses such a change with
+         * `Environment.ProtectionLoweringConfirmationRequired`.
+         */
+        confirmLowerProtection?: string;
     }): Promise<EnvConfigSetResponse> {
         await this.ensureConnected();
 

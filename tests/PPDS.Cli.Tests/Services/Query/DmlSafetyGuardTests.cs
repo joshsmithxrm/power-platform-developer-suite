@@ -864,4 +864,24 @@ public class DmlSafetyGuardTests
     }
 
     #endregion
+    [Fact]
+    public void UntypedEnvironmentEntry_IsProductionForSqlDml_LikeAnEnvironmentWithNoEntry()
+    {
+        // #1829: an entry without a saved type (a label-only save, Add Environment, env/list tagging)
+        // used to resolve to Development here, which switched SQL DML confirmation off.
+        var untyped = new EnvironmentConfig { Url = "https://org.crm.dynamics.com/", Label = "Contoso" };
+        var typedDevelopment = new EnvironmentConfig { Url = "https://org.crm.dynamics.com/", Type = EnvironmentType.Development };
+        var insert = Parse("INSERT INTO account (name) VALUES ('x')");
+
+        var noEntry = _guard.Check(insert, new DmlSafetyOptions(), protectionLevel:
+            PPDS.Cli.Services.Environment.WriteProtectionResolver.ResolveForSqlDml(null));
+        var entryWithoutType = _guard.Check(insert, new DmlSafetyOptions(), protectionLevel:
+            PPDS.Cli.Services.Environment.WriteProtectionResolver.ResolveForSqlDml(untyped));
+        var development = _guard.Check(insert, new DmlSafetyOptions(), protectionLevel:
+            PPDS.Cli.Services.Environment.WriteProtectionResolver.ResolveForSqlDml(typedDevelopment));
+
+        Assert.True(noEntry.RequiresConfirmation && noEntry.RequiresPreview);
+        Assert.True(entryWithoutType.RequiresConfirmation && entryWithoutType.RequiresPreview);
+        Assert.False(development.RequiresPreview, "A recorded Development type keeps its unrestricted DML");
+    }
 }

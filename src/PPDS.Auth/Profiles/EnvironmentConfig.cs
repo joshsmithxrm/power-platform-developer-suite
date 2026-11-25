@@ -28,7 +28,7 @@ public sealed class EnvironmentConfig
     /// Null means auto-detect from DiscoveredType or URL heuristics.
     /// </summary>
     [JsonPropertyName("type")]
-    [JsonConverter(typeof(JsonStringEnumConverter))]
+    [JsonConverter(typeof(DefinedEnumNameConverter<EnvironmentType>))]
     public EnvironmentType? Type { get; set; }
 
     /// <summary>
@@ -57,7 +57,7 @@ public sealed class EnvironmentConfig
     /// Explicit protection level override. Null means auto-detect from Type.
     /// </summary>
     [JsonPropertyName("protection")]
-    [JsonConverter(typeof(JsonStringEnumConverter))]
+    [JsonConverter(typeof(DefinedEnumNameConverter<ProtectionLevel>))]
     public ProtectionLevel? Protection { get; set; }
 
     /// <summary>
