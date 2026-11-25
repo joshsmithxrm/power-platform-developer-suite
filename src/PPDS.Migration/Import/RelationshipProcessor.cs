@@ -90,6 +90,15 @@ namespace PPDS.Migration.Import
             // This ensures thread-safe access during parallel operations
             await LoadRelationshipMetadataCacheAsync(cancellationToken).ConfigureAwait(false);
 
+            // Look up in the target the records of the file this import did not write that the
+            // associations point at: an association to one is sent only if it exists (#1934 r2 MF2).
+            if (context.References != null)
+            {
+                await context.References.EnsureCheckedAsync(
+                    allOperations.SelectMany(op => op.Data.TargetIds.Select(id => new EntityReference(op.Data.TargetEntityName, id))),
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             // Thread-safe counters for progress tracking
             var processedAssociations = 0;
             var successCount = 0;
@@ -142,6 +151,21 @@ namespace PPDS.Migration.Import
                         if (context.IdMappings.TryGetNewId(m2mData.TargetEntityName, targetId, out var directMappedId))
                         {
                             mappedId = directMappedId;
+                        }
+                        // A record of the file this import did not write: associated only when it is in
+                        // the target, otherwise counted and reported (#1934 r2 MF2).
+                        else if (context.References != null
+                                 && context.References.Decide(m2mData.TargetEntityName, targetId, out var existingId) is var decision
+                                 && decision != ReferenceDecision.OutsideTheFile)
+                        {
+                            if (decision == ReferenceDecision.Send)
+                            {
+                                mappedId = existingId;
+                            }
+                            else
+                            {
+                                context.References.CountAssociationNotSent(entityName, m2mData.RelationshipName);
+                            }
                         }
                         // For role entity, check if same ID exists in target
                         else if (isRoleTarget)

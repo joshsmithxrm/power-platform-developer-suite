@@ -68,6 +68,13 @@ namespace PPDS.Migration.Import
 
                 var fieldList = string.Join(", ", fields);
 
+                if (context.References != null)
+                {
+                    await context.References.EnsureCheckedAsync(
+                        records.SelectMany(r => fields.Where(r.Contains).Select(f => r[f])).OfType<EntityReference>(),
+                        cancellationToken).ConfigureAwait(false);
+                }
+
                 // Collect all updates for this entity upfront
                 var updates = new List<Entity>();
                 foreach (var record in records)
@@ -88,6 +95,21 @@ namespace PPDS.Migration.Import
                             {
                                 update[fieldName] = new EntityReference(er.LogicalName, mappedId);
                                 hasUpdates = true;
+                            }
+                            else if (context.References != null)
+                            {
+                                // A record of the file this import did not write: sent only when it is
+                                // in the target, otherwise counted and reported (#1934 r2 MF2).
+                                switch (context.References.Decide(er.LogicalName, er.Id, out var targetId))
+                                {
+                                    case ReferenceDecision.Send:
+                                        update[fieldName] = new EntityReference(er.LogicalName, targetId);
+                                        hasUpdates = true;
+                                        break;
+                                    case ReferenceDecision.NotSent:
+                                        context.References.CountLookupNotSent(entityName, fieldName);
+                                        break;
+                                }
                             }
                         }
                     }

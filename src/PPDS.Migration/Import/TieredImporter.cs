@@ -185,7 +185,8 @@ namespace PPDS.Migration.Import
             var context = new ImportContext(data, plan, options, idMappings, targetFieldMetadata, progress)
             {
                 OutputManager = options.OutputManager,
-                Warnings = warnings
+                Warnings = warnings,
+                References = new UnwrittenReferenceGuard(data, idMappings, _connectionPool)
             };
 
             // Select the plug-in steps of tables with disableplugins=true. Read-only: the tables are
@@ -274,6 +275,8 @@ namespace PPDS.Migration.Import
                 var relationshipResult = await _relationshipProcessor.ProcessAsync(context, cancellationToken)
                     .ConfigureAwait(false);
                 var phase4Duration = relationshipResult.Duration;
+
+                ReportReferencesNotSent(context, errors, warnings);
 
                 stopwatch.Stop();
 
@@ -431,6 +434,41 @@ namespace PPDS.Migration.Import
             throw new ImportRefusedException(
                 ImportRefusalReasons.ModeNotImplemented,
                 "The import mode is not one of Create, Update or Upsert. Nothing was read or written.");
+        }
+
+        /// <summary>
+        /// Turns the references not sent into a warning and an error per table and field or
+        /// relationship: data the user asked for was not written, so the import is not a success
+        /// (#1934 r2 MF2).
+        /// </summary>
+        private static void ReportReferencesNotSent(ImportContext context, ConcurrentBag<MigrationError> errors, IWarningCollector warnings)
+        {
+            if (context.References == null)
+            {
+                return;
+            }
+
+            foreach (var (table, via, association, count) in context.References.NotSent)
+            {
+                var message = association
+                    ? $"{count} {table} association(s) through {via} were not sent: each points at a record of the data file that this import did not write and that is not in the target."
+                    : $"{count} {table}.{via} lookup(s) were not sent: each points at a record of the data file that this import did not write and that is not in the target.";
+                warnings.AddWarning(new ImportWarning
+                {
+                    Code = ImportWarningCodes.ReferencesNotSent,
+                    Entity = table,
+                    Message = message,
+                    Impact = association ? $"{count} association(s) missing." : $"{count} record(s) without this lookup."
+                });
+                var error = new MigrationError
+                {
+                    Phase = association ? MigrationPhase.ProcessingRelationships : MigrationPhase.Importing,
+                    EntityLogicalName = table,
+                    Message = message
+                };
+                errors.Add(error);
+                context.Options.ErrorCallback?.Invoke(error);
+            }
         }
 
         /// <summary>
@@ -731,6 +769,7 @@ namespace PPDS.Migration.Import
                                 UpdatedCount = 0,
                                 Success = true
                             });
+                            context.References?.MarkTableDone(entityName);
                             Interlocked.Add(ref overallProcessed, records.Count);
                             return;
                         }
@@ -753,6 +792,7 @@ namespace PPDS.Migration.Import
                             ct).ConfigureAwait(false);
 
                         entityResults.Add(result);
+                        context.References?.MarkTableDone(entityName);
                         Interlocked.Add(ref totalImported, result.SuccessCount);
 
                         Interlocked.Add(ref tierRecordsSuccess, result.SuccessCount);
@@ -995,6 +1035,18 @@ namespace PPDS.Migration.Import
                 }
             }
 
+            // Look up in the target the records of the file that this import did not write and that
+            // these records point at, so a lookup to one is sent only if it exists (#1934 r2 MF2).
+            if (context.References != null)
+            {
+                await context.References.EnsureCheckedAsync(
+                    records.SelectMany(r => r.Attributes)
+                        .Where(a => !deferredSet.Contains(a.Key))
+                        .Select(a => a.Value)
+                        .OfType<EntityReference>(),
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             // Prepare records: apply handlers, remap lookups, null deferred fields, filter
             var preparedRecords = new List<Entity>();
             // State transitions are held here and handed to the state phase only for records
@@ -1090,7 +1142,7 @@ namespace PPDS.Migration.Import
                     ownerMappingList.Add(mappedOwner);
                 }
 
-                var prepared = PrepareRecordForImport(transformed, deferredSet, fieldMetadata, idMappings, options, effectiveMode);
+                var prepared = PrepareRecordForImport(transformed, deferredSet, fieldMetadata, idMappings, options, effectiveMode, context.References);
                 preparedRecords.Add(prepared);
             }
 
@@ -1540,7 +1592,8 @@ namespace PPDS.Migration.Import
             IReadOnlyDictionary<string, FieldValidity> fieldMetadata,
             IdMappingCollection idMappings,
             ImportOptions options,
-            ImportMode effectiveMode)
+            ImportMode effectiveMode,
+            UnwrittenReferenceGuard? references = null)
         {
             var prepared = new Entity(record.LogicalName);
             prepared.Id = record.Id; // Keep original ID for mapping
@@ -1576,7 +1629,13 @@ namespace PPDS.Migration.Import
                 // Remap entity references
                 if (attr.Value is EntityReference er)
                 {
-                    var mappedRef = RemapEntityReference(er, idMappings, options);
+                    var mappedRef = RemapEntityReference(er, idMappings, options, references);
+                    if (mappedRef == null && references != null && references.Decide(er.LogicalName, er.Id, out _) == ReferenceDecision.NotSent)
+                    {
+                        // The target is a record of the file this import did not write and it is not in
+                        // the target: the lookup is not sent, and is reported (#1934 r2 MF2).
+                        references.CountLookupNotSent(record.LogicalName, attr.Key);
+                    }
                     if (mappedRef != null)
                     {
                         prepared[attr.Key] = mappedRef;
@@ -1619,7 +1678,8 @@ namespace PPDS.Migration.Import
         private EntityReference? RemapEntityReference(
             EntityReference er,
             IdMappingCollection idMappings,
-            ImportOptions options)
+            ImportOptions options,
+            UnwrittenReferenceGuard? references = null)
         {
             // Check if this is a user reference that should use user mapping
             if (IsUserReference(er.LogicalName) && options.UserMappings != null)
@@ -1644,6 +1704,19 @@ namespace PPDS.Migration.Import
             if (idMappings.TryGetNewId(er.LogicalName, er.Id, out var newId))
             {
                 return new EntityReference(er.LogicalName, newId);
+            }
+
+            // A record of the file this import did not write: sent only when it exists in the target,
+            // the same rule as a deferred lookup (#1934 r2 MF2).
+            if (references != null)
+            {
+                switch (references.Decide(er.LogicalName, er.Id, out var targetId))
+                {
+                    case ReferenceDecision.Send:
+                        return new EntityReference(er.LogicalName, targetId);
+                    case ReferenceDecision.NotSent:
+                        return null;
+                }
             }
 
             // Return original - will be processed in deferred phase if needed

@@ -38,8 +38,20 @@ public class TieredImporterLaterPhaseTests
     /// <summary>Ids that already exist in the target: a create of one fails.</summary>
     private readonly HashSet<Guid> _existing = new();
 
+    /// <summary>Ids whose create fails although they are not in the target (a failure for another reason).</summary>
+    private readonly HashSet<Guid> _failing = new();
+
+    /// <summary>Every entity sent in an UpdateMultiple (the deferred phase), to read the lookups it carries.</summary>
+    private readonly ConcurrentQueue<Entity> _updates = new();
+
+    /// <summary>Every entity sent in a CreateMultiple, to read the lookups it carries.</summary>
+    private readonly ConcurrentQueue<Entity> _creates = new();
+
     /// <summary>Ids created during this run: a second create fails (a duplicate in the file).</summary>
     private readonly ConcurrentDictionary<Guid, byte> _created = new();
+
+    /// <summary>The tables asked about by the existence check.</summary>
+    private readonly ConcurrentQueue<string> _existenceQueries = new();
 
     /// <summary>When set, a failed create is reported without its record id.</summary>
     private bool _failuresWithoutRecordId;
@@ -83,13 +95,25 @@ public class TieredImporterLaterPhaseTests
             .ReturnsAsync((OrganizationRequest request, CancellationToken _) => Execute(request));
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>()))
             .ReturnsAsync((OrganizationRequest request) => Execute(request));
+
+        // The existence check (#1934 r2 MF2): a query by primary key answers with the ids in the target.
+        _client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryBase query, CancellationToken _) =>
+            {
+                var q = (Microsoft.Xrm.Sdk.Query.QueryExpression)query;
+                _existenceQueries.Enqueue(q.EntityName);
+                var asked = q.Criteria.Conditions.Single().Values.Cast<Guid>();
+                return new EntityCollection(asked.Where(id => _existing.Contains(id) || _created.ContainsKey(id))
+                    .Select(id => new Entity(q.EntityName, id)).ToList());
+            });
     }
 
-    private bool TryCreate(Guid id) => !_existing.Contains(id) && _created.TryAdd(id, 0);
+    private bool TryCreate(Guid id) => !_existing.Contains(id) && !_failing.Contains(id) && _created.TryAdd(id, 0);
 
     private BulkOperationResult BulkCreate(string entity, List<Entity> records)
     {
         _writes.Enqueue(("CreateMultiple " + entity, records.Select(r => r.Id).ToArray()));
+        foreach (var r in records) _creates.Enqueue(r);
         var errors = new List<BulkOperationError>();
         for (var i = 0; i < records.Count; i++)
         {
@@ -110,6 +134,10 @@ public class TieredImporterLaterPhaseTests
 
     private BulkOperationResult BulkSucceed(string what, List<Entity> records)
     {
+        if (what.StartsWith("UpdateMultiple"))
+        {
+            foreach (var r in records) _updates.Enqueue(r);
+        }
         _writes.Enqueue((what, records.Select(r => r.Id).ToArray()));
         return new BulkOperationResult { SuccessCount = records.Count, Errors = Array.Empty<BulkOperationError>() };
     }
@@ -427,6 +455,114 @@ public class TieredImporterLaterPhaseTests
 
     #endregion
 
+    #region #1934 r2 MF2: a reference to a record of the file that was not written
+
+    private static MigrationData AccountsAndContact(Guid parent, Guid child, Guid contact, bool association) => new()
+    {
+        Schema = new MigrationSchema
+        {
+            Entities = new List<EntitySchema>
+            {
+                new() { LogicalName = "account", PrimaryIdField = "accountid", DisplayName = "Account" },
+                new() { LogicalName = "contact", PrimaryIdField = "contactid", DisplayName = "Contact" }
+            }
+        },
+        EntityData = new Dictionary<string, IReadOnlyList<Entity>>
+        {
+            // child has a DEFERRED lookup to parent; the contact (a later tier) a NON-DEFERRED one.
+            ["account"] = new[] { new Entity("account") { Id = parent, ["name"] = "P" }, new Entity("account") { Id = child, ["name"] = "C", ["parentaccountid"] = new EntityReference("account", parent) } },
+            ["contact"] = new[] { new Entity("contact") { Id = contact, ["lastname"] = "X", ["parentcustomerid"] = new EntityReference("account", parent) } }
+        },
+        RelationshipData = association
+            ? new Dictionary<string, IReadOnlyList<ManyToManyRelationshipData>>
+            {
+                ["contact"] = new[] { new ManyToManyRelationshipData { RelationshipName = "contact_account", SourceEntityName = "contact", SourceId = contact, TargetEntityName = "account", TargetIds = new List<Guid> { parent } } }
+            }
+            : new Dictionary<string, IReadOnlyList<ManyToManyRelationshipData>>()
+    };
+
+    private static ExecutionPlan TwoTiers() => new()
+    {
+        Tiers = new List<ImportTier> { new() { TierNumber = 0, Entities = new List<string> { "account" } }, new() { TierNumber = 1, Entities = new List<string> { "contact" } } },
+        DeferredFields = new Dictionary<string, IReadOnlyList<string>> { ["account"] = new List<string> { "parentaccountid" } }
+    };
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UnwrittenTargetThatExistsInTheTarget_IsReferenced_ByDeferredAndNonDeferredLookupsAndAssociations(bool useBulkApis)
+    {
+        // P's create fails because P is already in the target: the rule allows references to it.
+        var (parent, child, contact) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _existing.Add(parent);
+
+        var result = await CreateImporter().ImportAsync(AccountsAndContact(parent, child, contact, association: true), TwoTiers(),
+            new ImportOptions { Mode = ImportMode.Create, ContinueOnError = true, UseBulkApis = useBulkApis });
+
+        if (useBulkApis)
+        {
+            _updates.Should().ContainSingle(u => u.Id == child).Which.GetAttributeValue<EntityReference>("parentaccountid").Id.Should().Be(parent);
+            _creates.Single(c => c.Id == contact).GetAttributeValue<EntityReference>("parentcustomerid").Id.Should().Be(parent);
+        }
+        _writes.Should().Contain(w => w.What == "Associate" && w.Ids.Contains(parent));
+        result.Warnings.Should().NotContain(w => w.Code == ImportWarningCodes.ReferencesNotSent);
+        _existenceQueries.Should().Contain("account");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UnwrittenTargetNotInTheTarget_IsNotReferenced_AndEachKindIsCountedAndReported(bool useBulkApis)
+    {
+        // P's create fails for another reason and P is not in the target: neither lookup nor the
+        // association may point at it. Sending the source id would point at a record that is not there.
+        var (parent, child, contact) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _failing.Add(parent);
+
+        var result = await CreateImporter().ImportAsync(AccountsAndContact(parent, child, contact, association: true), TwoTiers(),
+            new ImportOptions { Mode = ImportMode.Create, ContinueOnError = true, UseBulkApis = useBulkApis });
+
+        _updates.Should().NotContain(u => u.Contains("parentaccountid"), "the deferred lookup to P is not sent");
+        if (useBulkApis)
+        {
+            _creates.Single(c => c.Id == contact).Contains("parentcustomerid").Should().BeFalse("the non-deferred lookup to P is not sent either");
+        }
+        _writes.Should().NotContain(w => w.What == "Associate");
+        WritesTo(parent).Should().OnlyContain(w => w.What.StartsWith("Create"), "only P's own failed create names P");
+
+        result.Success.Should().BeFalse();
+        result.Warnings.Where(w => w.Code == ImportWarningCodes.ReferencesNotSent).Select(w => w.Message).Should().BeEquivalentTo(new[]
+        {
+            "1 account.parentaccountid lookup(s) were not sent: each points at a record of the data file that this import did not write and that is not in the target.",
+            "1 contact.parentcustomerid lookup(s) were not sent: each points at a record of the data file that this import did not write and that is not in the target.",
+            "1 contact association(s) through contact_account were not sent: each points at a record of the data file that this import did not write and that is not in the target."
+        });
+        result.Errors.Should().Contain(e => e.EntityLogicalName == "contact" && e.Message.Contains("contact.parentcustomerid"));
+    }
+
+    [Fact]
+    public async Task ReferenceToARecordOutsideTheFile_IsUnchanged_AndNotCounted()
+    {
+        var other = Guid.NewGuid();
+        var contact = Guid.NewGuid();
+        var data = new MigrationData
+        {
+            Schema = new MigrationSchema { Entities = new List<EntitySchema> { new() { LogicalName = "contact", PrimaryIdField = "contactid", DisplayName = "Contact" } } },
+            EntityData = new Dictionary<string, IReadOnlyList<Entity>>
+            {
+                ["contact"] = new[] { new Entity("contact") { Id = contact, ["parentcustomerid"] = new EntityReference("account", other) } }
+            }
+        };
+
+        var result = await CreateImporter().ImportAsync(data, Plan(new Dictionary<string, IReadOnlyList<string>>(), "contact"), new ImportOptions { Mode = ImportMode.Create });
+
+        _creates.Single().GetAttributeValue<EntityReference>("parentcustomerid").Id.Should().Be(other);
+        result.Success.Should().BeTrue();
+        _existenceQueries.Should().BeEmpty();
+    }
+
+    #endregion
+
     #region MF4: a table with importMode="skip" receives nothing in any phase
 
     [Theory]
@@ -472,8 +608,12 @@ public class TieredImporterLaterPhaseTests
         WritesTo(skipped).Should().BeEmpty();
         WritesTo(parent).Should().BeEmpty();
         WritesTo(contact).Should().NotBeEmpty("the other table is imported");
-        result.Success.Should().BeTrue("the skipped table's file data is not a failure");
         result.SkippedCount.Should().Be(2);
+        // The skipped account is not in the target, so the contact's association to it is not sent:
+        // that, and only that, makes the import not a success; the file data is not a failure.
+        result.Success.Should().BeFalse();
+        result.Errors.Should().ContainSingle().Which.Message.Should().Contain("contact association(s) through contact_account were not sent");
+        result.Warnings.Should().Contain(w => w.Code == ImportWarningCodes.ReferencesNotSent && w.Entity == "contact");
     }
 
     #endregion
