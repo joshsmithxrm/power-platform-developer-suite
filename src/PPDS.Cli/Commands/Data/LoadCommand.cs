@@ -19,7 +19,8 @@ namespace PPDS.Cli.Commands.Data;
 /// </summary>
 public static class LoadCommand
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    /// <summary>The options the command reads a mapping file with (internal so tests read it the same way).</summary>
+    internal static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase

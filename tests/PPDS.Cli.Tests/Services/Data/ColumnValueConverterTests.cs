@@ -118,6 +118,9 @@ public class ColumnValueConverterTests
     [InlineData("userlocal", "2024-01-15T09:30:00", Refused)]
     [InlineData("userlocal", "2024-01-15T09:30:00+0500", Refused)]
     [InlineData("userlocal", "2024-01-15T09:30:00.123Z", Refused)]
+    [InlineData("userlocal", "2024-01-15T09:30:00+01:60", Refused)] // review round 2, mutant m27: minutes past 59
+    [InlineData("userlocal", "2024-01-15T09:30:00+99:00", Refused)] // and an offset past 14 hours
+    [InlineData("userlocal", "2024-01-15T09:30:00+14:00", "date:2024-01-14T19:30:00:Utc")]
     [InlineData("userlocal", "2024-01-15 09:30:00Z", Refused)]
     [InlineData("userlocal", "2024-01-15", Refused)]
     [InlineData("userlocal", "15.01.2024 09:30", Refused)]
@@ -249,5 +252,30 @@ public class ColumnValueConverterTests
     public void Empty_text_is_refused_so_the_caller_decides_what_it_means()
     {
         Assert.False(ColumnValueConverter.Convert("", Text("name")).IsAdmitted);
+    }
+
+    [Theory]
+    [InlineData("dd/MM/yyyy", true)]
+    [InlineData("yyyy-MM-dd'T'HH:mm:ssK", true)]
+    [InlineData("d MMMM yyyy", true)]
+    [InlineData("%d/M/yyyy", true)]
+    [InlineData("dd/MM/yyyy 'yy'", true)]       // quoted text is not a part
+    [InlineData("dd\\/MM\\/yyyy", true)]        // an escaped character is not a part
+    [InlineData("ddd MMM yyyy", false)]         // ddd is the weekday name, not the day of the month
+    [InlineData("dd/MM/'yyyy'", false)]         // the only year is quoted text
+    [InlineData("dd/MM/yyyyy", false)]
+    [InlineData("dd/MM/yyyy yy", false)]
+    [InlineData("dd/MM/yyyy HH:mm:ss.FFF", false)]
+    [InlineData("D", false)]
+    public void A_date_format_must_name_a_four_digit_year_a_month_and_a_day(string format, bool admitted)
+    {
+        // Review round 2, must-fix 2: a missing part was taken from the machine.
+        Assert.Equal(admitted, ColumnValueConverter.DateFormatRefusal(format) is null);
+
+        var column = Date("day", DateTimeBehavior.DateOnly, DateTimeFormat.DateOnly);
+        if (!admitted)
+        {
+            Assert.False(ColumnValueConverter.Convert("15/01/2024", column, new ColumnValueOptions { DateFormat = format }).IsAdmitted);
+        }
     }
 }

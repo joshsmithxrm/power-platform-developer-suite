@@ -214,13 +214,9 @@ public sealed class LookupResolver
             return null;
         }
 
-        return value switch
-        {
-            string s => s,
-            EntityReference er => er.Id.ToString(),
-            Guid g => g.ToString(),
-            _ => value.ToString()
-        };
+        // Only text is compared: the loader has refused a key field that is not a text column, and any other value would
+        // be turned into text in the machine's culture (#1916).
+        return value as string;
     }
 
     /// <summary>

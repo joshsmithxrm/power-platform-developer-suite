@@ -333,26 +333,30 @@ Options:
 
 ##### Values in `data load` and `data update`
 
-Each value is converted by its column's type, read from the table's metadata, and never guessed from its text or read in the machine's culture. Anything that is not exact is refused before anything is written: `data load` checks the whole file first and writes no row if any problem is found, listing each by row and column (exit 3).
+Each value is converted by its column's type, read from the table's metadata, in the invariant culture; it is never guessed from its text. Anything that is not exact is refused before anything is written: `data load` checks the whole file first and writes no row if any problem is found, listing each by row and column (exit 3). A refusal names the row and the column header, not the cell's content; a refused control character is named by its code point and position.
 
-CSV files (both commands) are comma-separated with RFC 4180 quoting: a field in double quotes may hold commas, line breaks and doubled quotes. Nothing is trimmed. Every row must have the header's number of fields, and header names must not repeat.
+The files that `data load` loads and `data update --file` updates are UTF-8 (with or without a byte order mark; Excel's "CSV UTF-8"), comma-separated, with RFC 4180 quoting: a field in double quotes may hold commas, line breaks and doubled quotes. A file that is not valid UTF-8 (such as Excel's "CSV (Comma delimited)", which is Windows-1252) is refused. Nothing is trimmed. Every row must have the header's number of fields, and header names must not be empty or repeat (ignoring case). `data load --analyze` and `--generate-mapping` read only the header and a few sample values, with the earlier reader.
 
 | Column type | Write |
 |---|---|
 | Whole number, big integer | `-12`: an optional sign and digits |
-| Decimal, floating point, currency | `1234.5`: an optional sign, digits, a point and digits; no thousands separator, comma, exponent or currency symbol; at most 28 significant digits and no more decimal places than the column keeps. A currency column whose places come from the pricing precision or the record's currency takes whole amounts only |
+| Decimal, floating point, currency | `1234.5`: an optional sign, digits, a point and digits; no thousands separator, comma, exponent or currency symbol; at most 28 significant digits and no more decimal places than the column keeps |
+| Currency whose places come from the record's currency or the organization's pricing precision (many currency columns), or whose metadata does not say | whole amounts only (`10` or `10.00`; `10.50` is refused): those precisions are not read by these commands |
 | Text | the text exactly as given (`123` is text in a text column); no control characters other than tab and line breaks |
 | Yes/no | `true`/`false`, `yes`/`no`, `y`/`n`, `1`/`0` |
 | Choice, status, status reason | the option's integer value, or a label from the mapping file's `optionsetMap` |
 | Lookup to one table | the record's GUID (`8-4-4-4-12`) |
 | Lookup to several tables (customer, owner) | refused, unless a `data load` mapping file names the table in `lookup.entity` |
+| Lookup matched by a key field (`data load` mapping, `matchBy: field`) | the key field's text; the key field must be a text column of the lookup's table, and the text must match exactly one record (a GUID-shaped cell is text here) |
 | Date and time (user local) | `2024-01-15T09:30:00Z` or `2024-01-15T09:30:00+01:00` |
 | Date only | `2024-01-15` |
 | Date and time (time-zone independent) | `2024-01-15T09:30:00Z`, stored as written |
 
-A mapping file's `dateFormat` replaces the date forms for its column (read in the invariant culture); for a user-local column it must include a time zone (`K` or `zzz`).
+A mapping file's `dateFormat` replaces the date forms for its column, read in the invariant culture. It must name a four-digit year (`yyyy`), a month and a day (such as `dd/MM/yyyy`), so that no part is taken from the machine; a two-digit year (`yy`), a fraction of a second and a one-letter format are refused. For a user-local column it must include a time zone (`K` or `zzz`).
 
-`data update --set` takes `field=value` pairs separated by commas. Write a value unquoted when it holds no comma and no double quote; otherwise wrap the whole value in double quotes and double each quote in it: `--set 'name="Smith, ""Jr""",rate=1.5'`. Unquoted `null` clears a column. In `data update --file`, the id column is the table's primary id column (for example `accountid`) unless `--id-column` names another.
+In `data load`, the mapping file's column names match the header ignoring case, and two entries that differ only in case are refused. A column that takes no value when a record is created or when it is updated (such as `createdon`, the primary id column, or `statecode` in many tables) is refused, because a load may do either: skip it in the mapping file. Auto-mapping refuses a header whose name matches two columns once case, spaces, underscores and hyphens are ignored. An empty cell is not sent, except in an alternate key column (`--key`), where it refuses the row.
+
+`data update --set` takes `field=value` pairs separated by commas. Write a value unquoted when it holds no comma and no double quote; otherwise wrap the whole value in double quotes and double each quote in it: `--set 'name="Smith, ""Jr""",rate=1.5'`. Unquoted `null` clears a column, and a column named twice is refused. In `data update --file`, the id column is the table's primary id column from metadata (for example `accountid`) unless `--id-column` names another, and an empty cell clears its column (sends null). `data update --id` takes a GUID written 8-4-4-4-12, optionally in braces. A column that cannot be updated is refused.
 
 #### Update
 

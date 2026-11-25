@@ -157,11 +157,13 @@ public sealed class DataUpdateValueServiceTests : IDisposable
         return path;
     }
 
-    private static async Task<string> FileOutcomeAsync(string path, string? mapping = null, string? idColumn = null)
+    private static async Task<string> FileOutcomeAsync(string path, string? mapping = null, string? idColumn = null,
+        string primaryId = "accountid")
     {
         try
         {
-            var rows = await Service().ReadUpdateFileAsync(Table, path, idColumn, mapping);
+            var service = new DataUpdateValueService(PoolWithTables(new TestTable(Table, primaryId, AccountColumns())).Object);
+            var rows = await service.ReadUpdateFileAsync(Table, path, idColumn, mapping);
             return string.Join(" | ", rows.Select(r => $"{r.Id:D}: {DescribeValues(r.Attributes)}"));
         }
         catch (DataValuesRefusedException ex)
@@ -267,5 +269,48 @@ public sealed class DataUpdateValueServiceTests : IDisposable
         var twice = File($"accountid,Rate %,Other\n{RecordId},2.5,3\n");
         Assert.Contains("Column 'Other': The column names 'rate', as column 'Rate %' does", await FileOutcomeAsync(twice, mapping),
             StringComparison.Ordinal);
+    }
+
+    // ---- Review round 2 ----
+
+    [Fact]
+    public async Task The_id_column_is_the_primary_id_from_metadata_when_it_is_not_the_table_name_plus_id()
+    {
+        // Mutant m42: the id column was guessed as "<table>id". Here the table's primary id column is legacyid.
+        var guessed = File($"accountid,name\n{RecordId},first\n");
+        Assert.Contains("has no column 'legacyid'", await FileOutcomeAsync(guessed, primaryId: "legacyid"), StringComparison.Ordinal);
+
+        var named = File($"legacyid,name\n{RecordId},first\n");
+        Assert.Equal($"{RecordId}: name=text:first", await FileOutcomeAsync(named, primaryId: "legacyid"));
+    }
+
+    [Fact]
+    public async Task Id_column_is_honoured_when_the_primary_id_column_is_also_in_the_file()
+    {
+        // Mutant x10: --id-column was ignored when the primary id column was present. With --id-column legacyid, the ids
+        // come from legacyid, and accountid is then a value to update, which it cannot be.
+        var both = File($"accountid,legacyid,name\n{RecordId},{OtherId},first\n");
+        Assert.Equal($"{RecordId}: legacyid=guid:{OtherId}, name=text:first", await FileOutcomeAsync(both));
+        Assert.Equal("refused: Column 'accountid': 'accountid' cannot be updated.", await FileOutcomeAsync(both, idColumn: "legacyid"));
+
+        var idAndName = File($"legacyid,name\n{OtherId},first\n");
+        Assert.Equal($"{OtherId}: name=text:first", await FileOutcomeAsync(idAndName, idColumn: "legacyid"));
+    }
+
+    [Theory]
+    [InlineData("{ not json", "The mapping file is not valid JSON.")]
+    [InlineData("[1, 2]", "The mapping file is not a JSON object.")]
+    [InlineData("""{"columns": [1]}""", "The mapping file's 'columns' is not a JSON object.")]
+    [InlineData("""{"columns": {"name": "name"}}""", "Column 'name': The mapping file's entry for this column is not a JSON object.")]
+    [InlineData("""{"columns": {"name": {"field": 5}}}""", "Column 'name': The mapping file's 'field' for this column is not text.")]
+    [InlineData("""{"columns": {"name": {"field": "name"}, "NAME": {"field": "description"}}}""", "Column 'NAME': The mapping file has more than one entry")]
+    public async Task A_mapping_file_that_is_not_a_mapping_is_a_coded_refusal(string json, string expected)
+    {
+        // Should-fix 7: invalid JSON or an entry that is not an object threw a raw exception.
+        var mapping = Path.Combine(_directory, $"{Guid.NewGuid():N}.json");
+        System.IO.File.WriteAllText(mapping, json);
+        var outcome = await FileOutcomeAsync(File($"accountid,name\n{RecordId},first\n"), mapping);
+        Assert.StartsWith("refused: ", outcome);
+        Assert.Contains(expected, outcome, StringComparison.Ordinal);
     }
 }

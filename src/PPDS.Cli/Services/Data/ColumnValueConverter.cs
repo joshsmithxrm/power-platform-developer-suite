@@ -380,6 +380,11 @@ public static class ColumnValueConverter
             return ColumnValueResult.Refuse("The column's date and time behaviour is not known from its metadata.");
         }
 
+        if (dateFormat != null && DateFormatRefusal(dateFormat) is { } badFormat)
+        {
+            return ColumnValueResult.Refuse(badFormat);
+        }
+
         if (dateOnly)
         {
             return ConvertDate(text, dateFormat);
@@ -421,6 +426,81 @@ public static class ColumnValueConverter
             : ColumnValueResult.Refuse(column!.Format == DateTimeFormat.DateOnly
                 ? "The column shows a date but stores a UTC date and time (user local), so it takes yyyy-MM-ddTHH:mm:ssZ or yyyy-MM-ddTHH:mm:ss+hh:mm."
                 : "A date and time column takes yyyy-MM-ddTHH:mm:ssZ or yyyy-MM-ddTHH:mm:ss+hh:mm.");
+    }
+
+    /// <summary>
+    /// Why a mapping's <c>dateFormat</c> cannot be used, or null when it can. A format must name every part of the date
+    /// itself, so that nothing is taken from the machine's clock or settings: a four-digit year (<c>yyyy</c>), a month
+    /// (<c>M</c>, <c>MM</c>, <c>MMM</c> or <c>MMMM</c>) and a day of the month (<c>d</c> or <c>dd</c>). A missing part would
+    /// be the current year, or today's date; a two-digit year (<c>yy</c>) is given a century by a setting of the machine.
+    /// A fraction of a second (<c>f</c>, <c>F</c>) is refused, as the fixed forms refuse it, and so is a one-letter format,
+    /// which .NET reads as a standard format, not as the letter.
+    /// </summary>
+    internal static string? DateFormatRefusal(string format)
+    {
+        if (format.Length == 1)
+        {
+            return "The dateFormat is one letter, which .NET reads as a standard format; write the parts, such as dd/MM/yyyy.";
+        }
+
+        bool year = false, month = false, day = false, badYear = false, fraction = false;
+        for (var i = 0; i < format.Length;)
+        {
+            var c = format[i];
+            if (c is '\'' or '"')
+            {
+                var end = format.IndexOf(c, i + 1);
+                i = end < 0 ? format.Length : end + 1;
+                continue;
+            }
+
+            if (c == '\\')
+            {
+                i += 2;
+                continue;
+            }
+
+            if (c == '%')
+            {
+                i++;
+                continue;
+            }
+
+            var run = 1;
+            while (i + run < format.Length && format[i + run] == c)
+            {
+                run++;
+            }
+
+            switch (c)
+            {
+                case 'y':
+                    year |= run == 4;
+                    badYear |= run != 4;
+                    break;
+                case 'M':
+                    month |= run <= 4;
+                    break;
+                case 'd':
+                    day |= run <= 2;
+                    break;
+                case 'f' or 'F':
+                    fraction = true;
+                    break;
+            }
+
+            i += run;
+        }
+
+        if (badYear || !year || !month || !day)
+        {
+            return "The dateFormat must name a four-digit year (yyyy), a month (MM) and a day (dd), such as dd/MM/yyyy: " +
+                "a missing part, or a two-digit year, would be taken from the machine.";
+        }
+
+        return fraction
+            ? "The dateFormat has a fraction of a second (f or F); a date and time is sent to whole seconds."
+            : null;
     }
 
     private static ColumnValueResult ConvertDate(string text, string? dateFormat)

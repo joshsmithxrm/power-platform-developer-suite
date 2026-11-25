@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.ServiceModel;
 using CsvHelper;
 using CsvHelper.Configuration;
 using Microsoft.Extensions.Logging;
@@ -250,7 +251,23 @@ public sealed class CsvDataLoader
         Dictionary<string, ColumnMappingEntry> mappings;
         if (options.Mapping?.Columns != null)
         {
-            mappings = options.Mapping.Columns;
+            // Headers are matched to mapping keys ignoring case everywhere, so the keys are too, and two keys that differ
+            // only in case are refused: which entry is meant is not certain.
+            mappings = new Dictionary<string, ColumnMappingEntry>(StringComparer.OrdinalIgnoreCase);
+            var keyProblems = new List<DataValueProblem>();
+            foreach (var (name, entry) in options.Mapping.Columns)
+            {
+                if (!mappings.TryAdd(name, entry))
+                {
+                    keyProblems.Add(new DataValueProblem(null, name,
+                        "The mapping file has more than one entry for this column (ignoring case), so which is meant is not certain."));
+                }
+            }
+
+            if (keyProblems.Count > 0)
+            {
+                throw new DataValuesRefusedException(keyProblems);
+            }
 
             // Validate the mapping file against the CSV
             var validationResult = ValidateMapping(headers, mappings);
@@ -272,7 +289,13 @@ public sealed class CsvDataLoader
         }
         else
         {
-            var autoMappingResult = AutoMapColumns(headers, options.EntityLogicalName, attributesByName);
+            var ambiguous = new List<DataValueProblem>();
+            var autoMappingResult = AutoMapColumns(headers, options.EntityLogicalName, attributesByName, ambiguous);
+            if (ambiguous.Count > 0)
+            {
+                throw new DataValuesRefusedException(ambiguous);
+            }
+
             warnings.AddRange(autoMappingResult.Warnings);
 
             // Check if auto-mapping is incomplete
@@ -289,6 +312,7 @@ public sealed class CsvDataLoader
 
         // 5. The mapped columns and lookup configurations fit the table, before any lookup is read.
         var problems = CheckMappings(headers, mappings, attributesByName, options.AlternateKeyFields);
+        problems.AddRange(await CheckLookupKeyFieldsAsync(headers, mappings, cancellationToken));
         if (problems.Count > 0)
         {
             throw new DataValuesRefusedException(problems);
@@ -404,7 +428,8 @@ public sealed class CsvDataLoader
     private static AutoMappingResult AutoMapColumns(
         string[] headers,
         string entityLogicalName,
-        Dictionary<string, AttributeMetadata> attributesByName)
+        Dictionary<string, AttributeMetadata> attributesByName,
+        List<DataValueProblem> ambiguous)
     {
         var mappings = new Dictionary<string, ColumnMappingEntry>(StringComparer.OrdinalIgnoreCase);
         var unmatchedColumns = new List<UnmatchedColumn>();
@@ -417,6 +442,25 @@ public sealed class CsvDataLoader
         foreach (var header in headers)
         {
             var normalizedHeader = ColumnMatcher.NormalizeForMatching(header);
+
+            // A match by normalised name takes the one column that normalises alike, never the first of several.
+            bool Normalized(string normalized, out AttributeMetadata? found)
+            {
+                var candidates = attributesByName.Values
+                    .Where(a => ColumnMatcher.NormalizeForMatching(a.LogicalName) == normalized)
+                    .DistinctBy(a => a.LogicalName, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                found = candidates.Count == 1 ? candidates[0] : null;
+                if (candidates.Count > 1)
+                {
+                    ambiguous.Add(new DataValueProblem(null, header,
+                        $"The column's name matches {candidates.Count} columns of the table ({string.Join(", ", candidates.Select(c => c.LogicalName))}) " +
+                        "when compared without case, spaces, underscores and hyphens; map it in a mapping file."));
+                    found = candidates[0]; // refused above; kept only so the header is not reported as unmatched too
+                }
+
+                return found != null;
+            }
 
             // Try exact match first
             if (attributesByName.TryGetValue(header, out var attr))
@@ -431,13 +475,13 @@ public sealed class CsvDataLoader
                 matchedCount++;
             }
             // Try normalized prefix + column
-            else if (prefix != null && ColumnMatcher.TryFindAttribute(ColumnMatcher.NormalizeForMatching(prefix + header), attributesByName, out attr))
+            else if (prefix != null && Normalized(ColumnMatcher.NormalizeForMatching(prefix + header), out attr))
             {
                 mappings[header] = CreateAutoMapping(header, attr!);
                 matchedCount++;
             }
             // Try normalized match (existing)
-            else if (ColumnMatcher.TryFindAttribute(normalizedHeader, attributesByName, out attr))
+            else if (Normalized(normalizedHeader, out attr))
             {
                 mappings[header] = CreateAutoMapping(header, attr!);
                 matchedCount++;
@@ -522,6 +566,29 @@ public sealed class CsvDataLoader
                 continue;
             }
 
+            // An upsert creates the record or updates it, and which is not known before it is sent. A column that takes
+            // no value in one of the two (createdon; a primary id column, valid for create only; statecode in many tables,
+            // valid for update only) is refused: what Dataverse does with the value then is not certain.
+            if (attr.IsValidForCreate == false || attr.IsValidForUpdate == false)
+            {
+                var takes = (attr.IsValidForCreate, attr.IsValidForUpdate) switch
+                {
+                    (false, false) => "takes no value when a record is created or updated",
+                    (false, _) => "takes no value when a record is created",
+                    _ => "takes no value when a record is updated",
+                };
+                problems.Add(new DataValueProblem(null, header,
+                    $"'{attr.LogicalName}' {takes}, and a load may do either; skip the column in a mapping file."));
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(mapping.DateFormat) && attr is DateTimeAttributeMetadata
+                && ColumnValueConverter.DateFormatRefusal(mapping.DateFormat) is { } badFormat)
+            {
+                problems.Add(new DataValueProblem(null, header, badFormat));
+                continue;
+            }
+
             var isLookup = ColumnMatcher.IsLookupAttribute(attr);
             var targets = (attr as LookupAttributeMetadata)?.Targets ?? [];
             if (mapping.Lookup is { } lookup)
@@ -578,6 +645,65 @@ public sealed class CsvDataLoader
         return problems;
     }
 
+    /// <summary>
+    /// A lookup matched by a key field compares the cell's text with the key field's text, so the key field must be a text
+    /// column of the lookup's table: any other value would be turned into text in the machine's culture (#1916). Each
+    /// table and key field is read once from metadata.
+    /// </summary>
+    private async Task<List<DataValueProblem>> CheckLookupKeyFieldsAsync(
+        string[] headers,
+        Dictionary<string, ColumnMappingEntry> mappings,
+        CancellationToken cancellationToken)
+    {
+        var problems = new List<DataValueProblem>();
+        var refusals = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var header in headers)
+        {
+            if (!mappings.TryGetValue(header, out var mapping) || mapping.Skip || string.IsNullOrEmpty(mapping.Field)
+                || mapping.Lookup is not { MatchBy: "field", KeyField: { Length: > 0 } keyField } lookup)
+            {
+                continue;
+            }
+
+            var key = $"{lookup.Entity}:{keyField}";
+            if (!refusals.TryGetValue(key, out var refusal))
+            {
+                refusal = await KeyFieldRefusalAsync(lookup.Entity, keyField, cancellationToken);
+                refusals[key] = refusal;
+            }
+
+            if (refusal != null)
+            {
+                problems.Add(new DataValueProblem(null, header, refusal));
+            }
+        }
+
+        return problems;
+    }
+
+    private async Task<string?> KeyFieldRefusalAsync(string entity, string keyField, CancellationToken cancellationToken)
+    {
+        AttributeMetadata? attribute;
+        await using (var client = await _pool.GetClientAsync(cancellationToken: cancellationToken))
+        {
+            try
+            {
+                var response = (RetrieveAttributeResponse)await client.ExecuteAsync(
+                    new RetrieveAttributeRequest { EntityLogicalName = entity, LogicalName = keyField }, cancellationToken);
+                attribute = response.AttributeMetadata;
+            }
+            catch (FaultException<OrganizationServiceFault>)
+            {
+                return $"The lookup's keyField '{keyField}' is not a column of table '{entity}'.";
+            }
+        }
+
+        return attribute is StringAttributeMetadata or MemoAttributeMetadata
+            ? null
+            : $"The lookup's keyField '{keyField}' is not a text column of table '{entity}'. A lookup matched by field " +
+              "compares text, and another type would be read in the machine's culture; match by a text column, or by GUID.";
+    }
+
     private static IEnumerable<(string ColumnName, LookupConfig Config)> GetLookupConfigs(
         Dictionary<string, ColumnMappingEntry> mappings,
         Dictionary<string, AttributeMetadata> attributes)
@@ -632,6 +758,9 @@ public sealed class CsvDataLoader
                 var keyValue = Cell(keyHeader);
                 if (string.IsNullOrEmpty(keyValue))
                 {
+                    // Without every key value the upsert has no key, or a different one: the row is refused.
+                    problems.Add(new DataValueProblem(rowNumber, keyHeader, $"The row has no value for alternate key field '{keyField}'."));
+                    hasError = true;
                     continue;
                 }
 

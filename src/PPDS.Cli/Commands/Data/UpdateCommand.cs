@@ -67,7 +67,7 @@ public static class UpdateCommand
 
         var fileOption = new Option<FileInfo?>("--file")
         {
-            Description = "Path to CSV file of records to update: a header row, the table's primary id column (or --id-column) and the columns to update; RFC 4180 quoting. A malformed row, a bad or repeated id or a value not in its column's form refuses the whole file before anything is written"
+            Description = "Path to a UTF-8 CSV file of records to update: a header row, the table's primary id column (or --id-column) and the columns to update; RFC 4180 quoting. An empty cell clears its column. A file that is not UTF-8, a malformed row, a bad or repeated id or a value not in its column's form refuses the whole file before anything is written"
         };
         fileOption.Validators.Add(result =>
         {

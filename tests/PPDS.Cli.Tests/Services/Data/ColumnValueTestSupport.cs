@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using PPDS.Dataverse.Client;
 using PPDS.Dataverse.Pooling;
@@ -15,9 +16,10 @@ internal static class ColumnValueTestSupport
 {
     /// <summary>
     /// The invariant culture, two cultures whose decimal separator is a comma (de-DE groups with a point, fr-FR with a
-    /// space), and one whose native digits are not ASCII (ar-SA).
+    /// space), one whose native digits are not ASCII (ar-SA), and one whose calendar is not the Gregorian (fa-IR, the
+    /// Persian calendar).
     /// </summary>
-    public static readonly string[] Cultures = ["", "de-DE", "fr-FR", "ar-SA"];
+    public static readonly string[] Cultures = ["", "de-DE", "fr-FR", "ar-SA", "fa-IR"];
 
     /// <summary>Runs <paramref name="body"/> once under each of <see cref="Cultures"/> and returns each result.</summary>
     public static List<T> InEveryCulture<T>(Func<T> body)
@@ -123,27 +125,65 @@ internal static class ColumnValueTestSupport
 
     /// <summary>
     /// A pool whose clients answer <see cref="RetrieveEntityRequest"/> for <paramref name="entity"/> with these columns,
-    /// and fail any other request.
+    /// and fail any other request. The primary id column is <c>entity + "id"</c>.
     /// </summary>
-    public static Mock<IDataverseConnectionPool> PoolWithColumns(string entity, params AttributeMetadata[] columns)
-    {
-        var metadata = new EntityMetadata { LogicalName = entity };
-        typeof(EntityMetadata).GetProperty("PrimaryIdAttribute")!.SetValue(metadata, entity + "id");
-        typeof(EntityMetadata).GetProperty("Attributes")!.SetValue(metadata, columns);
+    public static Mock<IDataverseConnectionPool> PoolWithColumns(string entity, params AttributeMetadata[] columns) =>
+        PoolWithTables(new TestTable(entity, entity + "id", columns));
 
+    /// <summary>A table the test pool serves: its metadata, and the records a query of it returns.</summary>
+    public sealed record TestTable(string Name, string PrimaryId, AttributeMetadata[] Columns)
+    {
+        /// <summary>The records, returned one per page, so a reader that stops after the first page misses the rest.</summary>
+        public List<Entity> Records { get; init; } = [];
+    }
+
+    /// <summary>
+    /// A pool whose clients answer <see cref="RetrieveEntityRequest"/> and <see cref="RetrieveAttributeRequest"/> for these
+    /// tables (an unknown column is a fault, as on the server), and <c>RetrieveMultipleAsync</c> with each table's records,
+    /// one record per page; any other request fails.
+    /// </summary>
+    public static Mock<IDataverseConnectionPool> PoolWithTables(params TestTable[] tables)
+    {
+        var byName = tables.ToDictionary(t => t.Name, StringComparer.OrdinalIgnoreCase);
         var client = new Mock<IPooledClient>();
         client.Setup(c => c.DisposeAsync()).Returns(ValueTask.CompletedTask);
         client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((OrganizationRequest request, CancellationToken _) =>
             {
-                if (request is RetrieveEntityRequest { } r && r.LogicalName == entity)
+                if (request is RetrieveEntityRequest { } r && byName.TryGetValue(r.LogicalName, out var table))
                 {
+                    var metadata = new EntityMetadata { LogicalName = table.Name };
+                    typeof(EntityMetadata).GetProperty("PrimaryIdAttribute")!.SetValue(metadata, table.PrimaryId);
+                    typeof(EntityMetadata).GetProperty("Attributes")!.SetValue(metadata, table.Columns);
                     var response = new RetrieveEntityResponse();
                     response.Results["EntityMetadata"] = metadata;
                     return response;
                 }
 
+                if (request is RetrieveAttributeRequest { } a && byName.TryGetValue(a.EntityLogicalName, out var owner))
+                {
+                    var column = owner.Columns.FirstOrDefault(c => string.Equals(c.LogicalName, a.LogicalName, StringComparison.OrdinalIgnoreCase))
+                        ?? throw new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault(), "Unknown column.");
+                    var response = new RetrieveAttributeResponse();
+                    response.Results["AttributeMetadata"] = column;
+                    return response;
+                }
+
                 throw new InvalidOperationException($"Unexpected request {request.RequestName}.");
+            });
+        client.Setup(c => c.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryBase query, CancellationToken _) =>
+            {
+                var q = (QueryExpression)query;
+                var records = byName[q.EntityName].Records;
+                var page = q.PageInfo?.PageNumber ?? 1;
+                var result = new EntityCollection(records.Skip(page - 1).Take(1).ToList())
+                {
+                    EntityName = q.EntityName,
+                    MoreRecords = page < records.Count,
+                    PagingCookie = $"page{page}",
+                };
+                return result;
             });
 
         var pool = new Mock<IDataverseConnectionPool>();
