@@ -62,12 +62,6 @@ public enum DataTruncateStopReason
     /// <summary>Every record left is one that this run failed to delete; none was retried.</summary>
     OnlyFailedRecordsRemain,
 
-    /// <summary>
-    /// A read returned only records that this run failed to delete, and as many as one read can return: records not
-    /// attempted may remain.
-    /// </summary>
-    TooManyFailedRecords,
-
     /// <summary>A pass deleted no record.</summary>
     PassDeletedNothing,
 
@@ -158,7 +152,9 @@ public sealed class DataTruncateService : IDataTruncateService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Ask for enough rows that the records already failed cannot crowd out the next batch.
+            // Ask for enough rows that the records already failed cannot crowd out the next batch. A pass that deletes
+            // nothing ends the run, so fewer than MaxFetch records can have failed before any read: a read that holds
+            // no record this run has not attempted holds every record left.
             var fetchSize = Math.Min(MaxFetch, options.BatchSize + failed.Count);
             var fetched = await _dataQueryService.FetchBatchIdsAsync(entity, fetchSize, cancellationToken);
             if (fetched.Count == 0)
@@ -191,9 +187,7 @@ public sealed class DataTruncateService : IDataTruncateService
             var batch = fetched.Where(id => !attempted.Contains(id)).Distinct().Take(options.BatchSize).ToList();
             if (batch.Count == 0)
             {
-                reason = fetched.Count >= fetchSize
-                    ? DataTruncateStopReason.TooManyFailedRecords
-                    : DataTruncateStopReason.OnlyFailedRecordsRemain;
+                reason = DataTruncateStopReason.OnlyFailedRecordsRemain;
                 break;
             }
 

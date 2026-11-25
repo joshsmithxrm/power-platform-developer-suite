@@ -332,9 +332,6 @@ public static class TruncateCommand
         DataTruncateStopReason.Completed => "No record is left to read, although some deletes failed.",
         DataTruncateStopReason.OnlyFailedRecordsRemain =>
             "Stopped: every record left is one that could not be deleted in this run; none was retried.",
-        DataTruncateStopReason.TooManyFailedRecords =>
-            "Stopped: so many records could not be deleted that the next read held only those; records that were " +
-            "not attempted may remain. Fix the cause of the failures and run the command again.",
         DataTruncateStopReason.PassDeletedNothing =>
             "Stopped: a pass deleted no record. Records remain; fix the cause of the failures and run the command again.",
         DataTruncateStopReason.StoppedOnError =>
