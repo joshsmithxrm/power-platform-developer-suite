@@ -15,6 +15,8 @@ public class ExceptionMapperTests
     [InlineData(PPDS.Migration.Import.ImportRefusalReasons.SkipIsPerTable, ErrorCodes.Validation.InvalidArguments, ExitCodes.InvalidArguments)]
     [InlineData(PPDS.Migration.Import.ImportRefusalReasons.PluginTableNotResolved, ErrorCodes.Operation.NotFound, ExitCodes.NotFoundError)]
     [InlineData(PPDS.Migration.Import.ImportRefusalReasons.PluginStepNotDisabled, ErrorCodes.Operation.Dependency, ExitCodes.Failure)]
+    [InlineData(PPDS.Migration.Import.ImportRefusalReasons.ModeNotImplemented, ErrorCodes.Validation.InvalidArguments, ExitCodes.InvalidArguments)]
+    [InlineData(PPDS.Migration.Import.ImportRefusalReasons.PluginTableMetadataUnavailable, ErrorCodes.Connection.Failed, ExitCodes.ConnectionError)]
     public void Map_ImportRefusedException_MapsEachReason(string reason, string code, int exitCode)
     {
         // #1914, #1921: an import refused before anything was written.

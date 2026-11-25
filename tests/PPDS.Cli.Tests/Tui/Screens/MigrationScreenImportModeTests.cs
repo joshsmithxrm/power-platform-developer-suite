@@ -21,11 +21,17 @@ public sealed class MigrationScreenImportModeTests
     [InlineData(0, ImportMode.Create)]
     [InlineData(1, ImportMode.Update)]
     [InlineData(2, ImportMode.Upsert)]
-    [InlineData(3, ImportMode.Upsert)]
-    [InlineData(-1, ImportMode.Upsert)]
-    public void ImportModeAt_NeverReturnsSkip(int selected, ImportMode expected)
+    public void ImportModeAt_ReturnsTheSelectedMode(int selected, ImportMode expected)
     {
         Assert.Equal(expected, MigrationScreen.ImportModeAt(selected));
+    }
+
+    [Theory]
+    [InlineData(3)]
+    [InlineData(-1)]
+    public void ImportModeAt_OutOfRange_IsRefused_NotTheDefault(int selected)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => MigrationScreen.ImportModeAt(selected));
     }
 
     [Fact]

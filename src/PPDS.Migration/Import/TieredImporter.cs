@@ -426,7 +426,7 @@ namespace PPDS.Migration.Import
             }
 
             throw new ImportRefusedException(
-                ImportRefusalReasons.SkipIsPerTable,
+                ImportRefusalReasons.ModeNotImplemented,
                 "The import mode is not one of Create, Update or Upsert. Nothing was read or written.");
         }
 

@@ -43,7 +43,7 @@ internal sealed class FakePluginTarget
                 if (!Codes.TryGetValue(retrieve.LogicalName, out var code))
                 {
                     throw new System.ServiceModel.FaultException<OrganizationServiceFault>(
-                        new OrganizationServiceFault { Message = "Could not find entity" });
+                        new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040217), Message = "Could not find entity" });
                 }
 
                 var metadata = new EntityMetadata { LogicalName = MetadataAnswersWith ?? retrieve.LogicalName };

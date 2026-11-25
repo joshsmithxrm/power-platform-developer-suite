@@ -79,6 +79,18 @@ namespace PPDS.Migration.Import
         public const string PluginTableNotResolved = "Import.PluginTableNotResolved";
 
         /// <summary>
+        /// The metadata of a table whose plug-in steps are to be disabled could not be read from the
+        /// target environment for another reason than the table not existing (throttling, sign-in, a
+        /// missing privilege, an outage).
+        /// </summary>
+        public const string PluginTableMetadataUnavailable = "Import.PluginTableMetadataUnavailable";
+
+        /// <summary>
+        /// The import mode is not one of <see cref="ImportMode"/>'s members.
+        /// </summary>
+        public const string ModeNotImplemented = "Import.ModeNotImplemented";
+
+        /// <summary>
         /// A plug-in step that was to be disabled for the import could not be disabled.
         /// </summary>
         public const string PluginStepNotDisabled = "Import.PluginStepNotDisabled";

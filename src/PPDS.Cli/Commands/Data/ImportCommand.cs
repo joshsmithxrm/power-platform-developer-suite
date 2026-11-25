@@ -40,6 +40,37 @@ public static class ImportCommand
         error.WriteLine("Re-enable them in the target (for example in the Plug-in Registration Tool).");
     }
 
+    /// <summary>
+    /// Parses <c>--mode</c> by name only (Create, Update or Upsert, any case). Skip is a per-table
+    /// schema setting and as the mode of the whole import used to upsert every record (#1914); a
+    /// number or any other text is refused with its own message (#1914 review should-fix 9 and 13).
+    /// Refused here, before anything connects, and again by the importer.
+    /// </summary>
+    internal static ImportMode ParseMode(System.CommandLine.Parsing.ArgumentResult result)
+    {
+        if (result.Tokens.Count == 0)
+        {
+            return ImportMode.Upsert; // a missing value is reported by arity enforcement
+        }
+
+        var token = result.Tokens[^1].Value.Trim();
+        foreach (var mode in new[] { ImportMode.Create, ImportMode.Update, ImportMode.Upsert })
+        {
+            if (string.Equals(token, mode.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                return mode;
+            }
+        }
+
+        result.AddError(string.Equals(token, nameof(ImportMode.Skip), StringComparison.OrdinalIgnoreCase)
+            ? SkipModeRefusedMessage
+            : ModeNamesOnlyMessage);
+        return ImportMode.Upsert;
+    }
+
+    /// <summary>The parse error for a <c>--mode</c> value that is not a mode name.</summary>
+    internal const string ModeNamesOnlyMessage = "--mode takes one of the names Create, Update or Upsert.";
+
     /// <summary>The parse error for <c>--mode Skip</c> (#1914).</summary>
     internal const string SkipModeRefusedMessage =
         "--mode accepts Create, Update or Upsert. Skip applies to one table: set importMode=\"skip\" on that table in the schema.";
@@ -75,23 +106,10 @@ public static class ImportCommand
             Description = "Import mode: Create, Update, or Upsert. To leave a table out, set importMode=\"skip\" on it in the schema",
             DefaultValueFactory = _ => ImportMode.Upsert
         };
-        modeOption.Validators.Add(result =>
-        {
-            // Skip is a per-table schema setting; as the mode of the whole import it used to upsert
-            // every record (#1914). Refused here, before connecting, and again by the importer.
-            ImportMode value;
-            try
-            {
-                value = result.GetValueOrDefault<ImportMode>();
-            }
-            catch (InvalidOperationException)
-            {
-                return; // not an ImportMode at all: the parser reports that itself
-            }
-
-            if (value is not (ImportMode.Create or ImportMode.Update or ImportMode.Upsert))
-                result.AddError(SkipModeRefusedMessage);
-        });
+        modeOption.HelpName = "Create|Update|Upsert";
+        modeOption.CustomParser = result => ParseMode(result);
+        modeOption.CompletionSources.Clear();
+        modeOption.CompletionSources.Add("Create", "Update", "Upsert");
 
         var userMappingOption = new Option<FileInfo?>("--user-mapping", "-u")
         {

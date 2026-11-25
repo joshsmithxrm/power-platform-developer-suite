@@ -109,6 +109,30 @@ public class PluginStepManagerTests
         target.FetchXml.Should().BeEmpty();
     }
 
+    public static TheoryData<Exception, string> MetadataFailures => new()
+    {
+        { new PPDS.Dataverse.Resilience.ServiceProtectionException("c", TimeSpan.FromSeconds(1), 0), "the service is throttling requests" },
+        { new TimeoutException(), "the request timed out" },
+        { new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = PluginStepManager.PrivilegeDeniedErrorCode, Message = "Principal user is missing prvReadEntity" }), "you do not have the privilege to read it" },
+        { new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040216), Message = "Generic SQL error" }), "the service returned error 0x80040216" },
+    };
+
+    [Theory]
+    [MemberData(nameof(MetadataFailures))]
+    public async Task GetActivePluginStepsAsync_OtherMetadataFailure_IsNotReportedAsNotFound(Exception failure, string reason)
+    {
+        // #1921 review should-fix 7.
+        _pooledClient
+            .Setup(x => x.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure);
+
+        var act = () => _sut.GetActivePluginStepsAsync(new[] { "new_widget" });
+
+        var ex = (await act.Should().ThrowAsync<ImportRefusedException>()).Which;
+        ex.Reason.Should().Be(ImportRefusalReasons.PluginTableMetadataUnavailable);
+        ex.Message.Should().Contain(reason).And.Contain("new_widget").And.NotContain("not found");
+    }
+
     [Fact]
     public async Task GetActivePluginStepsAsync_MetadataWithoutCode_Refuses()
     {

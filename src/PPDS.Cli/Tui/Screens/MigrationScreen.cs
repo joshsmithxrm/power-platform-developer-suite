@@ -582,9 +582,14 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
     /// </summary>
     internal static readonly IReadOnlyList<ImportMode> ImportModes = new[] { ImportMode.Create, ImportMode.Update, ImportMode.Upsert };
 
-    /// <summary>The mode for a radio selection; Upsert (the default) when out of range.</summary>
+    /// <summary>
+    /// The mode for a radio selection. A selection outside the list is refused, not read as the
+    /// default (#1914 review should-fix 13).
+    /// </summary>
     internal static ImportMode ImportModeAt(int selectedItem) =>
-        selectedItem >= 0 && selectedItem < ImportModes.Count ? ImportModes[selectedItem] : ImportMode.Upsert;
+        selectedItem >= 0 && selectedItem < ImportModes.Count
+            ? ImportModes[selectedItem]
+            : throw new ArgumentOutOfRangeException(nameof(selectedItem), "No import mode is selected. Choose Create, Update or Upsert.");
 
     private static string FormatCount(int? count) => count?.ToString() ?? "unknown";
 

@@ -228,6 +228,31 @@ public class ImportCommandTests : IDisposable
         Assert.Equal("", output.ToString());
     }
 
+    [Theory]
+    [InlineData("3")]
+    [InlineData("0")]
+    [InlineData("2")]
+    [InlineData("Invalid")]
+    [InlineData("Create,Update")]
+    public void Parse_ModeThatIsNotAName_IsRefusedWithItsOwnMessage(string mode)
+    {
+        var result = _command.Parse($"-d \"{_tempDataFile}\" --mode {mode}");
+
+        var error = Assert.Single(result.Errors);
+        Assert.Equal(ImportCommand.ModeNamesOnlyMessage, error.Message);
+    }
+
+    [Theory]
+    [InlineData("create")]
+    [InlineData("UPDATE")]
+    [InlineData("Upsert")]
+    public void Parse_ModeName_AnyCase_Succeeds(string mode)
+    {
+        var result = _command.Parse($"-d \"{_tempDataFile}\" --mode {mode}");
+
+        Assert.Empty(result.Errors);
+    }
+
     [Fact]
     public void ModeOption_Description_NamesSkipAsAPerTableSetting()
     {

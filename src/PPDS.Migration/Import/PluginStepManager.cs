@@ -128,16 +128,54 @@ namespace PPDS.Migration.Import
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                throw NotResolved(logicalName, ex);
+                if (IsTableNotFound(ex))
+                {
+                    throw NotResolved(logicalName, ex);
+                }
+
+                // Throttling, sign-in, a missing privilege or an outage is not "the table is not
+                // there": say which, so the user does not go looking for a table that exists
+                // (#1921 review should-fix 7).
+                throw new ImportRefusedException(
+                    ImportRefusalReasons.PluginTableMetadataUnavailable,
+                    $"The metadata of table '{logicalName}' could not be read from the target environment ({DescribeMetadataFailure(ex)}), " +
+                    "so its plug-in steps cannot be selected. No plug-in step was disabled and nothing was imported. Try again, " +
+                    "or remove disableplugins from its entry in the schema.",
+                    ex);
             }
 
             return code ?? throw NotResolved(logicalName, null);
         }
 
+        /// <summary>The fault Dataverse returns for a table that does not exist (ObjectDoesNotExist).</summary>
+        internal const int ObjectDoesNotExistErrorCode = unchecked((int)0x80040217);
+
+        private static bool IsTableNotFound(Exception ex) =>
+            ex is System.ServiceModel.FaultException<OrganizationServiceFault> fault &&
+            (fault.Detail?.ErrorCode == ObjectDoesNotExistErrorCode ||
+             (fault.Detail?.Message ?? fault.Message).StartsWith("Could not find entity", StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>A short reason for a metadata failure, without the service's own message (it can carry ids).</summary>
+        internal static string DescribeMetadataFailure(Exception ex) => ex switch
+        {
+            PPDS.Dataverse.Resilience.ServiceProtectionException => "the service is throttling requests",
+            PPDS.Dataverse.Resilience.DataverseAuthenticationException => "sign-in failed",
+            PPDS.Dataverse.Security.DataverseConnectionException => "the connection failed",
+            TimeoutException => "the request timed out",
+            System.ServiceModel.FaultException<OrganizationServiceFault> fault when fault.Detail?.ErrorCode == PrivilegeDeniedErrorCode
+                => "you do not have the privilege to read it",
+            System.ServiceModel.FaultException<OrganizationServiceFault> fault
+                => $"the service returned error 0x{fault.Detail?.ErrorCode ?? 0:X8}",
+            _ => $"{ex.GetType().Name}"
+        };
+
+        /// <summary>The fault Dataverse returns for a missing privilege (PrivilegeDenied).</summary>
+        internal const int PrivilegeDeniedErrorCode = unchecked((int)0x80040220);
+
         private static ImportRefusedException NotResolved(string logicalName, Exception? inner) =>
             new(ImportRefusalReasons.PluginTableNotResolved,
-                $"Table '{logicalName}' is marked to have its plug-in steps disabled during the import, but it could not be " +
-                "found in the target environment's metadata. No plug-in step was disabled and nothing was imported. " +
+                $"Table '{logicalName}' is marked to have its plug-in steps disabled during the import, but it was not " +
+                "found in the target environment. No plug-in step was disabled and nothing was imported. " +
                 "Create the table in the target, or remove disableplugins from its entry in the schema.",
                 inner);
 

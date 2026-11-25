@@ -170,7 +170,8 @@ public class TieredImporterWriteSafetyTests
 
         var act = () => sut.ImportAsync(data, Plan("account"), new ImportOptions { Mode = (ImportMode)42 });
 
-        await act.Should().ThrowAsync<ImportRefusedException>();
+        (await act.Should().ThrowAsync<ImportRefusedException>()).Which.Reason
+            .Should().Be(ImportRefusalReasons.ModeNotImplemented, "a mode outside the enum is not the Skip refusal");
         _bulkCalls.Should().BeEmpty();
     }
 
