@@ -22,7 +22,11 @@ public static class DeleteCommand
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    public static Command Create()
+    public static Command Create() => Create(null);
+
+    /// <summary>Creates the command; tests pass <paramref name="providerFactory"/> to supply the services.</summary>
+    internal static Command Create(
+        Func<string?, string?, GlobalOptionValues, CancellationToken, Task<ServiceProvider>>? providerFactory)
     {
         var entityOption = new Option<string>("--entity", "-e")
         {
@@ -42,10 +46,20 @@ public static class DeleteCommand
             }
         });
 
-        var idOption = new Option<Guid?>("--id")
+        // Text, not Guid: the command-line library's GUID parse accepts damaged ids (a '+' or '0x' inside a block is
+        // read as hex digits), so the characters are checked first (#1915).
+        var idOption = new Option<string?>("--id")
         {
-            Description = "Record ID (GUID) to delete"
+            Description = $"Record ID to delete: {RecordIdText.Rule}"
         };
+        idOption.Validators.Add(result =>
+        {
+            var text = result.GetValue(idOption);
+            if (text != null && !RecordIdText.TryParse(text, out _))
+            {
+                result.AddError($"--id is not a record id: {RecordIdText.Rule}. Nothing was deleted.");
+            }
+        });
 
         var keyOption = new Option<string?>("--key", "-k")
         {
@@ -54,7 +68,7 @@ public static class DeleteCommand
 
         var fileOption = new Option<FileInfo?>("--file")
         {
-            Description = "Path to file containing record IDs (JSON array or CSV with ID column)"
+            Description = $"Path to file containing record IDs (JSON array or CSV with a header row); each id must be exact: {RecordIdText.Rule}"
         };
         fileOption.Validators.Add(result =>
         {
@@ -67,7 +81,7 @@ public static class DeleteCommand
 
         var idColumnOption = new Option<string?>("--id-column")
         {
-            Description = "Column name containing record IDs in CSV file (default: entity primary key)"
+            Description = "Column (CSV header or JSON property) holding the record IDs in the file (default: the table's primary id column)"
         };
 
         var filterOption = new Option<string?>("--filter")
@@ -161,7 +175,7 @@ public static class DeleteCommand
             var file = result.GetValue(fileOption);
             var filter = result.GetValue(filterOption);
 
-            var modeCount = (id.HasValue ? 1 : 0) +
+            var modeCount = (id != null ? 1 : 0) +
                            (!string.IsNullOrEmpty(key) ? 1 : 0) +
                            (file != null ? 1 : 0) +
                            (!string.IsNullOrEmpty(filter) ? 1 : 0);
@@ -179,7 +193,7 @@ public static class DeleteCommand
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             var entity = parseResult.GetValue(entityOption)!;
-            var id = parseResult.GetValue(idOption);
+            var id = RecordIdText.TryParse(parseResult.GetValue(idOption), out var parsedId) ? parsedId : (Guid?)null;
             var key = parseResult.GetValue(keyOption);
             var file = parseResult.GetValue(fileOption);
             var idColumn = parseResult.GetValue(idColumnOption);
@@ -202,7 +216,7 @@ public static class DeleteCommand
                 force, dryRun, limit, batchSize,
                 bypassPlugins, bypassFlows, continueOnError,
                 profile, environment, globalOptions,
-                cancellationToken);
+                cancellationToken, providerFactory);
         });
 
         return command;
@@ -225,7 +239,8 @@ public static class DeleteCommand
         string? profileName,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string?, string?, GlobalOptionValues, CancellationToken, Task<ServiceProvider>>? providerFactory = null)
     {
         try
         {
@@ -241,13 +256,15 @@ public static class DeleteCommand
                 Console.Error.WriteLine("Connecting to Dataverse...");
             }
 
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profileName,
-                environment,
-                globalOptions.Verbose,
-                globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+            await using var serviceProvider = providerFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
+                    profileName,
+                    environment,
+                    globalOptions.Verbose,
+                    globalOptions.Debug,
+                    ProfileServiceFactory.DefaultDeviceCodeCallback,
+                    cancellationToken)
+                : await providerFactory(profileName, environment, globalOptions, cancellationToken);
 
             if (!globalOptions.IsJsonMode)
             {
@@ -278,7 +295,9 @@ public static class DeleteCommand
             }
             else if (file != null)
             {
-                idsToDelete = await LoadIdsFromFileAsync(file, idColumn, entity, cancellationToken);
+                // The ids come only from --id-column or the table's primary id column; anything else is refused (#1915).
+                var recordIdFileService = serviceProvider.GetRequiredService<IRecordIdFileService>();
+                idsToDelete = (await recordIdFileService.ReadIdsAsync(file.FullName, entity, idColumn, cancellationToken)).ToList();
                 if (idsToDelete.Count == 0)
                 {
                     WriteError(globalOptions, "NO_RECORDS", "No record IDs found in file");
@@ -479,140 +498,6 @@ public static class DeleteCommand
             }
             return ExceptionMapper.ToExitCode(ex);
         }
-    }
-
-    private static async Task<List<Guid>> LoadIdsFromFileAsync(
-        FileInfo file,
-        string? idColumn,
-        string entity,
-        CancellationToken cancellationToken)
-    {
-        var content = await File.ReadAllTextAsync(file.FullName, cancellationToken);
-        content = content.Trim();
-
-        // Try JSON first
-        if (content.StartsWith('[') || content.StartsWith('{'))
-        {
-            return ParseJsonIds(content);
-        }
-
-        // Assume CSV
-        return ParseCsvIds(content, idColumn, entity);
-    }
-
-    private static List<Guid> ParseJsonIds(string content)
-    {
-        var ids = new List<Guid>();
-
-        using var doc = JsonDocument.Parse(content);
-
-        if (doc.RootElement.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var element in doc.RootElement.EnumerateArray())
-            {
-                if (element.ValueKind == JsonValueKind.String && Guid.TryParse(element.GetString(), out var id))
-                {
-                    ids.Add(id);
-                }
-                else if (element.ValueKind == JsonValueKind.Object)
-                {
-                    // Look for common ID property names
-                    foreach (var prop in element.EnumerateObject())
-                    {
-                        if (prop.Name.EndsWith("id", StringComparison.OrdinalIgnoreCase) &&
-                            prop.Value.ValueKind == JsonValueKind.String &&
-                            Guid.TryParse(prop.Value.GetString(), out var objId))
-                        {
-                            ids.Add(objId);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        else if (doc.RootElement.ValueKind == JsonValueKind.Object &&
-                 doc.RootElement.TryGetProperty("records", out var records) &&
-                 records.ValueKind == JsonValueKind.Array)
-        {
-            // Handle { "records": [...] } format
-            return ParseJsonIds(records.GetRawText());
-        }
-
-        return ids;
-    }
-
-    private static List<Guid> ParseCsvIds(string content, string? idColumn, string entity)
-    {
-        var ids = new List<Guid>();
-        var lines = content.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
-
-        if (lines.Length == 0) return ids;
-
-        // Parse header using same CSV parser as data rows for consistency
-        var headers = ParseCsvLine(lines[0]).Select(h => h.Trim()).ToList();
-
-        // Find ID column
-        var idColIndex = -1;
-        if (!string.IsNullOrEmpty(idColumn))
-        {
-            idColIndex = headers.FindIndex(h => h.Equals(idColumn, StringComparison.OrdinalIgnoreCase));
-            if (idColIndex < 0)
-            {
-                throw new ArgumentException($"Column '{idColumn}' not found in CSV. Available: {string.Join(", ", headers)}");
-            }
-        }
-        else
-        {
-            // Try to find primary key column (entityid or id)
-            idColIndex = headers.FindIndex(h =>
-                h.Equals($"{entity}id", StringComparison.OrdinalIgnoreCase) ||
-                h.Equals("id", StringComparison.OrdinalIgnoreCase));
-
-            if (idColIndex < 0)
-            {
-                throw new ArgumentException($"Could not find ID column. Specify --id-column. Available: {string.Join(", ", headers)}");
-            }
-        }
-
-        // Parse data rows
-        for (var i = 1; i < lines.Length; i++)
-        {
-            var values = ParseCsvLine(lines[i]).Select(v => v.Trim()).ToList();
-            if (values.Count > idColIndex && Guid.TryParse(values[idColIndex], out var id))
-            {
-                ids.Add(id);
-            }
-        }
-
-        return ids;
-    }
-
-    private static List<string> ParseCsvLine(string line)
-    {
-        var values = new List<string>();
-        var current = new System.Text.StringBuilder();
-        var inQuotes = false;
-
-        foreach (var c in line)
-        {
-            if (c == '"')
-            {
-                inQuotes = !inQuotes;
-                // Don't append quotes - just toggle state
-            }
-            else if (c == ',' && !inQuotes)
-            {
-                values.Add(current.ToString());
-                current.Clear();
-            }
-            else
-            {
-                current.Append(c);
-            }
-        }
-
-        values.Add(current.ToString());
-        return values;
     }
 
     private static void WriteTextResult(BulkOperationResult result)

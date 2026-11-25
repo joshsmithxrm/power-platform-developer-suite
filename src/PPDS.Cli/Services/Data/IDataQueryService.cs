@@ -19,9 +19,11 @@ public interface IDataQueryService
     /// <param name="entity">Logical name of the entity.</param>
     /// <param name="keyString">Comma-separated field=value pairs that uniquely identify the record.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The record GUID, or <see langword="null"/> if no match found.</returns>
+    /// <returns>The record GUID when exactly one record matches, or <see langword="null"/> if none matches.</returns>
     /// <exception cref="PPDS.Cli.Infrastructure.Errors.PpdsException">
-    /// Thrown with <c>Query.ExecutionFailed</c> when the Dataverse call fails.
+    /// Thrown with <c>Validation.KeyMatchesMultipleRecords</c> when more than one record matches (two rows are asked
+    /// for; the message says whether the columns are a defined alternate key of the table), and with
+    /// <c>Query.ExecutionFailed</c> when the Dataverse call fails.
     /// </exception>
     Task<Guid?> ResolveByAlternateKeyAsync(
         string entity,
