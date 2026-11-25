@@ -22,10 +22,24 @@ public interface IEnvironmentConfigService
     /// Saves or merges configuration for a specific environment.
     /// Only non-null parameters are updated (existing values preserved).
     /// </summary>
-    Task<EnvironmentConfig> SaveConfigAsync(string url, string? label = null, EnvironmentType? type = null, EnvironmentColor? color = null, bool clearColor = false, CancellationToken ct = default);
+    /// <param name="confirmLowerProtection">
+    /// The environment URL, given only after the user confirmed a change that lowers write protection
+    /// (see <see cref="AssessConfigChangeAsync"/>). Without it such a change is refused with
+    /// <see cref="EnvironmentConfirmationErrorCodes.ProtectionLoweringConfirmationRequired"/>; a different
+    /// URL is refused with <see cref="EnvironmentConfirmationErrorCodes.TargetMismatch"/>; a host that never
+    /// lowers protection refuses it with <see cref="EnvironmentConfirmationErrorCodes.ProtectionLoweringRefused"/>.
+    /// </param>
+    Task<EnvironmentConfig> SaveConfigAsync(string url, string? label = null, EnvironmentType? type = null, EnvironmentColor? color = null, bool clearColor = false, string? confirmLowerProtection = null, CancellationToken ct = default);
 
     /// <summary>
-    /// Removes configuration for a specific environment.
+    /// Reports whether saving <paramref name="type"/> for the environment would lower its write protection,
+    /// so a surface can ask for confirmation before calling <see cref="SaveConfigAsync"/>. Saves nothing.
+    /// </summary>
+    Task<ProtectionChangeAssessment> AssessConfigChangeAsync(string url, EnvironmentType? type, CancellationToken ct = default);
+
+    /// <summary>
+    /// Removes configuration for a specific environment. Never lowers protection: every writer treats
+    /// an environment without saved configuration as Production.
     /// </summary>
     Task<bool> RemoveConfigAsync(string url, CancellationToken ct = default);
 

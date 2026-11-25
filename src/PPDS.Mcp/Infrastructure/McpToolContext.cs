@@ -335,6 +335,7 @@ public sealed partial class McpToolContext : IDisposable
         // here, plus IShakedownGuard. MCP tools resolve these from this child provider, so
         // they must be registered here too (not only in PPDS.Mcp.Program.cs).
         services.AddCliApplicationServices();
+        services.AddMcpSafetyPolicies();
 
         // Connection pool with factory delegate.
         services.AddSingleton<IDataverseConnectionPool>(sp =>

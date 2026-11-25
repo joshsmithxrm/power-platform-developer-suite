@@ -1063,9 +1063,7 @@ public sealed class SqlQueryService : ISqlQueryService
         foreach (var targetLabel in DetectCrossEnvironmentDmlTargets(fragment, safetyResult))
         {
             var targetConfig = ProfileResolver?.ResolveByLabel(targetLabel);
-            var targetType = targetConfig?.Type ?? EnvironmentType.Production;
-            var targetProtection = targetConfig?.Protection
-                ?? DmlSafetyGuard.DetectProtectionLevel(targetType);
+            var targetProtection = PPDS.Cli.Services.Environment.WriteProtectionResolver.ResolveForCrossEnvironmentTarget(targetConfig);
 
             var crossEnvResult = _dmlSafetyGuard.CheckCrossEnvironmentDml(
                 plannedStatement,

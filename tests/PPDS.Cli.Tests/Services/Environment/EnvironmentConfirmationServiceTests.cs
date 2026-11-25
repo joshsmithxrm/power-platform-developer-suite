@@ -66,11 +66,11 @@ public sealed class EnvironmentConfirmationServiceTests
                        $"with --confirm-env {Target} or confirmEnvironment before writing.";
         ex.Message.Should().StartWith(original);
         if (guidance)
-        {
-            ex.Message.Should().Be(original + " This environment has no saved type, so it is treated as Production; " +
-                $"record its type with 'ppds env config {Target} --type <Production|Sandbox|Development|Test|Trial>'.");
-        }
+            ex.Message.Should().Be(original + " This environment has no saved type, so it is treated as Production.");
         else ex.Message.Should().Be(original);
+
+        // A caller refused for a missing confirmation is never shown how to lower the protection (#1829).
+        ex.Message.Should().NotContain("env config").And.NotContain("--type");
     }
 
     [Fact]

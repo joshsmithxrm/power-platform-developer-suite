@@ -528,10 +528,14 @@ public static class EnvCommandGroup
             Description = "Short display label for status bar and tabs"
         };
 
-        var typeOption = new Option<EnvironmentType?>("--type", "-t")
+        // Text, read by name only (EnvironmentTypeNames) as the daemon reads it: binding to the enum would accept
+        // "1" or "Production,Sandbox" and save another type (#1829).
+        var typeOption = new Option<string?>("--type", "-t")
         {
-            Description = "Environment type (Production, Sandbox, Development, Test, Trial)"
+            Description = "Environment type (Production, Sandbox, Development, Test, Trial)",
+            HelpName = "Production|Sandbox|Development|Test|Trial"
         };
+        typeOption.CompletionSources.Add(_ => EnvironmentTypeCompletions());
 
         var colorOption = new Option<EnvironmentColor?>("--color", "-c")
         {
@@ -553,20 +557,29 @@ public static class EnvCommandGroup
             Description = "Remove configuration for the environment"
         };
 
-        var command = new Command("config", "Configure environment display settings (label, type, color)")
+        var confirmLowerProtectionOption = new Option<string?>(ConfirmLowerProtectionOptionName)
         {
-            urlArgument, labelOption, typeOption, colorOption, showOption, listOption, removeOption
+            Description = "Acknowledge, for a non-interactive run, a --type change that lowers this environment's write protection " +
+                "(for example Production to Development). The value must be the environment URL being configured."
         };
 
-        command.SetAction(async (parseResult, cancellationToken) =>
+        var command = new Command("config", "Configure environment display settings (label, type, color)")
         {
+            urlArgument, labelOption, typeOption, colorOption, showOption, listOption, removeOption,
+            confirmLowerProtectionOption
+        };
+
+        command.SetAction((parseResult, cancellationToken) => ReportingFailuresAsync(async () =>
+        {
+            // Refused with Validation.InvalidArguments before anything is read or written.
+            var type = EnvironmentTypeNames.ParseOptional(parseResult.GetValue(typeOption));
             var url = parseResult.GetValue(urlArgument);
             var label = parseResult.GetValue(labelOption);
-            var type = parseResult.GetValue(typeOption);
             var color = parseResult.GetValue(colorOption);
             var show = parseResult.GetValue(showOption);
             var list = parseResult.GetValue(listOption);
             var remove = parseResult.GetValue(removeOption);
+            var confirmLowerProtection = parseResult.GetValue(confirmLowerProtectionOption);
 
             await using var localProvider = ProfileServiceFactory.CreateLocalProvider();
             var service = localProvider.GetRequiredService<IEnvironmentConfigService>();
@@ -608,22 +621,103 @@ public static class EnvCommandGroup
             if (label == null && type == null && color == null)
                 return await ExecuteConfigShowAsync(service, url, cancellationToken);
 
-            return await ExecuteConfigSetAsync(service, url, label, type, color, cancellationToken);
-        });
+            return await ExecuteConfigSetAsync(
+                service, url, label, type, color, confirmLowerProtection,
+                interactive: !IsInputRedirected(), Console.In, Console.Error, cancellationToken);
+        }));
 
         return command;
     }
 
-    private static async Task<int> ExecuteConfigSetAsync(
+    /// <summary>
+    /// Reports a refusal (<see cref="PpdsException"/>) or an environments file PPDS cannot read as one line on stderr
+    /// with its exit code (an invalid type is 3), instead of System.CommandLine's "Unhandled exception" with a stack
+    /// frame and exit code 1 (#1829).
+    /// </summary>
+    private static async Task<int> ReportingFailuresAsync(Func<Task<int>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (Exception ex) when (ex is PpdsException or EnvironmentConfigFileException)
+        {
+            var (error, exitCode) = ExceptionMapper.MapWithExitCode(ex);
+            Console.Error.WriteLine($"Error: {error.Message}");
+            return exitCode;
+        }
+    }
+
+    /// <summary>Option that acknowledges a type change lowering write protection (#1829).</summary>
+    internal const string ConfirmLowerProtectionOptionName = "--confirm-lower-protection";
+
+    /// <summary>
+    /// Whether standard input is redirected. <c>env config</c> prompts for a confirmation only when it is
+    /// not: piped or empty input is a non-interactive run, which needs the acknowledgement option.
+    /// Replaceable in tests.
+    /// </summary>
+    internal static Func<bool> IsInputRedirected { get; set; } = () => Console.IsInputRedirected;
+
+    /// <summary>
+    /// Saves the configuration. A change that lowers write protection is saved only after the user types
+    /// the environment URL (interactive run) or with <c>--confirm-lower-protection &lt;url&gt;</c>; the
+    /// service enforces this, the command only asks.
+    /// </summary>
+    internal static async Task<int> ExecuteConfigSetAsync(
         IEnvironmentConfigService service, string url,
         string? label, EnvironmentType? type, EnvironmentColor? color,
+        string? confirmLowerProtection, bool interactive, TextReader input, TextWriter error,
         CancellationToken ct)
     {
-        var config = await service.SaveConfigAsync(url, label, type, color, ct: ct);
+        var confirmation = confirmLowerProtection;
+        ProtectionChangeAssessment? assessment = null;
+        if (type is not null)
+        {
+            assessment = await service.AssessConfigChangeAsync(url, type, ct);
+            if (assessment.LowersProtection && confirmation is null && interactive)
+            {
+                error.WriteLine($"WARNING: {assessment.Describe()}");
+                error.WriteLine("Writes to this environment would then run without the confirmation they need now.");
+                error.Write($"Type the environment URL ({url}) to confirm, or press Enter to cancel: ");
+                var answer = input.ReadLine()?.Trim();
+                if (string.IsNullOrEmpty(answer))
+                {
+                    // Same exit code as an unconfirmed lowering: the requested change was not made.
+                    error.WriteLine("Cancelled. No change was saved.");
+                    return ExitCodes.ConfirmationRequired;
+                }
+
+                // The service compares the typed URL with the environment and refuses a mismatch.
+                confirmation = answer;
+            }
+        }
+
+        EnvironmentConfig config;
+        try
+        {
+            config = await service.SaveConfigAsync(url, label, type, color, confirmLowerProtection: confirmation, ct: ct);
+        }
+        catch (PpdsException ex) when (ex.ErrorCode is EnvironmentConfirmationErrorCodes.ProtectionLoweringConfirmationRequired
+            or EnvironmentConfirmationErrorCodes.ProtectionLoweringRefused
+            or EnvironmentConfirmationErrorCodes.TargetMismatch
+            or EnvironmentConfirmationErrorCodes.InvalidUrl)
+        {
+            // Every refusal of a lowering exits 11 (ConfirmationRequired), like a cancel at the prompt:
+            // a missing acknowledgement, one naming another environment, one that is not an address,
+            // and a mistyped address at the prompt. Only the lowering check raises these codes here.
+            error.WriteLine($"Error: {ex.UserMessage}");
+            // Names the option but not a ready-made command with the address filled in: whoever acknowledges
+            // the change should have read why it was refused (#1829).
+            if (ex.ErrorCode == EnvironmentConfirmationErrorCodes.ProtectionLoweringConfirmationRequired)
+                error.WriteLine($"Run the command in an interactive terminal to confirm, or acknowledge the change with {ConfirmLowerProtectionOptionName} followed by the environment URL.");
+            return ExitCodes.ConfirmationRequired;
+        }
 
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.Error.WriteLine("Environment configuration saved.");
+        error.WriteLine("Environment configuration saved.");
         Console.ResetColor();
+        if (assessment?.DiscoveredTypeWarning is { } warning)
+            error.WriteLine($"Warning: {warning}");
 
         WriteConfigDetails(config);
         return ExitCodes.Success;
@@ -698,12 +792,17 @@ public static class EnvCommandGroup
 
     #region Type Command
 
+    private static IEnumerable<System.CommandLine.Completions.CompletionItem> EnvironmentTypeCompletions()
+        => Enum.GetNames<EnvironmentType>().Select(name => new System.CommandLine.Completions.CompletionItem(name));
+
     private static Command CreateTypeCommand()
     {
-        var nameArgument = new Argument<EnvironmentType?>("name")
+        // Text, read by name only, like the config command's --type (#1829).
+        var nameArgument = new Argument<string?>("name")
         {
             Description = "Type name (Production, Sandbox, Development, Test, Trial)"
         };
+        nameArgument.CompletionSources.Add(_ => EnvironmentTypeCompletions());
         nameArgument.Arity = ArgumentArity.ZeroOrOne;
 
         var colorOption = new Option<EnvironmentColor?>("--color", "-c")
@@ -726,9 +825,9 @@ public static class EnvCommandGroup
             nameArgument, colorOption, removeOption, listOption
         };
 
-        command.SetAction(async (parseResult, cancellationToken) =>
+        command.SetAction((parseResult, cancellationToken) => ReportingFailuresAsync(async () =>
         {
-            var name = parseResult.GetValue(nameArgument);
+            var name = EnvironmentTypeNames.ParseOptional(parseResult.GetValue(nameArgument));
             var color = parseResult.GetValue(colorOption);
             var remove = parseResult.GetValue(removeOption);
             var list = parseResult.GetValue(listOption);
@@ -774,7 +873,7 @@ public static class EnvCommandGroup
             Console.Error.WriteLine($"Type '{name}' set to {color.Value}.");
             Console.ResetColor();
             return ExitCodes.Success;
-        });
+        }));
 
         return command;
     }

@@ -171,6 +171,12 @@ public static class ErrorCodes
         /// Raised by RPC handlers and CLI commands that reject arbitrary filesystem access.
         /// </summary>
         public const string PathOutsideWorkspace = "Validation.PathOutsideWorkspace";
+
+        /// <summary>
+        /// The environments file holds a value PPDS cannot read (for example a type or protection that is not a
+        /// member name) or is not valid JSON. The message names the file, the entry and the field (#1829).
+        /// </summary>
+        public const string EnvironmentConfigInvalid = PPDS.Auth.Profiles.EnvironmentConfigFileException.Code;
     }
 
     /// <summary>

@@ -132,19 +132,20 @@ public partial class RpcMethodHandler
         var configStore = _authServices.GetRequiredService<EnvironmentConfigStore>();
         var resolvedProfileName = profileKey;
 
-        // Tag all discovered environments with this profile in environments.json
-        foreach (var env in discovered)
+        EnvironmentConfigCollection configCollection;
+        try
         {
-            await configStore.SaveConfigAsync(
-                env.ApiUrl,
-                discoveredType: env.Type,
-                profileName: resolvedProfileName,
-                ct: cancellationToken);
-        }
+            // Tag all discovered environments with this profile in environments.json
+            await TagDiscoveredEnvironmentsAsync(configStore, discovered, resolvedProfileName, cancellationToken);
 
-        // Load config (fresh — after tagging) so the merge below reflects the writes above.
-        configStore.ClearCache();
-        var configCollection = await configStore.LoadAsync(cancellationToken);
+            // Load config (fresh — after tagging) so the merge below reflects the writes above.
+            configStore.ClearCache();
+            configCollection = await configStore.LoadAsync(cancellationToken);
+        }
+        catch (EnvironmentConfigFileException ex)
+        {
+            throw ToRpcException(ex);
+        }
 
         // 3. Merge: start with discovered, add configured that belong to this profile
         var merged = new List<EnvironmentInfo>(discovered);
@@ -318,9 +319,19 @@ public partial class RpcMethodHandler
         }
 
         var configService = _authServices.GetRequiredService<IEnvironmentConfigService>();
-        var config = await configService.GetConfigAsync(environmentUrl, cancellationToken);
-        var resolvedColor = await configService.ResolveColorAsync(environmentUrl, cancellationToken);
-        var resolvedType = await configService.ResolveTypeAsync(environmentUrl, ct: cancellationToken);
+        EnvironmentConfig? config;
+        EnvironmentColor resolvedColor;
+        EnvironmentType resolvedType;
+        try
+        {
+            config = await configService.GetConfigAsync(environmentUrl, cancellationToken);
+            resolvedColor = await configService.ResolveColorAsync(environmentUrl, cancellationToken);
+            resolvedType = await configService.ResolveTypeAsync(environmentUrl, ct: cancellationToken);
+        }
+        catch (EnvironmentConfigFileException ex)
+        {
+            throw ToRpcException(ex);
+        }
 
         return new EnvConfigGetResponse
         {
@@ -334,15 +345,42 @@ public partial class RpcMethodHandler
     }
 
     /// <summary>
+    /// Records, for each discovered environment, the profile that sees it and the type discovery reported.
+    /// It never saves a type, so it creates entries without one, which every writer treats as Production
+    /// (#1829); before, SQL DML treated them as Development.
+    /// </summary>
+    internal static async Task TagDiscoveredEnvironmentsAsync(
+        EnvironmentConfigStore configStore,
+        IEnumerable<EnvironmentInfo> discovered,
+        string profileName,
+        CancellationToken cancellationToken)
+    {
+        foreach (var env in discovered)
+        {
+            await configStore.SaveConfigAsync(
+                env.ApiUrl,
+                discoveredType: env.Type,
+                profileName: profileName,
+                ct: cancellationToken);
+        }
+    }
+
+    /// <summary>
     /// Sets environment configuration (label, type, color).
     /// Maps to: ppds env config set --environment "url" --label "label" --type "type" --color "color"
     /// </summary>
+    /// <remarks>
+    /// A type change that lowers write protection fails with
+    /// <c>Environment.ProtectionLoweringConfirmationRequired</c> unless <paramref name="confirmLowerProtection"/>
+    /// names the environment. The extension sends it only after its own modal confirmation (#1829).
+    /// </remarks>
     [JsonRpcMethod("env/config/set")]
     public async Task<EnvConfigSetResponse> EnvConfigSetAsync(
         string environmentUrl,
         string? label = null,
         string? type = null,
         string? color = null,
+        string? confirmLowerProtection = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(environmentUrl))
@@ -363,11 +401,10 @@ public partial class RpcMethodHandler
         EnvironmentType? parsedType = null;
         if (!string.IsNullOrWhiteSpace(type))
         {
-            if (!Enum.TryParse<EnvironmentType>(type, ignoreCase: true, out var t))
+            // By name only, with the same check as the CLI: Enum.TryParse also accepts "42" and "Production, Test" (#1829).
+            if (!EnvironmentTypeNames.TryParse(type, out var t))
             {
-                throw new RpcException(
-                    ErrorCodes.Validation.InvalidArguments,
-                    $"Invalid environment type '{type}'. Valid values: {string.Join(", ", Enum.GetNames<EnvironmentType>())}");
+                throw new RpcException(ErrorCodes.Validation.InvalidArguments, EnvironmentTypeNames.InvalidMessage(type));
             }
             parsedType = t;
         }
@@ -384,8 +421,21 @@ public partial class RpcMethodHandler
             parsedColor = c;
         }
 
-        var saved = await configService.SaveConfigAsync(
-            environmentUrl, label, parsedType, parsedColor, ct: cancellationToken);
+        EnvironmentConfig saved;
+        try
+        {
+            saved = await configService.SaveConfigAsync(
+                environmentUrl, label, parsedType, parsedColor,
+                confirmLowerProtection: confirmLowerProtection, ct: cancellationToken);
+        }
+        catch (EnvironmentConfigFileException ex)
+        {
+            throw ToRpcException(ex);
+        }
+        catch (PpdsException ex)
+        {
+            throw MapPpdsToRpcException(ex);
+        }
 
         return new EnvConfigSetResponse
         {
@@ -413,8 +463,21 @@ public partial class RpcMethodHandler
                 "The 'environmentUrl' parameter is required");
         }
 
-        var configStore = _authServices.GetRequiredService<EnvironmentConfigStore>();
-        var removed = await configStore.RemoveConfigAsync(environmentUrl, cancellationToken);
+        // Through the service, like env/config/set, so the protection rule applies to every change.
+        var configService = _authServices.GetRequiredService<IEnvironmentConfigService>();
+        bool removed;
+        try
+        {
+            removed = await configService.RemoveConfigAsync(environmentUrl, cancellationToken);
+        }
+        catch (EnvironmentConfigFileException ex)
+        {
+            throw ToRpcException(ex);
+        }
+        catch (PpdsException ex)
+        {
+            throw MapPpdsToRpcException(ex);
+        }
 
         return new EnvConfigRemoveResponse { Removed = removed };
     }

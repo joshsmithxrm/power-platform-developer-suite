@@ -71,4 +71,26 @@ public class WriteProtectionResolverTests
 
         level.Should().Be(ProtectionLevel.Production);
     }
+    [Theory]
+    [Trait("Category", "Unit")]
+    // hasEntry, type, protection, confirmation, sqlDml, crossEnvironment
+    [InlineData(false, null, null, ProtectionLevel.Production, ProtectionLevel.Production, ProtectionLevel.Production)]
+    [InlineData(true, null, null, ProtectionLevel.Production, ProtectionLevel.Production, ProtectionLevel.Production)]   // was Development for SQL DML before #1829
+    [InlineData(true, EnvironmentType.Unknown, null, ProtectionLevel.Production, ProtectionLevel.Production, ProtectionLevel.Production)] // was Development for both SQL rules
+    [InlineData(true, EnvironmentType.Production, null, ProtectionLevel.Production, ProtectionLevel.Production, ProtectionLevel.Production)]
+    [InlineData(true, EnvironmentType.Development, null, ProtectionLevel.Development, ProtectionLevel.Development, ProtectionLevel.Development)]
+    [InlineData(true, EnvironmentType.Test, null, ProtectionLevel.Development, ProtectionLevel.Development, ProtectionLevel.Development)]
+    [InlineData(true, EnvironmentType.Development, ProtectionLevel.Test, ProtectionLevel.Test, ProtectionLevel.Test, ProtectionLevel.Test)]
+    public void PerWriterRules_AllUseOneRule(
+        bool hasEntry, EnvironmentType? type, ProtectionLevel? protection,
+        ProtectionLevel confirmation, ProtectionLevel sqlDml, ProtectionLevel crossEnvironment)
+    {
+        // The SQL sites (SqlCommand, the daemon's query handler, the TUI session, cross-environment DML)
+        // call these helpers. Since #1829 every writer uses one rule: no saved type is Production.
+        var config = hasEntry ? new EnvironmentConfig { Url = "https://org.crm.dynamics.com/", Type = type, Protection = protection } : null;
+
+        WriteProtectionResolver.ResolveForConfirmation(config).Should().Be(confirmation);
+        WriteProtectionResolver.ResolveForSqlDml(config).Should().Be(sqlDml);
+        WriteProtectionResolver.ResolveForCrossEnvironmentTarget(config).Should().Be(crossEnvironment);
+    }
 }

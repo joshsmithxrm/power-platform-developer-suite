@@ -75,6 +75,12 @@ public sealed class EnvironmentConfirmationService : IEnvironmentConfirmationSer
         }
         catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
+        catch (EnvironmentConfigFileException ex)
+        {
+            // Carries the file, entry and field, so the user knows what to correct (#1829).
+            throw new PpdsException(EnvironmentConfirmationErrorCodes.PolicyUnavailable,
+                $"Could not resolve write protection for '{target}'. No write was performed. {ex.Message}", ex);
+        }
         catch (Exception ex)
         {
             throw new PpdsException(EnvironmentConfirmationErrorCodes.PolicyUnavailable,
@@ -86,13 +92,17 @@ public sealed class EnvironmentConfirmationService : IEnvironmentConfirmationSer
         var policy = $"{type}|{protection}";
         var key = $"{Context.SessionId}\n{Context.ProfileIdentity}\n{target}";
         var acknowledged = _acknowledgements.Check(key, policy, supplied);
-        if (protection is ProtectionLevel.Production or ProtectionLevel.Test && !acknowledged)
+        // Anything but Development needs the acknowledgement, so a level that is not a defined member can never pass
+        // unconfirmed (#1829). Defence in depth: Resolve already turns such a level into Production, so this line
+        // cannot be reached with one through the resolver, and no test reaches it (Resolve is static, not replaceable).
+        if (protection is not ProtectionLevel.Development && !acknowledged)
             throw new PpdsException(EnvironmentConfirmationErrorCodes.Required,
                 $"Confirm '{operation}' against '{target}' (type: {type}, protection: {protection}) " +
                 $"with --confirm-env {target} or confirmEnvironment before writing." +
+                // No command that changes the saved type is named here: a caller refused for a missing
+                // confirmation must not be shown how to switch the protection off (#1829).
                 (type == EnvironmentType.Unknown && config?.Protection is null
-                    ? $" This environment has no saved type, so it is treated as Production; " +
-                      $"record its type with 'ppds env config {target} --type <Production|Sandbox|Development|Test|Trial>'."
+                    ? " This environment has no saved type, so it is treated as Production."
                     : string.Empty));
     }
 
