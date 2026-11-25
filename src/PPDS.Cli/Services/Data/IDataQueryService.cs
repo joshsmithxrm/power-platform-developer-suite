@@ -31,17 +31,25 @@ public interface IDataQueryService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Executes a SQL WHERE clause filter against the entity and returns matching record IDs.
-    /// Uses QueryParser + FetchXmlGenerator to transpile the SQL fragment.
+    /// Returns the ids of the records of <paramref name="entity"/> that the SQL condition <paramref name="whereFilter"/>
+    /// selects, reading every page. The condition's structure is admitted by <see cref="DataFilter.Translate"/> before
+    /// anything is read; then the table's column metadata is read and every column and value is admitted for its
+    /// column's type (<see cref="AdmittedDataFilter.Bind"/>) before the first record is read.
     /// </summary>
     /// <param name="entity">Logical name of the entity.</param>
     /// <param name="whereFilter">SQL WHERE expression (without the <c>WHERE</c> keyword).</param>
-    /// <param name="limit">Optional upper bound on returned records (uses <c>SELECT TOP N+1</c> for over-limit detection).</param>
+    /// <param name="limit">
+    /// Optional upper bound. Reading stops at the end of the first page on which more than <paramref name="limit"/> ids
+    /// have been found, so the list then holds more than <paramref name="limit"/> ids (up to a page more) but not
+    /// necessarily every match: a caller that refuses on it can say only that at least that many records match.
+    /// Without it, every matching record is read.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of matching record GUIDs.</returns>
+    /// <returns>List of matching record GUIDs, each once.</returns>
     /// <exception cref="PPDS.Cli.Infrastructure.Errors.PpdsException">
-    /// Thrown with <c>Query.ExecutionFailed</c> when the Dataverse call fails,
-    /// or <c>Query.ParseError</c> when the SQL cannot be parsed.
+    /// Thrown with <c>Validation.FilterNotSupported</c> (or another code of <see cref="DataFilter.Translate"/>) and with
+    /// <c>Query.FilterMetadataUnavailable</c> before any record is read, or <c>Query.ExecutionFailed</c> when the
+    /// Dataverse call fails or the pages are inconsistent.
     /// </exception>
     Task<IReadOnlyList<Guid>> QueryIdsByFilterAsync(
         string entity,

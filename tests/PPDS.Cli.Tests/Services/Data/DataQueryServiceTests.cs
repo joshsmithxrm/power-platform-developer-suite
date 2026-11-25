@@ -28,7 +28,7 @@ public class DataQueryServiceTests
     {
         var logger = new NullLogger<DataQueryService>();
 
-        var act = () => new DataQueryService(null!, logger);
+        var act = () => new DataQueryService(null!, FilterTestColumns.Provider(), logger);
 
         act.Should().Throw<ArgumentNullException>()
             .And.ParamName.Should().Be("pool");
@@ -39,10 +39,21 @@ public class DataQueryServiceTests
     {
         var pool = new Mock<IDataverseConnectionPool>().Object;
 
-        var act = () => new DataQueryService(pool, null!);
+        var act = () => new DataQueryService(pool, FilterTestColumns.Provider(), null!);
 
         act.Should().Throw<ArgumentNullException>()
             .And.ParamName.Should().Be("logger");
+    }
+
+    [Fact]
+    public void Constructor_NullMetadata_ThrowsArgumentNullException()
+    {
+        var pool = new Mock<IDataverseConnectionPool>().Object;
+
+        var act = () => new DataQueryService(pool, null!, new NullLogger<DataQueryService>());
+
+        act.Should().Throw<ArgumentNullException>()
+            .And.ParamName.Should().Be("metadata");
     }
 
     [Fact]
@@ -51,7 +62,7 @@ public class DataQueryServiceTests
         var pool = new Mock<IDataverseConnectionPool>().Object;
         var logger = new NullLogger<DataQueryService>();
 
-        var service = new DataQueryService(pool, logger);
+        var service = new DataQueryService(pool, FilterTestColumns.Provider(), logger);
 
         service.Should().NotBeNull();
     }
@@ -200,7 +211,7 @@ public class DataQueryServiceTests
         pool.Setup(p => p.GetClientAsync(null, default))
             .ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
 
-        var service = new DataQueryService(pool.Object, new NullLogger<DataQueryService>());
+        var service = new DataQueryService(pool.Object, FilterTestColumns.Provider(), new NullLogger<DataQueryService>());
 
         var act = () => service.ResolveByAlternateKeyAsync("account", "accountnumber=TEST");
 
@@ -215,7 +226,7 @@ public class DataQueryServiceTests
         pool.Setup(p => p.GetClientAsync(null, default))
             .ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
 
-        var service = new DataQueryService(pool.Object, new NullLogger<DataQueryService>());
+        var service = new DataQueryService(pool.Object, FilterTestColumns.Provider(), new NullLogger<DataQueryService>());
 
         var act = () => service.CountRecordsAsync("account");
 
@@ -230,7 +241,7 @@ public class DataQueryServiceTests
         pool.Setup(p => p.GetClientAsync(null, default))
             .ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
 
-        var service = new DataQueryService(pool.Object, new NullLogger<DataQueryService>());
+        var service = new DataQueryService(pool.Object, FilterTestColumns.Provider(), new NullLogger<DataQueryService>());
 
         var act = () => service.FetchBatchIdsAsync("account", 100);
 
@@ -261,6 +272,6 @@ public class DataQueryServiceTests
     {
         // Use a pool mock that will never be called (validation tests don't reach the pool)
         var pool = new Mock<IDataverseConnectionPool>().Object;
-        return new DataQueryService(pool, new NullLogger<DataQueryService>());
+        return new DataQueryService(pool, FilterTestColumns.Provider(), new NullLogger<DataQueryService>());
     }
 }

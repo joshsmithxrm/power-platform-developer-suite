@@ -73,7 +73,7 @@ public static class UpdateCommand
 
         var filterOption = new Option<string?>("--filter")
         {
-            Description = "SQL-like filter expression to match records for update (e.g., \"statecode eq 0\")"
+            Description = "SQL condition selecting the records to update (e.g., \"statecode = 0 AND name like 'Contoso%'\"): a column compared with a literal, IN, LIKE, IS NULL or BETWEEN, joined by AND and OR; anything else is refused before anything is read"
         };
 
         var setOption = new Option<string?>("--set", "-s")
@@ -108,7 +108,7 @@ public static class UpdateCommand
 
         var limitOption = new Option<int?>("--limit")
         {
-            Description = "Maximum number of records to update (fails if query returns more)"
+            Description = "Maximum number of records to update: if more match, nothing is updated"
         };
         limitOption.Validators.Add(result =>
         {
@@ -261,6 +261,12 @@ public static class UpdateCommand
     {
         try
         {
+            // A filter FetchXML cannot express exactly is refused before signing in or reading anything (#1705).
+            if (!string.IsNullOrEmpty(filter))
+            {
+                DataFilter.Translate(entity, filter);
+            }
+
             // Connect to Dataverse
             if (!globalOptions.IsJsonMode)
             {
@@ -352,8 +358,10 @@ public static class UpdateCommand
             // Check limit
             if (limit.HasValue && entitiesToUpdate.Count > limit.Value)
             {
-                WriteError(globalOptions, "LIMIT_EXCEEDED",
-                    $"Query returned {entitiesToUpdate.Count} records, exceeds --limit {limit.Value}");
+                // With --filter, reading stops once the limit is passed, so the count is a lower bound.
+                WriteError(globalOptions, "LIMIT_EXCEEDED", string.IsNullOrEmpty(filter)
+                    ? $"{entitiesToUpdate.Count} records were given, more than --limit {limit.Value}. Nothing was updated."
+                    : $"At least {entitiesToUpdate.Count} records match the filter, more than --limit {limit.Value}. Nothing was updated.");
                 return ExitCodes.ValidationError;
             }
 

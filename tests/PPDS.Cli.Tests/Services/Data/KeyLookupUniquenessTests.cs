@@ -57,7 +57,7 @@ public class KeyLookupUniquenessTests
     }
 
     // DataQueryService's constructor is the one place to change if its dependencies change.
-    private DataQueryService CreateService() => new(_pool.Object, NullLogger<DataQueryService>.Instance);
+    private DataQueryService CreateService() => new(_pool.Object, FilterTestColumns.Provider(), NullLogger<DataQueryService>.Instance);
 
     private static EntityKeyMetadata Key(string name, EntityKeyIndexStatus status, params string[] columns)
     {

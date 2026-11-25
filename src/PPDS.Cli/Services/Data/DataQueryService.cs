@@ -4,11 +4,12 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Dataverse.Metadata;
+using PPDS.Dataverse.Metadata.Models;
 using PPDS.Dataverse.Pooling;
-using PPDS.Query.Parsing;
-using PPDS.Query.Transpilation;
 
 namespace PPDS.Cli.Services.Data;
 
@@ -19,16 +20,19 @@ namespace PPDS.Cli.Services.Data;
 public sealed class DataQueryService : IDataQueryService
 {
     private readonly IDataverseConnectionPool _pool;
+    private readonly ICachedMetadataProvider _metadata;
     private readonly ILogger<DataQueryService> _logger;
 
     /// <summary>
     /// Initializes a new instance of <see cref="DataQueryService"/>.
     /// </summary>
     /// <param name="pool">The Dataverse connection pool.</param>
+    /// <param name="metadata">The table metadata a filter's columns and values are checked against.</param>
     /// <param name="logger">Logger instance.</param>
-    public DataQueryService(IDataverseConnectionPool pool, ILogger<DataQueryService> logger)
+    public DataQueryService(IDataverseConnectionPool pool, ICachedMetadataProvider metadata, ILogger<DataQueryService> logger)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
+        _metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -102,60 +106,109 @@ public sealed class DataQueryService : IDataQueryService
         if (string.IsNullOrWhiteSpace(entity)) throw new ArgumentNullException(nameof(entity));
         if (string.IsNullOrWhiteSpace(whereFilter)) throw new ArgumentNullException(nameof(whereFilter));
 
-        // Build SQL and transpile to FetchXML
-        var sql = limit.HasValue
-            ? $"SELECT TOP {limit.Value + 1} {entity}id FROM {entity} WHERE {whereFilter}"
-            : $"SELECT {entity}id FROM {entity} WHERE {whereFilter}";
+        // The structure is admitted before anything is read; then the table's columns are read (metadata, no record),
+        // and every column and value of the filter is admitted for its column's type, before the first record is read.
+        var admitted = DataFilter.Translate(entity, whereFilter);
+        var columns = await ReadColumnsAsync(admitted.EntityName, cancellationToken);
+        var filter = admitted.Bind(columns);
 
-        string fetchXml;
-        try
-        {
-            var parser = new QueryParser();
-            var stmt = parser.ParseStatement(sql);
-            var generator = new FetchXmlGenerator();
-            fetchXml = generator.Generate(stmt);
-        }
-        catch (Exception ex)
-        {
-            throw new PpdsException(ErrorCodes.Query.ParseError,
-                $"Failed to parse filter expression: {ex.Message}", ex);
-        }
+        _logger.LogDebug("Querying IDs for entity {Entity} with a filter of {Count} condition(s)",
+            filter.EntityName, filter.ConditionCount);
 
-        _logger.LogDebug("Querying IDs for entity {Entity} with filter", entity);
+        var ids = new List<Guid>();
+        var seen = new HashSet<Guid>();
+        var page = 1;
+        string? pagingCookie = null;
 
         try
         {
-            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-            var query = new FetchExpression(fetchXml);
-            var results = await client.RetrieveMultipleAsync(query, cancellationToken);
-
-            var primaryKeyAttribute = $"{entity}id";
-            var ids = new List<Guid>(results.Entities.Count);
-
-            foreach (var record in results.Entities)
+            while (true)
             {
-                if (record.Contains(primaryKeyAttribute) && record[primaryKeyAttribute] is Guid id)
+                EntityCollection results;
+                await using (var client = await _pool.GetClientAsync(cancellationToken: cancellationToken))
                 {
+                    results = await client.RetrieveMultipleAsync(
+                        new FetchExpression(filter.ToFetchXml(page, pagingCookie)), cancellationToken);
+                }
+
+                foreach (var record in results.Entities)
+                {
+                    var id = record.Contains(filter.PrimaryIdAttribute) && record[filter.PrimaryIdAttribute] is Guid value
+                        ? value
+                        : record.Id;
+                    if (!seen.Add(id))
+                    {
+                        throw new PpdsException(ErrorCodes.Query.ExecutionFailed,
+                            $"A record of '{filter.EntityName}' came back twice while the matching records were read " +
+                            "page by page, so the set of records is not certain. Nothing was changed. Run the command again.");
+                    }
+
                     ids.Add(id);
                 }
-                else
-                {
-                    ids.Add(record.Id);
-                }
-            }
 
-            return ids;
+                // With --limit: once more than the limit is found the caller refuses, so the rest is not read. The list
+                // then holds more than the limit (up to the end of this page), not necessarily every match.
+                if (limit.HasValue && ids.Count > limit.Value)
+                    return ids;
+
+                if (!results.MoreRecords)
+                    return ids;
+
+                if (results.Entities.Count == 0)
+                {
+                    throw new PpdsException(ErrorCodes.Query.ExecutionFailed,
+                        $"Dataverse reported more records of '{filter.EntityName}' but returned an empty page, so not " +
+                        "every matching record could be read. Nothing was changed.");
+                }
+
+                page++;
+                pagingCookie = results.PagingCookie;
+            }
         }
         catch (PpdsException)
         {
             throw;
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to query IDs for entity {Entity}", entity);
+            _logger.LogError(ex, "Failed to query IDs for entity {Entity}", filter.EntityName);
             throw new PpdsException(ErrorCodes.Query.ExecutionFailed,
-                $"Failed to query records for '{entity}': {ex.Message}", ex);
+                $"Failed to query records for '{filter.EntityName}': {ex.Message}", ex);
         }
+    }
+
+    private async Task<IReadOnlyList<AttributeMetadataDto>> ReadColumnsAsync(string entity, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<AttributeMetadataDto>? columns;
+        try
+        {
+            columns = await _metadata.GetAttributesAsync(entity, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Never fall back to a filter without types: refuse.
+            _logger.LogError(ex, "Failed to read the column metadata of entity {Entity}", entity);
+            throw new PpdsException(ErrorCodes.Query.FilterMetadataUnavailable,
+                $"The columns of '{entity}' could not be read (does the table exist?), so the filter's values cannot be " +
+                "checked against their column types. Nothing was read or changed.", ex);
+        }
+
+        if (columns is null || columns.Count == 0)
+        {
+            throw new PpdsException(ErrorCodes.Query.FilterMetadataUnavailable,
+                $"No columns were found for '{entity}', so the filter's values cannot be checked against their column " +
+                "types. Nothing was read or changed.");
+        }
+
+        return columns;
     }
 
     /// <inheritdoc />
@@ -218,7 +271,7 @@ public sealed class DataQueryService : IDataQueryService
             if (result.Entities.Count > 0 && result.Entities[0].Contains("count"))
             {
                 var countValue = result.Entities[0]["count"];
-                if (countValue is Microsoft.Xrm.Sdk.AliasedValue aliased)
+                if (countValue is AliasedValue aliased)
                 {
                     return Convert.ToInt32(aliased.Value);
                 }

@@ -190,6 +190,12 @@ public static class ErrorCodes
         /// member name) or is not valid JSON. The message names the file, the entry and the field (#1829).
         /// </summary>
         public const string EnvironmentConfigInvalid = PPDS.Auth.Profiles.EnvironmentConfigFileException.Code;
+
+        /// <summary>
+        /// A <c>--filter</c> of <c>data delete</c> or <c>data update</c> holds a part that FetchXML cannot express exactly
+        /// (a function, arithmetic, a column compared with a column, NOT, a comparison with NULL, ...); nothing was read.
+        /// </summary>
+        public const string FilterNotSupported = "Validation.FilterNotSupported";
     }
 
     /// <summary>
@@ -274,6 +280,12 @@ public static class ErrorCodes
 
         /// <summary>Subquery returned more than one row.</summary>
         public const string SubqueryMultipleRows = "Query.SubqueryMultipleRows";
+
+        /// <summary>
+        /// The column metadata of the table a <c>data delete</c> or <c>data update</c> <c>--filter</c> names could not be
+        /// read, so the filter's values cannot be checked against their columns' types; nothing was read or changed.
+        /// </summary>
+        public const string FilterMetadataUnavailable = "Query.FilterMetadataUnavailable";
     }
 
     /// <summary>
