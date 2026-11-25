@@ -53,7 +53,7 @@ public static class ImportCommand
 
     /// <summary>The parse error for <c>--mode Skip</c> (#1914).</summary>
     internal const string SkipModeRefusedMessage =
-        "--mode accepts Create, Update or Upsert. Skip applies to one table: set importMode=\"skip\" on that table in the schema.";
+        "--mode accepts Create, Update or Upsert. Skip applies to one table: set importMode=\"skip\" on that table in the data archive's schema.";
 
     public static Command Create()
     {
@@ -83,7 +83,7 @@ public static class ImportCommand
 
         var modeOption = new Option<ImportMode>("--mode", "-m")
         {
-            Description = "Import mode: Create, Update, or Upsert. To leave a table out, set importMode=\"skip\" on it in the schema",
+            Description = "Import mode: Create, Update, or Upsert. To leave a table out, set importMode=\"skip\" on it in the data archive's schema",
             DefaultValueFactory = _ => ImportMode.Upsert
         };
         modeOption.HelpName = "Create|Update|Upsert";

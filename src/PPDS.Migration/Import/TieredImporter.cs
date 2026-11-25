@@ -426,7 +426,8 @@ namespace PPDS.Migration.Import
             {
                 throw new ImportRefusedException(
                     ImportRefusalReasons.SkipIsPerTable,
-                    "Import mode Skip applies to one table, set with importMode=\"skip\" on that table in the schema. " +
+                    "Import mode Skip applies to one table, set with importMode=\"skip\" on that table in the schema of the data being imported " +
+                    "(data export and data copy do not keep it yet). " +
                     "As the mode for the whole import it would import nothing. Nothing was read or written. " +
                     "Choose Create, Update or Upsert, and mark the tables to leave out with importMode=\"skip\".");
             }
