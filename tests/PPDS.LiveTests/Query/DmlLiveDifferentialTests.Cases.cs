@@ -152,7 +152,8 @@ public sealed partial class DmlLiveDifferentialTests
             ("ppds_name = N'alpha'", r => TEq(S(r, N), "alpha")),
             ("ppds_name = 'ALPHA'", r => TEq(S(r, N), "ALPHA")),
             ("ppds_name = 'cafe'", r => TEq(S(r, N), "cafe")),
-            ("ppds_name = 'CAFÉ'", r => TEq(S(r, N), "CAFÉ")),
+            // With N: text without N that is not 7-bit ASCII is refused in a condition (review round 1, MF3).
+            ("ppds_name = N'CAFÉ'", r => TEq(S(r, N), "CAFÉ")),
             ("ppds_name = 'trail'", r => TEq(S(r, N), "trail")),
             ("ppds_note = 'lead'", r => TEq(S(r, Note), "lead")),
             ("ppds_note = '  lead'", r => TEq(S(r, Note), "  lead")),
@@ -841,7 +842,6 @@ public sealed partial class DmlLiveDifferentialTests
             $"DELETE FROM {t} WHERE ppds_num = 1 OR ppds_num IN (SELECT ppds_num FROM {t} WHERE ppds_num = 2)",
             $"INSERT INTO {t} (ppds_name) SELECT UPPER(ppds_name) FROM {t}",
             $"MERGE {t} AS x USING {t} AS y ON x.ppds_num = y.ppds_num WHEN NOT MATCHED THEN INSERT (ppds_name) VALUES ('m');",
-            $"DELETE FROM [QA].{t} WHERE ppds_num = 1",
             $"UPDATE {t} SET ppds_note = 'x' WHERE ppds_when < '2024-01-01'",
             $"UPDATE {t} SET ppds_when = '2024-01-01' WHERE ppds_num = 1",
             $"UPDATE {t} SET ppds_day = '2024-01-01T10:00:00Z' WHERE ppds_num = 1",
@@ -930,10 +930,21 @@ public sealed partial class DmlLiveDifferentialTests
             $"UPDATE {t} SET ppds_note = UPPER(NULL) WHERE ppds_num = 1",
             $"UPDATE {t} SET ppds_note = COALESCE(NULL, NULL) WHERE ppds_num = 1",
             $"UPDATE {t} SET ppds_num = NULLIF(ppds_num, ppds_amount) WHERE ppds_num = 1",
+            // review round 1: the whole-script rule, and text without N that is not 7-bit ASCII in a condition
+            $"IF 1 = 1 UPDATE {t} SET ppds_note = 'x' WHERE ppds_num = 1",
+            $"UPDATE {t} SET ppds_note = 'x' WHERE ppds_num = 1; SELECT ppds_name FROM {t}",
+            $"UPDATE {t} SET ppds_note = 'x' WHERE ppds_name = 'CAFÉ'",
         })
         {
             await RefusedAsync(sql);
         }
+
+        // A write to another environment is the safety guard's own refusal, which keeps Query.DmlBlocked.
+        await RefusedAsync($"DELETE FROM [QA].{t} WHERE ppds_num = 1", ErrorCodes.Query.DmlBlocked);
+
+        // review round 1: values Dataverse stores differently
+        await RefusedAsync($"UPDATE {t} SET ppds_note = '' WHERE ppds_num = 1", ErrorCodes.Query.DmlValueStoredDifferently);
+        await RefusedAsync($"UPDATE {t} SET ppds_note = ' x' WHERE ppds_num = 1", ErrorCodes.Query.DmlValueStoredDifferently);
 
         await RefusedAsync($"UPDATE {t} SET ppds_note = 'x' WHERE ppds_num = 1\nGO\nUPDATE {t} SET ppds_note = 'y' WHERE ppds_num = 2", ErrorCodes.Validation.InvalidValue);
         await RefusedAsync($"-- ppds:USE_TDS\nUPDATE {t} SET ppds_note = 'x' WHERE ppds_num = 1", ErrorCodes.Query.TdsIncompatible);

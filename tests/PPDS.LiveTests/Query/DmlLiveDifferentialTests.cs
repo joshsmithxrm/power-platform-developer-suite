@@ -372,7 +372,9 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
             Fail(sql, "a refused statement changed the table");
     }
 
-    private const string Blocked = ErrorCodes.Query.DmlBlocked;
+    // Every refusal of the allowlist is the unsupported-construct class (a code per class, #1698 review round 1);
+    // a refusal of another class names its code.
+    private const string Blocked = ErrorCodes.Query.DmlUnsupportedConstruct;
 
     private void Fail(string sql, string what)
     {
