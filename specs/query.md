@@ -151,6 +151,7 @@ The plan-based pipeline (introduced by the v2 execution plan layer) replaces the
 | Field | Rule | Error |
 |-------|------|-------|
 | SQL | Non-empty, valid syntax | `SqlParseException` with line/column |
+| SQL size and nesting (every statement kind, before the parser runs; #1952) | At most 8,388,608 characters and 1,000 `/*`. On the token stream, with no recursion: the deepest point may need at most 440,000 bytes of stack by measured per-level weights. That bounds, alone: conditions in parentheses 453, a value in parentheses 221, function calls 174, subqueries 103, CASE 198, BEGIN ... END 241, IF or WHILE 189, NOT 1,349, arithmetic or unary operators about 650, UNION/EXCEPT/INTERSECT 2,604, and AND/OR 3,698 in a text that writes. A SELECT chains at most 200 conditions with AND or OR at one level (`QueryComplexityGuard.MaxSelectConditionChain`, apart from the write limit). An IN list is not bounded. Each bound was measured to survive on 512 KB (Release) and 448 KB (Debug), half of the 1 MB Windows main-thread default; the Windows margin is measured by the CI job only. The write limits (200 levels, 1,000 conditions) are unchanged, and every text they admit passes (`QueryComplexityGuardTests`) | `Query.TooComplex`, exit code 3, naming what is nested and what to write instead |
 | FROM entity | Must be valid Dataverse entity | Dataverse returns entity not found |
 | Column names | Must exist on entity | SELECT: Dataverse returns attribute not found. INSERT/UPDATE/DELETE: refused before anything runs (`DmlColumnValidator`, `Query.DmlUnsupportedConstruct`) |
 | TOP value | Positive integer | `SqlParseException` |
@@ -552,6 +553,7 @@ The implementation ([`QueryHistoryService.cs:52-98`](../src/PPDS.Cli/Services/Hi
 | Error | Condition | Recovery |
 |-------|-----------|----------|
 | `SqlParseException` | Invalid SQL syntax | Display line/column with context snippet |
+| `QueryTooComplexException` / `PpdsException(TooComplex)` | SQL text too long or nested too deeply to parse safely, refused before the parser runs (#1952: a very long condition chain used to overflow the stack and end the process) | Not retryable as is; the message names the kind of nesting and what to write instead. CLI exit 3 |
 | `FaultException` | Dataverse execution error | Map to `PpdsException`, show entity/attribute |
 | `ThrottleException` | Service protection limits | Automatic retry via connection pool |
 | `FileNotFoundException` | History file missing | Return empty list |
