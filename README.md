@@ -86,6 +86,7 @@ All libraries except PPDS.Plugins target net8.0, net9.0, and net10.0. Per-packag
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, build instructions, and guidelines.
+Versioning and deprecation rules are in [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ## License
 

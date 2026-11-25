@@ -91,7 +91,7 @@ The update check system keeps PPDS CLI users informed about new versions and pro
 
 ### Versioning Convention
 
-PPDS uses odd minor versions (0.5.x, 0.7.x) for pre-release lines and even minor versions (0.6.x, 0.8.x) for stable releases. A user running an odd-minor version is considered on the pre-release track. This convention drives notification logic — pre-release track users see both stable and pre-release update options.
+The odd/even minor convention applies to the extension only; the rule is in [docs/VERSIONING.md](../docs/VERSIONING.md#1-packages-and-versions) (1.5), and other packages mark pre-releases with a pre-release label. The CLI update check described in this spec still derives the pre-release track from an odd minor; that is tracked in #1744 and this section changes with it.
 
 ### Core Requirements
 
@@ -583,6 +583,7 @@ public void FormatNotification_BothUpdatesAvailable_ReturnsTwoLines()
 
 | Date | Change |
 |------|--------|
+| 2026-11-20 | The Versioning Convention section points to `docs/VERSIONING.md` for the odd/even rule |
 | 2026-03-18 | Added Surfaces frontmatter, Changelog per spec governance |
 
 ---

@@ -135,7 +135,7 @@ class TestClassifyUpdateType(unittest.TestCase):
 
     def test_minor_downgrade_treated_as_major(self):
         # Any downgrade — including minor (1.2.0 -> 1.1.0) — must classify as
-        # 'major' so it routes to Group C / manual review and never auto-merges.
+        # 'major' so it routes to Group C and the maintainer decides.
         self.assertEqual(classify.classify_update_type("1.2.0", "1.1.0"), "major")
 
     def test_patch_downgrade_treated_as_major(self):
@@ -244,7 +244,7 @@ class TestDependencyPolicySignals(unittest.TestCase):
 
 
 class TestClassifyPR(unittest.TestCase):
-    # Group A — auto-merge eligible
+    # Group A — routine: one fresh review, then an agent merges on green
 
     def test_patch_npm_tooling_is_group_a(self):
         pr = make_pr(
@@ -423,7 +423,7 @@ class TestClassifyPR(unittest.TestCase):
     def test_patch_auth_critical_is_group_b(self):
         # Regression for real PR #1288: an auth-critical PATCH bump
         # (System.Security.Cryptography.Pkcs 10.0.5 -> 10.0.9) must go through
-        # verify-then-merge (Group B), NOT auto-merge (Group A). Per
+        # verify-then-merge (Group B), NOT the routine Group A. Per
         # docs/MERGE-POLICY.md, auth-critical packages route to Group B at any
         # non-major version — patch included. Before the fix this fell through
         # to the generic "patch bump on non-critical path" branch and became A.
@@ -500,7 +500,7 @@ class TestClassifyPR(unittest.TestCase):
     # all-patch -> A, any-minor (no major) -> B, any-major -> C.
 
     def test_grouped_all_patch_is_group_a(self):
-        # All members are patch bumps -> Group A (auto-merge eligible).
+        # All members are patch bumps -> Group A (routine).
         pr = make_pr(
             number=860,
             title="Bump the npm_and_yarn group across 1 directory with 3 updates",
@@ -924,7 +924,7 @@ class TestClassifyPR(unittest.TestCase):
 
     def test_minor_downgrade_is_group_c(self):
         # 1.2.0 -> 1.1.0 was previously classified as 'minor' and could slip
-        # through auto-merge. Now any downgrade is Group C.
+        # through as a routine bump. Now any downgrade is Group C.
         pr = make_pr(
             number=856,
             title="Bump SomePkg from 1.2.0 to 1.1.0",
@@ -1017,7 +1017,7 @@ class TestGitHubActionsMaintainerFirst(unittest.TestCase):
     """Every GitHub Actions bump is Group C: the maintainer goes first on them.
 
     Before this rule, github-actions patch and minor bumps were Group A
-    (auto-merge eligible). They change workflow files, so they now always need
+    (routine). They change workflow files, so they now always need
     the maintainer, whatever their version, grouping or package name.
     """
 
@@ -1139,9 +1139,9 @@ class TestGitHubActionsMaintainerFirst(unittest.TestCase):
         self.assertEqual(c.group, "C")
         self.assertIn("maintainer goes first", c.reason)
 
-    def test_npm_pr_touching_dependabot_yml_is_classified_as_before(self):
-        # .github/dependabot.yml is not a workflow or an action: an npm bump
-        # that also touches it keeps the group the version rules give it.
+    def test_npm_pr_touching_dependabot_yml_is_group_c(self):
+        # Not an Actions bump, but the diff touches .github/: maintainer first.
+        # Ecosystem and update type stay as the version rules found them.
         pr = make_pr(
             number=1902,
             title="Bump knip from 6.1.0 to 6.1.1",
@@ -1150,9 +1150,13 @@ class TestGitHubActionsMaintainerFirst(unittest.TestCase):
             files=["src/PPDS.Extension/package.json", ".github/dependabot.yml"],
         )
         c = classify.classify_pr(pr)
+        before = classify._classify_by_version(pr)
+        self.assertEqual(before.group, "A")
+        self.assertEqual(c.group, "C")
         self.assertEqual(c.ecosystem, "npm")
-        self.assertEqual(c.group, "A")
-        self.assertEqual(c, classify._classify_by_version(pr))
+        self.assertEqual(c.update_type, before.update_type)
+        self.assertIn("diff touches .github/", c.reason)
+        self.assertIn("maintainer goes first", c.reason)
 
     def test_nuget_label_beside_actions_label_with_no_files_is_group_c(self):
         # detect_ecosystem checks nuget before github-actions, so this comes
@@ -1214,13 +1218,27 @@ class TestGitHubActionsMaintainerFirst(unittest.TestCase):
                 ))
                 self.assertEqual(c.group, "C")
 
-    def test_non_actions_prs_keep_the_version_rules_result(self):
-        # The override changes nothing for a PR with no Actions signal.
+    def test_prs_without_actions_or_github_paths_keep_the_version_rules_result(self):
+        # The override changes nothing for a PR with no Actions signal and no
+        # .github/ path.
         prs = [
             make_pr(number=1906, title="Bump knip from 6.1.0 to 6.1.1",
                     labels=["npm", "dependencies"],
                     head_ref="dependabot/npm_and_yarn/knip-6.1.1",
                     files=["src/PPDS.Extension/package.json"]),
+            make_pr(number=1911, title="Bump Newtonsoft.Json from 13.0.1 to 13.1.0",
+                    labels=["nuget", "dependencies"],
+                    head_ref="dependabot/nuget/Newtonsoft.Json-13.1.0",
+                    files=["Directory.Packages.props", "docs/.github-notes.md",
+                           "src/x/.github/y.yml"]),
+        ]
+        for pr in prs:
+            with self.subTest(title=pr["title"]):
+                self.assertEqual(classify.classify_pr(pr), classify._classify_by_version(pr))
+
+    def test_non_actions_prs_touching_github_paths_are_group_c(self):
+        # Any path under .github/, not only workflows and actions.
+        prs = [
             make_pr(number=1907, title="Bump Newtonsoft.Json from 13.0.1 to 13.1.0",
                     labels=["nuget", "dependencies"],
                     head_ref="dependabot/nuget/Newtonsoft.Json-13.1.0",
@@ -1234,10 +1252,65 @@ class TestGitHubActionsMaintainerFirst(unittest.TestCase):
                     head_ref="dependabot/npm_and_yarn/vite-8.0.0",
                     files=["src/PPDS.Extension/package.json",
                            ".github/pull_request_template.md"]),
+            make_pr(number=1910, title="Bump knip from 6.1.0 to 6.1.1",
+                    labels=["npm", "dependencies"],
+                    head_ref="dependabot/npm_and_yarn/knip-6.1.1",
+                    files=["src/PPDS.Extension/package.json",
+                           "./.github/ISSUE_TEMPLATE/bug.yml"]),
         ]
         for pr in prs:
             with self.subTest(title=pr["title"]):
-                self.assertEqual(classify.classify_pr(pr), classify._classify_by_version(pr))
+                before = classify._classify_by_version(pr)
+                c = classify.classify_pr(pr)
+                self.assertEqual(c.group, "C")
+                self.assertEqual(c.ecosystem, before.ecosystem)
+                self.assertEqual(c.update_type, before.update_type)
+                self.assertIn("maintainer goes first", c.reason)
+
+    def test_touches_github_path(self):
+        f = classify.touches_github_path
+        self.assertTrue(f([".github/dependabot.yml"]))
+        self.assertTrue(f(["src/a.cs", ".github/CODEOWNERS"]))
+        self.assertTrue(f(["./.github/pull_request_template.md"]))
+        self.assertTrue(f(["/.github/x"]))
+        self.assertTrue(f([".github\\ISSUE_TEMPLATE\\bug.yml"]))
+        self.assertTrue(f([".GitHub/x"]))
+        self.assertFalse(f([]))
+        self.assertFalse(f(["docs/.github-notes.md", "src/x/.github/y.yml", ".githubx/y"]))
+
+    def test_no_dependency_pr_touching_github_is_ever_auto_merge_eligible(self):
+        # npm and NuGet PRs whatever their version, package or other files.
+        titles = [
+            "Bump knip from 6.1.0 to 6.1.1",
+            "Bump Newtonsoft.Json from 13.0.1 to 13.1.0",
+            "Bump @types/node from 22.0.0 to 22.0.1",
+            "Bump Azure.Identity from 1.0.0 to 1.0.1",
+            "Bump the npm_and_yarn group with 2 updates",
+        ]
+        ecosystems = [
+            (["npm", "dependencies"], "dependabot/npm_and_yarn/x"),
+            (["nuget", "dependencies"], "dependabot/nuget/x"),
+            (["dependencies"], "human/x"),
+        ]
+        github_files = [
+            ".github/dependabot.yml",
+            "./.github/pull_request_template.md",
+            ".github/ISSUE_TEMPLATE/bug.yml",
+        ]
+        other_files = [[], ["package-lock.json"], ["src/PPDS.Extension/package.json"],
+                       ["Directory.Packages.props"]]
+        body = "Updates `knip` from 6.1.0 to 6.1.1\nUpdates `eslint` from 9.0.0 to 9.0.1\n"
+        for title in titles:
+            for labels, head_ref in ecosystems:
+                for gh_file in github_files:
+                    for others in other_files:
+                        files = others + [gh_file]
+                        with self.subTest(title=title, labels=labels, files=files):
+                            c = classify.classify_pr(make_pr(
+                                number=1990, title=title, body=body,
+                                labels=labels, head_ref=head_ref, files=files,
+                            ))
+                            self.assertEqual(c.group, "C", c.reason)
 
     def test_npm_and_nuget_prs_without_github_paths_are_unchanged(self):
         npm = classify.classify_pr(make_pr(

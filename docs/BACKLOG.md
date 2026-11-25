@@ -19,7 +19,8 @@ them here — past audits found drift between this doc and the live state.
 |-----------|---------|
 | `v1.0` | Must ship for v1 release |
 | `v1.1` | Committed post-v1 near-term work |
-| `v2.0` | Enterprise Data Migration Platform + major architecture |
+| `v2.0` | The PPDS 2.0 release (see #1676 for its scope) |
+| `Migration platform` | Undated: the enterprise data migration platform work moved out of `v2.0` (#1676) |
 
 ### Triage states
 

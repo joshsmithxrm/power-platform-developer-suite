@@ -1,7 +1,8 @@
 # Release Runbook
 
 The step-by-step procedure for cutting a PPDS release: CHANGELOGs, version
-bumps, the tag-push sequence, CI monitoring and post-publish verification. Use it
+bumps, the tag commands the maintainer runs, CI monitoring and post-publish
+verification. Use it
 for prereleases and stable releases alike; the mechanics are the same and only
 the version suffixes differ.
 
@@ -19,6 +20,16 @@ Related documents:
 Every tag push, GitHub release and publish is an irreversible action that the
 maintainer performs deliberately. Nothing in this procedure is automatic
 approval for the next step.
+
+**The maintainer creates and pushes every tag and makes every publication**
+([VERSIONING.md](../VERSIONING.md#9-decisions-in-documents), rule 9.2). A
+session prepares the release (scope, CHANGELOGs, version checks, the exact
+commands) and verifies it afterwards with read-only checks. A session never
+runs `git tag`, a tag push, `gh release create`, `edit`, `upload` or `delete`,
+`gh workflow run` of a publish or docs workflow, or `gh run rerun` of one. Where
+this runbook shows such a command, the block is headed **Maintainer runs**: the
+session writes the command with the real versions filled in, hands it to the
+maintainer, and waits for the maintainer to say it has run.
 
 ## When to Use
 
@@ -178,14 +189,15 @@ owners; if sending a reply or closing a PR needs the maintainer's permission,
 prepare the exact reply and decision and get that decision rather than leaving
 closeout silently unowned or marking it done. Use the policy's explicit
 no-contribution record when nothing external is included. None of this grants
-merge, publication or communication authority.
+merge, publication or communication authority; who may merge is in
+[MERGE-POLICY.md](../MERGE-POLICY.md#who-merges).
 
 ### 4. Version Bumps
 
 **NuGet packages (7): no csproj edits.** PPDS.Auth, PPDS.Cli, PPDS.Dataverse,
 PPDS.Mcp, PPDS.Migration, PPDS.Plugins and PPDS.Query are versioned by MinVer
 from git tags. Never edit `<Version>` in a csproj; the version is whatever tag
-you push in Step 8.
+the maintainer pushes in Step 8.
 
 **Extension: bump `package.json` by hand.** The Extension version is the only
 one in a tracked file:
@@ -211,15 +223,12 @@ refname sorting can rank `beta.2` above stable `1.0.0` and misorder
 multi-digit prerelease identifiers such as `beta.10`. Do not copy a version table
 into notes or this runbook; query the current state each time.
 
-Pick the next version per package:
+Pick the next version per package. What a patch, a minor and a major may
+contain, and what counts as a breaking change, is defined in
+[VERSIONING.md](../VERSIONING.md) (sections 2 to 4); do not restate it here. A
+major needs a CHANGELOG entry under Removed, or a `feat!:`/`fix!:` commit, that
+explains what broke.
 
-- **Patch** (`X.Y.Z+1`): bug fixes only; no new features and no behavior change
-  for working code.
-- **Minor** (`X.Y+1.0`): new features and backwards-compatible changes;
-  deprecations allowed.
-- **Major** (`X+1.0.0`): breaking changes such as removed features, renamed APIs
-  or changed defaults that affect existing callers. A major needs a CHANGELOG
-  entry under Removed, or a `feat!:`/`fix!:` commit, that explains what broke.
 - Heuristic: any `feat:` commit in the range means minor; any `feat!:` or
   `fix!:` means major; otherwise patch.
 - Prereleases increment the prerelease number (for example `-beta.N` or
@@ -313,17 +322,21 @@ The PR body contains:
 - **Summary** of the release window (dates, commit range)
 - **Versions table**: previous to new for each package
 - **Highlights**: one line per package of user-facing changes
-- **Release flow after merge**: the exact tag-push sequence from Step 8
+- **Release flow after merge**: the exact tag commands from Step 8, for the maintainer to run
 - **Test plan**: what to verify before and after merge
 
 PR #785 is a worked reference (`gh pr view 785 --json body`).
 
 When CI on the draft is green, mark it ready with `gh pr ready <pr-number>`.
 
-### 8. Post-Merge: Push Tags
+### 8. Post-Merge: Prepare the Tag Commands
 
-Tag only from `main` (or from a `release/X.Y` stabilization branch), never from a
-feature branch, so the published commit is on the mainline.
+The tags are created from `main` (or from a `release/X.Y` stabilization branch),
+never from a feature branch, so the published commit is on the mainline. **You do
+not create or push them.** You prepare the exact commands below and hand them to
+the maintainer, one wave at a time. Every tag command names the commit it
+points at (`git tag <name> <full-sha>`), so the tag lands on the reviewed release
+commit whatever the maintainer has checked out.
 
 **Co-release rule:** a release train that includes a `Cli-v*` tag also includes
 an `Extension-v*` tag on the same commit, because the Extension bundles the CLI
@@ -331,37 +344,51 @@ from that exact tag. The rule, how the advisory issue reconciles, and how to opt
 out with a durable record are in
 [CLI/Extension Co-release Reconciliation](../RELEASE.md#cli-extension-co-release-reconciliation).
 
-After the PR merges, update `main` in your main worktree (git does not let you
-check out `main` in the release worktree):
+After the PR merges, the session finds the full hash of the merged release
+commit (read-only; this is the `<release-commit-full-sha>` in every block below):
 
 ```bash
 git fetch origin
-git pull --ff-only origin main
+git rev-parse origin/main
 ```
 
-Create one tag per released package. Versions are per package; do not assume one
-shared version:
+Prepare one tag per released package. Versions are per package; do not assume one
+shared version.
+
+**Maintainer runs** (a session writes this block with the real versions and the
+full hash filled in and hands it over; it does not run it):
 
 ```bash
-git tag Auth-v<auth-version>
-git tag Cli-v<cli-version>
-git tag Dataverse-v<dataverse-version>
-git tag Mcp-v<mcp-version>
-git tag Migration-v<migration-version>
-git tag Query-v<query-version>
-git tag Plugins-v<plugins-version>
-git tag Extension-v<extension-version>   # same commit as the Cli tag
-
-# Check the prefixes before pushing; they must match each csproj's <MinVerTagPrefix>
-git tag -l 'Auth-v*' | tail -3
-git tag -l 'Cli-v*' | tail -3
-# ...and so on for each prefix
+git fetch origin
+git rev-parse origin/main      # must print <release-commit-full-sha>; stop if it does not
+git tag Auth-v<auth-version> <release-commit-full-sha>
+git tag Cli-v<cli-version> <release-commit-full-sha>
+git tag Dataverse-v<dataverse-version> <release-commit-full-sha>
+git tag Mcp-v<mcp-version> <release-commit-full-sha>
+git tag Migration-v<migration-version> <release-commit-full-sha>
+git tag Query-v<query-version> <release-commit-full-sha>
+git tag Plugins-v<plugins-version> <release-commit-full-sha>
+git tag Extension-v<extension-version> <release-commit-full-sha>   # same commit as the Cli tag
 ```
 
-Push **one tag at a time** (see
+Before handing the commands over, the session checks the prefixes against the
+[Release model](../RELEASE.md#release-model-tags-channels-and-lineage) (they must
+match each csproj's `<MinVerTagPrefix>`) and checks, with read-only commands, that
+no tag with a planned name already exists locally or on `origin` (a tagged version
+number is never reused). Each of these prints nothing when the name is free; any
+output means stop and tell the maintainer:
+
+```bash
+git tag -l "Auth-v<auth-version>"
+git ls-remote --tags origin "refs/tags/Auth-v<auth-version>"
+# ...the same two commands for every planned tag name, including the unified tag
+```
+
+The maintainer pushes **one tag at a time** (see
 [Large tag batches suppress GitHub Actions events](#large-tag-batches-suppress-github-actions-events)),
-in dependency waves, and wait for each wave's public verification (Step 10)
-before starting the next:
+in dependency waves, and waits for each wave's public verification (Step 10)
+before starting the next. Hand over one wave per message and verify it before
+handing over the next:
 
 1. Auth, Dataverse, Plugins (independent roots; may run concurrently)
 2. Query, Migration
@@ -369,18 +396,20 @@ before starting the next:
 4. MCP
 5. Extension (same reviewed commit as CLI)
 
+**Maintainer runs:**
+
 ```bash
 git push origin "refs/tags/Auth-v<auth-version>"
 # Continue through the reviewed version map only after the preceding wave verifies.
 ```
 
-The Extension tag push publishes to its inferred channel by itself. Do not also
-dispatch `extension-publish.yml` for the same version.
+The Extension tag push publishes to its inferred channel by itself. The
+maintainer does not also dispatch `extension-publish.yml` for the same version.
 
 Plugins: the Plugins publish path stays blocked until its signing policy is
 activated; check
 [Isolated Plugins signing preparation](../RELEASE.md#isolated-plugins-signing-preparation)
-before planning a `Plugins-v*` tag.
+before preparing a `Plugins-v*` tag.
 
 #### First NuGet publish through trusted publishing
 
@@ -388,8 +417,9 @@ Temporary note: remove this subsection after the first successful
 trusted-publishing release. `publish-nuget.yml` has used
 NuGet trusted publishing (OIDC login, no stored key) since #1564 (2026-11-09), and
 no package tag has been published through it yet; the newest package tags
-(2026-11-02) predate it. On the first wave of the next release, push a single
-tag and watch its `publish` job before pushing any other:
+(2026-11-02) predate it. On the first wave of the next release, the maintainer
+pushes a single tag and the session watches its `publish` job (read-only) before
+handing over any other:
 
 - `Validate trusted publishing identity` and `NuGet login` must succeed. A
   failure there means the token exchange or the nuget.org policy is wrong; no
@@ -397,11 +427,12 @@ tag and watch its `publish` job before pushing any other:
 - `Push packages to NuGet` and `Push symbols to NuGet` must succeed, and the
   `verify-public-artifact` job must find the version on nuget.org.
 
-If login or upload fails, stop and see
+If login or upload fails, the session stops and reports to the maintainer. See
 [NuGet trusted publishing](../RELEASE.md#nuget-trusted-publishing) for what is
-unverified about the policy before changing anything or rerunning.
+unverified about the policy; nothing is changed or rerun until the maintainer decides.
 
-**Worked example** from PR #785 (2026-04-17 prerelease):
+**Worked example** from PR #785 (2026-04-17 prerelease), as the maintainer ran
+it (commands the maintainer runs, shown for reference):
 
 ```bash
 git tag Auth-v1.0.0-beta.8
@@ -415,16 +446,16 @@ git tag Extension-v0.7.0
 ```
 
 That release pushed the tags in a loop with a three-second pause. A pause is not
-a substitute for the dependency waves above; push each wave only after the
-previous one verifies.
+a substitute for the dependency waves above; the maintainer pushes each wave only
+after the previous one verifies.
 
 #### Unified v* Tag (minor/stable releases only)
 
-After the per-package tags, a coordinated minor or stable release pushes one
-unified tag, which triggers `docs-release.yml`:
+After the per-package tags, a coordinated minor or stable release has one
+unified tag, which triggers `docs-release.yml`. **Maintainer runs:**
 
 ```bash
-git tag v<version>   # e.g. v1.1.0
+git tag v<version> <release-commit-full-sha>   # e.g. v1.1.0
 git push origin "refs/tags/v<version>"
 ```
 
@@ -432,7 +463,7 @@ git push origin "refs/tags/v<version>"
 |---|---|---|---|
 | Minor (coordinated) | **Yes**, `vX.Y.0` | `v1.1.0` | `docs-release.yml` regenerates reference docs and opens the ppds-docs PR |
 | Stable (coordinated) | **Yes**, `vX.Y.0` | `v1.0.0` | Same as minor |
-| Prerelease (coordinated) | **Skip**, or dispatch a dry run | none | Pushing `v*-beta.N` runs the **real** `docs-release.yml` and opens a ppds-docs PR. For a preview use `gh workflow run docs-release.yml -f dry_run=true`. |
+| Prerelease (coordinated) | **Skip**, or the maintainer dispatches a dry run | none | Pushing `v*-beta.N` runs the **real** `docs-release.yml` and opens a ppds-docs PR. For a preview the maintainer runs `gh workflow run docs-release.yml -f dry_run=true`. |
 | Patch | **No** | none | Per-package tags only; see below for a coordinated patch |
 
 How the unified tag relates to the per-package tags is in the
@@ -444,15 +475,16 @@ review and merge its ppds-docs PR and its API-baseline rollover PR, is in
 **Docs for a coordinated patch.** Per-product tags such as `Cli-v*` and
 `Extension-v*` do not trigger `docs-release.yml`, which listens only for `v*`
 tags and manual dispatch. Do not invent a unified version tag to trigger docs.
-After the release/docs approval, pick a co-located product tag whose peeled
-commit equals the reviewed release commit and dispatch a dry run against it:
+After the release/docs approval, the session picks a co-located product tag whose
+peeled commit equals the reviewed release commit and prepares a dry-run dispatch
+against it. **Maintainer runs:**
 
 ```bash
 gh workflow run docs-release.yml --ref <reviewed-product-release-tag> -f dry_run=true
 ```
 
-Review the generated artifacts, then separately authorize the `dry_run=false`
-dispatch that opens the paired docs and API-rollover PRs. Check the existing
+The session reviews the generated artifacts; the maintainer then separately runs
+the `dry_run=false` dispatch that opens the paired docs and API-rollover PRs. Check the existing
 rollover-PR gate and review both outputs as in Step 9 item 4. Recapture companion skills against the
 same final CLI/MCP versions. A successful product publish does not by itself mean
 the docs or skills were refreshed.
@@ -475,15 +507,15 @@ Expected sequence (timings are estimates; advance only after verification):
    must finish and verify before the next wave.
 3. `extension-publish.yml` runs on the `Extension-v*` tag push, about 10-15
    minutes, with the channel inferred from the minor version.
-4. `docs-release.yml` runs on the unified `v*` tag if you pushed one. It opens
+4. `docs-release.yml` runs on the unified `v*` tag if the maintainer pushed one. It opens
    the generated-reference PR in ppds-docs, and opens the core API-baseline
    rollover PR only if baseline files change (`scripts/docs-gen/open-rollover-pr.sh`
    skips the PR when there are no Unshipped entries to roll); otherwise record
    the verified no-op. Review any rollover before merging the public docs
    landing, in the order given in [docs-release.md](docs-release.md).
 
-Let `release-cli.yml` own the CLI GitHub release: do not pre-create a draft and
-do not use auto-generated notes. Its draft, resume and asset rules are in
+Let `release-cli.yml` own the CLI GitHub release: no one pre-creates a draft or
+uses auto-generated notes. Its draft, resume and asset rules are in
 [Pre-upload release-input checks](../RELEASE.md#pre-upload-release-input-checks).
 
 Do not assume success: check each publish separately. One surface can succeed
@@ -555,17 +587,18 @@ Also download a CLI binary from the GitHub release, run `./ppds --version` and
 confirm it matches the tag.
 
 If a smoke check fails, file a hotfix issue and prepare a patch release. Do not
-alter the existing release; publish a new one.
+alter the existing release; prepare a new one for the maintainer to publish.
 
 ### 11. Create GitHub Releases for the Other Surfaces
 
 Only the CLI gets a GitHub release automatically. Every other released surface
-(NuGet libraries and the Extension) needs one created by hand from its CHANGELOG
-section. For each released `<Prefix>-vX.Y.Z` **except `Cli`**:
+(NuGet libraries and the Extension) needs one created by the maintainer from its
+CHANGELOG section. For each released `<Prefix>-vX.Y.Z` **except `Cli`**:
 
-1. Copy the `## [X.Y.Z]` section of `src/PPDS.<Surface>/CHANGELOG.md` (from the
-   version heading to the next `## [` heading) into a notes file.
-2. Create the release from that file:
+1. The session copies the `## [X.Y.Z]` section of
+   `src/PPDS.<Surface>/CHANGELOG.md` (from the version heading to the next
+   `## [` heading) into a notes file.
+2. The maintainer creates the release from that file. **Maintainer runs:**
 
 ```bash
 gh release create <Prefix>-vX.Y.Z \
@@ -579,10 +612,10 @@ keeps library and Extension releases from taking the repository's "Latest" badge
 from the CLI. Pass the notes with `--notes-file`, not inline: CHANGELOG bodies
 contain backticks and command examples that a shell would interpret.
 
-Then check that every pushed tag has a release:
+Then the session checks, read-only, that every pushed tag has a release:
 
 ```bash
-for t in <every tag you pushed>; do
+for t in <every tag the maintainer pushed>; do
   gh release view "$t" >/dev/null 2>&1 && echo "$t OK" || echo "$t MISSING"
 done
 ```
@@ -616,18 +649,22 @@ to the co-release rule in Step 8.
    say "No user-facing changes; version consistency for stable dependencies."
 3. Open a focused CHANGELOG PR, merge it, then rerun the advisory on the final
    commit.
-4. Push the reviewed target and prerequisite tags individually. For example, a
-   stable Query patch can need both a Dataverse prerequisite tag and a Query tag:
+4. Prepare the commands for the reviewed target and prerequisite tags and hand
+   them to the maintainer, who pushes them individually. For example, a stable
+   Query patch can need both a Dataverse prerequisite tag and a Query tag.
+   **Maintainer runs:**
    ```bash
-   git tag Dataverse-v<X.Y.Z>
+   git fetch origin
+   git rev-parse origin/main      # must print <release-commit-full-sha>; stop if it does not
+   git tag Dataverse-v<X.Y.Z> <release-commit-full-sha>
    git push origin "refs/tags/Dataverse-v<X.Y.Z>"
-   git tag Query-v<X.Y.Z>
+   git tag Query-v<X.Y.Z> <release-commit-full-sha>
    git push origin "refs/tags/Query-v<X.Y.Z>"
    ```
 5. Monitor every workflow run those tags start. **A `Cli-v*` tag also starts
    `release-cli.yml`**; watch both.
-6. Verify the publish (Step 10) and create the GitHub release for each non-CLI
-   target (Step 11).
+6. Verify the publish (Step 10) and prepare the GitHub release command for each
+   non-CLI target (Step 11) for the maintainer to run.
 
 **No full release PR is required for a focused patch**: the original fix PR and
 the focused CHANGELOG PR are the audit trail.
@@ -676,12 +713,12 @@ locally on the branch before tagging. To get CI as well, open a draft PR from
 checks are path-selected as described in Step 6.
 
 **Tag from it**, not from `main`. The publish workflows run from the tag
-regardless of branch:
+regardless of branch. **Maintainer runs:**
 
 ```bash
-git checkout release/X.Y
-git pull
-git tag <Prefix>-v<X.Y.Z>
+git fetch origin
+git rev-parse origin/release/X.Y      # must print <release-commit-full-sha>; stop if it does not
+git tag <Prefix>-v<X.Y.Z> <release-commit-full-sha>
 git push origin "refs/tags/<Prefix>-v<X.Y.Z>"
 ```
 
@@ -726,16 +763,17 @@ state. The input guard rejects already-published versions and drafts whose
 source, workflow ownership, notes or assets cannot be verified. A failed read is
 not proof that no release exists.
 
-**Recovery:** preserve the existing tags, assets and failed run. Resume a known
-owned draft only when the guard verifies it; otherwise stop and obtain a deliberate
-recovery decision from the maintainer. Do not delete a draft, move or re-push a tag, or replace assets as a
-routine fix. Let the workflow own the release lifecycle.
+**Recovery:** preserve the existing tags, assets and failed run. The maintainer
+may resume a known owned draft, and only when the guard verifies it; otherwise the
+session stops and obtains a deliberate recovery decision from the maintainer. No
+one deletes a draft, moves or re-pushes a tag, or replaces assets as a routine
+fix. Let the workflow own the release lifecycle.
 
 ### Extension publish: manual dispatch needs `--ref`
 
 `extension-publish.yml` runs on every `Extension-v*` tag push and infers the
 channel from the minor version. To override the channel or do a dry run, dispatch
-it against the tag:
+it against the tag. **Maintainer runs:**
 
 ```bash
 gh workflow run extension-publish.yml --ref Extension-v<version> -f dry_run=false -f channel=stable
@@ -750,10 +788,10 @@ and fails the job's `refs/tags/Extension-v*` ref check.
 **Symptom:** a package publishes with the wrong (often stale) version.
 
 **Cause:** MinVer reads `<MinVerTagPrefix>` from the csproj and only considers
-tags with that prefix. If you push `Cli-v1.0.0` but the csproj said `CLI-v`,
+tags with that prefix. If `Cli-v1.0.0` is pushed but the csproj said `CLI-v`,
 MinVer falls back to older tags.
 
-**Fix:** tag with exactly the prefixes in the
+**Fix:** the maintainer tags with exactly the prefixes in the
 [Release model](../RELEASE.md#release-model-tags-channels-and-lineage); they are
 case-sensitive on Linux runners. Do not invent a new prefix without changing the matching csproj. To see recent prefix
 changes: `git log --oneline --grep='MinVerTagPrefix'`.
@@ -769,15 +807,16 @@ before the merge. That CI is path-selected and is not a full run (Step 6).
 
 ### Large tag batches suppress GitHub Actions events
 
-**Symptom:** after `git push origin --tags`, no `publish-nuget.yml` or
-`release-cli.yml` runs appear.
+**Symptom:** after more than three tags were pushed in one operation, no
+`publish-nuget.yml` or `release-cli.yml` runs appear.
 
 **Cause:** GitHub does not create push events for tags when more than three tags
 are pushed at once
 ([GitHub's push-event documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#push)).
 
-**Fix:** push tags individually in the dependency order from Step 8. A delay is
-not a substitute for waiting for the preceding wave's public verification.
+**Fix:** the maintainer pushes tags individually in the dependency order from
+Step 8. A delay is not a substitute for waiting for the preceding wave's public
+verification.
 
 ### MSYS2 path conversion breaks `/p:` MSBuild properties
 
@@ -801,7 +840,8 @@ recovery needs a separate, explicit decision; it is never a routine release step
 
 ### A publish or signing job failed
 
-Do not retag. Investigate the failure and fix the credential where it lives:
+Do not retag. The session investigates the failure with read-only checks; the
+maintainer fixes the credential where it lives:
 
 - **NuGet, tag on a commit that includes #1564:** there is no NuGet secret. A
   login or upload failure points at the trusted-publishing policy on nuget.org or
@@ -814,8 +854,8 @@ Do not retag. Investigate the failure and fix the credential where it lives:
   signing policy is active.
 
 Each credential is listed in
-[Signing and credentials](../RELEASE.md#signing-and-credentials). Then rerun the
-workflow on the existing tag:
+[Signing and credentials](../RELEASE.md#signing-and-credentials). Then the
+maintainer reruns the workflow on the existing tag. **Maintainer runs:**
 
 ```bash
 gh run rerun <run-id>
@@ -834,6 +874,8 @@ affected package.
 
 ### Never
 
+- Create or push a tag, create or edit a GitHub release, or dispatch or rerun a
+  publish or docs workflow from a session. The maintainer runs those commands.
 - Force-push, move or rewrite a published tag. Consumers have already pulled it,
   and package indexes and caches break.
 - Reuse a version number for different content. SemVer consumers treat the tag
@@ -872,4 +914,4 @@ After every publish verifies:
   `.github/workflows/docs-release.yml`
 - Previous prerelease: PR #785 (2026-04-17), commit `5bb4d5b90`
 - CHANGELOG format: [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)
-- Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html)
+- Versioning policy: [docs/VERSIONING.md](../VERSIONING.md), built on [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html)
