@@ -55,6 +55,11 @@ public class RecordIdTextTests
         "gccccccc-0000-0000-0000-000000000001",
         "cccccccc_0000_0000_0000_000000000001",
         "ｃccccccc-0000-0000-0000-000000000001",
+        // One character from another script in a digit position: digits and letters that are not ASCII hex.
+        "cccccccc-0000-0000-0000-00000000000１", // fullwidth digit one
+        "cccccccc-0000-0000-0000-00000000000١", // Arabic-Indic digit one
+        "ａccccccc-0000-0000-0000-000000000001", // fullwidth Latin small letter a
+        "cccccccc-0000-0000-а000-000000000001", // Cyrillic small letter a
         // The empty id is not a record.
         "00000000-0000-0000-0000-000000000000",
         "{00000000-0000-0000-0000-000000000000}",
