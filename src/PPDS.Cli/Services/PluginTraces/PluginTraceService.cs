@@ -23,9 +23,11 @@ public class PluginTraceService : IPluginTraceService
     private readonly IDataverseConnectionPool _pool;
     private readonly IShakedownGuard _guard;
     private readonly ILogger<PluginTraceService> _logger;
+    private readonly TimeProvider _clock;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="PluginTraceService"/> class.
+    /// Initializes a new instance of the <see cref="PluginTraceService"/> class, reading the
+    /// system clock.
     /// </summary>
     /// <param name="pool">The connection pool.</param>
     /// <param name="guard">The shakedown guard gating mutations.</param>
@@ -34,10 +36,27 @@ public class PluginTraceService : IPluginTraceService
         IDataverseConnectionPool pool,
         IShakedownGuard guard,
         ILogger<PluginTraceService> logger)
+        : this(pool, guard, logger, TimeProvider.System)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PluginTraceService"/> class.
+    /// </summary>
+    /// <param name="pool">The connection pool.</param>
+    /// <param name="guard">The shakedown guard gating mutations.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="clock">The clock the age cut-off and its check read (in UTC).</param>
+    public PluginTraceService(
+        IDataverseConnectionPool pool,
+        IShakedownGuard guard,
+        ILogger<PluginTraceService> logger,
+        TimeProvider clock)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
         _guard = guard ?? throw new ArgumentNullException(nameof(guard));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
     }
 
     /// <inheritdoc />
@@ -244,6 +263,15 @@ public class PluginTraceService : IPluginTraceService
             var batchDeleted = await DeleteByIdsAsync(ids, batchProgress, cancellationToken);
             totalDeleted += batchDeleted;
 
+            // A full page of which nothing could be deleted would be listed again for ever.
+            if (batchDeleted == 0 && result.Items.Count >= 5000)
+            {
+                throw new PpdsException(
+                    ErrorCodes.PluginTrace.DeleteMadeNoProgress,
+                    $"Deleting plug-in traces stopped: a full page of {result.Items.Count} matching traces was listed again " +
+                    $"but none of them could be deleted. {totalDeleted} trace(s) were deleted before this.");
+            }
+
             // If we deleted fewer than requested, we're done
             if (result.Items.Count < 5000)
             {
@@ -270,10 +298,38 @@ public class PluginTraceService : IPluginTraceService
         IProgress<int>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        // Refused before anything is read: a zero or negative age would put the cut-off at or
+        // after now, and every trace would match.
+        var cutoff = PluginTraceAge.CutoffUtc(olderThan, _clock.GetUtcNow().UtcDateTime);
+        return await DeleteCreatedBeforeAsync(cutoff, progress, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> DeleteCreatedBeforeAsync(
+        DateTime cutoffUtc,
+        IProgress<int>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (cutoffUtc.Kind != DateTimeKind.Utc)
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.InvalidValue,
+                "The cut-off for deleting plug-in traces must be a UTC time.");
+        }
+
+        // At least the shortest age the form can express in the past: a cut-off at or just before
+        // now matches (nearly) every trace.
+        if (cutoffUtc > _clock.GetUtcNow().UtcDateTime - PluginTraceAge.MinAge)
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.InvalidValue,
+                "The cut-off for deleting plug-in traces must be at least one minute in the past; a cut-off at or near now matches every trace. " +
+                "To delete every trace, use the separate option that deletes all traces.");
+        }
+
         _guard.EnsureCanMutate("plugintraces.deleteOlderThan");
 
-        var cutoff = DateTime.UtcNow - olderThan;
-        var filter = new PluginTraceFilter { CreatedBefore = cutoff };
+        var filter = new PluginTraceFilter { CreatedBefore = cutoffUtc };
         return await DeleteByFilterAsync(filter, progress, cancellationToken);
     }
 
@@ -394,6 +450,16 @@ public class PluginTraceService : IPluginTraceService
         return countValue?.Value is int count ? count : 0;
     }
 
+    /// <summary>
+    /// A date for a FetchXML condition. A UTC value on a whole second (every age cut-off) is sent as
+    /// <c>yyyy-MM-ddTHH:mm:ssZ</c>, the form observed to be read as a UTC instant; any other value keeps
+    /// the round-trip form, so no instant is moved.
+    /// </summary>
+    private static string FetchDate(DateTime value)
+        => value.Kind == DateTimeKind.Utc && value.Ticks % TimeSpan.TicksPerSecond == 0
+            ? value.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture)
+            : value.ToString("o", System.Globalization.CultureInfo.InvariantCulture);
+
     private static string BuildCountFetchXml(PluginTraceFilter? filter)
     {
         var conditions = new System.Text.StringBuilder();
@@ -422,10 +488,10 @@ public class PluginTraceService : IPluginTraceService
                 conditions.Append($"<condition attribute=\"depth\" operator=\"le\" value=\"{filter.MaxDepth.Value}\" />");
 
             if (filter.CreatedAfter.HasValue)
-                conditions.Append($"<condition attribute=\"createdon\" operator=\"on-or-after\" value=\"{filter.CreatedAfter.Value:o}\" />");
+                conditions.Append($"<condition attribute=\"createdon\" operator=\"ge\" value=\"{FetchDate(filter.CreatedAfter.Value)}\" />");
 
             if (filter.CreatedBefore.HasValue)
-                conditions.Append($"<condition attribute=\"createdon\" operator=\"on-or-before\" value=\"{filter.CreatedBefore.Value:o}\" />");
+                conditions.Append($"<condition attribute=\"createdon\" operator=\"lt\" value=\"{FetchDate(filter.CreatedBefore.Value)}\" />");
 
             if (filter.MinDurationMs.HasValue)
                 conditions.Append($"<condition attribute=\"performanceexecutionduration\" operator=\"ge\" value=\"{filter.MinDurationMs.Value}\" />");
@@ -526,12 +592,12 @@ public class PluginTraceService : IPluginTraceService
 
         if (filter.CreatedAfter.HasValue)
         {
-            query.Criteria.AddCondition(PluginTraceLog.Fields.CreatedOn, ConditionOperator.OnOrAfter, filter.CreatedAfter.Value);
+            query.Criteria.AddCondition(PluginTraceLog.Fields.CreatedOn, ConditionOperator.GreaterEqual, filter.CreatedAfter.Value);
         }
 
         if (filter.CreatedBefore.HasValue)
         {
-            query.Criteria.AddCondition(PluginTraceLog.Fields.CreatedOn, ConditionOperator.OnOrBefore, filter.CreatedBefore.Value);
+            query.Criteria.AddCondition(PluginTraceLog.Fields.CreatedOn, ConditionOperator.LessThan, filter.CreatedBefore.Value);
         }
 
         if (filter.MinDurationMs.HasValue)

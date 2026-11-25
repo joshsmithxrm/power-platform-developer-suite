@@ -168,6 +168,21 @@ public partial class RpcMethodHandler
         if (modeCount > 1)
             throw new RpcException(ErrorCodes.Validation.RequiredField, "Only one of 'ids', 'olderThanDays', or 'filter' may be provided per call");
 
+        // Checked before connecting: 0, a negative number or more than the maximum is refused with
+        // Validation.InvalidValue (a value too large for a TimeSpan included).
+        TimeSpan? olderThan = null;
+        if (olderThanDays != null)
+        {
+            try
+            {
+                olderThan = PluginTraceAge.FromDays(olderThanDays.Value);
+            }
+            catch (PpdsException ex)
+            {
+                throw MapPpdsToRpcException(ex);
+            }
+        }
+
         return await WithProfileAndEnvironmentAsync(profileName, environmentUrl, async (sp, ct) =>
         {
             var traceService = sp.GetRequiredService<IPluginTraceService>();
@@ -189,10 +204,9 @@ public partial class RpcMethodHandler
 
                 deletedCount = await traceService.DeleteByIdsAsync(guids, cancellationToken: ct);
             }
-            else if (olderThanDays != null)
+            else if (olderThan != null)
             {
-                var olderThan = TimeSpan.FromDays(olderThanDays.Value);
-                deletedCount = await traceService.DeleteOlderThanAsync(olderThan, cancellationToken: ct);
+                deletedCount = await traceService.DeleteOlderThanAsync(olderThan.Value, cancellationToken: ct);
             }
             else
             {

@@ -163,6 +163,19 @@ public static class ErrorCodes
         /// <summary>Invalid command-line argument combination.</summary>
         public const string InvalidArguments = "Validation.InvalidArguments";
 
+        /// <summary>
+        /// The <c>--key</c> of <c>data delete</c> or <c>data update</c> matches more than one record, so it does not name
+        /// one record; nothing was changed (#1918).
+        /// </summary>
+        public const string KeyMatchesMultipleRecords = "Validation.KeyMatchesMultipleRecords";
+
+        /// <summary>
+        /// A file of record ids (<c>data delete --file</c>) cannot be read exactly as a list of the table's record ids: an
+        /// unknown shape, a missing id column, an entry without the id or with a value that is not an id, or an id given
+        /// twice. Nothing was read from or changed in Dataverse beyond the table's metadata (#1915).
+        /// </summary>
+        public const string RecordIdFileInvalid = "Validation.RecordIdFileInvalid";
+
         /// <summary>URL scheme is not permitted (only http/https may be opened externally).</summary>
         public const string InvalidUrlScheme = "Validation.InvalidUrlScheme";
 
@@ -321,6 +334,9 @@ public static class ErrorCodes
 
         /// <summary>Failed to update plugin trace log settings.</summary>
         public const string SetSettingsFailed = "PluginTrace.SetSettingsFailed";
+
+        /// <summary>A delete by filter listed a full page again and could delete none of it, so it stopped.</summary>
+        public const string DeleteMadeNoProgress = "PluginTrace.DeleteMadeNoProgress";
     }
 
     /// <summary>
