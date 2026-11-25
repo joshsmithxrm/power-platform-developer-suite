@@ -77,6 +77,39 @@ public class PluginStepManagerTests
     }
 
     [Fact]
+    public async Task GetActivePluginStepsAsync_SelectsOnlyEnabledVisibleCustomSteps()
+    {
+        // #1921 review MF5: the query's state, hidden and custom-level conditions are each pinned.
+        var target = new FakePluginTarget();
+        target.Codes["new_widget"] = 10051;
+        var custom = Guid.NewGuid();
+        target.Steps.Add((custom, "custom step", 10051));
+        target.Steps.Add(new FakeStep { Id = Guid.NewGuid(), Name = "already disabled", Code = 10051, Enabled = false });
+        target.Steps.Add(new FakeStep { Id = Guid.NewGuid(), Name = "hidden", Code = 10051, Hidden = true });
+        target.Steps.Add(new FakeStep { Id = Guid.NewGuid(), Name = "system", Code = 10051, CustomizationLevel = 0 });
+        target.Attach(_pooledClient);
+
+        var result = await _sut.GetActivePluginStepsAsync(new[] { "new_widget" });
+
+        result.Select(st => st.Id).Should().Equal(custom);
+    }
+
+    [Fact]
+    public async Task GetActivePluginStepsAsync_MetadataForAnotherTable_Refuses()
+    {
+        var target = new FakePluginTarget { MetadataAnswersWith = "new_gadget" };
+        target.Codes["new_widget"] = 10051;
+        target.Steps.Add((Guid.NewGuid(), "widget step", 10051));
+        target.Attach(_pooledClient);
+
+        var act = () => _sut.GetActivePluginStepsAsync(new[] { "new_widget" });
+
+        (await act.Should().ThrowAsync<ImportRefusedException>()).Which.Reason
+            .Should().Be(ImportRefusalReasons.PluginTableNotResolved);
+        target.FetchXml.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task GetActivePluginStepsAsync_MetadataWithoutCode_Refuses()
     {
         _pooledClient

@@ -16,7 +16,10 @@ namespace PPDS.Migration.Tests.Import;
 internal sealed class FakePluginTarget
 {
     public Dictionary<string, int> Codes { get; } = new(StringComparer.OrdinalIgnoreCase);
-    public List<(Guid Id, string Name, int Code)> Steps { get; } = new();
+    public List<FakeStep> Steps { get; } = new();
+
+    /// <summary>When set, the metadata response names this table instead of the one asked for.</summary>
+    public string? MetadataAnswersWith { get; set; }
     public List<string> FetchXml { get; } = new();
     public List<string> MetadataRequests { get; } = new();
     public List<(Guid Id, int State)> StepUpdates { get; } = new();
@@ -43,7 +46,7 @@ internal sealed class FakePluginTarget
                         new OrganizationServiceFault { Message = "Could not find entity" });
                 }
 
-                var metadata = new EntityMetadata { LogicalName = retrieve.LogicalName };
+                var metadata = new EntityMetadata { LogicalName = MetadataAnswersWith ?? retrieve.LogicalName };
                 typeof(EntityMetadata).GetProperty(nameof(EntityMetadata.ObjectTypeCode))!.SetValue(metadata, code);
                 var response = new RetrieveEntityResponse();
                 response.Results["EntityMetadata"] = metadata;
@@ -57,12 +60,20 @@ internal sealed class FakePluginTarget
                 var xml = ((FetchExpression)query).Query;
                 FetchXml.Add(xml);
                 var doc = System.Xml.Linq.XDocument.Parse(xml);
-                var codes = doc.Descendants("condition")
-                    .Where(c => (string?)c.Attribute("attribute") == "primaryobjecttypecode")
-                    .Select(c => int.Parse((string)c.Attribute("value")!))
-                    .ToHashSet();
+                var conditions = doc.Descendants("condition")
+                    .Select(c => ((string)c.Attribute("attribute")!, (string)c.Attribute("value")!))
+                    .ToList();
+                var codes = conditions.Where(c => c.Item1 == "primaryobjecttypecode").Select(c => int.Parse(c.Item2)).ToHashSet();
+                // Each step condition is applied only when the query sends it, so a query that
+                // drops one selects the steps it should not (#1921 review MF5).
+                bool Holds(FakeStep st, string attribute, int value) => !conditions.Any(c => c.Item1 == attribute) ||
+                    conditions.Any(c => c.Item1 == attribute && int.Parse(c.Item2) == value);
                 var page = int.Parse((string?)doc.Root!.Attribute("page") ?? "1");
-                var matching = Steps.Where(st => codes.Contains(st.Code)).ToList();
+                var matching = Steps.Where(st => codes.Contains(st.Code)
+                        && Holds(st, "statecode", st.Enabled ? 0 : 1)
+                        && Holds(st, "ishidden", st.Hidden ? 1 : 0)
+                        && Holds(st, "customizationlevel", st.CustomizationLevel))
+                    .ToList();
                 var rows = matching.Skip((page - 1) * PageSize).Take(PageSize)
                     .Select(st => new Entity("sdkmessageprocessingstep", st.Id) { ["name"] = st.Name })
                     .ToList();
@@ -80,7 +91,23 @@ internal sealed class FakePluginTarget
                 var state = entity.GetAttributeValue<OptionSetValue>("statecode").Value;
                 OnUpdate?.Invoke(entity.Id, state);
                 StepUpdates.Add((entity.Id, state));
+                var step = Steps.FirstOrDefault(st => st.Id == entity.Id);
+                if (step != null) step.Enabled = state == 0;
                 return Task.CompletedTask;
             });
     }
+}
+
+/// <summary>A step in the fake target. Enabled, not hidden and custom (level 1) unless set otherwise.</summary>
+internal sealed class FakeStep
+{
+    public Guid Id { get; init; }
+    public string Name { get; init; } = "";
+    public int Code { get; init; }
+    public bool Enabled { get; set; } = true;
+    public bool Hidden { get; init; }
+    public int CustomizationLevel { get; init; } = 1;
+
+    public static implicit operator FakeStep((Guid Id, string Name, int Code) step) =>
+        new() { Id = step.Id, Name = step.Name, Code = step.Code };
 }

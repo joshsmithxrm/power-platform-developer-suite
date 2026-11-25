@@ -359,6 +359,20 @@ public class TieredImporterWriteSafetyTests
     }
 
     [Fact]
+    public async Task DisablePlugins_AnAlreadyDisabledStep_IsNotTouched_AndStaysDisabled()
+    {
+        var (sut, target, widgetStep, _) = WidgetAndGadget();
+        var off = Guid.NewGuid();
+        target.Steps.Add(new FakeStep { Id = off, Name = "switched off by an admin", Code = 10051, Enabled = false });
+
+        await sut.ImportAsync(Widgets(), Plan("new_widget"), new ImportOptions());
+
+        target.StepUpdates.Should().NotContain(u => u.Id == off);
+        target.Steps.Single(st => st.Id == off).Enabled.Should().BeFalse("the import must not switch on a step that was off");
+        target.Steps.Single(st => st.Id == widgetStep).Enabled.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task DisablePlugins_TableWithoutASourceCode_IsStillResolved()
     {
         var (sut, target, widgetStep, _) = WidgetAndGadget();

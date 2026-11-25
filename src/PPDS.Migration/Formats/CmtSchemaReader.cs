@@ -115,8 +115,9 @@ namespace PPDS.Migration.Formats
             var objectTypeCode = ParseInt(element.Attribute("etc")?.Value);
             var primaryIdField = element.Attribute("primaryidfield")?.Value ?? $"{logicalName}id";
             var primaryNameField = element.Attribute("primarynamefield")?.Value ?? "name";
-            var disablePlugins = ParseBool(element.Attribute("disableplugins")?.Value);
+            var disablePlugins = ReadDisablePlugins(element, logicalName);
             var importMode = ReadImportMode(element, logicalName);
+            RefuseUnappliedCmtAttributes(element, logicalName);
 
             var fields = new List<FieldSchema>();
             var fieldsElement = element.Element("fields");
@@ -183,8 +184,7 @@ namespace PPDS.Migration.Formats
             // Parse validity flags - default to true for backwards compatibility
             var isValidForCreate = ParseBool(element.Attribute("isValidForCreate")?.Value, defaultValue: true);
             var isValidForUpdate = ParseBool(element.Attribute("isValidForUpdate")?.Value, defaultValue: true);
-            var dateModeAttr = element.Attribute("dateMode")?.Value;
-            var dateMode = ParseDateMode(dateModeAttr);
+            var dateMode = ReadDateMode(element, logicalName);
 
             return new FieldSchema
             {
@@ -285,19 +285,95 @@ namespace PPDS.Migration.Formats
             return DateTime.TryParse(value, out var result) ? result : null;
         }
 
-        private static DateMode ParseDateMode(string? value)
+        /// <summary>
+        /// Finds an attribute by name in any case. Two attributes that differ only in case are refused:
+        /// which one applies would be a guess.
+        /// </summary>
+        private static XAttribute? FindAttribute(XElement element, string name, string owner)
         {
-            if (string.IsNullOrEmpty(value))
+            var attributes = element.Attributes()
+                .Where(a => a.Name.NamespaceName.Length == 0
+                    && string.Equals(a.Name.LocalName, name, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (attributes.Count > 1)
+            {
+                throw new InvalidDataException($"{owner} in the schema has more than one {name} attribute. Keep one.");
+            }
+
+            return attributes.Count == 1 ? attributes[0] : null;
+        }
+
+        /// <summary>
+        /// Reads <c>disableplugins</c>: true, false, 1, 0, yes or no, in any case with surrounding
+        /// spaces ignored; absent is false. Anything else is refused: it used to read as false, so
+        /// the table's plug-in steps silently stayed on (#1921 review should-fix 4).
+        /// </summary>
+        private static bool ReadDisablePlugins(XElement element, string logicalName)
+        {
+            var attribute = FindAttribute(element, "disableplugins", $"Table '{logicalName}'");
+            if (attribute == null)
+            {
+                return false;
+            }
+
+            return attribute.Value.Trim().ToLowerInvariant() switch
+            {
+                "true" or "1" or "yes" => true,
+                "false" or "0" or "no" => false,
+                _ => throw new InvalidDataException(
+                    $"Table '{logicalName}' in the schema has a disableplugins value that is not one of true, false, 1, 0, yes or no. Correct it.")
+            };
+        }
+
+        /// <summary>
+        /// Refuses the CMT entity attributes <c>skipupdate</c> and <c>forcecreate</c> when they ask for
+        /// something: PPDS does not apply them, and ignoring them imported the table with the import's
+        /// mode (Upsert by default), overwriting what <c>skipupdate</c> meant to keep (#1914 review
+        /// should-fix 3). A value of false asks for nothing and is accepted.
+        /// </summary>
+        private static void RefuseUnappliedCmtAttributes(XElement element, string logicalName)
+        {
+            foreach (var name in new[] { "skipupdate", "forcecreate" })
+            {
+                var attribute = FindAttribute(element, name, $"Table '{logicalName}'");
+                if (attribute == null)
+                {
+                    continue;
+                }
+
+                var value = attribute.Value.Trim().ToLowerInvariant();
+                if (value is "false" or "0" or "no")
+                {
+                    continue;
+                }
+
+                throw new InvalidDataException(
+                    $"Table '{logicalName}' in the schema carries the Configuration Migration Tool attribute {name}, which PPDS does not apply. " +
+                    "Remove it, and set importMode on the table instead (create, update, upsert or skip).");
+            }
+        }
+
+        /// <summary>
+        /// Reads a field's <c>dateMode</c>: absolute, relative, relativeDaily or relativeExact, in any
+        /// case with surrounding spaces ignored; absent is absolute. Anything else is refused: it used
+        /// to read as absolute (#1914 review should-fix 5).
+        /// </summary>
+        private static DateMode ReadDateMode(XElement element, string fieldName)
+        {
+            var attribute = FindAttribute(element, "dateMode", $"Field '{fieldName}'");
+            if (attribute == null)
             {
                 return DateMode.Absolute;
             }
 
-            return value.ToLowerInvariant() switch
+            return attribute.Value.Trim().ToLowerInvariant() switch
             {
+                "absolute" => DateMode.Absolute,
                 "relative" => DateMode.Relative,
                 "relativedaily" => DateMode.RelativeDaily,
                 "relativeexact" => DateMode.RelativeExact,
-                _ => DateMode.Absolute
+                _ => throw new InvalidDataException(
+                    $"Field '{fieldName}' in the schema has a dateMode that is not one of absolute, relative, relativeDaily or relativeExact. Correct it, or remove it.")
             };
         }
 
@@ -309,22 +385,13 @@ namespace PPDS.Migration.Formats
         /// </summary>
         private static ImportMode? ReadImportMode(XElement element, string logicalName)
         {
-            var attributes = element.Attributes()
-                .Where(a => a.Name.NamespaceName.Length == 0
-                    && string.Equals(a.Name.LocalName, "importMode", StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            if (attributes.Count == 0)
+            var attribute = FindAttribute(element, "importMode", $"Table '{logicalName}'");
+            if (attribute == null)
             {
                 return null;
             }
 
-            if (attributes.Count > 1)
-            {
-                throw new InvalidDataException(
-                    $"Table '{logicalName}' in the schema has more than one importMode attribute. Keep one, with create, update, upsert or skip.");
-            }
-
-            return attributes[0].Value.Trim().ToLowerInvariant() switch
+            return attribute.Value.Trim().ToLowerInvariant() switch
             {
                 "create" => ImportMode.Create,
                 "update" => ImportMode.Update,
