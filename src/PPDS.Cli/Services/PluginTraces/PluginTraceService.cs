@@ -270,10 +270,36 @@ public class PluginTraceService : IPluginTraceService
         IProgress<int>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        // Refused before anything is read: a zero or negative age would put the cut-off at or
+        // after now, and every trace would match.
+        var cutoff = PluginTraceAge.CutoffUtc(olderThan, DateTime.UtcNow);
+        return await DeleteCreatedBeforeAsync(cutoff, progress, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> DeleteCreatedBeforeAsync(
+        DateTime cutoffUtc,
+        IProgress<int>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (cutoffUtc.Kind != DateTimeKind.Utc)
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.InvalidValue,
+                "The cut-off for deleting plug-in traces must be a UTC time.");
+        }
+
+        if (cutoffUtc >= DateTime.UtcNow)
+        {
+            throw new PpdsException(
+                ErrorCodes.Validation.InvalidValue,
+                "The cut-off for deleting plug-in traces must be in the past; a cut-off at or after now matches every trace. " +
+                "To delete every trace, use the separate option that deletes all traces.");
+        }
+
         _guard.EnsureCanMutate("plugintraces.deleteOlderThan");
 
-        var cutoff = DateTime.UtcNow - olderThan;
-        var filter = new PluginTraceFilter { CreatedBefore = cutoff };
+        var filter = new PluginTraceFilter { CreatedBefore = cutoffUtc };
         return await DeleteByFilterAsync(filter, progress, cancellationToken);
     }
 
@@ -422,10 +448,10 @@ public class PluginTraceService : IPluginTraceService
                 conditions.Append($"<condition attribute=\"depth\" operator=\"le\" value=\"{filter.MaxDepth.Value}\" />");
 
             if (filter.CreatedAfter.HasValue)
-                conditions.Append($"<condition attribute=\"createdon\" operator=\"on-or-after\" value=\"{filter.CreatedAfter.Value:o}\" />");
+                conditions.Append($"<condition attribute=\"createdon\" operator=\"ge\" value=\"{filter.CreatedAfter.Value:o}\" />");
 
             if (filter.CreatedBefore.HasValue)
-                conditions.Append($"<condition attribute=\"createdon\" operator=\"on-or-before\" value=\"{filter.CreatedBefore.Value:o}\" />");
+                conditions.Append($"<condition attribute=\"createdon\" operator=\"lt\" value=\"{filter.CreatedBefore.Value:o}\" />");
 
             if (filter.MinDurationMs.HasValue)
                 conditions.Append($"<condition attribute=\"performanceexecutionduration\" operator=\"ge\" value=\"{filter.MinDurationMs.Value}\" />");
@@ -526,12 +552,12 @@ public class PluginTraceService : IPluginTraceService
 
         if (filter.CreatedAfter.HasValue)
         {
-            query.Criteria.AddCondition(PluginTraceLog.Fields.CreatedOn, ConditionOperator.OnOrAfter, filter.CreatedAfter.Value);
+            query.Criteria.AddCondition(PluginTraceLog.Fields.CreatedOn, ConditionOperator.GreaterEqual, filter.CreatedAfter.Value);
         }
 
         if (filter.CreatedBefore.HasValue)
         {
-            query.Criteria.AddCondition(PluginTraceLog.Fields.CreatedOn, ConditionOperator.OnOrBefore, filter.CreatedBefore.Value);
+            query.Criteria.AddCondition(PluginTraceLog.Fields.CreatedOn, ConditionOperator.LessThan, filter.CreatedBefore.Value);
         }
 
         if (filter.MinDurationMs.HasValue)

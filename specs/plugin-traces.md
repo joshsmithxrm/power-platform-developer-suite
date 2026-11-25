@@ -180,7 +180,8 @@ VS Code panel communicates through the daemon (JSON-RPC over stdio). TUI, MCP, a
 | Field | Rule | Error |
 |-------|------|-------|
 | `trace-id` | Must be valid GUID | `ArgumentException` |
-| `--older-than` | Must be valid duration (e.g., 7d, 24h, 30m) | Parse error |
+| `--older-than` | One form only: a whole number from 1 (no sign, no leading zero) followed by `d`, `h` or `m` (7d, 24h, 30m), at most 36500 days; 0, negatives, a bare number, other units and trailing text are refused before connecting. Traces created strictly before now (UTC) minus the age are deleted (`lt` on the full date and time), the cut-off computed once for the count, the prompt and the delete | `Validation.InvalidValue` |
+| `--older-than` without `--force` | Needs the confirmation prompt (cut-off and count); with JSON output or redirected input it is refused before connecting | `Validation.InvalidValue` |
 | `--all` | Requires `--force` flag | Error message |
 | `--record` | Format: `entity` or `entity/guid` | Parse error with example |
 | Min Duration (TUI filter) | Non-negative integer | "Duration must be a positive number" |
@@ -510,7 +511,7 @@ Deletes plugin trace logs with multiple modes.
 |--------|-------------|
 | `<trace-id>` | Delete a single trace by ID |
 | `--ids` | Comma-separated list of trace IDs |
-| `--older-than` | Delete traces older than duration (7d, 24h, 30m) |
+| `--older-than` | Delete traces created before now (UTC) minus this age (7d, 24h, 30m; see Validation Rules) |
 | `--all` | Delete ALL traces (requires --force) |
 | `--dry-run` | Preview count without deleting |
 | `--force` | Skip confirmation for --all |

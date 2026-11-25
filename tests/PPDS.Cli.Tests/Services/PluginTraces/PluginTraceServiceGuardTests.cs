@@ -27,6 +27,7 @@ public class PluginTraceServiceGuardTests
     [InlineData("DeleteByFilterAsync")]
     [InlineData("DeleteAllAsync")]
     [InlineData("DeleteOlderThanAsync")]
+    [InlineData("DeleteCreatedBeforeAsync")]
     [InlineData("SetSettingsAsync")]
     public async Task EveryMutationMethod_Blocks(string methodName)
     {
@@ -48,6 +49,7 @@ public class PluginTraceServiceGuardTests
         "DeleteByFilterAsync" => svc.DeleteByFilterAsync(new PluginTraceFilter(), null, CancellationToken.None),
         "DeleteAllAsync" => svc.DeleteAllAsync(null, CancellationToken.None),
         "DeleteOlderThanAsync" => svc.DeleteOlderThanAsync(TimeSpan.FromDays(1), null, CancellationToken.None),
+        "DeleteCreatedBeforeAsync" => svc.DeleteCreatedBeforeAsync(DateTime.UtcNow.AddDays(-1), null, CancellationToken.None),
         "SetSettingsAsync" => svc.SetSettingsAsync(PluginTraceLogSetting.Off, CancellationToken.None),
         _ => throw new ArgumentOutOfRangeException(nameof(methodName), methodName, null),
     };

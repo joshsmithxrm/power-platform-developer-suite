@@ -28,7 +28,7 @@ public static class DeleteCommand
 
         var olderThanOption = new Option<string?>("--older-than")
         {
-            Description = "Delete traces older than this duration (e.g., 7d, 24h, 30m)"
+            Description = "Delete traces created before now minus this age: a whole number from 1 followed by d, h or m (7d, 24h, 30m); nothing else is accepted. Shows the cut-off (UTC) and the count, then asks to confirm unless --force"
         };
 
         var allOption = new Option<bool>("--all")
@@ -152,6 +152,41 @@ public static class DeleteCommand
             return ExitCodes.InvalidArguments;
         }
 
+        // --older-than: the age is parsed, and a run that cannot be confirmed is refused, before
+        // anything is read.
+        TimeSpan? olderThanAge = null;
+        if (!string.IsNullOrEmpty(olderThan))
+        {
+            string? problem = null;
+            try
+            {
+                olderThanAge = PluginTraceAge.Parse(olderThan);
+            }
+            catch (PpdsException ex)
+            {
+                problem = ex.UserMessage;
+            }
+
+            problem ??= OlderThanConfirmationProblem(force, dryRun, globalOptions.IsJsonMode, Console.IsInputRedirected);
+            if (problem != null)
+            {
+                var error = new StructuredError(
+                    ErrorCodes.Validation.InvalidValue,
+                    problem,
+                    null,
+                    "older-than");
+                if (globalOptions.IsJsonMode)
+                {
+                    writer.WriteError(error);
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Error: {problem}");
+                }
+                return ExitCodes.InvalidArguments;
+            }
+        }
+
         try
         {
             await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
@@ -202,29 +237,9 @@ public static class DeleteCommand
             }
 
             // Handle older-than deletion
-            if (!string.IsNullOrEmpty(olderThan))
+            if (olderThanAge.HasValue)
             {
-                var duration = ParseDuration(olderThan);
-                if (duration == null)
-                {
-                    var message = $"Invalid duration format: '{olderThan}'. Use formats like 7d, 24h, 30m.";
-                    var error = new StructuredError(
-                        ErrorCodes.Validation.InvalidValue,
-                        message,
-                        null,
-                        "older-than");
-                    if (globalOptions.IsJsonMode)
-                    {
-                        writer.WriteError(error);
-                    }
-                    else
-                    {
-                        Console.Error.WriteLine($"Error: {message}");
-                    }
-                    return ExitCodes.InvalidArguments;
-                }
-
-                return await DeleteOlderThanAsync(traceService, duration.Value, dryRun, force, globalOptions, writer, cancellationToken);
+                return await DeleteOlderThanAsync(traceService, olderThanAge.Value, dryRun, force, globalOptions, writer, cancellationToken);
             }
 
             // Handle delete all
@@ -353,8 +368,9 @@ public static class DeleteCommand
         IOutputWriter writer,
         CancellationToken cancellationToken)
     {
-        // Get count first
-        var cutoff = DateTime.UtcNow - duration;
+        // The cut-off is computed once, in UTC; the count, the prompt and the delete all use it.
+        var cutoff = PluginTraceAge.CutoffUtc(duration, DateTime.UtcNow);
+        var shownCutoff = PluginTraceAge.Format(cutoff);
         var filter = new PluginTraceFilter { CreatedBefore = cutoff };
         var count = await traceService.CountAsync(filter, cancellationToken);
 
@@ -362,11 +378,11 @@ public static class DeleteCommand
         {
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new DryRunOutput { WouldDelete = count });
+                writer.WriteSuccess(new DryRunOutput { WouldDelete = count, Cutoff = shownCutoff });
             }
             else
             {
-                Console.Error.WriteLine($"Would delete {count} trace(s) older than {FormatDuration(duration)}.");
+                Console.Error.WriteLine($"Would delete {count} trace(s) created before {shownCutoff} (older than {FormatDuration(duration)}).");
             }
             return ExitCodes.Success;
         }
@@ -375,19 +391,19 @@ public static class DeleteCommand
         {
             if (globalOptions.IsJsonMode)
             {
-                writer.WriteSuccess(new DeleteOutput { Deleted = 0 });
+                writer.WriteSuccess(new DeleteOutput { Deleted = 0, Cutoff = shownCutoff });
             }
             else
             {
-                Console.Error.WriteLine($"No traces older than {FormatDuration(duration)} found.");
+                Console.Error.WriteLine($"No traces created before {shownCutoff} (older than {FormatDuration(duration)}) found.");
             }
             return ExitCodes.Success;
         }
 
-        // Confirm if not forced
-        if (!force && !globalOptions.IsJsonMode)
+        // Confirm if not forced (a run that cannot be confirmed was refused before connecting).
+        if (!force)
         {
-            Console.Error.Write($"Delete {count} traces older than {FormatDuration(duration)}? [y/N] ");
+            Console.Error.Write($"Delete {count} trace(s) created before {shownCutoff} (older than {FormatDuration(duration)})? [y/N] ");
             var response = Console.ReadLine()?.Trim().ToLowerInvariant();
             if (response != "y" && response != "yes")
             {
@@ -405,11 +421,11 @@ public static class DeleteCommand
             }
         });
 
-        var deleted = await traceService.DeleteOlderThanAsync(duration, progress, cancellationToken);
+        var deleted = await traceService.DeleteCreatedBeforeAsync(cutoff, progress, cancellationToken);
 
         if (globalOptions.IsJsonMode)
         {
-            writer.WriteSuccess(new DeleteOutput { Deleted = deleted });
+            writer.WriteSuccess(new DeleteOutput { Deleted = deleted, Cutoff = shownCutoff });
         }
         else
         {
@@ -496,39 +512,20 @@ public static class DeleteCommand
         return result;
     }
 
-    private static TimeSpan? ParseDuration(string durationString)
+    /// <summary>
+    /// Why a <c>--older-than</c> run cannot go ahead, or null: without <c>--force</c> or
+    /// <c>--dry-run</c> it needs the confirmation prompt, which JSON output and redirected input
+    /// cannot give.
+    /// </summary>
+    internal static string? OlderThanConfirmationProblem(bool force, bool dryRun, bool jsonMode, bool inputRedirected)
     {
-        if (string.IsNullOrWhiteSpace(durationString))
+        if (force || dryRun || (!jsonMode && !inputRedirected))
+        {
             return null;
-
-        durationString = durationString.Trim().ToLowerInvariant();
-
-        // Try parsing with different suffixes
-        if (durationString.EndsWith('d') &&
-            int.TryParse(durationString[..^1], out var days))
-        {
-            return TimeSpan.FromDays(days);
         }
 
-        if (durationString.EndsWith('h') &&
-            int.TryParse(durationString[..^1], out var hours))
-        {
-            return TimeSpan.FromHours(hours);
-        }
-
-        if (durationString.EndsWith('m') &&
-            int.TryParse(durationString[..^1], out var minutes))
-        {
-            return TimeSpan.FromMinutes(minutes);
-        }
-
-        // Try parsing as just a number (default to days)
-        if (int.TryParse(durationString, out var defaultDays))
-        {
-            return TimeSpan.FromDays(defaultDays);
-        }
-
-        return null;
+        return "--older-than asks to confirm the cut-off and the count before deleting, which is not possible " +
+               "with JSON output or redirected input. Add --force to delete without asking, or --dry-run to see the count.";
     }
 
     private static string FormatDuration(TimeSpan duration)
@@ -546,12 +543,22 @@ public static class DeleteCommand
     {
         [JsonPropertyName("deleted")]
         public int Deleted { get; set; }
+
+        /// <summary>The cut-off (UTC) for <c>--older-than</c>; absent for the other forms.</summary>
+        [JsonPropertyName("cutoff")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Cutoff { get; set; }
     }
 
     private sealed class DryRunOutput
     {
         [JsonPropertyName("wouldDelete")]
         public int WouldDelete { get; set; }
+
+        /// <summary>The cut-off (UTC) for <c>--older-than</c>; absent for the other forms.</summary>
+        [JsonPropertyName("cutoff")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Cutoff { get; set; }
     }
 
     #endregion
