@@ -145,6 +145,20 @@ public class DataTruncateServiceTests
     }
 
     [Fact]
+    public async Task LastPageHoldsOnlyAnUndeletableRecord_ReportsCompleted()
+    {
+        var table = new FakeTable().Add(5);
+        table.Undeletable.Add(table.Rows.Max);
+
+        var result = await Truncate(table);
+
+        result.StopReason.Should().Be(DataTruncateStopReason.Completed);
+        result.DeletedCount.Should().Be(4);
+        result.FailedCount.Should().Be(1);
+        result.RemainingCount.Should().Be(1);
+    }
+
+    [Fact]
     public async Task ThousandsOfFailures_DoNotHideTheRecordsAfterThem()
     {
         // Nine records in ten cannot be deleted (7,000 records): every deletable record is still reached.
@@ -161,7 +175,7 @@ public class DataTruncateServiceTests
         table.DeleteAttempts.Should().HaveCount(7000);
         table.DeleteAttempts.Values.Should().OnlyContain(n => n == 1);
         table.Reads.Should().OnlyContain(q => q.PageInfo.Count == 1000 && q.TopCount == null);
-        table.Rows.Should().BeEquivalentTo(table.Undeletable);
+        table.Rows.SetEquals(table.Undeletable).Should().BeTrue();
     }
 
     [Fact]

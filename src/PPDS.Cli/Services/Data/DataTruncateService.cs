@@ -249,7 +249,9 @@ public sealed class DataTruncateService : IDataTruncateService
                     break;
                 }
 
-                if (result.SuccessCount == 0)
+                // A pass that deletes nothing ends the run. On the last page that is the end of the table anyway, and
+                // the run reports it as Completed: no record after it was left unattempted.
+                if (result.SuccessCount == 0 && read.MoreRecords)
                 {
                     reason = DataTruncateStopReason.PassDeletedNothing;
                     break;
