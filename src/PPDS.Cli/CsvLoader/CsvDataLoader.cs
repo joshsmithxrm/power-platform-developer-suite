@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
+using PPDS.Cli.Services.Data;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Progress;
@@ -211,8 +212,12 @@ public sealed class CsvDataLoader
     }
 
     /// <summary>
-    /// Loads CSV data into Dataverse.
+    /// Loads CSV data into Dataverse. The whole file is read and checked before anything is written (#1916): the file is a
+    /// well-formed CSV with the header's number of fields in every row (<see cref="StrictCsvFile"/>), every mapped column
+    /// and lookup configuration fits the table's metadata, and every cell is exact for its column. Anything else throws
+    /// <see cref="DataValuesRefusedException"/> listing each row and column, and nothing is written.
     /// </summary>
+    /// <exception cref="DataValuesRefusedException">The file, the mapping or a cell is refused; nothing was written.</exception>
     public async Task<LoadResult> LoadAsync(
         string csvPath,
         CsvLoadOptions options,
@@ -226,7 +231,6 @@ public sealed class CsvDataLoader
         }
 
         var stopwatch = Stopwatch.StartNew();
-        var errors = new List<LoadError>();
         var warnings = new List<string>();
 
         _logger?.LogInformation("Loading CSV file: {CsvPath}", csvPath);
@@ -238,14 +242,18 @@ public sealed class CsvDataLoader
         // 2. Build attribute lookup
         var attributesByName = ColumnMatcher.BuildAttributeLookup(entityMetadata);
 
-        // 3. Determine column mappings
+        // 3. Read the whole file exactly: header, quoting and field counts. Refused here before anything else.
+        var table = await StrictCsvFile.ReadAsync(csvPath, cancellationToken);
+        var headers = table.Headers.ToArray();
+
+        // 4. Determine column mappings
         Dictionary<string, ColumnMappingEntry> mappings;
         if (options.Mapping?.Columns != null)
         {
             mappings = options.Mapping.Columns;
 
             // Validate the mapping file against the CSV
-            var validationResult = await ValidateMappingFileAsync(csvPath, mappings, cancellationToken);
+            var validationResult = ValidateMapping(headers, mappings);
 
             // Add stale mapping warnings
             foreach (var stale in validationResult.StaleMappings)
@@ -264,7 +272,7 @@ public sealed class CsvDataLoader
         }
         else
         {
-            var autoMappingResult = await AutoMapColumnsAsync(csvPath, options.EntityLogicalName, attributesByName, cancellationToken);
+            var autoMappingResult = AutoMapColumns(headers, options.EntityLogicalName, attributesByName);
             warnings.AddRange(autoMappingResult.Warnings);
 
             // Check if auto-mapping is incomplete
@@ -279,7 +287,14 @@ public sealed class CsvDataLoader
             mappings = autoMappingResult.Mappings;
         }
 
-        // 4. Identify and preload lookup caches
+        // 5. The mapped columns and lookup configurations fit the table, before any lookup is read.
+        var problems = CheckMappings(headers, mappings, attributesByName, options.AlternateKeyFields);
+        if (problems.Count > 0)
+        {
+            throw new DataValuesRefusedException(problems);
+        }
+
+        // 6. Identify and preload lookup caches
         var lookupResolver = new LookupResolver(_pool);
         var lookupConfigs = GetLookupConfigs(mappings, attributesByName);
 
@@ -289,66 +304,44 @@ public sealed class CsvDataLoader
             await lookupResolver.PreloadLookupsAsync(lookupConfigs, cancellationToken);
         }
 
-        // 5. Parse CSV and build entities
-        var (entities, parseErrors) = await BuildEntitiesAsync(
-            csvPath,
-            options,
-            mappings,
-            attributesByName,
-            lookupResolver,
-            cancellationToken);
-
-        errors.AddRange(parseErrors);
-        errors.AddRange(lookupResolver.Errors);
+        // 7. Convert every cell; any problem refuses the whole file and nothing is written.
+        var entities = BuildEntities(table, options, mappings, attributesByName, lookupResolver, problems, cancellationToken);
+        problems.AddRange(lookupResolver.Errors.Select(e => new DataValueProblem(e.RowNumber, e.Column, e.Message)));
+        if (problems.Count > 0)
+        {
+            throw new DataValuesRefusedException(problems
+                .OrderBy(p => p.Row ?? 0)
+                .ThenBy(p => p.Column is null ? -1 : Array.FindIndex(headers, h => h == p.Column))
+                .ToList());
+        }
 
         _logger?.LogInformation("Built {Count} entities from CSV", entities.Count);
 
-        // 6. The whole file is checked before anything is written: a cell that is not exact for its column, a column
-        // the table does not have or a lookup that does not resolve refuses the load, and no row is written (#1916).
-        if (errors.Count > 0)
-        {
-            stopwatch.Stop();
-            var rowsWithErrors = errors.Select(e => e.RowNumber).Distinct().Count();
-            return new LoadResult
-            {
-                Refused = true,
-                TotalRows = rowsWithErrors + entities.Count,
-                SuccessCount = 0,
-                FailureCount = rowsWithErrors,
-                SkippedCount = entities.Count,
-                Duration = stopwatch.Elapsed,
-                Errors = errors,
-                Warnings = warnings
-            };
-        }
-
-        // 7. Dry-run mode - just return validation results
+        // 8. Dry-run mode - just return validation results
         if (options.DryRun)
         {
             stopwatch.Stop();
             return new LoadResult
             {
-                TotalRows = entities.Count + errors.Count,
+                TotalRows = entities.Count,
                 SuccessCount = entities.Count,
-                FailureCount = errors.Count,
+                FailureCount = 0,
                 SkippedCount = 0,
                 Duration = stopwatch.Elapsed,
-                Errors = errors,
                 Warnings = warnings
             };
         }
 
-        // 8. Execute bulk upsert
+        // 9. Execute bulk upsert
         if (entities.Count == 0)
         {
             stopwatch.Stop();
             return new LoadResult
             {
-                TotalRows = errors.Count,
+                TotalRows = 0,
                 SuccessCount = 0,
-                FailureCount = errors.Count,
+                FailureCount = 0,
                 Duration = stopwatch.Elapsed,
-                Errors = errors,
                 Warnings = warnings
             };
         }
@@ -368,27 +361,24 @@ public sealed class CsvDataLoader
             progress: progress,
             cancellationToken: cancellationToken);
 
-        // 9. Map bulk operation errors
-        foreach (var bulkError in bulkResult.Errors)
+        // 10. Map bulk operation errors
+        var errors = bulkResult.Errors.Select(bulkError => new LoadError
         {
-            errors.Add(new LoadError
-            {
-                RowNumber = bulkError.Index + 1, // 1-based row number
-                ErrorCode = LoadErrorCodes.DataverseError,
-                Message = bulkError.Message
-            });
-        }
+            RowNumber = bulkError.Index + 1, // 1-based row number
+            ErrorCode = LoadErrorCodes.DataverseError,
+            Message = bulkError.Message
+        }).ToList();
 
         stopwatch.Stop();
 
         return new LoadResult
         {
-            TotalRows = entities.Count + parseErrors.Count,
+            TotalRows = entities.Count,
             SuccessCount = bulkResult.SuccessCount,
-            FailureCount = bulkResult.FailureCount + parseErrors.Count,
+            FailureCount = bulkResult.FailureCount,
             CreatedCount = bulkResult.CreatedCount,
             UpdatedCount = bulkResult.UpdatedCount,
-            SkippedCount = parseErrors.Count,
+            SkippedCount = 0,
             Duration = stopwatch.Elapsed,
             Errors = errors,
             Warnings = warnings
@@ -411,12 +401,10 @@ public sealed class CsvDataLoader
         return response.EntityMetadata;
     }
 
-
-    private async Task<AutoMappingResult> AutoMapColumnsAsync(
-        string csvPath,
+    private static AutoMappingResult AutoMapColumns(
+        string[] headers,
         string entityLogicalName,
-        Dictionary<string, AttributeMetadata> attributesByName,
-        CancellationToken cancellationToken)
+        Dictionary<string, AttributeMetadata> attributesByName)
     {
         var mappings = new Dictionary<string, ColumnMappingEntry>(StringComparer.OrdinalIgnoreCase);
         var unmatchedColumns = new List<UnmatchedColumn>();
@@ -425,20 +413,6 @@ public sealed class CsvDataLoader
 
         // Extract publisher prefix from entity name (e.g., "ppds_city" → "ppds_")
         var prefix = ColumnMatcher.ExtractPublisherPrefix(entityLogicalName);
-
-        var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
-        {
-            HasHeaderRecord = true,
-            MissingFieldFound = null,
-            HeaderValidated = null
-        };
-
-        using var reader = new StreamReader(csvPath);
-        using var csv = new CsvReader(reader, csvConfig);
-
-        await csv.ReadAsync();
-        csv.ReadHeader();
-        var headers = csv.HeaderRecord ?? [];
 
         foreach (var header in headers)
         {
@@ -499,18 +473,109 @@ public sealed class CsvDataLoader
             Field = attr.LogicalName
         };
 
-        // Auto-configure lookups with GUID-only matching
-        if (ColumnMatcher.IsLookupAttribute(attr))
+        // Auto-configure a lookup to exactly one table with GUID matching. A lookup that can point to several tables
+        // (customer, owner, regarding) gets no table: a GUID does not say which, so the mapping file must name it.
+        if (ColumnMatcher.IsLookupAttribute(attr) && ((LookupAttributeMetadata)attr).Targets is [var target]
+            && !string.IsNullOrEmpty(target))
         {
-            var lookupAttr = (LookupAttributeMetadata)attr;
             entry.Lookup = new LookupConfig
             {
-                Entity = lookupAttr.Targets?.FirstOrDefault() ?? "unknown",
+                Entity = target,
                 MatchBy = "guid"
             };
         }
 
         return entry;
+    }
+
+    /// <summary>
+    /// Checks the mapped columns against the table before any lookup or cell is read: each maps to a column of the table,
+    /// no two map to the same column, a lookup configuration names one of its column's target tables and a known way to
+    /// match, a lookup to several tables has a configuration, and at least one column is mapped.
+    /// </summary>
+    private static List<DataValueProblem> CheckMappings(
+        string[] headers,
+        Dictionary<string, ColumnMappingEntry> mappings,
+        Dictionary<string, AttributeMetadata> attributesByName,
+        string? alternateKeyFields)
+    {
+        var problems = new List<DataValueProblem>();
+        var mappedFields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var header in headers)
+        {
+            if (!mappings.TryGetValue(header, out var mapping) || mapping.Skip || string.IsNullOrEmpty(mapping.Field))
+            {
+                continue;
+            }
+
+            if (mappedFields.TryGetValue(mapping.Field, out var other))
+            {
+                problems.Add(new DataValueProblem(null, header,
+                    $"The column maps to '{mapping.Field}', which column '{other}' also maps to."));
+                continue;
+            }
+
+            mappedFields[mapping.Field] = header;
+            if (!attributesByName.TryGetValue(mapping.Field, out var attr))
+            {
+                problems.Add(new DataValueProblem(null, header, $"'{mapping.Field}' is not a column of the table."));
+                continue;
+            }
+
+            var isLookup = ColumnMatcher.IsLookupAttribute(attr);
+            var targets = (attr as LookupAttributeMetadata)?.Targets ?? [];
+            if (mapping.Lookup is { } lookup)
+            {
+                if (!isLookup)
+                {
+                    problems.Add(new DataValueProblem(null, header,
+                        $"The mapping gives a lookup configuration, but '{attr.LogicalName}' is not a lookup column."));
+                }
+                else if (!targets.Contains(lookup.Entity, StringComparer.OrdinalIgnoreCase))
+                {
+                    problems.Add(new DataValueProblem(null, header,
+                        $"The mapping's lookup table is not one this column points to ({string.Join(", ", targets)}); " +
+                        "set lookup.entity to one of them."));
+                }
+                else if (lookup.MatchBy != "guid" && !(lookup.MatchBy == "field" && !string.IsNullOrEmpty(lookup.KeyField)))
+                {
+                    problems.Add(new DataValueProblem(null, header,
+                        "The lookup's matchBy is neither 'guid' nor 'field' with a keyField."));
+                }
+            }
+            else if (isLookup && targets.Length != 1)
+            {
+                problems.Add(new DataValueProblem(null, header,
+                    $"The lookup can point to several tables ({string.Join(", ", targets)}) and a GUID does not say which; " +
+                    "name the table in a mapping file (lookup.entity), or skip the column."));
+            }
+        }
+
+        if (mappedFields.Count == 0)
+        {
+            problems.Add(new DataValueProblem(null, null,
+                "No column of the file maps to a column of the table, so every record would be empty. Check the delimiter " +
+                "(a comma) and the header."));
+        }
+
+        if (!string.IsNullOrEmpty(alternateKeyFields))
+        {
+            foreach (var keyField in alternateKeyFields.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(k => k.Trim()))
+            {
+                if (!attributesByName.ContainsKey(keyField))
+                {
+                    problems.Add(new DataValueProblem(null, FindHeaderForField(headers, mappings, keyField),
+                        $"The alternate key field '{keyField}' is not a column of the table."));
+                }
+                else if (FindHeaderForField(headers, mappings, keyField) == null)
+                {
+                    problems.Add(new DataValueProblem(null, null,
+                        $"The alternate key field '{keyField}' is not a column of the file."));
+                }
+            }
+        }
+
+        return problems;
     }
 
     private static IEnumerable<(string ColumnName, LookupConfig Config)> GetLookupConfigs(
@@ -528,148 +593,95 @@ public sealed class CsvDataLoader
         }
     }
 
-    private async Task<(List<Entity> Entities, List<LoadError> Errors)> BuildEntitiesAsync(
-        string csvPath,
+    private static List<Entity> BuildEntities(
+        StrictCsvTable table,
         CsvLoadOptions options,
         Dictionary<string, ColumnMappingEntry> mappings,
         Dictionary<string, AttributeMetadata> attributesByName,
         LookupResolver lookupResolver,
+        List<DataValueProblem> problems,
         CancellationToken cancellationToken)
     {
         var entities = new List<Entity>();
-        var errors = new List<LoadError>();
         var parser = new CsvRecordParser();
+        var headers = table.Headers.ToArray();
+        var keyFields = string.IsNullOrEmpty(options.AlternateKeyFields)
+            ? []
+            : options.AlternateKeyFields.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(k => k.Trim()).ToArray();
 
-        var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
-        {
-            HasHeaderRecord = true,
-            MissingFieldFound = null,
-            HeaderValidated = null
-        };
-
-        using var reader = new StreamReader(csvPath);
-        using var csv = new CsvReader(reader, csvConfig);
-
-        await csv.ReadAsync();
-        csv.ReadHeader();
-        var headers = csv.HeaderRecord ?? [];
-
-        var rowNumber = 0;
-        while (await csv.ReadAsync())
+        for (var index = 0; index < table.Rows.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            rowNumber++;
+            var rowNumber = index + 1;
+            var row = table.Rows[index];
+            string Cell(string header) => row[Array.IndexOf(headers, header)];
 
             var entity = new Entity(options.EntityLogicalName);
             var hasError = false;
             var processedKeyFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            // Set alternate key if specified
-            if (!string.IsNullOrEmpty(options.AlternateKeyFields))
+            // Set alternate key if specified (CheckMappings has refused a key field that is not a column)
+            foreach (var keyField in keyFields)
             {
-                var keyFields = options.AlternateKeyFields.Split(',', StringSplitOptions.RemoveEmptyEntries);
-                foreach (var keyField in keyFields)
+                var keyHeader = FindHeaderForField(headers, mappings, keyField);
+                if (keyHeader == null || !attributesByName.TryGetValue(keyField, out var keyAttr))
                 {
-                    var trimmedKey = keyField.Trim();
-                    // Find the header that maps to this key field
-                    var keyHeader = FindHeaderForField(headers, mappings, trimmedKey);
-                    if (keyHeader != null)
+                    continue;
+                }
+
+                var keyValue = Cell(keyHeader);
+                if (string.IsNullOrEmpty(keyValue))
+                {
+                    continue;
+                }
+
+                processedKeyFields.Add(keyField); // reported once, as the key
+                if (ColumnMatcher.IsLookupAttribute(keyAttr))
+                {
+                    var mapping = mappings.GetValueOrDefault(keyHeader);
+                    if (mapping?.Lookup == null)
                     {
-                        var keyValue = csv.GetField(keyHeader);
-                        if (!string.IsNullOrEmpty(keyValue))
-                        {
-                            // Coerce key value if we have metadata
-                            if (attributesByName.TryGetValue(trimmedKey, out var keyAttr))
-                            {
-                                // Check if this key field is a lookup
-                                if (ColumnMatcher.IsLookupAttribute(keyAttr))
-                                {
-                                    var mapping = mappings.GetValueOrDefault(keyHeader);
-                                    if (mapping?.Lookup != null)
-                                    {
-                                        var entityRef = lookupResolver.Resolve(keyValue, mapping.Lookup, rowNumber, keyHeader);
-                                        if (entityRef != null)
-                                        {
-                                            entity.KeyAttributes[trimmedKey] = entityRef;
-                                            processedKeyFields.Add(trimmedKey);
-                                        }
-                                        else
-                                        {
-                                            // Lookup resolution failed - error already added by resolver
-                                            hasError = true;
-                                        }
-                                    }
-                                    else
-                                    {
-                                        // Lookup key field without lookup configuration
-                                        errors.Add(new LoadError
-                                        {
-                                            RowNumber = rowNumber,
-                                            Column = keyHeader,
-                                            ErrorCode = LoadErrorCodes.LookupNotResolved,
-                                            Message = $"Alternate key field '{trimmedKey}' is a lookup but has no lookup configuration. " +
-                                                      "Use --generate-mapping to configure lookup resolution.",
-                                            Value = keyValue
-                                        });
-                                        hasError = true;
-                                    }
-                                }
-                                else
-                                {
-                                    // Non-lookup key field: the same conversion as every other cell (#1916)
-                                    var (keyConverted, coercedKey, keyRefusal) =
-                                        parser.TryCoerceValue(keyValue, keyAttr, mappings.GetValueOrDefault(keyHeader));
-                                    if (keyConverted && coercedKey != null)
-                                    {
-                                        entity.KeyAttributes[trimmedKey] = coercedKey;
-                                        processedKeyFields.Add(trimmedKey);
-                                    }
-                                    else
-                                    {
-                                        errors.Add(new LoadError
-                                        {
-                                            RowNumber = rowNumber,
-                                            Column = keyHeader,
-                                            ErrorCode = LoadErrorCodes.TypeCoercionFailed,
-                                            Message = $"Alternate key '{trimmedKey}': {keyRefusal}",
-                                            Value = keyValue
-                                        });
-                                        hasError = true;
-                                        processedKeyFields.Add(trimmedKey); // reported once, as the key
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                // A key column the table does not have: its value's type cannot be known, so it is not
-                                // sent as text on a guess.
-                                errors.Add(new LoadError
-                                {
-                                    RowNumber = rowNumber,
-                                    Column = keyHeader,
-                                    ErrorCode = LoadErrorCodes.ColumnNotFound,
-                                    Message = $"The alternate key field '{trimmedKey}' is not a column of the table.",
-                                    Value = keyValue
-                                });
-                                hasError = true;
-                            }
-                        }
+                        problems.Add(new DataValueProblem(rowNumber, keyHeader,
+                            $"Alternate key field '{keyField}' is a lookup but has no lookup configuration. " +
+                            "Use --generate-mapping to configure lookup resolution."));
+                        hasError = true;
+                        continue;
                     }
+
+                    var entityRef = lookupResolver.Resolve(keyValue, mapping.Lookup, rowNumber, keyHeader);
+                    if (entityRef != null)
+                    {
+                        entity.KeyAttributes[keyField] = entityRef;
+                    }
+                    else
+                    {
+                        hasError = true; // the reason is in lookupResolver.Errors
+                    }
+
+                    continue;
+                }
+
+                // Non-lookup key field: the same conversion as every other cell (#1916)
+                var (keyConverted, coercedKey, keyRefusal) = parser.TryCoerceValue(keyValue, keyAttr, mappings.GetValueOrDefault(keyHeader));
+                if (keyConverted && coercedKey != null)
+                {
+                    entity.KeyAttributes[keyField] = coercedKey;
+                }
+                else
+                {
+                    problems.Add(new DataValueProblem(rowNumber, keyHeader, $"Alternate key '{keyField}': {keyRefusal}"));
+                    hasError = true;
                 }
             }
 
             foreach (var header in headers)
             {
-                if (!mappings.TryGetValue(header, out var mapping) || mapping.Skip)
+                if (!mappings.TryGetValue(header, out var mapping) || mapping.Skip || string.IsNullOrEmpty(mapping.Field))
                 {
                     continue;
                 }
 
                 var fieldName = mapping.Field;
-                if (string.IsNullOrEmpty(fieldName))
-                {
-                    continue;
-                }
 
                 // Skip fields already processed as alternate key attributes
                 if (processedKeyFields.Contains(fieldName))
@@ -677,8 +689,7 @@ public sealed class CsvDataLoader
                     continue;
                 }
 
-                var rawValue = csv.GetField(header);
-
+                var rawValue = Cell(header);
                 if (string.IsNullOrEmpty(rawValue))
                 {
                     continue;
@@ -694,40 +705,19 @@ public sealed class CsvDataLoader
                     }
                     else
                     {
-                        // The error is collected in lookupResolver.Errors. The row is not written without the
-                        // lookup it names.
+                        // The reason is in lookupResolver.Errors. The row is not written without the lookup it names.
                         hasError = true;
                     }
+
                     continue;
                 }
 
-                // Handle regular attributes
-                if (!attributesByName.TryGetValue(fieldName, out var attrMetadata))
-                {
-                    errors.Add(new LoadError
-                    {
-                        RowNumber = rowNumber,
-                        Column = header,
-                        ErrorCode = LoadErrorCodes.ColumnNotFound,
-                        Message = $"Attribute '{fieldName}' not found in entity",
-                        Value = rawValue
-                    });
-                    hasError = true;
-                    continue;
-                }
-
+                // CheckMappings has refused a mapped field that is not a column.
+                var attrMetadata = attributesByName[fieldName];
                 var (success, value, errorMessage) = parser.TryCoerceValue(rawValue, attrMetadata, mapping);
-
                 if (!success)
                 {
-                    errors.Add(new LoadError
-                    {
-                        RowNumber = rowNumber,
-                        Column = header,
-                        ErrorCode = LoadErrorCodes.TypeCoercionFailed,
-                        Message = errorMessage ?? "The value is not valid for the column.",
-                        Value = rawValue
-                    });
+                    problems.Add(new DataValueProblem(rowNumber, header, errorMessage ?? "The value is not valid for the column."));
                     hasError = true;
                     continue;
                 }
@@ -738,16 +728,22 @@ public sealed class CsvDataLoader
                 }
             }
 
-            // Only add entities without errors to the batch
-            // Errors are collected and reported; ContinueOnError controls whether
-            // we proceed with valid entities or abort entirely (checked by caller)
-            if (!hasError)
+            if (hasError)
             {
-                entities.Add(entity);
+                continue;
             }
+
+            if (entity.Attributes.Count == 0 && entity.KeyAttributes.Count == 0)
+            {
+                // An upsert of nothing creates an empty record.
+                problems.Add(new DataValueProblem(rowNumber, null, "The row has no value for any mapped column, so it would create an empty record."));
+                continue;
+            }
+
+            entities.Add(entity);
         }
 
-        return (entities, errors);
+        return entities;
     }
 
     private static string? FindHeaderForField(
@@ -776,25 +772,10 @@ public sealed class CsvDataLoader
         return null;
     }
 
-    private async Task<MappingValidationResult> ValidateMappingFileAsync(
-        string csvPath,
-        Dictionary<string, ColumnMappingEntry> mappings,
-        CancellationToken cancellationToken)
+    private static MappingValidationResult ValidateMapping(
+        string[] headers,
+        Dictionary<string, ColumnMappingEntry> mappings)
     {
-        var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
-        {
-            HasHeaderRecord = true,
-            MissingFieldFound = null,
-            HeaderValidated = null
-        };
-
-        using var reader = new StreamReader(csvPath);
-        using var csv = new CsvReader(reader, csvConfig);
-
-        await csv.ReadAsync();
-        csv.ReadHeader();
-        var headers = csv.HeaderRecord ?? [];
-
         var csvColumns = new HashSet<string>(headers, StringComparer.OrdinalIgnoreCase);
         var mappingColumns = new HashSet<string>(mappings.Keys, StringComparer.OrdinalIgnoreCase);
 

@@ -337,14 +337,19 @@ public class CsvRecordParserTests
             AttributeTypeCode.BigInt => new BigIntAttributeMetadata { LogicalName = "test" },
             AttributeTypeCode.Decimal => new DecimalAttributeMetadata { LogicalName = "test", Precision = 2 },
             AttributeTypeCode.Double => new DoubleAttributeMetadata { LogicalName = "test", Precision = 5 },
-            AttributeTypeCode.Money => new MoneyAttributeMetadata { LogicalName = "test", Precision = 2 },
+            AttributeTypeCode.Money => new MoneyAttributeMetadata { LogicalName = "test", Precision = 2, PrecisionSource = 0 },
             AttributeTypeCode.Boolean => new BooleanAttributeMetadata { LogicalName = "test" },
             AttributeTypeCode.DateTime => new DateTimeAttributeMetadata
             {
                 LogicalName = "test", DateTimeBehavior = DateTimeBehavior.UserLocal, Format = DateTimeFormat.DateAndTime
             },
             AttributeTypeCode.Uniqueidentifier => new UniqueIdentifierAttributeMetadata { LogicalName = "test" },
-            AttributeTypeCode.Picklist => new PicklistAttributeMetadata { LogicalName = "test" },
+            AttributeTypeCode.Picklist => new PicklistAttributeMetadata
+            {
+                LogicalName = "test",
+                OptionSet = new OptionSetMetadata(new OptionMetadataCollection(
+                    [new OptionMetadata(new Label(), 0), new OptionMetadata(new Label(), 1), new OptionMetadata(new Label(), 5)]))
+            },
             AttributeTypeCode.Lookup => new LookupAttributeMetadata { LogicalName = "test" },
             _ => new StringAttributeMetadata { LogicalName = "test" }
         };

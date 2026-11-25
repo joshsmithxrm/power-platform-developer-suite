@@ -25,6 +25,10 @@ public class ColumnValueConverterTests
         ["double5"] = () => FloatingPoint("ratio", 5),
         ["money2"] = () => Currency("amount", 2),
         ["money?"] = () => Currency("amount", null),
+        ["money-pricing"] = () => Currency("amount", 2, precisionSource: 1),
+        ["money-currency"] = () => Currency("amount", 2, precisionSource: 2),
+        ["money-source?"] = () => Currency("amount", 2, precisionSource: null),
+        ["choice-no-options"] = () => new PicklistAttributeMetadata { LogicalName = "kind" },
         ["bool"] = () => YesNo("flag"),
         ["guid"] = () => Identifier("uid"),
         ["choice"] = () => Choice("kind", 1, 2),
@@ -132,6 +136,45 @@ public class ColumnValueConverterTests
     [InlineData("date?", "2024-01-15T09:30:00Z", Refused)]
     // Types that cannot be written.
     [InlineData("multichoice", "1", Refused)]
+    // Round 1: currency whose places come from elsewhere takes whole amounts only.
+    [InlineData("money-pricing", "5", "money:5")]
+    [InlineData("money-pricing", "5.00", "money:5.00")]
+    [InlineData("money-pricing", "1.5", Refused)]
+    [InlineData("money-currency", "1.5", Refused)]
+    [InlineData("money-currency", "-12", "money:-12")]
+    [InlineData("money-source?", "1.5", Refused)]
+    [InlineData("money2", "1.25", "money:1.25")]
+    // Round 1: more than 28 significant digits or places is refused, not rounded.
+    [InlineData("decimal?", "1234567890123456789012345678", "decimal:1234567890123456789012345678")]
+    [InlineData("decimal?", "12345678901234567890123456789", Refused)]
+    [InlineData("decimal2", "0.10000000000000000000000000000", "decimal:0.1000000000000000000000000000")]
+    [InlineData("double5", "12345678901234567890123456789", Refused)]
+    [InlineData("money?", "12345678901234567890123456789", Refused)]
+    // Round 1: the double check is on the text's digits: the double's shortest round-trip spelling must have exactly the
+    // text's significant digits and magnitude (as 0.1 is admitted, so is 10^24, spelled 1E+24 by the double).
+    [InlineData("double5", "1000000000000000000000000", "double:1E+24")]
+    [InlineData("double5", "1000000000000000000000001", Refused)]
+    [InlineData("double5", "123456789012345", "double:123456789012345")]
+    [InlineData("double5", "0.30000", "double:0.3")]
+    // Round 1: a choice column with no options in its metadata, white space around a GUID, and pinned forms.
+    [InlineData("choice-no-options", "1", Refused)]
+    [InlineData("guid", " " + AccountId, Refused)]
+    [InlineData("guid", AccountId + " ", Refused)]
+    [InlineData("lookup", " " + AccountId, Refused)]
+    [InlineData("lookup", AccountId + "\t", Refused)]
+    [InlineData("bool", "on", Refused)]
+    [InlineData("bool", "off", Refused)]
+    [InlineData("bool", " true", Refused)]
+    [InlineData("int", " 5", Refused)]
+    [InlineData("int", "5 ", Refused)]
+    [InlineData("int", "\u0665", Refused)]
+    // Round 1: text is sent as given, nothing trimmed; NUL, other controls and lone surrogates are refused.
+    [InlineData("text", "  padded  ", "text:  padded  ")]
+    [InlineData("text", "He said \"hi\"", "text:He said \"hi\"")]
+    [InlineData("text", "line1\r\nline2\tend", "text:line1\r\nline2\tend")]
+    [InlineData("text", "a\u0000b", Refused)]
+    [InlineData("text", "a\u0001b", Refused)]
+    [InlineData("text", "\uD83D\uDE00", "text:\uD83D\uDE00")]
     public void Converts_by_the_column_type_and_the_same_in_every_culture(string column, string text, string expected)
     {
         var results = InEveryCulture(() =>
@@ -140,7 +183,10 @@ public class ColumnValueConverterTests
             if (!result.IsAdmitted)
             {
                 Assert.False(string.IsNullOrWhiteSpace(result.Refusal));
-                Assert.DoesNotContain(text, result.Refusal, StringComparison.Ordinal);
+                if (text.Trim().Length > 0 && column != "bool")
+                {
+                    Assert.DoesNotContain(text.Trim(), result.Refusal, StringComparison.Ordinal);
+                }
             }
 
             return result.IsAdmitted ? Describe(result.Value) : Refused;
@@ -176,6 +222,16 @@ public class ColumnValueConverterTests
         Assert.Equal("option:1", Describe(ColumnValueConverter.Convert("Active", Choice("kind", 1, 2), options).Value));
         Assert.False(ColumnValueConverter.Convert("active", Choice("kind", 1, 2), options).IsAdmitted);
         Assert.False(ColumnValueConverter.Convert("Inactive", Choice("kind", 1, 2), options).IsAdmitted);
+    }
+
+    [Fact]
+    public void A_lone_surrogate_in_text_is_refused()
+    {
+        // Built here: an attribute argument cannot hold a lone surrogate.
+        foreach (var text in new[] { "a" + (char)0xD800 + "b", "a" + (char)0xDC00, ((char)0xDBFF).ToString(), "a\uFFFE" })
+        {
+            Assert.All(InEveryCulture(() => ColumnValueConverter.Convert(text, Text("name")).IsAdmitted), Assert.False);
+        }
     }
 
     [Fact]

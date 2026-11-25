@@ -13,8 +13,11 @@ namespace PPDS.Cli.Tests.Services.Data;
 /// </summary>
 internal static class ColumnValueTestSupport
 {
-    /// <summary>The invariant culture and two cultures whose decimal separator is a comma (de-DE groups with a point).</summary>
-    public static readonly string[] Cultures = ["", "de-DE", "fr-FR"];
+    /// <summary>
+    /// The invariant culture, two cultures whose decimal separator is a comma (de-DE groups with a point, fr-FR with a
+    /// space), and one whose native digits are not ASCII (ar-SA).
+    /// </summary>
+    public static readonly string[] Cultures = ["", "de-DE", "fr-FR", "ar-SA"];
 
     /// <summary>Runs <paramref name="body"/> once under each of <see cref="Cultures"/> and returns each result.</summary>
     public static List<T> InEveryCulture<T>(Func<T> body)
@@ -90,7 +93,10 @@ internal static class ColumnValueTestSupport
 
     public static DoubleAttributeMetadata FloatingPoint(string name, int? precision) => new() { LogicalName = name, Precision = precision };
 
-    public static MoneyAttributeMetadata Currency(string name, int? precision) => new() { LogicalName = name, Precision = precision };
+    /// <summary>A currency column; <paramref name="precisionSource"/> 0 is the column's own precision, 1 the organization's
+    /// pricing precision, 2 the record's currency.</summary>
+    public static MoneyAttributeMetadata Currency(string name, int? precision, int? precisionSource = 0) =>
+        new() { LogicalName = name, Precision = precision, PrecisionSource = precisionSource };
 
     public static BooleanAttributeMetadata YesNo(string name) => new() { LogicalName = name };
 
@@ -122,6 +128,7 @@ internal static class ColumnValueTestSupport
     public static Mock<IDataverseConnectionPool> PoolWithColumns(string entity, params AttributeMetadata[] columns)
     {
         var metadata = new EntityMetadata { LogicalName = entity };
+        typeof(EntityMetadata).GetProperty("PrimaryIdAttribute")!.SetValue(metadata, entity + "id");
         typeof(EntityMetadata).GetProperty("Attributes")!.SetValue(metadata, columns);
 
         var client = new Mock<IPooledClient>();

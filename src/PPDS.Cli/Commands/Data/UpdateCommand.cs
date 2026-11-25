@@ -55,7 +55,7 @@ public static class UpdateCommand
 
         var fileOption = new Option<FileInfo?>("--file")
         {
-            Description = "Path to CSV file containing records to update (must include ID column and columns to update)"
+            Description = "Path to CSV file of records to update: a header row, the table's primary id column (or --id-column) and the columns to update; RFC 4180 quoting. A malformed row, a bad or repeated id or a value not in its column's form refuses the whole file before anything is written"
         };
         fileOption.Validators.Add(result =>
         {
@@ -78,7 +78,7 @@ public static class UpdateCommand
 
         var setOption = new Option<string?>("--set", "-s")
         {
-            Description = "Field values to set. Format: field=value or field1=value1,field2=value2. Required for --id, --key, or --filter modes."
+            Description = "Field values to set: field=value pairs separated by commas. A value with no comma and no double quote is written as is; otherwise wrap the whole value in double quotes and double each quote in it (name=\"Smith, \"\"Jr\"\"\"). Unquoted null clears the column. Each value must be in its column's form (numbers as 1234.5, dates as 2024-01-15T09:30:00Z); anything else is refused before any record is read. Required for --id, --key, or --filter modes."
         };
 
         var mappingOption = new Option<FileInfo?>("--mapping", "-m")
@@ -195,6 +195,12 @@ public static class UpdateCommand
             else if (modeCount > 1)
             {
                 result.AddError("Only one input mode allowed: --id, --key, --file, or --filter");
+            }
+
+            // The file gives the values: --set beside --file would be ignored, so it is refused (#1917).
+            if (file != null && !string.IsNullOrEmpty(set))
+            {
+                result.AddError("--set cannot be combined with --file: the file gives the values to write.");
             }
 
             // --set is required for --id, --key, and --filter modes (not for --file which has values in the file)

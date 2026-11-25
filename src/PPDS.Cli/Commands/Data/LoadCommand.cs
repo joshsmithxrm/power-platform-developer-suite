@@ -7,6 +7,7 @@ using Microsoft.Xrm.Sdk.Metadata;
 using PPDS.Cli.CsvLoader;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Services.Data;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Progress;
@@ -322,12 +323,13 @@ public static class LoadCommand
                 WriteTextResult(result, dryRun);
             }
 
-            if (result.Refused)
-            {
-                return ExitCodes.ValidationError;
-            }
-
             return result.Success ? ExitCodes.Success : ExitCodes.PartialSuccess;
+        }
+        catch (DataValuesRefusedException ex)
+        {
+            Console.Error.WriteLine();
+            WriteRefusal(ex, outputFormat);
+            return ExceptionMapper.ToExitCode(ex);
         }
         catch (MappingIncompleteException ex)
         {
@@ -548,12 +550,6 @@ public static class LoadCommand
 
     private static void WriteTextResult(LoadResult result, bool dryRun)
     {
-        if (result.Refused)
-        {
-            WriteTextRefusal(result);
-            return;
-        }
-
         if (dryRun)
         {
             Console.Error.WriteLine("Dry-run complete (no records written)");
@@ -631,22 +627,33 @@ public static class LoadCommand
         }
     }
 
-    private static void WriteTextRefusal(LoadResult result)
+    private static void WriteRefusal(DataValuesRefusedException ex, OutputFormat outputFormat)
     {
-        const int shown = 20;
-        Console.Error.WriteLine(
-            $"Load refused: {result.FailureCount:N0} row(s) have a value that is not valid for its column. Nothing was written.");
-        Console.Error.WriteLine("Every cell is checked before any row is written; correct these and run the load again.");
-        Console.Error.WriteLine();
-        foreach (var error in result.Errors.Take(shown))
+        if (outputFormat == OutputFormat.Json)
         {
-            var column = string.IsNullOrEmpty(error.Column) ? "" : $", column '{error.Column}'";
-            Console.Error.WriteLine($"  Row {error.RowNumber}{column}: {error.Message}");
+            // The problems name rows and columns only; no cell's content is written out.
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                success = false,
+                refused = true,
+                error = new { code = ex.ErrorCode, message = $"{ex.Problems.Count} problem(s) in the input; nothing was written." },
+                problems = ex.Problems.Select(p => new { row = p.Row, column = p.Column, message = p.Message })
+            }, JsonOptions));
+            return;
         }
 
-        if (result.Errors.Count > shown)
+        const int shown = 20;
+        Console.Error.WriteLine($"Load refused: {ex.Problems.Count:N0} problem(s) in the file. Nothing was written.");
+        Console.Error.WriteLine("The whole file is checked before any row is written; correct these and run the load again.");
+        Console.Error.WriteLine();
+        foreach (var problem in ex.Problems.Take(shown))
         {
-            Console.Error.WriteLine($"  ... and {result.Errors.Count - shown:N0} more");
+            Console.Error.WriteLine($"  {problem}");
+        }
+
+        if (ex.Problems.Count > shown)
+        {
+            Console.Error.WriteLine($"  ... and {ex.Problems.Count - shown:N0} more");
         }
     }
 
@@ -655,7 +662,6 @@ public static class LoadCommand
         var output = new
         {
             success = result.Success,
-            refused = result.Refused,
             totalRows = result.TotalRows,
             successCount = result.SuccessCount,
             failureCount = result.FailureCount,

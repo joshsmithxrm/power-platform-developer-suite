@@ -43,13 +43,16 @@ public readonly record struct ColumnValueResult(bool IsAdmitted, object? Value, 
 /// <remarks>
 /// The forms, by the column's type:
 /// <list type="bullet">
-/// <item>Text (single line, multiple lines, table name): the text as given.</item>
+/// <item>Text (single line, multiple lines, table name): the text as given, nothing trimmed. Refused: a NUL or another
+/// control character other than tab, line feed and carriage return (a request cannot carry it), and a lone surrogate.</item>
 /// <item>Whole number and big integer: an optional sign and ASCII digits, in the type's range.</item>
 /// <item>
 /// Decimal, floating point and currency: an optional sign, digits, and optionally one point and digits. No thousands
-/// separator, no comma, no exponent, no currency symbol, no white space. No more places than the column keeps (currency:
-/// its precision, at most 4). A floating-point value must be held by a double with exactly the digits written; negative
-/// zero is sent as zero.
+/// separator, no comma, no exponent, no currency symbol, no white space; at most 28 significant digits and 28 places. No
+/// more places than the column keeps. Currency: the column's precision (at most 4) when the column itself is the precision
+/// source; when the source is the organization's pricing precision or the record's currency, which are not read here,
+/// whole amounts only. A floating-point value must be held by a double whose shortest round-trip digits are exactly the
+/// digits written; negative zero is sent as zero.
 /// </item>
 /// <item>Yes/no: <c>true</c>/<c>false</c>, <c>yes</c>/<c>no</c>, <c>y</c>/<c>n</c>, <c>1</c>/<c>0</c>, in any case.</item>
 /// <item>
@@ -57,9 +60,9 @@ public readonly record struct ColumnValueResult(bool IsAdmitted, object? Value, 
 /// <c>yyyy-MM-ddTHH:mm:ss+hh:mm</c>, sent as the UTC instant. Time-zone independent: <c>yyyy-MM-dd</c> when the column
 /// shows only the date, else <c>yyyy-MM-ddTHH:mm:ssZ</c> with the clock stored as written. From 1753-01-01 on.
 /// </item>
-/// <item>Unique identifier: a GUID with dashes (8-4-4-4-12), optionally in braces.</item>
+/// <item>Unique identifier: a GUID with dashes (8-4-4-4-12), optionally in braces, nothing around it.</item>
 /// <item>Choice, status and status reason: a label from <see cref="ColumnValueOptions.OptionLabels"/>, or the integer
-/// value of one of the column's options.</item>
+/// value of one of the column's options. A column whose options are not in the metadata is refused.</item>
 /// <item>Lookup with exactly one target table: a GUID, sent as a reference to that table. A lookup that can point to
 /// more than one table (customer, owner, regarding) is refused: the table cannot be known from a GUID.</item>
 /// <item>Every other type (multi-select choice, party list, file, image, ...) is refused.</item>
@@ -100,16 +103,15 @@ public static class ColumnValueConverter
 
         return column.AttributeType switch
         {
-            AttributeTypeCode.String or AttributeTypeCode.Memo or AttributeTypeCode.EntityName =>
-                ColumnValueResult.Admit(text),
+            AttributeTypeCode.String or AttributeTypeCode.Memo or AttributeTypeCode.EntityName => ConvertText(text),
             AttributeTypeCode.Integer => ConvertInteger(text),
             AttributeTypeCode.BigInt => ConvertBigInt(text),
             AttributeTypeCode.Decimal => ConvertDecimal(text, (column as DecimalAttributeMetadata)?.Precision),
             AttributeTypeCode.Double => ConvertDouble(text, (column as DoubleAttributeMetadata)?.Precision),
-            AttributeTypeCode.Money => ConvertMoney(text, (column as MoneyAttributeMetadata)?.Precision),
+            AttributeTypeCode.Money => ConvertMoney(text, column as MoneyAttributeMetadata),
             AttributeTypeCode.Boolean => ConvertBoolean(text),
             AttributeTypeCode.DateTime => ConvertDateTime(text, column as DateTimeAttributeMetadata, options?.DateFormat),
-            AttributeTypeCode.Uniqueidentifier => TryReadGuid(text, out var id)
+            AttributeTypeCode.Uniqueidentifier => TryReadExactGuid(text, out var id)
                 ? ColumnValueResult.Admit(id)
                 : ColumnValueResult.Refuse("A unique identifier column takes a GUID with dashes (8-4-4-4-12), optionally in braces."),
             AttributeTypeCode.Picklist or AttributeTypeCode.State or AttributeTypeCode.Status =>
@@ -119,6 +121,46 @@ public static class ColumnValueConverter
             null => ColumnValueResult.Refuse("The column's type is not known from its metadata."),
             _ => ColumnValueResult.Refuse($"A column of type {column.AttributeType} cannot be written by this command."),
         };
+    }
+
+    private static ColumnValueResult ConvertText(string text)
+    {
+        var refusal = TextRefusal(text);
+        return refusal == null ? ColumnValueResult.Admit(text) : ColumnValueResult.Refuse(refusal);
+    }
+
+    /// <summary>
+    /// Why <paramref name="text"/> cannot be sent as text, or null: a NUL or another control character other than tab, line
+    /// feed and carriage return, a lone surrogate, or U+FFFE / U+FFFF (none can be carried by the request).
+    /// </summary>
+    internal static string? TextRefusal(string text)
+    {
+        for (var i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (c < ' ' && c != '\t' && c != '\n' && c != '\r')
+            {
+                return $"The text holds a control character (U+{(int)c:X4}) at position {i + 1}; only tab, line feed and carriage return can be sent.";
+            }
+
+            if (c is '\uFFFE' or '\uFFFF')
+            {
+                return $"The text holds a noncharacter (U+{(int)c:X4}) at position {i + 1}.";
+            }
+
+            if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+            {
+                i++;
+                continue;
+            }
+
+            if (char.IsSurrogate(c))
+            {
+                return $"The text holds a lone surrogate at position {i + 1}, which is not a character.";
+            }
+        }
+
+        return null;
     }
 
     private static ColumnValueResult ConvertInteger(string text)
@@ -151,10 +193,28 @@ public static class ColumnValueConverter
         return read.Refusal != null ? ColumnValueResult.Refuse(read.Refusal) : ColumnValueResult.Admit(read.Value);
     }
 
-    private static ColumnValueResult ConvertMoney(string text, int? precision)
+    private static ColumnValueResult ConvertMoney(string text, MoneyAttributeMetadata? column)
     {
+        // PrecisionSource 0: the column's own Precision governs; 1: the organization's pricing decimal precision; 2: the
+        // record's currency precision. Only the first is in the column's metadata, so with the others a value with
+        // places could be rounded to a precision not read here: whole amounts only, until that precision is read.
+        if (column?.PrecisionSource is not 0)
+        {
+            var whole = ReadDecimal(text, 4, "A currency column");
+            if (whole.Refusal != null)
+            {
+                return ColumnValueResult.Refuse(whole.Refusal);
+            }
+
+            return whole.Value != decimal.Truncate(whole.Value)
+                ? ColumnValueResult.Refuse(
+                    "The currency column takes its decimal places from the organization's pricing precision or the record's " +
+                    "currency, which is not read here, so it takes whole amounts only.")
+                : ColumnValueResult.Admit(new Money(whole.Value));
+        }
+
         // Currency keeps at most four places whatever its precision says.
-        var read = ReadDecimal(text, precision is { } p ? Math.Min(p, 4) : 4, "A currency column");
+        var read = ReadDecimal(text, column.Precision is { } p ? Math.Min(p, 4) : 4, "A currency column");
         return read.Refusal != null ? ColumnValueResult.Refuse(read.Refusal) : ColumnValueResult.Admit(new Money(read.Value));
     }
 
@@ -167,9 +227,11 @@ public static class ColumnValueConverter
         }
 
         var value = double.Parse(text, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture);
-        var heldExactly = decimal.TryParse(
-            value.ToString("R", CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture, out var back)
-            && back == read.Value;
+
+        // Compared as digit strings, so nothing is rounded on the way: the double's shortest round-trip spelling must
+        // have exactly the significant digits and the magnitude of the text.
+        var heldExactly = double.IsFinite(value)
+            && Canonical(value.ToString("R", CultureInfo.InvariantCulture)) == Canonical(text);
         if (!heldExactly)
         {
             return ColumnValueResult.Refuse(
@@ -187,14 +249,19 @@ public static class ColumnValueConverter
             return (0, $"{what} takes {NumberForm}.");
         }
 
+        // Places that are written as zeros at the end change nothing.
+        var significant = fractionDigits.TrimEnd('0').Length;
+        var (digits, _) = Canonical(text);
+        if (significant > MaxDigits || (digits != "0" && digits.Length > MaxDigits))
+        {
+            return (0, $"The number has more than {MaxDigits} significant digits or places, more than {Lower(what)} can be sent.");
+        }
+
         if (!decimal.TryParse(text, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
                 CultureInfo.InvariantCulture, out var value))
         {
-            return (0, $"The number has more digits than {Lower(what)} can be sent.");
+            return (0, $"The number is too large for {Lower(what)}.");
         }
-
-        // Places that are written as zeros at the end change nothing.
-        var significant = fractionDigits.TrimEnd('0').Length;
         if (significant > 0 && places is null)
         {
             return (0, $"The number of decimal places {Lower(what)} keeps is not known from its metadata.");
@@ -209,6 +276,42 @@ public static class ColumnValueConverter
     }
 
     private static string Lower(string what) => char.ToLowerInvariant(what[0]) + what[1..];
+
+    private const int MaxDigits = 28;
+
+    /// <summary>
+    /// The significant digits (no leading or trailing zeros, <c>"0"</c> for zero), with the sign, and the power of ten of
+    /// the last digit, of a number spelled <c>[-+]digits[.digits][E[-+]digits]</c>.
+    /// </summary>
+    private static (string Digits, int Exponent) Canonical(string number)
+    {
+        var negative = number.StartsWith('-');
+        var body = number.TrimStart('-', '+');
+        var exponent = 0;
+        var e = body.IndexOfAny(['E', 'e']);
+        if (e >= 0)
+        {
+            exponent = int.Parse(body[(e + 1)..], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture);
+            body = body[..e];
+        }
+
+        var point = body.IndexOf('.');
+        if (point >= 0)
+        {
+            exponent -= body.Length - point - 1;
+            body = body.Remove(point, 1);
+        }
+
+        body = body.TrimStart('0');
+        if (body.Length == 0)
+        {
+            return ("0", 0);
+        }
+
+        var trimmed = body.TrimEnd('0');
+        exponent += body.Length - trimmed.Length;
+        return ((negative ? "-" : "") + trimmed, exponent);
+    }
 
     /// <summary>
     /// Whether <paramref name="text"/> is an optional sign, ASCII digits and, when allowed, one point followed by digits.
@@ -402,7 +505,12 @@ public static class ColumnValueConverter
         }
 
         var options = column?.OptionSet?.Options;
-        if (options is { Count: > 0 } && !options.Any(o => o.Value == value))
+        if (options is not { Count: > 0 })
+        {
+            return ColumnValueResult.Refuse("The column's options are not in its metadata, so the value cannot be checked.");
+        }
+
+        if (!options.Any(o => o.Value == value))
         {
             return ColumnValueResult.Refuse("The value is not one of the column's options.");
         }
@@ -419,11 +527,20 @@ public static class ColumnValueConverter
                 "The lookup can point to more than one table (or its table is not known), so a GUID does not say which record.");
         }
 
-        return TryReadGuid(text, out var id)
+        return TryReadExactGuid(text, out var id)
             ? ColumnValueResult.Admit(new EntityReference(targets[0], id))
             : ColumnValueResult.Refuse("A lookup column takes the GUID of the record, with dashes (8-4-4-4-12), optionally in braces.");
     }
 
-    private static bool TryReadGuid(string text, out Guid id) =>
-        Guid.TryParseExact(text, "D", out id) || Guid.TryParseExact(text, "B", out id);
+    /// <summary>
+    /// Reads a GUID written 8-4-4-4-12 with dashes, optionally in braces, with nothing around it (the parse itself would
+    /// trim white space). The one GUID rule of <c>data load</c> and <c>data update</c>, lookups and record ids included.
+    /// </summary>
+    internal static bool TryReadExactGuid(string? text, out Guid id)
+    {
+        id = Guid.Empty;
+        return !string.IsNullOrEmpty(text)
+            && !char.IsWhiteSpace(text[0]) && !char.IsWhiteSpace(text[^1])
+            && (Guid.TryParseExact(text, "D", out id) || Guid.TryParseExact(text, "B", out id));
+    }
 }
