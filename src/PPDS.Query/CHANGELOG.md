@@ -27,8 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `QueryParser.Parse` and `TryParse` (and so `ParseStatement` and `ParseBatch`) refuse SQL text too long or nested too deeply to parse safely before ScriptDom's parser runs, with the new `QueryTooComplexException` (a `QueryParseException`); the check is `QueryComplexityGuard`, which walks the token stream without recursion and counts `/*` before the tokenizer runs (nested block comments overflow the tokenizer). Before, such text overflowed the stack and ended the process; a SELECT of about 900 chained conditions also overflowed a 1 MB stack in FetchXML generation. The editor services (`SqlValidator`, `SqlCursorContext`, `SqlSourceTokenizer`) do not parse or tokenize such text; the validator reports the refusal as a diagnostic (#1952).
-
 - SELECT returns what its text says or fails with a clear error: `IN (subquery)`/`EXISTS` inside OR, parentheses or NOT no longer overflow the stack; `NOT (...)`, `= NULL`, `<> NULL` and variables in a pushed-down WHERE are errors (they selected wrong rows); `<>`, `NOT IN`, `NOT LIKE`, `NOT BEGINS/ENDS WITH` are paired with `not-null`, as SQL never matches NULL; `TOP (n)` is honoured, TOP PERCENT/WITH TIES/non-literal TOP are errors; an aliased column next to a computed item, and a computed item over a GROUP BY column, return their values; names that are not valid Dataverse names are refused instead of written into FetchXML; LIKE patterns with an inner wildcard are sent as `like` (#1698).
 - Int (and bigint) arithmetic that overflows is an error instead of a wider value: int / int and int % int are int, so a later step that leaves the int range is an error, and `-` of the smallest int or bigint is an overflow (#1698).
 

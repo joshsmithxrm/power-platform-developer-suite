@@ -199,7 +199,7 @@ public sealed class SqlQueryService : ISqlQueryService
         }
         catch (QueryParseException ex)
         {
-            throw ParseFailure(ex);
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
         }
     }
 
@@ -364,13 +364,6 @@ public sealed class SqlQueryService : ISqlQueryService
     /// The row-cap refusal as a <see cref="PpdsException"/> with its own error code, carrying the outcomes of
     /// any earlier script statements that already ran.
     /// </summary>
-    /// <summary>
-    /// A parse failure as a <see cref="PpdsException"/>: <c>Query.TooComplex</c> (exit code 3) for a text refused before it
-    /// was parsed because it is too long or nested too deeply (#1952), <c>Query.ParseError</c> otherwise.
-    /// </summary>
-    private static PpdsException ParseFailure(QueryParseException ex)
-        => new(ex is QueryTooComplexException ? ErrorCodes.Query.TooComplex : ErrorCodes.Query.ParseError, ex.Message, ex);
-
     private static PpdsException WrapRowCapExceeded(QueryExecutionException ex, QueryPlanContext context)
     {
         var wrapped = ex is DmlRowCapExceededException cap
@@ -482,7 +475,7 @@ public sealed class SqlQueryService : ISqlQueryService
         }
         catch (QueryParseException ex)
         {
-            throw ParseFailure(ex);
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
         }
 
         if (fragment is TSqlScript { Batches: var explainBatches } && explainBatches.Count(b => b.Statements.Count > 0) > 1)
@@ -522,7 +515,7 @@ public sealed class SqlQueryService : ISqlQueryService
         }
         catch (QueryParseException ex)
         {
-            throw ParseFailure(ex);
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
         }
         catch (DmlSafetyRefusalException ex)
         {
@@ -724,7 +717,7 @@ public sealed class SqlQueryService : ISqlQueryService
         }
         catch (QueryParseException ex)
         {
-            throw ParseFailure(ex);
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
         }
 
         // Only one batch runs per request: refuse rather than drop the batches after GO without a word.
@@ -1025,7 +1018,7 @@ public sealed class SqlQueryService : ISqlQueryService
         }
         catch (QueryParseException ex)
         {
-            throw ParseFailure(ex);
+            throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
         }
         catch (DmlSafetyRefusalException ex)
         {

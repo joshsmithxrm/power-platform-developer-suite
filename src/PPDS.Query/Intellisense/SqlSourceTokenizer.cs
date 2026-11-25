@@ -140,10 +140,6 @@ public sealed class SqlSourceTokenizer : ISourceTokenizer
         if (string.IsNullOrEmpty(text))
             return Array.Empty<SourceToken>();
 
-        // Nested block comments overflow the tokenizer's stack (#1952): too much of them is shown as one error span.
-        if (PPDS.Query.Parsing.QueryComplexityGuard.FindTextRefusal(text) != null)
-            return new[] { new SourceToken(0, text.Length, SourceTokenType.Error) };
-
         try
         {
             var parser = new TSql170Parser(initialQuotedIdentifiers: true);

@@ -21,16 +21,11 @@ namespace PPDS.Query.Parsing
         /// <returns>The parsed AST fragment.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="sql"/> is null.</exception>
         /// <exception cref="QueryParseException">The SQL text contains syntax errors.</exception>
-        /// <exception cref="QueryTooComplexException">
-        /// The SQL text is too long or nested too deeply to parse safely (<see cref="QueryComplexityGuard"/>), checked before
-        /// the parser runs.
-        /// </exception>
         public TSqlFragment Parse(string sql)
         {
             if (sql is null)
                 throw new ArgumentNullException(nameof(sql));
 
-            QueryComplexityGuard.ThrowIfTooComplex(sql, _parser);
             using var reader = new StringReader(sql);
             var fragment = _parser.Parse(reader, out IList<ParseError> errors);
 
@@ -48,16 +43,11 @@ namespace PPDS.Query.Parsing
         /// <param name="errors">The parse errors, empty on success.</param>
         /// <returns>True if parsing succeeded with no errors; otherwise false.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="sql"/> is null.</exception>
-        /// <exception cref="QueryTooComplexException">
-        /// The SQL text is too long or nested too deeply to parse safely (<see cref="QueryComplexityGuard"/>): a refusal, not a
-        /// syntax error, so it is thrown here too.
-        /// </exception>
         public bool TryParse(string sql, out TSqlFragment? fragment, out IList<ParseError> errors)
         {
             if (sql is null)
                 throw new ArgumentNullException(nameof(sql));
 
-            QueryComplexityGuard.ThrowIfTooComplex(sql, _parser);
             using var reader = new StringReader(sql);
             fragment = _parser.Parse(reader, out errors);
 
