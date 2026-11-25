@@ -67,8 +67,9 @@ has no comment.
 No agent merges a pull request in any of the categories below, or enables auto-merge on it, until
 the maintainer has answered for it. For categories 1 to 5, 7 and 8, a pull request is in the
 category when its diff changes anything the category names, in any way, comments and renames
-included. The one exception is in category 7: a change only to help text or a description that does
-not say whether a write happens or is confirmed.
+included. There are two exceptions. In category 2: a document change that only writes down a
+decision the maintainer has already made. In category 7: a change only to help text or a description
+that does not say whether a write happens or is confirmed.
 
 1. **Workflows and the rest of `.github/`.** This covers workflows, composite actions,
    `dependabot.yml`, and the pull request and issue templates. The agents' account cannot push
@@ -78,6 +79,12 @@ not say whether a write happens or is confirmed.
 2. **Agent rules, settings and hooks.** This covers everything under `.claude/`, plus `AGENTS.md`,
    `CLAUDE.md`, `CONTRIBUTING.md`, `docs/MERGE-POLICY.md`, `docs/MAINTAINER-SESSION-RULES.md`,
    `docs/CONTRIBUTOR-LIFECYCLE.md` and `specs/test-gates.md`.
+   One exception: a pull request that changes only the documents named here, and nothing under
+   `.claude/`, is not in this category when every rule it adds or changes is a decision the
+   maintainer has already made. Its description quotes his dated words for each one (D4 in
+   [MAINTAINER-SESSION-RULES.md](MAINTAINER-SESSION-RULES.md)), and the reviewer confirms that the
+   text says no more than those words. If it says more, or the reviewer is not sure, it is
+   maintainer first.
 3. **Scripts that a workflow runs, or that decide what merges.** Today these are `scripts/ci/`,
    `scripts/dependabot/` and `scripts/docs-gen/`. A script in any other folder joins this category
    the day a workflow runs it.
