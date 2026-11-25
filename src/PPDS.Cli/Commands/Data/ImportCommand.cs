@@ -231,6 +231,10 @@ public static class ImportCommand
 
         try
         {
+            // The schema's import-only attributes are checked before anything connects.
+            await ImportOutcome.EnsureSchemaCanBeImportedAsync(
+                () => ImportSchemaCheck.ReadArchiveImportIssuesAsync(data.FullName, cancellationToken));
+
             // Factory handles environment resolution automatically
             await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
                 profileName,

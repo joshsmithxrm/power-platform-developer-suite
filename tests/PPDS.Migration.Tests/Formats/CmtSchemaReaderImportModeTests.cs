@@ -61,18 +61,18 @@ public class CmtSchemaReaderImportModeTests
     [InlineData(@"importMode=""3""")]
     public async Task UnknownMode_IsRefused_NotTreatedAsTheGlobalMode(string attribute)
     {
-        var act = () => ReadAsync(attribute);
+        var schema = await ReadAsync(attribute);
 
-        var ex = await act.Should().ThrowAsync<InvalidDataException>();
-        ex.Which.Message.Should().Contain("account").And.Contain("create, update, upsert or skip");
+        // An import-only problem: recorded for the import to refuse, not thrown (an export reads the schema too).
+        schema.ImportIssues.Should().ContainSingle().Which.Should().Contain("account").And.Contain("create, update, upsert or skip");
     }
 
     [Fact]
     public async Task TwoImportModeAttributesInDifferentCase_AreRefused()
     {
-        var act = () => ReadAsync(@"importMode=""skip"" importmode=""upsert""");
+        var schema = await ReadAsync(@"importMode=""skip"" importmode=""upsert""");
 
-        await act.Should().ThrowAsync<InvalidDataException>();
+        schema.ImportIssues.Should().ContainSingle();
     }
 
     // #1914 review should-fix 3: CMT attributes PPDS does not apply.
@@ -83,10 +83,10 @@ public class CmtSchemaReaderImportModeTests
     [InlineData(@"skipupdate=""maybe""")]
     public async Task CmtSkipUpdateOrForceCreate_AskingForSomething_IsRefused(string attribute)
     {
-        var act = () => ReadAsync(attribute);
+        var schema = await ReadAsync(attribute);
 
-        var ex = await act.Should().ThrowAsync<InvalidDataException>();
-        ex.Which.Message.Should().Contain("account").And.Contain("which PPDS does not apply").And.Contain("importMode");
+        // An import-only problem: recorded for the import to refuse, not thrown (an export reads the schema too).
+        schema.ImportIssues.Should().ContainSingle().Which.Should().Contain("account").And.Contain("which PPDS does not apply").And.Contain("importMode");
     }
 
     [Theory]
@@ -123,9 +123,9 @@ public class CmtSchemaReaderImportModeTests
     [InlineData(@"disableplugins=""true"" DISABLEPLUGINS=""false""")]
     public async Task DisablePlugins_AnyOtherValue_IsRefused(string attribute)
     {
-        var act = () => ReadAsync(attribute);
+        var schema = await ReadAsync(attribute);
 
-        await act.Should().ThrowAsync<InvalidDataException>();
+        schema.ImportIssues.Should().ContainSingle();
     }
 
     // #1914 review should-fix 5: dateMode values.
@@ -148,9 +148,27 @@ public class CmtSchemaReaderImportModeTests
     [InlineData(@"dateMode=""1""")]
     public async Task DateMode_AnyOtherValue_IsRefused(string attribute)
     {
-        var act = () => ReadAsync("", attribute);
+        var schema = await ReadAsync("", attribute);
 
-        var ex = await act.Should().ThrowAsync<InvalidDataException>();
-        ex.Which.Message.Should().Contain("createdon");
+        // An import-only problem: recorded for the import to refuse, not thrown (an export reads the schema too).
+        schema.ImportIssues.Should().ContainSingle().Which.Should().Contain("createdon");
+    }
+
+    [Fact]
+    public async Task ASchemaWithImportIssues_StillReads_ForAnExport()
+    {
+        // #1934 r2 should-fix 4: skipupdate concerns only an import; the schema stays usable for an export.
+        var schema = await ReadAsync(@"skipupdate=""true"" importMode=""skp""", @"dateMode=""weekly""");
+
+        schema.Entities.Should().ContainSingle().Which.LogicalName.Should().Be("account");
+        schema.ImportIssues.Should().HaveCount(3);
+    }
+
+    [Fact]
+    public async Task ACleanSchema_HasNoImportIssues()
+    {
+        var schema = await ReadAsync(@"importMode=""skip"" disableplugins=""true""", @"dateMode=""relative""");
+
+        schema.ImportIssues.Should().BeEmpty();
     }
 }

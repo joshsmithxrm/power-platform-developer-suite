@@ -25,6 +25,14 @@ namespace PPDS.Migration.Models
         public IReadOnlyList<EntitySchema> Entities { get; set; } = Array.Empty<EntitySchema>();
 
         /// <summary>
+        /// Gets or sets the problems found in attributes only an import reads (<c>importMode</c>,
+        /// <c>disableplugins</c>, <c>dateMode</c>, and CMT's <c>skipupdate</c> and <c>forcecreate</c>):
+        /// a value the import cannot apply exactly. An export ignores them; an import refuses a schema
+        /// that has any, before anything is read from or written to the target.
+        /// </summary>
+        public IReadOnlyList<string> ImportIssues { get; set; } = Array.Empty<string>();
+
+        /// <summary>
         /// Gets an entity by its logical name.
         /// </summary>
         /// <param name="logicalName">The entity logical name.</param>

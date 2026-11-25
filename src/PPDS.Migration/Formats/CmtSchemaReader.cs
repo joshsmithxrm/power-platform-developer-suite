@@ -89,10 +89,11 @@ namespace PPDS.Migration.Formats
                 : root.Element("entities") ?? throw new InvalidOperationException("Schema XML has no <entities> element");
 
             var entities = new List<EntitySchema>();
+            var importIssues = new List<string>();
 
             foreach (var entityElement in entitiesElement.Elements("entity"))
             {
-                var entity = ParseEntity(entityElement);
+                var entity = ParseEntity(entityElement, importIssues);
                 entities.Add(entity);
             }
 
@@ -100,11 +101,31 @@ namespace PPDS.Migration.Formats
             {
                 Version = root.Attribute("version")?.Value ?? "1.0",
                 GeneratedAt = ParseDateTime(root.Attribute("timestamp")?.Value),
-                Entities = entities
+                Entities = entities,
+                ImportIssues = importIssues
             };
         }
 
-        private EntitySchema ParseEntity(XElement element)
+        /// <summary>
+        /// Reads an import-only attribute. A value the import cannot apply is not an error of the
+        /// schema as such (an export does not read these attributes): it is recorded in
+        /// <paramref name="importIssues"/>, and an import refuses a schema that has any
+        /// (#1934 r2 should-fix 4).
+        /// </summary>
+        private static T ReadForImport<T>(Func<T> read, T fallback, List<string> importIssues)
+        {
+            try
+            {
+                return read();
+            }
+            catch (InvalidDataException ex)
+            {
+                importIssues.Add(ex.Message);
+                return fallback;
+            }
+        }
+
+        private EntitySchema ParseEntity(XElement element, List<string> importIssues)
         {
             var logicalName = element.Attribute("name")?.Value;
             if (string.IsNullOrWhiteSpace(logicalName))
@@ -115,9 +136,9 @@ namespace PPDS.Migration.Formats
             var objectTypeCode = ParseInt(element.Attribute("etc")?.Value);
             var primaryIdField = element.Attribute("primaryidfield")?.Value ?? $"{logicalName}id";
             var primaryNameField = element.Attribute("primarynamefield")?.Value ?? "name";
-            var disablePlugins = ReadDisablePlugins(element, logicalName);
-            var importMode = ReadImportMode(element, logicalName);
-            RefuseUnappliedCmtAttributes(element, logicalName);
+            var disablePlugins = ReadForImport(() => ReadDisablePlugins(element, logicalName), false, importIssues);
+            var importMode = ReadForImport(() => ReadImportMode(element, logicalName), null, importIssues);
+            ReadForImport(() => { RefuseUnappliedCmtAttributes(element, logicalName); return 0; }, 0, importIssues);
 
             var fields = new List<FieldSchema>();
             var fieldsElement = element.Element("fields");
@@ -125,7 +146,7 @@ namespace PPDS.Migration.Formats
             {
                 foreach (var fieldElement in fieldsElement.Elements("field"))
                 {
-                    var field = ParseField(fieldElement);
+                    var field = ParseField(fieldElement, importIssues);
                     fields.Add(field);
                 }
             }
@@ -167,7 +188,7 @@ namespace PPDS.Migration.Formats
             };
         }
 
-        private FieldSchema ParseField(XElement element)
+        private FieldSchema ParseField(XElement element, List<string> importIssues)
         {
             var logicalName = element.Attribute("name")?.Value;
             if (string.IsNullOrWhiteSpace(logicalName))
@@ -184,7 +205,7 @@ namespace PPDS.Migration.Formats
             // Parse validity flags - default to true for backwards compatibility
             var isValidForCreate = ParseBool(element.Attribute("isValidForCreate")?.Value, defaultValue: true);
             var isValidForUpdate = ParseBool(element.Attribute("isValidForUpdate")?.Value, defaultValue: true);
-            var dateMode = ReadDateMode(element, logicalName);
+            var dateMode = ReadForImport(() => ReadDateMode(element, logicalName), DateMode.Absolute, importIssues);
 
             return new FieldSchema
             {

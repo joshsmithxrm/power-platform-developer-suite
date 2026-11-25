@@ -61,6 +61,7 @@ public static class ExceptionMapper
             // Import refusals (#1914, #1921): nothing was written
             ImportRefusedException { Reason: ImportRefusalReasons.SkipIsPerTable } => ExitCodes.InvalidArguments,
             ImportRefusedException { Reason: ImportRefusalReasons.ModeNotImplemented } => ExitCodes.InvalidArguments,
+            ImportRefusedException { Reason: ImportRefusalReasons.SchemaNotApplicable } => ExitCodes.InvalidArguments,
             ImportRefusedException { Reason: ImportRefusalReasons.PluginTableNotResolved } => ExitCodes.NotFoundError,
             ImportRefusedException { Reason: ImportRefusalReasons.PluginTableMetadataUnavailable } => ExitCodes.ConnectionError,
             ImportRefusedException => ExitCodes.Failure,
@@ -156,6 +157,8 @@ public static class ExceptionMapper
                 (ErrorCodes.Validation.InvalidArguments, "mode"),
             ImportRefusedException { Reason: ImportRefusalReasons.ModeNotImplemented } =>
                 (ErrorCodes.Validation.InvalidArguments, "mode"),
+            ImportRefusedException { Reason: ImportRefusalReasons.SchemaNotApplicable } =>
+                (ErrorCodes.Validation.SchemaInvalid, null),
             ImportRefusedException { Reason: ImportRefusalReasons.PluginTableNotResolved } =>
                 (ErrorCodes.Operation.NotFound, null),
             ImportRefusedException { Reason: ImportRefusalReasons.PluginTableMetadataUnavailable } =>

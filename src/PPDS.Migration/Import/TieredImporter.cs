@@ -158,6 +158,7 @@ namespace PPDS.Migration.Import
             progress ??= IProgressReporter.Silent;
             options ??= _defaultOptions;
             EnsureModeIsImplemented(options);
+            EnsureSchemaCanBeImported(data.Schema);
 
             if (options.ImpersonateOwners && options.UserMappings == null)
             {
@@ -431,6 +432,26 @@ namespace PPDS.Migration.Import
                 ImportRefusalReasons.ModeNotImplemented,
                 "The import mode is not one of Create, Update or Upsert. Nothing was read or written.");
         }
+
+        /// <summary>
+        /// Refuses a schema whose import-only attributes the import cannot apply exactly, before
+        /// anything is read from or written to the target (#1934 r2 should-fix 4).
+        /// </summary>
+        internal static void EnsureSchemaCanBeImported(MigrationSchema schema)
+        {
+            if (schema.ImportIssues.Count == 0)
+            {
+                return;
+            }
+
+            throw new ImportRefusedException(
+                ImportRefusalReasons.SchemaNotApplicable,
+                SchemaNotApplicableMessage(schema.ImportIssues));
+        }
+
+        /// <summary>The refusal message for a schema with import issues.</summary>
+        public static string SchemaNotApplicableMessage(IReadOnlyList<string> importIssues) =>
+            "The schema cannot be used for an import, and nothing was imported: " + string.Join(" ", importIssues);
 
         /// <summary>
         /// Finds the active plug-in steps of the tables marked with disableplugins=true, resolved in

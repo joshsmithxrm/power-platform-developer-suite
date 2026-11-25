@@ -113,6 +113,20 @@ internal static class ImportOutcome
     }
 
     /// <summary>
+    /// Refuses, as a <see cref="PpdsException"/> with <see cref="ErrorCodes.Validation.SchemaInvalid"/>
+    /// (exit 3), a schema whose import-only attributes the import cannot apply. Called before the
+    /// command connects (#1934 r2 should-fix 4).
+    /// </summary>
+    internal static async Task EnsureSchemaCanBeImportedAsync(Func<Task<IReadOnlyList<string>>> readImportIssues)
+    {
+        var issues = await readImportIssues().ConfigureAwait(false);
+        if (issues.Count > 0)
+        {
+            throw new PpdsException(ErrorCodes.Validation.SchemaInvalid, TieredImporter.SchemaNotApplicableMessage(issues));
+        }
+    }
+
+    /// <summary>
     /// Writes the plug-in steps an import disabled and could not re-enable, each with its id, so
     /// they can be re-enabled by hand. Writes nothing when there are none.
     /// </summary>

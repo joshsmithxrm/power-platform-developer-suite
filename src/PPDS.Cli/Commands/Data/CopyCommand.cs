@@ -211,6 +211,10 @@ public static class CopyCommand
 
         try
         {
+            // The schema's import-only attributes are checked before either environment is connected.
+            await ImportOutcome.EnsureSchemaCanBeImportedAsync(
+                () => ImportSchemaCheck.ReadSchemaFileImportIssuesAsync(schema.FullName, cancellationToken));
+
             var tempDirectory = tempDir?.FullName ?? Path.GetTempPath();
             if (!Directory.Exists(tempDirectory))
             {

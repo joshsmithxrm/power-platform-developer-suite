@@ -97,6 +97,12 @@ namespace PPDS.Migration.Import
         public const string ModeNotImplemented = "Import.ModeNotImplemented";
 
         /// <summary>
+        /// The schema carries an import-only attribute whose value the import cannot apply exactly
+        /// (see <see cref="Models.MigrationSchema.ImportIssues"/>).
+        /// </summary>
+        public const string SchemaNotApplicable = "Import.SchemaNotApplicable";
+
+        /// <summary>
         /// A plug-in step that was to be disabled for the import could not be disabled.
         /// </summary>
         public const string PluginStepNotDisabled = "Import.PluginStepNotDisabled";

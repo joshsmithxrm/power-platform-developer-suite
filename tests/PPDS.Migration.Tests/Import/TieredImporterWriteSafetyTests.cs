@@ -175,6 +175,23 @@ public class TieredImporterWriteSafetyTests
         _bulkCalls.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task SchemaWithImportIssues_IsRefused_BeforeAnythingIsReadOrWritten()
+    {
+        // #1934 r2 should-fix 4: refused where the import reads it.
+        var sut = CreateImporter();
+        var data = Data((Table("account"), Accounts(1)));
+        data.Schema.ImportIssues = new[] { "Table 'account' in the schema carries the Configuration Migration Tool attribute skipupdate, which PPDS does not apply." };
+
+        var act = () => sut.ImportAsync(data, Plan("account"), new ImportOptions());
+
+        var ex = (await act.Should().ThrowAsync<ImportRefusedException>()).Which;
+        ex.Reason.Should().Be(ImportRefusalReasons.SchemaNotApplicable);
+        ex.Message.Should().Contain("skipupdate").And.Contain("nothing was imported");
+        _bulkCalls.Should().BeEmpty();
+        _validator.Verify(v => v.LoadTargetFieldMetadataAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<IProgressReporter?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Theory]
     [InlineData(ImportMode.Create, BulkOperationType.Create)]
     [InlineData(ImportMode.Update, BulkOperationType.Update)]

@@ -154,4 +154,59 @@ public class ImportOutcomeTests
         Assert.Equal(ExitCodes.NotFoundError, code);
         Assert.Contains("Error: Table 'x' was not found.", Text);
     }
+
+    // #1934 r2 should-fix 4: the schema's import-only attributes are refused before anything connects.
+    private static string ArchiveWithSchema(string entityAttributes)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"ppds-schema-check-{Guid.NewGuid():N}.zip");
+        using (var zip = System.IO.Compression.ZipFile.Open(path, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            var entry = zip.CreateEntry("data_schema.xml");
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write($@"<?xml version=""1.0""?><entities><entity name=""account"" displayname=""Account"" primaryidfield=""accountid"" {entityAttributes}><fields /></entity></entities>");
+        }
+        return path;
+    }
+
+    [Fact]
+    public async Task SchemaCheck_ArchiveWithAnImportIssue_IsRefusedAsAPpdsException_Exit3()
+    {
+        var path = ArchiveWithSchema(@"skipupdate=""true""");
+        try
+        {
+            var act = () => ImportOutcome.EnsureSchemaCanBeImportedAsync(() => ImportSchemaCheck.ReadArchiveImportIssuesAsync(path));
+
+            var ex = await Assert.ThrowsAsync<PpdsException>(act);
+            Assert.Equal(ErrorCodes.Validation.SchemaInvalid, ex.ErrorCode);
+            Assert.Contains("skipupdate", ex.UserMessage);
+            Assert.Equal(ExitCodes.InvalidArguments, ImportOutcome.Report(ex, "Import", _progress.Object, _error, debug: false));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task SchemaCheck_CleanArchive_Passes()
+    {
+        var path = ArchiveWithSchema(@"importMode=""skip""");
+        try
+        {
+            await ImportOutcome.EnsureSchemaCanBeImportedAsync(() => ImportSchemaCheck.ReadArchiveImportIssuesAsync(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void RefusedSchema_FromTheImporter_ExitsThree()
+    {
+        var refused = new ImportRefusedException(ImportRefusalReasons.SchemaNotApplicable, "The schema cannot be used for an import.");
+
+        Assert.Equal(ExitCodes.InvalidArguments, ImportOutcome.Report(refused, "Import", _progress.Object, _error, debug: false));
+        Assert.Equal(ErrorCodes.Validation.SchemaInvalid, ExceptionMapper.Map(refused).Code);
+    }
 }
