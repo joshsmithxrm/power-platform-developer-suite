@@ -183,7 +183,7 @@ public sealed class RecordIdFileServiceTests : IDisposable
     [Fact]
     public async Task Csv_InvalidCells_AreRefusedWithTheirLineNumbers()
     {
-        var csv = $"accountid,name\n{Child1},a\n\nnot-a-guid,b\n,c\n{Child1},d\nshort";
+        var csv = $"accountid,name\n{Child1},a\n\nnot-a-guid,b\n,c\n{Child1},d\n{Guid.Empty},e";
 
         var ex = await Refused(csv, extension: ".csv");
 
@@ -228,5 +228,125 @@ public sealed class RecordIdFileServiceTests : IDisposable
             .ReadIdsAsync(Path.Combine(_directory, "missing.json"), "account", null);
 
         (await act.Should().ThrowAsync<PpdsException>()).Which.ErrorCode.Should().Be(ErrorCodes.Validation.FileNotFound);
+    }
+
+    // ---- Review round 1: the CSV file is read by the CSV rules and refused whole when any record is not exact.
+
+    [Fact]
+    public async Task Csv_UnquotedCommaShiftsTheParentUnderTheIdColumn_FileIsRefused()
+    {
+        // "Contoso, Inc" unquoted makes four fields: the parent's id would sit under the id column.
+        var ex = await Refused($"name,parentaccountid,accountid\nContoso, Inc,{Parent},{Child1}\nFabrikam,{Parent},{Child2}\n", extension: ".csv");
+
+        ex.UserMessage.Should().Contain("1 record has a number of fields other than the header's 3 (line 2: 4)")
+            .And.Contain("Nothing was deleted");
+        ex.UserMessage.Should().NotContain(Parent.ToString()).And.NotContain("Contoso");
+    }
+
+    [Fact]
+    public async Task Csv_FieldLeftOutBeforeTheId_FileIsRefused()
+    {
+        var ex = await Refused($"name,parentaccountid,accountid\n{Parent},{Child1}\n", extension: ".csv");
+
+        ex.UserMessage.Should().Contain("(line 2: 2)");
+    }
+
+    [Fact]
+    public async Task Csv_IdLookingTextInsideAMultiLineQuotedField_IsNotARecord()
+    {
+        // The second line is text inside the first record's description, not a record of its own.
+        var csv = $"accountid,description\n{Child1},\"Duplicate of\n{Child2},see above\"\n";
+
+        var ids = await Read(csv, extension: ".csv");
+
+        ids.Should().Equal(Child1);
+    }
+
+    [Fact]
+    public async Task Csv_FileEndsInsideAnOpenQuote_IsRefused()
+    {
+        var ex = await Refused($"accountid,description\n{Child1},\"Duplicate of\n{Child2},see above\n", extension: ".csv");
+
+        ex.UserMessage.Should().Contain("a quoted field opened on line 2 is never closed");
+        ex.UserMessage.Should().NotContain(Child2.ToString());
+    }
+
+    [Fact]
+    public async Task Csv_QuoteInsideAnUnquotedField_IsRefused()
+    {
+        var ex = await Refused($"accountid,name\n{Child1},Contoso \"East\"\n{Child2},b\n", extension: ".csv");
+
+        ex.UserMessage.Should().Contain("1 record has a quote that is not allowed there (line 2)");
+    }
+
+    [Fact]
+    public async Task Csv_QuotedFieldsDoubledQuotesCrLfAndByteOrderMark_AreRead()
+    {
+        var csv = $"\uFEFFaccountid,name\r\n\"{Child1}\",\"Contoso, \"\"East\"\"\"\r\n{Child2},\"two\r\nlines\"\r\n";
+
+        var ids = await Read(csv, extension: ".csv");
+
+        ids.Should().Equal(Child1, Child2);
+    }
+
+    [Fact]
+    public async Task Csv_LineNumbersCountTheLinesOfMultiLineRecords()
+    {
+        var csv = $"accountid,name\n{Child1},\"a\nb\"\n\nnot-an-id,c\n";
+
+        var ex = await Refused(csv, extension: ".csv");
+
+        ex.UserMessage.Should().Contain("(line 5)");
+    }
+
+    [Theory]
+    [InlineData("accountid,name,accountid")]
+    [InlineData("accountid,name,AccountId")]
+    public async Task Csv_HeaderNamesTheIdColumnTwice_IsRefused(string header)
+    {
+        var ex = await Refused($"{header}\n{Child1},a,{Child2}\n", extension: ".csv");
+
+        ex.UserMessage.Should().Contain("has the column 'accountid' 2 times");
+    }
+
+    [Fact]
+    public async Task Csv_RowShorterThanTheHeader_IsRefused()
+    {
+        var ex = await Refused($"name,accountid\na,{Child1}\nb\n", extension: ".csv");
+
+        ex.UserMessage.Should().Contain("(line 3: 1)");
+    }
+
+    [Fact]
+    public async Task Csv_FirstLineIsARecordNotAHeader_ItsValuesAreNotRepeated()
+    {
+        var ex = await Refused($"{Child1},Contoso\n{Child2},Fabrikam\n", extension: ".csv");
+
+        ex.UserMessage.Should().Contain("(2 columns found)").And.Contain("does not look like a header");
+        ex.UserMessage.Should().NotContain(Child1.ToString()).And.NotContain("Contoso");
+    }
+
+    [Fact]
+    public async Task Json_RecordsKeyTwice_IsRefused()
+    {
+        var ex = await Refused($"{{\"records\":[\"{Child1}\"],\"records\":[\"{Child2}\"]}}");
+
+        ex.UserMessage.Should().Contain("'records' key more than once");
+    }
+
+    [Fact]
+    public async Task Json_RecordsKeyInTwoCasings_IsRefused()
+    {
+        var ex = await Refused($"{{\"Records\":[\"{Child1}\"],\"records\":[\"{Child2}\"]}}");
+
+        ex.UserMessage.Should().Contain("'records' key more than once");
+    }
+
+    [Fact]
+    public async Task Json_RecordWithAnotherPropertyTwice_IsRefused()
+    {
+        var ex = await Refused($"[{{\"accountid\":\"{Child1}\",\"name\":\"a\",\"name\":\"b\"}}]");
+
+        ex.UserMessage.Should().Contain("1 entry holds another property more than once (entry 1)");
     }
 }

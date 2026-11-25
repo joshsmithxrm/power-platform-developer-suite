@@ -136,7 +136,8 @@ internal static class StrictCsvReader
                 badData = false;
                 if (raw.Count(c => c == '"') % 2 == 1)
                 {
-                    unclosed ??= line;
+                    // The open quote swallowed the file's last line break too, so every break in it is inside the record.
+                    unclosed ??= parser.RawRow - CountLineBreaks(raw);
                 }
                 else
                 {
@@ -169,10 +170,13 @@ internal static class StrictCsvReader
 
     /// <summary>The line breaks inside a record's raw text, not counting the one that ends it.</summary>
     private static int CountInnerLineBreaks(string raw)
-    {
-        var text = raw.EndsWith("\r\n", StringComparison.Ordinal) ? raw[..^2]
+        => CountLineBreaks(raw.EndsWith("\r\n", StringComparison.Ordinal) ? raw[..^2]
             : raw.EndsWith('\n') || raw.EndsWith('\r') ? raw[..^1]
-            : raw;
+            : raw);
+
+    /// <summary>The line breaks (CRLF, LF or CR) in <paramref name="text"/>.</summary>
+    private static int CountLineBreaks(string text)
+    {
         var count = 0;
         for (var i = 0; i < text.Length; i++)
         {
