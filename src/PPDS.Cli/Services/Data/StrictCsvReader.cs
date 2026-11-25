@@ -98,7 +98,7 @@ internal static class StrictCsvReader
     public static StrictCsvTable Read(string content)
     {
         ArgumentNullException.ThrowIfNull(content);
-        if (content.Length > 0 && content[0] == '﻿')
+        if (content.Length > 0 && content[0] == '\uFEFF')
         {
             content = content[1..];
         }
@@ -108,7 +108,9 @@ internal static class StrictCsvReader
         {
             HasHeaderRecord = false,
             Delimiter = ",",
-            IgnoreBlankLines = true,
+            DetectDelimiter = false,
+            // Blank lines come back as records so that every line is counted; they are skipped below.
+            IgnoreBlankLines = false,
             BadDataFound = _ => badData = true,
         };
 
@@ -116,33 +118,41 @@ internal static class StrictCsvReader
         var rows = new List<CsvRow>();
         var malformed = new List<int>();
         int? unclosed = null;
+        int? lastBadLine = null;
+        int? lastOpenQuoteLine = null;
+        var nextLine = 1;
 
         using var parser = new CsvParser(new StringReader(content), config);
         while (parser.Read())
         {
             var raw = parser.RawRecord;
-            var line = parser.RawRow - CountInnerLineBreaks(raw);
-            var fields = parser.Record ?? [];
-
-            // A line of only spaces is blank, not a record of one empty field.
-            if (fields.Length == 1 && string.IsNullOrWhiteSpace(fields[0]) && !raw.Contains('"'))
+            var line = nextLine;
+            nextLine = line + CountLineBreaks(raw);
+            if (!EndsWithLineBreak(raw))
             {
-                badData = false;
+                nextLine++;
+            }
+
+            var fields = parser.Record ?? [];
+            var bad = badData;
+            badData = false;
+
+            // A blank line, or a line of only spaces, is not a record.
+            if (!bad && fields.Length == 1 && string.IsNullOrWhiteSpace(fields[0]) && !raw.Contains('"'))
+            {
                 continue;
             }
 
-            if (badData)
+            if (bad)
             {
-                badData = false;
-                if (raw.Count(c => c == '"') % 2 == 1)
-                {
-                    // The open quote swallowed the file's last line break too, so every break in it is inside the record.
-                    unclosed ??= parser.RawRow - CountLineBreaks(raw);
-                }
-                else
-                {
-                    malformed.Add(line);
-                }
+                malformed.Add(line);
+                lastBadLine = line;
+                var open = OpenQuoteOffset(raw);
+                lastOpenQuoteLine = open < 0 ? null : line + CountLineBreaks(raw[..open]);
+            }
+            else
+            {
+                lastBadLine = null;
             }
 
             var row = new CsvRow(line, fields);
@@ -154,6 +164,14 @@ internal static class StrictCsvReader
             {
                 rows.Add(row);
             }
+        }
+
+        // A quoted field that is never closed runs to the end of the file, so only the last record can hold one. Any
+        // other bad record is a misplaced quote, reported on its own line.
+        if (lastBadLine is { } last && lastOpenQuoteLine is { } openLine)
+        {
+            malformed.Remove(last);
+            unclosed = openLine;
         }
 
         var expected = header?.Fields.Count ?? 0;
@@ -168,11 +186,52 @@ internal static class StrictCsvReader
         };
     }
 
-    /// <summary>The line breaks inside a record's raw text, not counting the one that ends it.</summary>
-    private static int CountInnerLineBreaks(string raw)
-        => CountLineBreaks(raw.EndsWith("\r\n", StringComparison.Ordinal) ? raw[..^2]
-            : raw.EndsWith('\n') || raw.EndsWith('\r') ? raw[..^1]
-            : raw);
+    /// <summary>
+    /// The offset of the quote that opens a field (at its start) and is never closed in <paramref name="raw"/>, or -1
+    /// when every quoted field closes. A quote inside an unquoted field does not open one.
+    /// </summary>
+    private static int OpenQuoteOffset(string raw)
+    {
+        var inQuotes = false;
+        var openedAt = -1;
+        var fieldStart = true;
+        for (var i = 0; i < raw.Length; i++)
+        {
+            var c = raw[i];
+            if (inQuotes)
+            {
+                if (c == '"')
+                {
+                    if (i + 1 < raw.Length && raw[i + 1] == '"')
+                    {
+                        i++;
+                    }
+                    else
+                    {
+                        inQuotes = false;
+                    }
+                }
+
+                continue;
+            }
+
+            if (c == '"' && fieldStart)
+            {
+                inQuotes = true;
+                openedAt = i;
+                fieldStart = false;
+            }
+            else
+            {
+                fieldStart = c is ',' or '\r' or '\n';
+            }
+        }
+
+        return inQuotes ? openedAt : -1;
+    }
+
+    /// <summary>Whether a record's raw text ends with its line break (the last line of a file may not).</summary>
+    private static bool EndsWithLineBreak(string raw) => raw.EndsWith('\n') || raw.EndsWith('\r');
 
     /// <summary>The line breaks (CRLF, LF or CR) in <paramref name="text"/>.</summary>
     private static int CountLineBreaks(string text)

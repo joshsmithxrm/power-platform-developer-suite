@@ -74,17 +74,23 @@ public enum DataTruncateStopReason
     /// <summary>The table was read to its end: every record in it was attempted once.</summary>
     Completed,
 
-    /// <summary>A pass deleted no record; records after it were not attempted.</summary>
-    PassDeletedNothing,
-
     /// <summary>A pass had a failure and <see cref="DataTruncateOptions.ContinueOnError"/> is false.</summary>
     StoppedOnError,
 
     /// <summary>A record already attempted was read again, so the counts are not certain.</summary>
     DeletedRecordReadAgain,
 
-    /// <summary>Dataverse returned no new paging cookie, so the run could not read past the page it had.</summary>
-    PagingUnavailable
+    /// <summary>
+    /// Dataverse returned no new paging cookie, or an empty page that claims more records, so the run could not read
+    /// past the page it had.
+    /// </summary>
+    PagingUnavailable,
+
+    /// <summary>The run was cancelled after it had deleted or attempted records.</summary>
+    Cancelled,
+
+    /// <summary>A read or a delete failed after the run had deleted or attempted records.</summary>
+    Interrupted
 }
 
 /// <summary>The outcome of <see cref="IDataTruncateService.TruncateAsync"/>.</summary>
@@ -113,6 +119,12 @@ public sealed record DataTruncateResult
 
     /// <summary>Time taken.</summary>
     public TimeSpan Duration { get; init; }
+
+    /// <summary>
+    /// For <see cref="DataTruncateStopReason.Interrupted"/>: the error code of the failure (a <c>PpdsException</c>'s
+    /// code, or the exception's type name), never its message.
+    /// </summary>
+    public string? InterruptionCode { get; init; }
 
     /// <summary>True when the table was read to its end with no failure and no record is left.</summary>
     public bool IsSuccess => StopReason == DataTruncateStopReason.Completed && FailedCount == 0 && RemainingCount == 0;
@@ -180,111 +192,128 @@ public sealed class DataTruncateService : IDataTruncateService
         var page = 1;
         string? pagingCookie = null;
         DataTruncateStopReason reason;
+        string? interruptionCode = null;
 
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            // Each read continues after the last primary id of the previous one (the paging cookie), so a record that
-            // failed is behind the read and cannot fill it, and every record is read once.
-            var read = await ReadPageAsync(entity, primaryId, options.BatchSize, page, pagingCookie, cancellationToken);
-            var fetched = read.Ids;
-
-            if (fetched.Any(attempted.Contains))
-            {
-                reason = DataTruncateStopReason.DeletedRecordReadAgain;
-                break;
-            }
-
-            var batch = fetched.Distinct().ToList();
-            if (batch.Count > 0)
-            {
-                attempted.UnionWith(batch);
-                passes++;
-
-                var processedBefore = deleted + failedCount;
-                var batchProgress = progress is null
-                    ? null
-                    : new Progress<DataverseProgressSnapshot>(snapshot => progress.ReportProgress(new ProgressSnapshot
-                    {
-                        CurrentItem = processedBefore + (int)snapshot.Processed,
-                        TotalItems = options.ExpectedCount,
-                        CurrentEntity = entity,
-                        RecordsPerSecond = snapshot.InstantRatePerSecond
-                    }));
-
-                var result = await _bulkExecutor.DeleteMultipleAsync(
-                    entity,
-                    batch,
-                    new BulkOperationOptions
-                    {
-                        BatchSize = options.BatchSize,
-                        ContinueOnError = options.ContinueOnError,
-                        BypassCustomLogic = options.BypassCustomLogic,
-                        BypassPowerAutomateFlows = options.BypassPowerAutomateFlows
-                    },
-                    progress: batchProgress,
-                    cancellationToken: cancellationToken);
-
-                deleted += result.SuccessCount;
-                failedCount += result.FailureCount;
-                errors.AddRange(result.Errors);
-                foreach (var error in result.Errors)
-                {
-                    var id = error.RecordId ??
-                             (error.Index >= 0 && error.Index < batch.Count ? batch[error.Index] : (Guid?)null);
-                    if (id is { } failedId && failed.Add(failedId))
-                    {
-                        failedIds.Add(failedId);
-                    }
-                }
-
-                _logger.LogDebug(
-                    "Truncate pass {Pass} of {Entity}: {Deleted} deleted, {Failed} failed",
-                    passes, entity, result.SuccessCount, result.FailureCount);
-
-                if (result.FailureCount > 0 && !options.ContinueOnError)
-                {
-                    reason = DataTruncateStopReason.StoppedOnError;
-                    break;
-                }
-
-                // A pass that deletes nothing ends the run. On the last page that is the end of the table anyway, and
-                // the run reports it as Completed: no record after it was left unattempted.
-                if (result.SuccessCount == 0 && read.MoreRecords)
-                {
-                    reason = DataTruncateStopReason.PassDeletedNothing;
-                    break;
-                }
-            }
-
-            if (!read.MoreRecords)
-            {
-                reason = DataTruncateStopReason.Completed;
-                break;
-            }
-
-            if (string.IsNullOrEmpty(read.PagingCookie) || read.PagingCookie == pagingCookie)
-            {
-                // Without a new cookie the next page would be counted by position (and the deletes have moved positions)
-                // or would repeat the last one.
-                reason = DataTruncateStopReason.PagingUnavailable;
-                break;
-            }
-
-            page++;
-            pagingCookie = read.PagingCookie;
-        }
-
-        int? remaining;
         try
         {
-            remaining = await CountAsync(entity, primaryId, cancellationToken);
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Each read continues after the last primary id of the previous one (the paging cookie), so a record that
+                // failed is behind the read and cannot fill it, and every record is read once.
+                var read = await ReadPageAsync(entity, primaryId, options.BatchSize, page, pagingCookie, cancellationToken);
+                var fetched = read.Ids;
+
+                if (fetched.Any(attempted.Contains))
+                {
+                    reason = DataTruncateStopReason.DeletedRecordReadAgain;
+                    break;
+                }
+
+                var batch = fetched.Distinct().ToList();
+                if (batch.Count > 0)
+                {
+                    attempted.UnionWith(batch);
+                    passes++;
+
+                    var processedBefore = deleted + failedCount;
+                    var batchProgress = progress is null
+                        ? null
+                        : new Progress<DataverseProgressSnapshot>(snapshot => progress.ReportProgress(new ProgressSnapshot
+                        {
+                            CurrentItem = processedBefore + (int)snapshot.Processed,
+                            TotalItems = options.ExpectedCount,
+                            CurrentEntity = entity,
+                            RecordsPerSecond = snapshot.InstantRatePerSecond
+                        }));
+
+                    var result = await _bulkExecutor.DeleteMultipleAsync(
+                        entity,
+                        batch,
+                        new BulkOperationOptions
+                        {
+                            BatchSize = options.BatchSize,
+                            ContinueOnError = options.ContinueOnError,
+                            BypassCustomLogic = options.BypassCustomLogic,
+                            BypassPowerAutomateFlows = options.BypassPowerAutomateFlows
+                        },
+                        progress: batchProgress,
+                        cancellationToken: cancellationToken);
+
+                    deleted += result.SuccessCount;
+                    failedCount += result.FailureCount;
+                    errors.AddRange(result.Errors);
+                    foreach (var error in result.Errors)
+                    {
+                        var id = error.RecordId ??
+                                 (error.Index >= 0 && error.Index < batch.Count ? batch[error.Index] : (Guid?)null);
+                        if (id is { } failedId && failed.Add(failedId))
+                        {
+                            failedIds.Add(failedId);
+                        }
+                    }
+
+                    _logger.LogDebug(
+                        "Truncate pass {Pass} of {Entity}: {Deleted} deleted, {Failed} failed",
+                        passes, entity, result.SuccessCount, result.FailureCount);
+
+                    // A pass in which every delete fails does not end the run: the next page starts after it, so the
+                    // failed records cannot hide the ones after them, and the run still ends at the end of the table.
+                    if (result.FailureCount > 0 && !options.ContinueOnError)
+                    {
+                        reason = DataTruncateStopReason.StoppedOnError;
+                        break;
+                    }
+                }
+                else if (read.MoreRecords)
+                {
+                    // An empty page that claims more records gives nothing to continue after: stop rather than spin.
+                    reason = DataTruncateStopReason.PagingUnavailable;
+                    break;
+                }
+
+                if (!read.MoreRecords)
+                {
+                    reason = DataTruncateStopReason.Completed;
+                    break;
+                }
+
+                if (string.IsNullOrEmpty(read.PagingCookie) || read.PagingCookie == pagingCookie)
+                {
+                    // Without a new cookie the next page would be counted by position (and the deletes have moved positions)
+                    // or would repeat the last one.
+                    reason = DataTruncateStopReason.PagingUnavailable;
+                    break;
+                }
+
+                page++;
+                pagingCookie = read.PagingCookie;
+            }
         }
-        catch (PpdsException ex)
+        catch (OperationCanceledException) when (passes > 0)
         {
-            _logger.LogWarning(ex, "Could not count the records left in {Entity} after truncate", entity);
-            remaining = null;
+            // Records were already deleted: report them rather than lose the counts.
+            reason = DataTruncateStopReason.Cancelled;
+        }
+        catch (Exception ex) when (passes > 0)
+        {
+            _logger.LogError(ex, "Truncate of {Entity} failed after {Passes} passes", entity, passes);
+            reason = DataTruncateStopReason.Interrupted;
+            interruptionCode = ex is PpdsException ppds ? ppds.ErrorCode : ex.GetType().Name;
+        }
+
+        int? remaining = null;
+        if (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                remaining = await CountAsync(entity, primaryId, cancellationToken);
+            }
+            catch (PpdsException ex)
+            {
+                _logger.LogWarning(ex, "Could not count the records left in {Entity} after truncate", entity);
+            }
         }
 
         stopwatch.Stop();
@@ -297,7 +326,8 @@ public sealed class DataTruncateService : IDataTruncateService
             Passes = passes,
             StopReason = reason,
             Errors = errors,
-            Duration = stopwatch.Elapsed
+            Duration = stopwatch.Elapsed,
+            InterruptionCode = interruptionCode
         };
     }
 

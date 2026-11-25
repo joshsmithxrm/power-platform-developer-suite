@@ -46,10 +46,20 @@ public static class DeleteCommand
             }
         });
 
-        var idOption = new Option<Guid?>("--id")
+        // Text, not Guid: the command-line library's GUID parse accepts damaged ids (a '+' or '0x' inside a block is
+        // read as hex digits), so the characters are checked first (#1915).
+        var idOption = new Option<string?>("--id")
         {
-            Description = "Record ID (GUID) to delete"
+            Description = $"Record ID to delete: {RecordIdText.Rule}"
         };
+        idOption.Validators.Add(result =>
+        {
+            var text = result.GetValue(idOption);
+            if (text != null && !RecordIdText.TryParse(text, out _))
+            {
+                result.AddError($"--id is not a record id: {RecordIdText.Rule}. Nothing was deleted.");
+            }
+        });
 
         var keyOption = new Option<string?>("--key", "-k")
         {
@@ -58,7 +68,7 @@ public static class DeleteCommand
 
         var fileOption = new Option<FileInfo?>("--file")
         {
-            Description = "Path to file containing record IDs (JSON array or CSV with ID column)"
+            Description = $"Path to file containing record IDs (JSON array or CSV with a header row); each id must be exact: {RecordIdText.Rule}"
         };
         fileOption.Validators.Add(result =>
         {
@@ -165,7 +175,7 @@ public static class DeleteCommand
             var file = result.GetValue(fileOption);
             var filter = result.GetValue(filterOption);
 
-            var modeCount = (id.HasValue ? 1 : 0) +
+            var modeCount = (id != null ? 1 : 0) +
                            (!string.IsNullOrEmpty(key) ? 1 : 0) +
                            (file != null ? 1 : 0) +
                            (!string.IsNullOrEmpty(filter) ? 1 : 0);
@@ -183,7 +193,7 @@ public static class DeleteCommand
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             var entity = parseResult.GetValue(entityOption)!;
-            var id = parseResult.GetValue(idOption);
+            var id = RecordIdText.TryParse(parseResult.GetValue(idOption), out var parsedId) ? parsedId : (Guid?)null;
             var key = parseResult.GetValue(keyOption);
             var file = parseResult.GetValue(fileOption);
             var idColumn = parseResult.GetValue(idColumnOption);

@@ -21,7 +21,11 @@ public static class TruncateCommand
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    public static Command Create()
+    public static Command Create() => Create(null);
+
+    /// <summary>Creates the command; tests pass <paramref name="providerFactory"/> to supply the services.</summary>
+    internal static Command Create(
+        Func<string?, string?, GlobalOptionValues, CancellationToken, Task<ServiceProvider>>? providerFactory)
     {
         var entityOption = new Option<string>("--entity", "-e")
         {
@@ -119,7 +123,7 @@ public static class TruncateCommand
                 entity, dryRun, force, batchSize,
                 bypassPlugins, bypassFlows, continueOnError,
                 profile, environment, globalOptions,
-                cancellationToken);
+                cancellationToken, providerFactory);
         });
 
         return command;
@@ -136,7 +140,8 @@ public static class TruncateCommand
         string? profileName,
         string? environment,
         GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string?, string?, GlobalOptionValues, CancellationToken, Task<ServiceProvider>>? providerFactory = null)
     {
         try
         {
@@ -146,13 +151,15 @@ public static class TruncateCommand
                 Console.Error.WriteLine("Connecting to Dataverse...");
             }
 
-            await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
-                profileName,
-                environment,
-                globalOptions.Verbose,
-                globalOptions.Debug,
-                ProfileServiceFactory.DefaultDeviceCodeCallback,
-                cancellationToken);
+            await using var serviceProvider = providerFactory is null
+                ? await ProfileServiceFactory.CreateFromProfilesAsync(
+                    profileName,
+                    environment,
+                    globalOptions.Verbose,
+                    globalOptions.Debug,
+                    ProfileServiceFactory.DefaultDeviceCodeCallback,
+                    cancellationToken)
+                : await providerFactory(profileName, environment, globalOptions, cancellationToken);
 
             var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
             var truncateService = serviceProvider.GetRequiredService<IDataTruncateService>();
@@ -277,6 +284,7 @@ public static class TruncateCommand
                     FailedIds = result.FailedIds.Take(MaxFailedIdsInOutput).ToList(),
                     FailedIdsOmitted = Math.Max(0, result.FailedCount - Math.Min(result.FailedIds.Count, MaxFailedIdsInOutput)),
                     RemainingCount = result.RemainingCount,
+                    ConfirmedCount = count,
                     Passes = result.Passes,
                     StopReason = result.StopReason.ToString(),
                     DurationMs = result.Duration.TotalMilliseconds
@@ -284,7 +292,7 @@ public static class TruncateCommand
             }
             else
             {
-                WriteTextResult(entity, result);
+                WriteTextResult(entity, result, count);
             }
 
             return ToExitCode(result);
@@ -327,7 +335,8 @@ public static class TruncateCommand
     internal static int ToExitCode(DataTruncateResult result) => result switch
     {
         { IsSuccess: true } => ExitCodes.Success,
-        { StopReason: DataTruncateStopReason.DeletedRecordReadAgain } => ExitCodes.Failure,
+        { StopReason: DataTruncateStopReason.DeletedRecordReadAgain or DataTruncateStopReason.Cancelled
+            or DataTruncateStopReason.Interrupted } => ExitCodes.Failure,
         _ => ExitCodes.PartialSuccess
     };
 
@@ -339,9 +348,12 @@ public static class TruncateCommand
         DataTruncateStopReason.Completed =>
             "Every record of the table was attempted once, but records remain (for example, created during the run). " +
             "Run the command again to delete them.",
-        DataTruncateStopReason.PassDeletedNothing =>
-            "Stopped: a pass deleted no record, so the records after it were not attempted and remain. Fix the cause " +
-            "of the failures and run the command again.",
+        DataTruncateStopReason.Cancelled =>
+            "Cancelled: the counts above are what was deleted before the cancellation; the records after it were not " +
+            "attempted and remain.",
+        DataTruncateStopReason.Interrupted =>
+            $"Stopped: a read or a delete failed ({result.InterruptionCode}); the counts above are what was deleted " +
+            "before it, and the records after it were not attempted and remain.",
         DataTruncateStopReason.StoppedOnError =>
             "Stopped at the first pass with a failure (--continue-on-error false); the records after it were not " +
             "attempted and remain.",
@@ -367,7 +379,17 @@ public static class TruncateCommand
         public void ReportInfo(string message) => Console.Error.WriteLine(message);
     }
 
-    private static void WriteTextResult(string entity, DataTruncateResult result)
+    /// <summary>
+    /// A note when the run deleted more records than the count the user confirmed (records created during the run
+    /// after the read position are deleted too), or <see langword="null"/>.
+    /// </summary>
+    internal static string? DescribeMoreThanConfirmed(DataTruncateResult result, int confirmedCount)
+        => result.DeletedCount > confirmedCount
+            ? $"Note: {result.DeletedCount:N0} records were deleted, more than the {confirmedCount:N0} confirmed: records " +
+              "created while the command ran were deleted too."
+            : null;
+
+    private static void WriteTextResult(string entity, DataTruncateResult result, int confirmedCount)
     {
         Console.Error.WriteLine(result.IsSuccess ? "Truncate complete" : "Truncate incomplete");
         Console.Error.WriteLine();
@@ -379,6 +401,13 @@ public static class TruncateCommand
             : "  Remaining: could not be counted");
 
         Console.Error.WriteLine($"  Duration: {result.Duration:mm\\:ss\\.fff}");
+
+        var moreThanConfirmed = DescribeMoreThanConfirmed(result, confirmedCount);
+        if (moreThanConfirmed != null)
+        {
+            Console.Error.WriteLine();
+            Console.Error.WriteLine(moreThanConfirmed);
+        }
 
         var stop = DescribeStop(result);
         if (stop != null)
@@ -448,6 +477,7 @@ public static class TruncateCommand
         public List<Guid>? FailedIds { get; init; }
         public int FailedIdsOmitted { get; init; }
         public int? RemainingCount { get; init; }
+        public int? ConfirmedCount { get; init; }
         public int Passes { get; init; }
         public string? StopReason { get; init; }
         public double DurationMs { get; init; }

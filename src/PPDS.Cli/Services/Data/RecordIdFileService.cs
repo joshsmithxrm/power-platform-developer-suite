@@ -153,90 +153,103 @@ public sealed class RecordIdFileService : IRecordIdFileService
 
         using (doc)
         {
-            var root = doc.RootElement;
-            JsonElement entries;
-            if (root.ValueKind == JsonValueKind.Array)
+            try
             {
-                entries = root;
+                return ReadJsonEntries(doc.RootElement, idColumn);
             }
-            else if (root.ValueKind == JsonValueKind.Object &&
-                     root.EnumerateObject().Count(p => string.Equals(p.Name, "records", StringComparison.OrdinalIgnoreCase)) > 1)
+            catch (InvalidOperationException ex)
             {
-                // JsonDocument keeps every duplicate and TryGetProperty would pick one of them: refuse instead.
-                throw Invalid("The JSON file has the 'records' key more than once, so the ids are not certain. " +
-                              "Nothing was deleted.");
+                // A string or a property name holding a lone surrogate escape (\ud800) cannot be read as text.
+                throw Invalid("The JSON file holds text that is not valid Unicode (a lone surrogate escape). " +
+                              "Nothing was deleted.", ex);
             }
-            else if (root.ValueKind == JsonValueKind.Object &&
-                     root.TryGetProperty("records", out var records) &&
-                     records.ValueKind == JsonValueKind.Array)
+        }
+    }
+
+    private static IReadOnlyList<Guid> ReadJsonEntries(JsonElement root, string idColumn)
+    {
+        JsonElement entries;
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            entries = root;
+        }
+        else if (root.ValueKind == JsonValueKind.Object &&
+                 root.EnumerateObject().Count(p => string.Equals(p.Name, "records", StringComparison.OrdinalIgnoreCase)) > 1)
+        {
+            // JsonDocument keeps every duplicate and TryGetProperty would pick one of them: refuse instead.
+            throw Invalid("The JSON file has the 'records' key more than once, so the ids are not certain. " +
+                          "Nothing was deleted.");
+        }
+        else if (root.ValueKind == JsonValueKind.Object &&
+                 root.TryGetProperty("records", out var records) &&
+                 records.ValueKind == JsonValueKind.Array)
+        {
+            entries = records;
+        }
+        else
+        {
+            throw Invalid("The JSON file is neither an array of ids or records nor an object with a 'records' " +
+                          "array. Nothing was deleted.");
+        }
+
+        var problems = new Problems("entry", "entries");
+        var ids = new List<Guid>();
+        var seen = new HashSet<Guid>();
+        var position = 0;
+
+        foreach (var element in entries.EnumerateArray())
+        {
+            position++;
+            JsonElement value;
+            if (element.ValueKind == JsonValueKind.Object)
             {
-                entries = records;
+                var matching = element.EnumerateObject()
+                    .Where(p => string.Equals(p.Name, idColumn, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (matching.Count == 0)
+                {
+                    problems.Missing.Add(position);
+                    continue;
+                }
+
+                if (matching.Count > 1)
+                {
+                    problems.Repeated.Add(position);
+                    continue;
+                }
+
+                // A record that holds any property twice is not well-formed JSON for this purpose: refuse it
+                // rather than decide which copy the user meant.
+                if (element.EnumerateObject().GroupBy(p => p.Name, StringComparer.Ordinal).Any(g => g.Count() > 1))
+                {
+                    problems.RepeatedProperty.Add(position);
+                    continue;
+                }
+
+                value = matching[0].Value;
             }
             else
             {
-                throw Invalid("The JSON file is neither an array of ids or records nor an object with a 'records' " +
-                              "array. Nothing was deleted.");
+                value = element;
             }
 
-            var problems = new Problems("entry", "entries");
-            var ids = new List<Guid>();
-            var seen = new HashSet<Guid>();
-            var position = 0;
-
-            foreach (var element in entries.EnumerateArray())
+            if (value.ValueKind != JsonValueKind.String || !TryReadId(value.GetString(), out var id))
             {
-                position++;
-                JsonElement value;
-                if (element.ValueKind == JsonValueKind.Object)
-                {
-                    var matching = element.EnumerateObject()
-                        .Where(p => string.Equals(p.Name, idColumn, StringComparison.OrdinalIgnoreCase))
-                        .ToList();
-                    if (matching.Count == 0)
-                    {
-                        problems.Missing.Add(position);
-                        continue;
-                    }
-
-                    if (matching.Count > 1)
-                    {
-                        problems.Repeated.Add(position);
-                        continue;
-                    }
-
-                    // A record that holds any property twice is not well-formed JSON for this purpose: refuse it
-                    // rather than decide which copy the user meant.
-                    if (element.EnumerateObject().GroupBy(p => p.Name, StringComparer.Ordinal).Any(g => g.Count() > 1))
-                    {
-                        problems.RepeatedProperty.Add(position);
-                        continue;
-                    }
-
-                    value = matching[0].Value;
-                }
-                else
-                {
-                    value = element;
-                }
-
-                if (value.ValueKind != JsonValueKind.String || !TryReadId(value.GetString(), out var id))
-                {
-                    problems.NotAnId.Add(position);
-                    continue;
-                }
-
-                if (!seen.Add(id))
-                {
-                    problems.Duplicate.Add(position);
-                    continue;
-                }
-
-                ids.Add(id);
+                problems.NotAnId.Add(position);
+                continue;
             }
 
-            problems.ThrowIfAny(idColumn);
-            return ids;
+            if (!seen.Add(id))
+            {
+                problems.Duplicate.Add(position);
+                continue;
+            }
+
+            ids.Add(id);
         }
+
+        problems.ThrowIfAny(idColumn);
+        return ids;
     }
 
     private static IReadOnlyList<Guid> ParseCsv(string content, string idColumn)
@@ -278,7 +291,8 @@ public sealed class RecordIdFileService : IRecordIdFileService
         var seen = new HashSet<Guid>();
         foreach (var row in table.Rows)
         {
-            if (!TryReadId(row.Fields[idIndex].Trim(), out var id))
+            // The cell is taken as written: the reader trims no field, and white space around an id is refused (#1915).
+            if (!TryReadId(row.Fields[idIndex], out var id))
             {
                 problems.NotAnId.Add(row.LineNumber);
                 continue;
@@ -298,29 +312,15 @@ public sealed class RecordIdFileService : IRecordIdFileService
     }
 
     /// <summary>
-    /// The refusal for a header without the id column. Header cells are named only when every one looks like a column
-    /// name, so a file without a header (its first line a record) never has its values repeated.
+    /// The refusal for a header without the id column. No cell of the first line is repeated: when the file has no
+    /// header, that line is a record, and even cells that look like column names may be its values.
     /// </summary>
     private static string DescribeMissingHeaderColumn(IReadOnlyList<string> headers, string idColumn)
-    {
-        var head = $"The first line of the CSV file has no column '{idColumn}' ({headers.Count} " +
-                   $"{(headers.Count == 1 ? "column" : "columns")} found). Nothing was deleted.";
-        var hint = $"The file needs a header row naming the column that holds the ids; name another column with --id-column.";
-        if (headers.All(IsColumnName))
-        {
-            return $"{head} Columns: {string.Join(", ", headers)}. {hint}";
-        }
+        => $"The first line of the CSV file has no column '{idColumn}' ({headers.Count} " +
+           $"{(headers.Count == 1 ? "column" : "columns")} found). Nothing was deleted. The file needs a header row " +
+           "naming its columns; name the column that holds the ids with --id-column if it is not the primary id column.";
 
-        return $"{head} The first line does not look like a header. {hint}";
-    }
-
-    private static bool IsColumnName(string text)
-        => text.Length is > 0 and <= 128 &&
-           (char.IsAsciiLetter(text[0]) || text[0] == '_') &&
-           text.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
-
-    private static bool TryReadId(string? text, out Guid id)
-        => Guid.TryParse(text, out id) && id != Guid.Empty;
+    private static bool TryReadId(string? text, out Guid id) => RecordIdText.TryParse(text, out id);
 
     private static PpdsException Invalid(string message, Exception? inner = null)
         => inner is null
