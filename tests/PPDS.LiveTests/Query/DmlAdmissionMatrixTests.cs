@@ -106,7 +106,7 @@ public sealed class DmlAdmissionMatrixTests
         foreach (var c in await DmlLiveDifferentialTests.CatalogueAsync())
         {
             var probe = await ProbeAsync(c.Sql);
-            var runtime = c.ExpectedCode is ErrorCodes.Query.ExecutionFailed or ErrorCodes.Query.DmlRowCapExceeded;
+            var runtime = c.AtRuntime || c.ExpectedCode is ErrorCodes.Query.ExecutionFailed or ErrorCodes.Query.DmlRowCapExceeded;
             if (c.Proves || runtime)
             {
                 if (!probe.Admitted)

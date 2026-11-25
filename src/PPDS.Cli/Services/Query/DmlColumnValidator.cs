@@ -224,6 +224,13 @@ internal static class DmlColumnValidator
             // SQL Server rounds currency converted to a whole number; the engine would truncate it.
             if (WholeNumberTypes.Contains(type) && category == Money)
                 throw Refuse(CurrencyToWholeNumber(value, $"writing it to the whole-number column {column}"));
+            // A decimal or floating-point value written to a whole number loses its fraction (as a decimal literal would):
+            // refused here, as the literal is, rather than value by value in the statement's pass (review round 2).
+            if (WholeNumberTypes.Contains(type) && category is Exact or Float)
+            {
+                throw Refuse($"{column} holds whole numbers; the value {Sql(value)} is a {(category == Float ? "floating-point" : "decimal")} " +
+                             "column, whose fraction would be lost. Write it to a decimal column, or write a whole number.");
+            }
             // SQL Server keeps 17 significant digits of a floating-point value converted to a decimal or currency; the
             // engine keeps 15, so the stored digits could differ.
             if (type is "Decimal" or "Money" && category == Float)

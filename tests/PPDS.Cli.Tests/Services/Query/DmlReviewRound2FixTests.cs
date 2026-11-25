@@ -87,10 +87,11 @@ public sealed class DmlReviewRound2FixTests
         Assert.Empty(h.Writes);
     }
 
+    /// <summary>A decimal column written to a whole number would lose its fraction: refused before anything is read.</summary>
     [Fact]
-    public async Task CopyingADecimalWithAFractionToAWholeNumber_WritesNothing()
+    public async Task CopyingADecimalColumnToAWholeNumber_IsRefusedBeforeAnythingIsRead()
     {
-        var h = DmlTestHarness.Create(rows: 2, shapeRow: (i, row) => row["revenue"] = PPDS.Dataverse.Query.QueryValue.Simple(i == 0 ? 2.5m : 3m));
+        var h = DmlTestHarness.Create(rows: 2);
 
         var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest
         {
@@ -98,8 +99,20 @@ public sealed class DmlReviewRound2FixTests
             DmlSafety = Confirmed
         }));
 
-        Assert.Equal(ErrorCodes.Query.DmlValueStoredDifferently, ex.ErrorCode);
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
+        Assert.Contains("whose fraction would be lost", ex.Message);
+        Assert.Empty(h.Reads);
         Assert.Empty(h.Writes);
+    }
+
+    /// <summary>The per-value rule of the pass refuses a fraction for a whole-number column from any source (its backstop).</summary>
+    [Fact]
+    public void ThePassRule_RefusesAFractionForAWholeNumberColumn()
+    {
+        var target = PPDS.Tests.Shared.DmlValueAdmissionTable.Targets.Single(t => t.Kind == "whole number").Metadata;
+
+        Assert.Equal(ErrorCodes.Query.DmlValueStoredDifferently, DmlValueAdmission.CheckSentValue(2.5m, 2, target)?.Code);
+        Assert.Null(DmlValueAdmission.CheckSentValue(3m, 3, target));
     }
 
     [Fact]

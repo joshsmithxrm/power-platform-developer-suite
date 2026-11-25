@@ -276,7 +276,7 @@ public static class DmlValueAdmission
         if (!FitsInt32(literal))
         {
             return DmlAdmission.Refuse(Unsupported,
-                "the number is outside the range of a whole-number column (-2,147,483,648 to 2,147,483,647).");
+                "this column holds whole numbers, and the number is outside the range of a whole-number column (-2,147,483,648 to 2,147,483,647).");
         }
         return use == DmlValueUse.Compare
             ? DmlAdmission.Admit(literal.Text)

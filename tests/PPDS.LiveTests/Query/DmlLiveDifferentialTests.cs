@@ -124,8 +124,9 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
     // -- the catalogue: the same cases, listed without a connection (for the offline admission matrix) --
 
     /// <summary>A case of this suite: its SQL, whether it proves the statement runs as T-SQL says (a differential case),
-    /// or must fail with <paramref name="ExpectedCode"/> having changed nothing.</summary>
-    internal sealed record LiveCase(string Sql, bool Proves, string? ExpectedCode);
+    /// or must fail with <paramref name="ExpectedCode"/> having changed nothing. <paramref name="AtRuntime"/>: the refusal
+    /// comes in the statement's pass (a value read from a column), so the statement is admitted at the gate.</summary>
+    internal sealed record LiveCase(string Sql, bool Proves, string? ExpectedCode, bool AtRuntime = false);
 
     private List<LiveCase>? _catalogue;
 
@@ -338,11 +339,11 @@ public sealed partial class DmlLiveDifferentialTests : LiveTestBase
     /// The statement must fail with <paramref name="code"/> (a refusal before anything runs, or a clean error such as
     /// divide by zero) and change nothing: every column and the row version of every row are compared.
     /// </summary>
-    private async Task RefusedAsync(string sql, string code = Blocked, int? rowCap = null)
+    private async Task RefusedAsync(string sql, string code = Blocked, int? rowCap = null, bool atRuntime = false)
     {
         if (_catalogue != null)
         {
-            _catalogue.Add(new LiveCase(sql, Proves: false, ExpectedCode: code));
+            _catalogue.Add(new LiveCase(sql, Proves: false, ExpectedCode: code, AtRuntime: atRuntime));
             return;
         }
         await ResetAsync();

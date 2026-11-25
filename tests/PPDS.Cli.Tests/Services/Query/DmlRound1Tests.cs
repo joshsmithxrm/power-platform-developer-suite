@@ -146,7 +146,6 @@ public sealed class DmlFaithfulRowsTests : IDisposable
     [InlineData("UPDATE account SET donotemail = 0 WHERE name = 'n0'", "donotemail", "0")]
     [InlineData("UPDATE account SET parentaccountid = '00000000-0000-0000-0000-000000000001' WHERE name = 'n1'", "parentaccountid", "00000000-0000-0000-0000-000000000001")]
     [InlineData("UPDATE account SET parentaccountid = CAST('00000000-0000-0000-0000-000000000001' AS uniqueidentifier) WHERE name = 'n1'", "parentaccountid", "00000000-0000-0000-0000-000000000001")]
-    [InlineData("UPDATE account SET numberofemployees = revenue WHERE name = 'n1'", "numberofemployees", "1000")]
     [InlineData("UPDATE account SET numberofemployees = 7 WHERE name = 'n1'", "numberofemployees", "7")]
     [InlineData("INSERT INTO account (name) SELECT TOP 2 name FROM account WHERE revenue > 0 ORDER BY name DESC", "name", "n3|n2")]
     [InlineData("INSERT INTO account (name, numberofemployees) VALUES ('a', -5)", "numberofemployees", "-5")]
@@ -221,6 +220,8 @@ public sealed class DmlRound1RefusalTests
     [InlineData("UPDATE account SET customertypecode = 3 WHERE name = 'n1'", "is not a choice of this column")]
     // A decimal literal into a whole-number column loses its fraction (review round 2: admission is exact).
     [InlineData("UPDATE account SET numberofemployees = 2.7 WHERE name = 'n1'", "whose fraction would be lost")]
+    // A decimal column copied to a whole number loses its fraction too (review round 2), whatever the values are.
+    [InlineData("UPDATE account SET numberofemployees = revenue WHERE name = 'n1'", "whose fraction would be lost")]
     [InlineData("DELETE FROM account WHERE numberofemployees = 99999999999", "holds whole numbers")]
     [InlineData("DELETE FROM account WHERE numberofemployees = 2147483648", "holds whole numbers")]
     [InlineData("DELETE FROM account WHERE customertypecode IN (1, 3000000000)", "holds whole numbers")]

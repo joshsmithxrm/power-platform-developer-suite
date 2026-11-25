@@ -382,11 +382,13 @@ public sealed partial class DmlLiveDifferentialTests
             r => r.With(FloatCol, -1m).With(Memo, "ň memo").With(Note, "2024-01-01"));
         await SetAll("ppds_note = 'lit'", r => r.With(Note, "lit"));
 
-        // implicit conversions of a decimal or floating-point value to a whole number truncate toward zero, as in SQL
-        await SetAll("ppds_num = ppds_amount", r => r.With(Num, Trunc(M(r, Amount))));
-        await SetAll("ppds_num = ppds_float", r => r.With(Num, Trunc(M(r, FloatCol))));
-        await SetAll("ppds_num = 2.7", r => r.With(Num, 2));
-        await SetAll("ppds_num = -2.7", r => r.With(Num, -2));
+        // A decimal or floating-point value written to a whole number would lose its fraction (SQL truncates it toward
+        // zero): review round 2 refuses it before anything runs, the literal and the column alike.
+        var t2 = _table;
+        await RefusedAsync($"UPDATE {t2} SET ppds_num = ppds_amount WHERE {All}");
+        await RefusedAsync($"UPDATE {t2} SET ppds_num = ppds_float WHERE {All}");
+        await RefusedAsync($"UPDATE {t2} SET ppds_num = 2.7 WHERE {All}");
+        await RefusedAsync($"UPDATE {t2} SET ppds_num = -2.7 WHERE {All}");
 
         // the GUID cast in each admitted spelling (braces, lower case)
         await Set($"ppds_parent = CAST('{{{id4.ToString().ToUpperInvariant()}}}' AS uniqueidentifier)", r => r.With(Parent, 4), "ppds_num = 4", r => I(r, Num) == 4);
