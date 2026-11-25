@@ -49,7 +49,15 @@ public sealed class DeleteFileCommandTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_directory, recursive: true); } catch (IOException) { }
+        try
+        {
+            Directory.Delete(_directory, recursive: true);
+        }
+        catch (IOException)
+        {
+            // Best-effort clean-up of this test's temporary folder: a file still held open must not fail the test,
+            // and the folder is a uniquely named one under the system temporary directory.
+        }
     }
 
     private Task<ServiceProvider> Provider(string? profile, string? environment, PPDS.Cli.Infrastructure.GlobalOptionValues options, CancellationToken ct)
