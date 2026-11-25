@@ -528,10 +528,14 @@ public static class EnvCommandGroup
             Description = "Short display label for status bar and tabs"
         };
 
-        var typeOption = new Option<EnvironmentType?>("--type", "-t")
+        // Text, read by name only (EnvironmentTypeNames) as the daemon reads it: binding to the enum would accept
+        // "1" or "Production,Sandbox" and save another type (#1829).
+        var typeOption = new Option<string?>("--type", "-t")
         {
-            Description = "Environment type (Production, Sandbox, Development, Test, Trial)"
+            Description = "Environment type (Production, Sandbox, Development, Test, Trial)",
+            HelpName = "Production|Sandbox|Development|Test|Trial"
         };
+        typeOption.CompletionSources.Add(_ => EnvironmentTypeCompletions());
 
         var colorOption = new Option<EnvironmentColor?>("--color", "-c")
         {
@@ -565,11 +569,12 @@ public static class EnvCommandGroup
             confirmLowerProtectionOption
         };
 
-        command.SetAction(async (parseResult, cancellationToken) =>
+        command.SetAction((parseResult, cancellationToken) => ReportingFailuresAsync(async () =>
         {
+            // Refused with Validation.InvalidArguments before anything is read or written.
+            var type = EnvironmentTypeNames.ParseOptional(parseResult.GetValue(typeOption));
             var url = parseResult.GetValue(urlArgument);
             var label = parseResult.GetValue(labelOption);
-            var type = parseResult.GetValue(typeOption);
             var color = parseResult.GetValue(colorOption);
             var show = parseResult.GetValue(showOption);
             var list = parseResult.GetValue(listOption);
@@ -619,9 +624,28 @@ public static class EnvCommandGroup
             return await ExecuteConfigSetAsync(
                 service, url, label, type, color, confirmLowerProtection,
                 interactive: !IsInputRedirected(), Console.In, Console.Error, cancellationToken);
-        });
+        }));
 
         return command;
+    }
+
+    /// <summary>
+    /// Reports a refusal (<see cref="PpdsException"/>) or an environments file PPDS cannot read as one line on stderr
+    /// with its exit code (an invalid type is 3), instead of System.CommandLine's "Unhandled exception" with a stack
+    /// frame and exit code 1 (#1829).
+    /// </summary>
+    private static async Task<int> ReportingFailuresAsync(Func<Task<int>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (Exception ex) when (ex is PpdsException or EnvironmentConfigFileException)
+        {
+            var (error, exitCode) = ExceptionMapper.MapWithExitCode(ex);
+            Console.Error.WriteLine($"Error: {error.Message}");
+            return exitCode;
+        }
     }
 
     /// <summary>Option that acknowledges a type change lowering write protection (#1829).</summary>
@@ -768,12 +792,17 @@ public static class EnvCommandGroup
 
     #region Type Command
 
+    private static IEnumerable<System.CommandLine.Completions.CompletionItem> EnvironmentTypeCompletions()
+        => Enum.GetNames<EnvironmentType>().Select(name => new System.CommandLine.Completions.CompletionItem(name));
+
     private static Command CreateTypeCommand()
     {
-        var nameArgument = new Argument<EnvironmentType?>("name")
+        // Text, read by name only, like the config command's --type (#1829).
+        var nameArgument = new Argument<string?>("name")
         {
             Description = "Type name (Production, Sandbox, Development, Test, Trial)"
         };
+        nameArgument.CompletionSources.Add(_ => EnvironmentTypeCompletions());
         nameArgument.Arity = ArgumentArity.ZeroOrOne;
 
         var colorOption = new Option<EnvironmentColor?>("--color", "-c")
@@ -796,9 +825,9 @@ public static class EnvCommandGroup
             nameArgument, colorOption, removeOption, listOption
         };
 
-        command.SetAction(async (parseResult, cancellationToken) =>
+        command.SetAction((parseResult, cancellationToken) => ReportingFailuresAsync(async () =>
         {
-            var name = parseResult.GetValue(nameArgument);
+            var name = EnvironmentTypeNames.ParseOptional(parseResult.GetValue(nameArgument));
             var color = parseResult.GetValue(colorOption);
             var remove = parseResult.GetValue(removeOption);
             var list = parseResult.GetValue(listOption);
@@ -844,7 +873,7 @@ public static class EnvCommandGroup
             Console.Error.WriteLine($"Type '{name}' set to {color.Value}.");
             Console.ResetColor();
             return ExitCodes.Success;
-        });
+        }));
 
         return command;
     }

@@ -132,12 +132,20 @@ public partial class RpcMethodHandler
         var configStore = _authServices.GetRequiredService<EnvironmentConfigStore>();
         var resolvedProfileName = profileKey;
 
-        // Tag all discovered environments with this profile in environments.json
-        await TagDiscoveredEnvironmentsAsync(configStore, discovered, resolvedProfileName, cancellationToken);
+        EnvironmentConfigCollection configCollection;
+        try
+        {
+            // Tag all discovered environments with this profile in environments.json
+            await TagDiscoveredEnvironmentsAsync(configStore, discovered, resolvedProfileName, cancellationToken);
 
-        // Load config (fresh — after tagging) so the merge below reflects the writes above.
-        configStore.ClearCache();
-        var configCollection = await configStore.LoadAsync(cancellationToken);
+            // Load config (fresh — after tagging) so the merge below reflects the writes above.
+            configStore.ClearCache();
+            configCollection = await configStore.LoadAsync(cancellationToken);
+        }
+        catch (EnvironmentConfigFileException ex)
+        {
+            throw ToRpcException(ex);
+        }
 
         // 3. Merge: start with discovered, add configured that belong to this profile
         var merged = new List<EnvironmentInfo>(discovered);
@@ -311,9 +319,19 @@ public partial class RpcMethodHandler
         }
 
         var configService = _authServices.GetRequiredService<IEnvironmentConfigService>();
-        var config = await configService.GetConfigAsync(environmentUrl, cancellationToken);
-        var resolvedColor = await configService.ResolveColorAsync(environmentUrl, cancellationToken);
-        var resolvedType = await configService.ResolveTypeAsync(environmentUrl, ct: cancellationToken);
+        EnvironmentConfig? config;
+        EnvironmentColor resolvedColor;
+        EnvironmentType resolvedType;
+        try
+        {
+            config = await configService.GetConfigAsync(environmentUrl, cancellationToken);
+            resolvedColor = await configService.ResolveColorAsync(environmentUrl, cancellationToken);
+            resolvedType = await configService.ResolveTypeAsync(environmentUrl, ct: cancellationToken);
+        }
+        catch (EnvironmentConfigFileException ex)
+        {
+            throw ToRpcException(ex);
+        }
 
         return new EnvConfigGetResponse
         {
@@ -383,13 +401,10 @@ public partial class RpcMethodHandler
         EnvironmentType? parsedType = null;
         if (!string.IsNullOrWhiteSpace(type))
         {
-            // By name only: Enum.TryParse also accepts "42", which names no type (#1829).
-            if (!Enum.GetNames<EnvironmentType>().Contains(type.Trim(), StringComparer.OrdinalIgnoreCase)
-                || !Enum.TryParse<EnvironmentType>(type, ignoreCase: true, out var t))
+            // By name only, with the same check as the CLI: Enum.TryParse also accepts "42" and "Production, Test" (#1829).
+            if (!EnvironmentTypeNames.TryParse(type, out var t))
             {
-                throw new RpcException(
-                    ErrorCodes.Validation.InvalidArguments,
-                    $"Invalid environment type '{type}'. Valid values: {string.Join(", ", Enum.GetNames<EnvironmentType>())}");
+                throw new RpcException(ErrorCodes.Validation.InvalidArguments, EnvironmentTypeNames.InvalidMessage(type));
             }
             parsedType = t;
         }
@@ -412,6 +427,10 @@ public partial class RpcMethodHandler
             saved = await configService.SaveConfigAsync(
                 environmentUrl, label, parsedType, parsedColor,
                 confirmLowerProtection: confirmLowerProtection, ct: cancellationToken);
+        }
+        catch (EnvironmentConfigFileException ex)
+        {
+            throw ToRpcException(ex);
         }
         catch (PpdsException ex)
         {
@@ -450,6 +469,10 @@ public partial class RpcMethodHandler
         try
         {
             removed = await configService.RemoveConfigAsync(environmentUrl, cancellationToken);
+        }
+        catch (EnvironmentConfigFileException ex)
+        {
+            throw ToRpcException(ex);
         }
         catch (PpdsException ex)
         {

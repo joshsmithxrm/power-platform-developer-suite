@@ -175,8 +175,17 @@ public sealed class EnvironmentConfigStore : IDisposable
             return new EnvironmentConfigCollection();
 
         var json = await File.ReadAllTextAsync(_filePath, ct).ConfigureAwait(false);
-        var collection = JsonSerializer.Deserialize<EnvironmentConfigCollection>(json, JsonOptions)
-            ?? new EnvironmentConfigCollection();
+        EnvironmentConfigCollection collection;
+        try
+        {
+            collection = JsonSerializer.Deserialize<EnvironmentConfigCollection>(json, JsonOptions)
+                ?? new EnvironmentConfigCollection();
+        }
+        catch (JsonException ex)
+        {
+            // Names the file, the entry and the field, and says how to repair it; nothing is written (#1829).
+            throw EnvironmentConfigFileException.From(_filePath, json, ex);
+        }
 
         // Dedup environments by normalized URL (keep first occurrence, merge profiles)
         var seen = new Dictionary<string, EnvironmentConfig>();

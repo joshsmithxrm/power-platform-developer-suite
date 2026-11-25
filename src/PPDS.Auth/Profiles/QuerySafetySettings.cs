@@ -6,6 +6,10 @@ namespace PPDS.Auth.Profiles;
 /// Per-environment query safety settings. Stored in environment config JSON.
 /// All settings have sensible defaults — null means "use default".
 /// </summary>
+/// <remarks>
+/// The enum settings are read from the file only by a member name (any case): a number or a list of names fails
+/// the read, as for an environment's type and protection (#1829).
+/// </remarks>
 public sealed class QuerySafetySettings
 {
     // ── DML Safety Thresholds ──
@@ -50,7 +54,7 @@ public sealed class QuerySafetySettings
 
     /// <summary>Bypass custom plugin execution. Default: None.</summary>
     [JsonPropertyName("bypass_custom_plugins")]
-    [JsonConverter(typeof(JsonStringEnumConverter))]
+    [JsonConverter(typeof(DefinedEnumNameConverter<BypassPluginMode>))]
     public BypassPluginMode BypassCustomPlugins { get; set; } = BypassPluginMode.None;
 
     /// <summary>Suppress Power Automate flow triggers on DML. Default: false.</summary>
@@ -67,7 +71,7 @@ public sealed class QuerySafetySettings
 
     /// <summary>DateTime display mode. Default: UTC.</summary>
     [JsonPropertyName("datetime_mode")]
-    [JsonConverter(typeof(JsonStringEnumConverter))]
+    [JsonConverter(typeof(DefinedEnumNameConverter<DateTimeMode>))]
     public DateTimeMode DateTimeMode { get; set; } = DateTimeMode.Utc;
 
     /// <summary>Include FetchXML in EXPLAIN output. Default: true.</summary>
@@ -80,7 +84,7 @@ public sealed class QuerySafetySettings
 
     /// <summary>Cross-environment DML policy. Default: ReadOnly.</summary>
     [JsonPropertyName("cross_env_dml_policy")]
-    [JsonConverter(typeof(JsonStringEnumConverter))]
+    [JsonConverter(typeof(DefinedEnumNameConverter<CrossEnvironmentDmlPolicy>))]
     public CrossEnvironmentDmlPolicy CrossEnvironmentDmlPolicy { get; set; } = CrossEnvironmentDmlPolicy.ReadOnly;
 }
 

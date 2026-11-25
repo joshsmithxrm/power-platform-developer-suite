@@ -75,6 +75,12 @@ public sealed class EnvironmentConfirmationService : IEnvironmentConfirmationSer
         }
         catch (OperationCanceledException) { throw; }
         catch (PpdsException) { throw; }
+        catch (EnvironmentConfigFileException ex)
+        {
+            // Carries the file, entry and field, so the user knows what to correct (#1829).
+            throw new PpdsException(EnvironmentConfirmationErrorCodes.PolicyUnavailable,
+                $"Could not resolve write protection for '{target}'. No write was performed. {ex.Message}", ex);
+        }
         catch (Exception ex)
         {
             throw new PpdsException(EnvironmentConfirmationErrorCodes.PolicyUnavailable,
@@ -86,8 +92,9 @@ public sealed class EnvironmentConfirmationService : IEnvironmentConfirmationSer
         var policy = $"{type}|{protection}";
         var key = $"{Context.SessionId}\n{Context.ProfileIdentity}\n{target}";
         var acknowledged = _acknowledgements.Check(key, policy, supplied);
-        // Anything but Development needs the acknowledgement, so a level that is not a defined member (which the
-        // resolver already makes Production) can never pass unconfirmed (#1829).
+        // Anything but Development needs the acknowledgement, so a level that is not a defined member can never pass
+        // unconfirmed (#1829). Defence in depth: Resolve already turns such a level into Production, so this line
+        // cannot be reached with one through the resolver, and no test reaches it (Resolve is static, not replaceable).
         if (protection is not ProtectionLevel.Development && !acknowledged)
             throw new PpdsException(EnvironmentConfirmationErrorCodes.Required,
                 $"Confirm '{operation}' against '{target}' (type: {type}, protection: {protection}) " +

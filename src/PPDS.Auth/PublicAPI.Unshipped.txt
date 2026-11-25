@@ -3,3 +3,13 @@ PPDS.Auth.Profiles.EnvironmentConfigStore.SaveConfigAsync(string! url, string? l
 PPDS.Auth.Profiles.EnvironmentConfigStore.UpdateAsync(System.Func<PPDS.Auth.Profiles.EnvironmentConfigCollection!, bool>! update, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
 PPDS.Auth.Profiles.EnvironmentConfigStore.ReloadAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PPDS.Auth.Profiles.EnvironmentConfigCollection!>!
 static readonly PPDS.Auth.Profiles.EnvironmentConfigStore.DefaultLockTimeout -> System.TimeSpan
+PPDS.Auth.Profiles.EnumMemberName
+static PPDS.Auth.Profiles.EnumMemberName.List<TEnum>() -> string!
+static PPDS.Auth.Profiles.EnumMemberName.TryParse<TEnum>(string? text, out TEnum value) -> bool
+PPDS.Auth.Profiles.EnvironmentConfigFileException
+PPDS.Auth.Profiles.EnvironmentConfigFileException.AcceptedValues.get -> System.Collections.Generic.IReadOnlyList<string!>?
+PPDS.Auth.Profiles.EnvironmentConfigFileException.Entry.get -> string?
+PPDS.Auth.Profiles.EnvironmentConfigFileException.ErrorCode.get -> string!
+PPDS.Auth.Profiles.EnvironmentConfigFileException.Field.get -> string?
+PPDS.Auth.Profiles.EnvironmentConfigFileException.FilePath.get -> string!
+const PPDS.Auth.Profiles.EnvironmentConfigFileException.Code = "Validation.EnvironmentConfigInvalid" -> string!

@@ -98,7 +98,12 @@ public sealed class DmlSafetyGuard
         if (!CheckCore(statement, new DmlSafetyOptions { IsConfirmed = true }, effectiveSettings).ContainsDml)
             return new DmlSafetyResult { IsBlocked = false };
 
-        if (effectiveSettings.CrossEnvironmentDmlPolicy == CrossEnvironmentDmlPolicy.ReadOnly)
+        // A policy that is not a defined member is the strictest, ReadOnly, never Allow (#1829).
+        var policy = Enum.IsDefined(effectiveSettings.CrossEnvironmentDmlPolicy)
+            ? effectiveSettings.CrossEnvironmentDmlPolicy
+            : CrossEnvironmentDmlPolicy.ReadOnly;
+
+        if (policy == CrossEnvironmentDmlPolicy.ReadOnly)
         {
             return new DmlSafetyResult
             {
@@ -120,7 +125,7 @@ public sealed class DmlSafetyGuard
             };
         }
 
-        if (effectiveSettings.CrossEnvironmentDmlPolicy == CrossEnvironmentDmlPolicy.Prompt)
+        if (policy == CrossEnvironmentDmlPolicy.Prompt)
         {
             return new DmlSafetyResult
             {

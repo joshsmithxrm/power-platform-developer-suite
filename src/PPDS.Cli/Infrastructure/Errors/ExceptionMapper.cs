@@ -59,6 +59,7 @@ public static class ExceptionMapper
             OptionSetNotFoundException => ExitCodes.NotFoundError,
 
             // Validation/argument errors
+            PPDS.Auth.Profiles.EnvironmentConfigFileException => ExitCodes.InvalidArguments,
             ArgumentException => ExitCodes.InvalidArguments,
             ConfigurationException => ExitCodes.InvalidArguments,
 
@@ -130,6 +131,10 @@ public static class ExceptionMapper
 
             TimeoutException =>
                 (ErrorCodes.Connection.Timeout, null),
+
+            // The environments file holds a value PPDS cannot read (#1829)
+            PPDS.Auth.Profiles.EnvironmentConfigFileException fileEx =>
+                (fileEx.ErrorCode, fileEx.Field),
 
             // Configuration exceptions
             ConfigurationException configEx =>
