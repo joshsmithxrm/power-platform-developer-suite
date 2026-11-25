@@ -177,6 +177,12 @@ public static class ErrorCodes
         /// member name) or is not valid JSON. The message names the file, the entry and the field (#1829).
         /// </summary>
         public const string EnvironmentConfigInvalid = PPDS.Auth.Profiles.EnvironmentConfigFileException.Code;
+
+        /// <summary>
+        /// A <c>--filter</c> of <c>data delete</c> or <c>data update</c> holds a part that FetchXML cannot express exactly
+        /// (a function, arithmetic, a column compared with a column, NOT, a comparison with NULL, ...); nothing was read.
+        /// </summary>
+        public const string FilterNotSupported = "Validation.FilterNotSupported";
     }
 
     /// <summary>

@@ -29,17 +29,21 @@ public interface IDataQueryService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Executes a SQL WHERE clause filter against the entity and returns matching record IDs.
-    /// Uses QueryParser + FetchXmlGenerator to transpile the SQL fragment.
+    /// Returns the ids of exactly the records of <paramref name="entity"/> that the SQL condition
+    /// <paramref name="whereFilter"/> selects, reading every page. The condition is admitted and translated by
+    /// <see cref="DataFilter.Translate"/> before anything is read; a part FetchXML cannot express exactly is refused.
     /// </summary>
     /// <param name="entity">Logical name of the entity.</param>
     /// <param name="whereFilter">SQL WHERE expression (without the <c>WHERE</c> keyword).</param>
-    /// <param name="limit">Optional upper bound on returned records (uses <c>SELECT TOP N+1</c> for over-limit detection).</param>
+    /// <param name="limit">
+    /// Optional upper bound: reading stops once more than <paramref name="limit"/> ids are found, so the caller can refuse
+    /// with at most <c>limit + 1</c> ids in hand. Without it, every matching record is read.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of matching record GUIDs.</returns>
+    /// <returns>List of matching record GUIDs, each once.</returns>
     /// <exception cref="PPDS.Cli.Infrastructure.Errors.PpdsException">
-    /// Thrown with <c>Query.ExecutionFailed</c> when the Dataverse call fails,
-    /// or <c>Query.ParseError</c> when the SQL cannot be parsed.
+    /// Thrown with <c>Validation.FilterNotSupported</c> (or another code of <see cref="DataFilter.Translate"/>) before
+    /// anything is read, or <c>Query.ExecutionFailed</c> when the Dataverse call fails or the pages are inconsistent.
     /// </exception>
     Task<IReadOnlyList<Guid>> QueryIdsByFilterAsync(
         string entity,

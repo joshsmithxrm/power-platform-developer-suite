@@ -73,7 +73,7 @@ public static class UpdateCommand
 
         var filterOption = new Option<string?>("--filter")
         {
-            Description = "SQL-like filter expression to match records for update (e.g., \"statecode eq 0\")"
+            Description = "SQL condition selecting the records to update (e.g., \"statecode = 0 AND name like 'Contoso%'\"): a column compared with a literal, IN, LIKE, IS NULL or BETWEEN, joined by AND and OR; anything else is refused before anything is read"
         };
 
         var setOption = new Option<string?>("--set", "-s")
@@ -261,6 +261,12 @@ public static class UpdateCommand
     {
         try
         {
+            // A filter FetchXML cannot express exactly is refused before signing in or reading anything (#1705).
+            if (!string.IsNullOrEmpty(filter))
+            {
+                DataFilter.Translate(entity, filter);
+            }
+
             // Connect to Dataverse
             if (!globalOptions.IsJsonMode)
             {

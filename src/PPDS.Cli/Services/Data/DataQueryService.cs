@@ -4,11 +4,10 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Dataverse.Pooling;
-using PPDS.Query.Parsing;
-using PPDS.Query.Transpilation;
 
 namespace PPDS.Cli.Services.Data;
 
@@ -88,59 +87,74 @@ public sealed class DataQueryService : IDataQueryService
         if (string.IsNullOrWhiteSpace(entity)) throw new ArgumentNullException(nameof(entity));
         if (string.IsNullOrWhiteSpace(whereFilter)) throw new ArgumentNullException(nameof(whereFilter));
 
-        // Build SQL and transpile to FetchXML
-        var sql = limit.HasValue
-            ? $"SELECT TOP {limit.Value + 1} {entity}id FROM {entity} WHERE {whereFilter}"
-            : $"SELECT {entity}id FROM {entity} WHERE {whereFilter}";
+        // Admitted and translated before anything is read; a part FetchXML cannot express exactly is refused here.
+        var filter = DataFilter.Translate(entity, whereFilter);
 
-        string fetchXml;
-        try
-        {
-            var parser = new QueryParser();
-            var stmt = parser.ParseStatement(sql);
-            var generator = new FetchXmlGenerator();
-            fetchXml = generator.Generate(stmt);
-        }
-        catch (Exception ex)
-        {
-            throw new PpdsException(ErrorCodes.Query.ParseError,
-                $"Failed to parse filter expression: {ex.Message}", ex);
-        }
+        _logger.LogDebug("Querying IDs for entity {Entity} with a filter of {Count} condition(s)",
+            filter.EntityName, filter.ConditionCount);
 
-        _logger.LogDebug("Querying IDs for entity {Entity} with filter", entity);
+        var ids = new List<Guid>();
+        var seen = new HashSet<Guid>();
+        var page = 1;
+        string? pagingCookie = null;
 
         try
         {
-            await using var client = await _pool.GetClientAsync(cancellationToken: cancellationToken);
-            var query = new FetchExpression(fetchXml);
-            var results = await client.RetrieveMultipleAsync(query, cancellationToken);
-
-            var primaryKeyAttribute = $"{entity}id";
-            var ids = new List<Guid>(results.Entities.Count);
-
-            foreach (var record in results.Entities)
+            while (true)
             {
-                if (record.Contains(primaryKeyAttribute) && record[primaryKeyAttribute] is Guid id)
+                EntityCollection results;
+                await using (var client = await _pool.GetClientAsync(cancellationToken: cancellationToken))
                 {
+                    results = await client.RetrieveMultipleAsync(
+                        new FetchExpression(filter.ToFetchXml(page, pagingCookie)), cancellationToken);
+                }
+
+                foreach (var record in results.Entities)
+                {
+                    var id = record.Contains(filter.PrimaryIdAttribute) && record[filter.PrimaryIdAttribute] is Guid value
+                        ? value
+                        : record.Id;
+                    if (!seen.Add(id))
+                    {
+                        throw new PpdsException(ErrorCodes.Query.ExecutionFailed,
+                            $"A record of '{filter.EntityName}' came back twice while the matching records were read " +
+                            "page by page, so the set of records is not certain. Nothing was changed. Run the command again.");
+                    }
+
                     ids.Add(id);
                 }
-                else
-                {
-                    ids.Add(record.Id);
-                }
-            }
 
-            return ids;
+                // With --limit, one record more than the limit is enough for the caller to refuse.
+                if (limit.HasValue && ids.Count > limit.Value)
+                    return ids;
+
+                if (!results.MoreRecords)
+                    return ids;
+
+                if (results.Entities.Count == 0)
+                {
+                    throw new PpdsException(ErrorCodes.Query.ExecutionFailed,
+                        $"Dataverse reported more records of '{filter.EntityName}' but returned an empty page, so not " +
+                        "every matching record could be read. Nothing was changed.");
+                }
+
+                page++;
+                pagingCookie = results.PagingCookie;
+            }
         }
         catch (PpdsException)
         {
             throw;
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to query IDs for entity {Entity}", entity);
+            _logger.LogError(ex, "Failed to query IDs for entity {Entity}", filter.EntityName);
             throw new PpdsException(ErrorCodes.Query.ExecutionFailed,
-                $"Failed to query records for '{entity}': {ex.Message}", ex);
+                $"Failed to query records for '{filter.EntityName}': {ex.Message}", ex);
         }
     }
 
@@ -204,7 +218,7 @@ public sealed class DataQueryService : IDataQueryService
             if (result.Entities.Count > 0 && result.Entities[0].Contains("count"))
             {
                 var countValue = result.Entities[0]["count"];
-                if (countValue is Microsoft.Xrm.Sdk.AliasedValue aliased)
+                if (countValue is AliasedValue aliased)
                 {
                     return Convert.ToInt32(aliased.Value);
                 }
