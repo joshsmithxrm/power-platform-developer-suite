@@ -63,6 +63,29 @@ public sealed class PluginTracesDeleteToolTests
             .WithMessage("*Only one deletion mode*");
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(36501)]
+    [InlineData(int.MaxValue)]
+    public async Task ExecuteAsync_OlderThanDaysOutOfRange_IsRefusedWithACode_BeforeTheScopeIsCreated(int days)
+    {
+        // Arrange
+        var pools = new Mock<IMcpConnectionPoolManager>(MockBehavior.Strict);
+        var tool = new PluginTracesDeleteTool(new McpToolContext(
+            pools.Object, new ProfileStore(), new Mock<ISecureCredentialStore>().Object, new McpSessionOptions()));
+
+        // Act
+        Func<Task> act = () => tool.ExecuteAsync(olderThanDays: days);
+
+        // Assert
+        // The tool's own check (PluginTraceAge.FromDays), not the service's after the scope is built.
+        var message = (await act.Should().ThrowAsync<Exception>()).Which.Message;
+        message.Should().Contain("Validation.InvalidValue");
+        message.Should().Contain("from 1 to 36500");
+        pools.Invocations.Should().BeEmpty();
+    }
+
     #endregion
 
     private static McpToolContext CreateContext()
