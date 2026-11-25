@@ -1003,7 +1003,7 @@ internal static class DmlStatementSupport
 
     private static string HowTo(ScalarExpression expression) => expression switch
     {
-        StringLiteral text =>
+        StringLiteral =>
             " Write the same text with the N prefix (N'...'). Without N, SQL Server " +
             "stores the characters that the database's code page does not have as question marks; the engine cannot tell " +
             "which code page that is, so text without N is written only when it is 7-bit ASCII.",
