@@ -326,7 +326,14 @@ public static class CopyCommand
                 progressReporter,
                 cancellationToken);
 
+            ImportCommand.WritePluginStepsLeftDisabled(Console.Error, importResult.PluginStepsLeftDisabled);
             return importResult.Success ? ExitCodes.Success : ExitCodes.Failure;
+        }
+        catch (ImportCancelledException ex)
+        {
+            progressReporter.Error(new OperationCanceledException(), "Copy cancelled by user.");
+            ImportCommand.WritePluginStepsLeftDisabled(Console.Error, ex.PluginStepsLeftDisabled);
+            return ExitCodes.Failure;
         }
         catch (OperationCanceledException)
         {
@@ -344,6 +351,7 @@ public static class CopyCommand
         {
             Console.Error.WriteLine();
             Console.Error.WriteLine($"Error: {ex.Message}");
+            ImportCommand.WritePluginStepsLeftDisabled(Console.Error, ex.PluginStepsLeftDisabled);
             return ExceptionMapper.ToExitCode(ex);
         }
         catch (Exception ex)

@@ -282,28 +282,49 @@ namespace PPDS.Migration.Import
                 // D5: re-enable plugins before building the result so any re-enable
                 // warnings (PluginStepReenableException → per-step warnings) are
                 // captured in ImportResult.Warnings.
-                await EnablePluginsAfterImportAsync(disabledPluginSteps, pluginStepsToDisable, progress, warnings).ConfigureAwait(false);
+                var leftDisabled = await EnablePluginsAfterImportAsync(disabledPluginSteps, pluginStepsToDisable, progress, warnings).ConfigureAwait(false);
                 pluginsReenabled = true;
 
                 return BuildImportResult(
                     plan, entityResults, errors, warnings,
                     totalImported, data.TotalRecordCount, deferredResult, relationshipResult,
                     stopwatch.Elapsed, phase1Duration, phase2Duration, phase4Duration,
-                    options, progress);
+                    options, progress, leftDisabled);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not ImportRefusedException)
+            catch (ImportRefusedException refused) when (refused.Reason == ImportRefusalReasons.PluginStepNotDisabled)
+            {
+                // A step could not be disabled: re-enable what was recorded first, then refuse
+                // with a message that says what is actually true afterwards (#1921 review MF3).
+                var leftDisabled = await EnablePluginsAfterImportAsync(disabledPluginSteps, pluginStepsToDisable, progress, warnings).ConfigureAwait(false);
+                pluginsReenabled = true;
+                throw StepNotDisabledRefusal(refused, disabledPluginSteps, pluginStepsToDisable, leftDisabled);
+            }
+            catch (OperationCanceledException cancelled)
+            {
+                var leftDisabled = await EnablePluginsAfterImportAsync(disabledPluginSteps, pluginStepsToDisable, progress, warnings).ConfigureAwait(false);
+                pluginsReenabled = true;
+                if (leftDisabled.Count > 0)
+                {
+                    // A cancelled import returns no result: the steps left disabled travel with
+                    // the cancellation so every surface can name them (#1921 review MF3, MF6).
+                    throw new ImportCancelledException(leftDisabled, cancelled);
+                }
+
+                throw;
+            }
+            catch (Exception ex) when (ex is not ImportRefusedException)
             {
                 stopwatch.Stop();
                 _logger?.LogError(ex, "Import failed");
 
                 // Same as happy path: re-enable before building the failure result
                 // so post-import plugin state is visible in the surfaced warnings.
-                await EnablePluginsAfterImportAsync(disabledPluginSteps, pluginStepsToDisable, progress, warnings).ConfigureAwait(false);
+                var leftDisabled = await EnablePluginsAfterImportAsync(disabledPluginSteps, pluginStepsToDisable, progress, warnings).ConfigureAwait(false);
                 pluginsReenabled = true;
 
                 return BuildFailureResult(
                     plan, entityResults, errors, warnings,
-                    totalImported, data.TotalRecordCount, stopwatch.Elapsed, ex, options, progress);
+                    totalImported, data.TotalRecordCount, stopwatch.Elapsed, ex, options, progress, leftDisabled);
             }
             finally
             {
@@ -452,10 +473,13 @@ namespace PPDS.Migration.Import
                 return;
             }
 
+            // Named before the first write, so a run that is killed before it re-enables them
+            // leaves a record of what to re-enable (#1921 review should-fix 2).
             progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
-                Message = $"Disabling {steps.Count} plugin step(s)..."
+                Message = $"Disabling {steps.Count} plugin step(s) for the import: {string.Join(", ", steps.Select(st => DescribeStep(st.Id, steps)))}. " +
+                          "They are re-enabled when the import ends; if this process is stopped before that, re-enable them in the target."
             });
 
             await _pluginStepManager.DisablePluginStepsAsync(
@@ -465,9 +489,12 @@ namespace PPDS.Migration.Import
         }
 
         /// <summary>
-        /// Re-enables plugins that were disabled during import.
+        /// Re-enables the plug-in steps recorded as disabled for this import, and returns the steps
+        /// that are left disabled (empty when every one was re-enabled). Each one left disabled is
+        /// named in a warning and through the progress reporter; "re-enabled" is said only of steps
+        /// that were (#1921 review MF3, MF6).
         /// </summary>
-        private async Task EnablePluginsAfterImportAsync(
+        private async Task<IReadOnlyList<PluginStepInfo>> EnablePluginsAfterImportAsync(
             IReadOnlyList<Guid> disabledPluginSteps,
             IReadOnlyList<PluginStepInfo> stepInfo,
             IProgressReporter progress,
@@ -475,76 +502,120 @@ namespace PPDS.Migration.Import
         {
             if (disabledPluginSteps.Count == 0 || _pluginStepManager == null)
             {
-                return;
+                return Array.Empty<PluginStepInfo>();
             }
 
             progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Complete,
-                Message = $"Re-enabling {disabledPluginSteps.Count} plugin steps..."
+                Message = $"Re-enabling {disabledPluginSteps.Count} plugin step(s)..."
             });
 
+            IReadOnlyList<Guid> failedIds;
+            string? detail;
             try
             {
                 await _pluginStepManager.EnablePluginStepsAsync(
                     disabledPluginSteps, CancellationToken.None).ConfigureAwait(false);
 
                 _logger?.LogInformation("Re-enabled {Count} plugin steps", disabledPluginSteps.Count);
-            }
-            catch (PluginStepReenableException ex)
-            {
-                // D5: per-step failures are surfaced explicitly so callers can detect
-                // that some plugin steps remain disabled post-import.
-                _logger?.LogError(ex,
-                    "Failed to re-enable {FailedCount}/{TotalCount} plugin steps — they remain disabled",
-                    ex.Failures.Count, disabledPluginSteps.Count);
-
-                foreach (var (stepId, error) in ex.Failures)
-                {
-                    var stepName = DescribeStep(stepId, stepInfo);
-                    warnings.AddWarning(new ImportWarning
-                    {
-                        Code = ImportWarningCodes.PluginReenableFailed,
-                        Message = $"Plugin step {stepName} could not be re-enabled: {error.Message}",
-                        Impact = "This plugin step remains disabled."
-                    });
-
-                    // Also through the progress reporter: on a cancelled import no result is
-                    // returned, so this is the only place the user sees which step to fix.
-                    progress.Report(new ProgressEventArgs
-                    {
-                        Phase = MigrationPhase.Complete,
-                        Message = $"Warning: plugin step {stepName} could not be re-enabled and remains disabled. Re-enable it manually."
-                    });
-                }
-
-                // Also emit a roll-up warning for dashboards/aggregators.
-                warnings.AddWarning(new ImportWarning
-                {
-                    Code = ImportWarningCodes.PluginReenableFailed,
-                    Message = $"{ex.Failures.Count} of {disabledPluginSteps.Count} plugin step(s) failed to re-enable after import.",
-                    Impact = $"{ex.Failures.Count} plugin step(s) remain disabled and must be re-enabled manually."
-                });
-            }
-            catch (Exception ex)
-            {
-                // Bulk/pool/token failure — no per-step detail available. Surface everything.
-                _logger?.LogError(ex,
-                    "Failed to re-enable plugin steps — {Count} step(s) may remain disabled",
-                    disabledPluginSteps.Count);
-                var names = string.Join(", ", disabledPluginSteps.Select(id => DescribeStep(id, stepInfo)));
-                warnings.AddWarning(new ImportWarning
-                {
-                    Code = ImportWarningCodes.PluginReenableFailed,
-                    Message = $"Failed to re-enable {disabledPluginSteps.Count} plugin steps ({names}): {ex.Message}",
-                    Impact = $"{disabledPluginSteps.Count} plugin step(s) may remain disabled and must be re-enabled manually."
-                });
                 progress.Report(new ProgressEventArgs
                 {
                     Phase = MigrationPhase.Complete,
-                    Message = $"Warning: these plugin steps may remain disabled; re-enable them manually: {names}"
+                    Message = $"Re-enabled {disabledPluginSteps.Count} plugin step(s)."
+                });
+                return Array.Empty<PluginStepInfo>();
+            }
+            catch (PluginStepReenableException ex)
+            {
+                failedIds = ex.Failures.Select(f => f.StepId).Distinct().ToList();
+                detail = null;
+                foreach (var (stepId, error) in ex.Failures)
+                {
+                    warnings.AddWarning(new ImportWarning
+                    {
+                        Code = ImportWarningCodes.PluginReenableFailed,
+                        Message = $"Plugin step {DescribeStep(stepId, stepInfo)} could not be re-enabled: {error.Message}",
+                        Impact = "This plugin step remains disabled."
+                    });
+                }
+                _logger?.LogError(ex, "Failed to re-enable {FailedCount}/{TotalCount} plugin steps — they remain disabled",
+                    failedIds.Count, disabledPluginSteps.Count);
+            }
+            catch (Exception ex)
+            {
+                // Bulk/pool/token failure — no per-step detail: every recorded step may still be disabled.
+                failedIds = disabledPluginSteps.Distinct().ToList();
+                detail = ex.Message;
+                _logger?.LogError(ex, "Failed to re-enable plugin steps — {Count} step(s) may remain disabled", failedIds.Count);
+            }
+
+            var leftDisabled = failedIds
+                .Select(id => stepInfo.FirstOrDefault(st => st.Id == id) ?? new PluginStepInfo(id, null))
+                .ToList();
+            var reenabled = disabledPluginSteps.Distinct().Count() - leftDisabled.Count;
+            var names = string.Join(", ", leftDisabled.Select(st => DescribeStep(st.Id, stepInfo)));
+
+            warnings.AddWarning(new ImportWarning
+            {
+                Code = ImportWarningCodes.PluginReenableFailed,
+                Message = detail == null
+                    ? $"{leftDisabled.Count} of {disabledPluginSteps.Count} plugin step(s) could not be re-enabled after the import and remain disabled: {names}."
+                    : $"Re-enabling the plugin steps failed ({detail}); these {leftDisabled.Count} plugin step(s) may remain disabled: {names}.",
+                Impact = $"{leftDisabled.Count} plugin step(s) remain disabled and must be re-enabled manually."
+            });
+
+            // Also through the progress reporter: a cancelled import returns no result, and a
+            // killed run has only this output.
+            foreach (var step in leftDisabled)
+            {
+                progress.Report(new ProgressEventArgs
+                {
+                    Phase = MigrationPhase.Complete,
+                    Message = $"Warning: plugin step {DescribeStep(step.Id, stepInfo)} could not be re-enabled and remains disabled. Re-enable it manually."
                 });
             }
+
+            progress.Report(new ProgressEventArgs
+            {
+                Phase = MigrationPhase.Complete,
+                Message = reenabled > 0
+                    ? $"Re-enabled {reenabled} of {disabledPluginSteps.Count} plugin step(s); {leftDisabled.Count} remain disabled."
+                    : $"None of the {disabledPluginSteps.Count} plugin step(s) could be re-enabled; they remain disabled."
+            });
+
+            return leftDisabled;
+        }
+
+        /// <summary>
+        /// The refusal for a step that could not be disabled, saying what is true after the
+        /// recorded steps were re-enabled: which step failed, and which steps remain disabled.
+        /// </summary>
+        private static ImportRefusedException StepNotDisabledRefusal(
+            ImportRefusedException original,
+            IReadOnlyList<Guid> disabledPluginSteps,
+            IReadOnlyList<PluginStepInfo> stepInfo,
+            IReadOnlyList<PluginStepInfo> leftDisabled)
+        {
+            // Each step is recorded before its update is sent, so the one that failed is the last.
+            var failed = disabledPluginSteps.Count > 0
+                ? stepInfo.FirstOrDefault(st => st.Id == disabledPluginSteps[^1])?.Name
+                : null;
+            var which = string.IsNullOrEmpty(failed) ? "A plug-in step" : $"Plug-in step '{failed}'";
+            var outcome = leftDisabled.Count == 0
+                ? "Every step this import disabled has been re-enabled."
+                : $"{leftDisabled.Count} step(s) could not be re-enabled and remain disabled: " +
+                  string.Join(", ", leftDisabled.Select(st => string.IsNullOrEmpty(st.Name) ? "(unnamed step)" : $"'{st.Name}'")) +
+                  ". Re-enable them in the target.";
+
+            return new ImportRefusedException(
+                ImportRefusalReasons.PluginStepNotDisabled,
+                $"{which} could not be disabled, so the import was not run and no record was written. {outcome} " +
+                "Check that you can change plug-in step registrations in the target, or remove disableplugins from the schema.",
+                original.InnerException ?? original)
+            {
+                PluginStepsLeftDisabled = leftDisabled
+            };
         }
 
         private static string DescribeStep(Guid stepId, IReadOnlyList<PluginStepInfo> stepInfo)
@@ -709,11 +780,14 @@ namespace PPDS.Migration.Import
             TimeSpan phase2Duration,
             TimeSpan phase3Duration,
             ImportOptions options,
-            IProgressReporter progress)
+            IProgressReporter progress,
+            IReadOnlyList<PluginStepInfo> pluginStepsLeftDisabled)
         {
             var result = new ImportResult
             {
-                Success = errors.IsEmpty,
+                // A plug-in step left disabled is not a successful import (#1921 review should-fix 1).
+                Success = errors.IsEmpty && pluginStepsLeftDisabled.Count == 0,
+                PluginStepsLeftDisabled = pluginStepsLeftDisabled,
                 TiersProcessed = plan.TierCount,
                 SourceRecordCount = sourceRecordCount,
                 RecordsImported = totalImported,
@@ -773,6 +847,7 @@ namespace PPDS.Migration.Import
                 CreatedCount = totalCreated,
                 UpdatedCount = totalUpdated,
                 SkippedCount = totalSkipped,
+                PluginStepsLeftDisabled = pluginStepsLeftDisabled.Count > 0 ? pluginStepsLeftDisabled.Count : null,
                 M2MCount = relationshipResult.SuccessCount > 0 ? relationshipResult.SuccessCount : null,
                 RelationshipsFailed = relationshipResult.FailureCount > 0 ? relationshipResult.FailureCount : null,
                 PoolStatistics = _connectionPool.Statistics,
@@ -796,7 +871,8 @@ namespace PPDS.Migration.Import
             TimeSpan duration,
             Exception ex,
             ImportOptions options,
-            IProgressReporter progress)
+            IProgressReporter progress,
+            IReadOnlyList<PluginStepInfo> pluginStepsLeftDisabled)
         {
             var safeMessage = ConnectionStringRedactor.RedactExceptionMessage(ex.Message);
             progress.Error(ex, "Import failed");
@@ -817,6 +893,7 @@ namespace PPDS.Migration.Import
                 RecordsImported = totalImported,
                 SkippedCount = entityResults.Sum(r => r.SkippedCount),
                 FailureCount = entityResults.Sum(r => r.FailureCount),
+                PluginStepsLeftDisabled = pluginStepsLeftDisabled,
                 Duration = duration,
                 EntityResults = entityResults.ToArray(),
                 Errors = errors.Append(exceptionError).ToArray(),

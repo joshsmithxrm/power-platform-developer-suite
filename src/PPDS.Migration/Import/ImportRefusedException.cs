@@ -1,11 +1,14 @@
 using System;
+using System.Collections.Generic;
+using System.Threading;
 
 namespace PPDS.Migration.Import
 {
     /// <summary>
     /// Thrown when an import is refused before any record is written, because it could not be
-    /// applied exactly as asked. Nothing in the target has been changed when this is thrown
-    /// (plug-in steps disabled before a refusal are re-enabled first).
+    /// applied exactly as asked. No record has been written when this is thrown. Plug-in steps the
+    /// import disabled before the refusal have been re-enabled where that succeeded;
+    /// <see cref="PluginStepsLeftDisabled"/> lists any that could not be and remain disabled.
     /// </summary>
     public class ImportRefusedException : Exception
     {
@@ -13,6 +16,12 @@ namespace PPDS.Migration.Import
         /// Gets the reason for the refusal, one of <see cref="ImportRefusalReasons"/>.
         /// </summary>
         public string Reason { get; }
+
+        /// <summary>
+        /// Gets the plug-in steps that the import disabled and could not re-enable before refusing;
+        /// they remain disabled in the target. Empty when none.
+        /// </summary>
+        public IReadOnlyList<PluginStepInfo> PluginStepsLeftDisabled { get; init; } = Array.Empty<PluginStepInfo>();
 
         /// <summary>
         /// Initializes a new instance of the <see cref="ImportRefusedException"/> class.
@@ -24,6 +33,31 @@ namespace PPDS.Migration.Import
             : base(message, innerException)
         {
             Reason = reason ?? throw new ArgumentNullException(nameof(reason));
+        }
+    }
+
+    /// <summary>
+    /// Thrown when an import is cancelled and one or more plug-in steps it disabled could not be
+    /// re-enabled. A cancelled import returns no result, so the steps left disabled travel with the
+    /// cancellation. It is an <see cref="OperationCanceledException"/>.
+    /// </summary>
+    public class ImportCancelledException : OperationCanceledException
+    {
+        /// <summary>
+        /// Gets the plug-in steps that remain disabled in the target.
+        /// </summary>
+        public IReadOnlyList<PluginStepInfo> PluginStepsLeftDisabled { get; }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ImportCancelledException"/> class.
+        /// </summary>
+        /// <param name="pluginStepsLeftDisabled">The steps that remain disabled.</param>
+        /// <param name="cancellation">The cancellation that stopped the import.</param>
+        public ImportCancelledException(IReadOnlyList<PluginStepInfo> pluginStepsLeftDisabled, OperationCanceledException cancellation)
+            : base($"The import was cancelled and {pluginStepsLeftDisabled?.Count ?? 0} plug-in step(s) it disabled could not be re-enabled.",
+                   cancellation, cancellation?.CancellationToken ?? CancellationToken.None)
+        {
+            PluginStepsLeftDisabled = pluginStepsLeftDisabled ?? Array.Empty<PluginStepInfo>();
         }
     }
 

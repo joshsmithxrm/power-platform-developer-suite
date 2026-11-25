@@ -374,12 +374,16 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
                 _resultsLabel.Text = FormatImportResults(result);
 
                 if (linkedCts.IsCancellationRequested)
-                    CompleteOperation(MigrationOperationState.Cancelled);
+                    CompleteOperation(MigrationOperationState.Cancelled, stepsLeftDisabled: result.PluginStepsLeftDisabled);
                 else if (result.Success)
                     CompleteOperation(MigrationOperationState.Completed);
                 else
-                    CompleteOperation(MigrationOperationState.Failed, "Import completed with errors.");
+                    CompleteOperation(MigrationOperationState.Failed, "Import completed with errors.", result.PluginStepsLeftDisabled);
             });
+        }
+        catch (ImportCancelledException ex)
+        {
+            Application.MainLoop?.Invoke(() => CompleteOperation(MigrationOperationState.Cancelled, stepsLeftDisabled: ex.PluginStepsLeftDisabled));
         }
         catch (OperationCanceledException)
         {
@@ -390,7 +394,8 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
             Application.MainLoop?.Invoke(() =>
             {
                 ErrorService.ReportError("Import failed", ex, "Migration.Import");
-                CompleteOperation(MigrationOperationState.Failed, ex.Message);
+                CompleteOperation(MigrationOperationState.Failed, ex.Message,
+                    (ex as ImportRefusedException)?.PluginStepsLeftDisabled);
             });
         }
     }
@@ -486,19 +491,45 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
         _statusLabel.Text = $"{_mode} in progress...";
     }
 
-    private void CompleteOperation(MigrationOperationState state, string? error = null)
+    private void CompleteOperation(
+        MigrationOperationState state,
+        string? error = null,
+        IReadOnlyList<PluginStepInfo>? stepsLeftDisabled = null)
     {
         _elapsed.Stop();
         _operationState = state;
         _errorMessage = error;
 
-        _statusLabel.Text = state switch
+        _statusLabel.Text = FinalStatusText(_mode, state, FormatTimeSpan(_elapsed.Elapsed), error, stepsLeftDisabled);
+    }
+
+    /// <summary>
+    /// The final status line. Plug-in steps the import could not re-enable are always named in it:
+    /// it is the last text the screen shows, and replaces any progress message that named them
+    /// (#1921 review MF3).
+    /// </summary>
+    internal static string FinalStatusText(
+        MigrationMode mode,
+        MigrationOperationState state,
+        string elapsed,
+        string? error,
+        IReadOnlyList<PluginStepInfo>? stepsLeftDisabled)
+    {
+        var status = state switch
         {
-            MigrationOperationState.Completed => $"{_mode} completed successfully in {FormatTimeSpan(_elapsed.Elapsed)}.",
-            MigrationOperationState.Failed => $"{_mode} failed: {error}",
-            MigrationOperationState.Cancelled => $"{_mode} cancelled after {FormatTimeSpan(_elapsed.Elapsed)}.",
+            MigrationOperationState.Completed => $"{mode} completed successfully in {elapsed}.",
+            MigrationOperationState.Failed => $"{mode} failed: {error}",
+            MigrationOperationState.Cancelled => $"{mode} cancelled after {elapsed}.",
             _ => ""
         };
+
+        if (stepsLeftDisabled is { Count: > 0 })
+        {
+            status += $" {stepsLeftDisabled.Count} plug-in step(s) could not be re-enabled and remain disabled; re-enable them in the target: " +
+                      string.Join(", ", stepsLeftDisabled.Select(st => string.IsNullOrEmpty(st.Name) ? st.Id.ToString() : $"'{st.Name}' ({st.Id})")) + ".";
+        }
+
+        return status;
     }
 
     private TuiMigrationProgressReporter CreateProgressReporter()
@@ -572,6 +603,14 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
             var status = entity.Success ? "OK" : "FAIL";
             var skipped = entity.SkippedCount > 0 ? $", {entity.SkippedCount} skipped" : string.Empty;
             lines.Add($"  {entity.EntityLogicalName} (tier {entity.TierNumber}): {entity.SuccessCount}/{entity.RecordCount}{skipped} [{status}]");
+        }
+
+        if (result.PluginStepsLeftDisabled.Count > 0)
+        {
+            lines.Add("");
+            lines.Add($"Plug-in steps left disabled ({result.PluginStepsLeftDisabled.Count}); re-enable them in the target:");
+            foreach (var step in result.PluginStepsLeftDisabled)
+                lines.Add($"  {(string.IsNullOrEmpty(step.Name) ? "(unnamed step)" : step.Name)} ({step.Id})");
         }
 
         if (result.Warnings.Count > 0)

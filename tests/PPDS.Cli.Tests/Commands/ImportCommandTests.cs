@@ -207,6 +207,28 @@ public class ImportCommandTests : IDisposable
     }
 
     [Fact]
+    public void WritePluginStepsLeftDisabled_ListsEachStepWithItsId()
+    {
+        var id = Guid.NewGuid();
+        var output = new StringWriter();
+
+        ImportCommand.WritePluginStepsLeftDisabled(output, new[] { new PPDS.Migration.Import.PluginStepInfo(id, "audit step") });
+
+        Assert.Contains("1 plug-in step(s) that this import disabled could not be re-enabled and remain disabled", output.ToString());
+        Assert.Contains($"  - audit step ({id})", output.ToString());
+    }
+
+    [Fact]
+    public void WritePluginStepsLeftDisabled_WritesNothingWhenNone()
+    {
+        var output = new StringWriter();
+
+        ImportCommand.WritePluginStepsLeftDisabled(output, Array.Empty<PPDS.Migration.Import.PluginStepInfo>());
+
+        Assert.Equal("", output.ToString());
+    }
+
+    [Fact]
     public void ModeOption_Description_NamesSkipAsAPerTableSetting()
     {
         var option = _command.Options.First(o => o.Name == "--mode");

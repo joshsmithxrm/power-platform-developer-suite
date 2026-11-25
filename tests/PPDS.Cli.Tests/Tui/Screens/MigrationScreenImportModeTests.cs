@@ -59,4 +59,37 @@ public sealed class MigrationScreenImportModeTests
 
         Assert.Contains("Created: unknown  |  Updated: unknown", text);
     }
+
+    [Theory]
+    [InlineData("Completed")]
+    [InlineData("Failed")]
+    [InlineData("Cancelled")]
+    public void FinalStatus_NamesThePluginStepsLeftDisabled(string stateName)
+    {
+        var state = Enum.Parse<MigrationOperationState>(stateName);
+        // #1921 review MF3: the final status is the last text shown; it must not drop the steps.
+        var id = Guid.NewGuid();
+
+        var text = MigrationScreen.FinalStatusText(MigrationMode.Import, state, "00:01", "Import completed with errors.",
+            new[] { new PluginStepInfo(id, "audit step") });
+
+        Assert.Contains($"1 plug-in step(s) could not be re-enabled and remain disabled; re-enable them in the target: 'audit step' ({id})", text);
+    }
+
+    [Fact]
+    public void FinalStatus_WithoutStepsLeftDisabled_IsUnchanged()
+    {
+        Assert.Equal("Import cancelled after 00:01.",
+            MigrationScreen.FinalStatusText(MigrationMode.Import, MigrationOperationState.Cancelled, "00:01", null, null));
+    }
+
+    [Fact]
+    public void ImportResults_ListThePluginStepsLeftDisabled()
+    {
+        var id = Guid.NewGuid();
+        var text = MigrationScreen.FormatImportResults(new ImportResult { PluginStepsLeftDisabled = new[] { new PluginStepInfo(id, "audit step") } });
+
+        Assert.Contains("Plug-in steps left disabled (1)", text);
+        Assert.Contains($"audit step ({id})", text);
+    }
 }

@@ -65,6 +65,12 @@ namespace PPDS.Migration.Progress
         public int? SkippedCount { get; set; }
 
         /// <summary>
+        /// Gets or sets the number of plug-in steps the import disabled and could not re-enable.
+        /// Only populated for import operations when any remain disabled; null otherwise.
+        /// </summary>
+        public int? PluginStepsLeftDisabled { get; set; }
+
+        /// <summary>
         /// Gets or sets the number of M2M (many-to-many) relationship records processed.
         /// Only populated for import operations; null otherwise.
         /// </summary>

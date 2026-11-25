@@ -61,6 +61,13 @@ namespace PPDS.Migration.Import
         public int FailureCount { get; set; }
 
         /// <summary>
+        /// Gets or sets the plug-in steps that this import disabled and could not re-enable: they
+        /// remain disabled in the target and must be re-enabled by hand. When any is listed,
+        /// <see cref="Success"/> is false.
+        /// </summary>
+        public IReadOnlyList<PluginStepInfo> PluginStepsLeftDisabled { get; set; } = Array.Empty<PluginStepInfo>();
+
+        /// <summary>
         /// Gets or sets the number of relationships processed.
         /// </summary>
         public int RelationshipsProcessed { get; set; }

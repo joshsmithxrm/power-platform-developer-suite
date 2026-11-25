@@ -475,5 +475,139 @@ public class TieredImporterWriteSafetyTests
         messages.Should().Contain(m => m.Contains("'widget step'") && m.Contains("remains disabled"));
     }
 
+    #region #1921 review MF3, MF6, should-fix 1 and 2: what is said when a step stays disabled
+
+    [Fact]
+    public async Task StepNotDisabled_AndAnotherNotReenabled_RefusalNamesTheStepLeftDisabled_AndDoesNotClaimItWasReenabled()
+    {
+        var (sut, target, widgetStep, _) = WidgetAndGadget();
+        var second = Guid.NewGuid();
+        target.Steps.Add((second, "widget step 2", 10051));
+        target.OnUpdate = (id, state) =>
+        {
+            if (state == 1 && id == second) throw new InvalidOperationException("no privilege");
+            if (state == 0 && id == widgetStep) throw new InvalidOperationException("token expired");
+        };
+
+        var act = () => sut.ImportAsync(Widgets(), Plan("new_widget"), new ImportOptions());
+
+        var ex = (await act.Should().ThrowAsync<ImportRefusedException>()).Which;
+        ex.Reason.Should().Be(ImportRefusalReasons.PluginStepNotDisabled);
+        ex.Message.Should().Contain("Plug-in step 'widget step 2' could not be disabled")
+            .And.Contain("remain disabled: 'widget step'")
+            .And.NotContain("has been re-enabled")
+            .And.NotContain(widgetStep.ToString(), "ids belong in the detail, not the one-line message");
+        ex.PluginStepsLeftDisabled.Should().Equal(new PluginStepInfo(widgetStep, "widget step"));
+        _bulkCalls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task StepNotDisabled_AllOthersReenabled_RefusalSaysSo()
+    {
+        var (sut, target, _, _) = WidgetAndGadget();
+        var second = Guid.NewGuid();
+        target.Steps.Add((second, "widget step 2", 10051));
+        target.OnUpdate = (id, state) =>
+        {
+            if (state == 1 && id == second) throw new InvalidOperationException("no privilege");
+        };
+
+        var act = () => sut.ImportAsync(Widgets(), Plan("new_widget"), new ImportOptions());
+
+        var ex = (await act.Should().ThrowAsync<ImportRefusedException>()).Which;
+        ex.Message.Should().Contain("Every step this import disabled has been re-enabled.");
+        ex.PluginStepsLeftDisabled.Should().BeEmpty();
+    }
+
+    private (TieredImporter Sut, Mock<IPluginStepManager> Steps, PluginStepInfo Step) ReenableAlwaysFails()
+    {
+        var step = new PluginStepInfo(Guid.NewGuid(), "audit step");
+        var steps = new Mock<IPluginStepManager>();
+        steps.Setup(p => p.GetActivePluginStepsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { step });
+        steps.Setup(p => p.DisablePluginStepsAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<ICollection<Guid>>(), It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<Guid>, ICollection<Guid>, CancellationToken>((ids, disabled, _) => { foreach (var id in ids) disabled.Add(id); })
+            .Returns(Task.CompletedTask);
+        // The general branch: no per-step detail (a pool or sign-in failure).
+        steps.Setup(p => p.EnablePluginStepsAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("the connection was closed"));
+        return (CreateImporter(steps.Object), steps, step);
+    }
+
+    [Fact]
+    public async Task ReenableFailsWithoutDetail_TheStepIsReportedLeftDisabled_AndTheImportIsNotASuccess()
+    {
+        var (sut, _, step) = ReenableAlwaysFails();
+        var data = Data((Table("account", disablePlugins: true), Accounts(1)));
+        var messages = new List<string>();
+        MigrationResult? completed = null;
+        var progress = new Mock<IProgressReporter>();
+        progress.Setup(p => p.Report(It.IsAny<ProgressEventArgs>())).Callback<ProgressEventArgs>(a => messages.Add(a.Message ?? ""));
+        progress.Setup(p => p.Complete(It.IsAny<MigrationResult>())).Callback<MigrationResult>(r => completed = r);
+
+        var result = await sut.ImportAsync(data, Plan("account"), new ImportOptions(), progress.Object);
+
+        result.Success.Should().BeFalse("a step left disabled is not a successful import");
+        result.PluginStepsLeftDisabled.Should().Equal(step);
+        result.Warnings.Should().Contain(w => w.Code == ImportWarningCodes.PluginReenableFailed && w.Message.Contains("'audit step'"));
+        messages.Should().Contain(m => m.Contains("'audit step'") && m.Contains("remains disabled"));
+        messages.Should().NotContain(m => m.StartsWith("Re-enabled"), "nothing was re-enabled");
+        completed!.Success.Should().BeFalse();
+        completed.PluginStepsLeftDisabled.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ReenableFailsWithoutDetail_OnACancelledImport_TheCancellationCarriesTheStep()
+    {
+        var (sut, _, step) = ReenableAlwaysFails();
+        var data = Data((Table("account", disablePlugins: true), Accounts(1)));
+        using var cts = new CancellationTokenSource();
+        _bulk.Setup(x => x.UpsertMultipleAsync(It.IsAny<string>(), It.IsAny<IEnumerable<Entity>>(), It.IsAny<BulkOperationOptions>(), It.IsAny<DataverseClientOptions>(), It.IsAny<IProgress<ProgressSnapshot>>(), It.IsAny<CancellationToken>()))
+            .Returns(() => { cts.Cancel(); throw new OperationCanceledException(cts.Token); });
+        var messages = new List<string>();
+        var progress = new Mock<IProgressReporter>();
+        progress.Setup(p => p.Report(It.IsAny<ProgressEventArgs>())).Callback<ProgressEventArgs>(a => messages.Add(a.Message ?? ""));
+
+        var act = () => sut.ImportAsync(data, Plan("account"), new ImportOptions(), progress.Object, cts.Token);
+
+        var ex = (await act.Should().ThrowAsync<ImportCancelledException>()).Which;
+        ex.PluginStepsLeftDisabled.Should().Equal(step);
+        messages.Should().Contain(m => m.Contains("'audit step'") && m.Contains("remains disabled"));
+    }
+
+    [Fact]
+    public async Task EveryStepReenabled_TheImportSucceeds_AndSaysReenabled()
+    {
+        var (sut, _, _, _) = WidgetAndGadget();
+        var messages = new List<string>();
+        var progress = new Mock<IProgressReporter>();
+        progress.Setup(p => p.Report(It.IsAny<ProgressEventArgs>())).Callback<ProgressEventArgs>(a => messages.Add(a.Message ?? ""));
+
+        var result = await sut.ImportAsync(Widgets(), Plan("new_widget"), new ImportOptions(), progress.Object);
+
+        result.Success.Should().BeTrue();
+        result.PluginStepsLeftDisabled.Should().BeEmpty();
+        messages.Should().Contain("Re-enabled 1 plugin step(s).");
+    }
+
+    [Fact]
+    public async Task TheStepsToDisable_AreNamedInTheProgress_BeforeTheFirstWrite()
+    {
+        var (sut, target, widgetStep, _) = WidgetAndGadget();
+        var events = new List<string>();
+        var progress = new Mock<IProgressReporter>();
+        progress.Setup(p => p.Report(It.IsAny<ProgressEventArgs>())).Callback<ProgressEventArgs>(a => events.Add("progress: " + a.Message));
+        target.OnUpdate = (id, state) => events.Add($"update {id} {state}");
+
+        await sut.ImportAsync(Widgets(), Plan("new_widget"), new ImportOptions(), progress.Object);
+
+        var named = events.FindIndex(e => e.StartsWith("progress: Disabling 1 plugin step(s) for the import: 'widget step' (" + widgetStep + ")"));
+        var firstWrite = events.FindIndex(e => e.StartsWith("update "));
+        named.Should().BeGreaterThanOrEqualTo(0);
+        named.Should().BeLessThan(firstWrite);
+        events[named].Should().Contain("re-enable them in the target");
+    }
+
+    #endregion
     #endregion
 }

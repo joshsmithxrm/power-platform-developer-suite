@@ -20,6 +20,26 @@ namespace PPDS.Cli.Commands.Data;
 /// </summary>
 public static class ImportCommand
 {
+    /// <summary>
+    /// Writes the plug-in steps an import disabled and could not re-enable, each with its id, so
+    /// they can be re-enabled by hand (#1921 review MF3). Writes nothing when there are none.
+    /// </summary>
+    internal static void WritePluginStepsLeftDisabled(TextWriter error, IReadOnlyList<PluginStepInfo> steps)
+    {
+        if (steps.Count == 0)
+        {
+            return;
+        }
+
+        error.WriteLine();
+        error.WriteLine($"Warning: {steps.Count} plug-in step(s) that this import disabled could not be re-enabled and remain disabled in the target:");
+        foreach (var step in steps)
+        {
+            error.WriteLine($"  - {(string.IsNullOrEmpty(step.Name) ? "(unnamed step)" : step.Name)} ({step.Id})");
+        }
+        error.WriteLine("Re-enable them in the target (for example in the Plug-in Registration Tool).");
+    }
+
     /// <summary>The parse error for <c>--mode Skip</c> (#1914).</summary>
     internal const string SkipModeRefusedMessage =
         "--mode accepts Create, Update or Upsert. Skip applies to one table: set importMode=\"skip\" on that table in the schema.";
@@ -358,6 +378,7 @@ public static class ImportCommand
                     Console.Error.WriteLine($"  Summary: {outputManager.SummaryPath}");
                 }
 
+                WritePluginStepsLeftDisabled(Console.Error, result.PluginStepsLeftDisabled);
                 return result.Success ? ExitCodes.Success : ExitCodes.Failure;
             }
             finally
@@ -368,6 +389,12 @@ public static class ImportCommand
                     await outputManager.DisposeAsync();
                 }
             }
+        }
+        catch (ImportCancelledException ex)
+        {
+            progressReporter.Error(new OperationCanceledException(), "Import cancelled by user.");
+            WritePluginStepsLeftDisabled(Console.Error, ex.PluginStepsLeftDisabled);
+            return ExitCodes.Failure;
         }
         catch (OperationCanceledException)
         {
@@ -385,6 +412,7 @@ public static class ImportCommand
         {
             Console.Error.WriteLine();
             Console.Error.WriteLine($"Error: {ex.Message}");
+            WritePluginStepsLeftDisabled(Console.Error, ex.PluginStepsLeftDisabled);
             return ExceptionMapper.ToExitCode(ex);
         }
         catch (Exception ex)

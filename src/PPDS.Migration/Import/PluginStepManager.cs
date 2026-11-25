@@ -188,9 +188,8 @@ namespace PPDS.Migration.Import
                     _logger?.LogWarning(ex, "Failed to disable plugin step {StepId}", stepId);
                     throw new ImportRefusedException(
                         ImportRefusalReasons.PluginStepNotDisabled,
-                        "A plug-in step that the schema asks to disable during the import could not be disabled, so the " +
-                        "import was not run. The steps already disabled are re-enabled. Check that you can change plug-in " +
-                        "step registrations in the target, or remove disableplugins from the schema.",
+                        "A plug-in step that the schema asks to disable during the import could not be disabled. " +
+                        "Check that you can change plug-in step registrations in the target, or remove disableplugins from the schema.",
                         ex);
                 }
             }
