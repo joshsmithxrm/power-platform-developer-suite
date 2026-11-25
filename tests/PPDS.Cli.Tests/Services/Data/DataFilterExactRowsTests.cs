@@ -130,6 +130,12 @@ public class DataFilterExactRowsTests
         { "accountid > '00000000-0000-0000-0000-000000000001'", "a range comparison on a row id column" },
         { "accountid = '{00000000-0000-0000-0000-000000000001}'", "not a GUID written as 8-4-4-4-12" },
         { "primarycontactid = 5", "not a GUID written as 8-4-4-4-12" },
+        // Spellings .NET's GUID parser reads as a different id (#1915): the character rule refuses them.
+        { "accountid = '+0000000-0000-0000-0000-000000000001'", "not a GUID written as 8-4-4-4-12" },
+        { "accountid = '0x000000-0000-0000-0000-000000000001'", "not a GUID written as 8-4-4-4-12" },
+        { "primarycontactid = '00000000-+000-0000-0000-000000000001'", "not a GUID written as 8-4-4-4-12" },
+        { "primarycontactid IN ('00000000-0000-0000-0000-0x0000000001')", "not a GUID written as 8-4-4-4-12" },
+        { "accountid = ' 0000000-0000-0000-0000-000000000001'", "white space" },
 
         // A column the table does not have.
         { "nosuchcolumn = 1", "a column the table does not have" },
