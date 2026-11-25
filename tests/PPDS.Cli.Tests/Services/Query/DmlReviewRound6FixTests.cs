@@ -415,15 +415,18 @@ public sealed class DmlReviewRound6FixTests
     }
 
     /// <summary>
-    /// The size the report saw exhaust the stack (about 6,500 ORed conditions), in the first statement and in a later one
-    /// of a script: one refusal, before the first statement runs.
+    /// A chain of 1,001 ORed conditions, over both write limits (200 levels, 1,000 conditions), in the first statement and
+    /// in a later one of a script: one refusal, before the first statement runs. The size is far below what the SQL
+    /// parser's own recursion survives on any stack the tests run on (thousands of levels on 1 MB), so the test shows the
+    /// write limits, not the parser's; a chain of several thousand overflowed the parser on a Windows test thread before any
+    /// check could run.
     /// </summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task AConditionTreeThatExhaustedTheStack_IsRefused_InTheFirstOrALaterStatement(bool later)
+    public async Task AConditionTreeOverTheWriteLimits_IsRefused_InTheFirstOrALaterStatement(bool later)
     {
-        var deep = $"DELETE FROM account WHERE {OrChain(6500)}";
+        var deep = $"DELETE FROM account WHERE {OrChain(1001)}";
         var sql = later ? $"UPDATE account SET description = 'x' WHERE name = 'n1'; {deep}" : deep;
 
         var ex = await RefusedBeforeAnythingIsReadAsync(sql);
