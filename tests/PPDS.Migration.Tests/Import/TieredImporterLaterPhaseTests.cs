@@ -44,6 +44,13 @@ public class TieredImporterLaterPhaseTests
     /// <summary>When set, a failed create is reported without its record id.</summary>
     private bool _failuresWithoutRecordId;
 
+    /// <summary>
+    /// When set, a bulk upsert reports half its records as succeeded and none as failed, with no
+    /// errors: what the executor returns for a batch whose request throws a task-cancelled exception
+    /// while the caller's token is not cancelled, or for an upsert response without results.
+    /// </summary>
+    private bool _shortUpsertResult;
+
     public TieredImporterLaterPhaseTests()
     {
         _pool.Setup(p => p.Statistics).Returns(new PoolStatistics());
@@ -63,7 +70,14 @@ public class TieredImporterLaterPhaseTests
         _bulk.Setup(x => x.UpdateMultipleAsync(It.IsAny<string>(), It.IsAny<IEnumerable<Entity>>(), It.IsAny<BulkOperationOptions>(), It.IsAny<DataverseClientOptions>(), It.IsAny<IProgress<ProgressSnapshot>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string e, IEnumerable<Entity> r, BulkOperationOptions _, DataverseClientOptions _, IProgress<ProgressSnapshot> _, CancellationToken _) => BulkSucceed("UpdateMultiple " + e, r.ToList()));
         _bulk.Setup(x => x.UpsertMultipleAsync(It.IsAny<string>(), It.IsAny<IEnumerable<Entity>>(), It.IsAny<BulkOperationOptions>(), It.IsAny<DataverseClientOptions>(), It.IsAny<IProgress<ProgressSnapshot>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string e, IEnumerable<Entity> r, BulkOperationOptions _, DataverseClientOptions _, IProgress<ProgressSnapshot> _, CancellationToken _) => BulkSucceed("UpsertMultiple " + e, r.ToList()));
+            .ReturnsAsync((string e, IEnumerable<Entity> r, BulkOperationOptions _, DataverseClientOptions _, IProgress<ProgressSnapshot> _, CancellationToken _) =>
+            {
+                var list = r.ToList();
+                var result = BulkSucceed("UpsertMultiple " + e, list);
+                return _shortUpsertResult
+                    ? new BulkOperationResult { SuccessCount = list.Count / 2, FailureCount = 0, Errors = Array.Empty<BulkOperationError>() }
+                    : result;
+            });
 
         _client.Setup(c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((OrganizationRequest request, CancellationToken _) => Execute(request));
@@ -326,6 +340,47 @@ public class TieredImporterLaterPhaseTests
             written.Should().BeNull();
             reason.Should().NotBeNullOrEmpty();
         }
+    }
+
+    [Fact]
+    public void ProvenWrittenRecords_ErrorListNamingTheSameRecordTwice_IsNotProof()
+    {
+        // #1934 r2 MF4: sent a, b, c; 1 succeeded, 2 failed, errors [a, a]: b and c cannot both be written.
+        var a = new Entity("account", Guid.NewGuid());
+        var b = new Entity("account", Guid.NewGuid());
+        var c = new Entity("account", Guid.NewGuid());
+        var result = new BulkOperationResult
+        {
+            SuccessCount = 1,
+            FailureCount = 2,
+            Errors = new[] { new BulkOperationError { RecordId = a.Id }, new BulkOperationError { RecordId = a.Id } }
+        };
+
+        TieredImporter.ProvenWrittenRecords(new[] { a, b, c }, result, out var reason).Should().BeNull();
+        reason.Should().Contain("only 1 succeeded");
+    }
+
+    [Fact]
+    public async Task UnaccountedRecords_MakeTheImportNotASuccess_AndSaySo()
+    {
+        // #1934 r2 MF1: 4 sent, 2 succeeded, 0 failed, no errors (the shape the real executor returns
+        // for a batch whose request throws a task-cancelled exception).
+        _shortUpsertResult = true;
+        var parent = Guid.NewGuid();
+        var data = AccountData(new[]
+        {
+            new Entity("account") { Id = parent, ["name"] = "Parent" },
+            InactiveAccount(Guid.NewGuid(), parent), InactiveAccount(Guid.NewGuid(), parent), InactiveAccount(Guid.NewGuid(), parent)
+        });
+
+        var result = await CreateImporter().ImportAsync(data, Plan(tables: "account"), new ImportOptions { Mode = ImportMode.Upsert, UseBulkApis = true });
+
+        result.Success.Should().BeFalse();
+        result.Errors.Should().ContainSingle(e => e.EntityLogicalName == "account")
+            .Which.Message.Should().Contain("3 of 4 account record(s) sent are unaccounted for", "the probe sends 1 (0 reported) and the rest 3 (1 reported)").And.Contain("were not sent");
+        result.EntityResults.Single().LaterPhasesSkipped.Should().BeTrue();
+        result.Warnings.Should().Contain(w => w.Code == ImportWarningCodes.LaterPhasesSkipped);
+        _writes.Should().OnlyContain(w => w.What.StartsWith("UpsertMultiple"));
     }
 
     [Fact]

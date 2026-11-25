@@ -1140,6 +1140,7 @@ namespace PPDS.Migration.Import
             // preserved from Entity.Id, so a written record maps to itself.
             var written = ProvenWrittenRecords(preparedRecords, bulkResult, out var notProvenReason);
             var laterPhasesSkipped = written == null;
+            MigrationError? laterPhasesError = null;
             if (written != null)
             {
                 foreach (var id in written)
@@ -1157,6 +1158,18 @@ namespace PPDS.Migration.Import
             }
             else
             {
+                // Not a warning only: records are unaccounted for and their later phases were not
+                // run, so the import is not a success (#1934 r2 MF1).
+                var unaccounted = Math.Max(0, preparedRecords.Count - bulkResult.SuccessCount - bulkResult.FailureCount);
+                laterPhasesError = new MigrationError
+                {
+                    Phase = MigrationPhase.Importing,
+                    EntityLogicalName = entityName,
+                    Message = (unaccounted > 0
+                        ? $"{unaccounted} of {preparedRecords.Count} {entityName} record(s) sent are unaccounted for: the write result reports neither their success nor their failure. "
+                        : $"The write result for {entityName} does not say which records were written ({notProvenReason}). ") +
+                        $"The deferred lookups, state changes, many-to-many associations and file data of all {preparedRecords.Count} were not sent."
+                };
                 _logger?.LogWarning("Not running the later phases for {Entity}: {Reason}", entityName, notProvenReason);
                 warnings.AddWarning(new ImportWarning
                 {
@@ -1179,6 +1192,10 @@ namespace PPDS.Migration.Import
                 Message = e.Message,
                 Diagnostics = e.Diagnostics
             }).ToList();
+            if (laterPhasesError != null)
+            {
+                allErrors.Add(laterPhasesError);
+            }
 
             entityStopwatch.Stop();
 
@@ -1449,6 +1466,14 @@ namespace PPDS.Migration.Import
                 {
                     written.Add(record.Id);
                 }
+            }
+
+            // More records left as written than the result says succeeded (an error list naming the
+            // same record twice): some of them were not written, and which is not known (#1934 r2 MF4).
+            if (written.Count > result.SuccessCount)
+            {
+                reason = $"{written.Count} record(s) would count as written but only {result.SuccessCount} succeeded";
+                return null;
             }
 
             return written;
