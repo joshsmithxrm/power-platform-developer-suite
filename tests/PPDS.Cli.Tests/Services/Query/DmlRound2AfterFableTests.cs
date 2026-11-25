@@ -184,9 +184,10 @@ public sealed class DmlRound2AfterFableTests
     [InlineData("ppds_virtual", "a virtual table")]
     [InlineData("ppds_provided", "a virtual table")]
     [InlineData("task", "an activity table")]
+    [InlineData("activitypointer", "an activity table")]
     public async Task AWriteToATableThatIsNotStandard_IsRefusedBeforeAnythingIsRead(string table, string kind)
     {
-        var name = table == "task" ? "subject" : "ppds_name";
+        var name = table is "task" or "activitypointer" ? "subject" : "ppds_name";
         foreach (var sql in new[]
                  {
                      $"UPDATE {table} SET {name} = 'b' WHERE {name} = 'a'",

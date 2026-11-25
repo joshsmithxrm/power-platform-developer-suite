@@ -178,7 +178,11 @@ internal static class DmlColumnValidator
             throw Refuse($"'{table}' is a virtual table. SQL writes to virtual tables are not supported: its rows live in an external data " +
                          "source, and what that source does with these writes has not been shown. Change its rows in the source instead.");
         }
-        if (entity.IsActivity == true || string.Equals(entity.TableType, "Activity", StringComparison.OrdinalIgnoreCase))
+        // An activity table such as task reports the table type Standard with the activity flag set, so the type alone would
+        // miss it. The shared activity table, activitypointer, reports type Standard and the activity flag false (observed on a
+        // live environment on 2026-11-25), so it is refused by its logical name.
+        if (entity.IsActivity == true || string.Equals(entity.TableType, "Activity", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(table, "activitypointer", StringComparison.OrdinalIgnoreCase))
         {
             throw Refuse($"'{table}' is an activity table. SQL writes to activity tables are not supported: Dataverse keeps each activity " +
                          "in the shared activity table too, with its parties, and how it applies these writes there has not been shown. " +

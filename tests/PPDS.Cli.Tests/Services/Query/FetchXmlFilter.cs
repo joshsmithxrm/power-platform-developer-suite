@@ -121,6 +121,7 @@ internal static class TestMetadata
         ["ppds_virtual"] = [A("ppds_virtualid", "Uniqueidentifier", update: false), A("ppds_name", "String")],
         ["ppds_provided"] = [A("ppds_providedid", "Uniqueidentifier", update: false), A("ppds_name", "String")],
         ["ppds_untyped"] = [A("ppds_untypedid", "Uniqueidentifier", update: false), A("ppds_name", "String")],
+        ["activitypointer"] = [A("activityid", "Uniqueidentifier", update: false), A("subject", "String")],
         // An activity table: its primary id is activityid, not taskid.
         ["task"] =
         [
@@ -142,7 +143,10 @@ internal static class TestMetadata
     /// <summary>The table list: the kind of each table (P2). <c>task</c> is an activity table.</summary>
     public static readonly IReadOnlyList<EntitySummary> Entities =
     [
-        E("account", "Standard"), E("contact", "Standard"), E("solution", "Standard"), E("task", "Activity", isActivity: true),
+        // As Dataverse reports them (live, 2026-11-25): an activity table has type Standard and the activity flag; the shared
+        // activity table, activitypointer, has type Standard and the flag false.
+        E("account", "Standard"), E("contact", "Standard"), E("solution", "Standard"), E("task", "Standard", isActivity: true),
+        E("activitypointer", "Standard", isActivity: false),
         E("ppds_elastic", "Elastic"), E("ppds_virtual", "Virtual"),
         E("ppds_provided", "Standard", dataProviderId: Guid.Parse("7015a531-cc0d-4537-b5f2-c882a1eb65ad")),
         E("ppds_untyped", null, isActivity: null)
