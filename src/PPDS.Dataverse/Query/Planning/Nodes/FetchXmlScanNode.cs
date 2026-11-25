@@ -261,7 +261,7 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
 
         try
         {
-            var doc = XDocument.Parse(fetchXml);
+            var doc = FetchXmlSerialization.Parse(fetchXml);
             var fetchElement = doc.Root;
             if (fetchElement == null) return fetchXml;
 
@@ -275,7 +275,7 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
                 fetchElement.SetAttributeValue("count", Math.Min(topValue, 5000).ToString());
             }
 
-            return doc.ToString(SaveOptions.DisableFormatting);
+            return FetchXmlSerialization.Serialize(doc);
         }
         catch (XmlException)
         {

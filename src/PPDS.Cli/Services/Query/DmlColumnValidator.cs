@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.RegularExpressions;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Cli.Infrastructure.Errors;
@@ -263,11 +262,10 @@ internal static class DmlColumnValidator
         if (state.Column is null || status.Column is null)
             return;
 
-        // Each status reason belongs to one status; a mismatched pair would be rejected row by row, or not at all.
-        // (WrittenValue already refused values that are not choices of the columns, so both parse.)
-        if (Unwrap(state.Value) is IntegerLiteral s && Unwrap(status.Value) is IntegerLiteral r
-            && int.TryParse(r.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var reason)
-            && int.TryParse(s.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var stateValue)
+        // Each status reason belongs to one status; a mismatched pair would be rejected row by row, or not at all. The pair
+        // is checked by the values that will be sent, as the admission function computes them, so -0 is 0 here too.
+        // (WrittenValue already refused values that are not choices of the columns.)
+        if (SentChoice(state.Column, state.Value) is { } stateValue && SentChoice(status.Column, status.Value) is { } reason
             && status.Column.Options?.FirstOrDefault(o => o.Value == reason) is { State: { } owner }
             && owner != stateValue)
         {
@@ -276,6 +274,13 @@ internal static class DmlColumnValidator
                          $"to the {state.Column.LogicalName} written.");
         }
     }
+
+    /// <summary>The choice value the executor sends for a written literal, or null when it is not an admitted choice literal.</summary>
+    private static int? SentChoice(AttributeMetadataDto column, ScalarExpression value)
+        => DmlStatementSupport.ToDmlLiteral(value) is { } literal
+           && DmlValueAdmission.AdmitLiteral(literal, column, DmlValueUse.Write) is { IsAdmitted: true, Value: Microsoft.Xrm.Sdk.OptionSetValue option }
+            ? option.Value
+            : null;
 
     // ── read columns ───────────────────────────────────────────────────
 
@@ -396,13 +401,17 @@ internal static class DmlColumnValidator
     /// (<see cref="DmlValueAdmission.AdmitLiteral"/> with <see cref="DmlValueUse.Compare"/>), the one path for a compared
     /// literal. The FetchXML carries the admitted text: the literal as written, except a date and time, which is rewritten
     /// in the parsed statement to its UTC instant (<see cref="DmlValueAdmission.UtcInstantFormat"/>) before it is planned,
-    /// so a compared date goes through the same conversion as a written one.
+    /// so a compared date goes through the same conversion as a written one. An IN value (<paramref name="inList"/>) is
+    /// decided by <see cref="DmlValueAdmission.AdmitInListOperand"/>.
     /// </summary>
-    private static void CheckFilterLiteral(AttributeMetadataDto attribute, string column, ScalarExpression value)
+    private static void CheckFilterLiteral(AttributeMetadataDto attribute, string column, ScalarExpression value, bool inList)
     {
         if (DmlStatementSupport.ToDmlLiteral(value) is not { } literal)
             throw Refuse($"{column} is compared with {Sql(value)}; compare it with a literal.");
-        var admission = DmlValueAdmission.AdmitLiteral(literal, attribute, DmlValueUse.Compare);
+        // An IN value is the text of a FetchXML value element, which has rules of its own (DmlValueAdmission.AdmitInListOperand).
+        var admission = inList
+            ? DmlValueAdmission.AdmitInListOperand(literal, attribute)
+            : DmlValueAdmission.AdmitLiteral(literal, attribute, DmlValueUse.Compare);
         if (!admission.IsAdmitted)
             throw Refuse($"The value at {DmlStatementSupport.At(value)} cannot be compared with {column}: {admission.Reason}", admission.Code!);
         if (Unwrap(value) is StringLiteral text && admission.Value is string sent && !string.Equals(text.Value, sent, StringComparison.Ordinal))
@@ -917,13 +926,16 @@ internal static class DmlColumnValidator
         public override void Visit(BooleanTernaryExpression node)
             => Check(node.FirstExpression, OrderedTypes, "BETWEEN", node.SecondExpression, node.ThirdExpression);
 
-        public override void Visit(InPredicate node) => Check(node.Expression, InTypes, "IN", [.. node.Values]);
+        public override void Visit(InPredicate node) => Check(node.Expression, InTypes, "IN", inList: true, [.. node.Values]);
 
         public override void Visit(LikePredicate node) => Check(node.FirstExpression, LikeTypes, "LIKE", node.SecondExpression);
 
         public override void Visit(BooleanIsNullExpression node) => Check(node.Expression, IsNullTypes, "IS NULL");
 
         private void Check(ScalarExpression expression, HashSet<string> types, string use, params ScalarExpression[] literals)
+            => Check(expression, types, use, inList: false, literals);
+
+        private void Check(ScalarExpression expression, HashSet<string> types, string use, bool inList, params ScalarExpression[] literals)
         {
             if (expression is not ColumnReferenceExpression column)
                 return;
@@ -943,7 +955,7 @@ internal static class DmlColumnValidator
             if (string.Equals(attribute.AttributeType, "DateTime", StringComparison.OrdinalIgnoreCase) && !IsVerifiedDateBehavior(attribute))
                 throw Refuse(UnverifiedDate($"{table}.{attribute.LogicalName}", attribute));
             foreach (var literal in literals)
-                CheckFilterLiteral(attribute, $"{table}.{attribute.LogicalName}", literal);
+                CheckFilterLiteral(attribute, $"{table}.{attribute.LogicalName}", literal, inList);
         }
     }
 

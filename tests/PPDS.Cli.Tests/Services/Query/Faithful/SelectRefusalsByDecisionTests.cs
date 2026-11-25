@@ -81,7 +81,8 @@ public sealed class SelectRefusalsByDecisionTests
         // 23 digits before the point plus 6 places: 29 digits.
         var refusal = await RefusalAsync("SELECT accountnumber, CAST(revenue AS decimal(38, 6)) AS v FROM account WHERE accountnumber = 'k2'");
 
-        refusal.ErrorCode.Should().Be(ErrorCodes.Query.ExecutionFailed);
+        // The engine refuses it with NotSupportedException, which keeps its own code (review round 6, S9).
+        refusal.ErrorCode.Should().Be(ErrorCodes.Operation.NotSupported);
         refusal.UserMessage.Should().Contain("needs more than 28 digits").And.Contain("Use a precision of at most 28");
     }
 }

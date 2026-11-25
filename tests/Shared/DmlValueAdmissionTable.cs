@@ -141,8 +141,14 @@ public static class DmlValueAdmissionTable
         T("'1'", "=1"),
         T("N'caf\u00E9'", "=caf\u00E9"),
         T("N'\u041F\u0440\u0438\u0432\u0435\u0442'", "=\u041F\u0440\u0438\u0432\u0435\u0442"),
-        T("N'\u200Ba'", "=\u200Ba"),
-        T("N'a\uFEFF'", "=a\uFEFF"),
+        // Inside the text, invisible characters are written as typed; at either end they are refused as white space is (S12).
+        T("N'a\u200Bb'", "=a\u200Bb"),
+        T("N'a\uFEFFb'", "=a\uFEFFb"),
+        T("N'a\u180Eb'", "=a\u180Eb"),
+        All("N'\u200Ba'", S),
+        All("N'a\uFEFF'", S),
+        All("N'\u180Ea'", S),
+        All("N'a\u200B'", S),
         All("'caf\u00E9'", U),
         All("''", S),
         All("N''", S),
@@ -156,6 +162,26 @@ public static class DmlValueAdmissionTable
         All("N'\u3000a'", S),
         All("N'\u2028a'", S),
         All("N'a\u0085'", S),
+        // A backslash directly before a line break is SQL Server's line continuation: SQL Server removes both (before a
+        // carriage return alone, the backslash only), so the text as typed is not the text SQL Server reads (MF1).
+        All("N'abc\\\ndef'", U),
+        All("N'abc\\\r\ndef'", U),
+        All("N'abc\\\rdef'", U),
+        All("N'abc\\\\\ndef'", U),
+        All("'abc\\\ndef'", U),
+        All("N'abc\\\n\\\ndef'", U),
+        // A backslash before anything else, a space or a tab before the line break included, is read as typed.
+        T("N'abc\\ \ndef'", "=abc\\ \ndef"),
+        T("N'abc\\\t\ndef'", "=abc\\\t\ndef"),
+        T("N'a\\b'", "=a\\b"),
+        T("N'abc\\\u2028def'", "=abc\\\u2028def"),
+        T("N'abc\ndef'", "=abc\ndef"),
+        T("N'abc\r\ndef'", "=abc\r\ndef"),
+        // Half of a surrogate pair is not a character (MF3); a whole pair is.
+        All("N'a<U+D800>b'", U),
+        All("N'a<U+DC00>b'", U),
+        All("N'ab<U+D83D>'", U),
+        T("N'a\uD83D\uDE00b'", "=a\uD83D\uDE00b"),
         // \u2500\u2500 dates and times \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
         T("'2024-01-15T09:30:00Z'", "=2024-01-15T09:30:00Z", "=2024-01-15T09:30:00Z"),
         T("N'2024-01-15T09:30:00Z'", "=2024-01-15T09:30:00Z", "=2024-01-15T09:30:00Z"),
@@ -217,13 +243,22 @@ public static class DmlValueAdmissionTable
         => Rows.SelectMany(row => row.Cells.Select((cell, i) => (row.Literal, Targets[i], cell)));
 
     /// <summary>The statement a cell is checked with.</summary>
-    public static string Statement(string literal, Target target) => $"UPDATE account SET {target.Column} = {literal} WHERE name = 'n1'";
+    public static string Statement(string literal, Target target) => $"UPDATE account SET {target.Column} = {Sql(literal)} WHERE name = 'n1'";
+
+    /// <summary>
+    /// The SQL text of a literal of the table: <c>&lt;U+XXXX&gt;</c> stands for that UTF-16 code unit. Half of a surrogate
+    /// pair, and U+FFFE, are written so because the test runner's serialisation of theory data replaces them.
+    /// </summary>
+    public static string Sql(string literal) => System.Text.RegularExpressions.Regex.Replace(literal, "<U\\+([0-9A-F]{4})>",
+        m => ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString());
 
     /// <summary>
     /// A literal compared with a column in a write's WHERE (<see cref="CompareStatement"/>): <c>U</c> (refused,
-    /// <c>Query.DmlUnsupportedConstruct</c>, nothing read), or <c>=text</c>, the value the FetchXML condition carries.
+    /// <c>Query.DmlUnsupportedConstruct</c>, nothing read), or <c>=text</c>, the value the FetchXML condition carries: its
+    /// <c>value</c> attribute, or for <c>IN</c> the text of its one <c>value</c> element. <see cref="Operator"/> is <c>=</c>,
+    /// <c>&lt;&gt;</c>, <c>&lt;</c>, <c>LIKE</c> or <c>IN</c> (the literal is the list's one value).
     /// </summary>
-    public sealed record CompareCase(string Kind, string Literal, string Cell);
+    public sealed record CompareCase(string Kind, string Literal, string Cell, string Operator = "=");
 
     /// <summary>
     /// Compared literals: a date and time is sent as its UTC instant in one spelling (yyyy-MM-ddTHH:mm:ssZ), whatever offset it
@@ -271,8 +306,65 @@ public static class DmlValueAdmissionTable
         new("floating point", "15.0000000000000000000000000000000000000", "U"),
         new("choice", "00000000000000000000000000000000000001", "=00000000000000000000000000000000000001"),
         new("choice", "000000000000000000000000000000000000001", "U"),
+        // Line breaks in an attribute value are sent as character references, so each is compared as itself (MF5).
+        new("text", "N'a\nb'", "=a\nb"),
+        new("text", "N'a\rb'", "=a\rb"),
+        new("text", "N'a\r\nb'", "=a\r\nb"),
+        new("text", "'a\nb'", "=a\nb", "LIKE"),
+        new("text", "N'a\rb'", "=a\rb", "<>"),
+        // SQL Server's line continuation (MF1): refused in every operator, with and without N.
+        new("text", "N'abc\\\ndef'", "U"),
+        new("text", "'abc\\\r\ndef'", "U"),
+        new("text", "N'abc\\\rdef'", "U"),
+        new("text", "N'abc\\\\\ndef'", "U"),
+        new("text", "N'abc\\\ndef'", "U", "IN"),
+        new("text", "N'abc\\\n%'", "U", "LIKE"),
+        new("text", "N'abc\\ \ndef'", "=abc\\ \ndef"),
+        // Not a sequence of XML 1.0 characters (MF3).
+        // (U+FFFF is refused by the parser already, Query.ParseError: DmlReviewRound6FixTests.)
+        new("text", "N'a<U+D800>b'", "U"),
+        new("text", "N'a<U+DC00>b'", "U"),
+        new("text", "N'<U+D83D>%'", "U", "LIKE"),
+        new("text", "N'a<U+DE00><U+D83D>b'", "U", "IN"),
+        new("text", "N'a<U+FFFE>b'", "U"),
+        new("text", "N'a<U+FFFE>b'", "U", "IN"),
+        new("text", "N'a\uD83D\uDE00b'", "=a\uD83D\uDE00b"),
+        new("text", "N'a\uFFFDb'", "=a\uFFFDb"),
+        // An IN value is element text: the executor's serialisation sends a carriage return as a line feed and empties an
+        // element that is only white space (MF2). A line feed is kept.
+        new("text", "N'line1\r\nline2'", "U", "IN"),
+        new("text", "N'c\rd'", "U", "IN"),
+        new("text", "N'c\nd'", "=c\nd", "IN"),
+        new("text", "N'\t'", "U", "IN"),
+        new("text", "N' '", "U", "IN"),
+        new("text", "N''", "U", "IN"),
+        new("text", "N'\u00A0'", "U", "IN"),
+        new("text", "N'a'", "=a", "IN"),
+        new("text", "N' a '", "= a ", "IN"),
+        new("text", "N'a\tb'", "=a\tb", "IN"),
+        new("text", "N'a&<>\"''b'", "=a&<>\"'b", "IN"),
+        new("whole number", "-5", "=-5", "IN"),
+        // The bounds of a written number hold for a compared one (MF4): places the column keeps, digits a double holds.
+        new("currency", "1.2345", "=1.2345"),
+        new("currency", "1.23450", "=1.23450"),
+        new("currency", "1.23456", "U"),
+        new("currency", "1.23456", "U", "IN"),
+        new("currency", "1.23456", "U", "<"),
+        new("decimal", "0.0000000001", "=0.0000000001"),
+        new("decimal", "0.00000000001", "U"),
+        new("decimal", "1.23456789012", "U", "IN"),
+        new("floating point", "0.1", "=0.1"),
+        new("floating point", "1.23495", "=1.23495"),
+        new("floating point", "0.1234567890123456789", "U"),
+        new("floating point", "9007199254740993", "U"),
+        new("floating point", "0.1234567890123456789", "U", "<"),
     ];
 
     /// <summary>The statement a compare case is checked with.</summary>
-    public static string CompareStatement(string literal, Target target) => $"UPDATE account SET description = 'x' WHERE {target.Column} = {literal}";
+    public static string CompareStatement(string literal, Target target) => CompareStatement(literal, target, "=");
+
+    /// <summary>The statement a compare case with <paramref name="op"/> is checked with.</summary>
+    public static string CompareStatement(string literal, Target target, string op) => op == "IN"
+        ? $"UPDATE account SET description = 'x' WHERE {target.Column} IN ({Sql(literal)})"
+        : $"UPDATE account SET description = 'x' WHERE {target.Column} {op} {Sql(literal)}";
 }

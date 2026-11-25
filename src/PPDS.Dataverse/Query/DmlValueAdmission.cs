@@ -205,6 +205,13 @@ public static class DmlValueAdmission
     {
         if (literal.Kind == DmlLiteralKind.Null)
             return AdmitNull(target, use);
+        if (literal.Kind is DmlLiteralKind.Text or DmlLiteralKind.NationalText or DmlLiteralKind.GuidCast && HasLineContinuation(literal.Text))
+        {
+            return DmlAdmission.Refuse(Unsupported,
+                "the text holds a backslash directly followed by a line break (a carriage return or a line feed). SQL Server reads " +
+                "that as a line continuation and removes the backslash and the line break (before a carriage return alone, the " +
+                "backslash only), so the text would not be the text as typed. Remove the backslash, or the line break after it.");
+        }
         if (literal.Kind is DmlLiteralKind.WholeNumber or DmlLiteralKind.DecimalNumber && literal.Text.Count(char.IsAsciiDigit) > MaxLiteralDigits)
         {
             return DmlAdmission.Refuse(Unsupported,
@@ -235,6 +242,39 @@ public static class DmlValueAdmission
         };
     }
 
+    /// <summary>
+    /// Admits <paramref name="literal"/> as one value of an IN list in the WHERE of a write, or refuses it: as
+    /// <see cref="AdmitLiteral"/> with <see cref="DmlValueUse.Compare"/>, and text that holds a carriage return, or is
+    /// empty or only white space, is refused. FetchXML carries an IN value as the text of a <c>value</c> element. The
+    /// executor's parse and serialisation of the FetchXML (<see cref="FetchXmlSerialization"/>) writes every line break in
+    /// element text as the machine's line break, which an XML parser reads as a line feed: a carriage return, alone or
+    /// before a line feed, reaches Dataverse as a line feed, and a line feed as itself. It also empties an element that is
+    /// only XML white space; what Dataverse selects for an empty or blank IN value has not been shown, so text that is only
+    /// Unicode white space is refused with it.
+    /// </summary>
+    /// <param name="literal">The literal as written.</param>
+    /// <param name="target">The column it is compared with.</param>
+    /// <returns>The decision.</returns>
+    public static DmlAdmission AdmitInListOperand(DmlLiteral literal, AttributeMetadataDto target)
+    {
+        var admission = AdmitLiteral(literal, target, DmlValueUse.Compare);
+        if (!admission.IsAdmitted || literal.Kind is not (DmlLiteralKind.Text or DmlLiteralKind.NationalText) || admission.Value is not string text)
+            return admission;
+        if (text.Contains('\r'))
+        {
+            return DmlAdmission.Refuse(Unsupported,
+                "an IN value that holds a carriage return is not sent unchanged: the FetchXML carries it as element text, where it " +
+                "reaches Dataverse as a line feed. Compare with = for each such value, combined with OR.");
+        }
+        if (text.Length == 0 || text.All(IsUnicodeWhiteSpace))
+        {
+            return DmlAdmission.Refuse(Unsupported,
+                "an IN value that is empty or only white space is not admitted: the FetchXML carries it as element text, which is " +
+                "emptied before it reaches Dataverse when it is only spaces, tabs or line breaks. Compare with = instead.");
+        }
+        return admission;
+    }
+
     private static DmlAdmission AdmitNull(AttributeMetadataDto target, DmlValueUse use)
     {
         if (use == DmlValueUse.Compare)
@@ -257,11 +297,17 @@ public static class DmlValueAdmission
                 : "this is a text column; compare it with a quoted string.");
         if (use == DmlValueUse.Compare)
         {
-            return HasControlOutsideXml(literal.Text)
+            return HasCharacterOutsideXml(literal.Text)
                 ? DmlAdmission.Refuse(Unsupported,
-                    "the text holds a control character other than tab, line feed and carriage return, which a FetchXML condition cannot " +
-                    "carry. Compare with text without it.")
+                    "the text holds a character that XML 1.0 does not allow (a control character other than tab, line feed and carriage " +
+                    "return, U+FFFE, U+FFFF, or half of a surrogate pair), which a FetchXML condition cannot carry. Compare with text without it.")
                 : DmlAdmission.Admit(literal.Text);
+        }
+        if (HasUnpairedSurrogate(literal.Text))
+        {
+            return DmlAdmission.Refuse(Unsupported,
+                "the text holds half of a surrogate pair (an unpaired surrogate), which is not a character and would not be stored as " +
+                "written. Remove it, or write the whole character.");
         }
         return TextRule(literal.Text) ?? Sent(literal, Coerce(literal.Text, "String"), sent => sent is string s && s == literal.Text);
     }
@@ -274,8 +320,9 @@ public static class DmlValueAdmission
         if (!WhiteSpaceEdgedTextIsWritten && IsWhiteSpaceEdged(text))
         {
             return DmlAdmission.Refuse(StoredDifferently,
-                "text that is only white space, or that begins or ends with a white-space character, is not written yet: Dataverse " +
-                "has not been shown to store such text unchanged. Remove the white space at either end, or write NULL.");
+                "text that is only white space, or that begins or ends with a white-space character or an invisible one (U+180E, " +
+                "U+200B, U+FEFF), is not written yet: Dataverse has not been shown to store such text unchanged. Remove the white space " +
+                "at either end (or the invisible character), or write NULL.");
         }
         return null;
     }
@@ -313,10 +360,12 @@ public static class DmlValueAdmission
         var places = target.Precision ?? DefaultDecimalPlaces;
         if (IntegerDigits(literal) > DecimalIntegerDigits)
             return DmlAdmission.Refuse(Unsupported, $"the number has more than {DecimalIntegerDigits} digits before the point, more than a decimal value holds.");
-        if (use == DmlValueUse.Write && Places(literal) > places)
+        if (Places(literal) > places)
         {
-            return DmlAdmission.Refuse(StoredDifferently,
-                $"the number has more decimal places than the column keeps ({places}), so Dataverse would store it rounded. Write at most {places} decimal places.");
+            return use == DmlValueUse.Write
+                ? DmlAdmission.Refuse(StoredDifferently,
+                    $"the number has more decimal places than the column keeps ({places}), so Dataverse would store it rounded. Write at most {places} decimal places.")
+                : DmlAdmission.Refuse(Unsupported, ComparedPlaces(places));
         }
         return use == DmlValueUse.Compare
             ? DmlAdmission.Admit(literal.Text)
@@ -329,10 +378,12 @@ public static class DmlValueAdmission
         if (NumberForm(literal) is { } refusal)
             return refusal;
         var places = Math.Min(target.Precision ?? MoneyPlaces, MoneyPlaces);
-        if (use == DmlValueUse.Write && Places(literal) > places)
+        if (Places(literal) > places)
         {
-            return DmlAdmission.Refuse(StoredDifferently,
-                $"the amount has more decimal places than the column keeps ({places}), so it would be stored rounded. Write at most {places} decimal places.");
+            return use == DmlValueUse.Write
+                ? DmlAdmission.Refuse(StoredDifferently,
+                    $"the amount has more decimal places than the column keeps ({places}), so it would be stored rounded. Write at most {places} decimal places.")
+                : DmlAdmission.Refuse(Unsupported, ComparedPlaces(places));
         }
         if (CompiledNumber(literal) is not { } compiled || Math.Abs(Convert.ToDecimal(compiled, CultureInfo.InvariantCulture)) > MoneyMax)
             return DmlAdmission.Refuse(Unsupported, "the amount is outside the range of a currency value (-922,337,203,685,477.5807 to 922,337,203,685,477.5807).");
@@ -346,16 +397,28 @@ public static class DmlValueAdmission
     {
         if (NumberForm(literal) is { } refusal)
             return refusal;
-        if (use == DmlValueUse.Compare)
-            return DmlAdmission.Admit(literal.Text);
         var sent = Coerce(CompiledNumber(literal), target);
-        if (sent is double d && !SameDigits(d.ToString("R", CultureInfo.InvariantCulture), literal))
+        if (sent is not double d || !SameDigits(d.ToString("R", CultureInfo.InvariantCulture), literal))
         {
-            return DmlAdmission.Refuse(StoredDifferently,
-                "a floating-point number cannot hold exactly these digits, so a different number would be stored. Write fewer significant digits (at most 15 are always kept).");
+            return use == DmlValueUse.Write
+                ? DmlAdmission.Refuse(StoredDifferently,
+                    "a floating-point number cannot hold exactly these digits, so a different number would be stored. Write fewer significant digits (at most 15 are always kept).")
+                : DmlAdmission.Refuse(Unsupported,
+                    "a floating-point number cannot hold exactly these digits, so the column would be compared with a different number. " +
+                    "Compare with fewer significant digits (at most 15 are always kept).");
         }
-        return Sent(literal, sent, value => value is double);
+        return use == DmlValueUse.Compare ? DmlAdmission.Admit(literal.Text) : Sent(literal, sent, value => value is double);
     }
+
+    /// <summary>
+    /// The refusal of a compared number with more decimal places than the column keeps: SQL Server compares the column with
+    /// the number as written, so no stored row matches; whether Dataverse compares with it as written or rounded to the
+    /// column's places has not been shown, so the two could select different rows.
+    /// </summary>
+    private static string ComparedPlaces(int places)
+        => $"the number has more decimal places than the column keeps ({places}). SQL Server compares the column with the number as " +
+           "written, so no stored value matches it; whether Dataverse compares it as written or rounded has not been shown. " +
+           $"Compare with at most {places} decimal places.";
 
     /// <summary>The number grammar shared by decimal, currency and floating point, and the 28 digits PPDS holds exactly.</summary>
     private static DmlAdmission? NumberForm(DmlLiteral literal)
@@ -540,22 +603,68 @@ public static class DmlValueAdmission
     public static bool IsSevenBitAscii(string text) => text.All(c => c <= '\u007F');
 
     /// <summary>
-    /// True when <paramref name="text"/> holds a control character below U+0020 other than tab, line feed and carriage
-    /// return: XML 1.0 has no such character, so a FetchXML condition cannot carry it.
+    /// True when <paramref name="text"/> is not a sequence of XML 1.0 characters (production <c>Char</c>): it holds a control
+    /// character below U+0020 other than tab, line feed and carriage return, U+FFFE, U+FFFF, or an unpaired surrogate. A
+    /// FetchXML condition cannot carry such text.
     /// </summary>
     /// <param name="text">The text.</param>
     /// <returns>Whether such a character occurs.</returns>
-    public static bool HasControlOutsideXml(string text) => text.Any(c => c < '\u0020' && c is not ('\t' or '\n' or '\r'));
+    public static bool HasCharacterOutsideXml(string text)
+        => HasUnpairedSurrogate(text) || text.Any(c => c < '\u0020' && c is not ('\t' or '\n' or '\r') || c is '\uFFFE' or '\uFFFF');
+
+    /// <summary>True when <paramref name="text"/> holds a high surrogate not followed by a low one, or a low surrogate not preceded by a high one.</summary>
+    /// <param name="text">The text.</param>
+    /// <returns>Whether an unpaired surrogate occurs.</returns>
+    public static bool HasUnpairedSurrogate(string text)
+    {
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+                i++;
+            else if (char.IsSurrogate(text[i]))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// True when <paramref name="text"/> holds a backslash directly followed by a carriage return or a line feed: SQL Server
+    /// reads it as a line continuation and removes the backslash and the line break after it (a carriage return and a line
+    /// feed together, or a line feed; before a carriage return alone, the backslash only). Checked on the reference SQL
+    /// Server: a backslash before any other character, a space or a tab before the line break included, is read as typed.
+    /// </summary>
+    /// <param name="text">The text of a literal, as ScriptDom reads it (the characters between the quotes).</param>
+    /// <returns>Whether a line continuation occurs.</returns>
+    public static bool HasLineContinuation(string text)
+    {
+        for (var i = 0; i + 1 < text.Length; i++)
+        {
+            if (text[i] == '\\' && text[i + 1] is '\r' or '\n')
+                return true;
+        }
+        return false;
+    }
 
     /// <summary>
     /// True when <paramref name="text"/> begins or ends with a character of the Unicode White_Space property (so also when
     /// it is only white space): U+0009 to U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000 to U+200A, U+2028, U+2029,
-    /// U+202F, U+205F, U+3000 (specs/sql-values.md, core requirement 4).
+    /// U+202F, U+205F, U+3000 (specs/sql-values.md, core requirement 4); or with one of the invisible characters
+    /// <see cref="InvisibleEdgeCharacters"/>, which are not in that set.
     /// </summary>
     /// <param name="text">The text.</param>
-    /// <returns>Whether either end is white space.</returns>
+    /// <returns>Whether either end is white space or an invisible character.</returns>
     public static bool IsWhiteSpaceEdged(string text)
-        => text.Length > 0 && (IsUnicodeWhiteSpace(text[0]) || IsUnicodeWhiteSpace(text[^1]));
+        => text.Length > 0 && (IsEdgeCharacter(text[0]) || IsEdgeCharacter(text[^1]));
+
+    /// <summary>
+    /// The invisible characters refused at either end of written text as white space is, though the Unicode White_Space set
+    /// does not have them: U+180E (Mongolian vowel separator, White_Space before Unicode 6.3), U+200B (zero width space) and
+    /// U+FEFF (zero width no-break space, the byte order mark). A reader cannot see them, and Dataverse has not been shown to
+    /// store them unchanged at either end of a value.
+    /// </summary>
+    public const string InvisibleEdgeCharacters = "\u180E\u200B\uFEFF";
+
+    private static bool IsEdgeCharacter(char c) => IsUnicodeWhiteSpace(c) || InvisibleEdgeCharacters.Contains(c);
 
     private static bool IsUnicodeWhiteSpace(char c) => c is >= '\u0009' and <= '\u000D' or '\u0020' or '\u0085' or '\u00A0'
         or '\u1680' or >= '\u2000' and <= '\u200A' or '\u2028' or '\u2029' or '\u202F' or '\u205F' or '\u3000';

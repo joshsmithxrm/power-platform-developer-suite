@@ -25,8 +25,16 @@ internal sealed class DmlTestHarness
     /// <summary>Every bulk write: ("Delete"|"Update"|"Create", entity, rows).</summary>
     public List<(string Operation, string Entity, int Rows)> Writes { get; } = new();
 
-    /// <summary>Every FetchXML read with the paging arguments the scan passed.</summary>
+    /// <summary>
+    /// Every FetchXML read with the paging arguments the scan passed. The FetchXML is the text sent to Dataverse: the
+    /// executor's parse and serialisation (<see cref="FetchXmlSerialization.RoundTrip(string)"/>) applied to the FetchXML
+    /// the engine passed, so an assertion on it is about what Dataverse receives (#1698, MF2). The executor's paging
+    /// attributes are not added; the page and cookie are recorded beside it.
+    /// </summary>
     public List<(string FetchXml, int? Page, string? Cookie)> Reads { get; } = new();
+
+    /// <summary>The FetchXML the engine passed to the executor for each read, before the executor's serialisation.</summary>
+    public List<string> Generated { get; } = new();
 
     public IEnumerable<int> Deleted => Writes.Where(w => w.Operation == "Delete").Select(w => w.Rows);
     public IEnumerable<int> Updated => Writes.Where(w => w.Operation == "Update").Select(w => w.Rows);
@@ -95,8 +103,11 @@ internal sealed class DmlTestHarness
             }
         };
 
-        QueryResult Pick(string fetchXml, int? page, string? cookie)
+        QueryResult Pick(string generated, int? page, string? cookie)
         {
+            // What Dataverse receives: everything below (the faithful filter included) reads the serialised text.
+            var fetchXml = FetchXmlSerialization.RoundTrip(generated);
+            harness.Generated.Add(generated);
             harness.Reads.Add((fetchXml, page, cookie));
             var count = fetchXml.Contains("contact") ? contactRows ?? rows : rows;
             var more = (page ?? 1) < pages;

@@ -393,10 +393,23 @@ public sealed class SqlQueryService : ISqlQueryService
                 RequiresReauthentication = auth.RequiresReauthentication
             },
             QueryExecutionException query => new PpdsException(query.ErrorCode, message, ex),
-            _ => new PpdsException(ErrorCodes.Query.ExecutionFailed, message, ex)
+            _ => new PpdsException(FailureCode(ex), message, ex)
         };
         RecordCommittedOutcome(wrapped, context);
         return wrapped;
+    }
+
+    /// <summary>
+    /// The code of a failure before any data changed: the code the surfaces gave the raw exception before the service
+    /// wrapped it (<see cref="ExceptionMapper"/>: a connection failure, throttling or a timeout is <c>Connection.*</c>, with
+    /// the connection exit code; a feature the engine does not support is <c>Operation.NotSupported</c>), and
+    /// <see cref="ErrorCodes.Query.ExecutionFailed"/> for a failure the mapper does not name (before the wrapping,
+    /// <c>Operation.Internal</c>).
+    /// </summary>
+    private static string FailureCode(Exception ex)
+    {
+        var code = ExceptionMapper.Map(ex).Code;
+        return code == ErrorCodes.Operation.Internal ? ErrorCodes.Query.ExecutionFailed : code;
     }
 
     /// <summary>A planner refusal raised while a script ran, as a <see cref="PpdsException"/> with its own code.</summary>

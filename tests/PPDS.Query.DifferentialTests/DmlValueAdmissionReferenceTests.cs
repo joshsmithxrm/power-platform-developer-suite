@@ -109,7 +109,7 @@ public sealed class DmlValueAdmissionReferenceTests(ReferenceDatabase database) 
             var read = target.ReferenceType.StartsWith("datetimeoffset", StringComparison.Ordinal)
                 ? "CONVERT(nvarchar(30), SWITCHOFFSET(v, '+00:00'), 127)"
                 : target.ReferenceType == "date" ? "CONVERT(nvarchar(10), v, 23)" : "v";
-            var sql = $"DECLARE @t TABLE (v {target.ReferenceType}); INSERT INTO @t (v) VALUES ({literal}); SELECT {read} FROM @t;";
+            var sql = $"DECLARE @t TABLE (v {target.ReferenceType}); INSERT INTO @t (v) VALUES ({DmlValueAdmissionTable.Sql(literal)}); SELECT {read} FROM @t;";
             try
             {
                 using var command = new SqlCommand(sql, database.Connection);
@@ -125,6 +125,87 @@ public sealed class DmlValueAdmissionReferenceTests(ReferenceDatabase database) 
         }
 
         Assert.True(wrong.Count == 0, $"{wrong.Count} of {admitted.Count} admitted cells differ from SQL Server:{Environment.NewLine}{string.Join(Environment.NewLine, wrong)}");
+    }
+
+    /// <summary>
+    /// Every text row of the table that the gate refuses as a line continuation is read by SQL Server as other text than its
+    /// characters as typed (MF1): the refusal is needed. The admitted rows with a backslash are compared above.
+    /// </summary>
+    [ReferenceServerFact]
+    public void EachRefusedLineContinuation_IsReadBySqlServerAsOtherText()
+    {
+        var rows = DmlValueAdmissionTable.Rows
+            .Select(r => (r.Literal, Text: TextOf(r.Literal)))
+            .Where(r => r.Text is not null && DmlValueAdmission.HasLineContinuation(r.Text))
+            .ToList();
+        Assert.True(rows.Count >= 6, $"only {rows.Count} rows");
+
+        var same = new List<string>();
+        foreach (var (literal, text) in rows)
+        {
+            using var command = new SqlCommand($"SELECT {DmlValueAdmissionTable.Sql(literal)}", database.Connection);
+            if ((string)command.ExecuteScalar()! == text)
+                same.Add(literal);
+        }
+
+        Assert.True(same.Count == 0, "SQL Server reads these as typed: " + string.Join(", ", same));
+    }
+
+    /// <summary>The text of a text literal as ScriptDom reads it (the characters between the quotes), or null for another literal.</summary>
+    private static string? TextOf(string literal)
+    {
+        var sql = $"SELECT {DmlValueAdmissionTable.Sql(literal)}";
+        var fragment = new QueryParser().Parse(sql);
+        var select = (QuerySpecification)((SelectStatement)((TSqlScript)fragment).Batches.Single().Statements.Single()).QueryExpression;
+        return ((SelectScalarExpression)select.SelectElements.Single()).Expression is StringLiteral text ? text.Value : null;
+    }
+
+    /// <summary>
+    /// A number compared in a write's WHERE (MF4), decided by the admission functions, against SQL Server: an admitted
+    /// operand selects the row that the same literal stores in a column of the reference type; a decimal or currency operand refused for its places does not,
+    /// because SQL Server compares with the number as written, which no stored value equals. (A floating-point operand
+    /// refused for its digits does select it on SQL Server, which reads the operand as the nearest double; whether Dataverse
+    /// does is not shown, so it is refused.)
+    /// </summary>
+    [ReferenceServerFact]
+    public void EachComparedNumber_SelectsTheRowItsLiteralStores_OnlyWhenAdmitted()
+    {
+        var cases = DmlValueAdmissionTable.CompareCases
+            .Where(c => c.Kind is "decimal" or "currency" or "floating point" && c.Operator is "=" or "IN"
+                        && !c.Literal.TrimStart('-').StartsWith("0000", StringComparison.Ordinal) && c.Literal.Length < 38)
+            .ToList();
+        Assert.True(cases.Count >= 10, $"only {cases.Count} cases");
+
+        var wrong = new List<string>();
+        foreach (var c in cases)
+        {
+            var target = DmlValueAdmissionTable.Targets.Single(t => t.Kind == c.Kind);
+            var condition = c.Operator == "IN" ? $"v IN ({c.Literal}, 99)" : $"v = {c.Literal}";
+            var sql = $"DECLARE @t TABLE (v {target.ReferenceType}); INSERT INTO @t (v) VALUES ({c.Literal}); SELECT COUNT(*) FROM @t WHERE {condition};";
+            using var command = new SqlCommand(sql, database.Connection);
+            var selected = (int)command.ExecuteScalar()! == 1;
+            var admitted = ComparedIsAdmitted(c.Literal, target, c.Operator);
+            if (admitted != c.Cell.StartsWith('='))
+                wrong.Add($"{c.Kind} {c.Operator} {c.Literal}: table {c.Cell}, implementation {(admitted ? "admitted" : "refused")}");
+            if (admitted && !selected)
+                wrong.Add($"{c.Kind} {c.Operator} {c.Literal}: admitted, but SQL Server does not select the row it stores");
+            if (!admitted && c.Kind != "floating point" && selected)
+                wrong.Add($"{c.Kind} {c.Operator} {c.Literal}: refused, but SQL Server selects the row it stores");
+        }
+
+        Assert.True(wrong.Count == 0, string.Join(Environment.NewLine, wrong));
+    }
+
+    /// <summary>The implementation's decision for a compared literal: the admission function for an operand, or for an IN value.</summary>
+    private static bool ComparedIsAdmitted(string literal, DmlValueAdmissionTable.Target target, string op)
+    {
+        var fragment = new QueryParser().Parse($"SELECT {DmlValueAdmissionTable.Sql(literal)}");
+        var select = (QuerySpecification)((SelectStatement)((TSqlScript)fragment).Batches.Single().Statements.Single()).QueryExpression;
+        if (DmlStatementSupport.ToDmlLiteral(((SelectScalarExpression)select.SelectElements.Single()).Expression) is not { } dmlLiteral)
+            return false;
+        return (op == "IN"
+            ? DmlValueAdmission.AdmitInListOperand(dmlLiteral, target.Metadata)
+            : DmlValueAdmission.AdmitLiteral(dmlLiteral, target.Metadata, DmlValueUse.Compare)).IsAdmitted;
     }
 
     private static string StoredText(object? stored, string referenceType) => stored switch

@@ -56,24 +56,25 @@ public sealed class DmlValueAdmissionTableTests
         AssertSent(cell[1..], kind, entity.Contains(target.Column) ? entity[target.Column] : "<missing>");
     }
 
-    public static TheoryData<string, string, string> CompareCases()
+    public static TheoryData<string, string, string, string> CompareCases()
     {
-        var data = new TheoryData<string, string, string>();
+        var data = new TheoryData<string, string, string, string>();
         foreach (var c in DmlValueAdmissionTable.CompareCases)
-            data.Add(c.Kind, c.Literal, c.Cell);
+            data.Add(c.Kind, c.Operator, c.Literal, c.Cell);
         return data;
     }
 
     /// <summary>
     /// A literal compared in a write's WHERE: refused before anything is read, or admitted with exactly the text the table
-    /// gives carried by the FetchXML condition (a date and time as its UTC instant, whatever offset it was written with).
+    /// gives carried by the FetchXML condition that is sent (a date and time as its UTC instant, whatever offset it was written
+    /// with): the harness records the FetchXML after the executor's serialisation.
     /// </summary>
     [Theory]
     [MemberData(nameof(CompareCases))]
-    public async Task EachComparedLiteral_IsRefusedBeforeAnythingIsRead_OrCarriesExactlyItsText(string kind, string literal, string cell)
+    public async Task EachComparedLiteral_IsRefusedBeforeAnythingIsRead_OrCarriesExactlyItsText(string kind, string op, string literal, string cell)
     {
         var target = DmlValueAdmissionTable.Targets.Single(t => t.Kind == kind);
-        var sql = DmlValueAdmissionTable.CompareStatement(literal, target);
+        var sql = DmlValueAdmissionTable.CompareStatement(literal, target, op);
         var h = DmlTestHarness.Create(rows: 1);
 
         if (cell == "U")
@@ -88,9 +89,7 @@ public sealed class DmlValueAdmissionTableTests
         await h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed });
 
         var read = Assert.Single(h.Reads);
-        var condition = Assert.Single(System.Xml.Linq.XDocument.Parse(read.FetchXml).Descendants("condition"),
-            c => (string?)c.Attribute("attribute") == target.Column);
-        Assert.Equal(cell[1..], (string?)condition.Attribute("value"));
+        Assert.Equal(cell[1..], DmlReviewRound6FixTests.ConditionValue(read.FetchXml, target.Column));
     }
 
     /// <summary>The value sent is exactly the expected one, compared as a value of the target's kind.</summary>

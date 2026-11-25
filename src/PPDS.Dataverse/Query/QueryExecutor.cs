@@ -59,7 +59,7 @@ public class QueryExecutor : IQueryExecutor
         var stopwatch = Stopwatch.StartNew();
 
         // Parse the FetchXML to extract metadata and apply paging
-        var fetchDoc = XDocument.Parse(fetchXml);
+        var fetchDoc = FetchXmlSerialization.Parse(fetchXml);
         var fetchElement = fetchDoc.Root
             ?? throw new ArgumentException("Invalid FetchXML: missing root element", nameof(fetchXml));
 
@@ -103,7 +103,8 @@ public class QueryExecutor : IQueryExecutor
             fetchElement.SetAttributeValue("returntotalrecordcount", "true");
         }
 
-        var modifiedFetchXml = fetchDoc.ToString(SaveOptions.DisableFormatting);
+        // The text sent: FetchXmlSerialization is the one serialisation, which the tests use to see what is sent.
+        var modifiedFetchXml = FetchXmlSerialization.Serialize(fetchDoc);
 
         _logger?.LogDebug("Executing FetchXML query for entity {Entity}, page {Page}",
             entityLogicalName, effectivePageNumber);
@@ -167,7 +168,7 @@ public class QueryExecutor : IQueryExecutor
         var stopwatch = Stopwatch.StartNew();
 
         // Parse the FetchXML to extract metadata and apply paging
-        var fetchDoc = XDocument.Parse(fetchXml);
+        var fetchDoc = FetchXmlSerialization.Parse(fetchXml);
         var fetchElement = fetchDoc.Root
             ?? throw new ArgumentException("Invalid FetchXML: missing root element", nameof(fetchXml));
 
@@ -208,7 +209,8 @@ public class QueryExecutor : IQueryExecutor
             fetchElement.SetAttributeValue("returntotalrecordcount", "true");
         }
 
-        var modifiedFetchXml = fetchDoc.ToString(SaveOptions.DisableFormatting);
+        // The text sent: FetchXmlSerialization is the one serialisation, which the tests use to see what is sent.
+        var modifiedFetchXml = FetchXmlSerialization.Serialize(fetchDoc);
 
         _logger?.LogDebug("Executing FetchXML with execution options for entity {Entity}, page {Page} (BypassPlugins={BypassPlugins}, BypassFlows={BypassFlows})",
             entityLogicalName, effectivePageNumber, executionOptions.BypassPlugins, executionOptions.BypassFlows);

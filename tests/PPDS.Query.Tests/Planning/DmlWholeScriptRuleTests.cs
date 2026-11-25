@@ -167,7 +167,7 @@ public class DmlWholeScriptRuleTests
             var refusal = Refused(sql);
             refusal.ErrorCode.Should().Be(QueryErrorCode.DmlValueStoredDifferently, sql);
             refusal.Message.Should().Contain("is not written in").And.Contain("Dataverse has not been shown to store such text unchanged")
-                .And.Contain("Remove the white space at either end, or write NULL.");
+                .And.Contain("Remove the white space at either end (or the invisible character), or write NULL.");
         }
     }
 
@@ -193,10 +193,14 @@ public class DmlWholeScriptRuleTests
     [InlineData("a\u202F", true)]
     [InlineData("\u205Fa", true)]
     [InlineData("a\u2029", true)]
-    [InlineData("a\u200B", false)] // zero width space is not White_Space
+    // Not White_Space, but invisible: refused at either end as white space is (review round 6, S12); inside the text, written.
+    [InlineData("a\u200B", true)]
+    [InlineData("\u180Ea", true)]
+    [InlineData("a\uFEFF", true)]
+    [InlineData("a\u200Bb", false)]
     [InlineData("a b", false)]
     [InlineData("", false)]
-    public void WhiteSpace_IsTheUnicodeWhiteSpaceProperty(string text, bool edged)
+    public void WhiteSpace_IsTheUnicodeWhiteSpaceProperty_AndThreeInvisibleCharacters(string text, bool edged)
         => DmlStatementSupport.IsWhiteSpaceEdged(text).Should().Be(edged);
 
     // ---- numbers PPDS cannot hold (review S3) -----------------------------------------------------------------------

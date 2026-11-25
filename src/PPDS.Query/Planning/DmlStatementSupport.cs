@@ -45,6 +45,8 @@ internal static class DmlStatementSupport
     /// <summary>The refusal message for the first unsupported part of <paramref name="statement"/>, or null.</summary>
     public static string? FindUnsupported(TSqlStatement statement) => statement switch
     {
+        // First, and without recursion: every later check walks the condition tree recursively.
+        DeleteStatement or UpdateStatement or InsertStatement when FindConditionTooLarge(statement) is { } tooLarge => tooLarge,
         DeleteStatement or UpdateStatement or InsertStatement when DecorationCheck.Find(statement) is { } decoration => decoration,
         DeleteStatement delete => CheckDelete(delete),
         UpdateStatement update => CheckUpdate(update),
@@ -107,6 +109,18 @@ internal static class DmlStatementSupport
     public static DmlRefusal? FindScriptRefusal(TSqlFragment fragment)
     {
         var statements = TopLevelStatements(fragment);
+        // The size of every write's condition tree is checked before anything walks the script recursively (the write
+        // finder below included), so a tree deep enough to exhaust the stack is refused, for every statement of the script.
+        for (var i = 0; i < statements.Count; i++)
+        {
+            if (FindConditionTooLarge(statements[i]) is { } tooLarge)
+            {
+                var message = statements.Count > 1
+                    ? $"Statement {i + 1} (line {statements[i].StartLine}, column {statements[i].StartColumn}): {tooLarge}"
+                    : tooLarge;
+                return new DmlRefusal(QueryErrorCode.DmlUnsupportedConstruct, message);
+            }
+        }
         if (!ContainsWrite(fragment))
             return null;
 
@@ -231,9 +245,9 @@ internal static class DmlStatementSupport
             }
             if (!WhiteSpaceEdgedTextIsWritten && IsWhiteSpaceEdged(text.Value))
             {
-                return $"The text at {At(text)} is only white space, or begins or ends with a white-space character, and is not written in {context} yet: " +
-                       "Dataverse has not been shown to store such text unchanged." + NothingExecuted +
-                       " Remove the white space at either end, or write NULL.";
+                return $"The text at {At(text)} is only white space, or begins or ends with a white-space character or an invisible one " +
+                       $"(U+180E, U+200B, U+FEFF), and is not written in {context} yet: Dataverse has not been shown to store such text unchanged." +
+                       NothingExecuted + " Remove the white space at either end (or the invisible character), or write NULL.";
             }
         }
         return null;
@@ -639,6 +653,67 @@ internal static class DmlStatementSupport
 
     // ── WHERE: conditions Dataverse evaluates (FetchXML) ─────────────────
 
+    /// <summary>
+    /// The most levels a write's condition tree may have (AND, OR, NOT and parentheses, the condition itself counted). The
+    /// checks of the condition recurse once per level, and the stack was exhausted at about 6,500 levels (a chain of ORs),
+    /// so the bound is far below that; a long chain of OR on one column is written as IN instead.
+    /// </summary>
+    public const int MaxConditionDepth = 200;
+
+    /// <summary>The most conditions a write's WHERE may have (each comparison, IN, LIKE, BETWEEN or IS NULL counts once).</summary>
+    public const int MaxConditions = 1000;
+
+    /// <summary>
+    /// The refusal of a write whose WHERE is deeper than <see cref="MaxConditionDepth"/> or has more conditions than
+    /// <see cref="MaxConditions"/>, or null. It walks the tree with a stack of its own, so it cannot exhaust the thread's.
+    /// </summary>
+    internal static string? FindConditionTooLarge(TSqlStatement statement)
+    {
+        var (verb, where) = statement switch
+        {
+            UpdateStatement update => ("UPDATE", update.UpdateSpecification.WhereClause),
+            DeleteStatement delete => ("DELETE", delete.DeleteSpecification.WhereClause),
+            InsertStatement { InsertSpecification.InsertSource: SelectInsertSource { Select: QuerySpecification select } } => ("INSERT ... SELECT", select.WhereClause),
+            _ => ("", null)
+        };
+        if (where?.SearchCondition is not { } root)
+            return null;
+
+        var pending = new Stack<(BooleanExpression Condition, int Depth)>();
+        pending.Push((root, 1));
+        var conditions = 0;
+        while (pending.Count > 0)
+        {
+            var (condition, depth) = pending.Pop();
+            if (depth > MaxConditionDepth)
+            {
+                return Unsupported($"A WHERE clause nested more than {MaxConditionDepth} levels deep (AND, OR, NOT and parentheses)", $"the WHERE clause of {verb}",
+                    " Compare one column with many values with IN (...), or split the statement into several.");
+            }
+            switch (condition)
+            {
+                case BooleanBinaryExpression binary:
+                    pending.Push((binary.SecondExpression, depth + 1));
+                    pending.Push((binary.FirstExpression, depth + 1));
+                    break;
+                case BooleanParenthesisExpression paren:
+                    pending.Push((paren.Expression, depth + 1));
+                    break;
+                case BooleanNotExpression not:
+                    pending.Push((not.Expression, depth + 1));
+                    break;
+                default:
+                    if (++conditions > MaxConditions)
+                    {
+                        return Unsupported($"A WHERE clause with more than {MaxConditions} conditions", $"the WHERE clause of {verb}",
+                            " Compare one column with many values with IN (...), or split the statement into several.");
+                    }
+                    break;
+            }
+        }
+        return null;
+    }
+
     private static string? CheckWhere(string verb, WhereClause? where, HashSet<string> names)
     {
         if (where == null)
@@ -990,7 +1065,7 @@ internal static class DmlStatementSupport
     }
 
     /// <summary>A Dataverse logical name: letters, digits and underscores, not starting with a digit.</summary>
-    public static bool IsLogicalName(string name) => System.Text.RegularExpressions.Regex.IsMatch(name, "^[A-Za-z_][A-Za-z0-9_]*$");
+    public static bool IsLogicalName(string name) => System.Text.RegularExpressions.Regex.IsMatch(name, @"\A[A-Za-z_][A-Za-z0-9_]*\z");
 
     private sealed class ColumnNames : TSqlFragmentVisitor
     {
@@ -1031,6 +1106,20 @@ internal static class DmlStatementSupport
         }
 
         public override void Visit(OdbcLiteral node) => _found ??= Unsupported("an ODBC literal ({d ...})", "INSERT, UPDATE or DELETE");
+
+        /// <summary>
+        /// A text literal with a lower-case n prefix (<c>n'...'</c>): ScriptDom reads it as N'...', SQL Server does not read it
+        /// as text at all (a syntax error, or the column n).
+        /// </summary>
+        public override void Visit(StringLiteral node)
+        {
+            if (node.IsNational && node.ScriptTokenStream is { } tokens && node.FirstTokenIndex >= 0 && node.FirstTokenIndex < tokens.Count
+                && tokens[node.FirstTokenIndex].Text.StartsWith('n'))
+            {
+                _found ??= Unsupported($"The text at {At(node)} (a lower-case n prefix, which SQL Server does not read as text)",
+                    "INSERT, UPDATE or DELETE", " Write the prefix in upper case: N'...'.");
+            }
+        }
 
         public override void Visit(IdentityFunctionCall node) => _found ??= Unsupported("IDENTITY()", "INSERT, UPDATE or DELETE");
     }
