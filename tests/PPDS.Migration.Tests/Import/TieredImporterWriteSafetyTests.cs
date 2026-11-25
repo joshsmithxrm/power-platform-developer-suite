@@ -434,7 +434,8 @@ public class TieredImporterWriteSafetyTests
         var (sut, target, _, _) = WidgetAndGadget();
         var second = Guid.NewGuid();
         target.Steps.Add((second, "widget step 2", 10051));
-        target.Steps.Add((Guid.NewGuid(), "widget step 3", 10051));
+        var third = Guid.NewGuid();
+        target.Steps.Add((third, "widget step 3", 10051));
         using var cts = new CancellationTokenSource();
         target.OnUpdate = (id, state) =>
         {
@@ -446,6 +447,7 @@ public class TieredImporterWriteSafetyTests
         await act.Should().ThrowAsync<OperationCanceledException>();
         target.StepUpdates.Where(u => u.State == 1).Should().HaveCount(2);
         target.LeftDisabled.Should().BeEmpty("every step that may have been disabled is re-enabled on cancel");
+        target.StepUpdates.Should().NotContain(u => u.Id == third, "only the steps recorded as disabled are re-enabled, not every selected step");
         _bulkCalls.Should().BeEmpty();
     }
 

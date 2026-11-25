@@ -29,6 +29,29 @@ public class ConsoleProgressReporterTests : IDisposable
     #region Complete() — Source vs Imported Comparison (#280)
 
     [Fact]
+    public void Complete_SaysHowManyPluginStepsRemainDisabled_AndNotSuccess()
+    {
+        // #1934 r2: the console summary line for steps left disabled.
+        var reporter = new ConsoleProgressReporter { OperationName = "Import" };
+
+        reporter.Complete(new MigrationResult { Success = false, PluginStepsLeftDisabled = 2, Duration = TimeSpan.FromSeconds(1) });
+
+        var output = _capturedStdErr.ToString();
+        output.Should().Contain("2 plug-in step(s) could not be re-enabled and remain disabled");
+        output.Should().Contain("Import completed with errors.");
+    }
+
+    [Fact]
+    public void Complete_WithoutStepsLeftDisabled_SaysNothingAboutThem()
+    {
+        var reporter = new ConsoleProgressReporter { OperationName = "Import" };
+
+        reporter.Complete(new MigrationResult { Success = true, Duration = TimeSpan.FromSeconds(1) });
+
+        _capturedStdErr.ToString().Should().NotContain("plug-in step");
+    }
+
+    [Fact]
     public void Complete_ShowsSourceVsImported_WhenFailuresExist()
     {
         var reporter = new ConsoleProgressReporter { OperationName = "Import" };
