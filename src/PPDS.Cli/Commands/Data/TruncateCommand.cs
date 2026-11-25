@@ -3,9 +3,9 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Infrastructure.Progress;
 using PPDS.Cli.Services.Data;
 using PPDS.Dataverse.BulkOperations;
-using PPDS.Dataverse.Progress;
 
 namespace PPDS.Cli.Commands.Data;
 
@@ -81,7 +81,7 @@ public static class TruncateCommand
 
         var continueOnErrorOption = new Option<bool>("--continue-on-error")
         {
-            Description = "Continue deleting on individual record failures",
+            Description = "Continue deleting on individual record failures (a record that fails is not retried in the same run)",
             DefaultValueFactory = _ => true
         };
 
@@ -156,7 +156,7 @@ public static class TruncateCommand
 
             var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
             var dataQueryService = serviceProvider.GetRequiredService<IDataQueryService>();
-            var bulkExecutor = serviceProvider.GetRequiredService<IBulkOperationExecutor>();
+            var truncateService = serviceProvider.GetRequiredService<IDataTruncateService>();
 
             // Count records
             var count = await dataQueryService.CountRecordsAsync(entity, cancellationToken);
@@ -245,10 +245,20 @@ public static class TruncateCommand
                 Console.Error.WriteLine();
             }
 
-            var result = await ExecuteTruncateAsync(
-                dataQueryService, bulkExecutor, entity, batchSize,
-                bypassPlugins, bypassFlows, continueOnError,
-                globalOptions, cancellationToken);
+            // Each record is attempted at most once: the run ends when no record is left that it has not attempted, or
+            // when a pass deletes nothing (#1922).
+            var result = await truncateService.TruncateAsync(
+                entity,
+                new DataTruncateOptions
+                {
+                    BatchSize = batchSize,
+                    ContinueOnError = continueOnError,
+                    BypassCustomLogic = bypassPlugins,
+                    BypassPowerAutomateFlows = bypassFlows,
+                    ExpectedCount = count
+                },
+                globalOptions.IsJsonMode ? null : new ConsoleTruncateProgress(),
+                cancellationToken);
 
             if (!globalOptions.IsJsonMode)
             {
@@ -263,8 +273,10 @@ public static class TruncateCommand
                 {
                     Success = result.IsSuccess,
                     Entity = entity,
-                    DeletedCount = result.SuccessCount,
-                    FailedCount = result.FailureCount,
+                    DeletedCount = result.DeletedCount,
+                    FailedCount = result.FailedCount,
+                    Passes = result.Passes,
+                    StopReason = result.StopReason.ToString(),
                     DurationMs = result.Duration.TotalMilliseconds
                 });
             }
@@ -273,7 +285,7 @@ public static class TruncateCommand
                 WriteTextResult(entity, result);
             }
 
-            return result.IsSuccess ? ExitCodes.Success : ExitCodes.PartialSuccess;
+            return ToExitCode(result);
         }
         catch (OperationCanceledException)
         {
@@ -303,93 +315,65 @@ public static class TruncateCommand
         }
     }
 
-    private static async Task<BulkOperationResult> ExecuteTruncateAsync(
-        IDataQueryService dataQueryService,
-        IBulkOperationExecutor bulkExecutor,
-        string entity,
-        int batchSize,
-        CustomLogicBypass bypassPlugins,
-        bool bypassFlows,
-        bool continueOnError,
-        GlobalOptionValues globalOptions,
-        CancellationToken cancellationToken)
+    /// <summary>
+    /// 0 when the table was emptied with no failure; 2 when the counts are not certain; otherwise 1 (records failed or
+    /// were not attempted).
+    /// </summary>
+    internal static int ToExitCode(DataTruncateResult result) => result switch
     {
-        var allResults = new List<BulkOperationResult>();
-        var totalDeleted = 0;
-        var totalFailed = 0;
-        var startTime = DateTime.UtcNow;
+        { IsSuccess: true } => ExitCodes.Success,
+        { StopReason: DataTruncateStopReason.DeletedRecordReadAgain } => ExitCodes.Failure,
+        _ => ExitCodes.PartialSuccess
+    };
 
-        // Delete in batches until no records remain
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
+    private static string? DescribeStop(DataTruncateResult result) => result.StopReason switch
+    {
+        DataTruncateStopReason.Completed when result.FailedCount == 0 => null,
+        DataTruncateStopReason.Completed => "No record is left to read, although some deletes failed.",
+        DataTruncateStopReason.OnlyFailedRecordsRemain =>
+            "Stopped: every record left is one that could not be deleted in this run; none was retried.",
+        DataTruncateStopReason.TooManyFailedRecords =>
+            "Stopped: so many records could not be deleted that the next read held only those; records that were " +
+            "not attempted may remain. Fix the cause of the failures and run the command again.",
+        DataTruncateStopReason.PassDeletedNothing =>
+            "Stopped: a pass deleted no record. Records remain; fix the cause of the failures and run the command again.",
+        DataTruncateStopReason.StoppedOnError =>
+            "Stopped at the first pass with a failure (--continue-on-error false). Records remain.",
+        DataTruncateStopReason.DeletedRecordReadAgain =>
+            "Stopped: a record reported as deleted was read again, so the counts above are not certain. Records remain.",
+        _ => null
+    };
 
-            // Fetch a batch of IDs
-            var ids = await dataQueryService.FetchBatchIdsAsync(entity, batchSize, cancellationToken);
+    /// <summary>Renders the truncate progress on stderr.</summary>
+    private sealed class ConsoleTruncateProgress : IProgressReporter
+    {
+        public void ReportProgress(ProgressSnapshot snapshot)
+            => Console.Error.Write(
+                $"\r  Processed: {snapshot.CurrentItem:N0} of {snapshot.TotalItems:N0} | {snapshot.RecordsPerSecond ?? 0:F0}/s");
 
-            if (ids.Count == 0)
-                break;
+        public void ReportPhase(string phase, string? detail = null) { }
 
-            // Delete this batch
-            var options = new BulkOperationOptions
-            {
-                BatchSize = batchSize,
-                ContinueOnError = continueOnError,
-                BypassCustomLogic = bypassPlugins,
-                BypassPowerAutomateFlows = bypassFlows
-            };
+        public void ReportWarning(string message) => Console.Error.WriteLine(message);
 
-            // Progress reporting
-            var batchProgress = new Progress<ProgressSnapshot>(snapshot =>
-            {
-                if (!globalOptions.IsJsonMode)
-                {
-                    Console.Error.Write($"\r  Deleted: {totalDeleted + snapshot.Processed:N0} | {snapshot.InstantRatePerSecond:F0}/s");
-                }
-            });
-
-            var result = await bulkExecutor.DeleteMultipleAsync(
-                entity,
-                ids,
-                options,
-                progress: batchProgress,
-                cancellationToken: cancellationToken);
-
-            totalDeleted += result.SuccessCount;
-            totalFailed += result.FailureCount;
-            allResults.Add(result);
-
-            // If batch had failures and we're not continuing on error, stop
-            if (result.FailureCount > 0 && !continueOnError)
-                break;
-        }
-
-        // Aggregate results
-        var duration = DateTime.UtcNow - startTime;
-        var allErrors = allResults.SelectMany(r => r.Errors).ToList();
-
-        return new BulkOperationResult
-        {
-            SuccessCount = totalDeleted,
-            FailureCount = totalFailed,
-            Duration = duration,
-            Errors = allErrors
-        };
+        public void ReportInfo(string message) => Console.Error.WriteLine(message);
     }
 
-    private static void WriteTextResult(string entity, BulkOperationResult result)
+    private static void WriteTextResult(string entity, DataTruncateResult result)
     {
-        Console.Error.WriteLine("Truncate complete");
+        Console.Error.WriteLine(result.IsSuccess ? "Truncate complete" : "Truncate incomplete");
         Console.Error.WriteLine();
         Console.Error.WriteLine($"  Entity: {entity}");
-        Console.Error.WriteLine($"  Deleted: {result.SuccessCount:N0}");
-
-        if (result.FailureCount > 0)
-        {
-            Console.Error.WriteLine($"  Failed: {result.FailureCount:N0}");
-        }
+        Console.Error.WriteLine($"  Deleted: {result.DeletedCount:N0}");
+        Console.Error.WriteLine($"  Failed: {result.FailedCount:N0}");
 
         Console.Error.WriteLine($"  Duration: {result.Duration:mm\\:ss\\.fff}");
+
+        var stop = DescribeStop(result);
+        if (stop != null)
+        {
+            Console.Error.WriteLine();
+            Console.Error.WriteLine(stop);
+        }
 
         if (result.Errors.Count > 0)
         {
@@ -449,6 +433,8 @@ public static class TruncateCommand
         public int RecordCount { get; init; }
         public int DeletedCount { get; init; }
         public int FailedCount { get; init; }
+        public int Passes { get; init; }
+        public string? StopReason { get; init; }
         public double DurationMs { get; init; }
     }
 }

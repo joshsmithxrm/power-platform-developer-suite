@@ -346,6 +346,15 @@ public static class ServiceRegistration
             sp.GetRequiredService<IEnvironmentConfirmationService>(),
             sp.GetRequiredService<FormMutationCoordinator>()));
 
+        // Record selection for data delete --file (#1915) and the data truncate loop (#1922).
+        services.AddTransient<IRecordIdFileService>(sp => new RecordIdFileService(
+            sp.GetRequiredService<IMetadataQueryService>(),
+            sp.GetRequiredService<ILogger<RecordIdFileService>>()));
+        services.AddTransient<IDataTruncateService>(sp => new DataTruncateService(
+            sp.GetRequiredService<IDataQueryService>(),
+            sp.GetRequiredService<IBulkOperationExecutor>(),
+            sp.GetRequiredService<ILogger<DataTruncateService>>()));
+
         // Read-only services (6) — unchanged ctor shape, simple type registration.
         services.AddTransient<IImportJobService, ImportJobService>();
         services.AddTransient<IUserService, UserService>();

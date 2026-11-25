@@ -67,7 +67,7 @@ public static class DeleteCommand
 
         var idColumnOption = new Option<string?>("--id-column")
         {
-            Description = "Column name containing record IDs in CSV file (default: entity primary key)"
+            Description = "Column (CSV header or JSON property) holding the record IDs in the file (default: the table's primary id column)"
         };
 
         var filterOption = new Option<string?>("--filter")
@@ -272,7 +272,9 @@ public static class DeleteCommand
             }
             else if (file != null)
             {
-                idsToDelete = await LoadIdsFromFileAsync(file, idColumn, entity, cancellationToken);
+                // The ids come only from --id-column or the table's primary id column; anything else is refused (#1915).
+                var recordIdFileService = serviceProvider.GetRequiredService<IRecordIdFileService>();
+                idsToDelete = (await recordIdFileService.ReadIdsAsync(file.FullName, entity, idColumn, cancellationToken)).ToList();
                 if (idsToDelete.Count == 0)
                 {
                     WriteError(globalOptions, "NO_RECORDS", "No record IDs found in file");
@@ -471,140 +473,6 @@ public static class DeleteCommand
             }
             return ExceptionMapper.ToExitCode(ex);
         }
-    }
-
-    private static async Task<List<Guid>> LoadIdsFromFileAsync(
-        FileInfo file,
-        string? idColumn,
-        string entity,
-        CancellationToken cancellationToken)
-    {
-        var content = await File.ReadAllTextAsync(file.FullName, cancellationToken);
-        content = content.Trim();
-
-        // Try JSON first
-        if (content.StartsWith('[') || content.StartsWith('{'))
-        {
-            return ParseJsonIds(content);
-        }
-
-        // Assume CSV
-        return ParseCsvIds(content, idColumn, entity);
-    }
-
-    private static List<Guid> ParseJsonIds(string content)
-    {
-        var ids = new List<Guid>();
-
-        using var doc = JsonDocument.Parse(content);
-
-        if (doc.RootElement.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var element in doc.RootElement.EnumerateArray())
-            {
-                if (element.ValueKind == JsonValueKind.String && Guid.TryParse(element.GetString(), out var id))
-                {
-                    ids.Add(id);
-                }
-                else if (element.ValueKind == JsonValueKind.Object)
-                {
-                    // Look for common ID property names
-                    foreach (var prop in element.EnumerateObject())
-                    {
-                        if (prop.Name.EndsWith("id", StringComparison.OrdinalIgnoreCase) &&
-                            prop.Value.ValueKind == JsonValueKind.String &&
-                            Guid.TryParse(prop.Value.GetString(), out var objId))
-                        {
-                            ids.Add(objId);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        else if (doc.RootElement.ValueKind == JsonValueKind.Object &&
-                 doc.RootElement.TryGetProperty("records", out var records) &&
-                 records.ValueKind == JsonValueKind.Array)
-        {
-            // Handle { "records": [...] } format
-            return ParseJsonIds(records.GetRawText());
-        }
-
-        return ids;
-    }
-
-    private static List<Guid> ParseCsvIds(string content, string? idColumn, string entity)
-    {
-        var ids = new List<Guid>();
-        var lines = content.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
-
-        if (lines.Length == 0) return ids;
-
-        // Parse header using same CSV parser as data rows for consistency
-        var headers = ParseCsvLine(lines[0]).Select(h => h.Trim()).ToList();
-
-        // Find ID column
-        var idColIndex = -1;
-        if (!string.IsNullOrEmpty(idColumn))
-        {
-            idColIndex = headers.FindIndex(h => h.Equals(idColumn, StringComparison.OrdinalIgnoreCase));
-            if (idColIndex < 0)
-            {
-                throw new ArgumentException($"Column '{idColumn}' not found in CSV. Available: {string.Join(", ", headers)}");
-            }
-        }
-        else
-        {
-            // Try to find primary key column (entityid or id)
-            idColIndex = headers.FindIndex(h =>
-                h.Equals($"{entity}id", StringComparison.OrdinalIgnoreCase) ||
-                h.Equals("id", StringComparison.OrdinalIgnoreCase));
-
-            if (idColIndex < 0)
-            {
-                throw new ArgumentException($"Could not find ID column. Specify --id-column. Available: {string.Join(", ", headers)}");
-            }
-        }
-
-        // Parse data rows
-        for (var i = 1; i < lines.Length; i++)
-        {
-            var values = ParseCsvLine(lines[i]).Select(v => v.Trim()).ToList();
-            if (values.Count > idColIndex && Guid.TryParse(values[idColIndex], out var id))
-            {
-                ids.Add(id);
-            }
-        }
-
-        return ids;
-    }
-
-    private static List<string> ParseCsvLine(string line)
-    {
-        var values = new List<string>();
-        var current = new System.Text.StringBuilder();
-        var inQuotes = false;
-
-        foreach (var c in line)
-        {
-            if (c == '"')
-            {
-                inQuotes = !inQuotes;
-                // Don't append quotes - just toggle state
-            }
-            else if (c == ',' && !inQuotes)
-            {
-                values.Add(current.ToString());
-                current.Clear();
-            }
-            else
-            {
-                current.Append(c);
-            }
-        }
-
-        values.Add(current.ToString());
-        return values;
     }
 
     private static void WriteTextResult(BulkOperationResult result)
