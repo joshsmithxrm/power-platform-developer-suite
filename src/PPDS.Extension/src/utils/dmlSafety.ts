@@ -39,7 +39,14 @@ const CONFIRMATION_REQUIRED_CODE = 'Query.DmlConfirmationRequired';
  * Error codes the daemon uses when a safety guard refuses a statement. `Query.DmlRowCapExceeded`
  * is handled for daemons that raise it; the daemon on main stops at the cap without an error.
  */
-const REFUSAL_CODES = new Set(['Query.DmlBlocked', 'Query.DmlRowCapExceeded', 'Safety.ShakedownActive']);
+const REFUSAL_CODES = new Set([
+    'Query.DmlBlocked',
+    'Query.DmlUnsupportedConstruct',
+    'Query.DmlValueStoredDifferently',
+    'Query.DmlMetadataUnavailable',
+    'Query.DmlRowCapExceeded',
+    'Safety.ShakedownActive',
+]);
 
 /** Statements within both limits are shown whole in the modal. */
 const MAX_PREVIEW_LINES = 24;
@@ -251,9 +258,12 @@ const normalisedUrl = (url: string | null | undefined): string | undefined => ur
 
 /** Protection mark: production is protected, and a missing or unknown type is never treated as ordinary. */
 function protectionMark(target: DmlWriteTarget): string | undefined {
-    const values = [target.protection, target.type].map(value => value?.toLowerCase()).filter((value): value is string => !!value);
-    if (values.includes('production')) return 'PRODUCTION / PROTECTED';
-    if (values.length === 0 || values.every(value => value === 'unknown')) return 'TYPE UNKNOWN, TREATED AS PROTECTED';
+    const type = target.type?.toLowerCase();
+    const protection = target.protection?.toLowerCase();
+    // No saved type counts as Production (the daemon reports its protection as Production): say why it is protected.
+    const typeUnknown = !type || type === 'unknown';
+    if (typeUnknown && (!protection || protection === 'unknown' || protection === 'production')) return 'TYPE UNKNOWN, TREATED AS PROTECTED';
+    if (protection === 'production' || type === 'production') return 'PRODUCTION / PROTECTED';
     return undefined;
 }
 

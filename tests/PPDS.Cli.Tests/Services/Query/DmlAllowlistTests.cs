@@ -84,7 +84,7 @@ public class DmlAllowlistTests
         var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(
             new SqlQueryRequest { Sql = $"UPDATE account SET description = {expression} WHERE name IS NOT NULL", DmlSafety = Confirmed }));
 
-        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
         Assert.Contains("Nothing was executed", ex.Message);
         h.AssertNothingChanged();
         Assert.Empty(h.Reads);
@@ -226,7 +226,7 @@ public class DmlAllowlistTests
             var ex = await Assert.ThrowsAsync<PpdsException>(
                 () => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = options }));
 
-            Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+            Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
             Assert.Contains(named, ex.Message);
             Assert.Contains("Nothing was executed", ex.Message);
             h.AssertNothingChanged();
@@ -274,16 +274,37 @@ public class DmlAllowlistTests
 
     // ---- S8: a refusal inside TRY inside WHILE ------------------------------------------------
 
+    /// <summary>
+    /// A write inside TRY inside WHILE can no longer run at all (the whole-script rule): the script is refused before its
+    /// first statement, so no CATCH can swallow a refusal and the earlier UPDATE does not run either.
+    /// </summary>
     [Fact]
-    public async Task RowCapRefusal_InsideTryInsideWhile_StopsOnce_KeepsItsCode_AndReportsTheEarlierStatement()
+    public async Task AWriteInsideTryInsideWhile_IsRefusedBeforeAnyStatementRuns()
+    {
+        var h = DmlTestHarness.Create(rows: 5, contactRows: 1);
+
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest
+        {
+            Sql = "UPDATE contact SET lastname = 'b' WHERE lastname = 'y'; " +
+                  "WHILE 1 = 1 BEGIN BEGIN TRY DELETE FROM account WHERE name = 'x' END TRY BEGIN CATCH PRINT 'caught' END CATCH END",
+            DmlSafety = new DmlSafetyOptions { IsConfirmed = true, RowCap = 2 }
+        }));
+
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
+        Assert.Contains("Statement 2 (line 1, column 57) is a WHILE loop", ex.Message);
+        h.AssertNothingChanged();
+        Assert.Empty(h.Reads);
+    }
+
+    /// <summary>In a script of admitted writes, the row cap stops the statement over it and reports the earlier one.</summary>
+    [Fact]
+    public async Task RowCapRefusal_InAScriptOfWrites_KeepsItsCode_AndReportsTheEarlierStatement()
     {
         var h = DmlTestHarness.Create(rows: 5, contactRows: 1);
 
         var ex = await Assert.ThrowsAsync<PpdsDmlRowCapExceededException>(() => h.Service.ExecuteAsync(new SqlQueryRequest
         {
-            // Without the fix the CATCH would swallow the refusal on every iteration of this endless loop.
-            Sql = "UPDATE contact SET lastname = 'b' WHERE lastname = 'y'; " +
-                  "WHILE 1 = 1 BEGIN BEGIN TRY DELETE FROM account WHERE name = 'x' END TRY BEGIN CATCH PRINT 'caught' END CATCH END",
+            Sql = "UPDATE contact SET lastname = 'b' WHERE lastname = 'y'; DELETE FROM account WHERE name = 'x'",
             DmlSafety = new DmlSafetyOptions { IsConfirmed = true, RowCap = 2 }
         }));
 

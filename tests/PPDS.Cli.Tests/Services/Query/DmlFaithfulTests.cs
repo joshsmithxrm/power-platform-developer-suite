@@ -149,7 +149,7 @@ public sealed class DmlFaithfulTests : IDisposable
 
         var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
 
-        Assert.Equal(PPDS.Cli.Infrastructure.Errors.ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        Assert.Equal(PPDS.Cli.Infrastructure.Errors.ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
         h.AssertNothingChanged();
     }
 
@@ -282,7 +282,7 @@ public sealed class DmlFaithfulTests : IDisposable
 
         var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
 
-        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
         Assert.Contains(named, ex.Message);
         h.AssertNothingChanged();
     }
@@ -327,7 +327,7 @@ public sealed class DmlFaithfulTests : IDisposable
 
         var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
 
-        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
         Assert.Contains(named, ex.Message);
         h.AssertNothingChanged();
         Assert.Empty(h.Reads);
@@ -459,7 +459,7 @@ public class DmlHintGateTests
 
             var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = hint + Update, DmlSafety = options }));
 
-            Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+            Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
             Assert.Contains($"-- ppds:{named} hint is not supported", ex.Message);
             h.AssertNothingChanged();
             Assert.Empty(h.Reads);

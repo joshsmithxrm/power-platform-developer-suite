@@ -158,11 +158,11 @@ internal static class DmlColumnValidator
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            throw Refuse($"The columns of '{table}' could not be read ({ex.Message}), so the statement cannot be checked.");
+            throw Refuse($"The columns of '{table}' could not be read ({ex.Message}), so the statement cannot be checked.", ErrorCodes.Query.DmlMetadataUnavailable);
         }
 
         if (attributes.Count == 0)
-            throw Refuse($"The table '{table}' was not found, or has no columns.");
+            throw Refuse($"The table '{table}' was not found, or has no columns.", ErrorCodes.Query.DmlMetadataUnavailable);
         return attributes.GroupBy(a => a.LogicalName, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
     }
@@ -459,11 +459,13 @@ internal static class DmlColumnValidator
                 return;
             case "Boolean":
                 throw Refuse($"{column} is a yes/no column; compare it with 1 or 0.");
-            case "Uniqueidentifier" or "Lookup" or "Owner" when literal is StringLiteral s && IsGuidText(s.Value):
+            // The spelling written values use: SQL Server refuses a GUID with surrounding white space (error 8169), which
+            // .NET's parser would trim.
+            case "Uniqueidentifier" or "Lookup" or "Owner" when literal is StringLiteral s && DmlStatementSupport.IsCanonicalGuidText(s.Value):
                 return;
             case "Uniqueidentifier" or "Lookup" or "Owner":
                 throw Refuse($"{column} holds row ids; compare it with a quoted GUID such as '00000000-0000-0000-0000-000000000000' " +
-                             $"(or in braces), not {Sql(value)}.");
+                             $"(or in braces), with dashes and without spaces, not {Sql(value)}.");
             case "DateTime" when literal is StringLiteral s:
                 CheckDateLiteral(attribute, column, s.Value);
                 return;
@@ -491,10 +493,6 @@ internal static class DmlColumnValidator
         CastCall { DataType: SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.UniqueIdentifier }, Parameter: StringLiteral s } => DmlStatementSupport.IsCanonicalGuidText(s.Value),
         _ => false
     };
-
-    /// <summary>The GUID forms a WHERE condition may compare an id with: with dashes, with or without braces, any case (.NET ignores surrounding spaces).</summary>
-    private static bool IsGuidText(string text)
-        => Guid.TryParseExact(text, "D", out _) || Guid.TryParseExact(text, "B", out _);
 
     /// <summary>An expression the engine evaluates to a number: number literals, number columns and arithmetic, functions and conversions of them.</summary>
     private static bool IsNumeric(ScalarExpression expression, Dictionary<string, AttributeMetadataDto> columns) => expression switch
@@ -1017,5 +1015,11 @@ internal static class DmlColumnValidator
         }
     }
 
-    private static PpdsException Refuse(string message) => new(ErrorCodes.Query.DmlBlocked, message + " Nothing was executed.");
+    /// <summary>
+    /// A refusal before anything runs. Every check here is of the unsupported-construct class (no admission row is in
+    /// force yet, so a value outside a column's limits is also not admitted) unless it says otherwise; a table whose
+    /// columns cannot be read is <see cref="ErrorCodes.Query.DmlMetadataUnavailable"/>.
+    /// </summary>
+    private static PpdsException Refuse(string message, string code = ErrorCodes.Query.DmlUnsupportedConstruct)
+        => new(code, message + " Nothing was executed.");
 }

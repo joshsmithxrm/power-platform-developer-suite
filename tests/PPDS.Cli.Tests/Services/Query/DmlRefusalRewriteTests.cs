@@ -43,7 +43,7 @@ public sealed class DmlRefusalRewriteTests : IDisposable
     [InlineData("UPDATE account SET description = 5 WHERE name = 'n1'", "Write text in quotes (for example '5')", "UPDATE account SET description = '5' WHERE name = 'n1'")]
     [InlineData("UPDATE account SET revenue = '5' WHERE name = 'n1'", "Write a number without quotes", "UPDATE account SET revenue = 5 WHERE name = 'n1'")]
     [InlineData("UPDATE account SET numberofemployees = creditlimit WHERE name = 'n1'", "Write the whole number as a literal", "UPDATE account SET numberofemployees = 5 WHERE name = 'n1'")]
-    [InlineData("UPDATE account SET parentaccountid = ' 00000000-0000-0000-0000-000000000001' WHERE name = 'n1'", "without spaces", "UPDATE account SET parentaccountid = '00000000-0000-0000-0000-000000000001' WHERE name = 'n1'")]
+    [InlineData("UPDATE account SET parentaccountid = ' 00000000-0000-0000-0000-000000000001' WHERE name = 'n1'", "Remove the white space at either end", "UPDATE account SET parentaccountid = '00000000-0000-0000-0000-000000000001' WHERE name = 'n1'")]
     // INSERT
     [InlineData("INSERT INTO account (name, numberofemployees) VALUES (UPPER('a'), 1 + 2)", "write the value you want stored as a literal", "INSERT INTO account (name, numberofemployees) VALUES ('A', 3)")]
     [InlineData("INSERT TOP (1) INTO account (name) SELECT name FROM account", "SELECT TOP (n) ... FROM table ORDER BY column", "INSERT INTO account (name) SELECT TOP (1) name FROM account ORDER BY name")]

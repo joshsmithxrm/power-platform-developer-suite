@@ -395,17 +395,14 @@ public class SqlQueryServiceTests
 
     [Theory]
     [Trait("Category", "PlanUnit")]
-    [InlineData("BEGIN UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END", "DmlExecuteNode", "<fetch")]
-    [InlineData("WHILE 1 = 0 UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
-    [InlineData("BEGIN TRY UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END TRY BEGIN CATCH DELETE FROM account WHERE accountid = '00000000-0000-0000-0000-000000000001' END CATCH", "DmlExecuteNode", "<fetch")]
-    [InlineData("DECLARE @preview int; SELECT @preview = 1; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
-    [InlineData("SELECT 1; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
-    [InlineData("SELECT name INTO #accounts FROM account; SELECT * FROM #accounts; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
-    [InlineData("SELECT COUNT(*) FROM account; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
-    public async Task ExecuteAsync_CompoundDmlDryRun_NeverDispatchesExecution(
-        string sql,
-        string expectedPlanNode,
-        string expectedFetchXml)
+    [InlineData("BEGIN UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END")]
+    [InlineData("WHILE 1 = 0 UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
+    [InlineData("BEGIN TRY UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END TRY BEGIN CATCH DELETE FROM account WHERE accountid = '00000000-0000-0000-0000-000000000001' END CATCH")]
+    [InlineData("DECLARE @preview int; SELECT @preview = 1; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
+    [InlineData("SELECT 1; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
+    [InlineData("SELECT name INTO #accounts FROM account; SELECT * FROM #accounts; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
+    [InlineData("SELECT COUNT(*) FROM account; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
+    public async Task ExecuteAsync_CompoundDmlDryRun_IsRefusedByTheWholeScriptRule_AndNeverDispatchesExecution(string sql)
     {
         var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
         var mockBulkExecutor = new Mock<IBulkOperationExecutor>(MockBehavior.Strict);
@@ -422,32 +419,26 @@ public class SqlQueryServiceTests
             DmlSafety = new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true }
         };
 
-        var result = await service.ExecuteAsync(request);
+        // A script that writes may contain only admitted INSERT, UPDATE and DELETE statements (the whole-script rule):
+        // a dry run of one that contains anything else is refused too, before anything is read.
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
 
-        Assert.True(result.DmlSafetyResult?.ContainsDml);
-        Assert.True(result.DmlSafetyResult?.IsDryRun);
-        Assert.True(result.DmlSafetyResult?.RequiresConfirmation);
-        Assert.NotNull(result.DryRunPlan);
-        Assert.True(ContainsNodeType(result.DryRunPlan, expectedPlanNode));
-        Assert.Contains(expectedFetchXml, result.TranspiledFetchXml, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("-- Script: multi-statement execution", result.TranspiledFetchXml);
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
+        Assert.Contains("This script changes data", ex.Message);
         mockExecutor.VerifyNoOtherCalls();
         mockBulkExecutor.VerifyNoOtherCalls();
     }
 
     [Theory]
     [Trait("Category", "PlanUnit")]
-    [InlineData("BEGIN UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END", "DmlExecuteNode", "<fetch")]
-    [InlineData("WHILE 1 = 0 UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
-    [InlineData("BEGIN TRY UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END TRY BEGIN CATCH DELETE FROM account WHERE accountid = '00000000-0000-0000-0000-000000000001' END CATCH", "DmlExecuteNode", "<fetch")]
-    [InlineData("DECLARE @preview int; SELECT @preview = 1; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
-    [InlineData("SELECT 1; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
-    [InlineData("SELECT name INTO #accounts FROM account; SELECT * FROM #accounts; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
-    [InlineData("SELECT COUNT(*) FROM account; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'", "DmlExecuteNode", "<fetch")]
-    public async Task ExecuteStreamingAsync_CompoundDmlDryRun_NeverDispatchesExecution(
-        string sql,
-        string expectedPlanNode,
-        string expectedFetchXml)
+    [InlineData("BEGIN UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END")]
+    [InlineData("WHILE 1 = 0 UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
+    [InlineData("BEGIN TRY UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001' END TRY BEGIN CATCH DELETE FROM account WHERE accountid = '00000000-0000-0000-0000-000000000001' END CATCH")]
+    [InlineData("DECLARE @preview int; SELECT @preview = 1; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
+    [InlineData("SELECT 1; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
+    [InlineData("SELECT name INTO #accounts FROM account; SELECT * FROM #accounts; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
+    [InlineData("SELECT COUNT(*) FROM account; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
+    public async Task ExecuteStreamingAsync_CompoundDmlDryRun_IsRefusedByTheWholeScriptRule_AndNeverDispatchesExecution(string sql)
     {
         var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
         var mockBulkExecutor = new Mock<IBulkOperationExecutor>(MockBehavior.Strict);
@@ -464,25 +455,21 @@ public class SqlQueryServiceTests
             DmlSafety = new DmlSafetyOptions { IsConfirmed = true, IsDryRun = true }
         };
 
-        var chunks = new List<SqlQueryStreamChunk>();
-        await foreach (var chunk in service.ExecuteStreamingAsync(request))
-            chunks.Add(chunk);
+        var ex = await Assert.ThrowsAsync<PpdsException>(async () =>
+        {
+            await foreach (var _ in service.ExecuteStreamingAsync(request))
+            {
+            }
+        });
 
-        var result = Assert.Single(chunks);
-        Assert.True(result.DmlSafetyResult?.ContainsDml);
-        Assert.True(result.DmlSafetyResult?.IsDryRun);
-        Assert.True(result.DmlSafetyResult?.RequiresConfirmation);
-        Assert.NotNull(result.DryRunPlan);
-        Assert.True(ContainsNodeType(result.DryRunPlan, expectedPlanNode));
-        Assert.Contains(expectedFetchXml, result.TranspiledFetchXml, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("-- Script: multi-statement execution", result.TranspiledFetchXml);
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
         mockExecutor.VerifyNoOtherCalls();
         mockBulkExecutor.VerifyNoOtherCalls();
     }
 
     [Fact]
     [Trait("Category", "PlanUnit")]
-    public async Task ExecuteAsync_TryCatchDryRun_DescribesBothDmlBranches()
+    public async Task ExecuteAsync_TryCatchDryRun_IsRefused_AWriteScriptMayNotContainTryCatch()
     {
         var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
         var mockBulkExecutor = new Mock<IBulkOperationExecutor>(MockBehavior.Strict);
@@ -499,19 +486,18 @@ public class SqlQueryServiceTests
             DmlSafety = new DmlSafetyOptions { IsDryRun = true }
         };
 
-        var result = await service.ExecuteAsync(request);
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
 
-        Assert.NotNull(result.DryRunPlan);
-        Assert.Equal(2, CountNodeType(result.DryRunPlan, "DmlExecuteNode"));
-        Assert.Equal(2, CountOccurrences(result.TranspiledFetchXml!, "<fetch"));
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
+        Assert.Contains("is TRY ... CATCH", ex.Message);
         mockExecutor.VerifyNoOtherCalls();
         mockBulkExecutor.VerifyNoOtherCalls();
     }
 
     [Theory]
     [Trait("Category", "PlanUnit")]
-    [InlineData("SELECT name FROM account; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
-    [InlineData("DECLARE @preview INT = 0; UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
+    [InlineData("UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'; DELETE FROM account WHERE accountid = '00000000-0000-0000-0000-000000000002'")]
+    [InlineData("INSERT INTO account (name) VALUES ('preview'); UPDATE account SET name = 'preview' WHERE accountid = '00000000-0000-0000-0000-000000000001'")]
     public async Task ExecuteAsync_MultiStatementDryRun_InspectsEntirePlannedBatch(string sql)
     {
         var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
@@ -1540,7 +1526,7 @@ public class SqlQueryServiceTests
 
         var exception = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
 
-        Assert.Equal(ErrorCodes.Query.DmlBlocked, exception.ErrorCode);
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, exception.ErrorCode);
         Assert.Contains("multiple FROM tables", exception.Message, StringComparison.OrdinalIgnoreCase);
         mockExecutor.VerifyNoOtherCalls();
         mockBulkExecutor.VerifyNoOtherCalls();
@@ -1583,7 +1569,7 @@ public class SqlQueryServiceTests
         // Ids read from another environment would be applied to the connected one: refused, also for a dry-run.
         var exception = await Assert.ThrowsAsync<PpdsException>(() => service.ExecuteAsync(request));
 
-        Assert.Equal(ErrorCodes.Query.DmlBlocked, exception.ErrorCode);
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, exception.ErrorCode);
         Assert.Contains("another environment", exception.Message);
         mockExecutor.VerifyNoOtherCalls();
         mockBulkExecutor.VerifyNoOtherCalls();
@@ -1647,7 +1633,7 @@ public class SqlQueryServiceTests
     [Trait("Category", "PlanUnit")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task CompoundDryRun_TempTableSelects_AreStructuralAndPreserveSourceMetadata(
+    public async Task CompoundDryRun_TempTableSelectsBesideAWrite_AreRefusedByTheWholeScriptRule(
         bool streaming)
     {
         var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
@@ -1667,40 +1653,24 @@ public class SqlQueryServiceTests
             DmlSafety = new DmlSafetyOptions { IsDryRun = true }
         };
 
-        PPDS.Dataverse.Query.Planning.QueryPlanDescription? plan;
-        string? fetchXml;
-        IReadOnlyList<QueryDataSource>? dataSources;
-        if (streaming)
+                // A script that writes may contain only admitted INSERT, UPDATE and DELETE statements: its dry run is refused
+        // before anything is read, on the streaming path as on the other.
+        var ex = await Assert.ThrowsAsync<PpdsException>(async () =>
         {
-            var chunks = new List<SqlQueryStreamChunk>();
-            await foreach (var chunk in service.ExecuteStreamingAsync(request))
-                chunks.Add(chunk);
-            var completion = Assert.Single(chunks);
-            plan = completion.DryRunPlan;
-            fetchXml = completion.TranspiledFetchXml;
-            dataSources = completion.DataSources;
-        }
-        else
-        {
-            var result = await service.ExecuteAsync(request);
-            plan = result.DryRunPlan;
-            fetchXml = result.TranspiledFetchXml;
-            dataSources = result.DataSources;
-        }
+            if (streaming)
+            {
+                await foreach (var _ in service.ExecuteStreamingAsync(request))
+                {
+                }
+            }
+            else
+            {
+                await service.ExecuteAsync(request);
+            }
+        });
 
-        Assert.NotNull(plan);
-        Assert.Equal(2, CountNodeType(plan, "SelectIntoTempTable"));
-        Assert.True(ContainsNodeType(plan, "RemoteScanNode"));
-        Assert.Equal(2, CountNodeType(plan, "TempTableSelect"));
-        Assert.True(ContainsNodeType(plan, "DmlExecuteNode"));
-        Assert.Equal(1, CountOccurrences(fetchXml!, "-- Next statement --"));
-        Assert.Contains("<!-- client-side join -->", fetchXml, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("<fetch", fetchXml, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("#accounts", fetchXml, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("#filtered", fetchXml, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(["Local", "DEV"], dataSources!.Select(source => source.Label));
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
         mockExecutor.VerifyNoOtherCalls();
-        remoteExecutor.VerifyNoOtherCalls();
         mockBulkExecutor.VerifyNoOtherCalls();
     }
 
@@ -1708,7 +1678,7 @@ public class SqlQueryServiceTests
     [Trait("Category", "PlanUnit")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task CompoundDryRun_FromBackedVariableAssignment_PreservesSourceMetadata(
+    public async Task CompoundDryRun_VariableAssignmentBesideAWrite_IsRefusedByTheWholeScriptRule(
         bool streaming)
     {
         var mockExecutor = new Mock<IQueryExecutor>(MockBehavior.Strict);
@@ -1728,35 +1698,23 @@ public class SqlQueryServiceTests
             DmlSafety = new DmlSafetyOptions { IsDryRun = true }
         };
 
-        PPDS.Dataverse.Query.Planning.QueryPlanDescription? plan;
-        string? fetchXml;
-        IReadOnlyList<QueryDataSource>? dataSources;
-        if (streaming)
+                // A script that writes may contain only admitted INSERT, UPDATE and DELETE statements: its dry run is refused
+        // before anything is read, on the streaming path as on the other.
+        var ex = await Assert.ThrowsAsync<PpdsException>(async () =>
         {
-            var chunks = new List<SqlQueryStreamChunk>();
-            await foreach (var chunk in service.ExecuteStreamingAsync(request))
-                chunks.Add(chunk);
-            var completion = Assert.Single(chunks);
-            plan = completion.DryRunPlan;
-            fetchXml = completion.TranspiledFetchXml;
-            dataSources = completion.DataSources;
-        }
-        else
-        {
-            var result = await service.ExecuteAsync(request);
-            plan = result.DryRunPlan;
-            fetchXml = result.TranspiledFetchXml;
-            dataSources = result.DataSources;
-        }
+            if (streaming)
+            {
+                await foreach (var _ in service.ExecuteStreamingAsync(request))
+                {
+                }
+            }
+            else
+            {
+                await service.ExecuteAsync(request);
+            }
+        });
 
-        Assert.NotNull(plan);
-        Assert.True(ContainsNodeType(plan, "SelectVariableAssignment"));
-        Assert.True(ContainsNodeType(plan, "RemoteScanNode"));
-        Assert.True(ContainsNodeType(plan, "DmlExecuteNode"));
-        Assert.Equal(1, CountOccurrences(fetchXml!, "-- Next statement --"));
-        Assert.Contains("<!-- client-side join -->", fetchXml, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("<fetch", fetchXml, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(["Local", "DEV"], dataSources!.Select(source => source.Label));
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
         mockExecutor.VerifyNoOtherCalls();
         mockBulkExecutor.VerifyNoOtherCalls();
     }

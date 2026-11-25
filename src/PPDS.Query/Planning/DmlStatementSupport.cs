@@ -58,12 +58,26 @@ internal static class DmlStatementSupport
         _ => null
     };
 
+    /// <summary>
+    /// The refusal of <paramref name="statement"/>, with its code, or null when it is admitted: first a written value
+    /// Dataverse would store differently (<see cref="QueryErrorCode.DmlValueStoredDifferently"/>), then anything not on
+    /// the allowlist (<see cref="QueryErrorCode.DmlUnsupportedConstruct"/>), the order of the spec (sql-values,
+    /// "Order of refusals before the first statement").
+    /// </summary>
+    public static DmlRefusal? FindRefusal(TSqlStatement statement)
+    {
+        if (statement is InsertStatement or UpdateStatement && FindStoredDifferently(statement) is { } stored)
+            return new DmlRefusal(QueryErrorCode.DmlValueStoredDifferently, stored);
+        return FindUnsupported(statement) is { } message
+            ? new DmlRefusal(QueryErrorCode.DmlUnsupportedConstruct, message)
+            : null;
+    }
+
     /// <summary>Throws a <see cref="DmlSafetyRefusalException"/> when <paramref name="statement"/> is not on the allowlist.</summary>
     public static void ThrowIfUnsupported(TSqlStatement statement)
     {
-        var message = FindUnsupported(statement);
-        if (message != null)
-            throw new DmlSafetyRefusalException(QueryErrorCode.DmlBlocked, message);
+        if (FindRefusal(statement) is { } refusal)
+            throw new DmlSafetyRefusalException(refusal.Code, refusal.Message);
     }
 
     /// <summary>
@@ -77,6 +91,189 @@ internal static class DmlStatementSupport
         foreach (var statement in collector.Statements)
             ThrowIfUnsupported(statement);
     }
+
+    // ── the whole-script rule ───────────────────────────────────────────
+
+    /// <summary>
+    /// The whole-script rule (maintainer decision M, "One whole-script rule"): a script that contains a write (INSERT,
+    /// UPDATE, DELETE or MERGE, anywhere in it) runs only when every one of its top-level statements is an INSERT,
+    /// UPDATE or DELETE on the allowlist. Anything else in such a script is refused, before its first statement runs
+    /// and before anything is read: IF and WHILE (their conditions are evaluated by the engine), DECLARE and SET, any
+    /// SELECT, SELECT ... INTO, TRY ... CATCH, PRINT, THROW, RETURN, BEGIN ... END, cursors, EXECUTE, temporary tables
+    /// and table variables, and every statement kind not on this closed list. One refusal names the first statement
+    /// that is not admitted and where it is. A script with no write is not affected.
+    /// </summary>
+    /// <param name="fragment">The parsed request: a <see cref="TSqlScript"/>, or a single statement.</param>
+    public static DmlRefusal? FindScriptRefusal(TSqlFragment fragment)
+    {
+        var statements = TopLevelStatements(fragment);
+        if (!ContainsWrite(fragment))
+            return null;
+
+        for (var i = 0; i < statements.Count; i++)
+        {
+            var statement = statements[i];
+            var where = statements.Count > 1
+                ? $"Statement {i + 1} (line {statement.StartLine}, column {statement.StartColumn})"
+                : $"The statement (line {statement.StartLine}, column {statement.StartColumn})";
+            if (!AdmittedScriptStatementKinds.Contains(statement.GetType()))
+            {
+                // MERGE and impersonation have a refusal of their own, which says more.
+                if (statement is MergeStatement or ExecuteAsStatement or RevertStatement && FindRefusal(statement) is { } own)
+                    return statements.Count > 1 ? own with { Message = $"{where}: {own.Message}" } : own;
+                return new DmlRefusal(QueryErrorCode.DmlUnsupportedConstruct,
+                    $"This script changes data, so every statement in it must be an INSERT, UPDATE or DELETE that PPDS runs " +
+                    $"as written. {where} is {StatementKind(statement)}, which is not." + NothingExecuted +
+                    " No row was read and nothing was written. Run the INSERT, UPDATE and DELETE statements on their own, in a " +
+                    "request without any other statement.");
+            }
+
+            if (FindRefusal(statement) is { } refusal)
+                return statements.Count > 1 ? refusal with { Message = $"{where}: {refusal.Message}" } : refusal;
+        }
+
+        return null;
+    }
+
+    /// <summary>Throws a <see cref="DmlSafetyRefusalException"/> when <see cref="FindScriptRefusal"/> refuses the script.</summary>
+    public static void ThrowIfScriptNotAdmitted(TSqlFragment fragment)
+    {
+        if (FindScriptRefusal(fragment) is { } refusal)
+            throw new DmlSafetyRefusalException(refusal.Code, refusal.Message);
+    }
+
+    /// <summary>
+    /// The statement kinds a script that writes may contain, matched by exact type. Any other kind, including any the
+    /// parser adds later, refuses the script.
+    /// </summary>
+    public static readonly IReadOnlySet<Type> AdmittedScriptStatementKinds = new HashSet<Type>
+    {
+        typeof(InsertStatement), typeof(UpdateStatement), typeof(DeleteStatement)
+    };
+
+    private static IReadOnlyList<TSqlStatement> TopLevelStatements(TSqlFragment fragment) => fragment switch
+    {
+        TSqlScript script => script.Batches.SelectMany(b => b.Statements).ToList(),
+        TSqlBatch batch => batch.Statements.ToList(),
+        TSqlStatement statement => [statement],
+        _ => []
+    };
+
+    private static bool ContainsWrite(TSqlFragment fragment)
+    {
+        var finder = new WriteFinder();
+        fragment.Accept(finder);
+        return finder.Found;
+    }
+
+    private sealed class WriteFinder : TSqlFragmentVisitor
+    {
+        public bool Found { get; private set; }
+
+        public override void Visit(InsertStatement node) => Found = true;
+
+        public override void Visit(UpdateStatement node) => Found = true;
+
+        public override void Visit(DeleteStatement node) => Found = true;
+
+        public override void Visit(MergeStatement node) => Found = true;
+    }
+
+    /// <summary>The kind of a statement, as the whole-script refusal names it. It repeats no literal from the statement.</summary>
+    private static string StatementKind(TSqlStatement statement) => statement switch
+    {
+        IfStatement => "an IF statement (its condition would be evaluated by PPDS, not by SQL Server or Dataverse)",
+        WhileStatement => "a WHILE loop (its condition would be evaluated by PPDS)",
+        DeclareVariableStatement => "DECLARE (a variable)",
+        DeclareTableVariableStatement => "DECLARE of a table variable",
+        SetVariableStatement => "SET of a variable",
+        SelectStatement { Into: not null } => "SELECT ... INTO",
+        SelectStatement => "a SELECT",
+        TryCatchStatement => "TRY ... CATCH",
+        PrintStatement => "PRINT",
+        ThrowStatement => "THROW",
+        RaiseErrorStatement => "RAISERROR",
+        ReturnStatement => "RETURN",
+        BeginEndBlockStatement => "a BEGIN ... END block",
+        ExecuteStatement => "EXECUTE",
+        DeclareCursorStatement or OpenCursorStatement or FetchCursorStatement or CloseCursorStatement
+            or DeallocateCursorStatement => "a cursor statement",
+        CreateTableStatement => "CREATE TABLE",
+        DropTableStatement => "DROP TABLE",
+        MergeStatement => "MERGE",
+        ExecuteAsStatement or RevertStatement => "EXECUTE AS or REVERT",
+        _ => $"a statement of kind {statement.GetType().Name.Replace("Statement", string.Empty, StringComparison.Ordinal)}"
+    };
+
+    // ── values Dataverse stores differently ─────────────────────────────
+
+    /// <summary>
+    /// Whether text made only of white space, or with white space at either end, is written. False until rows B25 and
+    /// B26 of the admission table (sql-values, core requirement 4) come into force; then set it to true.
+    /// </summary>
+    internal const bool WhiteSpaceEdgedTextIsWritten = false;
+
+    /// <summary>
+    /// A written text literal (UPDATE SET, INSERT VALUES, INSERT ... SELECT list) that Dataverse stores, or may store,
+    /// as something else: the empty string, which Dataverse stores as NULL; and, until <see cref="WhiteSpaceEdgedTextIsWritten"/>,
+    /// text that is only white space or has white space at either end. Null when there is none.
+    /// </summary>
+    private static string? FindStoredDifferently(TSqlStatement statement)
+    {
+        foreach (var (value, context) in WrittenValues(statement))
+        {
+            if (value is not StringLiteral text)
+                continue;
+            if (text.Value.Length == 0)
+            {
+                return $"{Sql(text)} (empty text) is not written in {context}: Dataverse stores empty text as NULL, so the " +
+                       "column would not hold what the statement says." + NothingExecuted + " Write NULL instead.";
+            }
+            if (!WhiteSpaceEdgedTextIsWritten && IsWhiteSpaceEdged(text.Value))
+            {
+                return $"Text that is only white space, or that begins or ends with a white-space character, is not written in {context} yet: " +
+                       "Dataverse has not been shown to store such text unchanged." + NothingExecuted +
+                       " Remove the white space at either end, or write NULL.";
+            }
+        }
+        return null;
+    }
+
+    private static IEnumerable<(ScalarExpression Value, string Context)> WrittenValues(TSqlStatement statement)
+    {
+        switch (statement)
+        {
+            case UpdateStatement update:
+                foreach (var clause in update.UpdateSpecification.SetClauses.OfType<AssignmentSetClause>())
+                {
+                    if (clause.NewValue != null)
+                        yield return (clause.NewValue, "UPDATE ... SET");
+                }
+                break;
+            case InsertStatement { InsertSpecification.InsertSource: ValuesInsertSource values }:
+                foreach (var row in values.RowValues)
+                {
+                    foreach (var value in row.ColumnValues)
+                        yield return (value, "INSERT ... VALUES");
+                }
+                break;
+            case InsertStatement { InsertSpecification.InsertSource: SelectInsertSource { Select: QuerySpecification select } }:
+                foreach (var element in select.SelectElements.OfType<SelectScalarExpression>())
+                    yield return (element.Expression, "INSERT ... SELECT");
+                break;
+        }
+    }
+
+    /// <summary>
+    /// True when <paramref name="text"/> begins or ends with a character of the Unicode White_Space property (so also when
+    /// it is only white space): U+0009 to U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000 to U+200A, U+2028, U+2029,
+    /// U+202F, U+205F, U+3000 (sql-values, core requirement 4).
+    /// </summary>
+    public static bool IsWhiteSpaceEdged(string text)
+        => text.Length > 0 && (IsUnicodeWhiteSpace(text[0]) || IsUnicodeWhiteSpace(text[^1]));
+
+    private static bool IsUnicodeWhiteSpace(char c) => c is >= '\u0009' and <= '\u000D' or '\u0020' or '\u0085' or '\u00A0'
+        or '\u1680' or >= '\u2000' and <= '\u200A' or '\u2028' or '\u2029' or '\u202F' or '\u205F' or '\u3000';
 
     private sealed class DataStatementCollector : TSqlFragmentVisitor
     {
@@ -461,6 +658,12 @@ internal static class DmlStatementSupport
         var real = RealLiteralIn(condition);
         if (real != null)
             return Unsupported($"{Sql(real)} (a floating-point literal)", context, RealLiteralHowTo);
+        var number = Operands(condition).OfType<ScalarExpression>().FirstOrDefault(o => !NumberFits(o));
+        if (number != null)
+            return Unsupported($"{Sql(number)} ({NumberTooLarge})", context, NumberTooLargeHowTo);
+        var text = Operands(condition).OfType<StringLiteral>().FirstOrDefault(s => !s.IsNational && !IsSevenBitAscii(s.Value));
+        if (text != null)
+            return Unsupported($"{Sql(text)} (text without the N prefix that holds characters outside 7-bit ASCII)", context, WhereTextHowTo(text));
         switch (condition)
         {
             case InPredicate { Subquery: null } tooLong when tooLong.Values.Count > MaxInValues:
@@ -502,15 +705,46 @@ internal static class DmlStatementSupport
     private static ScalarExpression? RealLiteralIn(BooleanExpression condition)
     {
         static bool Real(ScalarExpression? e) => e is RealLiteral or UnaryExpression { Expression: RealLiteral };
-        IEnumerable<ScalarExpression?> operands = condition switch
-        {
-            BooleanComparisonExpression c => [c.FirstExpression, c.SecondExpression],
-            InPredicate i => i.Values,
-            BooleanTernaryExpression b => [b.SecondExpression, b.ThirdExpression],
-            _ => []
-        };
-        return operands.FirstOrDefault(Real);
+        return Operands(condition).FirstOrDefault(Real);
     }
+
+    /// <summary>The operands of this condition (not inside nested AND/OR, which recurse): comparison, IN, BETWEEN and LIKE.</summary>
+    private static IEnumerable<ScalarExpression?> Operands(BooleanExpression condition) => condition switch
+    {
+        BooleanComparisonExpression c => [c.FirstExpression, c.SecondExpression],
+        InPredicate i => i.Values,
+        BooleanTernaryExpression b => [b.SecondExpression, b.ThirdExpression],
+        LikePredicate l => [l.SecondExpression],
+        _ => []
+    };
+
+    /// <summary>
+    /// The refusal's advice for text without N in a condition: SQL Server converts such text to the database's code page
+    /// before comparing, so characters the code page lacks become question marks and other rows match.
+    /// </summary>
+    private static string WhereTextHowTo(StringLiteral text) =>
+        $" Write it with the N prefix: {Sql(new StringLiteral { Value = text.Value, IsNational = true })}. Without N, SQL Server " +
+        "converts the text to the database's code page before comparing, so characters the code page does not have become " +
+        "question marks and other rows match; the engine cannot tell which code page that is, so text without N is compared " +
+        "only when it is 7-bit ASCII.";
+
+    private const string NumberTooLarge = "a number with more digits than PPDS can hold";
+
+    private const string NumberTooLargeHowTo =
+        " PPDS holds at most 28 significant digits (up to 79,228,162,514,264,337,593,543,950,335). Write a number within that range.";
+
+    /// <summary>
+    /// False for a whole-number or decimal literal (or a minus sign on one) that System.Decimal cannot hold. SQL Server
+    /// reads such a literal as numeric(38); the engine cannot, so it is refused before anything runs instead of failing
+    /// with a raw overflow. Any other expression is true (it is checked elsewhere).
+    /// </summary>
+    public static bool NumberFits(ScalarExpression? expression) => expression switch
+    {
+        IntegerLiteral or NumericLiteral => decimal.TryParse(((Literal)expression).Value, System.Globalization.NumberStyles.AllowDecimalPoint,
+            System.Globalization.CultureInfo.InvariantCulture, out _),
+        UnaryExpression { Expression: IntegerLiteral or NumericLiteral } unary => NumberFits(unary.Expression),
+        _ => true
+    };
 
     private static bool IsComparison(BooleanComparisonType type) => type is BooleanComparisonType.Equals
         or BooleanComparisonType.NotEqualToBrackets or BooleanComparisonType.NotEqualToExclamation
@@ -578,9 +812,10 @@ internal static class DmlStatementSupport
         return expression switch
         {
             StringLiteral text => text.IsNational || IsSevenBitAscii(text.Value),
-            IntegerLiteral or NumericLiteral or NullLiteral => true,
+            IntegerLiteral or NumericLiteral => NumberFits(expression),
+            NullLiteral => true,
             ColumnReferenceExpression column => column.ColumnType == ColumnType.Regular,
-            UnaryExpression unary => IsNegativeNumber(unary),
+            UnaryExpression unary => IsNegativeNumber(unary) && NumberFits(unary),
             CastCall cast => IsGuidCast(cast),
             _ => false
         };
@@ -640,7 +875,7 @@ internal static class DmlStatementSupport
             ? $"the variable {Sql(expression)}"
             : $"{Sql(expression)} ({Construct(expression)})";
         var howTo = HowTo(expression);
-        if (columns == null && expression is not (VariableReference or GlobalVariableExpression or RealLiteral or StringLiteral))
+        if (columns == null && expression is not (VariableReference or GlobalVariableExpression or RealLiteral or StringLiteral) && NumberFits(expression))
             howTo = " VALUES takes literal values only (text, numbers, NULL, or CAST('<guid>' AS uniqueidentifier)); write the value you want stored as a literal." +
                     (expression is FunctionCall { FunctionName.Value: var f } && f.Equals("NEWID", StringComparison.OrdinalIgnoreCase) ? howTo : string.Empty);
         return Unsupported(part, context, howTo);
@@ -650,6 +885,7 @@ internal static class DmlStatementSupport
     private static string Construct(ScalarExpression expression) => expression switch
     {
         StringLiteral => "text without the N prefix that holds characters outside 7-bit ASCII",
+        IntegerLiteral or NumericLiteral or UnaryExpression { Expression: IntegerLiteral or NumericLiteral } when !NumberFits(expression) => NumberTooLarge,
         RealLiteral => "a floating-point literal",
         UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative } => "a minus sign on something other than a number literal",
         UnaryExpression => "a unary operator",
@@ -682,6 +918,7 @@ internal static class DmlStatementSupport
             "stores the characters that the database's code page does not have as question marks; the engine cannot tell " +
             "which code page that is, so text without N is written only when it is 7-bit ASCII.",
         RealLiteral or UnaryExpression { Expression: RealLiteral } => RealLiteralHowTo,
+        IntegerLiteral or NumericLiteral or UnaryExpression { Expression: IntegerLiteral or NumericLiteral } when !NumberFits(expression) => NumberTooLargeHowTo,
         CastCall { DataType: SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.UniqueIdentifier }, Parameter: StringLiteral } =>
             " Write the GUID as 8-4-4-4-12 hexadecimal digits with dashes, with or without braces and without spaces, " +
             "for example CAST('6F9619FF-8B86-D011-B42D-00C04FC964FF' AS uniqueidentifier).",
@@ -805,3 +1042,6 @@ internal static class DmlStatementSupport
         _ => "(compound assignment)"
     };
 }
+
+/// <summary>A DML refusal: the code of its class (<see cref="QueryErrorCode"/>) and the message for the user.</summary>
+internal sealed record DmlRefusal(string Code, string Message);

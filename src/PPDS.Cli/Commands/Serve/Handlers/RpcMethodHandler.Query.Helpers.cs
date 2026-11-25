@@ -263,10 +263,12 @@ public partial class RpcMethodHandler
                         .ToList(),
                 }),
             // A refusal raised part-way through a script reports what the earlier statements committed, as the CLI does.
-            PpdsException { ErrorCode: ErrorCodes.Query.DmlBlocked } blocked =>
-                new RpcException(ErrorCodes.Query.DmlBlocked, WithCommitted(blocked.UserMessage), new DmlSafetyErrorData
+            // Each DML refusal class keeps its own code and carries dmlBlocked: true, so a client that knows only
+            // Query.DmlBlocked still shows it as a refusal (and never offers to confirm it).
+            PpdsException blocked when ErrorCodes.Query.DmlRefusalCodes.Contains(blocked.ErrorCode) =>
+                new RpcException(blocked.ErrorCode, WithCommitted(blocked.UserMessage), new DmlSafetyErrorData
                 {
-                    Code = ErrorCodes.Query.DmlBlocked,
+                    Code = blocked.ErrorCode,
                     Message = WithCommitted(blocked.UserMessage),
                     DmlBlocked = true,
                     DmlCommitted = committed,

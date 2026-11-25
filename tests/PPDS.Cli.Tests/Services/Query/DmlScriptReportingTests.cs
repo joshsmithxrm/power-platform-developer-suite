@@ -61,7 +61,8 @@ public class DmlScriptReportingTests
 
         var result = await service.ExecuteAsync(new SqlQueryRequest
         {
-            Sql = "SELECT name FROM account; UPDATE account SET name = 'a' WHERE name = 'x'; UPDATE contact SET lastname = 'b' WHERE lastname = 'y'",
+            // Three writes (a script that writes may contain nothing else); the third fails, so its position is #3.
+            Sql = "UPDATE account SET name = 'c' WHERE name = 'z'; UPDATE account SET name = 'a' WHERE name = 'x'; UPDATE contact SET lastname = 'b' WHERE lastname = 'y'",
             DmlSafety = Confirmed
         });
 

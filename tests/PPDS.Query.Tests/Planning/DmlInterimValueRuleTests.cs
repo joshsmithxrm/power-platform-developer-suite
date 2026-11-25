@@ -31,7 +31,7 @@ public class DmlInterimValueRuleTests
             Plan(sql);
             return null;
         }
-        catch (DmlSafetyRefusalException e) when (e.ErrorCode == QueryErrorCode.DmlBlocked)
+        catch (DmlSafetyRefusalException e) when (e.ErrorCode == QueryErrorCode.DmlUnsupportedConstruct)
         {
             return e.Message;
         }
@@ -51,7 +51,6 @@ public class DmlInterimValueRuleTests
     [Theory]
     [InlineData("'text'")]
     [InlineData("N'naïve'")]
-    [InlineData("''")]
     [InlineData("5")]
     [InlineData("0")]
     [InlineData("2.5")]
@@ -221,10 +220,11 @@ public class DmlInterimValueRuleTests
     [InlineData("0x0A", "(a literal of this kind)")]
     public void EveryOtherConstruct_IsRefused_NamingIt(string value, string construct)
     {
-        var script = value.StartsWith('@') && !value.StartsWith("@@", StringComparison.Ordinal) ? "DECLARE @v nvarchar(10) = 'a'; " : "";
+        // No DECLARE before a variable: a script that writes may not contain one (the whole-script rule), so the
+        // variable itself is what the planner names.
         foreach (var sql in Statements(value))
         {
-            var message = Refusal(script + sql);
+            var message = Refusal(sql);
             message.Should().NotBeNull(sql);
             message.Should().Contain(construct, sql).And.Contain("Nothing was executed.");
         }
@@ -354,11 +354,36 @@ public class DmlInterimValueRuleTests
     [InlineData("UPDATE account SET name = N'na\u00EFve' WHERE name = 'x'")]
     [InlineData("INSERT INTO account (name) VALUES (N'\u041F\u0440\u0438\u0432\u0435\u0442')")]
     [InlineData("UPDATE account SET name = 'plain ascii' WHERE name = 'x'")]
-    // A WHERE literal is not a written value: it is sent to Dataverse in the FetchXML as typed (unchanged).
-    [InlineData("UPDATE account SET name = 'x' WHERE name = 'na\u00EFve'")]
-    [InlineData("DELETE FROM account WHERE name = '\u041F\u0440\u0438\u0432\u0435\u0442'")]
-    public void TextWithN_AsciiWithoutN_AndAWhereLiteral_AreAdmitted(string sql)
+    // In a condition, text with N is sent to Dataverse as typed.
+    [InlineData("UPDATE account SET name = 'x' WHERE name = N'na\u00EFve'")]
+    [InlineData("DELETE FROM account WHERE name IN (N'\u041F\u0440\u0438\u0432\u0435\u0442', 'x')")]
+    [InlineData("DELETE FROM account WHERE name LIKE N'\u041F%'")]
+    [InlineData("DELETE FROM account WHERE name BETWEEN N'\u00E0' AND N'\u00E9'")]
+    public void TextWithN_AndAsciiWithoutN_AreAdmitted_InValuesAndConditions(string sql)
         => Refusal(sql).Should().BeNull();
+
+    /// <summary>
+    /// Text without N that is not 7-bit ASCII, in the condition of a write (coordinator's conservative reading of the
+    /// maintainer's "Refuse it", applied to conditions): SQL Server converts it to the code page before comparing, so it
+    /// would select other rows than the text says.
+    /// </summary>
+    [Theory]
+    [InlineData("UPDATE account SET name = N'x' WHERE name = '\u041F\u0440\u0438\u0432\u0435\u0442'", "the WHERE clause of UPDATE")]
+    [InlineData("UPDATE account SET name = N'x' WHERE name <> 'na\u00EFve'", "the WHERE clause of UPDATE")]
+    [InlineData("DELETE FROM account WHERE name IN ('x', '\u041F\u0440\u0438\u0432\u0435\u0442')", "the WHERE clause of DELETE")]
+    [InlineData("DELETE FROM account WHERE name LIKE '\u041F%'", "the WHERE clause of DELETE")]
+    [InlineData("DELETE FROM account WHERE name BETWEEN 'a' AND 'na\u00EFve'", "the WHERE clause of DELETE")]
+    [InlineData("DELETE FROM account WHERE name = 'x' OR (name = '\u00E9t\u00E9' AND revenue > 1)", "the WHERE clause of DELETE")]
+    [InlineData("INSERT INTO account (name) SELECT name FROM account WHERE name = '\u041F\u0440\u0438\u0432\u0435\u0442'", "the WHERE clause of INSERT ... SELECT")]
+    public void TextWithoutN_OutsideSevenBitAscii_InTheConditionOfAWrite_IsRefused_AndNamesTheNForm(string sql, string context)
+    {
+        var refusal = Refusal(sql);
+
+        refusal.Should().Contain("(text without the N prefix that holds characters outside 7-bit ASCII)")
+            .And.Contain($"is not supported in {context}.")
+            .And.Contain("Write it with the N prefix: N'")
+            .And.Contain("before comparing");
+    }
 
     [Fact]
     public void TheCanonicalGuidCheck_IsTheOneTheRuleUses()

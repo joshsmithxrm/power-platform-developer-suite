@@ -119,15 +119,15 @@ public sealed class SqlQueryService : ISqlQueryService
         _environmentUrl = environmentUrl;
         _environmentLabel = config?.Label;
         _environmentType = config?.Type?.ToString();
-        // A configuration that states neither a protection level nor a known type resolves to Development below; the
-        // bypass-hint gate treats it as Production instead (fail closed).
+        // A configuration that states neither a protection level nor a known type is Production (maintainer decision,
+        // 2026-11-24: no saved type counts as Production), and is reported so in the confirmation's target.
         _environmentTypeUnknown = config != null && config.Protection == null && config.Type is null or EnvironmentType.Unknown;
         if (config == null)
             return;
 
         EnvironmentSafetySettings = config.SafetySettings;
         EnvironmentProtectionLevel = config.Protection
-            ?? DmlSafetyGuard.DetectProtectionLevel(config.Type ?? EnvironmentType.Unknown);
+            ?? (_environmentTypeUnknown ? ProtectionLevel.Production : DmlSafetyGuard.DetectProtectionLevel(config.Type!.Value));
     }
 
     /// <summary>
@@ -511,6 +511,11 @@ public sealed class SqlQueryService : ISqlQueryService
         {
             throw new PpdsException(ex.ErrorCode, ex.Message, ex);
         }
+        catch (QueryExecutionException ex)
+        {
+            // A planning error with a code (for example a number literal PPDS cannot hold) keeps its code.
+            throw new PpdsException(ex.ErrorCode, ex.Message, ex);
+        }
 
         var description = QueryPlanDescription.FromNode(planResult.RootNode);
 
@@ -850,6 +855,12 @@ public sealed class SqlQueryService : ISqlQueryService
                 safetyResult.BlockReason ?? "DML operation blocked by safety guard.");
         }
 
+        // The whole-script rule: a script that writes may contain only admitted INSERT, UPDATE and DELETE statements.
+        // Refused here, before any row is read, any confirmation is asked for and anything is written, for confirmed,
+        // unconfirmed and dry-run requests alike. After the guard's own refusals, as the spec orders them.
+        if (DmlStatementSupport.FindScriptRefusal(fragment) is { } scriptRefusal)
+            throw new PpdsException(scriptRefusal.Code, scriptRefusal.Message);
+
         // NOLOCK, HASH_GROUP and MAXDOP were not proven for DML, and NOLOCK changes which rows the statement selects
         // (uncommitted rows). They are refused, like any OPTION (...) clause on the statement itself.
         if (safetyResult.ContainsDml)
@@ -863,7 +874,7 @@ public sealed class SqlQueryService : ISqlQueryService
             if (unproven != null)
             {
                 throw new PpdsException(
-                    ErrorCodes.Query.DmlBlocked,
+                    ErrorCodes.Query.DmlUnsupportedConstruct,
                     $"The -- ppds:{unproven} hint is not supported on INSERT, UPDATE or DELETE. Nothing was executed. " +
                     "Remove the hint (only -- ppds:BATCH_SIZE, -- ppds:BYPASS_PLUGINS and -- ppds:BYPASS_FLOWS apply to DML).");
             }
@@ -876,7 +887,7 @@ public sealed class SqlQueryService : ISqlQueryService
         {
             if (_metadataProvider == null)
             {
-                throw new PpdsException(ErrorCodes.Query.DmlBlocked,
+                throw new PpdsException(ErrorCodes.Query.DmlMetadataUnavailable,
                     "INSERT, UPDATE and DELETE need the table's column metadata to be checked before they run, and none is available here. Nothing was executed.");
             }
             await DmlColumnValidator.ValidateAsync(plannedStatement, _metadataProvider, cancellationToken).ConfigureAwait(false);
@@ -1002,6 +1013,11 @@ public sealed class SqlQueryService : ISqlQueryService
         }
         catch (DmlSafetyRefusalException ex)
         {
+            throw new PpdsException(ex.ErrorCode, ex.Message, ex);
+        }
+        catch (QueryExecutionException ex)
+        {
+            // A planning error with a code (for example a number literal PPDS cannot hold) keeps its code, before any read.
             throw new PpdsException(ex.ErrorCode, ex.Message, ex);
         }
 
@@ -1381,7 +1397,7 @@ public sealed class SqlQueryService : ISqlQueryService
         if (matches.Count > 1)
         {
             throw new PpdsException(
-                ErrorCodes.Query.DmlBlocked,
+                ErrorCodes.Query.DmlUnsupportedConstruct,
                 $"Cannot safely identify DML target '{targetAlias}' because multiple FROM tables match it. Nothing was executed. " +
                 "Name the target table alone in FROM (for example UPDATE a SET ... FROM account a WHERE ...), or leave FROM out " +
                 "and put the condition in the WHERE clause.");

@@ -70,7 +70,7 @@ public sealed class DmlRound2Tests
 
             var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = options }));
 
-            Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+            Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
             Assert.Contains(named, ex.Message);
             Assert.Contains("Nothing was executed.", ex.Message);
             h.AssertNothingChanged();
@@ -95,7 +95,7 @@ public sealed class DmlRound2Tests
 
         var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
 
-        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
         h.AssertNothingChanged();
     }
 
@@ -126,7 +126,7 @@ public sealed class DmlRound2Tests
             DmlSafety = Confirmed
         }));
 
-        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
         Assert.Contains("Nothing was executed.", ex.Message);
         Assert.Contains("Name the target table alone in FROM", ex.Message);
         h.AssertNothingChanged();

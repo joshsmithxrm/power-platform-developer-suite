@@ -249,6 +249,16 @@ public sealed class FetchXmlGenerator
         return schemaObject.BaseIdentifier.Value;
     }
 
+    /// <summary>The refusal of a TOP other than TOP n / TOP (n) with a whole number (maintainer decision, "Refuse all seven").</summary>
+    public const string TopFormMessage =
+        "Only TOP n or TOP (n) with a whole number is supported (not PERCENT, WITH TIES, variables or expressions). " +
+        "Write the number of rows, for example TOP (3), without PERCENT or WITH TIES.";
+
+    /// <summary>The refusal of a comparison with NULL (= NULL, &lt;&gt; NULL, IN (NULL)), which matches no rows in SQL.</summary>
+    public const string NullComparisonMessage =
+        "Comparing with NULL (= NULL, <> NULL, IN (NULL)) is not supported. Use IS NULL or IS NOT NULL; in an IN list, " +
+        "leave NULL out, and add OR <column> IS NULL if you mean the rows with no value.";
+
     /// <summary>
     /// Extracts the integer value from a TOP row filter expression.
     /// </summary>
@@ -260,9 +270,7 @@ public sealed class FetchXmlGenerator
             expression = paren.Expression;
         if (topRowFilter.Percent || topRowFilter.WithTies || expression is not IntegerLiteral)
         {
-            throw new PPDS.Query.Parsing.QueryParseException(
-                "Only TOP n or TOP (n) with a whole number is supported (not PERCENT, WITH TIES, variables or expressions). " +
-                "Write the number of rows, for example TOP (3), without PERCENT or WITH TIES.");
+            throw new PPDS.Query.Parsing.QueryParseException(TopFormMessage);
         }
 
         if (expression is IntegerLiteral intLiteral)
@@ -371,6 +379,10 @@ public sealed class FetchXmlGenerator
         string joinTableName,
         string? joinAlias)
     {
+        // ON column = NULL matches no rows in SQL; refused with the same message as in WHERE, naming the replacement.
+        if (ComparesWithNull(searchCondition))
+            throw new PPDS.Query.Parsing.QueryParseException(NullComparisonMessage);
+
         if (searchCondition is BooleanComparisonExpression comparison)
         {
             var leftCol = ExtractColumnReference(comparison.FirstExpression);
@@ -397,6 +409,17 @@ public sealed class FetchXmlGenerator
 
         return ("", "");
     }
+
+    /// <summary>A comparison with NULL anywhere in an ON condition (through AND, OR, NOT and parentheses).</summary>
+    private static bool ComparesWithNull(BooleanExpression? condition) => condition switch
+    {
+        BooleanComparisonExpression c => c.FirstExpression is NullLiteral || c.SecondExpression is NullLiteral,
+        InPredicate { Subquery: null } i => i.Values.Any(v => v is NullLiteral),
+        BooleanBinaryExpression b => ComparesWithNull(b.FirstExpression) || ComparesWithNull(b.SecondExpression),
+        BooleanParenthesisExpression p => ComparesWithNull(p.Expression),
+        BooleanNotExpression n => ComparesWithNull(n.Expression),
+        _ => false
+    };
 
     /// <summary>
     /// Checks if a column reference belongs to the specified table.
@@ -1684,9 +1707,7 @@ public sealed class FetchXmlGenerator
 
             case NullLiteral:
                 // In SQL, = NULL and <> NULL match no rows; sending an empty value would match empty strings.
-                throw new PPDS.Query.Parsing.QueryParseException(
-                    "Comparing with NULL (= NULL, <> NULL, IN (NULL)) is not supported. Use IS NULL or IS NOT NULL; in an IN list, " +
-                    "leave NULL out, and add OR <column> IS NULL if you mean the rows with no value.");
+                throw new PPDS.Query.Parsing.QueryParseException(NullComparisonMessage);
 
             case UnaryExpression unary when unary.UnaryExpressionType == UnaryExpressionType.Negative:
                 return $"-{FormatLiteralValue(unary.Expression)}";

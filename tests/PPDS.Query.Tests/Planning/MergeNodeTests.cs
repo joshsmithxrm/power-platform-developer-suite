@@ -242,6 +242,6 @@ public class MergeNodeTests
         var act = () => builder.Plan(fragment);
 
         act.Should().Throw<DmlSafetyRefusalException>()
-            .Which.ErrorCode.Should().Be(QueryErrorCode.DmlBlocked);
+            .Which.ErrorCode.Should().Be(QueryErrorCode.DmlUnsupportedConstruct);
     }
 }

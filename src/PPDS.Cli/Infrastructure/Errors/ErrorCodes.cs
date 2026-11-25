@@ -226,6 +226,25 @@ public static class ErrorCodes
         /// <summary>DML statement blocked by safety guard (e.g., DELETE/UPDATE without WHERE).</summary>
         public const string DmlBlocked = "Query.DmlBlocked";
 
+        /// <summary>A script that writes contains something the DML allow-list does not admit; nothing ran.</summary>
+        public const string DmlUnsupportedConstruct = PPDS.Dataverse.Query.Execution.QueryErrorCode.DmlUnsupportedConstruct;
+
+        /// <summary>A written value Dataverse stores, or may store, as something else (for example ''); nothing ran.</summary>
+        public const string DmlValueStoredDifferently = PPDS.Dataverse.Query.Execution.QueryErrorCode.DmlValueStoredDifferently;
+
+        /// <summary>A DML statement whose target's column metadata is not available; nothing ran.</summary>
+        public const string DmlMetadataUnavailable = PPDS.Dataverse.Query.Execution.QueryErrorCode.DmlMetadataUnavailable;
+
+        /// <summary>
+        /// The DML refusal codes: the safety guard's own (<see cref="DmlBlocked"/>) and the three refusal classes of the
+        /// allow-list. The daemon sends each with <c>dmlBlocked: true</c>, so a client that knows only
+        /// <see cref="DmlBlocked"/> still recognises the refusal.
+        /// </summary>
+        public static readonly IReadOnlySet<string> DmlRefusalCodes = new HashSet<string>(StringComparer.Ordinal)
+        {
+            DmlBlocked, DmlUnsupportedConstruct, DmlValueStoredDifferently, DmlMetadataUnavailable
+        };
+
         /// <summary>DML operation would affect more rows than the configured cap.</summary>
         public const string DmlRowCapExceeded = "Query.DmlRowCapExceeded";
 

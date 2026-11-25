@@ -79,16 +79,17 @@ public sealed class DmlInterimRuleTests : IDisposable
 
     /// <summary>A written row id, as a string literal or in the GUID cast, takes the canonical spelling only.</summary>
     [Theory]
-    [InlineData("' " + Guid + "'")]
-    [InlineData("'" + Guid + " '")]
+    // Text with a space at either end is refused first as a value Dataverse may store differently (the spec's order).
+    [InlineData("' " + Guid + "'", "white space at either end", ErrorCodes.Query.DmlValueStoredDifferently)]
+    [InlineData("'" + Guid + " '", "white space at either end", ErrorCodes.Query.DmlValueStoredDifferently)]
     [InlineData("'6F9619FF8B86D011B42D00C04FC964FF'")]
     [InlineData("'(" + Guid + ")'")]
     [InlineData("CAST(' " + Guid + "' AS uniqueidentifier)")]
     [InlineData("CAST('6F9619FF8B86D011B42D00C04FC964FF' AS uniqueidentifier)")]
     [InlineData("CAST('" + Guid + "junk' AS uniqueidentifier)")]
-    public async Task ALookupIdInAnotherSpelling_IsRefused(string value)
+    public async Task ALookupIdInAnotherSpelling_IsRefused(string value, string named = "without spaces", string code = ErrorCodes.Query.DmlUnsupportedConstruct)
     {
-        await AssertRefusedEverywhere($"UPDATE account SET parentaccountid = {value} WHERE name = 'n1'", "without spaces");
+        await AssertRefusedEverywhere($"UPDATE account SET parentaccountid = {value} WHERE name = 'n1'", named, code);
     }
 
     [Theory]
@@ -184,15 +185,12 @@ public sealed class DmlInterimRuleTests : IDisposable
     }
 
     /// <summary>
-    /// Every WHERE of an UPDATE, DELETE or INSERT ... SELECT is evaluated by Dataverse (a plan that needs PPDS to filter
-    /// rows is refused), so a WHERE literal is not a written value: it is sent in the FetchXML as typed, with or without N,
-    /// as before this decision. SQL Server would compare a literal without N after converting it to the code page.
+    /// Text with N in the condition of a write is sent to Dataverse in the FetchXML as typed.
     /// </summary>
     [Theory]
-    [InlineData("UPDATE account SET description = 'x' WHERE name = '" + Cyrillic + "'")]
-    [InlineData("DELETE FROM account WHERE name = '" + Accented + "'")]
     [InlineData("UPDATE account SET description = 'x' WHERE name = N'" + Cyrillic + "'")]
-    public async Task AWhereLiteral_IsSentToDataverseAsTyped_WithOrWithoutN(string sql)
+    [InlineData("DELETE FROM account WHERE name = N'" + Accented + "'")]
+    public async Task TextWithN_InTheConditionOfAWrite_IsSentToDataverseAsTyped(string sql)
     {
         var h = DmlTestHarness.Create(rows: 4);
 
@@ -202,7 +200,26 @@ public sealed class DmlInterimRuleTests : IDisposable
         Assert.Contains(h.Reads, r => r.FetchXml.Contains($"value=\"{typed}\""));
     }
 
-    private static async Task AssertRefusedEverywhere(string sql, string named)
+    /// <summary>
+    /// Text without N that is not 7-bit ASCII in the condition of a write (=, &lt;&gt;, IN, LIKE, BETWEEN) is refused
+    /// before anything is read or written: SQL Server converts it to the database's code page before comparing, so it
+    /// would select other rows than the text says (on a Latin database '<c>Привет</c>' matches the rows whose name is
+    /// '??????'). This is the coordinator's conservative reading of the maintainer's "Refuse it", applied to conditions.
+    /// </summary>
+    [Theory]
+    [InlineData("UPDATE account SET description = N'x' WHERE name = '" + Cyrillic + "'", "the WHERE clause of UPDATE")]
+    [InlineData("UPDATE account SET description = N'x' WHERE name <> '" + Accented + "'", "the WHERE clause of UPDATE")]
+    [InlineData("DELETE FROM account WHERE name IN ('n1', '" + Cyrillic + "')", "the WHERE clause of DELETE")]
+    [InlineData("DELETE FROM account WHERE name LIKE '" + Accented + "%'", "the WHERE clause of DELETE")]
+    [InlineData("DELETE FROM account WHERE name BETWEEN 'a' AND '" + Cyrillic + "'", "the WHERE clause of DELETE")]
+    [InlineData("INSERT INTO account (name) SELECT name FROM account WHERE name = '" + Accented + "'", "the WHERE clause of INSERT ... SELECT")]
+    public async Task TextWithoutN_InTheConditionOfAWrite_IsRefusedBeforeAnythingIsReadOrWritten(string sql, string context)
+    {
+        await AssertRefusedEverywhere(sql, $"is not supported in {context}.");
+        await AssertRefusedEverywhere(sql, "Write it with the N prefix: N'");
+    }
+
+    private static async Task AssertRefusedEverywhere(string sql, string named, string code = ErrorCodes.Query.DmlUnsupportedConstruct)
     {
         foreach (var options in new[] { Confirmed, new DmlSafetyOptions(), new DmlSafetyOptions { IsDryRun = true } })
         {
@@ -210,7 +227,7 @@ public sealed class DmlInterimRuleTests : IDisposable
 
             var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = options }));
 
-            Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+            Assert.Equal(code, ex.ErrorCode);
             Assert.Contains(named, ex.Message);
             h.AssertNothingChanged();
             Assert.Empty(h.Reads);

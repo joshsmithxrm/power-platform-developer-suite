@@ -271,7 +271,7 @@ public sealed partial class ExecutionPlanBuilder
     /// WHERE as FetchXML conditions). Any client-side node (filter, join, semi-join, remote scan) would evaluate the WHERE
     /// against rows that lack its columns, or read another environment, so the statement is refused instead.
     /// </summary>
-    private static void EnsureDataverseEvaluatesTheSource(IQueryPlanNode node, string verb, bool allowProjection)
+    internal static void EnsureDataverseEvaluatesTheSource(IQueryPlanNode node, string verb, bool allowProjection)
     {
         var current = node;
         if (allowProjection && current is ProjectNode project)
@@ -281,7 +281,7 @@ public sealed partial class ExecutionPlanBuilder
         if (current is not FetchXmlScanNode)
         {
             throw new DmlSafetyRefusalException(
-                QueryErrorCode.DmlBlocked,
+                QueryErrorCode.DmlUnsupportedConstruct,
                 $"The rows of this {verb} cannot be selected by Dataverse alone (the plan needs {node.Description}), so " +
                 "nothing was executed. Use only conditions on the table's own columns.");
         }

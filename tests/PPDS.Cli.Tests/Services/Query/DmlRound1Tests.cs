@@ -184,7 +184,7 @@ public sealed class DmlFaithfulRowsTests : IDisposable
 
         var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
 
-        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
         h.AssertNothingChanged();
         Assert.Empty(h.Reads);
     }
@@ -252,7 +252,7 @@ public sealed class DmlRound1RefusalTests
 
             var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = options }));
 
-            Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+            Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
             Assert.Contains(named, ex.Message);
             h.AssertNothingChanged();
             Assert.Empty(h.Reads);
@@ -297,7 +297,7 @@ public sealed class DmlRound1RefusalTests
                 DmlSafety = options
             }));
 
-            Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+            Assert.Equal(ErrorCodes.Query.DmlMetadataUnavailable, ex.ErrorCode);
             Assert.Contains(named, ex.Message);
             bulk.VerifyNoOtherCalls();
             executor.VerifyNoOtherCalls();

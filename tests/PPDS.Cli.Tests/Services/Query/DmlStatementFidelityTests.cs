@@ -201,7 +201,7 @@ public class DmlStatementFidelityTests
             var ex = await Assert.ThrowsAsync<PpdsException>(
                 () => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = options }));
 
-            Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+            Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
             Assert.Contains(named, ex.Message);
             Assert.Contains("Nothing was executed", ex.Message);
             h.AssertNothingChanged();
@@ -235,7 +235,7 @@ public class DmlStatementFidelityTests
             DmlSafety = Confirmed
         }));
 
-        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
         h.AssertNothingChanged();
     }
 
@@ -272,7 +272,7 @@ public class DmlStatementFidelityTests
         var ex = await Assert.ThrowsAsync<PpdsException>(
             () => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
 
-        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
         Assert.Contains("not supported", ex.Message);
         h.AssertNothingChanged();
     }
@@ -337,7 +337,7 @@ public class DmlStatementFidelityTests
             DmlSafety = Confirmed
         }));
 
-        Assert.Equal(ErrorCodes.Query.DmlBlocked, ex.ErrorCode);
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
         Assert.Contains("another environment", ex.Message);
         h.AssertNothingChanged();
     }
@@ -417,32 +417,40 @@ public class DmlStatementFidelityTests
 
     // ---- guard refusals are not catchable by script code (S1) --------------------------------
 
+    /// <summary>
+    /// A script that writes may not contain TRY ... CATCH (the whole-script rule), so no CATCH can swallow a refusal: the
+    /// script is refused before its first statement, and nothing is read or written.
+    /// </summary>
     [Fact]
-    public async Task RowCapRefusal_InsideTry_EndsTheScript_KeepsItsCode_AndRunsNothingAfter()
+    public async Task AWriteInsideTry_IsRefusedBeforeAnything_SoNoCatchCanSwallowARefusal()
     {
-        var h = DmlTestHarness.Create(rows: 5, contactRows: 1); // the UPDATE after the CATCH is within the cap
+        var h = DmlTestHarness.Create(rows: 5, contactRows: 1);
 
-        var ex = await Assert.ThrowsAsync<PpdsDmlRowCapExceededException>(() => h.Service.ExecuteAsync(new SqlQueryRequest
+        var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest
         {
             Sql = "BEGIN TRY DELETE FROM account WHERE name = 'x' END TRY BEGIN CATCH PRINT 'swallowed' END CATCH; UPDATE contact SET lastname = 'b' WHERE lastname = 'y'",
             DmlSafety = new DmlSafetyOptions { IsConfirmed = true, RowCap = 2 }
         }));
 
-        Assert.Equal(ErrorCodes.Query.DmlRowCapExceeded, ex.ErrorCode);
+        Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
+        Assert.Contains("Statement 1 (line 1, column 1) is TRY ... CATCH", ex.Message);
         h.AssertNothingChanged();
+        Assert.Empty(h.Reads);
     }
 
+    /// <summary>In a script that does not write, CATCH still catches an ordinary error.</summary>
     [Fact]
-    public async Task OrdinaryErrors_InsideTry_AreStillCaught()
+    public async Task OrdinaryErrors_InsideTry_AreStillCaught_InAScriptThatDoesNotWrite()
     {
         var h = DmlTestHarness.Create(rows: 2);
 
-        await h.Service.ExecuteAsync(new SqlQueryRequest
+        var result = await h.Service.ExecuteAsync(new SqlQueryRequest
         {
-            Sql = "BEGIN TRY THROW 50001, 'boom', 1; END TRY BEGIN CATCH PRINT 'caught' END CATCH; DELETE FROM account WHERE name = 'x'",
+            Sql = "BEGIN TRY THROW 50001, 'boom', 1; END TRY BEGIN CATCH PRINT 'caught' END CATCH; SELECT name FROM account WHERE name = 'x'",
             DmlSafety = Confirmed
         });
 
-        Assert.Equal(new[] { 2 }, h.Deleted);
+        Assert.Equal(2, result.Result.Count);
+        h.AssertNothingChanged();
     }
 }

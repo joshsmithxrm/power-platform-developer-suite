@@ -578,7 +578,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         if (context.MetadataProvider == null)
         {
             throw new DmlSafetyRefusalException(
-                QueryErrorCode.DmlBlocked,
+                QueryErrorCode.DmlMetadataUnavailable,
                 $"{Operation.ToString().ToUpperInvariant()} {EntityLogicalName} needs the table's column metadata to write values, and none " +
                 "is available here. Nothing was executed.");
         }
@@ -607,7 +607,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         if (attributeMap == null || !attributeMap.TryGetValue(columnName, out var attr))
         {
             throw new DmlSafetyRefusalException(
-                QueryErrorCode.DmlBlocked,
+                QueryErrorCode.DmlUnsupportedConstruct,
                 $"The column '{columnName}' is not in the table's metadata, so its value cannot be written with the right type. Nothing was executed.");
         }
         return DmlValueCoercer.Coerce(value, attr);

@@ -1132,6 +1132,18 @@ describe('DataverseNotebookController DML safety', () => {
         controller.dispose();
     });
 
+    it('marks a target with no saved type as type unknown, also when the daemon reports its protection as Production', async () => {
+        const { daemon, controller, run } = setup();
+        targetsDaemon(daemon, [{ label: 'local', url: A + '/', protection: 'Production' }, { label: 'UNK', url: 'https://unk.crm.dynamics.com', type: 'Unknown', protection: 'Production' }]);
+        answerDml(CONFIRM);
+        await run(sqlNotebook('untyped', ['DELETE FROM account WHERE name = 1']));
+        const detail = modalCalls()[0][1].detail;
+        expect(detail).toMatch(/local \(protection Production\) .*\[this environment; TYPE UNKNOWN, TREATED AS PROTECTED\]/);
+        expect(detail).toMatch(/UNK \(Unknown, protection Production\) .*\[OTHER ENVIRONMENT; TYPE UNKNOWN, TREATED AS PROTECTED\]/);
+        expect(detail).not.toMatch(/local .*PRODUCTION \/ PROTECTED/);
+        controller.dispose();
+    });
+
     it('marks a target with no type as protected and a target with no URL as another environment', async () => {
         const { daemon, controller, run } = setup();
         const ls = String.fromCharCode(0x2028);

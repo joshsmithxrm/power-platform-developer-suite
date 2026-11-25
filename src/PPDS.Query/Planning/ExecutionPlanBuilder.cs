@@ -64,6 +64,10 @@ public sealed partial class ExecutionPlanBuilder
         if (fragment is TSqlScript script && script.Batches.Count(b => b.Statements.Count > 0) > 1)
             throw new QueryParseException(MultipleBatchesMessage);
 
+        // The whole-script rule: a script that writes may contain only admitted INSERT, UPDATE and DELETE statements.
+        // Checked here, before anything is planned or run, so every caller (explain, the ADO.NET provider) is covered.
+        DmlStatementSupport.ThrowIfScriptNotAdmitted(fragment);
+
         // Extract the first statement from the script
         var statement = ExtractFirstStatement(fragment);
 

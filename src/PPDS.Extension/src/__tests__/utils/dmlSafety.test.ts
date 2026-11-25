@@ -28,6 +28,16 @@ describe('dmlSafety helpers', () => {
         expect(isDmlConfirmationRequired(new Error('Query.DmlConfirmationRequired'))).toBe(false);
     });
 
+    it('shows each DML refusal code as a refusal, with or without the dmlBlocked flag', () => {
+        for (const code of ['Query.DmlBlocked', 'Query.DmlUnsupportedConstruct', 'Query.DmlValueStoredDifferently', 'Query.DmlMetadataUnavailable']) {
+            expect(dmlRefusalMessage(new ResponseError(1, 'x', { code, message: 'Refused.' }))).toContain('Refused.');
+            expect(dmlRefusalMessage(new ResponseError(1, 'x', { code, message: 'Refused.', dmlBlocked: true }))).toContain('Refused.');
+            expect(isDmlConfirmationRequired(new ResponseError(1, 'x', { code, dmlBlocked: true }))).toBe(false);
+        }
+        // An older client recognises a code it does not know by the flag the daemon sends with it.
+        expect(dmlRefusalMessage(new ResponseError(1, 'x', { code: 'Query.DmlSomethingNew', message: 'Refused.', dmlBlocked: true }))).toContain('Refused.');
+    });
+
     it('returns no refusal message for unrelated errors', () => {
         expect(dmlRefusalMessage(new ResponseError(1, 'x', { code: 'Query.ParseError' }))).toBeUndefined();
         expect(dmlRefusalMessage(new Error('boom'))).toBeUndefined();

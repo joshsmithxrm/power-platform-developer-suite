@@ -106,8 +106,23 @@ public static class QueryErrorCode
     /// <summary>Query exceeded the in-memory working set limit.</summary>
     public const string MemoryLimitExceeded = "Query.MemoryLimitExceeded";
 
-    /// <summary>DML statement blocked by safety guard.</summary>
+    /// <summary>DML statement blocked by the safety guard's own rules (for example DELETE or UPDATE without WHERE).</summary>
     public const string DmlBlocked = "Query.DmlBlocked";
+
+    /// <summary>
+    /// A script that writes contains something the DML allow-list does not admit (a statement kind, a clause, an
+    /// expression or a literal). Refused before the script's first statement runs; nothing is read or written.
+    /// </summary>
+    public const string DmlUnsupportedConstruct = "Query.DmlUnsupportedConstruct";
+
+    /// <summary>
+    /// A written value Dataverse stores, or may store, as something else (the empty string, text with white space at
+    /// either end). Refused before the script's first statement runs; nothing is read or written.
+    /// </summary>
+    public const string DmlValueStoredDifferently = "Query.DmlValueStoredDifferently";
+
+    /// <summary>A DML statement whose target table's column metadata is not available. Nothing runs.</summary>
+    public const string DmlMetadataUnavailable = "Query.DmlMetadataUnavailable";
 
     /// <summary>DML operation would affect more rows than the configured cap.</summary>
     public const string DmlRowCapExceeded = "Query.DmlRowCapExceeded";

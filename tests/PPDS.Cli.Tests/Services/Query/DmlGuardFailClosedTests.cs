@@ -33,7 +33,8 @@ public class DmlGuardFailClosedTests
     [InlineData("DELETE FROM account WHERE name = 'x'")]
     [InlineData("UPDATE account SET name = 'y' WHERE name = 'x'")]
     [InlineData("INSERT INTO account (name) VALUES ('x')")]
-    [InlineData("SELECT name FROM account; DELETE FROM account WHERE name = 'x'")]
+    // A script of admitted writes (one with a SELECT beside the write is refused outright by the whole-script rule).
+    [InlineData("UPDATE account SET name = 'y' WHERE name = 'x'; DELETE FROM account WHERE name = 'x'")]
     public async Task NullDmlSafety_Dml_IsRefusedAsConfirmationRequired_AndNothingExecutes(string sql)
     {
         var (service, executor, bulk) = Create();

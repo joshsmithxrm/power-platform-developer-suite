@@ -211,7 +211,7 @@ public sealed class ExpressionCompiler
 
     private static CompiledScalarExpression CompileNumericLiteral(NumericLiteral lit)
     {
-        var value = decimal.Parse(lit.Value, CultureInfo.InvariantCulture);
+        var value = ParseDecimalLiteral(lit.Value);
         return _ => value;
     }
 
@@ -894,7 +894,7 @@ public sealed class ExpressionCompiler
     internal static object ParseNumber(string value)
     {
         if (value.Contains('.'))
-            return decimal.Parse(value, CultureInfo.InvariantCulture);
+            return ParseDecimalLiteral(value);
 
         if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l))
         {
@@ -904,7 +904,22 @@ public sealed class ExpressionCompiler
             return l;
         }
 
-        return decimal.Parse(value, CultureInfo.InvariantCulture);
+        return ParseDecimalLiteral(value);
+    }
+
+    /// <summary>
+    /// A number literal as a decimal. SQL Server reads a literal of up to 38 digits as numeric(38); System.Decimal holds
+    /// at most 28 to 29 significant digits, so a larger literal is refused with a code (before anything is read, since
+    /// literals are compiled when the statement is planned) instead of failing with a raw overflow.
+    /// </summary>
+    internal static decimal ParseDecimalLiteral(string value)
+    {
+        if (decimal.TryParse(value, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var parsed))
+            return parsed;
+        throw new QueryExecutionException(
+            QueryErrorCode.ExecutionFailed,
+            $"The number {value} has more digits than PPDS can hold (at most 28 significant digits, up to " +
+            "79,228,162,514,264,337,593,543,950,335), so nothing was executed. Write a number within that range.");
     }
 
     /// <summary>

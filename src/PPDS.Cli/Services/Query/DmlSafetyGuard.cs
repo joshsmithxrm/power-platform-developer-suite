@@ -50,15 +50,16 @@ public sealed class DmlSafetyGuard
     {
         // A clause the engine cannot honour (TOP on UPDATE/DELETE, OUTPUT, MERGE, impersonation, ...) would be dropped
         // and change what the statement affects, so it is refused here, before any confirmation is asked for.
-        var unsupported = PPDS.Query.Planning.DmlStatementSupport.FindUnsupported(statement);
-        if (unsupported != null)
+        // Its code is the refusal's class: a value Dataverse stores differently, or anything not on the allowlist.
+        var refusal = PPDS.Query.Planning.DmlStatementSupport.FindRefusal(statement);
+        if (refusal != null)
         {
             return new DmlSafetyResult
             {
                 IsBlocked = true,
                 ContainsDml = statement is not (ExecuteAsStatement or RevertStatement),
-                BlockReason = unsupported,
-                ErrorCode = ErrorCodes.Query.DmlBlocked
+                BlockReason = refusal.Message,
+                ErrorCode = refusal.Code
             };
         }
 

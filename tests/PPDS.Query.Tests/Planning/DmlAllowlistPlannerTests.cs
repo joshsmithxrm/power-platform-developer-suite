@@ -34,14 +34,15 @@ public class DmlAllowlistPlannerTests
     [InlineData("INSERT INTO account (name) SELECT UPPER(name) AS n FROM account", "the function UPPER")]
     [InlineData("INSERT INTO [QA].dbo.account (name) VALUES ('a')", "another environment")]
     [InlineData("MERGE account AS t USING contact AS s ON t.name = s.lastname WHEN NOT MATCHED THEN INSERT (name) VALUES (s.lastname);", "MERGE")]
-    [InlineData("BEGIN TRY DELETE TOP (1) FROM account WHERE name = 'x' END TRY BEGIN CATCH END CATCH", "TOP")]
+    // A script that writes may not contain TRY ... CATCH at all (the whole-script rule), which is refused first.
+    [InlineData("BEGIN TRY DELETE TOP (1) FROM account WHERE name = 'x' END TRY BEGIN CATCH END CATCH", "TRY ... CATCH")]
     public void UnsupportedDml_IsRefusedByThePlanner(string sql, string named)
     {
         // Scripts are planned lazily, statement by statement, so plan and execute the first data statement.
         var act = () => PlanAndPlanInner(sql);
 
         act.Should().Throw<DmlSafetyRefusalException>()
-            .Where(e => e.ErrorCode == QueryErrorCode.DmlBlocked && e.Message.Contains(named));
+            .Where(e => e.ErrorCode == QueryErrorCode.DmlUnsupportedConstruct && e.Message.Contains(named));
     }
 
     private static void PlanAndPlanInner(string sql)
@@ -124,7 +125,7 @@ public class DmlAllowlistPlannerTests
         var act = () => PlanAndPlanInner(sql);
 
         act.Should().Throw<DmlSafetyRefusalException>()
-            .Where(e => e.ErrorCode == QueryErrorCode.DmlBlocked && e.Message.Contains(named));
+            .Where(e => e.ErrorCode == QueryErrorCode.DmlUnsupportedConstruct && e.Message.Contains(named));
     }
 
     [Fact]
