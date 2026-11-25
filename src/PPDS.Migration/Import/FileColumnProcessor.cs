@@ -65,11 +65,31 @@ namespace PPDS.Migration.Import
                 Message = "Uploading file column data..."
             });
 
+            var notWrittenCount = 0;
+
             foreach (var (entityName, fileDataList) in context.Data.FileData)
             {
+                // The records of this table that are in the data file. Only those the entity phase
+                // proved written are mapped; the file data of the others (a table with
+                // importMode="skip", a record that failed or that a filter left out) is not sent,
+                // and is not a failure of this phase: the record's own outcome is already reported.
+                var inFile = context.Data.EntityData.TryGetValue(entityName, out var tableRecords)
+                    ? new HashSet<Guid>(tableRecords.Select(r => r.Id))
+                    : new HashSet<Guid>();
+
                 foreach (var fileData in fileDataList)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+
+                    if (inFile.Contains(fileData.RecordId)
+                        && !context.IdMappings.TryGetNewId(entityName, fileData.RecordId, out _))
+                    {
+                        notWrittenCount++;
+                        _logger?.LogDebug(
+                            "Not uploading file column {Field} for {Entity}/{RecordId}: the record was not written",
+                            fileData.FieldName, entityName, fileData.RecordId);
+                        continue;
+                    }
 
                     // Map source record ID to target record ID
                     if (!context.IdMappings.TryGetNewId(entityName, fileData.RecordId, out var targetRecordId))
@@ -148,7 +168,9 @@ namespace PPDS.Migration.Import
             context.Progress?.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Importing,
-                Message = $"File column upload: {successCount} succeeded, {failureCount} failed"
+                Message = notWrittenCount > 0
+                    ? $"File column upload: {successCount} succeeded, {failureCount} failed, {notWrittenCount} not sent (record not written)"
+                    : $"File column upload: {successCount} succeeded, {failureCount} failed"
             });
 
             return new PhaseResult

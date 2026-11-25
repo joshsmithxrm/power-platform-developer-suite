@@ -169,6 +169,13 @@ namespace PPDS.Migration.Import
         public int SkippedCount { get; set; }
 
         /// <summary>
+        /// Gets or sets whether the later phases (deferred fields, state transitions, many-to-many,
+        /// file data) were not run for this table because the write result did not say which records
+        /// were written. Only records proven written receive later-phase writes.
+        /// </summary>
+        public bool LaterPhasesSkipped { get; set; }
+
+        /// <summary>
         /// Gets or sets the import duration for this entity.
         /// </summary>
         public TimeSpan Duration { get; set; }

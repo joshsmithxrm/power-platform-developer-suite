@@ -877,6 +877,10 @@ namespace PPDS.Migration.Import
 
             // Prepare records: apply handlers, remap lookups, null deferred fields, filter
             var preparedRecords = new List<Entity>();
+            // State transitions are held here and handed to the state phase only for records
+            // proven written below: a record that failed (in Create mode, one that already exists)
+            // or that a filter left out must not have its state changed (#1914 review MF1, MF2).
+            var pendingTransitions = new List<(Guid RecordId, StateTransitionData Data)>();
             List<Guid?>? ownerMappingList = options.ImpersonateOwners ? new List<Guid?>() : null;
             foreach (var record in records)
             {
@@ -900,7 +904,7 @@ namespace PPDS.Migration.Import
                     var transition = stateHandler.GetTransition(record, context);
                     if (transition != null)
                     {
-                        context.StateTransitions.Add(entityName, record.Id, transition);
+                        pendingTransitions.Add((record.Id, transition));
                     }
                 }
 
@@ -911,13 +915,13 @@ namespace PPDS.Migration.Import
                     var stc = record.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? -1;
                     if (sc != 0)
                     {
-                        context.StateTransitions.Add(entityName, record.Id, new StateTransitionData
+                        pendingTransitions.Add((record.Id, new StateTransitionData
                         {
                             EntityName = entityName,
                             RecordId = record.Id,
                             StateCode = sc,
                             StatusCode = stc
-                        });
+                        }));
                     }
                 }
 
@@ -1053,11 +1057,38 @@ namespace PPDS.Migration.Import
                 }
             }
 
-            // Track ID mappings - for bulk operations, IDs are preserved from Entity.Id
-            for (var i = 0; i < records.Count; i++)
+            // Map only the records PROVEN written. The later phases (deferred fields, state
+            // transitions, many-to-many, file columns) follow these mappings, so a record that
+            // failed, or that a filter left out, gets nothing more (#1914 review MF1, MF2). IDs are
+            // preserved from Entity.Id, so a written record maps to itself.
+            var written = ProvenWrittenRecords(preparedRecords, bulkResult, out var notProvenReason);
+            var laterPhasesSkipped = written == null;
+            if (written != null)
             {
-                var oldId = records[i].Id;
-                idMappings.AddMapping(entityName, oldId, oldId);
+                foreach (var id in written)
+                {
+                    idMappings.AddMapping(entityName, id, id);
+                }
+
+                foreach (var (recordId, transition) in pendingTransitions)
+                {
+                    if (written.Contains(recordId))
+                    {
+                        context.StateTransitions.Add(entityName, recordId, transition);
+                    }
+                }
+            }
+            else
+            {
+                _logger?.LogWarning("Not running the later phases for {Entity}: {Reason}", entityName, notProvenReason);
+                warnings.AddWarning(new ImportWarning
+                {
+                    Code = ImportWarningCodes.LaterPhasesSkipped,
+                    Entity = entityName,
+                    Message = $"The result of writing {entityName} does not say which records were written ({notProvenReason}), " +
+                              "so its deferred lookups, state changes, many-to-many associations and file data were not sent.",
+                    Impact = $"{preparedRecords.Count} {entityName} record(s) may be missing lookups, state, associations or files."
+                });
             }
 
             // Convert BulkOperationErrors to MigrationErrors
@@ -1093,8 +1124,9 @@ namespace PPDS.Migration.Import
                 SkippedCount = records.Count - preparedRecords.Count,
                 CreatedCount = createdCount,
                 UpdatedCount = updatedCount,
+                LaterPhasesSkipped = laterPhasesSkipped,
                 Duration = entityStopwatch.Elapsed,
-                Success = bulkResult.FailureCount == 0,
+                Success = bulkResult.FailureCount == 0 && !laterPhasesSkipped,
                 Errors = allErrors
             };
         }
@@ -1294,6 +1326,55 @@ namespace PPDS.Migration.Import
                 CreatedCount = totalCreated,
                 UpdatedCount = totalUpdated
             };
+        }
+
+        /// <summary>
+        /// The ids of the prepared records that the result proves were written, or null when it
+        /// cannot say. A failure counts only by its record id: the bulk executor's error index is
+        /// relative to a batch, so it cannot name a record of the table. Every occurrence of a failed
+        /// id is treated as not written (a duplicate in the file whose second create failed).
+        /// </summary>
+        internal static HashSet<Guid>? ProvenWrittenRecords(
+            IReadOnlyList<Entity> preparedRecords,
+            BulkOperationResult result,
+            out string? reason)
+        {
+            reason = null;
+            if (result.SuccessCount + result.FailureCount != preparedRecords.Count)
+            {
+                reason = $"{result.SuccessCount} succeeded and {result.FailureCount} failed of {preparedRecords.Count} sent";
+                return null;
+            }
+
+            if (result.Errors.Count != result.FailureCount)
+            {
+                reason = $"{result.FailureCount} failed but {result.Errors.Count} error(s) were returned";
+                return null;
+            }
+
+            var sent = new HashSet<Guid>(preparedRecords.Select(r => r.Id));
+            var failed = new HashSet<Guid>();
+            foreach (var error in result.Errors)
+            {
+                if (error.RecordId is not { } id || id == Guid.Empty || !sent.Contains(id))
+                {
+                    reason = "a failure does not name a record that was sent";
+                    return null;
+                }
+
+                failed.Add(id);
+            }
+
+            var written = new HashSet<Guid>();
+            foreach (var record in preparedRecords)
+            {
+                if (record.Id != Guid.Empty && !failed.Contains(record.Id))
+                {
+                    written.Add(record.Id);
+                }
+            }
+
+            return written;
         }
 
         /// <summary>

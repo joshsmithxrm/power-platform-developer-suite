@@ -42,6 +42,7 @@ public class StateTransitionProcessorTests
         // AC-06: transition statecode=1, record currently at statecode=0
         var recordId = Guid.NewGuid();
         var context = CreateContext();
+        context.IdMappings.AddMapping("incident", recordId, recordId); // written by the entity phase
         context.StateTransitions.Add("incident", recordId, new StateTransitionData
         {
             EntityName = "incident",
@@ -79,6 +80,7 @@ public class StateTransitionProcessorTests
         // AC-16: record already matches desired statecode and statuscode, skip transition
         var recordId = Guid.NewGuid();
         var context = CreateContext();
+        context.IdMappings.AddMapping("incident", recordId, recordId); // written by the entity phase
         context.StateTransitions.Add("incident", recordId, new StateTransitionData
         {
             EntityName = "incident",
@@ -111,6 +113,7 @@ public class StateTransitionProcessorTests
         closeEntity["subject"] = "Won (migrated)";
 
         var context = CreateContext();
+        context.IdMappings.AddMapping("opportunity", recordId, recordId); // written by the entity phase
         context.StateTransitions.Add("opportunity", recordId, new StateTransitionData
         {
             EntityName = "opportunity",
@@ -152,10 +155,13 @@ public class StateTransitionProcessorTests
         var id3 = Guid.NewGuid();
 
         var context = CreateContext();
+        context.IdMappings.AddMapping("incident", id1, id1); // written by the entity phase
         context.StateTransitions.Add("incident", id1, new StateTransitionData
         { EntityName = "incident", RecordId = id1, StateCode = 1, StatusCode = 5 });
+        context.IdMappings.AddMapping("incident", id2, id2); // written by the entity phase
         context.StateTransitions.Add("incident", id2, new StateTransitionData
         { EntityName = "incident", RecordId = id2, StateCode = 1, StatusCode = 5 });
+        context.IdMappings.AddMapping("account", id3, id3); // written by the entity phase
         context.StateTransitions.Add("account", id3, new StateTransitionData
         { EntityName = "account", RecordId = id3, StateCode = 1, StatusCode = 2 });
 
@@ -174,6 +180,23 @@ public class StateTransitionProcessorTests
         result.RecordsProcessed.Should().Be(3);
         result.SuccessCount.Should().Be(3);
         result.FailureCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UnwrittenRecord_HasNoStateChangeSent()
+    {
+        // #1914 review MF1: a record the entity phase did not write (in Create mode, one that already
+        // exists in the target) has no mapping, and its state must not be changed.
+        var recordId = Guid.NewGuid();
+        var context = CreateContext();
+        context.StateTransitions.Add("incident", recordId, new StateTransitionData
+        { EntityName = "incident", RecordId = recordId, StateCode = 1, StatusCode = 5 });
+
+        await _sut.ProcessAsync(context, CancellationToken.None);
+
+        _client.Verify(
+            c => c.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]

@@ -76,11 +76,13 @@ namespace PPDS.Migration.Import
 
                     try
                     {
-                        // Resolve mapped record ID
-                        var targetId = transition.RecordId;
-                        if (context.IdMappings.TryGetNewId(entityName, transition.RecordId, out var mappedId))
+                        // Only a record the entity phase proved written has a mapping; a record that
+                        // failed (in Create mode, one that already existed) or was left out must not
+                        // have its state changed in the target (#1914 review MF1).
+                        if (!context.IdMappings.TryGetNewId(entityName, transition.RecordId, out var targetId))
                         {
-                            targetId = mappedId;
+                            _logger?.LogDebug("Skipping state transition for unwritten {Entity}/{Id}", entityName, transition.RecordId);
+                            continue;
                         }
 
                         await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
