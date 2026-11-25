@@ -311,7 +311,7 @@ public sealed class CsvDataLoader
         }
 
         // 5. The mapped columns and lookup configurations fit the table, before any lookup is read.
-        var problems = CheckMappings(headers, mappings, attributesByName, options.AlternateKeyFields);
+        var problems = CheckMappings(headers, mappings, attributesByName, options.AlternateKeyFields, options.RefuseOneSidedColumns);
         problems.AddRange(await CheckLookupKeyFieldsAsync(headers, mappings, cancellationToken));
         if (problems.Count > 0)
         {
@@ -443,48 +443,38 @@ public sealed class CsvDataLoader
         {
             var normalizedHeader = ColumnMatcher.NormalizeForMatching(header);
 
-            // A match by normalised name takes the one column that normalises alike, never the first of several.
-            bool Normalized(string normalized, out AttributeMetadata? found)
+            // An exact logical name wins. Otherwise the prefixed name, the normalised prefixed name and the normalised name
+            // are each tried, and together they must give exactly one column: never the first of several, from one way of
+            // matching or from two (columns test_code and code, header "Co de").
+            List<AttributeMetadata> Candidates()
             {
-                var candidates = attributesByName.Values
-                    .Where(a => ColumnMatcher.NormalizeForMatching(a.LogicalName) == normalized)
-                    .DistinctBy(a => a.LogicalName, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-                found = candidates.Count == 1 ? candidates[0] : null;
-                if (candidates.Count > 1)
+                var found = new List<AttributeMetadata>();
+                if (prefix != null && attributesByName.TryGetValue(prefix + header, out var prefixed))
                 {
-                    ambiguous.Add(new DataValueProblem(null, header,
-                        $"The column's name matches {candidates.Count} columns of the table ({string.Join(", ", candidates.Select(c => c.LogicalName))}) " +
-                        "when compared without case, spaces, underscores and hyphens; map it in a mapping file."));
-                    found = candidates[0]; // refused above; kept only so the header is not reported as unmatched too
+                    found.Add(prefixed);
                 }
 
-                return found != null;
+                var names = prefix != null
+                    ? new[] { ColumnMatcher.NormalizeForMatching(prefix + header), normalizedHeader }
+                    : new[] { normalizedHeader };
+                found.AddRange(attributesByName.Values.Where(a => names.Contains(ColumnMatcher.NormalizeForMatching(a.LogicalName))));
+                return found.DistinctBy(a => a.LogicalName, StringComparer.OrdinalIgnoreCase).ToList();
             }
 
-            // Try exact match first
-            if (attributesByName.TryGetValue(header, out var attr))
+            AttributeMetadata? attr;
+            List<AttributeMetadata> candidates = [];
+            if (attributesByName.TryGetValue(header, out attr) || (candidates = Candidates()).Count == 1)
             {
-                mappings[header] = CreateAutoMapping(header, attr);
+                mappings[header] = CreateAutoMapping(header, attr ?? candidates[0]);
                 matchedCount++;
             }
-            // Try prefix + column (e.g., "city" → "ppds_city")
-            else if (prefix != null && attributesByName.TryGetValue(prefix + header, out attr))
+            else if (candidates.Count > 1)
             {
-                mappings[header] = CreateAutoMapping(header, attr);
-                matchedCount++;
-            }
-            // Try normalized prefix + column
-            else if (prefix != null && Normalized(ColumnMatcher.NormalizeForMatching(prefix + header), out attr))
-            {
-                mappings[header] = CreateAutoMapping(header, attr!);
-                matchedCount++;
-            }
-            // Try normalized match (existing)
-            else if (Normalized(normalizedHeader, out attr))
-            {
-                mappings[header] = CreateAutoMapping(header, attr!);
-                matchedCount++;
+                ambiguous.Add(new DataValueProblem(null, header,
+                    $"The column's name matches {candidates.Count} columns of the table ({string.Join(", ", candidates.Select(c => c.LogicalName))}) " +
+                    "with the table's prefix or when compared without case, spaces, underscores and hyphens; map it in a mapping file."));
+                mappings[header] = new ColumnMappingEntry { Skip = true };
+                matchedCount++; // refused above; not reported as unmatched too
             }
             else
             {
@@ -541,7 +531,8 @@ public sealed class CsvDataLoader
         string[] headers,
         Dictionary<string, ColumnMappingEntry> mappings,
         Dictionary<string, AttributeMetadata> attributesByName,
-        string? alternateKeyFields)
+        string? alternateKeyFields,
+        bool refuseOneSided)
     {
         var problems = new List<DataValueProblem>();
         var mappedFields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -566,10 +557,9 @@ public sealed class CsvDataLoader
                 continue;
             }
 
-            // An upsert creates the record or updates it, and which is not known before it is sent. A column that takes
-            // no value in one of the two (createdon; a primary id column, valid for create only; statecode in many tables,
-            // valid for update only) is refused: what Dataverse does with the value then is not certain.
-            if (attr.IsValidForCreate == false || attr.IsValidForUpdate == false)
+            // A column that takes no value when a record is created and none when it is updated (createdon) is refused.
+            // A column that takes one of the two only is refused while RefuseOneSidedColumns is true.
+            if (TakesNoValueForUpsert(attr, refuseOneSided))
             {
                 var takes = (attr.IsValidForCreate, attr.IsValidForUpdate) switch
                 {
@@ -703,6 +693,19 @@ public sealed class CsvDataLoader
             : $"The lookup's keyField '{keyField}' is not a text column of table '{entity}'. A lookup matched by field " +
               "compares text, and another type would be read in the machine's culture; match by a text column, or by GUID.";
     }
+
+    /// <summary>
+    /// The maintainer's decision for #1940 (asked, not yet answered): whether <c>data load</c> refuses a column that takes a
+    /// value only when a record is created (such as the primary id column) or only when it is updated (<c>statecode</c> in many tables). A load is an upsert,
+    /// which creates or updates, and what Dataverse does with such a value in the other case is not known here. Before
+    /// #1940 the value was sent. A column valid for neither is refused either way. Changing this one value is the whole
+    /// change.
+    /// </summary>
+    internal const bool RefuseOneSidedColumns = true;
+
+    private static bool TakesNoValueForUpsert(AttributeMetadata attr, bool refuseOneSided) =>
+        (attr.IsValidForCreate == false && attr.IsValidForUpdate == false)
+        || (refuseOneSided && (attr.IsValidForCreate == false || attr.IsValidForUpdate == false));
 
     private static IEnumerable<(string ColumnName, LookupConfig Config)> GetLookupConfigs(
         Dictionary<string, ColumnMappingEntry> mappings,

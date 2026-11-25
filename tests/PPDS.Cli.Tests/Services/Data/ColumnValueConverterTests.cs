@@ -247,27 +247,52 @@ public class ColumnValueConverterTests
     }
 
     [Theory]
-    [InlineData("dd/MM/yyyy", true)]
-    [InlineData("yyyy-MM-dd'T'HH:mm:ssK", true)]
-    [InlineData("d MMMM yyyy", true)]
-    [InlineData("%d/M/yyyy", true)]
-    [InlineData("dd/MM/yyyy 'yy'", true)]       // quoted text is not a part
-    [InlineData("dd\\/MM\\/yyyy", true)]        // an escaped character is not a part
-    [InlineData("ddd MMM yyyy", false)]         // ddd is the weekday name, not the day of the month
-    [InlineData("dd/MM/'yyyy'", false)]         // the only year is quoted text
-    [InlineData("dd/MM/yyyyy", false)]
-    [InlineData("dd/MM/yyyy yy", false)]
-    [InlineData("dd/MM/yyyy HH:mm:ss.FFF", false)]
-    [InlineData("D", false)]
-    public void A_date_format_must_name_a_four_digit_year_a_month_and_a_day(string format, bool admitted)
+    [InlineData("dd/MM/yyyy", true, "15/01/2024")]
+    [InlineData("yyyy-MM-dd'T'HH:mm:ssK", true, "2024-01-15T00:00:00")]
+    [InlineData("d MMMM yyyy", true, "15 January 2024")]
+    [InlineData("%d/M/yyyy", true, "15/1/2024")]
+    [InlineData("dd/MM/yyyy 'yy'", true, "15/01/2024 yy")]          // quoted text is not a part
+    [InlineData("dd\\/MM\\/yyyy", true, "15/01/2024")]              // an escaped character is not a part
+    [InlineData("ddd MMM yyyy", false, "Mon Jan 2024")]             // ddd is the weekday name, not the day of the month
+    [InlineData("dd/MM/'yyyy'", false, "15/01/yyyy")]               // the only year is quoted text
+    [InlineData("dd/MM/yyyyy", false, "15/01/02024")]
+    [InlineData("dd/MM/yy", false, "15/01/24")]                  // a two-digit year: the century comes from a setting
+    [InlineData("dd/MM/yyyy HH:mm:ss.FFF", false, "15/01/2024 00:00:00")]
+    [InlineData("D", false, "Monday, 15 January 2024")]
+    [InlineData("\\d/MM/yyyy", false, "d/01/2024")]                 // round 3: an escaped letter is not a day
+    [InlineData("dd/MM 'x\\'yyyy'", false, "15/01 x'yyyy")]          // round 3: an escaped quote does not end quoted text
+    [InlineData("dd/MM \"x\\\"yyyy\"", false, "15/01 x\"yyyy")]
+    public void A_date_format_must_name_a_four_digit_year_a_month_and_a_day(string format, bool admitted, string cell)
     {
-        // Review round 2, must-fix 2: a missing part was taken from the machine.
+        // Review round 2, must-fix 2, and round 3, must-fixes 2 and 3: a missing part was taken from the machine. Each
+        // cell matches its format, so without the refusal it would be read, with the missing part from the machine.
+        Assert.True(DateTime.TryParseExact(cell, format, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None, out _));
         Assert.Equal(admitted, ColumnValueConverter.DateFormatRefusal(format) is null);
 
-        var column = Date("day", DateTimeBehavior.DateOnly, DateTimeFormat.DateOnly);
-        if (!admitted)
+        foreach (var column in new[]
+                 {
+                     Date("day", DateTimeBehavior.DateOnly, DateTimeFormat.DateOnly),
+                     Date("when", DateTimeBehavior.UserLocal, DateTimeFormat.DateAndTime),
+                 })
         {
-            Assert.False(ColumnValueConverter.Convert("15/01/2024", column, new ColumnValueOptions { DateFormat = format }).IsAdmitted);
+            var result = ColumnValueConverter.Convert(cell, column, new ColumnValueOptions { DateFormat = format });
+            if (!admitted)
+            {
+                Assert.False(result.IsAdmitted);
+                Assert.Equal(ColumnValueConverter.DateFormatRefusal(format), result.Refusal);
+            }
+            else if (column.DateTimeBehavior == DateTimeBehavior.DateOnly)
+            {
+                Assert.True(result.IsAdmitted, result.Refusal);
+            }
         }
+    }
+
+    [Fact]
+    public void A_date_format_with_quoted_text_that_is_not_closed_is_refused()
+    {
+        Assert.NotNull(ColumnValueConverter.DateFormatRefusal("dd/MM/yyyy 'x"));
+        Assert.NotNull(ColumnValueConverter.DateFormatRefusal("dd/MM/yyyy 'x\\'"));
     }
 }

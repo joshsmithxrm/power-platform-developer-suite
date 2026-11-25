@@ -19,7 +19,7 @@ public sealed record StrictCsvFileTable(IReadOnlyList<string> Headers, IReadOnly
 /// <summary>
 /// Reads the CSV files of <c>data load</c> and <c>data update</c> with one rule (#1916, #1917): comma-separated, RFC 4180
 /// quoting (a field in double quotes may hold commas, line breaks and doubled quotes), UTF-8 with or without a byte
-/// order mark, blank lines skipped. Nothing is trimmed. The file is refused, naming the rows, when it is empty, it is not
+/// order mark (UTF-16 and UTF-32 are refused), blank lines skipped. Nothing is trimmed. The file is refused, naming the rows, when it is empty, it is not
 /// valid UTF-8 (a file saved in another encoding, such as Windows-1252, or a sequence cut off), a header name is empty or
 /// repeated (ignoring case), a quote is stray or unterminated, or a record has more or fewer fields than the header.
 /// </summary>
@@ -47,7 +47,10 @@ public static class StrictCsvFile
         try
         {
             // Invalid bytes throw instead of becoming U+FFFD, so a file in another encoding is refused, never rewritten.
-            using var reader = new StreamReader(path, StrictUtf8, detectEncodingFromByteOrderMarks: true);
+            // Byte order marks are not detected: detection would swap in the lenient built-in decoders (UTF-8, UTF-16 and
+            // UTF-32, which replace invalid bytes). A UTF-8 byte order mark is still consumed, as the strict encoding's
+            // preamble; a UTF-16 or UTF-32 one is invalid UTF-8, so such a file is refused.
+            using var reader = new StreamReader(path, StrictUtf8, detectEncodingFromByteOrderMarks: false);
             using var csv = new CsvReader(reader, configuration);
             if (!await csv.ReadAsync().ConfigureAwait(false))
             {
@@ -81,7 +84,7 @@ public static class StrictCsvFile
                 reading = rowNumber + 1;
             }
         }
-        catch (Exception ex) when (IsInvalidText(ex))
+        catch (DecoderFallbackException)
         {
             // The reader decodes ahead of the record being read, so no row can be named.
             throw new DataValuesRefusedException([new DataValueProblem(null, null,
@@ -106,10 +109,8 @@ public static class StrictCsvFile
         return new StrictCsvFileTable(headers, rows);
     }
 
-    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
-
-    private static bool IsInvalidText(Exception ex) =>
-        ex is DecoderFallbackException || ex.InnerException is DecoderFallbackException;
+    // The identifier (the preamble) is what lets the reader consume a UTF-8 byte order mark without detection.
+    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: true, throwOnInvalidBytes: true);
 
     private static IEnumerable<DataValueProblem> HeaderProblems(string[] headers)
     {

@@ -449,8 +449,19 @@ public static class ColumnValueConverter
             var c = format[i];
             if (c is '\'' or '"')
             {
-                var end = format.IndexOf(c, i + 1);
-                i = end < 0 ? format.Length : end + 1;
+                // Quoted text up to the same quote; .NET honours a backslash inside it, so an escaped quote does not end it.
+                var j = i + 1;
+                while (j < format.Length && format[j] != c)
+                {
+                    j += format[j] == '\\' ? 2 : 1;
+                }
+
+                if (j >= format.Length)
+                {
+                    return "The dateFormat has quoted text that is not closed.";
+                }
+
+                i = j + 1;
                 continue;
             }
 

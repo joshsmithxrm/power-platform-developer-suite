@@ -19,8 +19,7 @@ namespace PPDS.Cli.Commands.Data;
 /// </summary>
 public static class LoadCommand
 {
-    /// <summary>The options the command reads a mapping file with (internal so tests read it the same way).</summary>
-    internal static readonly JsonSerializerOptions JsonOptions = new()
+    private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -48,7 +47,7 @@ public static class LoadCommand
 
         var fileOption = new Option<FileInfo>("--file", "-f")
         {
-            Description = "Path to CSV file",
+            Description = "Path to the CSV file: UTF-8, with or without a byte order mark; comma-separated, RFC 4180 quoting",
             Required = true
         }.AcceptExistingOnly();
 
@@ -59,7 +58,7 @@ public static class LoadCommand
 
         var mappingOption = new Option<FileInfo?>("--mapping", "-m")
         {
-            Description = "Path to column mapping JSON file"
+            Description = "Path to column mapping JSON file. Names are case-sensitive; repeated or unknown entries are refused. A lookup with matchBy 'field' compares the key field's text ignoring case"
         };
         mappingOption.Validators.Add(result =>
         {
@@ -264,7 +263,7 @@ public static class LoadCommand
             {
                 Console.Error.WriteLine($"Loading mapping from {mappingFile.Name}...");
                 var mappingJson = await File.ReadAllTextAsync(mappingFile.FullName, cancellationToken);
-                mapping = JsonSerializer.Deserialize<CsvMappingConfig>(mappingJson, JsonOptions);
+                mapping = CsvMappingFile.Read(mappingJson); // duplicates, unknown names and bad JSON refused
 
                 // Validate schema version
                 if (mapping != null)

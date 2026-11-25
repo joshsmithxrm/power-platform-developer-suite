@@ -315,4 +315,57 @@ public sealed class DataUpdateValueServiceTests : IDisposable
         Assert.StartsWith("refused: ", outcome);
         Assert.Contains(expected, outcome, StringComparison.Ordinal);
     }
+
+    // ---- Review round 3 ----
+
+    private string Mapping(string json)
+    {
+        var path = Path.Combine(_directory, $"{Guid.NewGuid():N}.json");
+        System.IO.File.WriteAllText(path, json);
+        return path;
+    }
+
+    [Fact]
+    public async Task A_header_is_matched_to_its_mapping_entry_ignoring_case()
+    {
+        // Round 3, must-fix 4: header Name, entry name: description is sent, name is not.
+        var path = File($"accountid,Name\n{RecordId},first\n");
+        var mapping = Mapping("""{"columns":{"name":{"field":"description"}}}""");
+        Assert.Equal($"{RecordId}: description=text:first", await FileOutcomeAsync(path, mapping));
+    }
+
+    [Fact]
+    public async Task A_column_the_mapping_skips_is_not_written()
+    {
+        // Round 3, should-fix 1.
+        var path = File($"accountid,name,description\n{RecordId},first,second\n");
+        var mapping = Mapping("""{"columns":{"description":{"skip":true}}}""");
+        Assert.Equal($"{RecordId}: name=text:first", await FileOutcomeAsync(path, mapping));
+    }
+
+    [Fact]
+    public async Task A_mapping_entry_that_names_no_column_of_the_file_is_refused()
+    {
+        // Round 3, should-fix 3: it was ignored, and the value went to the column the header names.
+        var path = File($"accountid,name\n{RecordId},first\n");
+        var mapping = Mapping("""{"columns":{"Full Name":{"field":"description"}}}""");
+        Assert.Equal("refused: Column 'Full Name': The mapping file has an entry for this column, and the file has no such column.",
+            await FileOutcomeAsync(path, mapping));
+    }
+
+    [Fact]
+    public async Task A_mapping_entry_with_an_unknown_property_is_refused()
+    {
+        var path = File($"accountid,name\n{RecordId},first\n");
+        var outcome = await FileOutcomeAsync(path, Mapping("""{"columns":{"name":{"Skip":true}}}"""));
+        Assert.StartsWith("refused: Column 'name': The mapping file's property 'Skip'", outcome);
+    }
+
+    [Fact]
+    public async Task The_empty_GUID_is_refused_as_the_update_file_id()
+    {
+        // Round 3, should-fix 6.
+        var outcome = await FileOutcomeAsync(File("accountid,name\n00000000-0000-0000-0000-000000000000,first\n"));
+        Assert.Equal($"refused: Row 1, column 'accountid': {NotAnId}", outcome);
+    }
 }

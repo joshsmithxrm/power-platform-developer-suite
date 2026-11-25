@@ -67,7 +67,7 @@ public static class UpdateCommand
 
         var fileOption = new Option<FileInfo?>("--file")
         {
-            Description = "Path to a UTF-8 CSV file of records to update: a header row, the table's primary id column (or --id-column) and the columns to update; RFC 4180 quoting. An empty cell clears its column. A file that is not UTF-8, a malformed row, a bad or repeated id or a value not in its column's form refuses the whole file before anything is written"
+            Description = "Path to a CSV file of records to update, UTF-8 with or without a byte order mark: a header row, the table's primary id column (or --id-column) and the columns to update; RFC 4180 quoting. An empty cell clears its column. A file that is not UTF-8, a malformed row, a bad or repeated id or a value not in its column's form refuses the whole file before anything is written"
         };
         fileOption.Validators.Add(result =>
         {
@@ -95,7 +95,7 @@ public static class UpdateCommand
 
         var mappingOption = new Option<FileInfo?>("--mapping", "-m")
         {
-            Description = "Path to column mapping JSON file (for --file mode)"
+            Description = "Path to column mapping JSON file (for --file mode): each entry renames a header (field) or leaves it out (skip); names are case-sensitive, and repeated or unknown entries, or an entry for a header the file does not have, are refused"
         };
         mappingOption.Validators.Add(result =>
         {

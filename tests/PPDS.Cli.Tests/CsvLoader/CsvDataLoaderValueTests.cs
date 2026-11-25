@@ -3,7 +3,6 @@ using Microsoft.Xrm.Sdk.Metadata;
 using Moq;
 using System.Text;
 using System.Text.Json;
-using PPDS.Cli.Commands.Data;
 using PPDS.Cli.CsvLoader;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Cli.Services.Data;
@@ -52,6 +51,9 @@ public sealed class CsvDataLoaderValueTests : IDisposable
         new IntegerAttributeMetadata { LogicalName = "test_stage", IsValidForCreate = false, IsValidForUpdate = true },
         Text("test_first_name"),
         Text("test_firstname"),
+        Text("code"),
+        Text("ab_c"),
+        Text("a_bc"),
     ];
 
     /// <summary>The lookup table of <c>test_parentid</c>: a text key, a date key and a whole-number key, and records.</summary>
@@ -62,14 +64,17 @@ public sealed class CsvDataLoaderValueTests : IDisposable
             new MemoAttributeMetadata { LogicalName = "test_notes" },
             Date("test_since", DateTimeBehavior.UserLocal, DateTimeFormat.DateAndTime),
             WholeNumber("test_number"),
+            YesNo("test_flag"),
+            Choice("test_kind", 1, 2),
+            Lookup("test_ownerid", "systemuser"),
+            Identifier("test_legacyid"),
         ])
         {
             Records = records.Select(r => new Entity("test_parent", Guid.Parse(r.Id)) { ["test_code"] = r.Code }).ToList()
         };
 
-    /// <summary>A mapping file read as the command reads it: JSON text through the command's own serializer options.</summary>
-    internal static CsvMappingConfig MappingJson(string json) =>
-        JsonSerializer.Deserialize<CsvMappingConfig>(json, LoadCommand.JsonOptions)!;
+    /// <summary>A mapping file read as the command reads it: JSON text through <see cref="CsvMappingFile.Read"/>.</summary>
+    internal static CsvMappingConfig MappingJson(string json) => CsvMappingFile.Read(json);
 
     private string Csv(string content)
     {
@@ -92,7 +97,8 @@ public sealed class CsvDataLoaderValueTests : IDisposable
     }
 
     internal static async Task<Run> LoadAsync(string csvPath, bool dryRun = false, string? key = null,
-        CsvMappingConfig? mapping = null, bool force = false, TestTable? parents = null)
+        CsvMappingConfig? mapping = null, bool force = false, TestTable? parents = null,
+        bool refuseOneSided = CsvDataLoader.RefuseOneSidedColumns)
     {
         var pool = PoolWithTables(new TestTable(Table, Table + "id", WidgetColumns()), parents ?? Parents());
         var upserts = new List<List<Entity>>();
@@ -117,6 +123,7 @@ public sealed class CsvDataLoaderValueTests : IDisposable
                 DryRun = dryRun,
                 Mapping = mapping,
                 Force = force,
+                RefuseOneSidedColumns = refuseOneSided,
             });
             return new Run(result, null, upserts);
         }
@@ -355,7 +362,23 @@ public sealed class CsvDataLoaderValueTests : IDisposable
             Assert.Null(run.Refusal.InnerException);
         }
 
-        foreach (var bom in new[] { Array.Empty<byte>(), new byte[] { 0xEF, 0xBB, 0xBF } })
+        // Round 3, must-fix 1: with a byte order mark the reader used to switch to the lenient decoders.
+        byte[] bom8 = [0xEF, 0xBB, 0xBF];
+        var refusedWithBom = new[]
+        {
+            CsvBytes(Bytes(bom8, header, [0x4D, 0xFC, 0x6C, 0x6C, 0x65, 0x72], Encoding.ASCII.GetBytes(",1.5\n"))), // Windows-1252
+            CsvBytes(Bytes(bom8, header, Encoding.ASCII.GetBytes("M"), [0xC3], Encoding.ASCII.GetBytes(",1.5\nsecond,2\n"))), // cut off inside a row
+            CsvBytes(Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes("test_name,test_rate\nfirst,1.5\n")).ToArray()), // UTF-16LE
+            CsvBytes(Encoding.UTF32.GetPreamble().Concat(Encoding.UTF32.GetBytes("test_name,test_rate\nfirst,1.5\n")).ToArray()), // UTF-32LE
+        };
+        foreach (var path in refusedWithBom)
+        {
+            var run = await LoadAsync(path);
+            AssertRefused(run, ":");
+            Assert.Contains("not valid UTF-8", run.Refusal!.Problems[0].Message, StringComparison.Ordinal);
+        }
+
+        foreach (var bom in new[] { Array.Empty<byte>(), bom8 })
         {
             var utf8 = await LoadAsync(CsvBytes(Bytes(bom, header, Encoding.UTF8.GetBytes("Müller Œ 東京,1.5\n"))));
             Assert.Null(utf8.Refusal);
@@ -397,10 +420,18 @@ public sealed class CsvDataLoaderValueTests : IDisposable
     [Fact]
     public async Task Two_mapping_keys_equal_ignoring_case_are_refused()
     {
+        // A mapping file is refused by CsvMappingFile.Read (A_mapping_file_the_serializer_would_read_loosely_is_refused);
+        // a mapping built in code, with a case-sensitive dictionary, is refused by the loader.
         var csv = Csv("test_name,test_rate\nfirst,1.5\n");
-        var mapping = MappingJson("""
-            { "columns": { "test_name": { "field": "test_name" }, "TEST_NAME": { "field": "test_code" }, "test_rate": { "field": "test_rate" } } }
-            """);
+        var mapping = new CsvMappingConfig
+        {
+            Columns = new Dictionary<string, ColumnMappingEntry>(StringComparer.Ordinal)
+            {
+                ["test_name"] = new() { Field = "test_name" },
+                ["TEST_NAME"] = new() { Field = "test_code" },
+                ["test_rate"] = new() { Field = "test_rate" },
+            }
+        };
         AssertRefused(await LoadAsync(csv, mapping: mapping), ":TEST_NAME");
     }
 
@@ -541,6 +572,105 @@ public sealed class CsvDataLoaderValueTests : IDisposable
         Assert.Contains("test_first_name", run.Refusal!.Problems[0].Message, StringComparison.Ordinal);
         Assert.Contains("test_firstname", run.Refusal.Problems[0].Message, StringComparison.Ordinal);
     }
+
+    // ---- Review round 3 ----
+
+    [Fact]
+    public async Task A_key_column_skipped_in_the_mapping_still_has_its_date_format_checked()
+    {
+        // Round 3, must-fix 3: the mapping check skips a "skip" entry, and the key path still used its dateFormat, so only
+        // the converter's own check refused dd/MM (which takes the current year).
+        var mapping = MappingJson("""
+            { "columns": { "test_name": { "field": "test_name" },
+                           "test_day": { "field": "test_day", "skip": true, "dateFormat": "dd/MM" } } }
+            """);
+        var run = await LoadAsync(Csv("test_name,test_day\nfirst,15/01\n"), key: "test_day", mapping: mapping);
+        AssertRefused(run, "1:test_day");
+    }
+
+    [Theory]
+    [InlineData("""{ "columns": { "Test_Name": { "field": "test_name" }, "Test_Name": { "field": "test_code" } } }""", "Test_Name")]
+    [InlineData("""{ "columns": { "test_name": { "field": "test_name" }, "TEST_NAME": { "field": "test_code" } } }""", "TEST_NAME")]
+    [InlineData("""{ "columns": { "test_name": { "field": "test_name", "Skip": true } } }""", "test_name")]
+    [InlineData("""{ "columns": { "test_name": { "feild": "test_name" } } }""", "test_name")]
+    [InlineData("""{ "columns": { "test_name": { "field": "test_name", "lookup": { "entity": "a", "matchby": "guid" } } } }""", "test_name")]
+    [InlineData("""{ "columns": { "test_name": { "field": "test_name", "skip": "yes" } } }""", "test_name")]
+    [InlineData("""{ "columns": { "test_name": { "field": 5 } } }""", "test_name")]
+    [InlineData("""{ "columns": [ ] }""", null)]
+    [InlineData("""{ not json""", null)]
+    public void A_mapping_file_the_serializer_would_read_loosely_is_refused(string json, string? column)
+    {
+        // Round 3, should-fixes 2 and 8: the same key twice kept the last silently, and an unknown or wrong-case property
+        // ("Skip") was ignored, so the column was written. Property names are case-sensitive; names starting with _ are
+        // annotations and are allowed.
+        var ex = Assert.Throws<DataValuesRefusedException>(() => MappingJson(json));
+        Assert.Equal(ErrorCodes.Validation.InvalidValue, ex.ErrorCode);
+        Assert.Equal(column, Assert.Single(ex.Problems).Column);
+    }
+
+    [Fact]
+    public void A_generated_mapping_with_its_annotations_is_read()
+    {
+        var mapping = MappingJson("""
+            { "$schema": "x", "version": "1.0", "entity": "test_widget",
+              "columns": { "test_name": { "field": "test_name", "_status": "auto-matched", "_note": "n", "_csvSample": ["a"],
+                                          "lookup": { "entity": "account", "matchBy": "guid", "_options": ["o"] } } } }
+            """);
+        Assert.Equal("test_name", mapping.Columns!["test_name"].Field);
+    }
+
+    [Fact]
+    public async Task Auto_mapping_takes_the_one_column_a_normalised_name_matches_and_refuses_two()
+    {
+        // Round 3, should-fix 4: the plain normalised way of matching had no test, and candidates from two ways were not
+        // compared (columns test_code and code, header "Co de", went to test_code).
+        var one = await LoadAsync(Csv("Test Name,test_rate\nfirst,1.5\n"));
+        Assert.Equal("test_name=text:first, test_rate=decimal:1.5", DescribeRows(Assert.Single(one.Upserts)));
+
+        AssertRefused(await LoadAsync(Csv("test_name,A B C\nfirst,x\n"), force: true), ":A B C");   // ab_c and a_bc
+        var across = await LoadAsync(Csv("test_name,Co de\nfirst,x\n"), force: true);             // test_code and code
+        AssertRefused(across, ":Co de");
+        Assert.Contains("code,", across.Refusal!.Problems[0].Message + ",", StringComparison.Ordinal);
+        Assert.Contains("test_code", across.Refusal.Problems[0].Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_one_sided_column_follows_the_one_setting_and_a_column_valid_for_neither_is_refused_either_way(bool refuseOneSided)
+    {
+        // Review round 2, must-fix 6: the maintainer decides CsvDataLoader.RefuseOneSidedColumns; both settings are tested.
+        const string Id = "8b0f6c2e-3c1d-4a5b-9e7f-0123456789ab";
+        var oneSided = await LoadAsync(Csv($"test_name,test_widgetid,test_stage\nfirst,{Id},3\n"), refuseOneSided: refuseOneSided);
+        if (refuseOneSided)
+        {
+            AssertRefused(oneSided, ":test_widgetid", ":test_stage");
+        }
+        else
+        {
+            Assert.Equal($"test_name=text:first, test_stage=int:3, test_widgetid=guid:{Id}", DescribeRows(Assert.Single(oneSided.Upserts)));
+        }
+
+        AssertRefused(await LoadAsync(Csv("test_name,createdon\nfirst,2024-01-15T00:00:00Z\n"), refuseOneSided: refuseOneSided), ":createdon");
+    }
+
+    [Theory]
+    [InlineData("test_flag")]     // yes/no
+    [InlineData("test_kind")]     // choice
+    [InlineData("test_ownerid")]  // lookup
+    [InlineData("test_legacyid")] // unique identifier
+    public async Task A_lookup_key_field_of_another_non_text_type_is_refused(string keyField)
+    {
+        // Round 3, should-fix 6.
+        AssertRefused(await LoadAsync(Csv("test_name,test_parentid\nfirst,P-1\n"), mapping: ParentByField(keyField)), ":test_parentid");
+    }
+
+    [Fact]
+    public async Task The_empty_GUID_is_refused_in_a_lookup_by_GUID()
+    {
+        // Round 3, should-fix 6: main's record id rule refuses the all-zero GUID.
+        AssertRefused(await LoadAsync(Csv("test_name,test_accountid\nfirst,00000000-0000-0000-0000-000000000000\n")), "1:test_accountid");
+    }
 }
 
 /// <summary>
@@ -573,6 +703,23 @@ public sealed class CsvDataLoaderDateFormatTests : IDisposable
 
         var runs = await MachineTimeZone.InEachAsync(() => InEveryCultureAsync(() => CsvDataLoaderValueTests.LoadAsync(csv, mapping: mapping)));
         Assert.All(runs.SelectMany(r => r), run => CsvDataLoaderValueTests.AssertRefused(run, ":test_day"));
+    }
+
+    [Theory]
+    [InlineData("test_day", "dd/MM 'x\\'yyyy'", "15/01 x'yyyy")]
+    [InlineData("test_day", "dd/MM \"x\\\"yyyy\"", "15/01 x\"yyyy")]
+    [InlineData("test_when", "dd/MM 'x\\'yyyy' HH:mm zzz", "15/01 x'yyyy 09:30 +00:00")]
+    [InlineData("test_when", "dd/MM \"x\\\"yyyy\" HH:mm zzz", "15/01 x\"yyyy 09:30 +00:00")]
+    public async Task A_date_format_whose_year_is_hidden_after_an_escaped_quote_is_refused(string column, string format, string cell)
+    {
+        // Round 3, must-fix 2: the check ended the quoted text at the escaped quote, counted the quoted yyyy as the year,
+        // and the current year was sent.
+        var csv = _files.Csv($"test_name,{column}\nfirst,\"{cell.Replace("\"", "\"\"")}\"\n");
+        var mapping = CsvDataLoaderValueTests.MappingJson(
+            $$"""{ "columns": { "test_name": { "field": "test_name" }, "{{column}}": { "field": "{{column}}", "dateFormat": {{System.Text.Json.JsonSerializer.Serialize(format)}} } } }""");
+
+        var runs = await MachineTimeZone.InEachAsync(() => InEveryCultureAsync(() => CsvDataLoaderValueTests.LoadAsync(csv, mapping: mapping)));
+        Assert.All(runs.SelectMany(r => r), run => CsvDataLoaderValueTests.AssertRefused(run, $":{column}"));
     }
 
     [Fact]

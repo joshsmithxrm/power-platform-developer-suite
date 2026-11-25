@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
+using PPDS.Cli.CsvLoader;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Dataverse.Pooling;
 
@@ -97,11 +98,13 @@ public sealed class DataUpdateValueService : IDataUpdateValueService
         ArgumentException.ThrowIfNullOrWhiteSpace(entity);
         ArgumentException.ThrowIfNullOrWhiteSpace(csvPath);
 
-        Dictionary<string, string>? columnMappings = null;
+        // The mapping file is read by the same reader as data load's: duplicates, unknown names and bad JSON refused.
+        Dictionary<string, ColumnMappingEntry>? columnMappings = null;
         if (mappingPath != null)
         {
             var mappingContent = await File.ReadAllTextAsync(mappingPath, cancellationToken).ConfigureAwait(false);
-            columnMappings = ReadColumnMappings(mappingContent);
+            columnMappings = new Dictionary<string, ColumnMappingEntry>(
+                CsvMappingFile.Read(mappingContent).Columns ?? [], StringComparer.OrdinalIgnoreCase);
         }
 
         // The file is read exactly first: quoting, line breaks in quoted fields, field counts, header names (#1936).
@@ -110,8 +113,23 @@ public sealed class DataUpdateValueService : IDataUpdateValueService
 
         var metadata = await GetMetadataAsync(entity, cancellationToken).ConfigureAwait(false);
         var columns = Columns(metadata);
+        // A header is matched to its mapping entry ignoring case. An entry may rename the header's column (field) or
+        // leave it out (skip); every entry must name a header of the file.
         string FieldOf(string header) =>
-            columnMappings != null && columnMappings.TryGetValue(header, out var mapped) ? mapped : header;
+            columnMappings != null && columnMappings.TryGetValue(header, out var mapped) && !string.IsNullOrEmpty(mapped.Field)
+                ? mapped.Field
+                : header;
+        bool Skipped(string header) =>
+            columnMappings != null && columnMappings.TryGetValue(header, out var mapped) && mapped.Skip;
+
+        if (columnMappings != null)
+        {
+            var unknown = columnMappings.Keys
+                .Where(k => !headers.Contains(k, StringComparer.OrdinalIgnoreCase))
+                .Select(k => new DataValueProblem(null, k, "The mapping file has an entry for this column, and the file has no such column."))
+                .ToList();
+            ThrowIfAny(unknown);
+        }
 
         // The id column: the one named with --id-column, else the table's primary id column from metadata. Never guessed.
         var problems = new List<DataValueProblem>();
@@ -134,7 +152,7 @@ public sealed class DataUpdateValueService : IDataUpdateValueService
                     "The table's primary id column is not in its metadata; name the id column with --id-column.")]);
             }
 
-            idIndex = IndexOf(headers, h => string.Equals(FieldOf(h), primaryId, StringComparison.OrdinalIgnoreCase));
+            idIndex = IndexOf(headers, h => !Skipped(h) && string.Equals(FieldOf(h), primaryId, StringComparison.OrdinalIgnoreCase));
             if (idIndex < 0)
             {
                 throw new DataValuesRefusedException([new DataValueProblem(null, null,
@@ -147,7 +165,7 @@ public sealed class DataUpdateValueService : IDataUpdateValueService
         var seenFields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         for (var j = 0; j < headers.Count; j++)
         {
-            if (j == idIndex)
+            if (j == idIndex || Skipped(headers[j]))
             {
                 continue;
             }
@@ -371,68 +389,6 @@ public sealed class DataUpdateValueService : IDataUpdateValueService
             throw new PpdsException(ErrorCodes.Query.ExecutionFailed,
                 $"The columns of table '{entity}' could not be read, so the values cannot be checked against their types. Nothing was updated.",
                 ex);
-        }
-    }
-
-    /// <summary>
-    /// The <c>columns</c> of a mapping file: each header and the <c>field</c> it names. JSON that is not valid, or a
-    /// <c>columns</c> or entry that is not an object, or a <c>field</c> that is not text, refuses the mapping file.
-    /// </summary>
-    private static Dictionary<string, string>? ReadColumnMappings(string content)
-    {
-        static DataValuesRefusedException Refused(string? column, string message) =>
-            new([new DataValueProblem(null, column, message)]);
-
-        JsonDocument document;
-        try
-        {
-            document = JsonDocument.Parse(content);
-        }
-        catch (JsonException)
-        {
-            // The parser's message can quote the file, so only the fact is kept.
-            throw Refused(null, "The mapping file is not valid JSON.");
-        }
-
-        using (document)
-        {
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                throw Refused(null, "The mapping file is not a JSON object.");
-            }
-
-            if (!document.RootElement.TryGetProperty("columns", out var mappedColumns))
-            {
-                return null;
-            }
-
-            if (mappedColumns.ValueKind != JsonValueKind.Object)
-            {
-                throw Refused(null, "The mapping file's 'columns' is not a JSON object.");
-            }
-
-            var columnMappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var problems = new List<DataValueProblem>();
-            foreach (var col in mappedColumns.EnumerateObject())
-            {
-                if (col.Value.ValueKind != JsonValueKind.Object)
-                {
-                    problems.Add(new DataValueProblem(null, col.Name, "The mapping file's entry for this column is not a JSON object."));
-                }
-                else if (col.Value.TryGetProperty("field", out var field) && field.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
-                {
-                    problems.Add(new DataValueProblem(null, col.Name, "The mapping file's 'field' for this column is not text."));
-                }
-                else if (field.ValueKind == JsonValueKind.String && field.GetString() is { } fieldName
-                         && !columnMappings.TryAdd(col.Name, fieldName))
-                {
-                    problems.Add(new DataValueProblem(null, col.Name,
-                        "The mapping file has more than one entry for this column (ignoring case), so which is meant is not certain."));
-                }
-            }
-
-            ThrowIfAny(problems);
-            return columnMappings;
         }
     }
 
