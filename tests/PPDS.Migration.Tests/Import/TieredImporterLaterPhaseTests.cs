@@ -149,13 +149,26 @@ public class TieredImporterLaterPhaseTests
 
     private List<(string What, Guid[] Ids)> WritesTo(Guid id) => _writes.Where(w => w.Ids.Contains(id)).ToList();
 
-    private TieredImporter CreateImporter(IEnumerable<IRecordFilter>? filters = null)
+    /// <summary>Runs after the state phase and keeps the import context, to read what was handed to it.</summary>
+    private sealed class ContextProbe : IPostImportHandler
+    {
+        public ImportContext? Context { get; private set; }
+        public bool CanHandle(string entityLogicalName) => true;
+        public Task ExecuteAsync(string entityLogicalName, ImportContext context, CancellationToken cancellationToken)
+        {
+            Context = context;
+            return Task.CompletedTask;
+        }
+    }
+
+    private TieredImporter CreateImporter(IEnumerable<IRecordFilter>? filters = null, IPostImportHandler? probe = null)
     {
         var prober = new BulkOperationProber(_bulk.Object);
         return new TieredImporter(
             _pool.Object, _bulk.Object, Mock.Of<ICmtDataReader>(), Mock.Of<IDependencyGraphBuilder>(), Mock.Of<IExecutionPlanBuilder>(), _validator.Object,
             new DeferredFieldProcessor(_pool.Object, prober), new RelationshipProcessor(_pool.Object), prober,
             recordFilters: filters,
+            postImportHandlers: probe != null ? new[] { probe } : null,
             stateTransitionProcessor: new StateTransitionProcessor(_pool.Object),
             fileColumnProcessor: new FileColumnProcessor(new FileColumnTransferHelper(_pool.Object)));
     }
@@ -210,6 +223,23 @@ public class TieredImporterLaterPhaseTests
             .And.Contain("SetState", "the new record still gets its deferred lookup and state");
         result.FailureCount.Should().Be(1);
         result.CreatedCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task CreateMode_FailedRecord_HasNoStateTransitionHandedToTheStatePhase()
+    {
+        // The state phase also refuses an unmapped record; this pins the entity phase on its own.
+        var existing = Guid.NewGuid();
+        var written = Guid.NewGuid();
+        _existing.Add(existing);
+        var parent = Guid.NewGuid();
+        var data = AccountData(new[] { new Entity("account") { Id = parent, ["name"] = "Parent" }, InactiveAccount(written, parent), InactiveAccount(existing, parent) });
+        var probe = new ContextProbe();
+
+        await CreateImporter(probe: probe).ImportAsync(data, Plan(tables: "account"), new ImportOptions { Mode = ImportMode.Create, ContinueOnError = true });
+
+        var transitions = probe.Context!.StateTransitions.GetTransitions("account").Select(t => t.RecordId).ToList();
+        transitions.Should().Equal(written);
     }
 
     [Fact]
@@ -271,7 +301,8 @@ public class TieredImporterLaterPhaseTests
 
     [Theory]
     [InlineData(1, 1, 1, true)]   // counts add up and the error names a record sent
-    [InlineData(1, 0, 1, false)]  // fewer results than records: the write stopped part-way
+    [InlineData(0, 1, 1, false)]  // fewer results than records: the write stopped part-way
+    [InlineData(1, 0, 1, false)]  // an error for a record counted as a success
     [InlineData(1, 1, 0, false)]  // a failure without an error
     public void ProvenWrittenRecords_ProvesOnlyWhatTheResultSays(int success, int failure, int errorCount, bool proven)
     {
