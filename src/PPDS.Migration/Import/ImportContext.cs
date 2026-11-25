@@ -96,6 +96,13 @@ namespace PPDS.Migration.Import
         public IWarningCollector Warnings { get; set; } = new WarningCollector();
 
         /// <summary>
+        /// Gets or sets the guard that decides about references to records of the data file this
+        /// import did not write, and counts those not sent (#1934 r2 MF2). Null: each phase keeps
+        /// its own behaviour for such references.
+        /// </summary>
+        public UnwrittenReferenceGuard? References { get; set; }
+
+        /// <summary>
         /// Gets or sets the source Entity Type Code to logical name mapping.
         /// Used by DuplicateRuleHandler to remap baseentitytypecode and matchingentitytypecode fields.
         /// Key is the source ETC (int), value is the entity logical name.

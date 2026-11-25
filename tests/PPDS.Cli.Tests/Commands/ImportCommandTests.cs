@@ -193,6 +193,75 @@ public class ImportCommandTests : IDisposable
         Assert.Empty(result.Errors);
     }
 
+    [Theory]
+    [InlineData("Skip")]
+    [InlineData("skip")]
+    public void Parse_WithSkipMode_IsRefused_BeforeAnythingRuns(string mode)
+    {
+        // #1914: as the mode of a whole import, Skip used to upsert every record.
+        var result = _command.Parse($"-d \"{_tempDataFile}\" --mode {mode}");
+
+        var error = Assert.Single(result.Errors);
+        Assert.Equal(ImportCommand.SkipModeRefusedMessage, error.Message);
+        Assert.Contains("importMode=\"skip\"", error.Message);
+    }
+
+    [Fact]
+    public void WritePluginStepsLeftDisabled_ListsEachStepWithItsId()
+    {
+        var id = Guid.NewGuid();
+        using var output = new StringWriter();
+
+        ImportOutcome.WritePluginStepsLeftDisabled(output, new[] { new PPDS.Migration.Import.PluginStepInfo(id, "audit step") });
+
+        Assert.Contains("1 plug-in step(s) that this import disabled could not be re-enabled and remain disabled", output.ToString());
+        Assert.Contains($"  - audit step ({id})", output.ToString());
+    }
+
+    [Fact]
+    public void WritePluginStepsLeftDisabled_WritesNothingWhenNone()
+    {
+        using var output = new StringWriter();
+
+        ImportOutcome.WritePluginStepsLeftDisabled(output, Array.Empty<PPDS.Migration.Import.PluginStepInfo>());
+
+        Assert.Equal("", output.ToString());
+    }
+
+    [Theory]
+    [InlineData("3")]
+    [InlineData("0")]
+    [InlineData("2")]
+    [InlineData("Invalid")]
+    [InlineData("Create,Update")]
+    public void Parse_ModeThatIsNotAName_IsRefusedWithItsOwnMessage(string mode)
+    {
+        var result = _command.Parse($"-d \"{_tempDataFile}\" --mode {mode}");
+
+        var error = Assert.Single(result.Errors);
+        Assert.Equal(ImportCommand.ModeNamesOnlyMessage, error.Message);
+    }
+
+    [Theory]
+    [InlineData("create")]
+    [InlineData("UPDATE")]
+    [InlineData("Upsert")]
+    public void Parse_ModeName_AnyCase_Succeeds(string mode)
+    {
+        var result = _command.Parse($"-d \"{_tempDataFile}\" --mode {mode}");
+
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void ModeOption_Description_NamesSkipAsAPerTableSetting()
+    {
+        var option = _command.Options.First(o => o.Name == "--mode");
+
+        Assert.Contains("Create, Update, or Upsert", option.Description);
+        Assert.Contains("importMode=\"skip\"", option.Description);
+    }
+
     [Fact]
     public void Parse_WithInvalidMode_HasError()
     {

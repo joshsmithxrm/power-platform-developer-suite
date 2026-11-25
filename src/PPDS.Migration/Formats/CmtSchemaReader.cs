@@ -89,10 +89,11 @@ namespace PPDS.Migration.Formats
                 : root.Element("entities") ?? throw new InvalidOperationException("Schema XML has no <entities> element");
 
             var entities = new List<EntitySchema>();
+            var importIssues = new List<string>();
 
             foreach (var entityElement in entitiesElement.Elements("entity"))
             {
-                var entity = ParseEntity(entityElement);
+                var entity = ParseEntity(entityElement, importIssues);
                 entities.Add(entity);
             }
 
@@ -100,11 +101,31 @@ namespace PPDS.Migration.Formats
             {
                 Version = root.Attribute("version")?.Value ?? "1.0",
                 GeneratedAt = ParseDateTime(root.Attribute("timestamp")?.Value),
-                Entities = entities
+                Entities = entities,
+                ImportIssues = importIssues
             };
         }
 
-        private EntitySchema ParseEntity(XElement element)
+        /// <summary>
+        /// Reads an import-only attribute. A value the import cannot apply is not an error of the
+        /// schema as such (an export does not read these attributes): it is recorded in
+        /// <paramref name="importIssues"/>, and an import refuses a schema that has any
+        /// (#1934 r2 should-fix 4).
+        /// </summary>
+        private static T ReadForImport<T>(Func<T> read, T fallback, List<string> importIssues)
+        {
+            try
+            {
+                return read();
+            }
+            catch (InvalidDataException ex)
+            {
+                importIssues.Add(ex.Message);
+                return fallback;
+            }
+        }
+
+        private EntitySchema ParseEntity(XElement element, List<string> importIssues)
         {
             var logicalName = element.Attribute("name")?.Value;
             if (string.IsNullOrWhiteSpace(logicalName))
@@ -115,9 +136,9 @@ namespace PPDS.Migration.Formats
             var objectTypeCode = ParseInt(element.Attribute("etc")?.Value);
             var primaryIdField = element.Attribute("primaryidfield")?.Value ?? $"{logicalName}id";
             var primaryNameField = element.Attribute("primarynamefield")?.Value ?? "name";
-            var disablePlugins = ParseBool(element.Attribute("disableplugins")?.Value);
-            var importModeAttr = element.Attribute("importMode")?.Value;
-            var importMode = ParseImportMode(importModeAttr);
+            var disablePlugins = ReadForImport(() => ReadDisablePlugins(element, logicalName), false, importIssues);
+            var importMode = ReadForImport(() => ReadImportMode(element, logicalName), null, importIssues);
+            ReadForImport(() => { RefuseUnappliedCmtAttributes(element, logicalName); return 0; }, 0, importIssues);
 
             var fields = new List<FieldSchema>();
             var fieldsElement = element.Element("fields");
@@ -125,7 +146,7 @@ namespace PPDS.Migration.Formats
             {
                 foreach (var fieldElement in fieldsElement.Elements("field"))
                 {
-                    var field = ParseField(fieldElement);
+                    var field = ParseField(fieldElement, importIssues);
                     fields.Add(field);
                 }
             }
@@ -167,7 +188,7 @@ namespace PPDS.Migration.Formats
             };
         }
 
-        private FieldSchema ParseField(XElement element)
+        private FieldSchema ParseField(XElement element, List<string> importIssues)
         {
             var logicalName = element.Attribute("name")?.Value;
             if (string.IsNullOrWhiteSpace(logicalName))
@@ -184,8 +205,7 @@ namespace PPDS.Migration.Formats
             // Parse validity flags - default to true for backwards compatibility
             var isValidForCreate = ParseBool(element.Attribute("isValidForCreate")?.Value, defaultValue: true);
             var isValidForUpdate = ParseBool(element.Attribute("isValidForUpdate")?.Value, defaultValue: true);
-            var dateModeAttr = element.Attribute("dateMode")?.Value;
-            var dateMode = ParseDateMode(dateModeAttr);
+            var dateMode = ReadForImport(() => ReadDateMode(element, logicalName), DateMode.Absolute, importIssues);
 
             return new FieldSchema
             {
@@ -286,36 +306,121 @@ namespace PPDS.Migration.Formats
             return DateTime.TryParse(value, out var result) ? result : null;
         }
 
-        private static DateMode ParseDateMode(string? value)
+        /// <summary>
+        /// Finds an attribute by name in any case. Two attributes that differ only in case are refused:
+        /// which one applies would be a guess.
+        /// </summary>
+        private static XAttribute? FindAttribute(XElement element, string name, string owner)
         {
-            if (string.IsNullOrEmpty(value))
+            var attributes = element.Attributes()
+                .Where(a => a.Name.NamespaceName.Length == 0
+                    && string.Equals(a.Name.LocalName, name, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (attributes.Count > 1)
+            {
+                throw new InvalidDataException($"{owner} in the schema has more than one {name} attribute. Keep one.");
+            }
+
+            return attributes.Count == 1 ? attributes[0] : null;
+        }
+
+        /// <summary>
+        /// Reads <c>disableplugins</c>: true, false, 1, 0, yes or no, in any case with surrounding
+        /// spaces ignored; absent is false. Anything else is refused: it used to read as false, so
+        /// the table's plug-in steps silently stayed on (#1921 review should-fix 4).
+        /// </summary>
+        private static bool ReadDisablePlugins(XElement element, string logicalName)
+        {
+            var attribute = FindAttribute(element, "disableplugins", $"Table '{logicalName}'");
+            if (attribute == null)
+            {
+                return false;
+            }
+
+            return attribute.Value.Trim().ToLowerInvariant() switch
+            {
+                "true" or "1" or "yes" => true,
+                "false" or "0" or "no" => false,
+                _ => throw new InvalidDataException(
+                    $"Table '{logicalName}' in the schema has a disableplugins value that is not one of true, false, 1, 0, yes or no. Correct it.")
+            };
+        }
+
+        /// <summary>
+        /// Refuses the CMT entity attributes <c>skipupdate</c> and <c>forcecreate</c> when they ask for
+        /// something: PPDS does not apply them, and ignoring them imported the table with the import's
+        /// mode (Upsert by default), overwriting what <c>skipupdate</c> meant to keep (#1914 review
+        /// should-fix 3). A value of false asks for nothing and is accepted.
+        /// </summary>
+        private static void RefuseUnappliedCmtAttributes(XElement element, string logicalName)
+        {
+            foreach (var name in new[] { "skipupdate", "forcecreate" })
+            {
+                var attribute = FindAttribute(element, name, $"Table '{logicalName}'");
+                if (attribute == null)
+                {
+                    continue;
+                }
+
+                var value = attribute.Value.Trim().ToLowerInvariant();
+                if (value is "false" or "0" or "no")
+                {
+                    continue;
+                }
+
+                throw new InvalidDataException(
+                    $"Table '{logicalName}' in the schema carries the Configuration Migration Tool attribute {name}, which PPDS does not apply. " +
+                    "Remove it, and set importMode on the table instead (create, update, upsert or skip).");
+            }
+        }
+
+        /// <summary>
+        /// Reads a field's <c>dateMode</c>: absolute, relative, relativeDaily or relativeExact, in any
+        /// case with surrounding spaces ignored; absent is absolute. Anything else is refused: it used
+        /// to read as absolute (#1914 review should-fix 5).
+        /// </summary>
+        private static DateMode ReadDateMode(XElement element, string fieldName)
+        {
+            var attribute = FindAttribute(element, "dateMode", $"Field '{fieldName}'");
+            if (attribute == null)
             {
                 return DateMode.Absolute;
             }
 
-            return value.ToLowerInvariant() switch
+            return attribute.Value.Trim().ToLowerInvariant() switch
             {
+                "absolute" => DateMode.Absolute,
                 "relative" => DateMode.Relative,
                 "relativedaily" => DateMode.RelativeDaily,
                 "relativeexact" => DateMode.RelativeExact,
-                _ => DateMode.Absolute
+                _ => throw new InvalidDataException(
+                    $"Field '{fieldName}' in the schema has a dateMode that is not one of absolute, relative, relativeDaily or relativeExact. Correct it, or remove it.")
             };
         }
 
-        private static ImportMode? ParseImportMode(string? value)
+        /// <summary>
+        /// Reads the per-table <c>importMode</c> attribute (attribute name in any case, value in any
+        /// case with surrounding spaces ignored). A value that is not a mode is refused: it used to be
+        /// ignored, so the table took the global mode (Upsert by default) and a mistyped "skip"
+        /// overwrote the table's existing records (#1914).
+        /// </summary>
+        private static ImportMode? ReadImportMode(XElement element, string logicalName)
         {
-            if (string.IsNullOrEmpty(value))
+            var attribute = FindAttribute(element, "importMode", $"Table '{logicalName}'");
+            if (attribute == null)
             {
                 return null;
             }
 
-            return value.ToLowerInvariant() switch
+            return attribute.Value.Trim().ToLowerInvariant() switch
             {
                 "create" => ImportMode.Create,
                 "update" => ImportMode.Update,
                 "upsert" => ImportMode.Upsert,
                 "skip" => ImportMode.Skip,
-                _ => null
+                _ => throw new InvalidDataException(
+                    $"Table '{logicalName}' in the schema has an importMode that is not one of create, update, upsert or skip. " +
+                    "Correct it, or remove it to use the import's mode.")
             };
         }
     }

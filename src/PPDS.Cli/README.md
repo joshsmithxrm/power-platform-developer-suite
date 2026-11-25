@@ -232,7 +232,7 @@ ppds data import --data data.zip --mode Upsert
 
 Options:
 - `--data`, `-d` (required) - Path to data.zip
-- `--mode`, `-m` - Import mode: Create, Update, Upsert (default: Upsert)
+- `--mode`, `-m` - Import mode: Create, Update, Upsert (default: Upsert). Skip is not a mode for the whole import: to leave a table out, set `importMode="skip"` on it in the data archive's schema (`data export` and `data copy` do not keep it yet)
 - `--profile`, `-p` - Profile name(s), comma-separated for pooling
 - `--environment`, `-env` - Override environment URL
 - `--user-mapping`, `-u` - User mapping XML file

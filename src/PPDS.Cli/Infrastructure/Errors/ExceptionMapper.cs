@@ -58,6 +58,14 @@ public static class ExceptionMapper
             DirectoryNotFoundException => ExitCodes.NotFoundError,
             OptionSetNotFoundException => ExitCodes.NotFoundError,
 
+            // Import refusals (#1914, #1921): nothing was written
+            ImportRefusedException { Reason: ImportRefusalReasons.SkipIsPerTable } => ExitCodes.InvalidArguments,
+            ImportRefusedException { Reason: ImportRefusalReasons.ModeNotImplemented } => ExitCodes.InvalidArguments,
+            ImportRefusedException { Reason: ImportRefusalReasons.SchemaNotApplicable } => ExitCodes.InvalidArguments,
+            ImportRefusedException { Reason: ImportRefusalReasons.PluginTableNotResolved } => ExitCodes.NotFoundError,
+            ImportRefusedException { Reason: ImportRefusalReasons.PluginTableMetadataUnavailable } => ExitCodes.ConnectionError,
+            ImportRefusedException => ExitCodes.Failure,
+
             // Validation/argument errors
             PPDS.Auth.Profiles.EnvironmentConfigFileException => ExitCodes.InvalidArguments,
             ArgumentException => ExitCodes.InvalidArguments,
@@ -143,6 +151,20 @@ public static class ExceptionMapper
             // Schema exceptions
             SchemaMismatchException =>
                 (ErrorCodes.Validation.SchemaInvalid, null),
+
+            // Import refusals (#1914, #1921)
+            ImportRefusedException { Reason: ImportRefusalReasons.SkipIsPerTable } =>
+                (ErrorCodes.Validation.InvalidArguments, "mode"),
+            ImportRefusedException { Reason: ImportRefusalReasons.ModeNotImplemented } =>
+                (ErrorCodes.Validation.InvalidArguments, "mode"),
+            ImportRefusedException { Reason: ImportRefusalReasons.SchemaNotApplicable } =>
+                (ErrorCodes.Validation.SchemaInvalid, null),
+            ImportRefusedException { Reason: ImportRefusalReasons.PluginTableNotResolved } =>
+                (ErrorCodes.Operation.NotFound, null),
+            ImportRefusedException { Reason: ImportRefusalReasons.PluginTableMetadataUnavailable } =>
+                (ErrorCodes.Connection.Failed, null),
+            ImportRefusedException =>
+                (ErrorCodes.Operation.Dependency, null),
 
             // File system exceptions
             FileNotFoundException fileEx =>

@@ -62,5 +62,18 @@ namespace PPDS.Migration.Progress
         /// Emitted by RelationshipProcessor when cross-environment role lookup by ID fails.
         /// </summary>
         public const string RoleMappingSkipped = "ROLE_MAPPING_SKIPPED";
+
+        /// <summary>
+        /// The result of writing a table did not say which records were written, so none of its
+        /// records was mapped and its later phases (deferred fields, state, many-to-many, file data)
+        /// were not run for it.
+        /// </summary>
+        public const string LaterPhasesSkipped = "LATER_PHASES_SKIPPED";
+
+        /// <summary>
+        /// Lookups or many-to-many associations were not sent because the record they point at is in
+        /// the data file but was not written by this import and is not known to exist in the target.
+        /// </summary>
+        public const string ReferencesNotSent = "REFERENCES_NOT_SENT";
     }
 }

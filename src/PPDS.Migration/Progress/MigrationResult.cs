@@ -46,16 +46,29 @@ namespace PPDS.Migration.Progress
         public IReadOnlyList<MigrationError> Errors { get; set; } = Array.Empty<MigrationError>();
 
         /// <summary>
-        /// Gets or sets the number of records created during upsert operations.
-        /// Only populated for upsert mode; null for create/update modes.
+        /// Gets or sets the number of records created. For an import: every success in Create mode,
+        /// none in Update mode, and what the responses reported in Upsert mode.
         /// </summary>
         public int? CreatedCount { get; set; }
 
         /// <summary>
-        /// Gets or sets the number of records updated during upsert operations.
-        /// Only populated for upsert mode; null for create/update modes.
+        /// Gets or sets the number of existing records updated. For an import: every success in Update
+        /// mode, none in Create mode, and what the responses reported in Upsert mode.
         /// </summary>
         public int? UpdatedCount { get; set; }
+
+        /// <summary>
+        /// Gets or sets the number of records not written because their table has
+        /// <c>importMode="skip"</c> or a record filter left them out.
+        /// Only populated for import operations; null otherwise.
+        /// </summary>
+        public int? SkippedCount { get; set; }
+
+        /// <summary>
+        /// Gets or sets the number of plug-in steps the import disabled and could not re-enable.
+        /// Only populated for import operations when any remain disabled; null otherwise.
+        /// </summary>
+        public int? PluginStepsLeftDisabled { get; set; }
 
         /// <summary>
         /// Gets or sets the number of M2M (many-to-many) relationship records processed.

@@ -37,58 +37,195 @@ public class PluginStepManagerTests
             .WithParameterName("connectionPool");
     }
 
-    #region GetActivePluginStepsAsync
+    #region GetActivePluginStepsAsync (#1921: resolved in the target by logical name)
 
     [Fact]
-    public async Task GetActivePluginStepsAsync_ReturnsSteps_ForEntityTypeCodes()
+    public async Task GetActivePluginStepsAsync_SelectsByTheTargetCode_NotTheSourceCode()
     {
-        // Arrange
-        var stepId1 = Guid.NewGuid();
-        var stepId2 = Guid.NewGuid();
-        var response = new EntityCollection(new List<Entity>
-        {
-            new Entity("sdkmessageprocessingstep") { Id = stepId1 },
-            new Entity("sdkmessageprocessingstep") { Id = stepId2 }
-        });
+        // The issue's example: in the source new_widget had 10050; in the target 10050 is
+        // new_gadget and new_widget is 10051.
+        var widgetStep = Guid.NewGuid();
+        var gadgetStep = Guid.NewGuid();
+        var target = new FakePluginTarget();
+        target.Codes["new_widget"] = 10051;
+        target.Codes["new_gadget"] = 10050;
+        target.Steps.Add((widgetStep, "widget step", 10051));
+        target.Steps.Add((gadgetStep, "gadget step", 10050));
+        target.Attach(_pooledClient);
 
-        _pooledClient
-            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<QueryBase>()))
-            .ReturnsAsync(response);
+        var result = await _sut.GetActivePluginStepsAsync(new[] { "new_widget" });
 
-        // Act
-        var result = await _sut.GetActivePluginStepsAsync(new[] { 1, 2 });
-
-        // Assert
-        result.Should().HaveCount(2);
-        result.Should().Contain(stepId1);
-        result.Should().Contain(stepId2);
+        result.Select(st => st.Id).Should().Equal(widgetStep);
+        result[0].Name.Should().Be("widget step");
+        target.MetadataRequests.Should().Equal("new_widget");
+        target.FetchXml.Should().ContainSingle().Which.Should().Contain("value='10051'").And.NotContain("10050");
     }
 
     [Fact]
-    public async Task GetActivePluginStepsAsync_ReturnsEmpty_WhenNoObjectTypeCodes()
+    public async Task GetActivePluginStepsAsync_TableNotInTarget_RefusesAndQueriesNoSteps()
     {
-        // Act
-        var result = await _sut.GetActivePluginStepsAsync(Array.Empty<int>());
+        var target = new FakePluginTarget();
+        target.Codes["new_widget"] = 10051;
+        target.Attach(_pooledClient);
 
-        // Assert
+        var act = () => _sut.GetActivePluginStepsAsync(new[] { "new_widget", "new_missing" });
+
+        var ex = await act.Should().ThrowAsync<ImportRefusedException>();
+        ex.Which.Reason.Should().Be(ImportRefusalReasons.PluginTableNotResolved);
+        ex.Which.Message.Should().Contain("new_missing").And.Contain("No plug-in step was disabled");
+        target.FetchXml.Should().BeEmpty("nothing is selected when any table cannot be resolved");
+    }
+
+    [Fact]
+    public async Task GetActivePluginStepsAsync_SelectsOnlyEnabledVisibleCustomSteps()
+    {
+        // #1921 review MF5: the query's state, hidden and custom-level conditions are each pinned.
+        var target = new FakePluginTarget();
+        target.Codes["new_widget"] = 10051;
+        var custom = Guid.NewGuid();
+        target.Steps.Add((custom, "custom step", 10051));
+        target.Steps.Add(new FakeStep { Id = Guid.NewGuid(), Name = "already disabled", Code = 10051, Enabled = false });
+        target.Steps.Add(new FakeStep { Id = Guid.NewGuid(), Name = "hidden", Code = 10051, Hidden = true });
+        target.Steps.Add(new FakeStep { Id = Guid.NewGuid(), Name = "system", Code = 10051, CustomizationLevel = 0 });
+        target.Attach(_pooledClient);
+
+        var result = await _sut.GetActivePluginStepsAsync(new[] { "new_widget" });
+
+        result.Select(st => st.Id).Should().Equal(custom);
+    }
+
+    [Fact]
+    public async Task GetActivePluginStepsAsync_QueryStructure_IsPinned()
+    {
+        // #1934 r2 MF5: the link must be inner (outer would select every custom step of every table);
+        // the step conditions must be ANDed (OR would select already-disabled steps and then switch them
+        // on); the table conditions must be ORed (AND would select nothing for two tables).
+        var target = new FakePluginTarget();
+        target.Codes["new_widget"] = 10051;
+        target.Codes["new_gadget"] = 10050;
+        target.Attach(_pooledClient);
+
+        await _sut.GetActivePluginStepsAsync(new[] { "new_widget", "new_gadget" });
+
+        var doc = System.Xml.Linq.XDocument.Parse(target.FetchXml.Single());
+        var entity = doc.Root!.Elements("entity").Single();
+        entity.Attribute("name")!.Value.Should().Be("sdkmessageprocessingstep");
+
+        var stepFilter = entity.Elements("filter").Single();
+        stepFilter.Attribute("type")!.Value.Should().Be("and");
+        stepFilter.Elements().Should().OnlyContain(e => e.Name.LocalName == "condition");
+        stepFilter.Elements("condition").Select(c => ((string)c.Attribute("attribute")!, (string)c.Attribute("operator")!, (string)c.Attribute("value")!))
+            .Should().BeEquivalentTo(new[] { ("statecode", "eq", "0"), ("ishidden", "eq", "0"), ("customizationlevel", "eq", "1") });
+
+        var link = entity.Elements("link-entity").Single();
+        link.Attribute("name")!.Value.Should().Be("sdkmessagefilter");
+        link.Attribute("from")!.Value.Should().Be("sdkmessagefilterid");
+        link.Attribute("to")!.Value.Should().Be("sdkmessagefilterid");
+        link.Attribute("link-type")!.Value.Should().Be("inner");
+
+        var tableFilter = link.Elements("filter").Single();
+        tableFilter.Attribute("type")!.Value.Should().Be("or");
+        tableFilter.Elements().Should().OnlyContain(e => e.Name.LocalName == "condition");
+        tableFilter.Elements("condition").Select(c => ((string)c.Attribute("attribute")!, (string)c.Attribute("operator")!, (string)c.Attribute("value")!))
+            .Should().BeEquivalentTo(new[] { ("primaryobjecttypecode", "eq", "10051"), ("primaryobjecttypecode", "eq", "10050") });
+        entity.Descendants("filter").Should().HaveCount(2, "no other filter may narrow or widen the selection");
+    }
+
+    [Fact]
+    public async Task GetActivePluginStepsAsync_MetadataForAnotherTable_Refuses()
+    {
+        var target = new FakePluginTarget { MetadataAnswersWith = "new_gadget" };
+        target.Codes["new_widget"] = 10051;
+        target.Steps.Add((Guid.NewGuid(), "widget step", 10051));
+        target.Attach(_pooledClient);
+
+        var act = () => _sut.GetActivePluginStepsAsync(new[] { "new_widget" });
+
+        (await act.Should().ThrowAsync<ImportRefusedException>()).Which.Reason
+            .Should().Be(ImportRefusalReasons.PluginTableNotResolved);
+        target.FetchXml.Should().BeEmpty();
+    }
+
+    public static TheoryData<Exception, string> MetadataFailures => new()
+    {
+        { new PPDS.Dataverse.Resilience.ServiceProtectionException("c", TimeSpan.FromSeconds(1), 0), "the service is throttling requests" },
+        { new TimeoutException(), "the request timed out" },
+        { new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = PluginStepManager.PrivilegeDeniedErrorCode, Message = "Principal user is missing prvReadEntity" }), "you do not have the privilege to read it" },
+        { new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040216), Message = "Generic SQL error" }), "the service returned error 0x80040216" },
+    };
+
+    [Theory]
+    [MemberData(nameof(MetadataFailures))]
+    public async Task GetActivePluginStepsAsync_OtherMetadataFailure_IsNotReportedAsNotFound(Exception failure, string reason)
+    {
+        // #1921 review should-fix 7.
+        _pooledClient
+            .Setup(x => x.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure);
+
+        var act = () => _sut.GetActivePluginStepsAsync(new[] { "new_widget" });
+
+        var ex = (await act.Should().ThrowAsync<ImportRefusedException>()).Which;
+        ex.Reason.Should().Be(ImportRefusalReasons.PluginTableMetadataUnavailable);
+        ex.Message.Should().Contain(reason).And.Contain("new_widget").And.NotContain("not found");
+    }
+
+    [Fact]
+    public async Task GetActivePluginStepsAsync_MetadataWithoutCode_Refuses()
+    {
+        _pooledClient
+            .Setup(x => x.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                var response = new Microsoft.Xrm.Sdk.Messages.RetrieveEntityResponse();
+                response.Results["EntityMetadata"] = new Microsoft.Xrm.Sdk.Metadata.EntityMetadata { LogicalName = "new_widget" };
+                return response;
+            });
+
+        var act = () => _sut.GetActivePluginStepsAsync(new[] { "new_widget" });
+
+        (await act.Should().ThrowAsync<ImportRefusedException>()).Which.Reason
+            .Should().Be(ImportRefusalReasons.PluginTableNotResolved);
+    }
+
+    [Fact]
+    public async Task GetActivePluginStepsAsync_ReadsEveryPage()
+    {
+        var target = new FakePluginTarget { PageSize = 2 };
+        target.Codes["account"] = 1;
+        for (var i = 0; i < 5; i++)
+        {
+            target.Steps.Add((Guid.NewGuid(), $"step {i}", 1));
+        }
+        target.Attach(_pooledClient);
+
+        var result = await _sut.GetActivePluginStepsAsync(new[] { "account" });
+
+        result.Should().HaveCount(5);
+        target.FetchXml.Should().HaveCount(3);
+        target.FetchXml[1].Should().Contain("page='2'").And.Contain("paging-cookie=");
+        target.FetchXml[0].Should().Contain($"count='{PluginStepManager.PageSize}'");
+    }
+
+    [Fact]
+    public async Task GetActivePluginStepsAsync_ReturnsEmpty_WhenNoTables()
+    {
+        var result = await _sut.GetActivePluginStepsAsync(Array.Empty<string>());
+
         result.Should().BeEmpty();
-        _pooledClient.Verify(
-            x => x.RetrieveMultipleAsync(It.IsAny<QueryBase>()),
-            Times.Never);
+        _pooledClient.Verify(x => x.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _pooledClient.Verify(x => x.RetrieveMultipleAsync(It.IsAny<QueryBase>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
     public async Task GetActivePluginStepsAsync_ReturnsEmpty_WhenNoStepsFound()
     {
-        // Arrange
-        _pooledClient
-            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<QueryBase>()))
-            .ReturnsAsync(new EntityCollection());
+        var target = new FakePluginTarget();
+        target.Codes["account"] = 1;
+        target.Attach(_pooledClient);
 
-        // Act
-        var result = await _sut.GetActivePluginStepsAsync(new[] { 999 });
+        var result = await _sut.GetActivePluginStepsAsync(new[] { "account" });
 
-        // Assert
         result.Should().BeEmpty();
     }
 
@@ -97,69 +234,91 @@ public class PluginStepManagerTests
     #region DisablePluginStepsAsync
 
     [Fact]
-    public async Task DisablePluginStepsAsync_SetsStateToDisabled()
+    public async Task DisablePluginStepsAsync_SetsStateToDisabled_AndRecordsTheStep()
     {
-        // Arrange
         var stepId = Guid.NewGuid();
         var updatedEntities = new List<Entity>();
+        var disabled = new List<Guid>();
 
         _pooledClient
-            .Setup(x => x.UpdateAsync(It.IsAny<Entity>()))
-            .Callback<Entity>(e => updatedEntities.Add(e))
+            .Setup(x => x.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => updatedEntities.Add(e))
             .Returns(Task.CompletedTask);
 
-        // Act
-        await _sut.DisablePluginStepsAsync(new[] { stepId });
+        await _sut.DisablePluginStepsAsync(new[] { stepId }, disabled);
 
-        // Assert
         updatedEntities.Should().HaveCount(1);
         updatedEntities[0].Id.Should().Be(stepId);
         updatedEntities[0].LogicalName.Should().Be("sdkmessageprocessingstep");
         updatedEntities[0].GetAttributeValue<OptionSetValue>("statecode").Value.Should().Be(1, "StateCode should be Disabled (1)");
         updatedEntities[0].GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(2, "StatusCode should be Disabled (2)");
+        disabled.Should().Equal(stepId);
     }
 
     [Fact]
     public async Task DisablePluginStepsAsync_DoesNothing_WhenEmptyList()
     {
-        // Act
-        await _sut.DisablePluginStepsAsync(Array.Empty<Guid>());
+        await _sut.DisablePluginStepsAsync(Array.Empty<Guid>(), new List<Guid>());
 
-        // Assert
-        _pooledClient.Verify(x => x.UpdateAsync(It.IsAny<Entity>()), Times.Never);
+        _pooledClient.Verify(x => x.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task DisablePluginStepsAsync_ContinuesOnFailure()
+    public async Task DisablePluginStepsAsync_StepThatCannotBeDisabled_Refuses_AndKeepsItForReenable()
     {
-        // Arrange
+        // A step left enabled would run during an import that was asked to suppress it.
         var stepId1 = Guid.NewGuid();
         var stepId2 = Guid.NewGuid();
+        var stepId3 = Guid.NewGuid();
+        var disabled = new List<Guid>();
 
         _pooledClient
-            .SetupSequence(x => x.UpdateAsync(It.IsAny<Entity>()))
-            .ThrowsAsync(new InvalidOperationException("First step failed"))
+            .SetupSequence(x => x.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask)
+            .ThrowsAsync(new InvalidOperationException("Second step failed"))
             .Returns(Task.CompletedTask);
 
-        // Act - should not throw
-        await _sut.DisablePluginStepsAsync(new[] { stepId1, stepId2 });
+        var act = () => _sut.DisablePluginStepsAsync(new[] { stepId1, stepId2, stepId3 }, disabled);
 
-        // Assert - both steps attempted
-        _pooledClient.Verify(x => x.UpdateAsync(It.IsAny<Entity>()), Times.Exactly(2));
+        (await act.Should().ThrowAsync<ImportRefusedException>()).Which.Reason
+            .Should().Be(ImportRefusalReasons.PluginStepNotDisabled);
+        _pooledClient.Verify(x => x.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        disabled.Should().Equal(new[] { stepId1, stepId2 }, "the failed update may have been applied, so it is re-enabled too");
+    }
+
+    [Fact]
+    public async Task DisablePluginStepsAsync_CancelledPartWay_KeepsTheStepsAlreadyDisabled()
+    {
+        using var cts = new CancellationTokenSource();
+        var stepIds = new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
+        var disabled = new List<Guid>();
+        var calls = 0;
+
+        _pooledClient
+            .Setup(x => x.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                if (++calls == 2)
+                {
+                    cts.Cancel();
+                }
+                return Task.CompletedTask;
+            });
+
+        var act = () => _sut.DisablePluginStepsAsync(stepIds, disabled, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        disabled.Should().Equal(stepIds[0], stepIds[1]);
     }
 
     [Fact]
     public async Task DisablePluginStepsAsync_RespectsCancellationToken()
     {
-        // Arrange
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        var stepId = Guid.NewGuid();
-
-        // Act & Assert
-        await Assert.ThrowsAsync<OperationCanceledException>(
-            () => _sut.DisablePluginStepsAsync(new[] { stepId }, cts.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => _sut.DisablePluginStepsAsync(new[] { Guid.NewGuid() }, new List<Guid>(), cts.Token));
     }
 
     #endregion
@@ -174,8 +333,8 @@ public class PluginStepManagerTests
         var updatedEntities = new List<Entity>();
 
         _pooledClient
-            .Setup(x => x.UpdateAsync(It.IsAny<Entity>()))
-            .Callback<Entity>(e => updatedEntities.Add(e))
+            .Setup(x => x.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => updatedEntities.Add(e))
             .Returns(Task.CompletedTask);
 
         // Act
@@ -196,7 +355,7 @@ public class PluginStepManagerTests
         await _sut.EnablePluginStepsAsync(Array.Empty<Guid>());
 
         // Assert
-        _pooledClient.Verify(x => x.UpdateAsync(It.IsAny<Entity>()), Times.Never);
+        _pooledClient.Verify(x => x.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -208,7 +367,7 @@ public class PluginStepManagerTests
         var stepId2 = Guid.NewGuid();
 
         _pooledClient
-            .SetupSequence(x => x.UpdateAsync(It.IsAny<Entity>()))
+            .SetupSequence(x => x.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("First step failed"))
             .Returns(Task.CompletedTask);
 
@@ -217,7 +376,7 @@ public class PluginStepManagerTests
 
         // Assert — all steps attempted and aggregated exception thrown
         var ex = await act.Should().ThrowAsync<PluginStepReenableException>();
-        _pooledClient.Verify(x => x.UpdateAsync(It.IsAny<Entity>()), Times.Exactly(2));
+        _pooledClient.Verify(x => x.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
 
         ex.Which.Failures.Should().HaveCount(1);
         ex.Which.Failures[0].StepId.Should().Be(stepId1);
@@ -230,7 +389,7 @@ public class PluginStepManagerTests
         // Arrange — D5 regression guard: the new aggregation path must stay
         // quiet when nothing fails.
         _pooledClient
-            .Setup(x => x.UpdateAsync(It.IsAny<Entity>()))
+            .Setup(x => x.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var stepIds = new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
@@ -239,7 +398,7 @@ public class PluginStepManagerTests
         await _sut.EnablePluginStepsAsync(stepIds);
 
         // Assert — all three updates attempted, no throw
-        _pooledClient.Verify(x => x.UpdateAsync(It.IsAny<Entity>()), Times.Exactly(3));
+        _pooledClient.Verify(x => x.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
     }
 
     [Fact]
@@ -249,7 +408,7 @@ public class PluginStepManagerTests
         var stepIds = new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
 
         _pooledClient
-            .Setup(x => x.UpdateAsync(It.IsAny<Entity>()))
+            .Setup(x => x.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("token expired"));
 
         // Act

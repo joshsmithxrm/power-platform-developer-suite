@@ -268,6 +268,7 @@ namespace PPDS.Migration.Progress
                         FailureCount = er.FailureCount,
                         CreatedCount = er.CreatedCount,
                         UpdatedCount = er.UpdatedCount,
+                        SkippedCount = er.SkippedCount,
                         Duration = er.Duration,
                         RecordsPerSecond = er.Duration.TotalSeconds > 0
                             ? er.SuccessCount / er.Duration.TotalSeconds
@@ -531,6 +532,9 @@ namespace PPDS.Migration.Progress
 
             [JsonPropertyName("updatedCount")]
             public int? UpdatedCount { get; set; }
+
+            [JsonPropertyName("skippedCount")]
+            public int SkippedCount { get; set; }
 
             [JsonPropertyName("duration")]
             public TimeSpan Duration { get; set; }

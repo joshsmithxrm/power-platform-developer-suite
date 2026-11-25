@@ -20,6 +20,41 @@ namespace PPDS.Cli.Commands.Data;
 /// </summary>
 public static class ImportCommand
 {
+    /// <summary>
+    /// Parses <c>--mode</c> by name only (Create, Update or Upsert, any case). Skip is a per-table
+    /// schema setting and as the mode of the whole import used to upsert every record (#1914); a
+    /// number or any other text is refused with its own message (#1914 review should-fix 9 and 13).
+    /// Refused here, before anything connects, and again by the importer.
+    /// </summary>
+    internal static ImportMode ParseMode(System.CommandLine.Parsing.ArgumentResult result)
+    {
+        if (result.Tokens.Count == 0)
+        {
+            return ImportMode.Upsert; // a missing value is reported by arity enforcement
+        }
+
+        var token = result.Tokens[^1].Value.Trim();
+        foreach (var mode in new[] { ImportMode.Create, ImportMode.Update, ImportMode.Upsert })
+        {
+            if (string.Equals(token, mode.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                return mode;
+            }
+        }
+
+        result.AddError(string.Equals(token, nameof(ImportMode.Skip), StringComparison.OrdinalIgnoreCase)
+            ? SkipModeRefusedMessage
+            : ModeNamesOnlyMessage);
+        return ImportMode.Upsert;
+    }
+
+    /// <summary>The parse error for a <c>--mode</c> value that is not a mode name.</summary>
+    internal const string ModeNamesOnlyMessage = "--mode takes one of the names Create, Update or Upsert.";
+
+    /// <summary>The parse error for <c>--mode Skip</c> (#1914).</summary>
+    internal const string SkipModeRefusedMessage =
+        "--mode accepts Create, Update or Upsert. Skip applies to one table: set importMode=\"skip\" on that table in the data archive's schema.";
+
     public static Command Create()
     {
         var dataOption = new Option<FileInfo>("--data", "-d")
@@ -48,9 +83,13 @@ public static class ImportCommand
 
         var modeOption = new Option<ImportMode>("--mode", "-m")
         {
-            Description = "Import mode: Create, Update, or Upsert",
+            Description = "Import mode: Create, Update, or Upsert. To leave a table out, set importMode=\"skip\" on it in the data archive's schema",
             DefaultValueFactory = _ => ImportMode.Upsert
         };
+        modeOption.HelpName = "Create|Update|Upsert";
+        modeOption.CustomParser = result => ParseMode(result);
+        modeOption.CompletionSources.Clear();
+        modeOption.CompletionSources.Add("Create", "Update", "Upsert");
 
         var userMappingOption = new Option<FileInfo?>("--user-mapping", "-u")
         {
@@ -192,6 +231,10 @@ public static class ImportCommand
 
         try
         {
+            // The schema's import-only attributes are checked before anything connects.
+            await ImportOutcome.EnsureSchemaCanBeImportedAsync(
+                () => ImportSchemaCheck.ReadArchiveImportIssuesAsync(data.FullName, cancellationToken));
+
             // Factory handles environment resolution automatically
             await using var serviceProvider = await ProfileServiceFactory.CreateFromProfilesAsync(
                 profileName,
@@ -302,42 +345,45 @@ public static class ImportCommand
                     OutputManager = outputManager
                 };
 
-                var result = await importer.ImportAsync(
-                    data.FullName,
-                    importOptions,
-                    progressReporter,
-                    cancellationToken);
-
-                // Write summary if output manager is active
-                if (outputManager != null)
+                return await ImportOutcome.RunAsync(async () =>
                 {
-                    var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
-                    var executionContext = new ImportExecutionContext
-                    {
-                        CliVersion = ErrorOutput.Version,
-                        SdkVersion = ErrorOutput.SdkVersion,
-                        RuntimeVersion = Environment.Version.ToString(),
-                        Platform = RuntimeInformation.OSDescription,
-                        ImportMode = importOptions.Mode.ToString(),
-                        StripOwnerFields = importOptions.StripOwnerFields,
-                        BypassPlugins = importOptions.BypassCustomPlugins != CustomLogicBypass.None,
-                        UserMappingProvided = userMappingFile != null
-                    };
-
-                    await outputManager.WriteSummaryAsync(
-                        result,
+                    var result = await importer.ImportAsync(
                         data.FullName,
-                        connectionInfo.EnvironmentUrl,
-                        executionContext,
+                        importOptions,
+                        progressReporter,
                         cancellationToken);
 
-                    Console.Error.WriteLine($"Output written to:");
-                    Console.Error.WriteLine($"  Errors: {outputManager.ErrorsPath}");
-                    Console.Error.WriteLine($"  Progress: {outputManager.ProgressPath}");
-                    Console.Error.WriteLine($"  Summary: {outputManager.SummaryPath}");
-                }
+                    // Write summary if output manager is active
+                    if (outputManager != null)
+                    {
+                        var connectionInfo = serviceProvider.GetRequiredService<ResolvedConnectionInfo>();
+                        var executionContext = new ImportExecutionContext
+                        {
+                            CliVersion = ErrorOutput.Version,
+                            SdkVersion = ErrorOutput.SdkVersion,
+                            RuntimeVersion = Environment.Version.ToString(),
+                            Platform = RuntimeInformation.OSDescription,
+                            ImportMode = importOptions.Mode.ToString(),
+                            StripOwnerFields = importOptions.StripOwnerFields,
+                            BypassPlugins = importOptions.BypassCustomPlugins != CustomLogicBypass.None,
+                            UserMappingProvided = userMappingFile != null
+                        };
 
-                return result.Success ? ExitCodes.Success : ExitCodes.Failure;
+                        await outputManager.WriteSummaryAsync(
+                            result,
+                            data.FullName,
+                            connectionInfo.EnvironmentUrl,
+                            executionContext,
+                            cancellationToken);
+
+                        Console.Error.WriteLine($"Output written to:");
+                        Console.Error.WriteLine($"  Errors: {outputManager.ErrorsPath}");
+                        Console.Error.WriteLine($"  Progress: {outputManager.ProgressPath}");
+                        Console.Error.WriteLine($"  Summary: {outputManager.SummaryPath}");
+                    }
+
+                    return result;
+                }, "Import", progressReporter, Console.Error, debug);
             }
             finally
             {
@@ -348,26 +394,11 @@ public static class ImportCommand
                 }
             }
         }
-        catch (OperationCanceledException)
-        {
-            progressReporter.Error(new OperationCanceledException(), "Import cancelled by user.");
-            return ExitCodes.Failure;
-        }
-        catch (SchemaMismatchException ex)
-        {
-            // Schema mismatch gets special handling - display the detailed message
-            Console.Error.WriteLine();
-            Console.Error.WriteLine(ex.Message);
-            return ExitCodes.Failure;
-        }
         catch (Exception ex)
         {
-            progressReporter.Error(ex, "Import failed");
-            if (debug)
-            {
-                Console.Error.WriteLine(ex.StackTrace);
-            }
-            return ExitCodes.Failure;
+            // Connection, read and import failures alike: one tested place decides the text and
+            // the exit code (#1934 r2 MF6).
+            return ImportOutcome.Report(ex, "Import", progressReporter, Console.Error, debug);
         }
     }
 }
