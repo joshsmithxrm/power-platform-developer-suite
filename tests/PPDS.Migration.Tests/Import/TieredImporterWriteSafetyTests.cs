@@ -644,6 +644,7 @@ public class TieredImporterWriteSafetyTests
         var ex = (await act.Should().ThrowAsync<ImportRefusedException>()).Which;
         ex.PluginStepInUnknownState.Should().Be(new PluginStepInfo(second, "widget step 2"));
         ex.PluginStepsLeftDisabled.Should().BeEmpty("the step that was disabled, widget step, was re-enabled");
+        target.StepUpdates.Should().Contain((widgetStep, 0), "widget step was disabled and then re-enabled");
         ex.Message.Should().Contain("its state is unknown").And.NotContain("remain disabled");
         messages.Should().Contain(m => m.Contains("'widget step 2'") && m.Contains("could not be disabled and could not be re-enabled: its state is unknown"));
         messages.Should().NotContain(m => m.Contains("'widget step 2'") && m.Contains("remains disabled"));

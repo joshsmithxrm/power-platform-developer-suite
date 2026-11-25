@@ -1630,11 +1630,12 @@ namespace PPDS.Migration.Import
                 if (attr.Value is EntityReference er)
                 {
                     var mappedRef = RemapEntityReference(er, idMappings, options, references);
-                    if (mappedRef == null && references != null && references.Decide(er.LogicalName, er.Id, out _) == ReferenceDecision.NotSent)
+                    if (mappedRef == null)
                     {
-                        // The target is a record of the file this import did not write and it is not in
-                        // the target: the lookup is not sent, and is reported (#1934 r2 MF2).
-                        references.CountLookupNotSent(record.LogicalName, attr.Key);
+                        // RemapEntityReference returns null only when the guard decided NotSent: the
+                        // target is a record of the file this import did not write and it is not in
+                        // the target. The lookup is not sent, and is reported (#1934 r2 MF2).
+                        references?.CountLookupNotSent(record.LogicalName, attr.Key);
                     }
                     if (mappedRef != null)
                     {

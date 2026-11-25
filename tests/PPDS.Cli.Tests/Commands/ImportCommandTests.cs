@@ -210,7 +210,7 @@ public class ImportCommandTests : IDisposable
     public void WritePluginStepsLeftDisabled_ListsEachStepWithItsId()
     {
         var id = Guid.NewGuid();
-        var output = new StringWriter();
+        using var output = new StringWriter();
 
         ImportOutcome.WritePluginStepsLeftDisabled(output, new[] { new PPDS.Migration.Import.PluginStepInfo(id, "audit step") });
 
@@ -221,7 +221,7 @@ public class ImportCommandTests : IDisposable
     [Fact]
     public void WritePluginStepsLeftDisabled_WritesNothingWhenNone()
     {
-        var output = new StringWriter();
+        using var output = new StringWriter();
 
         ImportOutcome.WritePluginStepsLeftDisabled(output, Array.Empty<PPDS.Migration.Import.PluginStepInfo>());
 
