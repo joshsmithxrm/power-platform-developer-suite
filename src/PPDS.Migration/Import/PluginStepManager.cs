@@ -5,6 +5,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
+using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Generated;
 using PPDS.Dataverse.Pooling;
@@ -37,43 +39,123 @@ namespace PPDS.Migration.Import
         }
 
         /// <inheritdoc />
-        public async Task<IReadOnlyList<Guid>> GetActivePluginStepsAsync(
-            IEnumerable<int> objectTypeCodes,
+        /// <remarks>
+        /// Each table is resolved in the target environment by its logical name (entity metadata), and
+        /// the steps are selected by the target's object type code. The object type code recorded in a
+        /// schema file is the source environment's: codes of custom tables differ between environments,
+        /// so it is never used (#1921). If any table cannot be resolved, nothing is selected and an
+        /// <see cref="ImportRefusedException"/> is thrown. The step query reads every page.
+        /// </remarks>
+        public async Task<IReadOnlyList<PluginStepInfo>> GetActivePluginStepsAsync(
+            IEnumerable<string> entityLogicalNames,
             CancellationToken cancellationToken = default)
         {
-            var otcList = objectTypeCodes.ToList();
-            if (otcList.Count == 0)
+            var names = entityLogicalNames
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (names.Count == 0)
             {
-                return Array.Empty<Guid>();
+                return Array.Empty<PluginStepInfo>();
             }
 
-            _logger?.LogInformation("Querying active plugin steps for {Count} entities", otcList.Count);
+            _logger?.LogInformation("Querying active plugin steps for {Count} entities", names.Count);
 
             await using var client = await _connectionPool.GetClientAsync(cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
-            var activeStepIds = new List<Guid>();
-
-            var fetchXml = BuildPluginStepQuery(otcList);
-
-            var response = await client.RetrieveMultipleAsync(new FetchExpression(fetchXml))
-                .ConfigureAwait(false);
-
-            foreach (var entity in response.Entities)
+            var targetCodes = new List<int>();
+            foreach (var name in names)
             {
-                activeStepIds.Add(entity.Id);
+                targetCodes.Add(await ResolveTargetObjectTypeCodeAsync(client, name, cancellationToken).ConfigureAwait(false));
             }
 
-            _logger?.LogInformation("Found {Count} active plugin steps", activeStepIds.Count);
+            var steps = new List<PluginStepInfo>();
+            var seen = new HashSet<Guid>();
+            var page = 1;
+            string? pagingCookie = null;
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
 
-            return activeStepIds;
+                var fetchXml = BuildPluginStepQuery(targetCodes.Distinct().ToList(), page, pagingCookie);
+                var response = await client.RetrieveMultipleAsync(new FetchExpression(fetchXml), cancellationToken)
+                    .ConfigureAwait(false);
+
+                foreach (var entity in response.Entities)
+                {
+                    if (seen.Add(entity.Id))
+                    {
+                        steps.Add(new PluginStepInfo(entity.Id, entity.GetAttributeValue<string>(SdkMessageProcessingStep.Fields.Name)));
+                    }
+                }
+
+                if (!response.MoreRecords)
+                {
+                    break;
+                }
+
+                page++;
+                pagingCookie = response.PagingCookie;
+            }
+
+            _logger?.LogInformation("Found {Count} active plugin steps", steps.Count);
+
+            return steps;
         }
 
+        private static async Task<int> ResolveTargetObjectTypeCodeAsync(
+            IPooledClient client,
+            string logicalName,
+            CancellationToken cancellationToken)
+        {
+            int? code;
+            try
+            {
+                var response = (RetrieveEntityResponse)await client.ExecuteAsync(
+                    new RetrieveEntityRequest
+                    {
+                        LogicalName = logicalName,
+                        EntityFilters = EntityFilters.Entity,
+                        RetrieveAsIfPublished = false
+                    },
+                    cancellationToken).ConfigureAwait(false);
+
+                var metadata = response.EntityMetadata;
+                code = metadata != null && string.Equals(metadata.LogicalName, logicalName, StringComparison.OrdinalIgnoreCase)
+                    ? metadata.ObjectTypeCode
+                    : null;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw NotResolved(logicalName, ex);
+            }
+
+            return code ?? throw NotResolved(logicalName, null);
+        }
+
+        private static ImportRefusedException NotResolved(string logicalName, Exception? inner) =>
+            new(ImportRefusalReasons.PluginTableNotResolved,
+                $"Table '{logicalName}' is marked to have its plug-in steps disabled during the import, but it could not be " +
+                "found in the target environment's metadata. No plug-in step was disabled and nothing was imported. " +
+                "Create the table in the target, or remove disableplugins from its entry in the schema.",
+                inner);
+
         /// <inheritdoc />
+        /// <remarks>
+        /// Each step id is added to <paramref name="disabledStepIds"/> before its update is sent, so a
+        /// caller that re-enables that collection in a <c>finally</c> block restores every step that
+        /// may have been disabled, also when the run is cancelled or an update fails part-way. A step
+        /// that cannot be disabled stops the run with an <see cref="ImportRefusedException"/>: the
+        /// import must not run with plug-ins it was asked to suppress.
+        /// </remarks>
         public async Task DisablePluginStepsAsync(
             IEnumerable<Guid> stepIds,
+            ICollection<Guid> disabledStepIds,
             CancellationToken cancellationToken = default)
         {
+            if (disabledStepIds == null) throw new ArgumentNullException(nameof(disabledStepIds));
+
             var stepList = stepIds.ToList();
             if (stepList.Count == 0)
             {
@@ -96,13 +178,20 @@ namespace PPDS.Migration.Import
                     StatusCode = sdkmessageprocessingstep_statuscode.Disabled
                 };
 
+                disabledStepIds.Add(stepId);
                 try
                 {
-                    await client.UpdateAsync(update).ConfigureAwait(false);
+                    await client.UpdateAsync(update, cancellationToken).ConfigureAwait(false);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     _logger?.LogWarning(ex, "Failed to disable plugin step {StepId}", stepId);
+                    throw new ImportRefusedException(
+                        ImportRefusalReasons.PluginStepNotDisabled,
+                        "A plug-in step that the schema asks to disable during the import could not be disabled, so the " +
+                        "import was not run. The steps already disabled are re-enabled. Check that you can change plug-in " +
+                        "step registrations in the target, or remove disableplugins from the schema.",
+                        ex);
                 }
             }
         }
@@ -145,7 +234,7 @@ namespace PPDS.Migration.Import
 
                 try
                 {
-                    await client.UpdateAsync(update).ConfigureAwait(false);
+                    await client.UpdateAsync(update, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -160,16 +249,24 @@ namespace PPDS.Migration.Import
             }
         }
 
-        private static string BuildPluginStepQuery(List<int> objectTypeCodes)
+        /// <summary>Rows per page of the step query.</summary>
+        internal const int PageSize = 5000;
+
+        private static string BuildPluginStepQuery(List<int> objectTypeCodes, int page, string? pagingCookie)
         {
-            // Build filter condition for multiple entities using Object Type Codes
+            // Build filter condition for multiple entities using the TARGET's object type codes
             var entityConditions = string.Join("\n",
                 objectTypeCodes.Select(otc => $"<condition attribute='{SdkMessageFilter.Fields.PrimaryObjectTypeCode}' operator='eq' value='{otc}' />"));
 
-            return $@"<fetch>
+            var cookie = pagingCookie != null
+                ? $" paging-cookie='{System.Security.SecurityElement.Escape(pagingCookie)}'"
+                : string.Empty;
+
+            return $@"<fetch count='{PageSize}' page='{page}'{cookie}>
                 <entity name='{SdkMessageProcessingStep.EntityLogicalName}'>
                     <attribute name='{SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId}' />
                     <attribute name='{SdkMessageProcessingStep.Fields.Name}' />
+                    <order attribute='{SdkMessageProcessingStep.Fields.SdkMessageProcessingStepId}' />
                     <filter type='and'>
                         <condition attribute='{SdkMessageProcessingStep.Fields.StateCode}' operator='eq' value='{(int)sdkmessageprocessingstep_statecode.Enabled}' />
                         <condition attribute='{SdkMessageProcessingStep.Fields.IsHidden}' operator='eq' value='0' />
@@ -191,19 +288,27 @@ namespace PPDS.Migration.Import
     public interface IPluginStepManager
     {
         /// <summary>
-        /// Gets the IDs of active plugin steps for the specified entities.
+        /// Gets the active custom plug-in steps of the specified tables in the target environment.
         /// </summary>
-        /// <param name="objectTypeCodes">The Object Type Codes of entities to find plugin steps for.</param>
+        /// <param name="entityLogicalNames">The logical names of the tables. Each is resolved in the target
+        /// environment's metadata; if one cannot be resolved, an <see cref="ImportRefusedException"/> is thrown
+        /// and no step is returned.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
-        Task<IReadOnlyList<Guid>> GetActivePluginStepsAsync(
-            IEnumerable<int> objectTypeCodes,
+        Task<IReadOnlyList<PluginStepInfo>> GetActivePluginStepsAsync(
+            IEnumerable<string> entityLogicalNames,
             CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// Disables the specified plugin steps.
+        /// Disables the specified plug-in steps.
         /// </summary>
+        /// <param name="stepIds">The steps to disable.</param>
+        /// <param name="disabledStepIds">Receives each step id before its update is sent, so the caller can
+        /// re-enable every step that may have been disabled, whatever happens next.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <exception cref="ImportRefusedException">A step could not be disabled.</exception>
         Task DisablePluginStepsAsync(
             IEnumerable<Guid> stepIds,
+            ICollection<Guid> disabledStepIds,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -217,6 +322,13 @@ namespace PPDS.Migration.Import
             IEnumerable<Guid> stepIds,
             CancellationToken cancellationToken = default);
     }
+
+    /// <summary>
+    /// An active plug-in step found for an import.
+    /// </summary>
+    /// <param name="Id">The step id.</param>
+    /// <param name="Name">The step name, as registered.</param>
+    public sealed record PluginStepInfo(Guid Id, string? Name);
 
     /// <summary>
     /// Aggregated exception thrown when one or more plugin steps fail to re-enable.

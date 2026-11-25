@@ -340,6 +340,12 @@ public static class CopyCommand
             Console.Error.WriteLine(ex.Message);
             return ExitCodes.Failure;
         }
+        catch (ImportRefusedException ex)
+        {
+            Console.Error.WriteLine();
+            Console.Error.WriteLine($"Error: {ex.Message}");
+            return ExceptionMapper.ToExitCode(ex);
+        }
         catch (Exception ex)
         {
             progressReporter.Error(ex, "Copy failed");

@@ -36,6 +36,31 @@ namespace PPDS.Migration.Import
         public int RecordsUpdated { get; set; }
 
         /// <summary>
+        /// Gets or sets the number of records the entity phase created: every success in Create mode,
+        /// none in Update mode, and what the responses reported in Upsert mode. Null when an Upsert
+        /// response did not say.
+        /// </summary>
+        public int? CreatedCount { get; set; }
+
+        /// <summary>
+        /// Gets or sets the number of existing records the entity phase updated: every success in
+        /// Update mode, none in Create mode, and what the responses reported in Upsert mode. Null when
+        /// an Upsert response did not say.
+        /// </summary>
+        public int? UpdatedCount { get; set; }
+
+        /// <summary>
+        /// Gets or sets the number of records in the data file that were not written: the records of
+        /// tables with <c>importMode="skip"</c>, and records left out by a record filter.
+        /// </summary>
+        public int SkippedCount { get; set; }
+
+        /// <summary>
+        /// Gets or sets the number of records the entity phase failed to write.
+        /// </summary>
+        public int FailureCount { get; set; }
+
+        /// <summary>
         /// Gets or sets the number of relationships processed.
         /// </summary>
         public int RelationshipsProcessed { get; set; }
@@ -124,14 +149,24 @@ namespace PPDS.Migration.Import
         public int FailureCount { get; set; }
 
         /// <summary>
-        /// Gets or sets the number of records created (for upsert operations).
+        /// Gets or sets the number of records created: every success in Create mode, none in Update
+        /// mode or for a skipped table, and what the responses reported in Upsert mode (null when they
+        /// did not say).
         /// </summary>
         public int? CreatedCount { get; set; }
 
         /// <summary>
-        /// Gets or sets the number of records updated (for upsert operations).
+        /// Gets or sets the number of existing records updated: every success in Update mode, none in
+        /// Create mode or for a skipped table, and what the responses reported in Upsert mode (null
+        /// when they did not say).
         /// </summary>
         public int? UpdatedCount { get; set; }
+
+        /// <summary>
+        /// Gets or sets the number of records not written: all of them for a table with
+        /// <c>importMode="skip"</c>, otherwise those left out by a record filter.
+        /// </summary>
+        public int SkippedCount { get; set; }
 
         /// <summary>
         /// Gets or sets the import duration for this entity.

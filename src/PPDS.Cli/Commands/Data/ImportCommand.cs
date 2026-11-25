@@ -20,6 +20,10 @@ namespace PPDS.Cli.Commands.Data;
 /// </summary>
 public static class ImportCommand
 {
+    /// <summary>The parse error for <c>--mode Skip</c> (#1914).</summary>
+    internal const string SkipModeRefusedMessage =
+        "--mode accepts Create, Update or Upsert. Skip applies to one table: set importMode=\"skip\" on that table in the schema.";
+
     public static Command Create()
     {
         var dataOption = new Option<FileInfo>("--data", "-d")
@@ -48,9 +52,26 @@ public static class ImportCommand
 
         var modeOption = new Option<ImportMode>("--mode", "-m")
         {
-            Description = "Import mode: Create, Update, or Upsert",
+            Description = "Import mode: Create, Update, or Upsert. To leave a table out, set importMode=\"skip\" on it in the schema",
             DefaultValueFactory = _ => ImportMode.Upsert
         };
+        modeOption.Validators.Add(result =>
+        {
+            // Skip is a per-table schema setting; as the mode of the whole import it used to upsert
+            // every record (#1914). Refused here, before connecting, and again by the importer.
+            ImportMode value;
+            try
+            {
+                value = result.GetValueOrDefault<ImportMode>();
+            }
+            catch (InvalidOperationException)
+            {
+                return; // not an ImportMode at all: the parser reports that itself
+            }
+
+            if (value is not (ImportMode.Create or ImportMode.Update or ImportMode.Upsert))
+                result.AddError(SkipModeRefusedMessage);
+        });
 
         var userMappingOption = new Option<FileInfo?>("--user-mapping", "-u")
         {
@@ -359,6 +380,12 @@ public static class ImportCommand
             Console.Error.WriteLine();
             Console.Error.WriteLine(ex.Message);
             return ExitCodes.Failure;
+        }
+        catch (ImportRefusedException ex)
+        {
+            Console.Error.WriteLine();
+            Console.Error.WriteLine($"Error: {ex.Message}");
+            return ExceptionMapper.ToExitCode(ex);
         }
         catch (Exception ex)
         {

@@ -208,10 +208,15 @@ namespace PPDS.Migration.Progress
                 Console.Error.WriteLine($"        Source: {result.SourceRecordCount.Value:N0} | Imported: {importedCount:N0} | Failed: {entityFailureCount:N0}");
             }
 
-            // Show created/updated breakdown for upsert operations
+            // Show created/updated breakdown
             if (result.CreatedCount.HasValue && result.UpdatedCount.HasValue)
             {
                 Console.Error.WriteLine($"        Created: {result.CreatedCount:N0} | Updated: {result.UpdatedCount:N0}");
+            }
+
+            if (result.SkippedCount is > 0)
+            {
+                Console.Error.WriteLine($"        Skipped: {result.SkippedCount:N0} (not written)");
             }
 
             // Error count if any

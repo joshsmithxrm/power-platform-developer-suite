@@ -98,7 +98,9 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
         _dataPathField = new TextField("") { X = 15, Y = 0, Width = Dim.Fill(1) };
         _dataPathHint = new Label("e.g., ./data.zip") { X = 15, Y = 0, Width = Dim.Fill(1), ColorScheme = TuiColorPalette.Dimmed };
         _importModeLabel = new Label("Mode:") { X = 1, Y = 2 };
-        _importModeRadio = new RadioGroup(new NStack.ustring[] { "Create", "Update", "Upsert", "Skip" })
+        // Skip is not offered: it is a per-table schema setting (importMode="skip"), and the importer
+        // refuses it as the mode of a whole import (#1914).
+        _importModeRadio = new RadioGroup(ImportModes.Select(m => (NStack.ustring)m.ToString()).ToArray())
         {
             X = 15,
             Y = 2,
@@ -346,14 +348,7 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
                 ScreenCancellation, _operationCts!.Token);
 
-            var importMode = _importModeRadio.SelectedItem switch
-            {
-                0 => ImportMode.Create,
-                1 => ImportMode.Update,
-                2 => ImportMode.Upsert,
-                3 => ImportMode.Skip,
-                _ => ImportMode.Upsert
-            };
+            var importMode = ImportModeAt(_importModeRadio.SelectedItem);
 
             var options = new ImportOptions
             {
@@ -373,6 +368,7 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
                 _recordCount = result.RecordsImported;
                 _successCount = result.EntityResults.Sum(e => e.SuccessCount);
                 _failureCount = result.EntityResults.Sum(e => e.FailureCount);
+                _skipCount = result.SkippedCount;
                 _warningCount = result.Warnings.Count;
                 _recordsPerSecond = result.RecordsPerSecond;
                 _resultsLabel.Text = FormatImportResults(result);
@@ -549,11 +545,24 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
         return string.Join("\n", lines);
     }
 
-    private static string FormatImportResults(ImportResult result)
+    /// <summary>
+    /// The modes the Mode radio group offers, in order. Skip is not one of them: it is a per-table
+    /// schema setting, and the importer refuses it for a whole import (#1914).
+    /// </summary>
+    internal static readonly IReadOnlyList<ImportMode> ImportModes = new[] { ImportMode.Create, ImportMode.Update, ImportMode.Upsert };
+
+    /// <summary>The mode for a radio selection; Upsert (the default) when out of range.</summary>
+    internal static ImportMode ImportModeAt(int selectedItem) =>
+        selectedItem >= 0 && selectedItem < ImportModes.Count ? ImportModes[selectedItem] : ImportMode.Upsert;
+
+    private static string FormatCount(int? count) => count?.ToString() ?? "unknown";
+
+    internal static string FormatImportResults(ImportResult result)
     {
         var lines = new List<string>
         {
             $"Imported {result.RecordsImported} of {result.SourceRecordCount} records in {FormatTimeSpan(result.Duration)} ({result.RecordsPerSecond:F0} rec/s)",
+            $"Created: {FormatCount(result.CreatedCount)}  |  Updated: {FormatCount(result.UpdatedCount)}  |  Skipped: {result.SkippedCount}  |  Failed: {result.FailureCount}",
             $"Tiers: {result.TiersProcessed}  |  M2M: {result.RelationshipsProcessed}  |  Deferred: {result.RecordsUpdated}",
             ""
         };
@@ -561,7 +570,8 @@ internal sealed class MigrationScreen : TuiScreenBase, ITuiStateCapture<Migratio
         foreach (var entity in result.EntityResults)
         {
             var status = entity.Success ? "OK" : "FAIL";
-            lines.Add($"  {entity.EntityLogicalName} (tier {entity.TierNumber}): {entity.SuccessCount}/{entity.RecordCount} [{status}]");
+            var skipped = entity.SkippedCount > 0 ? $", {entity.SkippedCount} skipped" : string.Empty;
+            lines.Add($"  {entity.EntityLogicalName} (tier {entity.TierNumber}): {entity.SuccessCount}/{entity.RecordCount}{skipped} [{status}]");
         }
 
         if (result.Warnings.Count > 0)

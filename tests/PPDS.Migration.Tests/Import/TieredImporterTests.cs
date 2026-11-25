@@ -582,14 +582,19 @@ public class TieredImporterTests
 
         _pluginStepManager
             .Setup(p => p.GetActivePluginStepsAsync(
-                It.IsAny<IEnumerable<int>>(),
+                It.IsAny<IEnumerable<string>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(pluginStepIds);
+            .ReturnsAsync(pluginStepIds.Select(id => new PluginStepInfo(id, "step")).ToList());
 
         _pluginStepManager
             .Setup(p => p.DisablePluginStepsAsync(
                 It.IsAny<IEnumerable<Guid>>(),
+                It.IsAny<ICollection<Guid>>(),
                 It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<Guid>, ICollection<Guid>, CancellationToken>((ids, disabled, _) =>
+            {
+                foreach (var id in ids) disabled.Add(id);
+            })
             .Returns(Task.CompletedTask);
 
         _pluginStepManager
@@ -609,6 +614,7 @@ public class TieredImporterTests
         // Verify plugins were disabled before import
         _pluginStepManager.Verify(p => p.DisablePluginStepsAsync(
             It.Is<IEnumerable<Guid>>(ids => ids.Count() == 2),
+            It.IsAny<ICollection<Guid>>(),
             It.IsAny<CancellationToken>()), Times.Once);
 
         // Verify plugins were re-enabled after import
@@ -644,14 +650,19 @@ public class TieredImporterTests
 
         _pluginStepManager
             .Setup(p => p.GetActivePluginStepsAsync(
-                It.IsAny<IEnumerable<int>>(),
+                It.IsAny<IEnumerable<string>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(pluginStepIds);
+            .ReturnsAsync(pluginStepIds.Select(id => new PluginStepInfo(id, "step")).ToList());
 
         _pluginStepManager
             .Setup(p => p.DisablePluginStepsAsync(
                 It.IsAny<IEnumerable<Guid>>(),
+                It.IsAny<ICollection<Guid>>(),
                 It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<Guid>, ICollection<Guid>, CancellationToken>((ids, disabled, _) =>
+            {
+                foreach (var id in ids) disabled.Add(id);
+            })
             .Returns(Task.CompletedTask);
 
         _pluginStepManager
@@ -716,14 +727,19 @@ public class TieredImporterTests
 
         _pluginStepManager
             .Setup(p => p.GetActivePluginStepsAsync(
-                It.IsAny<IEnumerable<int>>(),
+                It.IsAny<IEnumerable<string>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(pluginStepIds);
+            .ReturnsAsync(pluginStepIds.Select(id => new PluginStepInfo(id, "step")).ToList());
 
         _pluginStepManager
             .Setup(p => p.DisablePluginStepsAsync(
                 It.IsAny<IEnumerable<Guid>>(),
+                It.IsAny<ICollection<Guid>>(),
                 It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<Guid>, ICollection<Guid>, CancellationToken>((ids, disabled, _) =>
+            {
+                foreach (var id in ids) disabled.Add(id);
+            })
             .Returns(Task.CompletedTask);
 
         // Simulate token expiry after disable: one step fails, one succeeds.

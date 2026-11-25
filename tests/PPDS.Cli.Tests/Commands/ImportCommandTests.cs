@@ -193,6 +193,28 @@ public class ImportCommandTests : IDisposable
         Assert.Empty(result.Errors);
     }
 
+    [Theory]
+    [InlineData("Skip")]
+    [InlineData("skip")]
+    public void Parse_WithSkipMode_IsRefused_BeforeAnythingRuns(string mode)
+    {
+        // #1914: as the mode of a whole import, Skip used to upsert every record.
+        var result = _command.Parse($"-d \"{_tempDataFile}\" --mode {mode}");
+
+        var error = Assert.Single(result.Errors);
+        Assert.Equal(ImportCommand.SkipModeRefusedMessage, error.Message);
+        Assert.Contains("importMode=\"skip\"", error.Message);
+    }
+
+    [Fact]
+    public void ModeOption_Description_NamesSkipAsAPerTableSetting()
+    {
+        var option = _command.Options.First(o => o.Name == "--mode");
+
+        Assert.Contains("Create, Update, or Upsert", option.Description);
+        Assert.Contains("importMode=\"skip\"", option.Description);
+    }
+
     [Fact]
     public void Parse_WithInvalidMode_HasError()
     {

@@ -83,6 +83,9 @@ namespace PPDS.Migration.Progress
                 recordsProcessed = result.RecordsProcessed,
                 successCount = result.SuccessCount,
                 failureCount = result.FailureCount,
+                createdCount = result.CreatedCount,
+                updatedCount = result.UpdatedCount,
+                skippedCount = result.SkippedCount,
                 rps = Math.Round(result.RecordsPerSecond, 1),
                 success = result.Success,
                 timestamp = DateTime.UtcNow.ToString("O")

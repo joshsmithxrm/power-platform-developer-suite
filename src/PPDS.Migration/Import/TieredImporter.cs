@@ -122,6 +122,7 @@ namespace PPDS.Migration.Import
             CancellationToken cancellationToken = default)
         {
             progress ??= IProgressReporter.Silent;
+            EnsureModeIsImplemented(options ?? _defaultOptions);
 
             progress.Report(new ProgressEventArgs
             {
@@ -156,6 +157,7 @@ namespace PPDS.Migration.Import
 
             progress ??= IProgressReporter.Silent;
             options ??= _defaultOptions;
+            EnsureModeIsImplemented(options);
 
             if (options.ImpersonateOwners && options.UserMappings == null)
             {
@@ -185,9 +187,16 @@ namespace PPDS.Migration.Import
                 Warnings = warnings
             };
 
-            // Disable plugins on entities with disableplugins=true
-            var disabledPluginSteps = await DisablePluginsForImportAsync(
-                data, options, progress, cancellationToken).ConfigureAwait(false);
+            // Select the plug-in steps of tables with disableplugins=true. Read-only: the tables are
+            // resolved in the TARGET by logical name, and an unresolved table refuses the import
+            // here, before any step is disabled or any record written (#1921).
+            var pluginStepsToDisable = await FindPluginStepsToDisableAsync(
+                data, options, cancellationToken).ConfigureAwait(false);
+
+            // Every step that may have been disabled, added before its update is sent, so the
+            // re-enable below restores it whether the import ends, fails or is cancelled, also
+            // when that happens while the steps are still being disabled.
+            var disabledPluginSteps = new List<Guid>();
 
             // Track whether we've re-enabled plugins so the finally-block fallback
             // doesn't double-run after the inline call on the happy/failure paths.
@@ -195,6 +204,9 @@ namespace PPDS.Migration.Import
 
             try
             {
+                await DisablePluginsForImportAsync(
+                    pluginStepsToDisable, disabledPluginSteps, progress, cancellationToken).ConfigureAwait(false);
+
                 // Phase 1: Process tiers
                 var tierResult = await ProcessTiersAsync(
                     context, entityResults, errors, warnings, cancellationToken).ConfigureAwait(false);
@@ -270,7 +282,7 @@ namespace PPDS.Migration.Import
                 // D5: re-enable plugins before building the result so any re-enable
                 // warnings (PluginStepReenableException → per-step warnings) are
                 // captured in ImportResult.Warnings.
-                await EnablePluginsAfterImportAsync(disabledPluginSteps, progress, warnings).ConfigureAwait(false);
+                await EnablePluginsAfterImportAsync(disabledPluginSteps, pluginStepsToDisable, progress, warnings).ConfigureAwait(false);
                 pluginsReenabled = true;
 
                 return BuildImportResult(
@@ -279,14 +291,14 @@ namespace PPDS.Migration.Import
                     stopwatch.Elapsed, phase1Duration, phase2Duration, phase4Duration,
                     options, progress);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not ImportRefusedException)
             {
                 stopwatch.Stop();
                 _logger?.LogError(ex, "Import failed");
 
                 // Same as happy path: re-enable before building the failure result
                 // so post-import plugin state is visible in the surfaced warnings.
-                await EnablePluginsAfterImportAsync(disabledPluginSteps, progress, warnings).ConfigureAwait(false);
+                await EnablePluginsAfterImportAsync(disabledPluginSteps, pluginStepsToDisable, progress, warnings).ConfigureAwait(false);
                 pluginsReenabled = true;
 
                 return BuildFailureResult(
@@ -300,7 +312,7 @@ namespace PPDS.Migration.Import
                 // silently disabled if import is cancelled mid-flight.
                 if (!pluginsReenabled)
                 {
-                    await EnablePluginsAfterImportAsync(disabledPluginSteps, progress, warnings).ConfigureAwait(false);
+                    await EnablePluginsAfterImportAsync(disabledPluginSteps, pluginStepsToDisable, progress, warnings).ConfigureAwait(false);
                 }
             }
         }
@@ -369,47 +381,87 @@ namespace PPDS.Migration.Import
         }
 
         /// <summary>
-        /// Disables plugins on entities marked with disableplugins=true.
+        /// Refuses an import mode the importer does not implement for a whole import.
         /// </summary>
-        private async Task<IReadOnlyList<Guid>> DisablePluginsForImportAsync(
+        /// <remarks>
+        /// <see cref="ImportMode.Skip"/> means "do not import this table" and is set per table in the
+        /// schema (<c>importMode="skip"</c>). As the mode of the whole import it used to fall through to
+        /// Upsert and overwrite every existing record (#1914); it is refused before anything is read.
+        /// </remarks>
+        private static void EnsureModeIsImplemented(ImportOptions options)
+        {
+            if (options.Mode is ImportMode.Create or ImportMode.Update or ImportMode.Upsert)
+            {
+                return;
+            }
+
+            if (options.Mode == ImportMode.Skip)
+            {
+                throw new ImportRefusedException(
+                    ImportRefusalReasons.SkipIsPerTable,
+                    "Import mode Skip applies to one table, set with importMode=\"skip\" on that table in the schema. " +
+                    "As the mode for the whole import it would import nothing. Nothing was read or written. " +
+                    "Choose Create, Update or Upsert, and mark the tables to leave out with importMode=\"skip\".");
+            }
+
+            throw new ImportRefusedException(
+                ImportRefusalReasons.SkipIsPerTable,
+                "The import mode is not one of Create, Update or Upsert. Nothing was read or written.");
+        }
+
+        /// <summary>
+        /// Finds the active plug-in steps of the tables marked with disableplugins=true, resolved in
+        /// the target environment by logical name. Reads only.
+        /// </summary>
+        private async Task<IReadOnlyList<PluginStepInfo>> FindPluginStepsToDisableAsync(
             MigrationData data,
             ImportOptions options,
-            IProgressReporter progress,
             CancellationToken cancellationToken)
         {
             if (!options.RespectDisablePluginsSetting || _pluginStepManager == null)
             {
-                return Array.Empty<Guid>();
+                return Array.Empty<PluginStepInfo>();
             }
 
-            var entitiesToDisablePlugins = data.Schema.Entities
-                .Where(e => e.DisablePlugins && e.ObjectTypeCode.HasValue)
-                .Select(e => e.ObjectTypeCode!.Value)
+            // By logical name, never by the schema's object type code: that code is the SOURCE
+            // environment's, and custom tables have different codes in each environment (#1921).
+            var tables = data.Schema.Entities
+                .Where(e => e.DisablePlugins && e.ImportMode != ImportMode.Skip)
+                .Select(e => e.LogicalName)
                 .ToList();
 
-            if (entitiesToDisablePlugins.Count == 0)
+            if (tables.Count == 0)
             {
-                return Array.Empty<Guid>();
+                return Array.Empty<PluginStepInfo>();
+            }
+
+            return await _pluginStepManager.GetActivePluginStepsAsync(tables, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Disables the given plug-in steps, recording each one in <paramref name="disabledPluginSteps"/>.
+        /// </summary>
+        private async Task DisablePluginsForImportAsync(
+            IReadOnlyList<PluginStepInfo> steps,
+            List<Guid> disabledPluginSteps,
+            IProgressReporter progress,
+            CancellationToken cancellationToken)
+        {
+            if (steps.Count == 0 || _pluginStepManager == null)
+            {
+                return;
             }
 
             progress.Report(new ProgressEventArgs
             {
                 Phase = MigrationPhase.Analyzing,
-                Message = $"Disabling plugins for {entitiesToDisablePlugins.Count} entities..."
+                Message = $"Disabling {steps.Count} plugin step(s)..."
             });
 
-            var disabledPluginSteps = await _pluginStepManager.GetActivePluginStepsAsync(
-                entitiesToDisablePlugins, cancellationToken).ConfigureAwait(false);
+            await _pluginStepManager.DisablePluginStepsAsync(
+                steps.Select(st => st.Id), disabledPluginSteps, cancellationToken).ConfigureAwait(false);
 
-            if (disabledPluginSteps.Count > 0)
-            {
-                await _pluginStepManager.DisablePluginStepsAsync(
-                    disabledPluginSteps, cancellationToken).ConfigureAwait(false);
-
-                _logger?.LogInformation("Disabled {Count} plugin steps", disabledPluginSteps.Count);
-            }
-
-            return disabledPluginSteps;
+            _logger?.LogInformation("Disabled {Count} plugin steps", disabledPluginSteps.Count);
         }
 
         /// <summary>
@@ -417,6 +469,7 @@ namespace PPDS.Migration.Import
         /// </summary>
         private async Task EnablePluginsAfterImportAsync(
             IReadOnlyList<Guid> disabledPluginSteps,
+            IReadOnlyList<PluginStepInfo> stepInfo,
             IProgressReporter progress,
             IWarningCollector warnings)
         {
@@ -448,11 +501,20 @@ namespace PPDS.Migration.Import
 
                 foreach (var (stepId, error) in ex.Failures)
                 {
+                    var stepName = DescribeStep(stepId, stepInfo);
                     warnings.AddWarning(new ImportWarning
                     {
                         Code = ImportWarningCodes.PluginReenableFailed,
-                        Message = $"Plugin step {stepId} could not be re-enabled: {error.Message}",
+                        Message = $"Plugin step {stepName} could not be re-enabled: {error.Message}",
                         Impact = "This plugin step remains disabled."
+                    });
+
+                    // Also through the progress reporter: on a cancelled import no result is
+                    // returned, so this is the only place the user sees which step to fix.
+                    progress.Report(new ProgressEventArgs
+                    {
+                        Phase = MigrationPhase.Complete,
+                        Message = $"Warning: plugin step {stepName} could not be re-enabled and remains disabled. Re-enable it manually."
                     });
                 }
 
@@ -470,13 +532,25 @@ namespace PPDS.Migration.Import
                 _logger?.LogError(ex,
                     "Failed to re-enable plugin steps — {Count} step(s) may remain disabled",
                     disabledPluginSteps.Count);
+                var names = string.Join(", ", disabledPluginSteps.Select(id => DescribeStep(id, stepInfo)));
                 warnings.AddWarning(new ImportWarning
                 {
                     Code = ImportWarningCodes.PluginReenableFailed,
-                    Message = $"Failed to re-enable {disabledPluginSteps.Count} plugin steps: {ex.Message}",
+                    Message = $"Failed to re-enable {disabledPluginSteps.Count} plugin steps ({names}): {ex.Message}",
                     Impact = $"{disabledPluginSteps.Count} plugin step(s) may remain disabled and must be re-enabled manually."
                 });
+                progress.Report(new ProgressEventArgs
+                {
+                    Phase = MigrationPhase.Complete,
+                    Message = $"Warning: these plugin steps may remain disabled; re-enable them manually: {names}"
+                });
             }
+        }
+
+        private static string DescribeStep(Guid stepId, IReadOnlyList<PluginStepInfo> stepInfo)
+        {
+            var name = stepInfo.FirstOrDefault(st => st.Id == stepId)?.Name;
+            return string.IsNullOrEmpty(name) ? stepId.ToString() : $"'{name}' ({stepId})";
         }
 
         /// <summary>
@@ -533,6 +607,17 @@ namespace PPDS.Migration.Import
                         if (entitySchema?.ImportMode == ImportMode.Skip)
                         {
                             _logger?.LogInformation("Skipping entity {Entity} (ImportMode=Skip)", entityName);
+                            entityResults.Add(new EntityImportResult
+                            {
+                                EntityLogicalName = entityName,
+                                TierNumber = tier.TierNumber,
+                                RecordCount = records.Count,
+                                SkippedCount = records.Count,
+                                CreatedCount = 0,
+                                UpdatedCount = 0,
+                                Success = true
+                            });
+                            Interlocked.Add(ref overallProcessed, records.Count);
                             return;
                         }
 
@@ -667,9 +752,16 @@ namespace PPDS.Migration.Import
                 }
             }
 
-            var totalCreated = hasCreated ? (int?)createdAgg : null;
-            var totalUpdated = hasUpdated ? (int?)updatedAgg : null;
+            // A total is known only when every table that wrote records reported it.
+            var totalCreated = hasCreated && entityResults.All(r => r.CreatedCount.HasValue) ? (int?)createdAgg : null;
+            var totalUpdated = hasUpdated && entityResults.All(r => r.UpdatedCount.HasValue) ? (int?)updatedAgg : null;
             var totalFailureCount = recordFailureCount + relationshipResult.FailureCount;
+            var totalSkipped = entityResults.Sum(r => r.SkippedCount);
+
+            result.CreatedCount = totalCreated;
+            result.UpdatedCount = totalUpdated;
+            result.SkippedCount = totalSkipped;
+            result.FailureCount = recordFailureCount;
 
             progress.Complete(new MigrationResult
             {
@@ -680,6 +772,7 @@ namespace PPDS.Migration.Import
                 FailureCount = totalFailureCount,
                 CreatedCount = totalCreated,
                 UpdatedCount = totalUpdated,
+                SkippedCount = totalSkipped,
                 M2MCount = relationshipResult.SuccessCount > 0 ? relationshipResult.SuccessCount : null,
                 RelationshipsFailed = relationshipResult.FailureCount > 0 ? relationshipResult.FailureCount : null,
                 PoolStatistics = _connectionPool.Statistics,
@@ -722,6 +815,8 @@ namespace PPDS.Migration.Import
                 TiersProcessed = plan.TierCount,
                 SourceRecordCount = sourceRecordCount,
                 RecordsImported = totalImported,
+                SkippedCount = entityResults.Sum(r => r.SkippedCount),
+                FailureCount = entityResults.Sum(r => r.FailureCount),
                 Duration = duration,
                 EntityResults = entityResults.ToArray(),
                 Errors = errors.Append(exceptionError).ToArray(),
@@ -906,12 +1001,7 @@ namespace PPDS.Migration.Import
                 // Track if we fell back to individual operations (for warning emission)
                 var wasKnownBulkNotSupported = _prober.IsKnownBulkNotSupported(entityName);
 
-                var operationType = effectiveMode switch
-                {
-                    ImportMode.Create => BulkOperationType.Create,
-                    ImportMode.Update => BulkOperationType.Update,
-                    _ => BulkOperationType.Upsert
-                };
+                var operationType = ToBulkOperationType(effectiveMode);
 
                 if (options.ImpersonateOwners && ownerMapping != null)
                 {
@@ -953,7 +1043,7 @@ namespace PPDS.Migration.Import
                 if (options.ImpersonateOwners && ownerMapping != null)
                 {
                     bulkResult = await ExecuteWithOwnerGroupingAsync(
-                        entityName, preparedRecords, ownerMapping, BulkOperationType.Upsert, bulkOptions,
+                        entityName, preparedRecords, ownerMapping, ToBulkOperationType(effectiveMode), bulkOptions,
                         effectiveMode, options, null, cancellationToken).ConfigureAwait(false);
                 }
                 else
@@ -984,6 +1074,15 @@ namespace PPDS.Migration.Import
 
             entityStopwatch.Stop();
 
+            // Created and updated follow from the mode for Create and Update; for Upsert they come
+            // from the responses, and stay unknown (null) when the responses did not say.
+            var (createdCount, updatedCount) = effectiveMode switch
+            {
+                ImportMode.Create => ((int?)bulkResult.SuccessCount, (int?)0),
+                ImportMode.Update => (0, bulkResult.SuccessCount),
+                _ => (bulkResult.CreatedCount, bulkResult.UpdatedCount)
+            };
+
             return new EntityImportResult
             {
                 EntityLogicalName = entityName,
@@ -991,8 +1090,9 @@ namespace PPDS.Migration.Import
                 RecordCount = records.Count,
                 SuccessCount = bulkResult.SuccessCount,
                 FailureCount = bulkResult.FailureCount,
-                CreatedCount = bulkResult.CreatedCount,
-                UpdatedCount = bulkResult.UpdatedCount,
+                SkippedCount = records.Count - preparedRecords.Count,
+                CreatedCount = createdCount,
+                UpdatedCount = updatedCount,
                 Duration = entityStopwatch.Elapsed,
                 Success = bulkResult.FailureCount == 0,
                 Errors = allErrors
@@ -1011,6 +1111,8 @@ namespace PPDS.Migration.Import
             var errors = new List<BulkOperationError>();
             var successCount = 0;
             var failureCount = 0;
+            var upsertCreated = 0;
+            var upsertUpdated = 0;
 
             await using var client = await _connectionPool.GetClientAsync(clientOptions, cancellationToken: cancellationToken).ConfigureAwait(false);
 
@@ -1034,12 +1136,24 @@ namespace PPDS.Migration.Import
                             await client.ExecuteAsync(updateRequest, cancellationToken).ConfigureAwait(false);
                             newId = record.Id;
                             break;
-                        default:
+                        case ImportMode.Upsert:
                             var upsertRequest = new UpsertRequest { Target = record };
                             upsertRequest.ApplyBypassOptions(options);
                             var upsertResponse = (UpsertResponse)await client.ExecuteAsync(upsertRequest, cancellationToken).ConfigureAwait(false);
                             newId = upsertResponse.Target?.Id ?? record.Id;
+                            if (upsertResponse.RecordCreated)
+                            {
+                                upsertCreated++;
+                            }
+                            else
+                            {
+                                upsertUpdated++;
+                            }
                             break;
+                        default:
+                            // Skip never reaches a write: it is refused for a whole import and
+                            // returns before this for a table (#1914). Never fall through to Upsert.
+                            throw new InvalidOperationException($"Import mode {effectiveMode} does not write records.");
                     }
 
                     createdIds.Add(newId);
@@ -1069,7 +1183,9 @@ namespace PPDS.Migration.Import
                 FailureCount = failureCount,
                 CreatedIds = createdIds,
                 Errors = errors,
-                Duration = TimeSpan.Zero
+                Duration = TimeSpan.Zero,
+                CreatedCount = effectiveMode == ImportMode.Upsert ? upsertCreated : null,
+                UpdatedCount = effectiveMode == ImportMode.Upsert ? upsertUpdated : null
             };
         }
 
@@ -1179,6 +1295,18 @@ namespace PPDS.Migration.Import
                 UpdatedCount = totalUpdated
             };
         }
+
+        /// <summary>
+        /// The bulk operation for a mode that writes records. Skip has none: it is refused for a whole
+        /// import and handled before this for a table. Nothing falls through to Upsert (#1914).
+        /// </summary>
+        internal static BulkOperationType ToBulkOperationType(ImportMode mode) => mode switch
+        {
+            ImportMode.Create => BulkOperationType.Create,
+            ImportMode.Update => BulkOperationType.Update,
+            ImportMode.Upsert => BulkOperationType.Upsert,
+            _ => throw new InvalidOperationException($"Import mode {mode} does not write records.")
+        };
 
         private Entity PrepareRecordForImport(
             Entity record,
