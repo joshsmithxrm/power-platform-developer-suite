@@ -38,6 +38,11 @@ public class DataTruncateServiceTests
         public bool ReturnCookies { get; set; } = true;
         public bool RestartEveryRead { get; set; }
         public string PrimaryId { get; set; } = "accountid";
+        public bool EmptyPagesClaimMore { get; set; }
+        public bool FailCounts { get; set; }
+        public int? ThrowOnRead { get; set; }
+        public Action<int>? AfterDelete { get; set; }
+        public int Deletes { get; private set; }
 
         public FakeTable Add(int count, bool undeletable = false)
         {
@@ -54,6 +59,7 @@ public class DataTruncateServiceTests
         {
             if (queryBase is FetchExpression)
             {
+                if (FailCounts) throw new InvalidOperationException("aggregate limit exceeded");
                 // The aggregate count.
                 var counted = new Entity("account") { ["count"] = new AliasedValue("account", PrimaryId, Rows.Count) };
                 return new EntityCollection([counted]);
@@ -62,6 +68,11 @@ public class DataTruncateServiceTests
             var query = (QueryExpression)queryBase;
             if (Reads.Count > 10_000) throw new InvalidOperationException("truncate did not end");
             Reads.Add(query);
+            if (ThrowOnRead == Reads.Count) throw new InvalidOperationException("the service is unavailable");
+            if (EmptyPagesClaimMore && Reads.Count > 1)
+            {
+                return new EntityCollection { MoreRecords = true, PagingCookie = "cookie-" + Reads.Count };
+            }
             var after = !RestartEveryRead && query.PageInfo.PagingCookie is { } cookie ? Guid.Parse(cookie) : (Guid?)null;
             var page = Rows.Where(id => after is null || id.CompareTo(after.Value) > 0).Take(query.PageInfo.Count + 1).ToList();
             var more = page.Count > query.PageInfo.Count;
@@ -94,6 +105,8 @@ public class DataTruncateServiceTests
                 succeeded++;
             }
 
+            Deletes++;
+            AfterDelete?.Invoke(Deletes);
             return new BulkOperationResult { SuccessCount = succeeded, FailureCount = errors.Count, Errors = errors };
         }
     }
@@ -120,9 +133,11 @@ public class DataTruncateServiceTests
         return new DataTruncateService(pool.Object, metadata.Object, bulk.Object, NullLogger<DataTruncateService>.Instance);
     }
 
-    private static Task<DataTruncateResult> Truncate(FakeTable table, int batchSize = 2, bool continueOnError = true)
+    private static Task<DataTruncateResult> Truncate(FakeTable table, int batchSize = 2, bool continueOnError = true,
+        CancellationToken cancellationToken = default)
         => CreateService(table).TruncateAsync("account",
-            new DataTruncateOptions { BatchSize = batchSize, ContinueOnError = continueOnError });
+            new DataTruncateOptions { BatchSize = batchSize, ContinueOnError = continueOnError },
+            cancellationToken: cancellationToken);
 
     [Fact]
     public async Task OneRecordCannotBeDeleted_RunEnds_AndThatRecordIsAttemptedOnce()
@@ -179,20 +194,142 @@ public class DataTruncateServiceTests
     }
 
     [Fact]
-    public async Task EveryRecordOfAPassFails_PassDeletedNothing_EndsTheRun()
+    public async Task BatchOfOne_FirstRecordUndeletable_TheOthersAreStillDeleted()
     {
-        var table = new FakeTable().Add(8);
-        table.Undeletable.UnionWith(table.Rows.Take(2));
+        // The reviewer's probe: batch size 1, six records, the first undeletable.
+        var table = new FakeTable().Add(6);
+        table.Undeletable.Add(table.Rows.Min);
+
+        var result = await Truncate(table, batchSize: 1);
+
+        result.DeletedCount.Should().Be(5);
+        result.FailedCount.Should().Be(1);
+        result.RemainingCount.Should().Be(1);
+        result.StopReason.Should().Be(DataTruncateStopReason.Completed);
+        table.DeleteAttempts.Should().HaveCount(6);
+    }
+
+    [Fact]
+    public async Task AWholePassFails_TheRecordsAfterItAreStillAttempted()
+    {
+        // The reviewer's probe: batch 2, ten records, the third and fourth undeletable (the whole second page).
+        var table = new FakeTable().Add(10);
+        table.Undeletable.UnionWith(table.Rows.Skip(2).Take(2));
 
         var result = await Truncate(table);
 
-        result.Passes.Should().Be(1);
-        result.DeletedCount.Should().Be(0);
+        result.DeletedCount.Should().Be(8);
         result.FailedCount.Should().Be(2);
-        result.RemainingCount.Should().Be(8);
-        result.StopReason.Should().Be(DataTruncateStopReason.PassDeletedNothing);
+        result.StopReason.Should().Be(DataTruncateStopReason.Completed);
+        table.DeleteAttempts.Should().HaveCount(10);
+        table.DeleteAttempts.Values.Should().OnlyContain(n => n == 1);
+    }
+
+    [Fact]
+    public async Task EmptyPageClaimingMore_StopsAsPagingUnavailable_InsteadOfSpinning()
+    {
+        var table = new FakeTable { EmptyPagesClaimMore = true }.Add(6);
+
+        var result = await Truncate(table);
+
+        result.StopReason.Should().Be(DataTruncateStopReason.PagingUnavailable);
+        table.Reads.Should().HaveCount(2);
         TruncateCommand.ToExitCode(result).Should().Be(ExitCodes.PartialSuccess);
-        TruncateCommand.DescribeStop(result).Should().Contain("not attempted and remain");
+    }
+
+    [Fact]
+    public async Task RecordCreatedBehindTheReadDuringTheRun_IsLeft_AndTheRunIsNotASuccess()
+    {
+        var table = new FakeTable().Add(4);
+        table.AfterDelete = n => { if (n == 1) table.Rows.Add(Guid.Empty); }; // sorts before every other id
+
+        var result = await Truncate(table);
+
+        result.StopReason.Should().Be(DataTruncateStopReason.Completed);
+        result.FailedCount.Should().Be(0);
+        result.RemainingCount.Should().Be(1);
+        result.IsSuccess.Should().BeFalse();
+        TruncateCommand.ToExitCode(result).Should().Be(ExitCodes.PartialSuccess);
+        TruncateCommand.DescribeStop(result).Should().Contain("records remain");
+    }
+
+    [Fact]
+    public async Task RecordsCreatedAheadOfTheReadDuringTheRun_AreDeleted_AndTheNoteSaysMoreThanConfirmed()
+    {
+        var table = new FakeTable().Add(4);
+        table.AfterDelete = n => { if (n == 1) table.Rows.Add(Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff")); };
+
+        var result = await Truncate(table);
+
+        result.DeletedCount.Should().Be(5);
+        result.IsSuccess.Should().BeTrue();
+        TruncateCommand.DescribeMoreThanConfirmed(result, confirmedCount: 4).Should().Contain("5 records were deleted, more than the 4 confirmed");
+        TruncateCommand.DescribeMoreThanConfirmed(result, confirmedCount: 5).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RemainingCountThatCannotBeRead_IsNotZero_AndTheRunIsNotASuccess()
+    {
+        var table = new FakeTable { FailCounts = true }.Add(3);
+
+        var result = await Truncate(table);
+
+        result.StopReason.Should().Be(DataTruncateStopReason.Completed);
+        result.RemainingCount.Should().BeNull();
+        result.IsSuccess.Should().BeFalse();
+        TruncateCommand.ToExitCode(result).Should().Be(ExitCodes.PartialSuccess);
+    }
+
+    [Fact]
+    public async Task PageNumbersAdvanceWithTheCookie()
+    {
+        var table = new FakeTable().Add(5);
+
+        await Truncate(table);
+
+        table.Reads.Select(q => q.PageInfo.PageNumber).Should().Equal(1, 2, 3);
+        table.Reads[0].PageInfo.PagingCookie.Should().BeNull();
+        table.Reads.Skip(1).Should().OnlyContain(q => q.PageInfo.PagingCookie != null);
+    }
+
+    [Fact]
+    public async Task CancelledAfterAPass_ReportsWhatWasDeleted()
+    {
+        using var cts = new CancellationTokenSource();
+        var table = new FakeTable().Add(6);
+        table.AfterDelete = n => { if (n == 1) cts.Cancel(); };
+
+        var result = await Truncate(table, cancellationToken: cts.Token);
+
+        result.StopReason.Should().Be(DataTruncateStopReason.Cancelled);
+        result.DeletedCount.Should().Be(2);
+        result.RemainingCount.Should().BeNull();
+        TruncateCommand.ToExitCode(result).Should().Be(ExitCodes.Failure);
+    }
+
+    [Fact]
+    public async Task ReadFailsAfterAPass_ReportsWhatWasDeleted_WithTheCodeNotTheMessage()
+    {
+        var table = new FakeTable { ThrowOnRead = 2 }.Add(6);
+
+        var result = await Truncate(table);
+
+        result.StopReason.Should().Be(DataTruncateStopReason.Interrupted);
+        result.DeletedCount.Should().Be(2);
+        result.InterruptionCode.Should().Be(ErrorCodes.Query.ExecutionFailed);
+        result.RemainingCount.Should().Be(4);
+        TruncateCommand.ToExitCode(result).Should().Be(ExitCodes.Failure);
+        TruncateCommand.DescribeStop(result).Should().NotContain("unavailable");
+    }
+
+    [Fact]
+    public async Task ReadFailsBeforeAnyPass_Throws()
+    {
+        var table = new FakeTable { ThrowOnRead = 1 }.Add(2);
+
+        var act = () => Truncate(table);
+
+        (await act.Should().ThrowAsync<PpdsException>()).Which.ErrorCode.Should().Be(ErrorCodes.Query.ExecutionFailed);
     }
 
     [Fact]

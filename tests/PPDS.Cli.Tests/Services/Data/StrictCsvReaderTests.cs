@@ -54,4 +54,57 @@ public class StrictCsvReaderTests
     {
         StrictCsvReader.Read("").Header.Should().BeNull();
     }
+
+    [Fact]
+    public void StrayQuoteOnTheLastLine_IsAMisplacedQuote_NotAnUnclosedOne()
+    {
+        var table = StrictCsvReader.Read("a,b\n1,2\n3,x\"y\n");
+
+        table.UnclosedQuoteLine.Should().BeNull();
+        table.MalformedQuoteLines.Should().Equal(3);
+        table.DescribeProblems().Single().Should().Be("1 record has a quote that is not allowed there (line 3)");
+    }
+
+    [Fact]
+    public void StrayQuoteOnLineTwo_IsReportedOnLineTwo()
+    {
+        var table = StrictCsvReader.Read("a,b\n1,x\"y\n2,3\n");
+
+        table.UnclosedQuoteLine.Should().BeNull();
+        table.MalformedQuoteLines.Should().Equal(2);
+    }
+
+    [Fact]
+    public void StrayQuoteInTheHeader_IsReportedOnLineOne()
+    {
+        var table = StrictCsvReader.Read("a,b\"c\n1,2\n");
+
+        table.MalformedQuoteLines.Should().Equal(1);
+        table.DescribeProblems().Should().NotContain(p => p.Contains("line 0"));
+    }
+
+    [Fact]
+    public void UnclosedQuote_IsReportedOnTheLineItOpens_InsideAMultiLineRecord()
+    {
+        var table = StrictCsvReader.Read("a,b,c\n1,\"two\nlines\",\"open\nrest\n");
+
+        table.UnclosedQuoteLine.Should().Be(3);
+        table.MalformedQuoteLines.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void UnclosedQuoteInTheHeader_IsReportedOnLineOne()
+    {
+        var table = StrictCsvReader.Read("\"a,b\n1,2\n");
+
+        table.UnclosedQuoteLine.Should().Be(1);
+    }
+
+    [Fact]
+    public void FileWithoutAFinalLineBreak_CountsLinesExactly()
+    {
+        var table = StrictCsvReader.Read("a,b\r\n\r\n1,2\r\n3,4");
+
+        table.Rows.Select(r => r.LineNumber).Should().Equal(3, 4);
+    }
 }

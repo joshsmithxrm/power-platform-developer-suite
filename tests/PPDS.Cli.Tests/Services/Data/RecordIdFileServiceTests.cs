@@ -322,7 +322,7 @@ public sealed class RecordIdFileServiceTests : IDisposable
     {
         var ex = await Refused($"{Child1},Contoso\n{Child2},Fabrikam\n", extension: ".csv");
 
-        ex.UserMessage.Should().Contain("(2 columns found)").And.Contain("does not look like a header");
+        ex.UserMessage.Should().Contain("(2 columns found)");
         ex.UserMessage.Should().NotContain(Child1.ToString()).And.NotContain("Contoso");
     }
 
@@ -348,5 +348,75 @@ public sealed class RecordIdFileServiceTests : IDisposable
         var ex = await Refused($"[{{\"accountid\":\"{Child1}\",\"name\":\"a\",\"name\":\"b\"}}]");
 
         ex.UserMessage.Should().Contain("1 entry holds another property more than once (entry 1)");
+    }
+
+    // ---- Review round 2: the id spelling rule, white space, lone surrogates, a semicolon file, no echo of cells.
+
+    [Theory]
+    [InlineData("+ccccccc-0000-0000-0000-000000000001")]
+    [InlineData("0xcccccc-0000-0000-0000-000000000001")]
+    [InlineData("cccccccc-0x12-0000-0000-000000000001")]
+    [InlineData(" cccccccc-0000-0000-0000-000000000001")]
+    [InlineData("cccccccc-0000-0000-0000-000000000001 ")]
+    [InlineData("cccccccc000000000000000000000001")]
+    [InlineData("(cccccccc-0000-0000-0000-000000000001)")]
+    public async Task Json_DamagedOrPaddedId_IsRefused(string text)
+    {
+        var ex = await Refused($"[\"{text}\"]");
+
+        ex.UserMessage.Should().Contain("1 entry holds a value that is not a record id (entry 1)");
+    }
+
+    [Theory]
+    [InlineData("+ccccccc-0000-0000-0000-000000000001")]
+    [InlineData("0Xcccccc-0000-0000-0000-000000000001")]
+    [InlineData(" cccccccc-0000-0000-0000-000000000001")]
+    [InlineData("\"cccccccc-0000-0000-0000-000000000001 \"")]
+    [InlineData("\"cccccccc-0000-0000-0000-000000000001\n\"")]
+    public async Task Csv_DamagedOrPaddedId_IsRefused(string cell)
+    {
+        var ex = await Refused($"accountid,name\n{cell},a\n", extension: ".csv");
+
+        ex.UserMessage.Should().Contain("1 entry holds a value that is not a record id (line 2)");
+    }
+
+    [Fact]
+    public async Task UpperCaseAndBracedIds_AreRead()
+    {
+        var ids = await Read($"[\"{Child1.ToString().ToUpperInvariant()}\", \"{{{Child2}}}\"]");
+
+        ids.Should().Equal(Child1, Child2);
+    }
+
+    [Fact]
+    public async Task Json_LoneSurrogateInAValue_IsRefusedAsAnInvalidFile()
+    {
+        var ex = await Refused("[\"\\ud800\"]");
+
+        ex.UserMessage.Should().Contain("not valid Unicode");
+    }
+
+    [Fact]
+    public async Task Json_LoneSurrogateInAPropertyName_IsRefusedAsAnInvalidFile()
+    {
+        var ex = await Refused($"[{{\"accountid\":\"{Child1}\",\"\\udc00\":1}}]");
+
+        ex.UserMessage.Should().Contain("not valid Unicode");
+    }
+
+    [Fact]
+    public async Task Csv_SemicolonFile_IsRefused_DelimiterIsNotDetected()
+    {
+        var ex = await Refused($"accountid;name\n{Child1};a\n{Child2};b\n", extension: ".csv");
+
+        ex.UserMessage.Should().Contain("has no column 'accountid' (1 column found)");
+    }
+
+    [Fact]
+    public async Task Csv_FirstRowThatLooksLikeColumnNames_IsNotEchoed()
+    {
+        var ex = await Refused("contoso,fabrikam\nnorthwind,adventureworks\n", extension: ".csv");
+
+        ex.UserMessage.Should().Contain("(2 columns found)").And.NotContain("contoso").And.NotContain("fabrikam");
     }
 }
