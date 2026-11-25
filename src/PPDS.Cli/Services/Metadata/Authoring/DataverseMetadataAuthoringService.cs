@@ -378,6 +378,9 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         ArgumentNullException.ThrowIfNull(request);
         _guard.EnsureCanMutate("metadata.column.create");
 
+        // Text that names no required level or format is refused before anything is read (#1919).
+        ValidateCreateColumnText(request);
+
         reporter?.ReportPhase("Resolving publisher prefix");
         var prefix = await ResolvePublisherPrefixAsync(request.SolutionUniqueName, ct).ConfigureAwait(false);
 
@@ -464,6 +467,10 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _validator.ValidateRequiredString(request.EntityLogicalName, "EntityLogicalName");
         _validator.ValidateRequiredString(request.ColumnLogicalName, "ColumnLogicalName");
         ct.ThrowIfCancellationRequested();
+
+        // Text that names no required level or format is refused before anything is read, dry run included (#1919).
+        ValidateGivenRequiredLevel(request.RequiredLevel);
+        ValidateGivenFormat(request.Format);
 
         // A dry-run is input-only (MetadataDryRunScope.Inputs): it reads nothing and computes no notices.
         var columnLabelsRequested = request.DisplayName != null || request.Description != null;
@@ -779,6 +786,13 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         reporter?.ReportPhase("Retrieving existing relationship", request.SchemaName);
         var existingRel = await ReadRelationshipForUpdateAsync(request.SchemaName, ct).ConfigureAwait(false);
 
+        // The definition sent is the one read, so it must be the relationship asked for: a response that names another
+        // relationship, or carries no metadata id, is not written back.
+        if (!string.Equals(existingRel.SchemaName, request.SchemaName, StringComparison.OrdinalIgnoreCase)
+            || existingRel.MetadataId is not { } metadataId || metadataId == Guid.Empty)
+            throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                "Dataverse did not return the relationship asked for (another schema name, or no metadata id), so nothing was changed. Check the schema name and try again.");
+
         if (existingRel is not OneToManyRelationshipMetadata o2m)
             throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
                 "Cascade settings and the hierarchical flag apply only to a one-to-many relationship; this relationship is many-to-many. Nothing was changed.",
@@ -801,7 +815,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         // Only the given settings are written, on the object that was read.
         foreach (var (name, _, write) in CascadeSettingAccessors)
             if (given.TryGetValue(name, out var value))
-                write(cascade!, MapCascadeType(value));
+                write(cascade!, ToSdkCascadeType(value));
         if (request.IsHierarchical.HasValue)
             o2m.IsHierarchical = request.IsHierarchical.Value;
 
@@ -819,10 +833,14 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             };
         }).ToList();
 
+        var hasChanges = settings.Any(s => s.Changed) || hierarchicalBefore != o2m.IsHierarchical;
+        var send = !request.DryRun && hasChanges;
         var result = new UpdateRelationshipResult
         {
-            SchemaName = request.SchemaName,
+            SchemaName = o2m.SchemaName ?? request.SchemaName,
             WasDryRun = request.DryRun,
+            WasSent = send,
+            HasChanges = hasChanges,
             CascadeSettings = settings,
             IsHierarchicalBefore = hierarchicalBefore,
             IsHierarchicalAfter = o2m.IsHierarchical,
@@ -835,6 +853,14 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         if (request.DryRun)
         {
             _logger?.LogInformation("Dry-run: UpdateRelationship {SchemaName} computed", request.SchemaName);
+            return result;
+        }
+
+        // Every value given already equals the current one: nothing is sent, and the result says so.
+        if (!send)
+        {
+            reporter?.ReportInfo($"Relationship '{request.SchemaName}' already has every value given; nothing was sent.");
+            _logger?.LogInformation("UpdateRelationship {SchemaName}: nothing to change, nothing sent", request.SchemaName);
             return result;
         }
 
@@ -852,9 +878,14 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             SolutionUniqueName = request.SolutionUniqueName
         };
 
-        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
+        try
         {
+            await using var client = await GetMetadataClientAsync(ct).ConfigureAwait(false);
             await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not PpdsException and not MetadataValidationException)
+        {
+            throw RelationshipWriteFailure(ex);
         }
 
         // UpdateRelationshipRequest doesn't carry entity logical names, so we must
@@ -889,7 +920,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         {
             // Dataverse's object-not-found code. Which code RetrieveRelationship returns for an unknown name is not
             // documented; this is the code the other metadata reads return (see ObjectDoesNotExistErrorCode).
-            throw new PpdsException(ErrorCodes.Operation.NotFound,
+            throw new PpdsNotFoundException("Relationship", schemaName,
                 "No relationship with that schema name was found, so nothing was changed. Check the schema name (it is the relationship's SchemaName, not its display name).",
                 fault);
         }
@@ -897,6 +928,23 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         {
             throw NormalizeColumnLabelSdkFailure(ex, message);
         }
+    }
+
+    /// <summary>
+    /// The relationship write failed. A Dataverse fault is a refusal: the single request was not applied, so nothing
+    /// was changed, and only Dataverse's typed fault code is shown (its message can carry ids). A timeout or a
+    /// cancellation leaves the outcome unknown, and so may a failure with no answer from Dataverse; the message says
+    /// so. The mapper's classification (sign-in, connection) is kept.
+    /// </summary>
+    private static PpdsException RelationshipWriteFailure(Exception ex)
+    {
+        if (!IsIndeterminate(ex) && FindTypedFault(ex) is not null)
+            return new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                AppendDataverseFaultCode("Dataverse refused the relationship update, so nothing was changed.", ex), ex);
+
+        var interruption = IsIndeterminate(ex) ? Interruption(ex) : "failed without an answer from Dataverse";
+        return NormalizeColumnLabelSdkFailure(ex,
+            $"The relationship update {interruption}, so whether it was applied is unknown. Read the relationship's current settings (a dry run of the same update shows them) before trying again.");
     }
 
     /// <summary>
@@ -940,6 +988,22 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         return given;
     }
+
+    /// <summary>
+    /// Maps a cascade value to the SDK's. A value that is not a defined member is refused, never written as a
+    /// default; the values given are checked before this, so this is the last guard.
+    /// </summary>
+    private static SdkCascadeType ToSdkCascadeType(CascadeBehavior behavior) => behavior switch
+    {
+        CascadeBehavior.Cascade => SdkCascadeType.Cascade,
+        CascadeBehavior.Active => SdkCascadeType.Active,
+        CascadeBehavior.NoCascade => SdkCascadeType.NoCascade,
+        CascadeBehavior.UserOwned => SdkCascadeType.UserOwned,
+        CascadeBehavior.RemoveLink => SdkCascadeType.RemoveLink,
+        CascadeBehavior.Restrict => SdkCascadeType.Restrict,
+        _ => throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+            "A cascade value is not one Dataverse accepts. Nothing was changed.", "CascadeConfiguration")
+    };
 
     private static CascadeBehavior? ToCascadeBehavior(SdkCascadeType value) => value switch
     {
@@ -2921,66 +2985,128 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         };
     }
 
+    // Create: a setting not given is NoCascade (a separate issue); an undefined value is refused.
     private static SdkCascadeType MapCascadeType(CascadeBehavior? behavior)
+        => behavior is { } value ? ToSdkCascadeType(value) : SdkCascadeType.NoCascade;
+
+    // #1919: the text given for a required level or a format must name one of these (any letter case, surrounding
+    // white space ignored). Unknown text is refused, never read as a default: a typo must not make a required column
+    // optional or set a format nobody asked for.
+    private static readonly (string Name, AttributeRequiredLevel Value)[] RequiredLevelNames =
+    [
+        ("None", AttributeRequiredLevel.None),
+        ("Recommended", AttributeRequiredLevel.Recommended),
+        ("Required", AttributeRequiredLevel.ApplicationRequired),
+        ("ApplicationRequired", AttributeRequiredLevel.ApplicationRequired),
+        ("SystemRequired", AttributeRequiredLevel.SystemRequired),
+    ];
+
+    private static readonly (string Name, StringFormatName Value)[] StringFormatNames =
+    [
+        ("Text", StringFormatName.Text), ("Email", StringFormatName.Email), ("Url", StringFormatName.Url),
+        ("Phone", StringFormatName.Phone), ("TickerSymbol", StringFormatName.TickerSymbol),
+        ("Phonetic", StringFormatName.PhoneticGuide), ("VersionNumber", StringFormatName.VersionNumber),
+        ("Json", StringFormatName.Json), ("RichText", StringFormatName.RichText),
+    ];
+
+    private static readonly (string Name, IntegerFormat Value)[] IntegerFormatNames =
+    [
+        ("None", IntegerFormat.None), ("Duration", IntegerFormat.Duration), ("TimeZone", IntegerFormat.TimeZone),
+        ("Language", IntegerFormat.Language), ("Locale", IntegerFormat.Locale),
+    ];
+
+    private static readonly (string Name, DateTimeFormat Value)[] DateTimeFormatNames =
+    [
+        ("DateAndTime", DateTimeFormat.DateAndTime), ("DateOnly", DateTimeFormat.DateOnly),
+    ];
+
+    private static bool TryName<T>((string Name, T Value)[] names, string? text, out T value)
     {
-        return behavior switch
+        var trimmed = text?.Trim();
+        foreach (var (name, candidate) in names)
         {
-            CascadeBehavior.Cascade => SdkCascadeType.Cascade,
-            CascadeBehavior.Active => SdkCascadeType.Active,
-            CascadeBehavior.NoCascade => SdkCascadeType.NoCascade,
-            CascadeBehavior.UserOwned => SdkCascadeType.UserOwned,
-            CascadeBehavior.RemoveLink => SdkCascadeType.RemoveLink,
-            CascadeBehavior.Restrict => SdkCascadeType.Restrict,
-            _ => SdkCascadeType.NoCascade
+            if (string.Equals(name, trimmed, StringComparison.OrdinalIgnoreCase))
+            {
+                value = candidate;
+                return true;
+            }
+        }
+
+        value = default!;
+        return false;
+    }
+
+    private static string NameList<T>((string Name, T Value)[] names)
+        => string.Join(", ", names[..^1].Select(n => n.Name)) + " or " + names[^1].Name;
+
+    private static MetadataValidationException RequiredLevelNotKnown()
+        => new(MetadataErrorCodes.InvalidConstraint,
+            $"The required level is not one PPDS knows. Give {NameList(RequiredLevelNames)}. Nothing was changed.",
+            "RequiredLevel");
+
+    private static MetadataValidationException FormatNotKnown(string columnType, string names)
+        => new(MetadataErrorCodes.InvalidConstraint,
+            $"The format is not one a {columnType} column takes. Give {names}. Nothing was changed.",
+            "Format");
+
+    /// <summary>A required level that was given (update): any text, blank included, must name a level.</summary>
+    private static void ValidateGivenRequiredLevel(string? level)
+    {
+        if (level != null && !TryName(RequiredLevelNames, level, out _))
+            throw RequiredLevelNotKnown();
+    }
+
+    /// <summary>
+    /// Create: blank text is not given (the default applies); other text must name a level, and a format given for a
+    /// String, Integer or DateTime column must name one that type takes. Checked before anything is read.
+    /// </summary>
+    private static void ValidateCreateColumnText(CreateColumnRequest request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.RequiredLevel))
+            ValidateGivenRequiredLevel(request.RequiredLevel);
+        if (string.IsNullOrWhiteSpace(request.Format))
+            return;
+        _ = request.ColumnType switch
+        {
+            SchemaColumnType.String => ParseStringFormat(request.Format),
+            SchemaColumnType.Integer => ParseIntegerFormat(request.Format),
+            SchemaColumnType.DateTime => (object?)ParseDateTimeFormat(request.Format),
+            _ => null
         };
+    }
+
+    /// <summary>
+    /// Update, before the read: a format given (blank included) must name a format of some column type. After the
+    /// read, <see cref="ApplyTypeSpecificUpdates"/> refuses one the column's own type does not take.
+    /// </summary>
+    private static void ValidateGivenFormat(string? format)
+    {
+        if (format != null && !TryName(StringFormatNames, format, out _) && !TryName(IntegerFormatNames, format, out _)
+            && !TryName(DateTimeFormatNames, format, out _))
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                $"The format is not one any column type takes. String: {NameList(StringFormatNames)}. Integer: {NameList(IntegerFormatNames)}. DateTime: {NameList(DateTimeFormatNames)}. Nothing was changed.",
+                "Format");
     }
 
     private static AttributeRequiredLevel ParseRequiredLevel(string? level)
     {
         if (string.IsNullOrWhiteSpace(level))
             return AttributeRequiredLevel.None;
-
-        return level.ToLowerInvariant() switch
-        {
-            "required" or "applicationrequired" => AttributeRequiredLevel.ApplicationRequired,
-            "recommended" => AttributeRequiredLevel.Recommended,
-            "systemrequired" => AttributeRequiredLevel.SystemRequired,
-            _ => AttributeRequiredLevel.None
-        };
+        return TryName(RequiredLevelNames, level, out var value) ? value : throw RequiredLevelNotKnown();
     }
 
     private static StringFormatName? ParseStringFormat(string? format)
     {
         if (string.IsNullOrWhiteSpace(format))
             return StringFormatName.Text;
-
-        return format.ToLowerInvariant() switch
-        {
-            "email" => StringFormatName.Email,
-            "url" => StringFormatName.Url,
-            "phone" => StringFormatName.Phone,
-            "tickersymbol" => StringFormatName.TickerSymbol,
-            "phonetic" => StringFormatName.PhoneticGuide,
-            "versionnumber" => StringFormatName.VersionNumber,
-            "json" => StringFormatName.Json,
-            "richtext" => StringFormatName.RichText,
-            _ => StringFormatName.Text
-        };
+        return TryName(StringFormatNames, format, out var value) ? value : throw FormatNotKnown("String", NameList(StringFormatNames));
     }
 
     private static IntegerFormat? ParseIntegerFormat(string? format)
     {
         if (string.IsNullOrWhiteSpace(format))
             return IntegerFormat.None;
-
-        return format.ToLowerInvariant() switch
-        {
-            "duration" => IntegerFormat.Duration,
-            "timezone" => IntegerFormat.TimeZone,
-            "language" => IntegerFormat.Language,
-            "locale" => IntegerFormat.Locale,
-            _ => IntegerFormat.None
-        };
+        return TryName(IntegerFormatNames, format, out var value) ? value : throw FormatNotKnown("Integer", NameList(IntegerFormatNames));
     }
 
     private static ImeMode? ParseImeMode(string? mode)
@@ -3025,12 +3151,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     {
         if (string.IsNullOrWhiteSpace(format))
             return DateTimeFormat.DateAndTime;
-
-        return format.ToLowerInvariant() switch
-        {
-            "dateonly" => DateTimeFormat.DateOnly,
-            _ => DateTimeFormat.DateAndTime
-        };
+        return TryName(DateTimeFormatNames, format, out var value) ? value : throw FormatNotKnown("DateTime", NameList(DateTimeFormatNames));
     }
 
     private async Task<int> ResolvePublisherOptionValuePrefixAsync(string solutionUniqueName, CancellationToken ct)

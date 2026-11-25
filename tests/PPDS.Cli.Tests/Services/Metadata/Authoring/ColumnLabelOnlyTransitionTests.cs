@@ -87,7 +87,10 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
         var request = Request("both", publish: true);
         object value = setting switch
         {
-            "RequiredLevel" or "Format" or "AutoNumberFormat" => "",
+            // A valid name: the shape refuses any supplied setting (blank text is refused earlier, for its own reason).
+            "RequiredLevel" => "Required",
+            "Format" => "Text",
+            "AutoNumberFormat" => "",
             "IsAuditEnabled" or "IsSecured" or "IsValidForAdvancedFind" => false,
             "MinValue" or "MaxValue" => 0d,
             _ => 0

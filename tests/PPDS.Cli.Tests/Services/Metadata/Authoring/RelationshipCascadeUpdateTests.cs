@@ -148,7 +148,7 @@ public sealed class RelationshipCascadeUpdateTests
     [Fact]
     public async Task ManyToMany_IsRefusedAndNothingIsSent()
     {
-        var env = new FakeEnvironment(new ManyToManyRelationshipMetadata { SchemaName = "new_parent_child" });
+        var env = new FakeEnvironment(new ManyToManyRelationshipMetadata { SchemaName = "new_parent_child", MetadataId = new Guid("6f1d7c3e-2a4b-4c5d-8e9f-0a1b2c3d4e5f"), });
 
         var ex = await Assert.ThrowsAsync<MetadataValidationException>(() =>
             env.Service.UpdateRelationshipAsync(Request(new CascadeConfigurationDto { Delete = CascadeBehavior.Restrict })));
@@ -245,7 +245,7 @@ public sealed class RelationshipCascadeUpdateTests
     /// <summary>A parental relationship: every cascade setting is Cascade.</summary>
     private static OneToManyRelationshipMetadata Parental() => new()
     {
-        SchemaName = "new_parent_child",
+        SchemaName = "new_parent_child", MetadataId = new Guid("6f1d7c3e-2a4b-4c5d-8e9f-0a1b2c3d4e5f"),
         ReferencedEntity = "new_parent",
         ReferencingEntity = "new_child",
         CascadeConfiguration = new CascadeConfiguration

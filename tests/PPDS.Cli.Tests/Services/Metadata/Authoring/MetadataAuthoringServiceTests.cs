@@ -640,7 +640,7 @@ public class MetadataAuthoringServiceTests
     {
         var existingRel = new OneToManyRelationshipMetadata
         {
-            SchemaName = "new_account_contact",
+            SchemaName = "new_account_contact", MetadataId = new Guid("6f1d7c3e-2a4b-4c5d-8e9f-0a1b2c3d4e5f"),
             CascadeConfiguration = ReferentialCascade()
         };
         var retrieveResponse = new RetrieveRelationshipResponse();
@@ -731,7 +731,7 @@ public class MetadataAuthoringServiceTests
         // Setup retrieve existing relationship
         var existingRel = new OneToManyRelationshipMetadata
         {
-            SchemaName = "new_account_contact",
+            SchemaName = "new_account_contact", MetadataId = new Guid("6f1d7c3e-2a4b-4c5d-8e9f-0a1b2c3d4e5f"),
             CascadeConfiguration = ReferentialCascade()
         };
         var retrieveResponse = new RetrieveRelationshipResponse();

@@ -51,16 +51,15 @@ public sealed class MetadataUpdateRelationshipTool : McpToolBase
                 (nameof(solution), solution),
                 (nameof(schemaName), schemaName)).ConfigureAwait(false);
 
-            CascadeConfigurationDto? cascadeConfig = null;
+            // The tool takes two settings; the refusal names only those (the service's own names six and a flag).
+            if (cascadeDelete == null && cascadeAssign == null)
+                throw new ArgumentException("Nothing to update: give cascadeDelete, cascadeAssign or both.", nameof(cascadeDelete));
 
-            if (cascadeDelete != null || cascadeAssign != null)
+            var cascadeConfig = new CascadeConfigurationDto
             {
-                cascadeConfig = new CascadeConfigurationDto
-                {
-                    Delete = ParseCascade(cascadeDelete, "Delete", nameof(cascadeDelete)),
-                    Assign = ParseCascade(cascadeAssign, "Assign", nameof(cascadeAssign))
-                };
-            }
+                Delete = ParseCascade(cascadeDelete, "Delete", nameof(cascadeDelete)),
+                Assign = ParseCascade(cascadeAssign, "Assign", nameof(cascadeAssign))
+            };
 
             var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
@@ -76,8 +75,8 @@ public sealed class MetadataUpdateRelationshipTool : McpToolBase
             {
                 Success = true,
                 WasDryRun = result.WasDryRun,
-                RemovesInheritedAccess = result.RemovesInheritedAccess,
-                InheritedAccessNotice = result.RemovesInheritedAccess ? CascadeActionRules.InheritedAccessCleanupNotice : null,
+                Updated = result.WasSent,
+                NothingToChange = !result.HasChanges,
                 CascadeSettings = result.CascadeSettings.Select(s => new MetadataCascadeSettingChange
                 {
                     Setting = s.Setting,
@@ -101,20 +100,16 @@ public sealed class MetadataUpdateRelationshipTool : McpToolBase
     }
 
     /// <summary>
-    /// Parses a cascade value by its name only (any case), and only a value documented as valid for the action; the
-    /// error lists the valid values for that action.
+    /// Parses a cascade value with the parser every surface shares (<see cref="CascadeActionRules.TryParse"/>: a name
+    /// valid for the action, nothing else); the error lists the valid values for that action.
     /// </summary>
     private static CascadeBehavior? ParseCascade(string? value, string action, string parameter)
     {
         if (value == null)
             return null;
-        var match = CascadeActionRules.ValidFor(action)
-            .Where(v => string.Equals(v.ToString(), value.Trim(), StringComparison.OrdinalIgnoreCase))
-            .Select(v => (CascadeBehavior?)v)
-            .FirstOrDefault();
-        return match ?? throw new ArgumentException(
-            $"Invalid cascade {action.ToLowerInvariant()} behavior. Valid values: {CascadeActionRules.Describe(action)}.",
-            parameter);
+        return CascadeActionRules.TryParse(action, value, out var parsed)
+            ? parsed
+            : throw new ArgumentException(CascadeActionRules.InvalidValueMessage(action), parameter);
     }
 }
 
@@ -138,16 +133,13 @@ public sealed class MetadataUpdateRelationshipResult
     [JsonPropertyName("cascadeSettings")]
     public List<MetadataCascadeSettingChange> CascadeSettings { get; set; } = [];
 
-    /// <summary>
-    /// Whether Reparent or Share changes to NoCascade, which Microsoft documents starts the inherited access rights
-    /// cleanup system job.
-    /// </summary>
-    [JsonPropertyName("removesInheritedAccess")]
-    public bool RemovesInheritedAccess { get; set; }
+    /// <summary>Whether the update was sent: false on a dry run and when every value given already equals the current one.</summary>
+    [JsonPropertyName("updated")]
+    public bool Updated { get; set; }
 
-    /// <summary>What that job does, when <see cref="RemovesInheritedAccess"/> is true; otherwise null.</summary>
-    [JsonPropertyName("inheritedAccessNotice")]
-    public string? InheritedAccessNotice { get; set; }
+    /// <summary>Whether every value given already equals the current one, so that nothing is (or would be) sent.</summary>
+    [JsonPropertyName("nothingToChange")]
+    public bool NothingToChange { get; set; }
 }
 
 /// <summary>

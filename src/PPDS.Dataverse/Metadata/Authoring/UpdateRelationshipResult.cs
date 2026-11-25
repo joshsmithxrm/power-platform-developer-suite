@@ -7,11 +7,20 @@ namespace PPDS.Dataverse.Metadata.Authoring;
 /// </summary>
 public sealed class UpdateRelationshipResult
 {
-    /// <summary>Gets the schema name of the relationship.</summary>
+    /// <summary>Gets the schema name of the relationship as stored in the environment (as read).</summary>
     public string SchemaName { get; init; } = "";
 
     /// <summary>Gets whether this was a dry run: the settings were read and computed, and nothing was sent.</summary>
     public bool WasDryRun { get; init; }
+
+    /// <summary>
+    /// Gets whether the update was sent. False on a dry run, and false when every value given already equals the
+    /// current one (see <see cref="HasChanges"/>): then nothing is sent.
+    /// </summary>
+    public bool WasSent { get; init; }
+
+    /// <summary>Gets whether any cascade setting or the hierarchical flag differs from the value read.</summary>
+    public bool HasChanges { get; init; }
 
     /// <summary>
     /// Gets the six cascade settings (Assign, Delete, Merge, Reparent, Share, Unshare), each with the value read from

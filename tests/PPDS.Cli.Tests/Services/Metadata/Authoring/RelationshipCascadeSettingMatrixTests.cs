@@ -29,7 +29,7 @@ namespace PPDS.Cli.Tests.Services.Metadata.Authoring;
 [Trait("Category", "Unit")]
 [Trait("Issue", "1919")]
 [Collection(nameof(ConsoleCaptureCollection))]
-public sealed class RelationshipCascadeSettingMatrixTests
+public sealed partial class RelationshipCascadeSettingMatrixTests
 {
     private static readonly string[] Six = ["Assign", "Delete", "Merge", "Reparent", "Share", "Unshare"];
     private static readonly string[] Eight = [.. Six, "Archive", "RollupView"];
@@ -69,6 +69,8 @@ public sealed class RelationshipCascadeSettingMatrixTests
 
         var sent = Assert.Single(env.Sent);
         Assert.Same(stored, sent.Relationship); // the object read is the object sent: its other properties travel as read
+        Assert.Equal("SyntheticSolution", sent.SolutionUniqueName);
+        Assert.True(sent.MergeLabels);
         var expected = Kinds[kind].ToArray();
         expected[Array.IndexOf(Eight, setting)] = ToSdk(newValue);
         Assert.Equal(expected, Values(((OneToManyRelationshipMetadata)sent.Relationship).CascadeConfiguration));
@@ -153,9 +155,19 @@ public sealed class RelationshipCascadeSettingMatrixTests
 
         if (documented.Contains(value))
         {
-            await env.Service.UpdateRelationshipAsync(Request(Dto((action, value))));
-            var sent = ((OneToManyRelationshipMetadata)Assert.Single(env.Sent).Relationship).CascadeConfiguration;
-            Assert.Equal(ToSdk(value), Values(sent)[Array.IndexOf(Eight, action)]);
+            var result = await env.Service.UpdateRelationshipAsync(Request(Dto((action, value))));
+            if (Kinds["mixed"][Array.IndexOf(Eight, action)] == ToSdk(value))
+            {
+                // Already the current value: nothing to change, nothing sent.
+                Assert.Empty(env.Sent);
+                Assert.False(result.WasSent || result.HasChanges);
+            }
+            else
+            {
+                var sent = ((OneToManyRelationshipMetadata)Assert.Single(env.Sent).Relationship).CascadeConfiguration;
+                Assert.Equal(ToSdk(value), Values(sent)[Array.IndexOf(Eight, action)]);
+                Assert.True(result.WasSent && result.HasChanges);
+            }
         }
         else
         {
@@ -215,9 +227,11 @@ public sealed class RelationshipCascadeSettingMatrixTests
                 "Could not find relationship new_parent_child")
         };
 
-        var ex = await Assert.ThrowsAsync<PpdsException>(() => env.Service.UpdateRelationshipAsync(Request(Dto(("Delete", CascadeBehavior.Restrict)))));
+        // The not-found exception type, so every surface maps it as not found (the CLI exits 6).
+        var ex = await Assert.ThrowsAsync<PpdsNotFoundException>(() => env.Service.UpdateRelationshipAsync(Request(Dto(("Delete", CascadeBehavior.Restrict)))));
 
         Assert.Equal(ErrorCodes.Operation.NotFound, ex.ErrorCode);
+        Assert.Equal(ExitCodes.NotFoundError, ExceptionMapper.ToExitCode(ex));
         Assert.Contains("Check the schema name", ex.UserMessage);
         Assert.DoesNotContain("new_parent_child", ex.UserMessage);
         Assert.Empty(env.Sent);
@@ -366,7 +380,7 @@ public sealed class RelationshipCascadeSettingMatrixTests
         var v = Kinds[kind];
         return new OneToManyRelationshipMetadata
         {
-            SchemaName = "new_parent_child",
+            SchemaName = "new_parent_child", MetadataId = new Guid("6f1d7c3e-2a4b-4c5d-8e9f-0a1b2c3d4e5f"),
             ReferencedEntity = "new_parent",
             ReferencingEntity = "new_child",
             CascadeConfiguration = new CascadeConfiguration
@@ -406,10 +420,14 @@ public sealed class RelationshipCascadeSettingMatrixTests
         internal List<RetrieveRelationshipRequest> Reads { get; } = [];
         internal List<SdkUpdateRelationshipRequest> Sent { get; } = [];
         internal Exception? ReadFailure { get; init; }
+        internal Exception? WriteFailure { get; init; }
+        /// <summary>What the environment holds; each read answers with the current value, so it can change between updates.</summary>
+        internal RelationshipMetadataBase Stored { get; set; }
         internal DataverseMetadataAuthoringService Service { get; }
 
         internal FakeEnvironment(RelationshipMetadataBase stored)
         {
+            Stored = stored;
             var pool = new Mock<IDataverseConnectionPool>(MockBehavior.Strict);
             pool.Setup(p => p.GetClientAsync(null, null, It.IsAny<CancellationToken>())).ReturnsAsync(() =>
             {
@@ -424,9 +442,10 @@ public sealed class RelationshipCascadeSettingMatrixTests
                                 Reads.Add(read);
                                 if (ReadFailure != null) return Task.FromException<OrganizationResponse>(ReadFailure);
                                 var response = new RetrieveRelationshipResponse();
-                                response.Results["RelationshipMetadata"] = stored;
+                                response.Results["RelationshipMetadata"] = Stored;
                                 return Task.FromResult<OrganizationResponse>(response);
                             case SdkUpdateRelationshipRequest update:
+                                if (WriteFailure != null) return Task.FromException<OrganizationResponse>(WriteFailure);
                                 Sent.Add(update);
                                 return Task.FromResult(new OrganizationResponse());
                             default:

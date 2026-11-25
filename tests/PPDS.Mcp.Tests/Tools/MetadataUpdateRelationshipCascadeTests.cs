@@ -16,73 +16,93 @@ using SdkUpdateRelationshipRequest = Microsoft.Xrm.Sdk.Messages.UpdateRelationsh
 namespace PPDS.Mcp.Tests.Tools;
 
 /// <summary>
-/// #1919 through the MCP tool and the shared authoring service: a cascade-delete change on a parental relationship
-/// changes that setting only, and the result lists every setting before and after.
+/// #1919 through the MCP tool and the shared authoring service: a cascade change on a parental or a mixed relationship
+/// changes that setting only, and the result lists every setting before and after; text that names no valid value,
+/// and a request with nothing given, are refused before anything is read.
 /// </summary>
 [Trait("Category", "Unit")]
 [Trait("Issue", "1919")]
 public sealed class MetadataUpdateRelationshipCascadeTests
 {
-    [Theory]
-    [InlineData("Restrict", null, false)]
-    [InlineData("Restrict", null, true)]
-    [InlineData(null, "UserOwned", false)]
-    [InlineData(null, "Active", true)]
-    [InlineData("RemoveLink", "NoCascade", false)]
-    [InlineData("restrict", "useROWNED", false)] // names in any case
-    public async Task GivenSettings_ChangeOnly_TheOthersAreSentAsRead(string? cascadeDelete, string? cascadeAssign, bool dryRun)
+    /// <summary>The fixtures: a parental relationship (all Cascade) and a mixed one, as the eight values.</summary>
+    private static readonly Dictionary<string, CascadeType[]> Kinds = new()
     {
-        using var fx = await Fixture.CreateAsync();
+        // Assign, Delete, Merge, Reparent, Share, Unshare, Archive, RollupView
+        ["parental"] = [CascadeType.Cascade, CascadeType.Cascade, CascadeType.Cascade, CascadeType.Cascade, CascadeType.Cascade, CascadeType.Cascade, CascadeType.Cascade, CascadeType.Cascade],
+        ["mixed"] = [CascadeType.UserOwned, CascadeType.Restrict, CascadeType.NoCascade, CascadeType.Active, CascadeType.Cascade, CascadeType.NoCascade, CascadeType.RemoveLink, CascadeType.Active],
+    };
+
+    private static readonly string[] Eight = ["Assign", "Delete", "Merge", "Reparent", "Share", "Unshare", "Archive", "RollupView"];
+
+    [Theory]
+    [InlineData("parental", "Restrict", null, false)]
+    [InlineData("parental", "Restrict", null, true)]
+    [InlineData("parental", null, "UserOwned", false)]
+    [InlineData("parental", null, "Active", true)]
+    [InlineData("parental", "RemoveLink", "NoCascade", false)]
+    [InlineData("parental", "restrict", " useROWNED ", false)] // names in any case, spaces trimmed
+    [InlineData("mixed", "Cascade", null, false)]
+    [InlineData("mixed", "RemoveLink", null, true)]
+    [InlineData("mixed", null, "Cascade", false)]
+    [InlineData("mixed", null, "NoCascade", false)]
+    [InlineData("mixed", "Cascade", "Active", false)]
+    [InlineData("mixed", "Cascade", "UserOwned", false)] // assign already UserOwned: only delete changes
+    public async Task GivenSettings_ChangeOnly_TheOthersAreSentAsRead(string kind, string? cascadeDelete, string? cascadeAssign, bool dryRun)
+    {
+        using var fx = await Fixture.CreateAsync(Kinds[kind]);
 
         var result = await new MetadataUpdateRelationshipTool(fx.Context).ExecuteAsync("Sol", "new_parent_child",
             cascadeDelete: cascadeDelete, cascadeAssign: cascadeAssign, dryRun: dryRun);
 
-        var given = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (cascadeDelete != null) given["Delete"] = Canonical(cascadeDelete);
-        if (cascadeAssign != null) given["Assign"] = Canonical(cascadeAssign);
+        var expected = Kinds[kind].ToArray();
+        if (cascadeDelete != null) expected[1] = Enum.Parse<CascadeType>(cascadeDelete.Trim(), ignoreCase: true);
+        if (cascadeAssign != null) expected[0] = Enum.Parse<CascadeType>(cascadeAssign.Trim(), ignoreCase: true);
+        var changes = !expected.SequenceEqual(Kinds[kind]);
 
         Assert.True(result.Success);
         Assert.Equal(dryRun, result.WasDryRun);
+        Assert.Equal(!dryRun && changes, result.Updated);
+        Assert.Equal(!changes, result.NothingToChange);
         Assert.Equal(["Assign", "Delete", "Merge", "Reparent", "Share", "Unshare"], result.CascadeSettings.Select(s => s.Setting));
         foreach (var s in result.CascadeSettings)
         {
-            Assert.Equal("Cascade", s.Before);
-            Assert.Equal(given.TryGetValue(s.Setting, out var v) ? v : "Cascade", s.After);
-            Assert.Equal(given.ContainsKey(s.Setting), s.Requested);
+            var i = Array.IndexOf(Eight, s.Setting);
+            Assert.Equal(Kinds[kind][i].ToString(), s.Before);
+            Assert.Equal(expected[i].ToString(), s.After);
+            Assert.Equal((s.Setting == "Delete" && cascadeDelete != null) || (s.Setting == "Assign" && cascadeAssign != null), s.Requested);
+            Assert.Equal(Kinds[kind][i] != expected[i], s.Changed);
         }
-        Assert.False(result.RemovesInheritedAccess);
-        Assert.Null(result.InheritedAccessNotice);
 
-        if (dryRun)
+        Assert.Single(fx.Reads);
+        if (dryRun || !changes)
         {
             Assert.Empty(fx.Sent);
             return;
         }
         var sent = Assert.Single(fx.Sent);
         Assert.Same(fx.Stored, sent.Relationship);
+        Assert.Equal("Sol", sent.SolutionUniqueName);
+        Assert.True(sent.MergeLabels);
         var c = ((OneToManyRelationshipMetadata)sent.Relationship).CascadeConfiguration;
-        var expected = new Dictionary<string, CascadeType?>
-        {
-            ["Assign"] = given.TryGetValue("Assign", out var a) ? Enum.Parse<CascadeType>(a) : CascadeType.Cascade,
-            ["Delete"] = given.TryGetValue("Delete", out var d) ? Enum.Parse<CascadeType>(d) : CascadeType.Cascade,
-            ["Merge"] = CascadeType.Cascade, ["Reparent"] = CascadeType.Cascade, ["Share"] = CascadeType.Cascade,
-            ["Unshare"] = CascadeType.Cascade, ["Archive"] = CascadeType.Cascade, ["RollupView"] = CascadeType.Cascade,
-        };
-        Assert.Equal(expected, new Dictionary<string, CascadeType?>
-        {
-            ["Assign"] = c.Assign, ["Delete"] = c.Delete, ["Merge"] = c.Merge, ["Reparent"] = c.Reparent, ["Share"] = c.Share,
-            ["Unshare"] = c.Unshare, ["Archive"] = c.Archive, ["RollupView"] = c.RollupView,
-        });
+        Assert.Equal(expected, new[] { c.Assign, c.Delete, c.Merge, c.Reparent, c.Share, c.Unshare, c.Archive, c.RollupView }.Select(v => v!.Value));
     }
 
     [Theory]
     [InlineData("NoCascade", null, "Cascade, RemoveLink or Restrict")]
     [InlineData("5", null, "Cascade, RemoveLink or Restrict")]
+    [InlineData("0", null, "Cascade, RemoveLink or Restrict")]
+    [InlineData("+5", null, "Cascade, RemoveLink or Restrict")]
+    [InlineData("05", null, "Cascade, RemoveLink or Restrict")]
+    [InlineData("Active,RemoveLink", null, "Cascade, RemoveLink or Restrict")]
+    [InlineData("", null, "Cascade, RemoveLink or Restrict")]
+    [InlineData(null, "Active,NoCascade", "Active, Cascade, NoCascade or UserOwned")]
+    [InlineData(null, "3", "Active, Cascade, NoCascade or UserOwned")]
+    [InlineData(null, " ", "Active, Cascade, NoCascade or UserOwned")]
     [InlineData(null, "Restrict", "Active, Cascade, NoCascade or UserOwned")]
     [InlineData(null, "RemoveLink", "Active, Cascade, NoCascade or UserOwned")]
     public async Task ValueNotValidForTheAction_IsRefused_ListingOnlyThatActionsValues(string? cascadeDelete, string? cascadeAssign, string listed)
     {
-        using var fx = await Fixture.CreateAsync();
+        using var fx = await Fixture.CreateAsync(Kinds["mixed"]);
 
         var ex = await Assert.ThrowsAsync<ArgumentException>(() => new MetadataUpdateRelationshipTool(fx.Context)
             .ExecuteAsync("Sol", "new_parent_child", cascadeDelete: cascadeDelete, cascadeAssign: cascadeAssign));
@@ -90,6 +110,29 @@ public sealed class MetadataUpdateRelationshipCascadeTests
         Assert.Contains("Valid values: " + listed + ".", ex.Message);
         Assert.Empty(fx.Reads);
         Assert.Empty(fx.Sent);
+    }
+
+    [Fact]
+    public async Task NothingGiven_NamesOnlyTheParametersTheToolHas()
+    {
+        using var fx = await Fixture.CreateAsync(Kinds["mixed"]);
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => new MetadataUpdateRelationshipTool(fx.Context).ExecuteAsync("Sol", "new_parent_child"));
+
+        Assert.Contains("cascadeDelete", ex.Message);
+        Assert.Contains("cascadeAssign", ex.Message);
+        foreach (var other in new[] { "Merge", "Reparent", "Share", "Unshare", "hierarchical" })
+            Assert.DoesNotContain(other, ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(fx.Reads);
+    }
+
+    [Fact]
+    public void Result_HasNoInheritedAccessFields_TheToolCannotChangeReparentOrShare()
+    {
+        var names = typeof(MetadataUpdateRelationshipResult).GetProperties().Select(p => p.Name).ToArray();
+        Assert.DoesNotContain(names, n => n.Contains("InheritedAccess", StringComparison.Ordinal));
+        var parameters = typeof(MetadataUpdateRelationshipTool).GetMethod(nameof(MetadataUpdateRelationshipTool.ExecuteAsync))!.GetParameters().Select(p => p.Name);
+        Assert.DoesNotContain(parameters, n => n!.Contains("Reparent", StringComparison.OrdinalIgnoreCase) || n.Contains("Share", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -109,8 +152,6 @@ public sealed class MetadataUpdateRelationshipCascadeTests
         }
     }
 
-    private static string Canonical(string value) => Enum.GetNames<CascadeBehavior>().Single(n => n.Equals(value, StringComparison.OrdinalIgnoreCase));
-
     private sealed class Fixture : IDisposable
     {
         private readonly string _directory = Path.Combine(Path.GetTempPath(), "ppds-cascade-1919-" + Guid.NewGuid().ToString("N"));
@@ -118,20 +159,21 @@ public sealed class MetadataUpdateRelationshipCascadeTests
         internal McpToolContext Context { get; private set; } = null!;
         internal List<RetrieveRelationshipRequest> Reads { get; } = [];
         internal List<SdkUpdateRelationshipRequest> Sent { get; } = [];
-        internal OneToManyRelationshipMetadata Stored { get; } = new()
-        {
-            SchemaName = "new_parent_child",
-            CascadeConfiguration = new CascadeConfiguration
-            {
-                Assign = CascadeType.Cascade, Delete = CascadeType.Cascade, Merge = CascadeType.Cascade,
-                Reparent = CascadeType.Cascade, Share = CascadeType.Cascade, Unshare = CascadeType.Cascade,
-                Archive = CascadeType.Cascade, RollupView = CascadeType.Cascade
-            }
-        };
+        internal OneToManyRelationshipMetadata Stored { get; private init; } = null!;
 
-        internal static async Task<Fixture> CreateAsync()
+        internal static async Task<Fixture> CreateAsync(CascadeType[] v)
         {
-            var fx = new Fixture();
+            var fx = new Fixture
+            {
+                Stored = new OneToManyRelationshipMetadata
+                {
+                    SchemaName = "new_parent_child", MetadataId = new Guid("6f1d7c3e-2a4b-4c5d-8e9f-0a1b2c3d4e5f"),
+                    CascadeConfiguration = new CascadeConfiguration
+                    {
+                        Assign = v[0], Delete = v[1], Merge = v[2], Reparent = v[3], Share = v[4], Unshare = v[5], Archive = v[6], RollupView = v[7]
+                    }
+                }
+            };
             try
             {
                 await fx.InitializeAsync();

@@ -119,7 +119,7 @@ public sealed class MetadataOtherDryRunContractTests
                                 var response = new RetrieveRelationshipResponse();
                                 response.Results["RelationshipMetadata"] = new OneToManyRelationshipMetadata
                                 {
-                                    SchemaName = "new_rel",
+                                    SchemaName = "new_rel", MetadataId = new Guid("6f1d7c3e-2a4b-4c5d-8e9f-0a1b2c3d4e5f"),
                                     CascadeConfiguration = new CascadeConfiguration { Assign = CascadeType.NoCascade, Delete = CascadeType.RemoveLink, Merge = CascadeType.NoCascade, Reparent = CascadeType.NoCascade, Share = CascadeType.NoCascade, Unshare = CascadeType.NoCascade }
                                 };
                                 return Task.FromResult<OrganizationResponse>(response);

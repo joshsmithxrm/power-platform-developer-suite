@@ -278,6 +278,55 @@ public static class RelationshipCommandGroup
 
     internal static Command CreateUpdateCommand() => CreateUpdateCommand(null);
 
+    /// <summary>
+    /// A cascade option of the update command. It is text, parsed by <see cref="CascadeActionRules.TryParse"/> (a name
+    /// valid for the action, nothing else), so no number or list of names reaches the service (#1919).
+    /// </summary>
+    private static Option<string?> CascadeOption(string action) => new($"--cascade-{action.ToLowerInvariant()}")
+    {
+        Description = $"New cascade behavior for {action.ToLowerInvariant()}: {CascadeActionRules.Describe(action)}. Not given: kept as it is"
+    };
+
+    /// <summary>
+    /// Parses the update command's cascade options. Text that does not name a value valid for its action is refused
+    /// before anything is read, listing that action's values; so is a request with no cascade option.
+    /// </summary>
+    internal static CascadeConfigurationDto ParseCascadeOptions(
+        string? delete, string? assign, string? merge, string? reparent, string? share, string? unshare)
+    {
+        var given = new (string Action, string? Text)[]
+        {
+            ("Delete", delete), ("Assign", assign), ("Merge", merge),
+            ("Reparent", reparent), ("Share", share), ("Unshare", unshare)
+        };
+        if (given.All(g => g.Text == null))
+            throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
+                "Nothing to update: give at least one of --cascade-assign, --cascade-delete, --cascade-merge, --cascade-reparent, --cascade-share or --cascade-unshare.",
+                "CascadeConfiguration");
+
+        CascadeBehavior? Parse(string action)
+        {
+            var text = given.Single(g => g.Action == action).Text;
+            if (text == null)
+                return null;
+            return CascadeActionRules.TryParse(action, text, out var value)
+                ? value
+                : throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                    $"--cascade-{action.ToLowerInvariant()}: {CascadeActionRules.InvalidValueMessage(action)} Give one name. Nothing was changed.",
+                    $"CascadeConfiguration.{action}");
+        }
+
+        return new CascadeConfigurationDto
+        {
+            Delete = Parse("Delete"),
+            Assign = Parse("Assign"),
+            Merge = Parse("Merge"),
+            Reparent = Parse("Reparent"),
+            Share = Parse("Share"),
+            Unshare = Parse("Unshare")
+        };
+    }
+
     internal static Command CreateUpdateCommand(Func<CancellationToken, Task<ServiceProvider>>? serviceProviderFactory)
     {
         var solutionOption = new Option<string>("--solution", "-s")
@@ -292,35 +341,17 @@ public static class RelationshipCommandGroup
             Required = true
         };
 
-        var cascadeDeleteOption = new Option<CascadeBehavior?>("--cascade-delete")
-        {
-            Description = $"New cascade behavior for delete: {CascadeActionRules.Describe("Delete")}. Not given: kept as it is"
-        };
+        var cascadeDeleteOption = CascadeOption("Delete");
 
-        var cascadeAssignOption = new Option<CascadeBehavior?>("--cascade-assign")
-        {
-            Description = $"New cascade behavior for assign: {CascadeActionRules.Describe("Assign")}. Not given: kept as it is"
-        };
+        var cascadeAssignOption = CascadeOption("Assign");
 
-        var cascadeMergeOption = new Option<CascadeBehavior?>("--cascade-merge")
-        {
-            Description = $"New cascade behavior for merge: {CascadeActionRules.Describe("Merge")}. Not given: kept as it is"
-        };
+        var cascadeMergeOption = CascadeOption("Merge");
 
-        var cascadeReparentOption = new Option<CascadeBehavior?>("--cascade-reparent")
-        {
-            Description = $"New cascade behavior for reparent: {CascadeActionRules.Describe("Reparent")}. Not given: kept as it is"
-        };
+        var cascadeReparentOption = CascadeOption("Reparent");
 
-        var cascadeShareOption = new Option<CascadeBehavior?>("--cascade-share")
-        {
-            Description = $"New cascade behavior for share: {CascadeActionRules.Describe("Share")}. Not given: kept as it is"
-        };
+        var cascadeShareOption = CascadeOption("Share");
 
-        var cascadeUnshareOption = new Option<CascadeBehavior?>("--cascade-unshare")
-        {
-            Description = $"New cascade behavior for unshare: {CascadeActionRules.Describe("Unshare")}. Not given: kept as it is"
-        };
+        var cascadeUnshareOption = CascadeOption("Unshare");
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
@@ -380,12 +411,12 @@ public static class RelationshipCommandGroup
     private static async Task<int> ExecuteUpdateAsync(
         string solution,
         string name,
-        CascadeBehavior? cascadeDelete,
-        CascadeBehavior? cascadeAssign,
-        CascadeBehavior? cascadeMerge,
-        CascadeBehavior? cascadeReparent,
-        CascadeBehavior? cascadeShare,
-        CascadeBehavior? cascadeUnshare,
+        string? cascadeDelete,
+        string? cascadeAssign,
+        string? cascadeMerge,
+        string? cascadeReparent,
+        string? cascadeShare,
+        string? cascadeUnshare,
         bool dryRun,
         string? profile,
         string? environment,
@@ -397,6 +428,9 @@ public static class RelationshipCommandGroup
 
         try
         {
+            // Parsed before any connection or read: a value that names nothing valid is refused here.
+            var cascade = ParseCascadeOptions(cascadeDelete, cascadeAssign, cascadeMerge, cascadeReparent, cascadeShare, cascadeUnshare);
+
             await using var serviceProvider = serviceProviderFactory is null
                 ? await ProfileServiceFactory.CreateFromProfilesAsync(
                 profile, environment,
@@ -413,21 +447,6 @@ public static class RelationshipCommandGroup
                 ConsoleHeader.WriteConnectedAs(connectionInfo);
                 Console.Error.WriteLine();
                 Console.Error.WriteLine(dryRun ? "Validating relationship update..." : $"Updating relationship '{name}'...");
-            }
-
-            CascadeConfigurationDto? cascade = null;
-            if (cascadeDelete.HasValue || cascadeAssign.HasValue || cascadeMerge.HasValue ||
-                cascadeReparent.HasValue || cascadeShare.HasValue || cascadeUnshare.HasValue)
-            {
-                cascade = new CascadeConfigurationDto
-                {
-                    Delete = cascadeDelete,
-                    Assign = cascadeAssign,
-                    Merge = cascadeMerge,
-                    Reparent = cascadeReparent,
-                    Share = cascadeShare,
-                    Unshare = cascadeUnshare
-                };
             }
 
             var request = new UpdateRelationshipRequest
@@ -447,11 +466,12 @@ public static class RelationshipCommandGroup
             {
                 MetadataDryRunScope.CurrentSettings.WriteSuccess(writer, dryRun, new
                 {
-                    name,
-                    updated = !dryRun,
+                    name = result.SchemaName,
+                    updated = result.WasSent,
                     dryRun,
-                    requiresPublish = !dryRun,
-                    publishHint = dryRun ? null : publishHint,
+                    nothingToChange = !result.HasChanges,
+                    requiresPublish = result.WasSent,
+                    publishHint = result.WasSent ? publishHint : null,
                     removesInheritedAccess = result.RemovesInheritedAccess,
                     cascadeSettings = result.CascadeSettings.Select(s => new
                     {
@@ -472,8 +492,10 @@ public static class RelationshipCommandGroup
                     Console.Error.WriteLine(InheritedAccessNotice(dryRun));
                 if (dryRun)
                     MetadataDryRunScope.CurrentSettings.WriteDiagnostic();
+                else if (!result.WasSent)
+                    Console.Error.WriteLine($"Relationship '{result.SchemaName}' already has every value given; nothing was sent.");
                 else
-                    Console.Error.WriteLine($"Relationship '{name}' updated. Run '{publishHint}' to publish changes.");
+                    Console.Error.WriteLine($"Relationship '{result.SchemaName}' updated. Run '{publishHint}' to publish changes.");
             }
 
             return ExitCodes.Success;
