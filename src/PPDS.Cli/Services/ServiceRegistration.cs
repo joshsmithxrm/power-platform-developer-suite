@@ -319,6 +319,7 @@ public static class ServiceRegistration
         // Data query service — thin pool wrapper for Delete/Truncate/Update query logic (M6).
         services.AddTransient<IDataQueryService>(sp => new DataQueryService(
             sp.GetRequiredService<IDataverseConnectionPool>(),
+            sp.GetRequiredService<ICachedMetadataProvider>(),
             sp.GetRequiredService<ILogger<DataQueryService>>()));
 
         // Model-driven app service — manages app navigation, sitemap XML, and component visibility.

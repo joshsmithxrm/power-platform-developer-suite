@@ -9,11 +9,15 @@ namespace PPDS.Cli.Tests.Services.Data;
 
 /// <summary>
 /// The allow-list and the translation of <see cref="DataFilter"/> (issue 1705): which filters are admitted, the FetchXML
-/// conditions each admitted shape becomes, the refusals with their kind and position, and the independent count guard.
+/// conditions each admitted shape becomes, the refusals with their kind and position, and the condition count guard.
+/// The columns are those of <see cref="FilterTestColumns.Account"/>.
 /// </summary>
 [Trait("Category", "Unit")]
 public class DataFilterTests
 {
+    private static BoundDataFilter Bound(string filter, string entity = "account")
+        => DataFilter.Translate(entity, filter).Bind(FilterTestColumns.Account());
+
     private static List<string> Conditions(XElement filter) => filter.DescendantsAndSelf("condition").Select(c =>
     {
         var values = c.Attribute("value") is { } v ? new[] { v.Value } : c.Elements("value").Select(e => e.Value).ToArray();
@@ -26,12 +30,15 @@ public class DataFilterTests
         { "name = 'x'", new[] { "name eq x" } },
         { "name <> 'x'", new[] { "name ne x", "name not-null" } },
         { "name != 'x'", new[] { "name ne x", "name not-null" } },
-        { "revenue < 5", new[] { "revenue lt 5" } },
-        { "revenue <= 5.25", new[] { "revenue le 5.25" } },
+        { "description = N'x'", new[] { "description eq x" } },
+        { "numberofemployees < 5", new[] { "numberofemployees lt 5" } },
+        { "numberofemployees >= -2147483648", new[] { "numberofemployees ge -2147483648" } },
+        { "price <= 5.25", new[] { "price le 5.25" } },
         { "revenue > -5", new[] { "revenue gt -5" } },
         { "revenue >= -2.5", new[] { "revenue ge -2.5" } },
-        { "statecode IN (0, 1)", new[] { "statecode in 0,1" } },
-        { "statecode NOT IN (0, 1)", new[] { "statecode not-in 0,1", "statecode not-null" } },
+        { "ratio = 0.1", new[] { "ratio eq 0.1" } },
+        { "numberofemployees IN (0, 1)", new[] { "numberofemployees in 0,1" } },
+        { "numberofemployees NOT IN (0, 1)", new[] { "numberofemployees not-in 0,1", "numberofemployees not-null" } },
         { "name LIKE 'a_c%'", new[] { "name like a_c%" } },
         { "name LIKE 'abc%'", new[] { "name like abc%" } },
         { "name NOT LIKE '%x'", new[] { "name not-like %x", "name not-null" } },
@@ -40,32 +47,33 @@ public class DataFilterTests
         { "revenue BETWEEN 1 AND 10.5", new[] { "revenue between 1,10.5" } },
         { "revenue NOT BETWEEN 1 AND 10", new[] { "revenue not-between 1,10", "revenue not-null" } },
         { "createdon >= '2024-01-15T09:30:00Z'", new[] { "createdon ge 2024-01-15T09:30:00Z" } },
-        { "createdon < '2024-01-15T10:30:00+01:00'", new[] { "createdon lt 2024-01-15T10:30:00+01:00" } },
+        { "birthdate = '2024-01-15'", new[] { "birthdate eq 2024-01-15" } },
         { "accountid = '0a1b2c3d-0000-4000-8000-00000000000A'", new[] { "accountid eq 0a1b2c3d-0000-4000-8000-00000000000A" } },
+        { "primarycontactid IN ('0a1b2c3d-0000-4000-8000-00000000000A')", new[] { "primarycontactid in 0a1b2c3d-0000-4000-8000-00000000000A" } },
         { "[Name] = 'O''Brien'", new[] { "name eq O'Brien" } },
-        { "(statecode = 0 OR revenue > 700) AND name IS NOT NULL",
-            new[] { "statecode eq 0", "revenue gt 700", "name not-null" } },
+        { "code = '1.2'", new[] { "code eq 1.2" } },
+        { "(numberofemployees = 0 OR revenue > 700) AND name IS NOT NULL",
+            new[] { "numberofemployees eq 0", "revenue gt 700", "name not-null" } },
     };
 
     [Theory]
     [MemberData(nameof(AdmittedShapes))]
     public void AdmittedShape_BecomesExactlyTheseConditions(string filter, string[] expected)
     {
-        var admitted = DataFilter.Translate("account", filter);
+        var bound = Bound(filter);
 
-        Conditions(admitted.Filter).Should().Equal(expected);
+        Conditions(bound.Filter).Should().Equal(expected);
         // One condition per part of the filter; each negated one has one not-null partner.
         var negated = expected.Count(e => e.Split(' ')[1] is "ne" or "not-in" or "not-like" or "not-between");
-        admitted.ConditionCount.Should().Be(expected.Length - negated);
+        bound.ConditionCount.Should().Be(expected.Length - negated);
     }
 
     [Fact]
     public void NegatedCondition_IsPairedWithNotNull_InsideItsOwnBranch()
     {
-        var admitted = DataFilter.Translate("account", "name = 'x' OR name <> 'y'");
+        var root = Bound("name = 'x' OR name <> 'y'").Filter;
 
         // <filter type="or"><condition eq/><filter type="and"><condition ne/><condition not-null/></filter></filter>
-        var root = admitted.Filter;
         root.Attribute("type")!.Value.Should().Be("or");
         var branch = root.Elements().ElementAt(1);
         branch.Name.LocalName.Should().Be("filter");
@@ -74,22 +82,32 @@ public class DataFilterTests
     }
 
     [Fact]
+    public void AndAndOr_KeepTheirMeaningAndPrecedence()
+    {
+        var root = Bound("name = 'a' OR name = 'b' AND numberofemployees = 1").Filter;
+
+        // SQL: AND binds tighter than OR.
+        root.Attribute("type")!.Value.Should().Be("or");
+        root.Elements().ElementAt(1).Attribute("type")!.Value.Should().Be("and");
+    }
+
+    [Fact]
     public void SingleCondition_IsWrappedInAnAndFilter()
     {
-        var admitted = DataFilter.Translate("account", "statecode = 0");
+        var bound = Bound("numberofemployees = 0");
 
-        admitted.Filter.Name.LocalName.Should().Be("filter");
-        admitted.Filter.Attribute("type")!.Value.Should().Be("and");
-        admitted.EntityName.Should().Be("account");
-        admitted.PrimaryIdAttribute.Should().Be("accountid");
+        bound.Filter.Name.LocalName.Should().Be("filter");
+        bound.Filter.Attribute("type")!.Value.Should().Be("and");
+        bound.EntityName.Should().Be("account");
+        bound.PrimaryIdAttribute.Should().Be("accountid");
     }
 
     [Fact]
     public void FetchXml_ReadsOnlyTheId_InIdOrder_ByPage()
     {
-        var admitted = DataFilter.Translate("Account", "statecode = 0");
+        var bound = Bound("numberofemployees = 0", entity: "Account");
 
-        var first = XElement.Parse(admitted.ToFetchXml(1, null));
+        var first = XElement.Parse(bound.ToFetchXml(1, null));
         first.Attribute("page")!.Value.Should().Be("1");
         first.Attribute("count")!.Value.Should().Be("5000");
         first.Attribute("paging-cookie").Should().BeNull();
@@ -99,20 +117,21 @@ public class DataFilterTests
         entity.Elements("attribute").Select(a => a.Attribute("name")!.Value).Should().Equal("accountid");
         entity.Element("order")!.Attribute("attribute")!.Value.Should().Be("accountid");
 
-        var second = XElement.Parse(admitted.ToFetchXml(2, "<cookie page=\"1\" />"));
+        var second = XElement.Parse(bound.ToFetchXml(2, "<cookie page=\"1\" />"));
         second.Attribute("page")!.Value.Should().Be("2");
         second.Attribute("paging-cookie")!.Value.Should().Be("<cookie page=\"1\" />");
     }
 
-    public static TheoryData<string, string> RefusedShapes => new()
+    /// <summary>Refused by the structure or the text alone, before any connection.</summary>
+    public static TheoryData<string, string> RefusedBeforeConnecting => new()
     {
         { "CAST(revenue AS int) = 5", "CAST or CONVERT" },
         { "CONVERT(int, revenue) = 5", "CAST or CONVERT" },
         { "COALESCE(name, 'a') = 'a'", "a function" },
-        { "IIF(statecode = 0, 1, 0) = 1", "a function" },
-        { "CASE WHEN statecode = 0 THEN 1 ELSE 0 END = 1", "a CASE expression" },
+        { "IIF(numberofemployees = 0, 1, 0) = 1", "a function" },
+        { "CASE WHEN numberofemployees = 0 THEN 1 ELSE 0 END = 1", "a CASE expression" },
         { "name + 'a' = 'xa'", "arithmetic" },
-        { "statecode IN (SELECT statecode FROM account)", "a subquery" },
+        { "numberofemployees IN (SELECT numberofemployees FROM account)", "a subquery" },
         { "EXISTS (SELECT 1 FROM account)", "a subquery (EXISTS)" },
         { "revenue = (SELECT MAX(revenue) FROM account)", "a subquery" },
         { "revenue = @limit", "a variable" },
@@ -129,8 +148,6 @@ public class DataFilterTests
         { "name = ''", "empty text" },
         { "name = ' x'", "white space" },
         { "name = 'x '", "white space" },
-        { "name > 'abc'", "a range comparison" },
-        { "name BETWEEN 'a' AND 'b'", "a range comparison" },
         { "revenue = (5)", "a value in parentheses" },
         { "revenue = +5", "a sign or operator on a value" },
         { "-revenue > 5", "a sign or operator on a value" },
@@ -139,26 +156,43 @@ public class DataFilterTests
         { "NULL = name", "a comparison with NULL" },
         { "name NOT IN ('a', NULL)", "NULL in an IN list" },
         { "NOT name = 'x'", "NOT (...)" },
-        { "accountid = '0a1b2c3d000040008000000000000000'", "a GUID not written as 8-4-4-4-12" },
-        { "accountid = '{0a1b2c3d-0000-4000-8000-000000000000}'", "a GUID not written as 8-4-4-4-12" },
-        { "createdon = '2024-01-15'", "a date and time without a time zone" },
-        { "createdon = '2024-01-15T09:30:00'", "a date and time without a time zone" },
-        { "createdon = '2024-01-15 09:30:00Z'", "a date and time without a time zone" },
-        { "createdon = '1/2/2024'", "a date and time without a time zone" },
-        { "createdon = '2024-01-15T09:30:00+15:00'", "a date and time without a time zone" },
-        { "createdon > N'2024-01-15'", "a date and time without a time zone" },
-        { "name = N'a' AND (statecode = 0 OR UPPER(name) = N'A')", "a function" },
+        { "name = N'a' AND (numberofemployees = 0 OR UPPER(name) = N'A')", "a function" },
     };
 
     [Theory]
-    [MemberData(nameof(RefusedShapes))]
-    public void RefusedShape_IsRefusedNamingItsKind(string filter, string kind)
+    [MemberData(nameof(RefusedBeforeConnecting))]
+    public void RefusedShape_IsRefusedByTranslate_NamingItsKind(string filter, string kind)
     {
         var act = () => DataFilter.Translate("account", filter);
 
         var ex = act.Should().Throw<PpdsException>().Which;
         ex.ErrorCode.Should().Be(ErrorCodes.Validation.FilterNotSupported);
         ex.UserMessage.Should().Contain(kind).And.Contain("at line 1, column ").And.Contain("Nothing was read or changed");
+    }
+
+    [Theory]
+    [InlineData(0x01)]
+    [InlineData(0x09)]
+    [InlineData(0x0A)]
+    [InlineData(0x1F)]
+    [InlineData(0x7F)]
+    [InlineData(0x85)]
+    [InlineData(0x9F)]
+    public void ControlCharacter_InText_IsRefusedByTranslate(int code)
+    {
+        var filter = "name = N'a" + (char)code + "b'";
+
+        var act = () => DataFilter.Translate("account", filter);
+
+        act.Should().Throw<PpdsException>().Which.UserMessage.Should().Contain("a control character");
+    }
+
+    [Fact]
+    public void ControlCharacter_InALikePattern_IsRefusedByTranslate()
+    {
+        var act = () => DataFilter.Translate("account", "name LIKE N'a" + (char)0x01 + "%'");
+
+        act.Should().Throw<PpdsException>().Which.UserMessage.Should().Contain("a control character");
     }
 
     [Fact]
@@ -169,7 +203,28 @@ public class DataFilterTests
         var refused = () => DataFilter.Translate("account", $"name = '{omega}'");
         refused.Should().Throw<PpdsException>().Which.UserMessage.Should().Contain("text without N");
 
-        Conditions(DataFilter.Translate("account", $"name = N'{omega}'").Filter).Should().Equal($"name eq {omega}");
+        Conditions(Bound($"name = N'{omega}'").Filter).Should().Equal($"name eq {omega}");
+    }
+
+    [Fact]
+    public void InList_OfTheCap_IsAdmitted_OneMore_IsRefused()
+    {
+        string List(int n) => "numberofemployees IN (" + string.Join(", ", Enumerable.Range(0, n)) + ")";
+
+        Bound(List(DataFilter.MaxInListValues)).ConditionCount.Should().Be(1);
+        var act = () => DataFilter.Translate("account", List(DataFilter.MaxInListValues + 1));
+        act.Should().Throw<PpdsException>().Which.UserMessage.Should().Contain("an IN list of more than 1000 values");
+    }
+
+    [Fact]
+    public void ValuesInTheWholeFilter_OverTheCap_AreRefused()
+    {
+        var list = string.Join(", ", Enumerable.Range(0, 700));
+        var filter = $"numberofemployees IN ({list}) OR numberofemployees IN ({list}) OR numberofemployees IN ({list})";
+
+        var act = () => DataFilter.Translate("account", filter);
+
+        act.Should().Throw<PpdsException>().Which.UserMessage.Should().Contain("a filter with more than 2000 values");
     }
 
     [Theory]
@@ -179,30 +234,48 @@ public class DataFilterTests
     [InlineData("name = 'SECRETMARKER' ORDER BY name")]
     [InlineData("name IN ('SECRETMARKER', NULL)")]
     [InlineData("name > 'SECRETMARKER'")]
+    [InlineData("numberofemployees = 'SECRETMARKER'")]
+    [InlineData("createdon = 'SECRETMARKER'")]
     public void Refusal_DoesNotRepeatTheLiteralText(string filter)
     {
-        var act = () => DataFilter.Translate("account", filter);
+        var act = () => Bound(filter);
 
-        // Some of these are refused as a parse error, some by the allow-list; neither may echo the value.
+        // Some are parse errors, some refused by the structure, some by the column's type; none may echo the value.
         act.Should().Throw<PpdsException>().Which.UserMessage.Should().NotContain("SECRETMARKER");
     }
 
     [Fact]
     public void Refusal_GivesThePositionOfThePart()
     {
-        var act = () => DataFilter.Translate("account", "statecode = 0 AND\nLEN(name) = 3");
+        var act = () => DataFilter.Translate("account", "numberofemployees = 0 AND\nLEN(name) = 3");
 
         act.Should().Throw<PpdsException>().Which.UserMessage.Should().Contain("a function at line 2, column 1");
     }
 
+    [Fact]
+    public void ColumnRefusal_GivesThePositionOfTheColumn()
+    {
+        var act = () => Bound("name = N'x' AND nosuchcolumn = 1");
+
+        act.Should().Throw<PpdsException>().Which.UserMessage.Should().Contain("a column the table does not have at line 1, column 17");
+    }
+
+    [Fact]
+    public void ValueRefusal_GivesThePositionOfTheValue()
+    {
+        var act = () => Bound("code = 5");
+
+        act.Should().Throw<PpdsException>().Which.UserMessage.Should().Contain("a number compared with a text column at line 1, column 8");
+    }
+
     [Theory]
-    [InlineData("statecode = 0; DELETE FROM account")]
-    [InlineData("statecode = 0 ORDER BY name")]
-    [InlineData("statecode = 0) OR (1 = 1")]
-    [InlineData("statecode = 0 UNION SELECT accountid FROM account")]
-    [InlineData("statecode = 0 OPTION (MAXDOP 1)")]
-    [InlineData("statecode eq 0")]
-    [InlineData("-- statecode = 0")]
+    [InlineData("numberofemployees = 0; DELETE FROM account")]
+    [InlineData("numberofemployees = 0 ORDER BY name")]
+    [InlineData("numberofemployees = 0) OR (1 = 1")]
+    [InlineData("numberofemployees = 0 UNION SELECT accountid FROM account")]
+    [InlineData("numberofemployees = 0 OPTION (MAXDOP 1)")]
+    [InlineData("numberofemployees eq 0")]
+    [InlineData("-- numberofemployees = 0")]
     public void TextThatIsNotOneCondition_IsAParseError(string filter)
     {
         var act = () => DataFilter.Translate("account", filter);
@@ -229,12 +302,12 @@ public class DataFilterTests
     [InlineData("")]
     public void EntityThatIsNotALogicalName_IsRefused(string entity)
     {
-        var act = () => DataFilter.Translate(entity, "statecode = 0");
+        var act = () => DataFilter.Translate(entity, "numberofemployees = 0");
 
         act.Should().Throw<PpdsException>().Which.ErrorCode.Should().Be(ErrorCodes.Validation.InvalidValue);
     }
 
-    // --- The independent count guard ---------------------------------------------------------------------------
+    // --- The condition count guard -------------------------------------------------------------------------------
 
     private static BooleanExpression ParseCondition(string text)
     {
@@ -247,9 +320,9 @@ public class DataFilterTests
     [Fact]
     public void CountGuard_AFilterWithEveryCondition_Passes()
     {
-        var condition = ParseCondition("statecode = 0 AND name <> 'x'");
+        var condition = ParseCondition("numberofemployees = 0 AND name <> 'x'");
         var xml = XElement.Parse(
-            "<filter type=\"and\"><condition attribute=\"statecode\" operator=\"eq\" value=\"0\" />" +
+            "<filter type=\"and\"><condition attribute=\"numberofemployees\" operator=\"eq\" value=\"0\" />" +
             "<filter type=\"and\"><condition attribute=\"name\" operator=\"ne\" value=\"x\" />" +
             "<condition attribute=\"name\" operator=\"not-null\" /></filter></filter>");
 
@@ -259,10 +332,23 @@ public class DataFilterTests
     [Fact]
     public void CountGuard_ADroppedCondition_StopsTheCommand()
     {
-        // What the query engine's generator emits for "statecode = 0 AND UPPER(name) = 'X'": the function is left out.
-        var condition = ParseCondition("statecode = 0 AND UPPER(name) = 'X'");
+        // What the query engine's generator emits for "numberofemployees = 0 AND UPPER(name) = 'X'": the function is left out.
+        var condition = ParseCondition("numberofemployees = 0 AND UPPER(name) = 'X'");
         var xml = XElement.Parse(
-            "<filter type=\"and\"><condition attribute=\"statecode\" operator=\"eq\" value=\"0\" /></filter>");
+            "<filter type=\"and\"><condition attribute=\"numberofemployees\" operator=\"eq\" value=\"0\" /></filter>");
+
+        var act = () => DataFilter.VerifyEveryConditionEmitted(condition, xml);
+
+        act.Should().Throw<PpdsException>().Which.ErrorCode.Should().Be(ErrorCodes.Operation.Internal);
+    }
+
+    [Fact]
+    public void CountGuard_AnAddedCondition_StopsTheCommand()
+    {
+        var condition = ParseCondition("name = 'x'");
+        var xml = XElement.Parse(
+            "<filter type=\"and\"><condition attribute=\"name\" operator=\"eq\" value=\"x\" />" +
+            "<condition attribute=\"name\" operator=\"eq\" value=\"y\" /></filter>");
 
         var act = () => DataFilter.VerifyEveryConditionEmitted(condition, xml);
 

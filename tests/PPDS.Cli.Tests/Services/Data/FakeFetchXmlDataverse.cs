@@ -14,7 +14,8 @@ namespace PPDS.Cli.Tests.Services.Data;
 /// every FetchXML sent, and answers FetchXML from in-memory rows with Dataverse's own semantics, not SQL's:
 /// <c>ne</c>, <c>not-in</c>, <c>not-like</c>, <c>not-begin-with</c> and <c>not-end-with</c> match rows whose column is
 /// NULL (observed live, specs/query.md on the SQL write-safety work), <c>not-between</c> does not, a date and time value
-/// without a zone is read in the calling user's time zone (here UTC-05:00), text compares ignoring case and trailing
+/// without a zone is read in the calling user's time zone (here UTC-05:00), a date alone is compared as written (a
+/// date-only column), text compares ignoring case and trailing
 /// spaces, and results come in pages (the <c>count</c> attribute, 5,000 by default, with <c>MoreRecords</c> and a paging
 /// cookie). No Dataverse is involved.
 /// </summary>
@@ -172,6 +173,7 @@ internal sealed class FakeFetchXmlDataverse
         string s => string.Compare(s.TrimEnd(' '), value.TrimEnd(' '), StringComparison.OrdinalIgnoreCase),
         int i => ((decimal)i).CompareTo(decimal.Parse(value, NumberStyles.Float, CultureInfo.InvariantCulture)),
         decimal d => d.CompareTo(decimal.Parse(value, NumberStyles.Float, CultureInfo.InvariantCulture)),
+        double f => f.CompareTo(double.Parse(value, NumberStyles.Float, CultureInfo.InvariantCulture)),
         DateTime dt => dt.CompareTo(ReadDate(value)),
         Guid g => g.CompareTo(Guid.Parse(value)),
         _ => throw new InvalidOperationException($"The fake does not compare {stored.GetType().Name}.")
@@ -179,6 +181,10 @@ internal sealed class FakeFetchXmlDataverse
 
     private static DateTime ReadDate(string value)
     {
+        // A date alone is compared as written (a date-only column stores midnight of that date).
+        if (Regex.IsMatch(value, @"\A[0-9]{4}-[0-9]{2}-[0-9]{2}\z"))
+            return DateTime.SpecifyKind(DateTime.ParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture), DateTimeKind.Utc);
+
         var hasZone = Regex.IsMatch(value, @"(Z|[+-][0-9]{2}:[0-9]{2})\z");
         if (hasZone)
             return DateTimeOffset.Parse(value, CultureInfo.InvariantCulture).UtcDateTime;

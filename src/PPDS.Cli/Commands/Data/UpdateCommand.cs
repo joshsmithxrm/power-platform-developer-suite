@@ -108,7 +108,7 @@ public static class UpdateCommand
 
         var limitOption = new Option<int?>("--limit")
         {
-            Description = "Maximum number of records to update (fails if query returns more)"
+            Description = "Maximum number of records to update: if more match, nothing is updated"
         };
         limitOption.Validators.Add(result =>
         {
@@ -358,8 +358,10 @@ public static class UpdateCommand
             // Check limit
             if (limit.HasValue && entitiesToUpdate.Count > limit.Value)
             {
-                WriteError(globalOptions, "LIMIT_EXCEEDED",
-                    $"Query returned {entitiesToUpdate.Count} records, exceeds --limit {limit.Value}");
+                // With --filter, reading stops once the limit is passed, so the count is a lower bound.
+                WriteError(globalOptions, "LIMIT_EXCEEDED", string.IsNullOrEmpty(filter)
+                    ? $"{entitiesToUpdate.Count} records were given, more than --limit {limit.Value}. Nothing was updated."
+                    : $"At least {entitiesToUpdate.Count} records match the filter, more than --limit {limit.Value}. Nothing was updated.");
                 return ExitCodes.ValidationError;
             }
 

@@ -267,6 +267,12 @@ public static class ErrorCodes
 
         /// <summary>Subquery returned more than one row.</summary>
         public const string SubqueryMultipleRows = "Query.SubqueryMultipleRows";
+
+        /// <summary>
+        /// The column metadata of the table a <c>data delete</c> or <c>data update</c> <c>--filter</c> names could not be
+        /// read, so the filter's values cannot be checked against their columns' types; nothing was read or changed.
+        /// </summary>
+        public const string FilterMetadataUnavailable = "Query.FilterMetadataUnavailable";
     }
 
     /// <summary>

@@ -7,6 +7,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Dataverse.Metadata;
+using PPDS.Dataverse.Metadata.Models;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Cli.Services.Data;
@@ -18,16 +20,19 @@ namespace PPDS.Cli.Services.Data;
 public sealed class DataQueryService : IDataQueryService
 {
     private readonly IDataverseConnectionPool _pool;
+    private readonly ICachedMetadataProvider _metadata;
     private readonly ILogger<DataQueryService> _logger;
 
     /// <summary>
     /// Initializes a new instance of <see cref="DataQueryService"/>.
     /// </summary>
     /// <param name="pool">The Dataverse connection pool.</param>
+    /// <param name="metadata">The table metadata a filter's columns and values are checked against.</param>
     /// <param name="logger">Logger instance.</param>
-    public DataQueryService(IDataverseConnectionPool pool, ILogger<DataQueryService> logger)
+    public DataQueryService(IDataverseConnectionPool pool, ICachedMetadataProvider metadata, ILogger<DataQueryService> logger)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
+        _metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -87,8 +92,11 @@ public sealed class DataQueryService : IDataQueryService
         if (string.IsNullOrWhiteSpace(entity)) throw new ArgumentNullException(nameof(entity));
         if (string.IsNullOrWhiteSpace(whereFilter)) throw new ArgumentNullException(nameof(whereFilter));
 
-        // Admitted and translated before anything is read; a part FetchXML cannot express exactly is refused here.
-        var filter = DataFilter.Translate(entity, whereFilter);
+        // The structure is admitted before anything is read; then the table's columns are read (metadata, no record),
+        // and every column and value of the filter is admitted for its column's type, before the first record is read.
+        var admitted = DataFilter.Translate(entity, whereFilter);
+        var columns = await ReadColumnsAsync(admitted.EntityName, cancellationToken);
+        var filter = admitted.Bind(columns);
 
         _logger.LogDebug("Querying IDs for entity {Entity} with a filter of {Count} condition(s)",
             filter.EntityName, filter.ConditionCount);
@@ -124,7 +132,8 @@ public sealed class DataQueryService : IDataQueryService
                     ids.Add(id);
                 }
 
-                // With --limit, one record more than the limit is enough for the caller to refuse.
+                // With --limit: once more than the limit is found the caller refuses, so the rest is not read. The list
+                // then holds more than the limit (up to the end of this page), not necessarily every match.
                 if (limit.HasValue && ids.Count > limit.Value)
                     return ids;
 
@@ -156,6 +165,36 @@ public sealed class DataQueryService : IDataQueryService
             throw new PpdsException(ErrorCodes.Query.ExecutionFailed,
                 $"Failed to query records for '{filter.EntityName}': {ex.Message}", ex);
         }
+    }
+
+    private async Task<IReadOnlyList<AttributeMetadataDto>> ReadColumnsAsync(string entity, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<AttributeMetadataDto>? columns;
+        try
+        {
+            columns = await _metadata.GetAttributesAsync(entity, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Never fall back to a filter without types: refuse.
+            _logger.LogError(ex, "Failed to read the column metadata of entity {Entity}", entity);
+            throw new PpdsException(ErrorCodes.Query.FilterMetadataUnavailable,
+                $"The columns of '{entity}' could not be read (does the table exist?), so the filter's values cannot be " +
+                "checked against their column types. Nothing was read or changed.", ex);
+        }
+
+        if (columns is null || columns.Count == 0)
+        {
+            throw new PpdsException(ErrorCodes.Query.FilterMetadataUnavailable,
+                $"No columns were found for '{entity}', so the filter's values cannot be checked against their column " +
+                "types. Nothing was read or changed.");
+        }
+
+        return columns;
     }
 
     /// <inheritdoc />
