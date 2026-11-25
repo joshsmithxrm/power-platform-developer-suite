@@ -271,7 +271,9 @@ internal static class DmlColumnValidator
             && status.Column.Options?.FirstOrDefault(o => o.Value == reason) is { State: { } owner }
             && owner != stateValue)
         {
-            throw Refuse($"statuscode {r.Value} belongs to statecode {owner}, not {s.Value}.");
+            throw Refuse($"The {status.Column.LogicalName} value at {DmlStatementSupport.At(status.Value)} is a status reason of another " +
+                         $"{state.Column.LogicalName} than the value at {DmlStatementSupport.At(state.Value)}. Write a status reason that belongs " +
+                         $"to the {state.Column.LogicalName} written.");
         }
     }
 
@@ -392,7 +394,9 @@ internal static class DmlColumnValidator
     /// <summary>
     /// The constant a WHERE condition compares a column with: decided by the admission function of the column's kind
     /// (<see cref="DmlValueAdmission.AdmitLiteral"/> with <see cref="DmlValueUse.Compare"/>), the one path for a compared
-    /// literal. An admitted literal is sent in the FetchXML as written; the grammar leaves it no room for interpretation.
+    /// literal. The FetchXML carries the admitted text: the literal as written, except a date and time, which is rewritten
+    /// in the parsed statement to its UTC instant (<see cref="DmlValueAdmission.UtcInstantFormat"/>) before it is planned,
+    /// so a compared date goes through the same conversion as a written one.
     /// </summary>
     private static void CheckFilterLiteral(AttributeMetadataDto attribute, string column, ScalarExpression value)
     {
@@ -401,6 +405,8 @@ internal static class DmlColumnValidator
         var admission = DmlValueAdmission.AdmitLiteral(literal, attribute, DmlValueUse.Compare);
         if (!admission.IsAdmitted)
             throw Refuse($"The value at {DmlStatementSupport.At(value)} cannot be compared with {column}: {admission.Reason}", admission.Code!);
+        if (Unwrap(value) is StringLiteral text && admission.Value is string sent && !string.Equals(text.Value, sent, StringComparison.Ordinal))
+            text.Value = sent;
     }
 
     private static bool IsLiteral<T>(ScalarExpression value) where T : Literal => Unwrap(value) switch

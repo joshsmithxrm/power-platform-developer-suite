@@ -220,7 +220,7 @@ public sealed class DmlFaithfulTests : IDisposable
 
         var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = "UPDATE account SET statecode = 0, statuscode = 2 WHERE name = 'n1'", DmlSafety = Confirmed }));
 
-        Assert.Contains("belongs to statecode 1", ex.Message);
+        Assert.Contains("is a status reason of another statecode", ex.Message);
         h.AssertNothingChanged();
     }
 

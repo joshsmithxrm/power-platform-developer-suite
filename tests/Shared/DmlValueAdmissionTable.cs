@@ -112,6 +112,20 @@ public static class DmlValueAdmissionTable
         N("922337203685477.5808", U, "=922337203685477.5808", U, S, U, U),
         N("123456789012345.6", U, "=123456789012345.6", "=123456789012345.6", "=123456789012345.6", U, U),
         N("1234567890.12345678", U, "=1234567890.12345678", S, S, U, U),
+        // Negative zero: sent as +0 (the floating-point cell is checked bit for bit), as SQL Server stores it.
+        N("-0.000", U, "=0", "=0", "=0", U, U),
+        // 38 digits in the literal's text, leading zeros and zeros at the end of the fraction counted, is the most SQL Server reads
+        // (error 1007 above): admitted where the kind's other rules admit it; 39 is refused for every kind.
+        N("00000000000000000000000000000000000015", "=15", "=15", "=15", "=15", U, U),
+        N("000000000000000000000000000000000000015", U, U, U, U, U, U),
+        N("00000000000000000000000000000000000001", "=1", "=1", "=1", "=1", U, "=1"),
+        N("000000000000000000000000000000000000001", U, U, U, U, U, U),
+        N("15.000000000000000000000000000000000000", U, "=15", "=15", "=15", U, U),
+        N("15.0000000000000000000000000000000000000", U, U, U, U, U, U),
+        N("-0554.0000000000000000000000000000000000", U, "=-554", "=-554", "=-554", U, U),
+        N("-0554.00000000000000000000000000000000000", U, U, U, U, U, U),
+        N("0.0000000000000000000000000000000000000", U, "=0", "=0", "=0", U, U),
+        N("0.00000000000000000000000000000000000000", U, U, U, U, U, U),
         // \u2500\u2500 other number spellings \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
         All("2.5E0", U),
         All("$5", U),
@@ -164,6 +178,9 @@ public static class DmlValueAdmissionTable
         T("'01/02/2024 10:00Z'", "=01/02/2024 10:00Z"),
         T("'Jan 15 2024 9:30AM Z'", "=Jan 15 2024 9:30AM Z"),
         T("'2024-01-15t09:30:00z'", "=2024-01-15t09:30:00z"),
+        // The letters are upper case only, each on its own: SQL Server refuses a lower-case z (error 241).
+        T("'2024-01-15T09:30:00z'", "=2024-01-15T09:30:00z"),
+        T("'2024-01-15t09:30:00Z'", "=2024-01-15t09:30:00Z"),
         T("'2024-01-15T09:30:00+0100'", "=2024-01-15T09:30:00+0100"),
         T("'2024-02-30T00:00:00Z'", "=2024-02-30T00:00:00Z"),
         T("'2024-01-15T24:00:00Z'", "=2024-01-15T24:00:00Z"),
@@ -201,4 +218,61 @@ public static class DmlValueAdmissionTable
 
     /// <summary>The statement a cell is checked with.</summary>
     public static string Statement(string literal, Target target) => $"UPDATE account SET {target.Column} = {literal} WHERE name = 'n1'";
+
+    /// <summary>
+    /// A literal compared with a column in a write's WHERE (<see cref="CompareStatement"/>): <c>U</c> (refused,
+    /// <c>Query.DmlUnsupportedConstruct</c>, nothing read), or <c>=text</c>, the value the FetchXML condition carries.
+    /// </summary>
+    public sealed record CompareCase(string Kind, string Literal, string Cell);
+
+    /// <summary>
+    /// Compared literals: a date and time is sent as its UTC instant in one spelling (yyyy-MM-ddTHH:mm:ssZ), whatever offset it
+    /// was written with; text with a control character a FetchXML condition cannot carry is refused, with and without N;
+    /// numbers of 38 and 39 digits; the case of the date's letters.
+    /// </summary>
+    public static readonly CompareCase[] CompareCases =
+    [
+        new("date and time", "'2024-01-15T09:30:00Z'", "=2024-01-15T09:30:00Z"),
+        new("date and time", "N'2024-01-15T09:30:00Z'", "=2024-01-15T09:30:00Z"),
+        new("date and time", "'2024-01-15T09:30:00+05:00'", "=2024-01-15T04:30:00Z"),
+        new("date and time", "'2024-01-15T09:30:00-05:30'", "=2024-01-15T15:00:00Z"),
+        new("date and time", "'2024-01-15T09:30:00+14:00'", "=2024-01-14T19:30:00Z"),
+        new("date and time", "'2024-01-15T09:30:00-14:00'", "=2024-01-15T23:30:00Z"),
+        new("date and time", "N'2024-01-15T00:30:00+01:00'", "=2024-01-14T23:30:00Z"),
+        new("date and time", "'2024-01-15T09:30:00+00:00'", "=2024-01-15T09:30:00Z"),
+        new("date and time", "'2024-01-15T09:30:00-00:00'", "=2024-01-15T09:30:00Z"),
+        new("date and time", "'2024-01-15T09:30:00z'", "U"),
+        new("date and time", "'2024-01-15t09:30:00Z'", "U"),
+        new("date and time", "'2024-01-15T09:30:00'", "U"),
+        new("date and time", "'2024-01-15T09:30:00.123Z'", "U"),
+        new("date only", "'2024-01-15'", "=2024-01-15"),
+        new("text", "'a'", "=a"),
+        new("text", "N'a'", "=a"),
+        new("text", "'a\tb'", "=a\tb"),
+        new("text", "'a\u0000b'", "U"),
+        new("text", "'a\u0001b'", "U"),
+        new("text", "N'a\u0001b'", "U"),
+        new("text", "'a\u0008'", "U"),
+        new("text", "'a\u000Bb'", "U"),
+        new("text", "'a\u000Cb'", "U"),
+        new("text", "N'\u000Ea'", "U"),
+        new("text", "'a\u001Fb'", "U"),
+        new("text", "N'a\u001Fb'", "U"),
+        new("text", "'a\u007Fb'", "=a\u007Fb"),
+        new("whole number", "00000000000000000000000000000000000015", "=00000000000000000000000000000000000015"),
+        new("whole number", "000000000000000000000000000000000000015", "U"),
+        new("decimal", "15.000000000000000000000000000000000000", "=15.000000000000000000000000000000000000"),
+        new("decimal", "15.0000000000000000000000000000000000000", "U"),
+        new("decimal", "00000000000000000000000000000000000015", "=00000000000000000000000000000000000015"),
+        new("decimal", "000000000000000000000000000000000000015", "U"),
+        new("currency", "-0554.0000000000000000000000000000000000", "=-0554.0000000000000000000000000000000000"),
+        new("currency", "-0554.00000000000000000000000000000000000", "U"),
+        new("floating point", "15.000000000000000000000000000000000000", "=15.000000000000000000000000000000000000"),
+        new("floating point", "15.0000000000000000000000000000000000000", "U"),
+        new("choice", "00000000000000000000000000000000000001", "=00000000000000000000000000000000000001"),
+        new("choice", "000000000000000000000000000000000000001", "U"),
+    ];
+
+    /// <summary>The statement a compare case is checked with.</summary>
+    public static string CompareStatement(string literal, Target target) => $"UPDATE account SET description = 'x' WHERE {target.Column} = {literal}";
 }

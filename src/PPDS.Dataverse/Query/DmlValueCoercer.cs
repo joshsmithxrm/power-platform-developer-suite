@@ -178,7 +178,7 @@ public static class DmlValueCoercer
 
     private static double CoerceDouble(object value)
     {
-        return value switch
+        var result = value switch
         {
             double d => d,
             int i => i,
@@ -187,6 +187,8 @@ public static class DmlValueCoercer
             string s when double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) => d,
             _ => throw TypeMismatch(value, "Double")
         };
+        // Negative zero (from -0.0, or a decimal -0.0) is sent as +0, as SQL Server stores it.
+        return result == 0 ? 0d : result;
     }
 
     /// <summary>

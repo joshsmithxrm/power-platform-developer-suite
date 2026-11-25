@@ -225,6 +225,9 @@ public sealed class DmlReviewRound2FixTests
         $"INSERT INTO account (name) SELECT '{Marker}' FROM account WHERE name = 'n1'",
         $"IF '{Marker}' = 'x' DELETE FROM account WHERE name = 'n1'",
         $"UPDATE account SET name = 'x' WHERE name = 'n1' OPTION (MAXDOP 987654321)",
+        // A status reason of another status (#1698 review round 3, item 4): the values are valid choices, so no marker fits
+        // them; DmlReviewRound3FixTests pins that neither value is in the message.
+        $"UPDATE account SET statecode = 1, statuscode = 1 WHERE name = '{Marker}'",
     };
 
     [Theory]

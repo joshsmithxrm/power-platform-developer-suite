@@ -84,8 +84,10 @@ internal static class FetchXmlFilter
 internal static class TestMetadata
 {
     private static AttributeMetadataDto A(string name, string type, bool create = true, bool update = true, string? attributeOf = null,
-        List<OptionValueDto>? options = null, List<string>? targets = null, string? behavior = null, string? format = null, bool? primary = null) => new()
+        List<OptionValueDto>? options = null, List<string>? targets = null, string? behavior = null, string? format = null, bool? primary = null,
+        int? precision = null) => new()
     {
+        Precision = precision,
         LogicalName = name, DisplayName = name, SchemaName = name, AttributeType = type,
         IsValidForCreate = create, IsValidForUpdate = update, IsValidForRead = true, AttributeOf = attributeOf,
         Options = options, Targets = targets, IsPrimaryId = primary ?? type == "Uniqueidentifier",
@@ -108,7 +110,7 @@ internal static class TestMetadata
             A("legacydate", "DateTime", behavior: "UserLocal", format: "DateOnly"), A("tzidate", "DateTime", behavior: "TimeZoneIndependent"),
             A("nobehaviordate", "DateTime", behavior: "-"), A("birthday", "DateTime", behavior: "DateOnly", format: "DateOnly"),
             A("stageid", "Uniqueidentifier", primary: false), A("donotemail", "Boolean"), A("aging30", "BigInt"),
-            A("address1_latitude", "Double")
+            A("address1_latitude", "Double"), A("ppds_rate", "Decimal", precision: 2)
         ],
         // An activity table: its primary id is activityid, not taskid.
         ["task"] =

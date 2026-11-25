@@ -150,6 +150,12 @@ public static class DmlValueAdmission
     /// <summary>The earliest year a date or date and time may have (SQL Server's datetime, which Dataverse uses).</summary>
     public const int EarliestYear = 1753;
 
+    /// <summary>
+    /// The most digits a number literal may be written with, leading zeros and trailing zeros of the fraction included: SQL
+    /// Server refuses a longer one (error 1007, maximum precision 38), whatever its value.
+    /// </summary>
+    public const int MaxLiteralDigits = 38;
+
     private static readonly Regex Digits = new(@"\A[0-9]+\z", RegexOptions.CultureInvariant);
     private static readonly Regex DecimalDigits = new(@"\A[0-9]+(?:\.[0-9]+)?\z", RegexOptions.CultureInvariant);
     private static readonly Regex DateOnlyForm = new(@"\A[0-9]{4}-[0-9]{2}-[0-9]{2}\z", RegexOptions.CultureInvariant);
@@ -159,6 +165,9 @@ public static class DmlValueAdmission
     private static readonly Regex CanonicalGuidForm = new(
         @"\A(?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}|\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\})\z",
         RegexOptions.CultureInvariant);
+
+    /// <summary>The one spelling a compared date and time is sent in: its UTC instant, for example 2024-01-15T04:30:00Z.</summary>
+    public const string UtcInstantFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'";
 
     private const string Unsupported = QueryErrorCode.DmlUnsupportedConstruct;
     private const string StoredDifferently = QueryErrorCode.DmlValueStoredDifferently;
@@ -184,8 +193,9 @@ public static class DmlValueAdmission
 
     /// <summary>
     /// Admits <paramref name="literal"/> for <paramref name="target"/>, or refuses it. For <see cref="DmlValueUse.Write"/>
-    /// the admitted value is the one the executor sends; for <see cref="DmlValueUse.Compare"/> it is the literal's text,
-    /// which the FetchXML carries unchanged.
+    /// the admitted value is the one the executor sends; for <see cref="DmlValueUse.Compare"/> it is the text the FetchXML
+    /// carries: the literal's text, except a date and time, which is its UTC instant written as <c>yyyy-MM-ddTHH:mm:ssZ</c>
+    /// (<see cref="UtcInstantFormat"/>), the same instant a written date and time is converted to.
     /// </summary>
     /// <param name="literal">The literal as written.</param>
     /// <param name="target">The column it is written to or compared with.</param>
@@ -195,6 +205,12 @@ public static class DmlValueAdmission
     {
         if (literal.Kind == DmlLiteralKind.Null)
             return AdmitNull(target, use);
+        if (literal.Kind is DmlLiteralKind.WholeNumber or DmlLiteralKind.DecimalNumber && literal.Text.Count(char.IsAsciiDigit) > MaxLiteralDigits)
+        {
+            return DmlAdmission.Refuse(Unsupported,
+                $"the number is written with more than {MaxLiteralDigits} digits (leading zeros and zeros at the end of the fraction count), " +
+                "which SQL Server does not read as a number. Write it without the extra zeros.");
+        }
         if (literal.Kind == DmlLiteralKind.Text && !IsSevenBitAscii(literal.Text))
         {
             return DmlAdmission.Refuse(Unsupported,
@@ -240,7 +256,13 @@ public static class DmlValueAdmission
                 ? "this is a text column and the value is not text. Write text in quotes (for example '5')."
                 : "this is a text column; compare it with a quoted string.");
         if (use == DmlValueUse.Compare)
-            return DmlAdmission.Admit(literal.Text);
+        {
+            return HasControlOutsideXml(literal.Text)
+                ? DmlAdmission.Refuse(Unsupported,
+                    "the text holds a control character other than tab, line feed and carriage return, which a FetchXML condition cannot " +
+                    "carry. Compare with text without it.")
+                : DmlAdmission.Admit(literal.Text);
+        }
         return TextRule(literal.Text) ?? Sent(literal, Coerce(literal.Text, "String"), sent => sent is string s && s == literal.Text);
     }
 
@@ -392,7 +414,7 @@ public static class DmlValueAdmission
         if (local.Year < EarliestYear || utc.Year < EarliestYear)
             return DmlAdmission.Refuse(Unsupported, $"the date and time is outside the range Dataverse stores ({EarliestYear} to 9999, in UTC).");
         return use == DmlValueUse.Compare
-            ? DmlAdmission.Admit(literal.Text)
+            ? DmlAdmission.Admit(utc.ToString(UtcInstantFormat, CultureInfo.InvariantCulture))
             : Sent(literal, Coerce(literal.Text, target), sent => sent is DateTime dt && dt == utc && dt.Kind == DateTimeKind.Utc);
     }
 
@@ -516,6 +538,14 @@ public static class DmlValueAdmission
     /// <param name="text">The text.</param>
     /// <returns>Whether every character is at most U+007F.</returns>
     public static bool IsSevenBitAscii(string text) => text.All(c => c <= '\u007F');
+
+    /// <summary>
+    /// True when <paramref name="text"/> holds a control character below U+0020 other than tab, line feed and carriage
+    /// return: XML 1.0 has no such character, so a FetchXML condition cannot carry it.
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <returns>Whether such a character occurs.</returns>
+    public static bool HasControlOutsideXml(string text) => text.Any(c => c < '\u0020' && c is not ('\t' or '\n' or '\r'));
 
     /// <summary>
     /// True when <paramref name="text"/> begins or ends with a character of the Unicode White_Space property (so also when

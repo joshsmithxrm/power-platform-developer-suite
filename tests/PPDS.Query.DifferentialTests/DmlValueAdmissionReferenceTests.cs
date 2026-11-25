@@ -14,8 +14,8 @@ namespace PPDS.Query.DifferentialTests;
 /// The admission table (<see cref="DmlValueAdmissionTable"/>) against the implementation and the reference SQL Server
 /// (#1698, review round 2). Every cell is decided by the implementation as the table says (the planner's own refusals,
 /// then the admission function of the target's kind); and every admitted cell's value is the one SQL Server stores when
-/// the same literal is assigned to a column of the target's reference type. So an admitted literal that SQL Server would
-/// store differently, or refuse, fails the test.
+/// the same literal is assigned to a column of the target's reference type. So an admitted cell of the table that SQL
+/// Server would store differently, or refuse, fails the test; a literal outside the table is not compared here.
 /// </summary>
 /// <remarks>
 /// The reference types: <c>nvarchar(4000)</c>, <c>int</c>, <c>decimal(38, 10)</c>, <c>money</c>, <c>float</c>,

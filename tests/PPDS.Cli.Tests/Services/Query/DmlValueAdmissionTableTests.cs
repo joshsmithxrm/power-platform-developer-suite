@@ -56,6 +56,43 @@ public sealed class DmlValueAdmissionTableTests
         AssertSent(cell[1..], kind, entity.Contains(target.Column) ? entity[target.Column] : "<missing>");
     }
 
+    public static TheoryData<string, string, string> CompareCases()
+    {
+        var data = new TheoryData<string, string, string>();
+        foreach (var c in DmlValueAdmissionTable.CompareCases)
+            data.Add(c.Kind, c.Literal, c.Cell);
+        return data;
+    }
+
+    /// <summary>
+    /// A literal compared in a write's WHERE: refused before anything is read, or admitted with exactly the text the table
+    /// gives carried by the FetchXML condition (a date and time as its UTC instant, whatever offset it was written with).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(CompareCases))]
+    public async Task EachComparedLiteral_IsRefusedBeforeAnythingIsRead_OrCarriesExactlyItsText(string kind, string literal, string cell)
+    {
+        var target = DmlValueAdmissionTable.Targets.Single(t => t.Kind == kind);
+        var sql = DmlValueAdmissionTable.CompareStatement(literal, target);
+        var h = DmlTestHarness.Create(rows: 1);
+
+        if (cell == "U")
+        {
+            var ex = await Assert.ThrowsAsync<PpdsException>(() => h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed }));
+            Assert.Equal(ErrorCodes.Query.DmlUnsupportedConstruct, ex.ErrorCode);
+            Assert.Empty(h.Reads);
+            h.AssertNothingChanged();
+            return;
+        }
+
+        await h.Service.ExecuteAsync(new SqlQueryRequest { Sql = sql, DmlSafety = Confirmed });
+
+        var read = Assert.Single(h.Reads);
+        var condition = Assert.Single(System.Xml.Linq.XDocument.Parse(read.FetchXml).Descendants("condition"),
+            c => (string?)c.Attribute("attribute") == target.Column);
+        Assert.Equal(cell[1..], (string?)condition.Attribute("value"));
+    }
+
     /// <summary>The value sent is exactly the expected one, compared as a value of the target's kind.</summary>
     internal static void AssertSent(string expected, string kind, object? sent)
     {
@@ -80,7 +117,9 @@ public sealed class DmlValueAdmissionTableTests
                 Assert.Equal(decimal.Parse(expected, NumberStyles.Float, CultureInfo.InvariantCulture), Assert.IsType<Money>(sent).Value);
                 break;
             case "floating point":
-                Assert.Equal(double.Parse(expected, NumberStyles.Float, CultureInfo.InvariantCulture), Assert.IsType<double>(sent));
+                // Bit for bit, so negative zero is not taken for +0.
+                Assert.Equal(BitConverter.DoubleToInt64Bits(double.Parse(expected, NumberStyles.Float, CultureInfo.InvariantCulture)),
+                    BitConverter.DoubleToInt64Bits(Assert.IsType<double>(sent)));
                 break;
             case "date and time":
                 var instant = Assert.IsType<DateTime>(sent);
