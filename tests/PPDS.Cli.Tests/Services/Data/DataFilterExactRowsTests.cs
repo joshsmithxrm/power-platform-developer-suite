@@ -61,6 +61,16 @@ public class DataFilterExactRowsTests
         { "name IN ('a', NULL)", "NULL in an IN list" },
         // SQL: r1. The old path sent no condition at all: every row.
         { "UPPER(name) = 'X'", "function" },
+        // Nothing translates: SQL r2; the old path sent no condition and selected every row.
+        { "LEN(name) = 3 AND revenue * 2 > 1500", "function" },
+        // SQL: r2. Date functions: the old path sent no condition (every row).
+        { "YEAR(createdon) = 2024 AND MONTH(createdon) = 1 AND DAY(createdon) = 2", "function" },
+        // SQL: r1, r2. The old path sent no condition and also asked for an attribute named "year".
+        { "DATEPART(year, createdon) = 2024", "function" },
+        // SQL: r2, r5, r6. The old path sent no condition and asked for an attribute named "day".
+        { "DATEADD(day, 1, createdon) > '2024-01-03T00:00:00Z'", "function" },
+        // SQL: r1, r2, r5. The old path dropped the NOT and sent statecode ne 0: exactly the opposite rows.
+        { "NOT (statecode <> 0)", "NOT" },
         // SQL (no time zone): r1, r4. Dataverse reads the date in the user's time zone: r1, r2, r4.
         { "createdon < '2024-01-02'", "date and time without a time zone" },
         // SQL (Latin code page): r6, since the letter becomes '?'. The old path sent the letter: r5.
@@ -144,6 +154,38 @@ public class DataFilterExactRowsTests
 
         ids.Select(fake.LabelOf).Should().BeEquivalentTo(expected,
             "conditions sent: {0}", string.Join("; ", fake.ConditionsSent()));
+    }
+
+    [Theory]
+    [InlineData(3, 3)]
+    [InlineData(2, 3)]
+    public async Task Limit_AtNAndNPlusOne_ReturnsAtMostOneMoreThanTheLimit(int limit, int expected)
+    {
+        // Three matching records. With --limit 3 the three come back and the command goes on; with --limit 2 three come
+        // back (limit + 1) and the command refuses with LIMIT_EXCEEDED (DeleteCommand / UpdateCommand: Count > limit).
+        var fake = new FakeFetchXmlDataverse(Entity);
+        for (var i = 0; i < 3; i++)
+            fake.Add($"s{i}", ("statecode", 0));
+        fake.Add("inactive", ("statecode", 1));
+        var service = new DataQueryService(fake.CreatePool(), NullLogger<DataQueryService>.Instance);
+
+        var ids = await service.QueryIdsByFilterAsync(Entity, "statecode = 0", limit);
+
+        ids.Should().HaveCount(expected);
+        (ids.Count > limit).Should().Be(limit < 3);
+        ids.Should().NotContain(fake.IdOf("inactive"));
+    }
+
+    [Fact]
+    public async Task Limit_ExactlyThePageSize_IsNotRefused_OneMore_Is()
+    {
+        var fake = new FakeFetchXmlDataverse(Entity);
+        for (var i = 0; i < 5_001; i++)
+            fake.Add($"s{i}", ("statecode", 0));
+        var service = new DataQueryService(fake.CreatePool(), NullLogger<DataQueryService>.Instance);
+
+        (await service.QueryIdsByFilterAsync(Entity, "statecode = 0", limit: 5_001)).Should().HaveCount(5_001);
+        (await service.QueryIdsByFilterAsync(Entity, "statecode = 0", limit: 5_000)).Should().HaveCount(5_001);
     }
 
     [Fact]
