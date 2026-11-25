@@ -324,11 +324,11 @@ public static class RelationshipCommandGroup
 
         var dryRunOption = new Option<bool>("--dry-run")
         {
-            Description = MetadataDryRunScope.InputsHelp,
+            Description = MetadataDryRunScope.CurrentSettingsHelp,
             DefaultValueFactory = _ => false
         };
 
-        var command = new Command("update", "Update an existing Dataverse relationship")
+        var command = new Command("update", "Update an existing one-to-many relationship. Only the cascade settings given change; the others keep their current values.")
         {
             solutionOption,
             nameOption,
@@ -431,29 +431,39 @@ public static class RelationshipCommandGroup
                 DryRun = dryRun
             };
 
-            await authoringService.UpdateRelationshipAsync(request, ct: cancellationToken);
+            var result = await authoringService.UpdateRelationshipAsync(request, ct: cancellationToken);
 
             // Relationships span two entities; the request DTO doesn't carry them, so suggest publish --all.
             const string publishHint = "ppds publish --all";
 
             if (globalOptions.IsJsonMode)
             {
-                MetadataDryRunScope.Inputs.WriteSuccess(writer, dryRun, new
+                MetadataDryRunScope.CurrentSettings.WriteSuccess(writer, dryRun, new
                 {
                     name,
-                    updated = true,
+                    updated = !dryRun,
                     dryRun,
                     requiresPublish = !dryRun,
-                    publishHint = dryRun ? null : publishHint
+                    publishHint = dryRun ? null : publishHint,
+                    cascadeSettings = result.CascadeSettings.Select(s => new
+                    {
+                        setting = s.Setting,
+                        before = s.Before.ToString(),
+                        after = s.After.ToString(),
+                        requested = s.Requested,
+                        changed = s.Changed
+                    }).ToList()
                 });
-            }
-            else if (dryRun)
-            {
-                MetadataDryRunScope.Inputs.WriteDiagnostic();
             }
             else
             {
-                Console.Error.WriteLine($"Relationship '{name}' updated. Run '{publishHint}' to publish changes.");
+                Console.Error.WriteLine(dryRun ? "Cascade settings (before -> after, nothing sent):" : "Cascade settings (before -> after):");
+                foreach (var setting in result.CascadeSettings)
+                    Console.Error.WriteLine($"  {setting.Setting,-9} {setting.Before} -> {setting.After}{(setting.Changed ? "" : " (unchanged)")}");
+                if (dryRun)
+                    MetadataDryRunScope.CurrentSettings.WriteDiagnostic();
+                else
+                    Console.Error.WriteLine($"Relationship '{name}' updated. Run '{publishHint}' to publish changes.");
             }
 
             return ExitCodes.Success;

@@ -343,6 +343,7 @@ public sealed class ColumnLabelOnlyTransitionTests(ITestOutputHelper output)
         Assert.True(update.MergeLabels);
         var expected = ColumnLabelHarness.Fresh(type);
         expected.LogicalName = ColumnLabelHarness.Column; expected.SchemaName = ColumnLabelHarness.Schema;
+        expected.RequiredLevel = null; // #1919: the file type's constructor sets None; a level not asked for is not sent.
         RequestedLabels(expected, request);
         Assert.True(XNode.DeepEquals(ColumnLabelHarness.Serialize(expected), ColumnLabelHarness.Serialize(update.Attribute)));
         Assert.Equal(original, h.SourceXml());

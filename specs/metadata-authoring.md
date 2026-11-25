@@ -267,7 +267,7 @@ Task ReactivateKeyAsync(ReactivateKeyRequest request, CancellationToken ct = def
 
 ### Validation
 
-In dry-run mode, mutation SDK calls are skipped. Checks vary by operation: creates resolve publisher information and validate inputs; schema updates validate required strings; option update/removal resolves the option; status/local additions read options and derive a provisional value. Schema deletes resolve unpublished target metadata and read deletion dependencies. Other platform constraints are not simulated.
+In dry-run mode, mutation SDK calls are skipped. Checks vary by operation: creates resolve publisher information and validate inputs; schema updates validate required strings (a relationship update also reads the relationship and reports each cascade setting before and after); option update/removal resolves the option; status/local additions read options and derive a provisional value. Schema deletes resolve unpublished target metadata and read deletion dependencies. Other platform constraints are not simulated.
 
 | Rule | Applies To | Error |
 |------|-----------|-------|
@@ -885,6 +885,24 @@ Public API delta and migration: `OptionDefinition.HasExplicitValue` is an additi
 
 ---
 
+### Relationship updates (#1919)
+
+`UpdateRelationshipAsync` changes only the cascade settings the caller gives. It reads the relationship as if published, sets each given setting, and sends every other setting exactly as read; the result (`UpdateRelationshipResult`) lists all six settings (Assign, Delete, Merge, Reparent, Share, Unshare) with the value read, the value sent and whether it was given. It refuses, before anything is written:
+
+- a request with no cascade setting and no hierarchical flag (`MISSING_REQUIRED_FIELD`, before any read);
+- a value Microsoft does not list as valid for that action in "Configure table relationship cascading behavior" (Assign, Reparent, Share, Unshare: Active, Cascade, NoCascade, UserOwned; Delete: Cascade, RemoveLink, Restrict; Merge: Cascade, NoCascade) (`INVALID_CONSTRAINT`, field `CascadeConfiguration.<action>`, before any read);
+- a many-to-many relationship (`INVALID_CONSTRAINT`);
+- a relationship whose read fails or does not return all six settings (`SDK_OPERATION_FAILED`): a setting that was not read is never guessed.
+
+Other combinations are left to Dataverse, whose refusal is reported through the usual error mapping. The dry run performs the same read and returns the same result, and sends nothing.
+
+| ID | Criterion | Test | Status |
+|----|-----------|------|--------|
+| AC-149 | Changing one cascade setting of a parental relationship sends the other five as read (0 of 5 changed), for the service, the CLI command and the MCP tool, and the result lists each setting before and after | `RelationshipCascadeUpdateTests.Parental_ChangeDeleteOnly_SendsTheOtherFiveAsRead`, `RelationshipCascadeUpdateTests.CliShape_CascadeDeleteRestrict_SendsTheOtherFiveAsRead_AndReportsThem`, `MetadataUpdateRelationshipCascadeTests.CascadeDeleteRestrict_OnParental_ChangesDeleteOnly` | ✅ |
+| AC-150 | A relationship update whose current settings cannot be read, a many-to-many target, an empty request or an undocumented value for an action is refused and sends nothing; the last two read nothing | `RelationshipCascadeUpdateTests.CurrentSettingNotRead_IsRefusedAndNothingIsSent`, `RelationshipCascadeUpdateTests.ReadFails_IsRefusedAndNothingIsSent`, `RelationshipCascadeUpdateTests.ManyToMany_IsRefusedAndNothingIsSent`, `RelationshipCascadeUpdateTests.NothingGiven_IsRefusedBeforeAnythingIsRead`, `RelationshipCascadeUpdateTests.UndocumentedValueForTheAction_IsRefusedBeforeAnythingIsRead` | ✅ |
+| AC-151 | The relationship is read as if published, the update sets `MergeLabels`, and the dry run reads once and sends nothing | `RelationshipCascadeUpdateTests.ReadsAsIfPublished_AndKeepsOtherLanguages`, `RelationshipCascadeUpdateTests.DryRun_ReadsAndReportsBeforeAndAfter_SendsNothing`, `MetadataOtherDryRunContractTests.EveryBranch_OnlyPerformsItsDocumentedReads_NoCacheOrWrite` | ✅ |
+| AC-152 | A column update sends no required level the caller did not give, including for a file column, whose SDK type sets one of its own | `MetadataAuthoringServiceTests.UpdateColumnAsync_FileColumn_DoesNotSendARequiredLevelThatWasNotGiven` | ✅ |
+
 ## Core Types
 
 ### IMetadataAuthoringService
@@ -1138,6 +1156,7 @@ All `ErrorCode`s above are carried on `MetadataValidationException`, which deriv
 
 | Date | Change |
 |------|--------|
+| 2026-11-25 | Relationship updates change only the given cascade settings and report each before and after; the dry run reads the relationship; a file-column update sends no unrequested required level (#1919, AC-149 to AC-152) |
 | 2026-11-17 | Schema-delete dependency preview with an incomplete check exits 12 (`ExitCodes.Incomplete`) instead of 2, for a dry run and for a refused real delete. The service-recheck refusal (a dependency found between preview and delete) changed with it: blocked 2 → 10 and incomplete 2 → 12, so the command preflight and the recheck now agree; read failures keep their own mapped codes (AC-66, AC-120) |
 | 2026-11-09 | Prepare the approved finite State/Status/GUID column-label transition, strict identity/minimal-payload/editability policy and lifecycle/privacy safeguards; preserve the common224 BEFORE proof and hold fixed validation (AC-123 through AC-130). |
 | 2026-11-09 | Add strict dependency preview/recheck, safe read recovery classification and truthful wider scope with AC-114–AC-122; 277 focused cases and both corrected combined-workflow regressions passed, with composed ordinary unit validation. |

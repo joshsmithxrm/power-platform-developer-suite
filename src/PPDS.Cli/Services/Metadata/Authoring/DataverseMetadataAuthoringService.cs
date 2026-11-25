@@ -508,6 +508,9 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         // changes on the wire. Build a fresh, minimal attribute of the same SDK type
         // and copy only the fields the caller explicitly asked to change.
         var updateAttr = primaryIdLabels ? new AttributeMetadata() : CreateUpdateAttribute(existingAttr);
+        // Some SDK constructors set a required level of their own (FileAttributeMetadata sets None); only a level the
+        // caller gave is sent (#1919).
+        updateAttr.RequiredLevel = null;
         updateAttr.LogicalName = existingAttr.LogicalName;
         updateAttr.SchemaName = existingAttr.SchemaName;
 
@@ -752,7 +755,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     }
 
     /// <inheritdoc />
-    public async Task UpdateRelationshipAsync(
+    public async Task<UpdateRelationshipResult> UpdateRelationshipAsync(
         PPDS.Dataverse.Metadata.Authoring.UpdateRelationshipRequest request,
         IMetadataAuthoringProgressReporter? reporter = null,
         CancellationToken ct = default)
@@ -764,42 +767,69 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         _validator.ValidateRequiredString(request.SolutionUniqueName, "SolutionUniqueName");
         _validator.ValidateRequiredString(request.SchemaName, "SchemaName");
 
-        if (request.DryRun)
+        // #1919: an update changes only the settings the caller gave. Each given value is checked against the values
+        // Microsoft documents for its action before anything is read.
+        var given = GivenCascadeSettings(request.CascadeConfiguration);
+        if (given.Count == 0 && !request.IsHierarchical.HasValue)
+            throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
+                "Nothing to update: give at least one cascade setting to change.", "CascadeConfiguration");
+
+        // The dry run reads the relationship too, so that it can show each setting before and after.
+        reporter?.ReportPhase("Retrieving existing relationship", request.SchemaName);
+        var existingRel = await ReadRelationshipForUpdateAsync(request.SchemaName, ct).ConfigureAwait(false);
+
+        if (existingRel is not OneToManyRelationshipMetadata o2m)
+            throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                "Cascade settings and the hierarchical flag apply only to a one-to-many relationship; this relationship is many-to-many. Nothing was changed.",
+                "SchemaName");
+
+        // Every setting not given is sent exactly as read, so it must have been read. A relationship whose current
+        // settings are not all known is refused rather than written with a guess.
+        var cascade = o2m.CascadeConfiguration;
+        var settings = new List<CascadeSettingChange>(CascadeSettingAccessors.Length);
+        foreach (var (name, read, write, _) in CascadeSettingAccessors)
         {
-            _logger?.LogInformation("Dry-run: UpdateRelationship {SchemaName} validated", request.SchemaName);
-            return;
+            var current = cascade == null ? null : read(cascade);
+            if (current is not { } currentValue || ToCascadeBehavior(currentValue) is not { } before)
+                throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
+                    "Could not read the relationship's current cascade settings, so it was not updated: every setting that is not given must be sent as it is.");
+
+            var requested = given.TryGetValue(name, out var value);
+            var after = requested ? value : before;
+            if (requested)
+                write(cascade!, MapCascadeType(after));
+            settings.Add(new CascadeSettingChange { Setting = name, Before = before, After = after, Requested = requested });
         }
 
-        reporter?.ReportPhase("Retrieving existing relationship");
+        if (request.IsHierarchical.HasValue)
+            o2m.IsHierarchical = request.IsHierarchical.Value;
 
-        await using var client = await _connectionPool.GetClientAsync(cancellationToken: ct).ConfigureAwait(false);
-
-        // Retrieve existing relationship
-        var retrieveRequest = new RetrieveRelationshipRequest
+        var result = new UpdateRelationshipResult
         {
-            Name = request.SchemaName
+            SchemaName = request.SchemaName,
+            WasDryRun = request.DryRun,
+            CascadeSettings = settings
         };
-        var retrieveResponse = (RetrieveRelationshipResponse)await client.ExecuteAsync(retrieveRequest, ct).ConfigureAwait(false);
+
+        if (request.DryRun)
+        {
+            _logger?.LogInformation("Dry-run: UpdateRelationship {SchemaName} computed", request.SchemaName);
+            return result;
+        }
 
         reporter?.ReportPhase("Updating relationship", request.SchemaName);
 
-        var existingRel = retrieveResponse.RelationshipMetadata;
-
-        if (existingRel is OneToManyRelationshipMetadata o2m)
-        {
-            if (request.CascadeConfiguration != null)
-                o2m.CascadeConfiguration = MapCascadeConfiguration(request.CascadeConfiguration);
-            if (request.IsHierarchical.HasValue)
-                o2m.IsHierarchical = request.IsHierarchical.Value;
-        }
-
         var sdkRequest = new SdkUpdateRelationshipRequest
         {
-            Relationship = existingRel,
+            Relationship = o2m,
+            MergeLabels = true, // The labels are sent as read; this keeps any language not in them (#1767).
             SolutionUniqueName = request.SolutionUniqueName
         };
 
-        await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        await using (var client = await GetMetadataClientAsync(ct).ConfigureAwait(false))
+        {
+            await client.ExecuteAsync(sdkRequest, ct).ConfigureAwait(false);
+        }
 
         // UpdateRelationshipRequest doesn't carry entity logical names, so we must
         // invalidate all entity caches to ensure stale relationship data is cleared.
@@ -807,7 +837,87 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         reporter?.ReportInfo($"Relationship '{request.SchemaName}' updated. Changes must be published to take effect.");
         _logger?.LogInformation("Updated relationship {SchemaName}", request.SchemaName);
+        return result;
     }
+
+    /// <summary>
+    /// Reads the relationship to update on its own lease, as if published, so that unpublished changes to the settings
+    /// the caller did not give are sent back unchanged (#1767). SDK failures keep the mapper's classification; a
+    /// response without a relationship stops the update.
+    /// </summary>
+    private async Task<RelationshipMetadataBase> ReadRelationshipForUpdateAsync(string schemaName, CancellationToken ct)
+    {
+        const string message = "Could not read the relationship before updating it, so it was not updated.";
+        await using var client = await GetMetadataClientAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var response = await client.ExecuteAsync(new RetrieveRelationshipRequest
+            {
+                Name = schemaName,
+                RetrieveAsIfPublished = true
+            }, ct).ConfigureAwait(false);
+            return (response as RetrieveRelationshipResponse)?.RelationshipMetadata
+                ?? throw new PpdsException(MetadataErrorCodes.SdkOperationFailed, message);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not PpdsException and not MetadataValidationException)
+        {
+            throw NormalizeColumnLabelSdkFailure(ex, message);
+        }
+    }
+
+    /// <summary>
+    /// The six cascade settings an update can change, with the values Microsoft documents as valid for each action
+    /// ("Configure table relationship cascading behavior", the Valid options of each action).
+    /// </summary>
+    private static readonly (string Name, Func<CascadeConfiguration, SdkCascadeType?> Read, Action<CascadeConfiguration, SdkCascadeType> Write, CascadeBehavior[] Valid)[] CascadeSettingAccessors =
+    [
+        ("Assign", c => c.Assign, (c, v) => c.Assign = v, [CascadeBehavior.Active, CascadeBehavior.Cascade, CascadeBehavior.NoCascade, CascadeBehavior.UserOwned]),
+        ("Delete", c => c.Delete, (c, v) => c.Delete = v, [CascadeBehavior.Cascade, CascadeBehavior.RemoveLink, CascadeBehavior.Restrict]),
+        ("Merge", c => c.Merge, (c, v) => c.Merge = v, [CascadeBehavior.Cascade, CascadeBehavior.NoCascade]),
+        ("Reparent", c => c.Reparent, (c, v) => c.Reparent = v, [CascadeBehavior.Active, CascadeBehavior.Cascade, CascadeBehavior.NoCascade, CascadeBehavior.UserOwned]),
+        ("Share", c => c.Share, (c, v) => c.Share = v, [CascadeBehavior.Active, CascadeBehavior.Cascade, CascadeBehavior.NoCascade, CascadeBehavior.UserOwned]),
+        ("Unshare", c => c.Unshare, (c, v) => c.Unshare = v, [CascadeBehavior.Active, CascadeBehavior.Cascade, CascadeBehavior.NoCascade, CascadeBehavior.UserOwned]),
+    ];
+
+    /// <summary>
+    /// The cascade settings the caller gave, by name. A value Microsoft does not document for its action is refused
+    /// before anything is read.
+    /// </summary>
+    private static Dictionary<string, CascadeBehavior> GivenCascadeSettings(CascadeConfigurationDto? dto)
+    {
+        var given = new Dictionary<string, CascadeBehavior>(StringComparer.Ordinal);
+        if (dto == null)
+            return given;
+
+        foreach (var (name, value) in new (string, CascadeBehavior?)[]
+                 {
+                     ("Assign", dto.Assign), ("Delete", dto.Delete), ("Merge", dto.Merge),
+                     ("Reparent", dto.Reparent), ("Share", dto.Share), ("Unshare", dto.Unshare)
+                 })
+        {
+            if (value is not { } behavior)
+                continue;
+            var valid = CascadeSettingAccessors.Single(a => a.Name == name).Valid;
+            if (!valid.Contains(behavior))
+                throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
+                    $"Cascade {name} cannot be {behavior}. Valid values for {name}: {string.Join(", ", valid)}. Nothing was changed.",
+                    $"CascadeConfiguration.{name}");
+            given[name] = behavior;
+        }
+
+        return given;
+    }
+
+    private static CascadeBehavior? ToCascadeBehavior(SdkCascadeType value) => value switch
+    {
+        SdkCascadeType.Cascade => CascadeBehavior.Cascade,
+        SdkCascadeType.Active => CascadeBehavior.Active,
+        SdkCascadeType.NoCascade => CascadeBehavior.NoCascade,
+        SdkCascadeType.UserOwned => CascadeBehavior.UserOwned,
+        SdkCascadeType.RemoveLink => CascadeBehavior.RemoveLink,
+        SdkCascadeType.Restrict => CascadeBehavior.Restrict,
+        _ => null
+    };
 
     /// <inheritdoc />
     public async Task DeleteRelationshipAsync(

@@ -41,8 +41,12 @@ public interface IMetadataAuthoringService
     /// <summary>Creates a many-to-many (N:N) relationship.</summary>
     Task<CreateRelationshipResult> CreateManyToManyAsync(CreateManyToManyRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
 
-    /// <summary>Updates an existing relationship.</summary>
-    Task UpdateRelationshipAsync(UpdateRelationshipRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
+    /// <summary>
+    /// Updates an existing one-to-many relationship. Only the cascade settings given change; every other setting is
+    /// sent as read from the environment, and the update is refused when they cannot be read. A dry run reads the
+    /// relationship and sends nothing. The result has each cascade setting before and after.
+    /// </summary>
+    Task<UpdateRelationshipResult> UpdateRelationshipAsync(UpdateRelationshipRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);
 
     /// <summary>Deletes a relationship.</summary>
     Task DeleteRelationshipAsync(DeleteRelationshipRequest request, IMetadataAuthoringProgressReporter? reporter = null, CancellationToken ct = default);

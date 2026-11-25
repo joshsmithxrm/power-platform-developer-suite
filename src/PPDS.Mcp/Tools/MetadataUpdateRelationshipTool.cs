@@ -33,7 +33,7 @@ public sealed class MetadataUpdateRelationshipTool : McpToolBase
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Result indicating success.</returns>
     [McpServerTool(Name = "ppds_metadata_update_relationship")]
-    [Description("Updates an existing Dataverse relationship's cascade configuration. Only the provided optional fields are changed; omitted fields remain unchanged. Supports dry-run mode.")]
+    [Description("Updates an existing one-to-many relationship's cascade configuration. Only the provided cascade settings change; every other setting keeps its current value. The result lists each setting before and after. Dry-run mode reads the relationship and sends nothing.")]
     public async Task<MetadataUpdateRelationshipResult> ExecuteAsync(
         [Description("Unique name of the solution containing the relationship.")] string solution,
         [Description("Schema name of the relationship to update.")] string schemaName,
@@ -82,7 +82,7 @@ public sealed class MetadataUpdateRelationshipTool : McpToolBase
 
             var service = serviceProvider.GetRequiredService<IMetadataAuthoringService>();
 
-            await service.UpdateRelationshipAsync(new UpdateRelationshipRequest
+            var result = await service.UpdateRelationshipAsync(new UpdateRelationshipRequest
             {
                 SolutionUniqueName = solution,
                 SchemaName = schemaName,
@@ -93,7 +93,15 @@ public sealed class MetadataUpdateRelationshipTool : McpToolBase
             return new MetadataUpdateRelationshipResult
             {
                 Success = true,
-                WasDryRun = dryRun
+                WasDryRun = result.WasDryRun,
+                CascadeSettings = result.CascadeSettings.Select(s => new MetadataCascadeSettingChange
+                {
+                    Setting = s.Setting,
+                    Before = s.Before.ToString(),
+                    After = s.After.ToString(),
+                    Requested = s.Requested,
+                    Changed = s.Changed
+                }).ToList()
             };
         }
         catch (PpdsException ex)
@@ -121,4 +129,37 @@ public sealed class MetadataUpdateRelationshipResult
     /// <summary>Whether the operation was a dry run.</summary>
     [JsonPropertyName("wasDryRun")]
     public bool WasDryRun { get; set; }
+
+    /// <summary>
+    /// The six cascade settings, each with its value before the update and the value sent. A setting not given is
+    /// sent as it was read.
+    /// </summary>
+    [JsonPropertyName("cascadeSettings")]
+    public List<MetadataCascadeSettingChange> CascadeSettings { get; set; } = [];
+}
+
+/// <summary>
+/// One cascade setting of a relationship update.
+/// </summary>
+public sealed class MetadataCascadeSettingChange
+{
+    /// <summary>The setting: Assign, Delete, Merge, Reparent, Share or Unshare.</summary>
+    [JsonPropertyName("setting")]
+    public string Setting { get; set; } = "";
+
+    /// <summary>The value before the update.</summary>
+    [JsonPropertyName("before")]
+    public string Before { get; set; } = "";
+
+    /// <summary>The value sent.</summary>
+    [JsonPropertyName("after")]
+    public string After { get; set; } = "";
+
+    /// <summary>Whether the caller gave this setting.</summary>
+    [JsonPropertyName("requested")]
+    public bool Requested { get; set; }
+
+    /// <summary>Whether the value sent differs from the value before.</summary>
+    [JsonPropertyName("changed")]
+    public bool Changed { get; set; }
 }
