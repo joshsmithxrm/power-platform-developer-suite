@@ -61,6 +61,13 @@ public sealed class SqlValidator
         TSqlFragment fragment;
         IList<ParseError> parseErrors;
 
+        // Text too long or nested too deeply would overflow the parser's stack and end the process (#1952).
+        if (PPDS.Query.Parsing.QueryComplexityGuard.FindRefusal(sql, _parser) is { } tooComplex)
+        {
+            diagnostics.Add(new SqlDiagnostic(0, sql.Length, SqlDiagnosticSeverity.Error, tooComplex));
+            return diagnostics;
+        }
+
         try
         {
             using var reader = new StringReader(sql);

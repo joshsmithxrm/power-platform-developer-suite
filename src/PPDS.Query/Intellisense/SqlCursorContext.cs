@@ -67,8 +67,11 @@ public static class SqlCursorContext
         try
         {
             var parser = new TSql170Parser(initialQuotedIdentifiers: true);
+            // Text too long or nested too deeply would overflow the parser's stack (#1952): use the token heuristic.
+            var tooComplex = PPDS.Query.Parsing.QueryComplexityGuard.FindRefusal(sql, parser) != null;
             using var reader = new StringReader(sql);
-            var fragment = parser.Parse(reader, out IList<ParseError> errors);
+            IList<ParseError> errors = Array.Empty<ParseError>();
+            var fragment = tooComplex ? null : parser.Parse(reader, out errors);
 
             if (errors.Count == 0 && fragment is TSqlScript script)
             {
@@ -812,6 +815,9 @@ public static class SqlCursorContext
     {
         try
         {
+            // Nested block comments overflow the tokenizer's stack (#1952).
+            if (PPDS.Query.Parsing.QueryComplexityGuard.FindTextRefusal(sql) != null)
+                return Array.Empty<TSqlParserToken>();
             var parser = new TSql170Parser(initialQuotedIdentifiers: true);
             using var tokenReader = new StringReader(sql);
             var tokens = parser.GetTokenStream(tokenReader, out IList<ParseError> _);

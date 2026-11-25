@@ -63,6 +63,9 @@ public static class ExceptionMapper
             ArgumentException => ExitCodes.InvalidArguments,
             ConfigurationException => ExitCodes.InvalidArguments,
 
+            // SQL refused before it was parsed: too long or nested too deeply (#1952)
+            PPDS.Query.Parsing.QueryTooComplexException => ExitCodes.InvalidArguments,
+
             // Query execution errors
             QueryExecutionException => ExitCodes.Failure,
 
@@ -81,6 +84,7 @@ public static class ExceptionMapper
             PpdsAuthException => ExitCodes.AuthError,
             PpdsThrottleException => ExitCodes.ConnectionError,
             PpdsException { ErrorCode: ErrorCodes.Query.DmlConfirmationRequired } => ExitCodes.ConfirmationRequired,
+            PpdsException { ErrorCode: ErrorCodes.Query.TooComplex } => ExitCodes.InvalidArguments,
             PpdsException { ErrorCode: PPDS.Cli.Services.Environment.EnvironmentConfirmationErrorCodes.ProtectionLoweringConfirmationRequired } => ExitCodes.ConfirmationRequired,
             PpdsException { ErrorCode: ErrorCodes.Operation.Timeout } => ExitCodes.ConnectionError,
             PpdsException { ErrorCode: var code } when code.StartsWith("Plugin.") => ExitCodes.Failure,
@@ -161,6 +165,9 @@ public static class ExceptionMapper
 
             ArgumentException argEx =>
                 (ErrorCodes.Validation.InvalidValue, argEx.ParamName),
+
+            PPDS.Query.Parsing.QueryTooComplexException =>
+                (ErrorCodes.Query.TooComplex, null),
 
             // Query execution exceptions (must be before InvalidOperationException — subclass)
             QueryExecutionException queryEx =>

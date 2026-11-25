@@ -220,6 +220,11 @@ public static class ErrorCodes
         /// <summary>SQL parse error.</summary>
         public const string ParseError = "Query.ParseError";
 
+        /// <summary>
+        /// The SQL text is too long or nested too deeply to parse safely, refused before the parser runs (#1952). Exit code 3.
+        /// </summary>
+        public const string TooComplex = "Query.TooComplex";
+
         /// <summary>Invalid FetchXML syntax.</summary>
         public const string InvalidFetchXml = "Query.InvalidFetchXml";
 

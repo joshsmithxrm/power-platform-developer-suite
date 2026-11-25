@@ -194,6 +194,9 @@ internal sealed class SqlQueryPresenter : IDisposable
     internal static IReadOnlyList<string>? DataChangingStatements(string sql)
     {
         var parser = new Microsoft.SqlServer.TransactSql.ScriptDom.TSql160Parser(initialQuotedIdentifiers: false);
+        // Text too long or nested too deeply would overflow the parser's stack (#1952); the dialog then shows the whole text.
+        if (PPDS.Query.Parsing.QueryComplexityGuard.FindRefusal(sql, parser) != null)
+            return null;
         using var reader = new StringReader(sql);
         var fragment = parser.Parse(reader, out var errors);
         if (errors.Count > 0 || fragment is null)

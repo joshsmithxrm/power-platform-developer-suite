@@ -416,18 +416,22 @@ public sealed class DmlReviewRound6FixTests
 
     /// <summary>
     /// The size the report saw exhaust the stack (about 6,500 ORed conditions), in the first statement and in a later one
-    /// of a script: one refusal, before the first statement runs.
+    /// of a script: refused before the parser runs (#1952: on Windows the parser itself overflowed the test host's stack on
+    /// it), on a thread with a 1 MB stack so that the outcome does not depend on the test runner's thread.
     /// </summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task AConditionTreeThatExhaustedTheStack_IsRefused_InTheFirstOrALaterStatement(bool later)
+    public void AConditionTreeThatExhaustedTheStack_IsRefusedBeforeTheParser_InTheFirstOrALaterStatement(bool later)
     {
         var deep = $"DELETE FROM account WHERE {OrChain(6500)}";
         var sql = later ? $"UPDATE account SET description = 'x' WHERE name = 'n1'; {deep}" : deep;
 
-        var ex = await RefusedBeforeAnythingIsReadAsync(sql);
-        Assert.Contains("nested more than", ex.Message);
+        QueryComplexityGuardTests.OnStack(1024 * 1024, async () =>
+        {
+            var ex = await RefusedBeforeAnythingIsReadAsync(sql, ErrorCodes.Query.TooComplex);
+            Assert.Contains("nested too deeply", ex.Message);
+        });
     }
 
     // ---- S9: the codes of failures during a SELECT ---------------------------------------------------------------
