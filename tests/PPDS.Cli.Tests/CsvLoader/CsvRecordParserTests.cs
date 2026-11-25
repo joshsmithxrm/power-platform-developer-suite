@@ -120,12 +120,12 @@ public class CsvRecordParserTests
     }
 
     [Fact]
-    public void CoerceValue_Money_HandlesDollarSign()
+    public void CoerceValue_Money_RefusesACurrencySymbol()
     {
+        // The symbol does not say which currency the record is in, so it is refused rather than dropped (#1916).
         var attr = CreateAttributeMetadata(AttributeTypeCode.Money);
-        var result = _parser.CoerceValue("$100.50", attr);
-        Assert.IsType<Money>(result);
-        Assert.Equal(100.50m, ((Money)result!).Value);
+        Assert.Null(_parser.CoerceValue("$100.50", attr));
+        Assert.False(_parser.TryCoerceValue("$100.50", attr).Success);
     }
 
     #endregion
@@ -190,7 +190,10 @@ public class CsvRecordParserTests
     [Fact]
     public void CoerceValue_DateTime_UsesCustomFormat()
     {
-        var attr = CreateAttributeMetadata(AttributeTypeCode.DateTime);
+        var attr = new DateTimeAttributeMetadata
+        {
+            LogicalName = "test", DateTimeBehavior = DateTimeBehavior.DateOnly, Format = DateTimeFormat.DateOnly
+        };
         var mapping = new ColumnMappingEntry { DateFormat = "MM/dd/yyyy" };
         var result = _parser.CoerceValue("01/15/2024", attr, mapping);
         Assert.IsType<DateTime>(result);
@@ -318,7 +321,7 @@ public class CsvRecordParserTests
         Assert.False(success);
         Assert.Null(value);
         Assert.NotNull(error);
-        Assert.Contains("Cannot convert", error);
+        Assert.DoesNotContain("not-a-number", error, StringComparison.Ordinal);
     }
 
     #endregion
@@ -332,13 +335,21 @@ public class CsvRecordParserTests
             AttributeTypeCode.Memo => new MemoAttributeMetadata { LogicalName = "test" },
             AttributeTypeCode.Integer => new IntegerAttributeMetadata { LogicalName = "test" },
             AttributeTypeCode.BigInt => new BigIntAttributeMetadata { LogicalName = "test" },
-            AttributeTypeCode.Decimal => new DecimalAttributeMetadata { LogicalName = "test" },
-            AttributeTypeCode.Double => new DoubleAttributeMetadata { LogicalName = "test" },
-            AttributeTypeCode.Money => new MoneyAttributeMetadata { LogicalName = "test" },
+            AttributeTypeCode.Decimal => new DecimalAttributeMetadata { LogicalName = "test", Precision = 2 },
+            AttributeTypeCode.Double => new DoubleAttributeMetadata { LogicalName = "test", Precision = 5 },
+            AttributeTypeCode.Money => new MoneyAttributeMetadata { LogicalName = "test", Precision = 2, PrecisionSource = 0 },
             AttributeTypeCode.Boolean => new BooleanAttributeMetadata { LogicalName = "test" },
-            AttributeTypeCode.DateTime => new DateTimeAttributeMetadata { LogicalName = "test" },
+            AttributeTypeCode.DateTime => new DateTimeAttributeMetadata
+            {
+                LogicalName = "test", DateTimeBehavior = DateTimeBehavior.UserLocal, Format = DateTimeFormat.DateAndTime
+            },
             AttributeTypeCode.Uniqueidentifier => new UniqueIdentifierAttributeMetadata { LogicalName = "test" },
-            AttributeTypeCode.Picklist => new PicklistAttributeMetadata { LogicalName = "test" },
+            AttributeTypeCode.Picklist => new PicklistAttributeMetadata
+            {
+                LogicalName = "test",
+                OptionSet = new OptionSetMetadata(new OptionMetadataCollection(
+                    [new OptionMetadata(new Label(), 0), new OptionMetadata(new Label(), 1), new OptionMetadata(new Label(), 5)]))
+            },
             AttributeTypeCode.Lookup => new LookupAttributeMetadata { LogicalName = "test" },
             _ => new StringAttributeMetadata { LogicalName = "test" }
         };

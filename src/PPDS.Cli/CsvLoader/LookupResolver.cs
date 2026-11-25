@@ -1,5 +1,6 @@
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
+using PPDS.Cli.Services.Data;
 using PPDS.Dataverse.Pooling;
 
 namespace PPDS.Cli.CsvLoader;
@@ -78,97 +79,64 @@ public sealed class LookupResolver
             return null;
         }
 
-        // GUID matching - always works
-        if (config.MatchBy == "guid" || CsvRecordParser.IsGuid(value))
+        // matchBy guid: the record's GUID, read by the record id rule of the data commands (#1915, #1916).
+        if (config.MatchBy == "guid")
         {
-            if (Guid.TryParse(value, out var guid))
+            if (RecordIdText.TryParse(value, out var guid))
             {
                 return new EntityReference(config.Entity, guid);
             }
 
-            // Non-GUID value with matchBy=guid is an error
-            if (config.MatchBy == "guid")
-            {
-                _errors.Add(new LoadError
-                {
-                    RowNumber = rowNumber,
-                    Column = columnName,
-                    ErrorCode = LoadErrorCodes.LookupNotResolved,
-                    Message = $"Expected GUID for lookup to '{config.Entity}', got '{value}'. " +
-                              "Use --generate-mapping to configure field-based matching.",
-                    Value = value
-                });
-                return null;
-            }
+            return Fail(rowNumber, columnName, LoadErrorCodes.LookupNotResolved,
+                $"The lookup to '{config.Entity}' takes the record's GUID: {RecordIdText.Rule}; not the empty (all-zero) GUID. " +
+                "To match by another column, set matchBy: 'field' and keyField in the mapping file.");
         }
 
-        // Field-based matching
+        // matchBy field: the key field only. A value shaped like a GUID is not taken as a GUID.
         if (config.MatchBy == "field" && !string.IsNullOrEmpty(config.KeyField))
         {
             var cacheKey = $"{config.Entity}:{config.KeyField}";
 
             if (_caches.TryGetValue(cacheKey, out var cache))
             {
-                return ResolveFromCache(value, cache, config.Entity, rowNumber, columnName);
+                return ResolveFromCache(value, cache, config, rowNumber, columnName);
             }
 
-            _errors.Add(new LoadError
-            {
-                RowNumber = rowNumber,
-                Column = columnName,
-                ErrorCode = LoadErrorCodes.LookupNotResolved,
-                Message = $"Lookup cache not loaded for {config.Entity}.{config.KeyField}",
-                Value = value
-            });
-            return null;
+            return Fail(rowNumber, columnName, LoadErrorCodes.LookupNotResolved,
+                $"The lookup values of {config.Entity}.{config.KeyField} were not loaded.");
         }
 
-        _errors.Add(new LoadError
-        {
-            RowNumber = rowNumber,
-            Column = columnName,
-            ErrorCode = LoadErrorCodes.LookupNotResolved,
-            Message = $"Cannot resolve lookup value '{value}' without configuration. " +
-                      "Use --generate-mapping to configure lookup resolution.",
-            Value = value
-        });
+        return Fail(rowNumber, columnName, LoadErrorCodes.LookupNotResolved,
+            "The lookup has no usable configuration: set matchBy to 'guid', or to 'field' with a keyField.");
+    }
+
+    private EntityReference? Fail(int rowNumber, string columnName, string code, string message)
+    {
+        // The cell's content is not kept: errors name the row and column only.
+        _errors.Add(new LoadError { RowNumber = rowNumber, Column = columnName, ErrorCode = code, Message = message });
         return null;
     }
 
     private EntityReference? ResolveFromCache(
         string value,
         LookupCache cache,
-        string entityName,
+        LookupConfig config,
         int rowNumber,
         string columnName)
     {
         if (cache.SingleMatches.TryGetValue(value, out var id))
         {
-            return new EntityReference(entityName, id);
+            return new EntityReference(config.Entity, id);
         }
 
         if (cache.Duplicates.TryGetValue(value, out var duplicateIds))
         {
-            _errors.Add(new LoadError
-            {
-                RowNumber = rowNumber,
-                Column = columnName,
-                ErrorCode = LoadErrorCodes.LookupDuplicate,
-                Message = $"Multiple records found for '{value}' in {entityName}: {string.Join(", ", duplicateIds.Take(3))}",
-                Value = value
-            });
-            return null;
+            return Fail(rowNumber, columnName, LoadErrorCodes.LookupDuplicate,
+                $"{duplicateIds.Count} {config.Entity} records have this {config.KeyField}, so the record is not certain.");
         }
 
-        _errors.Add(new LoadError
-        {
-            RowNumber = rowNumber,
-            Column = columnName,
-            ErrorCode = LoadErrorCodes.LookupNotResolved,
-            Message = $"No {entityName} record found with value '{value}'",
-            Value = value
-        });
-        return null;
+        return Fail(rowNumber, columnName, LoadErrorCodes.LookupNotResolved,
+            $"No {config.Entity} record has this {config.KeyField}.");
     }
 
     private async Task<LookupCache> LoadLookupCacheAsync(
@@ -246,13 +214,9 @@ public sealed class LookupResolver
             return null;
         }
 
-        return value switch
-        {
-            string s => s,
-            EntityReference er => er.Id.ToString(),
-            Guid g => g.ToString(),
-            _ => value.ToString()
-        };
+        // Only text is compared: the loader has refused a key field that is not a text column, and any other value would
+        // be turned into text in the machine's culture (#1916).
+        return value as string;
     }
 
     /// <summary>

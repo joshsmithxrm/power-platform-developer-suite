@@ -51,4 +51,10 @@ public sealed class CsvLoadOptions
     /// Force loading even when auto-mapping is incomplete (unmatched columns will be skipped).
     /// </summary>
     public bool Force { get; init; }
+
+    /// <summary>
+    /// Whether a column that takes a value only when a record is created, or only when it is updated, is refused. Set
+    /// from <see cref="CsvDataLoader.RefuseOneSidedColumns"/>; settable here only so tests can run both settings.
+    /// </summary>
+    internal bool RefuseOneSidedColumns { get; init; } = CsvDataLoader.RefuseOneSidedColumns;
 }

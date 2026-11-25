@@ -184,15 +184,21 @@ public sealed class MappingGenerator
         if (ColumnMatcher.IsLookupAttribute(attr))
         {
             var lookupAttr = (LookupAttributeMetadata)attr;
-            var targetEntity = lookupAttr.Targets?.FirstOrDefault() ?? "unknown";
+            var targets = lookupAttr.Targets ?? [];
+
+            // A lookup to several tables (customer, owner, regarding) gets no table: a GUID does not say which, and
+            // data load refuses the column until lookup.entity names one of its targets (#1916).
+            var targetEntity = targets.Length == 1 ? targets[0] : "";
 
             // Check if samples contain non-GUID values
             var hasNonGuidValues = samples?.Any(s => !CsvRecordParser.IsGuid(s)) ?? false;
 
-            entry.Status = hasNonGuidValues ? "needs-configuration" : "auto-matched";
-            entry.Note = hasNonGuidValues
-                ? "Lookup field - configure resolution below"
-                : "Lookup field with GUID values - no configuration needed";
+            entry.Status = hasNonGuidValues || targets.Length != 1 ? "needs-configuration" : "auto-matched";
+            entry.Note = targets.Length != 1
+                ? $"Lookup to several tables ({string.Join(", ", targets)}) - set lookup.entity to the table of the records"
+                : hasNonGuidValues
+                    ? "Lookup field - configure resolution below"
+                    : "Lookup field with GUID values - no configuration needed";
 
             entry.Lookup = new LookupConfig
             {
@@ -202,7 +208,7 @@ public sealed class MappingGenerator
                 Options = new List<string>
                 {
                     "matchBy: 'guid' - CSV values must be GUIDs",
-                    $"matchBy: 'field', keyField: 'name' - match by {targetEntity} name",
+                    $"matchBy: 'field', keyField: 'name' - match by {(targetEntity.Length > 0 ? targetEntity : "the table's")} name",
                     $"matchBy: 'field', keyField: '<field>' - match by specific field"
                 }
             };

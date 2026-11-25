@@ -7,6 +7,7 @@ using Microsoft.Xrm.Sdk.Metadata;
 using PPDS.Cli.CsvLoader;
 using PPDS.Cli.Infrastructure;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Cli.Services.Data;
 using PPDS.Dataverse.BulkOperations;
 using PPDS.Dataverse.Pooling;
 using PPDS.Dataverse.Progress;
@@ -46,7 +47,7 @@ public static class LoadCommand
 
         var fileOption = new Option<FileInfo>("--file", "-f")
         {
-            Description = "Path to CSV file",
+            Description = "Path to the CSV file: UTF-8, with or without a byte order mark; comma-separated, RFC 4180 quoting",
             Required = true
         }.AcceptExistingOnly();
 
@@ -57,7 +58,7 @@ public static class LoadCommand
 
         var mappingOption = new Option<FileInfo?>("--mapping", "-m")
         {
-            Description = "Path to column mapping JSON file"
+            Description = "Path to column mapping JSON file. Names are case-sensitive; repeated or unknown entries are refused. A lookup with matchBy 'field' compares the key field's text ignoring case"
         };
         mappingOption.Validators.Add(result =>
         {
@@ -262,7 +263,7 @@ public static class LoadCommand
             {
                 Console.Error.WriteLine($"Loading mapping from {mappingFile.Name}...");
                 var mappingJson = await File.ReadAllTextAsync(mappingFile.FullName, cancellationToken);
-                mapping = JsonSerializer.Deserialize<CsvMappingConfig>(mappingJson, JsonOptions);
+                mapping = CsvMappingFile.Read(mappingJson); // duplicates, unknown names and bad JSON refused
 
                 // Validate schema version
                 if (mapping != null)
@@ -323,6 +324,12 @@ public static class LoadCommand
             }
 
             return result.Success ? ExitCodes.Success : ExitCodes.PartialSuccess;
+        }
+        catch (DataValuesRefusedException ex)
+        {
+            Console.Error.WriteLine();
+            WriteRefusal(ex, outputFormat);
+            return ExceptionMapper.ToExitCode(ex);
         }
         catch (MappingIncompleteException ex)
         {
@@ -617,6 +624,36 @@ public static class LoadCommand
             {
                 Console.Error.WriteLine($"  ... and {groupedErrors.Count() - 5} more error types");
             }
+        }
+    }
+
+    private static void WriteRefusal(DataValuesRefusedException ex, OutputFormat outputFormat)
+    {
+        if (outputFormat == OutputFormat.Json)
+        {
+            // The problems name rows and columns only; no cell's content is written out.
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                success = false,
+                refused = true,
+                error = new { code = ex.ErrorCode, message = $"{ex.Problems.Count} problem(s) in the input; nothing was written." },
+                problems = ex.Problems.Select(p => new { row = p.Row, column = p.Column, message = p.Message })
+            }, JsonOptions));
+            return;
+        }
+
+        const int shown = 20;
+        Console.Error.WriteLine($"Load refused: {ex.Problems.Count:N0} problem(s) in the file. Nothing was written.");
+        Console.Error.WriteLine("The whole file is checked before any row is written; correct these and run the load again.");
+        Console.Error.WriteLine();
+        foreach (var problem in ex.Problems.Take(shown))
+        {
+            Console.Error.WriteLine($"  {problem}");
+        }
+
+        if (ex.Problems.Count > shown)
+        {
+            Console.Error.WriteLine($"  ... and {ex.Problems.Count - shown:N0} more");
         }
     }
 
