@@ -521,7 +521,7 @@ internal sealed class PluginTracesScreen : TuiScreenBase
             }
             else
             {
-                var olderThan = TimeSpan.FromDays(deleteResult.DayCount!.Value);
+                var olderThan = PluginTraceAge.FromDays(deleteResult.DayCount!.Value);
                 deletedCount = await service.DeleteOlderThanAsync(olderThan, cancellationToken: ScreenCancellation);
             }
 
