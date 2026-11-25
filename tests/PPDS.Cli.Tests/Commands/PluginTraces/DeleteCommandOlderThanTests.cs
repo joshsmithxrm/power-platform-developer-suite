@@ -185,8 +185,8 @@ public sealed class DeleteCommandOlderThanTests
         Func<string?>? readLine = null)
     {
         var connects = 0;
-        var stdout = new StringWriter();
-        var stderr = new StringWriter();
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
         var oldOut = Console.Out;
         var oldErr = Console.Error;
         Console.SetOut(stdout);
