@@ -1565,9 +1565,12 @@ namespace PPDS.Migration.Import
 
             // More records left as written than the result says succeeded (an error list naming the
             // same record twice): some of them were not written, and which is not known (#1934 r2 MF4).
-            if (written.Count > result.SuccessCount)
+            // Counted by occurrence, not by distinct id: a file that itself holds a duplicate id would
+            // otherwise hide the shortfall (#1934 r3 MF-2).
+            var leftAsWritten = preparedRecords.Count(r => !failed.Contains(r.Id));
+            if (leftAsWritten > result.SuccessCount)
             {
-                reason = $"{written.Count} record(s) would count as written but only {result.SuccessCount} succeeded";
+                reason = $"{leftAsWritten} record(s) would count as written but only {result.SuccessCount} succeeded";
                 return null;
             }
 

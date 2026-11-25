@@ -50,6 +50,9 @@ public class TieredImporterLaterPhaseTests
     /// <summary>Ids created during this run: a second create fails (a duplicate in the file).</summary>
     private readonly ConcurrentDictionary<Guid, byte> _created = new();
 
+    /// <summary>When set, the existence query throws (a privilege or service failure).</summary>
+    private bool _existenceQueryFails;
+
     /// <summary>The tables asked about by the existence check.</summary>
     private readonly ConcurrentQueue<string> _existenceQueries = new();
 
@@ -102,6 +105,10 @@ public class TieredImporterLaterPhaseTests
             {
                 var q = (Microsoft.Xrm.Sdk.Query.QueryExpression)query;
                 _existenceQueries.Enqueue(q.EntityName);
+                if (_existenceQueryFails)
+                {
+                    throw new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { Message = "Principal user is missing prvReadAccount" });
+                }
                 var asked = q.Criteria.Conditions.Single().Values.Cast<Guid>();
                 return new EntityCollection(asked.Where(id => _existing.Contains(id) || _created.ContainsKey(id))
                     .Select(id => new Entity(q.EntityName, id)).ToList());
@@ -407,8 +414,43 @@ public class TieredImporterLaterPhaseTests
         result.Errors.Should().ContainSingle(e => e.EntityLogicalName == "account")
             .Which.Message.Should().Contain("3 of 4 account record(s) sent are unaccounted for", "the probe sends 1 (0 reported) and the rest 3 (1 reported)").And.Contain("were not sent");
         result.EntityResults.Single().LaterPhasesSkipped.Should().BeTrue();
+        result.EntityResults.Single().Success.Should().BeFalse("the table is not [OK]: its records are unaccounted for");
         result.Warnings.Should().Contain(w => w.Code == ImportWarningCodes.LaterPhasesSkipped);
         _writes.Should().OnlyContain(w => w.What.StartsWith("UpsertMultiple"));
+    }
+
+    /// <summary>
+    /// #1934 r3 MF-2: records by letter (a duplicate letter is a duplicate id in the file), the
+    /// result's counts and the ids its errors name; whether the result proves which were written.
+    /// </summary>
+    [Theory]
+    [InlineData("P a a b c", 3, 2, "b b", false)] // the file's duplicate a hides that one of a, a, c was not written
+    [InlineData("P a a b", 3, 1, "b", true)]      // a legitimate duplicate: both copies of a succeeded
+    [InlineData("P a a", 2, 1, "a", true)]        // Create: the second copy of a failed; a is left unmapped
+    [InlineData("a a", 2, 0, "", true)]           // Upsert: both copies succeeded
+    public void ProvenWrittenRecords_CountsOccurrences_NotDistinctIds(string file, int success, int failure, string errors, bool proven)
+    {
+        var ids = new Dictionary<char, Guid>();
+        Guid Id(char c) => ids.TryGetValue(c, out var g) ? g : ids[c] = Guid.NewGuid();
+        var records = file.Split(' ').Select(x => new Entity("account", Id(x[0]))).ToList();
+        var result = new BulkOperationResult
+        {
+            SuccessCount = success,
+            FailureCount = failure,
+            Errors = errors.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(x => new BulkOperationError { RecordId = Id(x[0]) }).ToList()
+        };
+
+        var written = TieredImporter.ProvenWrittenRecords(records, result, out var reason);
+
+        if (proven)
+        {
+            written.Should().NotBeNull(reason);
+        }
+        else
+        {
+            written.Should().BeNull();
+            reason.Should().Contain("would count as written");
+        }
     }
 
     [Fact]
@@ -538,6 +580,26 @@ public class TieredImporterLaterPhaseTests
             "1 contact association(s) through contact_account were not sent: each points at a record of the data file that this import did not write and that is not in the target."
         });
         result.Errors.Should().Contain(e => e.EntityLogicalName == "contact" && e.Message.Contains("contact.parentcustomerid"));
+    }
+
+    [Fact]
+    public async Task FailingExistenceQuery_CountsAsNotFound_SoTheReferencesAreNotSent_AndReported()
+    {
+        // #1934 r3 should-fix 2: P IS in the target, but the query that would find it fails, so P is
+        // not known to exist and nothing may point at it.
+        var (parent, child, contact) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _existing.Add(parent);
+        _existenceQueryFails = true;
+
+        var result = await CreateImporter().ImportAsync(AccountsAndContact(parent, child, contact, association: true), TwoTiers(),
+            new ImportOptions { Mode = ImportMode.Create, ContinueOnError = true });
+
+        _existenceQueries.Should().NotBeEmpty();
+        _updates.Should().NotContain(u => u.Contains("parentaccountid"));
+        _creates.Single(c => c.Id == contact).Contains("parentcustomerid").Should().BeFalse();
+        _writes.Should().NotContain(w => w.What == "Associate");
+        result.Success.Should().BeFalse();
+        result.Warnings.Count(w => w.Code == ImportWarningCodes.ReferencesNotSent).Should().Be(3);
     }
 
     [Fact]
