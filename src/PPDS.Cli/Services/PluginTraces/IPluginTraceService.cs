@@ -100,14 +100,31 @@ public interface IPluginTraceService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Deletes plugin traces older than the specified age.
+    /// Deletes plugin traces older than the specified age: those created strictly before the
+    /// current UTC time less <paramref name="olderThan"/>, computed once.
     /// </summary>
-    /// <param name="olderThan">Delete traces older than this timespan.</param>
+    /// <param name="olderThan">Delete traces older than this timespan; greater than zero and at most
+    /// <see cref="PluginTraceAge.MaxAge"/>, otherwise refused before anything is read.</param>
     /// <param name="progress">Progress callback reporting count of deleted traces.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Count of deleted traces.</returns>
     Task<int> DeleteOlderThanAsync(
         TimeSpan olderThan,
+        IProgress<int>? progress = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes plugin traces created strictly before <paramref name="cutoffUtc"/>. A caller that
+    /// shows a count first passes the same cut-off it counted with
+    /// (<see cref="PluginTraceAge.CutoffUtc"/>).
+    /// </summary>
+    /// <param name="cutoffUtc">The cut-off, in UTC and in the past; otherwise refused before
+    /// anything is read.</param>
+    /// <param name="progress">Progress callback reporting count of deleted traces.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Count of deleted traces.</returns>
+    Task<int> DeleteCreatedBeforeAsync(
+        DateTime cutoffUtc,
         IProgress<int>? progress = null,
         CancellationToken cancellationToken = default);
 
@@ -255,10 +272,12 @@ public sealed record PluginTraceFilter
     /// <summary>Gets or sets the maximum depth filter.</summary>
     public int? MaxDepth { get; init; }
 
-    /// <summary>Gets or sets the created after filter.</summary>
+    /// <summary>Gets or sets the created after filter: traces created at or after this time
+    /// (compared with <c>ge</c> on the full date and time).</summary>
     public DateTime? CreatedAfter { get; init; }
 
-    /// <summary>Gets or sets the created before filter.</summary>
+    /// <summary>Gets or sets the created before filter: traces created strictly before this time
+    /// (compared with <c>lt</c> on the full date and time).</summary>
     public DateTime? CreatedBefore { get; init; }
 
     /// <summary>Gets or sets the minimum duration filter (ms).</summary>

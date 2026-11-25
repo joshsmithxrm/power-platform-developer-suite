@@ -321,6 +321,9 @@ public static class ErrorCodes
 
         /// <summary>Failed to update plugin trace log settings.</summary>
         public const string SetSettingsFailed = "PluginTrace.SetSettingsFailed";
+
+        /// <summary>A delete by filter listed a full page again and could delete none of it, so it stopped.</summary>
+        public const string DeleteMadeNoProgress = "PluginTrace.DeleteMadeNoProgress";
     }
 
     /// <summary>
