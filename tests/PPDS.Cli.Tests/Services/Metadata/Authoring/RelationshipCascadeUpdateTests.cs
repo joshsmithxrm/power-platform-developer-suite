@@ -50,7 +50,7 @@ public sealed class RelationshipCascadeUpdateTests
 
         // The settings outside the six an update can give travel unchanged too.
         Assert.Equal(CascadeType.Cascade, sent.Archive);
-        Assert.Equal(CascadeType.NoCascade, sent.RollupView);
+        Assert.Equal(CascadeType.Cascade, sent.RollupView);
 
         Assert.False(result.WasDryRun);
         Assert.Equal(SettingNames, result.CascadeSettings.Select(s => s.Setting));
@@ -257,7 +257,7 @@ public sealed class RelationshipCascadeUpdateTests
             Share = CascadeType.Cascade,
             Unshare = CascadeType.Cascade,
             Archive = CascadeType.Cascade,
-            RollupView = CascadeType.NoCascade
+            RollupView = CascadeType.Cascade // not NoCascade, the default a reset would produce
         }
     };
 

@@ -18,6 +18,18 @@ public sealed class UpdateRelationshipResult
     /// the environment and the value sent. A setting the caller did not give is sent as read.
     /// </summary>
     public IReadOnlyList<CascadeSettingChange> CascadeSettings { get; init; } = [];
+
+    /// <summary>Gets the relationship's hierarchical flag as read before the update.</summary>
+    public bool? IsHierarchicalBefore { get; init; }
+
+    /// <summary>Gets the hierarchical flag sent: the requested value, or the value read when it was not given.</summary>
+    public bool? IsHierarchicalAfter { get; init; }
+
+    /// <summary>
+    /// Gets whether the update changes Reparent or Share to NoCascade. Microsoft documents that Dataverse then starts a
+    /// system job (inherited access rights cleanup) that removes access users had only through this cascading.
+    /// </summary>
+    public bool RemovesInheritedAccess { get; init; }
 }
 
 /// <summary>

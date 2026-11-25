@@ -294,32 +294,32 @@ public static class RelationshipCommandGroup
 
         var cascadeDeleteOption = new Option<CascadeBehavior?>("--cascade-delete")
         {
-            Description = "Updated cascade behavior for delete"
+            Description = $"New cascade behavior for delete: {CascadeActionRules.Describe("Delete")}. Not given: kept as it is"
         };
 
         var cascadeAssignOption = new Option<CascadeBehavior?>("--cascade-assign")
         {
-            Description = "Updated cascade behavior for assign"
+            Description = $"New cascade behavior for assign: {CascadeActionRules.Describe("Assign")}. Not given: kept as it is"
         };
 
         var cascadeMergeOption = new Option<CascadeBehavior?>("--cascade-merge")
         {
-            Description = "Updated cascade behavior for merge"
+            Description = $"New cascade behavior for merge: {CascadeActionRules.Describe("Merge")}. Not given: kept as it is"
         };
 
         var cascadeReparentOption = new Option<CascadeBehavior?>("--cascade-reparent")
         {
-            Description = "Updated cascade behavior for reparent"
+            Description = $"New cascade behavior for reparent: {CascadeActionRules.Describe("Reparent")}. Not given: kept as it is"
         };
 
         var cascadeShareOption = new Option<CascadeBehavior?>("--cascade-share")
         {
-            Description = "Updated cascade behavior for share"
+            Description = $"New cascade behavior for share: {CascadeActionRules.Describe("Share")}. Not given: kept as it is"
         };
 
         var cascadeUnshareOption = new Option<CascadeBehavior?>("--cascade-unshare")
         {
-            Description = "Updated cascade behavior for unshare"
+            Description = $"New cascade behavior for unshare: {CascadeActionRules.Describe("Unshare")}. Not given: kept as it is"
         };
 
         var dryRunOption = new Option<bool>("--dry-run")
@@ -328,7 +328,7 @@ public static class RelationshipCommandGroup
             DefaultValueFactory = _ => false
         };
 
-        var command = new Command("update", "Update an existing one-to-many relationship. Only the cascade settings given change; the others keep their current values.")
+        var command = new Command("update", "Update an existing one-to-many relationship. Only the cascade settings given change; the others keep their current values. The relationship is read and then written back whole: a change someone else makes in between is overwritten (last writer wins).")
         {
             solutionOption,
             nameOption,
@@ -369,6 +369,13 @@ public static class RelationshipCommandGroup
 
         return command;
     }
+
+    /// <summary>
+    /// Microsoft documents that changing Reparent or Share to Cascade None starts the inherited access rights cleanup
+    /// system job, which removes access that users had only through this cascading.
+    /// </summary>
+    internal static string InheritedAccessNotice(bool dryRun) =>
+        (dryRun ? "If this is applied: " : "") + CascadeActionRules.InheritedAccessCleanupNotice;
 
     private static async Task<int> ExecuteUpdateAsync(
         string solution,
@@ -445,6 +452,7 @@ public static class RelationshipCommandGroup
                     dryRun,
                     requiresPublish = !dryRun,
                     publishHint = dryRun ? null : publishHint,
+                    removesInheritedAccess = result.RemovesInheritedAccess,
                     cascadeSettings = result.CascadeSettings.Select(s => new
                     {
                         setting = s.Setting,
@@ -460,6 +468,8 @@ public static class RelationshipCommandGroup
                 Console.Error.WriteLine(dryRun ? "Cascade settings (before -> after, nothing sent):" : "Cascade settings (before -> after):");
                 foreach (var setting in result.CascadeSettings)
                     Console.Error.WriteLine($"  {setting.Setting,-9} {setting.Before} -> {setting.After}{(setting.Changed ? "" : " (unchanged)")}");
+                if (result.RemovesInheritedAccess)
+                    Console.Error.WriteLine(InheritedAccessNotice(dryRun));
                 if (dryRun)
                     MetadataDryRunScope.CurrentSettings.WriteDiagnostic();
                 else

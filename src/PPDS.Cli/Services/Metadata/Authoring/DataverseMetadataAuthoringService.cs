@@ -772,7 +772,8 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         var given = GivenCascadeSettings(request.CascadeConfiguration);
         if (given.Count == 0 && !request.IsHierarchical.HasValue)
             throw new MetadataValidationException(MetadataErrorCodes.MissingRequiredField,
-                "Nothing to update: give at least one cascade setting to change.", "CascadeConfiguration");
+                "Nothing to update: give at least one cascade setting (Assign, Delete, Merge, Reparent, Share or Unshare) or the hierarchical flag.",
+                "CascadeConfiguration");
 
         // The dry run reads the relationship too, so that it can show each setting before and after.
         reporter?.ReportPhase("Retrieving existing relationship", request.SchemaName);
@@ -786,29 +787,49 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         // Every setting not given is sent exactly as read, so it must have been read. A relationship whose current
         // settings are not all known is refused rather than written with a guess.
         var cascade = o2m.CascadeConfiguration;
-        var settings = new List<CascadeSettingChange>(CascadeSettingAccessors.Length);
-        foreach (var (name, read, write, _) in CascadeSettingAccessors)
+        var before = new Dictionary<string, CascadeBehavior>(StringComparer.Ordinal);
+        foreach (var (name, read, _) in CascadeSettingAccessors)
         {
             var current = cascade == null ? null : read(cascade);
-            if (current is not { } currentValue || ToCascadeBehavior(currentValue) is not { } before)
+            if (current is not { } currentValue || ToCascadeBehavior(currentValue) is not { } value)
                 throw new PpdsException(MetadataErrorCodes.SdkOperationFailed,
-                    "Could not read the relationship's current cascade settings, so it was not updated: every setting that is not given must be sent as it is.");
-
-            var requested = given.TryGetValue(name, out var value);
-            var after = requested ? value : before;
-            if (requested)
-                write(cascade!, MapCascadeType(after));
-            settings.Add(new CascadeSettingChange { Setting = name, Before = before, After = after, Requested = requested });
+                    "Could not read all six cascade settings of the relationship, so it was not updated: a setting that is not given is sent as read, never guessed. Check the relationship in the maker portal and try again.");
+            before[name] = value;
         }
+        var hierarchicalBefore = o2m.IsHierarchical;
 
+        // Only the given settings are written, on the object that was read.
+        foreach (var (name, _, write) in CascadeSettingAccessors)
+            if (given.TryGetValue(name, out var value))
+                write(cascade!, MapCascadeType(value));
         if (request.IsHierarchical.HasValue)
             o2m.IsHierarchical = request.IsHierarchical.Value;
+
+        // The result is read back from the configuration that will be sent, not from the request, so it reports what
+        // is actually sent.
+        var settings = CascadeSettingAccessors.Select(accessor =>
+        {
+            var sent = accessor.Read(cascade!) is { } raw ? ToCascadeBehavior(raw) : null;
+            return new CascadeSettingChange
+            {
+                Setting = accessor.Name,
+                Before = before[accessor.Name],
+                After = sent ?? throw new InvalidOperationException("A cascade setting was cleared while it was applied."),
+                Requested = given.ContainsKey(accessor.Name)
+            };
+        }).ToList();
 
         var result = new UpdateRelationshipResult
         {
             SchemaName = request.SchemaName,
             WasDryRun = request.DryRun,
-            CascadeSettings = settings
+            CascadeSettings = settings,
+            IsHierarchicalBefore = hierarchicalBefore,
+            IsHierarchicalAfter = o2m.IsHierarchical,
+            // Microsoft: when Reparent or Share is changed to Cascade None, Dataverse starts the inherited access
+            // rights cleanup job ("Create and edit relationships between tables", "Inherited access rights cleanup").
+            RemovesInheritedAccess = settings.Any(s => s.Setting is "Reparent" or "Share"
+                && s.Changed && s.After == CascadeBehavior.NoCascade)
         };
 
         if (request.DryRun)
@@ -819,6 +840,11 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
 
         reporter?.ReportPhase("Updating relationship", request.SchemaName);
 
+        // The update is safe only because it sends the object it read: UpdateRelationship writes every property of
+        // the definition it is given (menu behaviour, labels, navigation names, customizability...), so a definition
+        // built here would reset whatever it left out. Do not replace o2m with a new object.
+        // Last writer wins: the request has no concurrency option, so a change made to the relationship between the
+        // read above and this write is overwritten with the value read.
         var sdkRequest = new SdkUpdateRelationshipRequest
         {
             Relationship = o2m,
@@ -847,7 +873,7 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     /// </summary>
     private async Task<RelationshipMetadataBase> ReadRelationshipForUpdateAsync(string schemaName, CancellationToken ct)
     {
-        const string message = "Could not read the relationship before updating it, so it was not updated.";
+        const string message = "Could not read the relationship before updating it, so it was not updated. Check the schema name and that your account can read the relationship's definition, then try again.";
         await using var client = await GetMetadataClientAsync(ct).ConfigureAwait(false);
         try
         {
@@ -859,6 +885,14 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
             return (response as RetrieveRelationshipResponse)?.RelationshipMetadata
                 ?? throw new PpdsException(MetadataErrorCodes.SdkOperationFailed, message);
         }
+        catch (System.ServiceModel.FaultException<OrganizationServiceFault> fault) when (fault.Detail?.ErrorCode == ObjectDoesNotExistErrorCode)
+        {
+            // Dataverse's object-not-found code. Which code RetrieveRelationship returns for an unknown name is not
+            // documented; this is the code the other metadata reads return (see ObjectDoesNotExistErrorCode).
+            throw new PpdsException(ErrorCodes.Operation.NotFound,
+                "No relationship with that schema name was found, so nothing was changed. Check the schema name (it is the relationship's SchemaName, not its display name).",
+                fault);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException and not PpdsException and not MetadataValidationException)
         {
             throw NormalizeColumnLabelSdkFailure(ex, message);
@@ -866,17 +900,17 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
     }
 
     /// <summary>
-    /// The six cascade settings an update can change, with the values Microsoft documents as valid for each action
-    /// ("Configure table relationship cascading behavior", the Valid options of each action).
+    /// The six cascade settings an update can change, in the order of <see cref="CascadeActionRules.Actions"/>. The
+    /// values valid for each are in <see cref="CascadeActionRules"/>.
     /// </summary>
-    private static readonly (string Name, Func<CascadeConfiguration, SdkCascadeType?> Read, Action<CascadeConfiguration, SdkCascadeType> Write, CascadeBehavior[] Valid)[] CascadeSettingAccessors =
+    private static readonly (string Name, Func<CascadeConfiguration, SdkCascadeType?> Read, Action<CascadeConfiguration, SdkCascadeType> Write)[] CascadeSettingAccessors =
     [
-        ("Assign", c => c.Assign, (c, v) => c.Assign = v, [CascadeBehavior.Active, CascadeBehavior.Cascade, CascadeBehavior.NoCascade, CascadeBehavior.UserOwned]),
-        ("Delete", c => c.Delete, (c, v) => c.Delete = v, [CascadeBehavior.Cascade, CascadeBehavior.RemoveLink, CascadeBehavior.Restrict]),
-        ("Merge", c => c.Merge, (c, v) => c.Merge = v, [CascadeBehavior.Cascade, CascadeBehavior.NoCascade]),
-        ("Reparent", c => c.Reparent, (c, v) => c.Reparent = v, [CascadeBehavior.Active, CascadeBehavior.Cascade, CascadeBehavior.NoCascade, CascadeBehavior.UserOwned]),
-        ("Share", c => c.Share, (c, v) => c.Share = v, [CascadeBehavior.Active, CascadeBehavior.Cascade, CascadeBehavior.NoCascade, CascadeBehavior.UserOwned]),
-        ("Unshare", c => c.Unshare, (c, v) => c.Unshare = v, [CascadeBehavior.Active, CascadeBehavior.Cascade, CascadeBehavior.NoCascade, CascadeBehavior.UserOwned]),
+        ("Assign", c => c.Assign, (c, v) => c.Assign = v),
+        ("Delete", c => c.Delete, (c, v) => c.Delete = v),
+        ("Merge", c => c.Merge, (c, v) => c.Merge = v),
+        ("Reparent", c => c.Reparent, (c, v) => c.Reparent = v),
+        ("Share", c => c.Share, (c, v) => c.Share = v),
+        ("Unshare", c => c.Unshare, (c, v) => c.Unshare = v),
     ];
 
     /// <summary>
@@ -897,10 +931,9 @@ public partial class DataverseMetadataAuthoringService : IMetadataAuthoringServi
         {
             if (value is not { } behavior)
                 continue;
-            var valid = CascadeSettingAccessors.Single(a => a.Name == name).Valid;
-            if (!valid.Contains(behavior))
+            if (!CascadeActionRules.IsValid(name, behavior))
                 throw new MetadataValidationException(MetadataErrorCodes.InvalidConstraint,
-                    $"Cascade {name} cannot be {behavior}. Valid values for {name}: {string.Join(", ", valid)}. Nothing was changed.",
+                    $"Cascade {name} cannot be {(Enum.IsDefined(behavior) ? behavior.ToString() : "that value")}. Give {CascadeActionRules.Describe(name)}. Nothing was changed.",
                     $"CascadeConfiguration.{name}");
             given[name] = behavior;
         }
