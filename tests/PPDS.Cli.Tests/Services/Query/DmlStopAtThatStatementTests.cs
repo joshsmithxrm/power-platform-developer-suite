@@ -114,7 +114,8 @@ public sealed class DmlStopAtThatStatementTests
 
         Assert.Equal(new[] { (DmlOperation.Delete, "contact"), (DmlOperation.Insert, "account") },
             outcome.NotRun.Select(s => (s.Operation, s.EntityLogicalName)));
-        Assert.All(outcome.NotRun, s => Assert.Equal((0L, 0L, (string?)null, false), (s.AffectedRows, s.FailedRows, s.ErrorMessage, s.Interrupted)));
+        (long Affected, long Failed, string? Error, bool Interrupted) nothingWritten = (0L, 0L, null, false);
+        Assert.All(outcome.NotRun, s => Assert.Equal(nothingWritten, (s.AffectedRows, s.FailedRows, s.ErrorMessage, s.Interrupted)));
     }
 
     [Fact]
