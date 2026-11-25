@@ -177,8 +177,7 @@ public sealed class EnvironmentConfigStoreConcurrencyTests : IDisposable
         await store.SaveConfigAsync(Url, type: EnvironmentType.Production);
         store.LockTimeout = TimeSpan.FromMilliseconds(300);
 
-        var holder = new FileStream(store.LockFilePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-        try
+        using (var holder = new FileStream(store.LockFilePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
         {
             var save = () => store.SaveConfigAsync(Url, type: EnvironmentType.Development);
             (await save.Should().ThrowAsync<TimeoutException>())
@@ -187,10 +186,6 @@ public sealed class EnvironmentConfigStoreConcurrencyTests : IDisposable
             await read.Should().ThrowAsync<TimeoutException>();
             // Read the raw file: any store would wait for the lock this test holds.
             File.ReadAllText(_path).Should().Contain("\"Production\"").And.NotContain("Development");
-        }
-        finally
-        {
-            holder.Dispose();
         }
 
         await store.SaveConfigAsync(Url, label: "after");

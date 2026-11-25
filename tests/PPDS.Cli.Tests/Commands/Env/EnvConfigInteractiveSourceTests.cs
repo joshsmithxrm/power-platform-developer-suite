@@ -66,7 +66,8 @@ public sealed class EnvConfigInteractiveSourceTests : IDisposable
     {
         await SeedProductionAsync();
         EnvCommandGroup.IsInputRedirected = () => true;
-        Console.SetIn(new StringReader(Url + "\n"));
+        using var input = new StringReader(Url + "\n");
+        Console.SetIn(input);
 
         var exit = await InvokeAsync("env", "config", Url, "--type", "Development");
 
@@ -80,7 +81,8 @@ public sealed class EnvConfigInteractiveSourceTests : IDisposable
     {
         await SeedProductionAsync();
         EnvCommandGroup.IsInputRedirected = () => false;
-        Console.SetIn(new StringReader(Url + "\n"));
+        using var input = new StringReader(Url + "\n");
+        Console.SetIn(input);
 
         var exit = await InvokeAsync("env", "config", Url, "--type", "Development");
 

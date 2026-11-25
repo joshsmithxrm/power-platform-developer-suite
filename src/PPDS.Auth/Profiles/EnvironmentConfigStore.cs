@@ -241,7 +241,18 @@ public sealed class EnvironmentConfigStore : IDisposable
         }
         finally
         {
-            try { if (File.Exists(temp)) File.Delete(temp); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            try
+            {
+                if (File.Exists(temp)) File.Delete(temp);
+            }
+            catch (IOException)
+            {
+                // Best effort: a leftover temporary file is never read and does no harm.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Best effort, as above.
+            }
         }
     }
 

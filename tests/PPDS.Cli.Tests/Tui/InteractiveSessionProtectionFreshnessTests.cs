@@ -170,7 +170,8 @@ public sealed class InteractiveSessionProtectionFreshnessTests : IDisposable
     private static DmlSafetyResult CrossEnvironmentDecision(SqlQueryService service)
     {
         var target = service.ProfileResolver!.ResolveByLabel("B");
-        var statement = new TSql160Parser(true).Parse(new StringReader("UPDATE account SET name = 'x' WHERE name = 'y'"), out _)
+        using var sql = new StringReader("UPDATE account SET name = 'x' WHERE name = 'y'");
+        var statement = new TSql160Parser(true).Parse(sql, out _)
             is TSqlScript script ? script.Batches[0].Statements[0] : throw new InvalidOperationException();
         return new DmlSafetyGuard().CheckCrossEnvironmentDml(statement,
             new QuerySafetySettings { CrossEnvironmentDmlPolicy = CrossEnvironmentDmlPolicy.Allow }, "Dev", "B",
