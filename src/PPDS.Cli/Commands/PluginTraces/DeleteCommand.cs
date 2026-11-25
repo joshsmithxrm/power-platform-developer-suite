@@ -81,9 +81,10 @@ public static class DeleteCommand
     }
 
     /// <summary>
-    /// Runs the command. <paramref name="connect"/>, <paramref name="clock"/> and
-    /// <paramref name="inputRedirected"/> replace the profile connection, the system clock and
-    /// <see cref="Console.IsInputRedirected"/> in tests.
+    /// Runs the command. <paramref name="connect"/>, <paramref name="clock"/>,
+    /// <paramref name="inputRedirected"/> and <paramref name="readLine"/> replace the profile
+    /// connection, the system clock, <see cref="Console.IsInputRedirected"/> and
+    /// <see cref="Console.ReadLine"/> in tests.
     /// </summary>
     internal static async Task<int> ExecuteAsync(
         Guid? traceId,
@@ -98,7 +99,8 @@ public static class DeleteCommand
         CancellationToken cancellationToken,
         Func<CancellationToken, Task<ServiceProvider>>? connect = null,
         TimeProvider? clock = null,
-        bool? inputRedirected = null)
+        bool? inputRedirected = null,
+        Func<string?>? readLine = null)
     {
         var writer = ServiceFactory.CreateOutputWriter(globalOptions);
         var redirected = inputRedirected ?? Console.IsInputRedirected;
@@ -250,8 +252,8 @@ public static class DeleteCommand
             if (olderThanAge.HasValue)
             {
                 return await DeleteOlderThanAsync(
-                    traceService, clock ?? TimeProvider.System, olderThanAge.Value, dryRun, force, redirected,
-                    globalOptions, writer, cancellationToken);
+                    traceService, clock ?? TimeProvider.System, olderThanAge.Value, olderThan!, dryRun, force, redirected,
+                    readLine ?? Console.ReadLine, globalOptions, writer, cancellationToken);
             }
 
             // Handle delete all
@@ -375,20 +377,22 @@ public static class DeleteCommand
         IPluginTraceService traceService,
         TimeProvider clock,
         TimeSpan duration,
+        string typedAge,
         bool dryRun,
         bool force,
         bool inputRedirected,
+        Func<string?> readLine,
         GlobalOptionValues globalOptions,
         IOutputWriter writer,
         CancellationToken cancellationToken)
     {
-        var age = FormatDuration(duration);
+        // The age as typed: the parser accepts one exact form, so it is shown back unchanged.
+        var age = typedAge;
 
         bool Confirm(DateTime cutoff, int count)
         {
             Console.Error.Write($"Delete {count} trace(s) created before {PluginTraceAge.Format(cutoff)} (older than {age})? [y/N] ");
-            var response = Console.ReadLine()?.Trim().ToLowerInvariant();
-            return response == "y" || response == "yes";
+            return IsYes(readLine());
         }
 
         // Shown on every run that deletes, a forced one too, before the delete starts.
@@ -531,13 +535,11 @@ public static class DeleteCommand
         return result;
     }
 
-    private static string FormatDuration(TimeSpan duration)
+    /// <summary>The prompt's answer: only <c>y</c> or <c>yes</c> (any case, spaces around ignored) deletes.</summary>
+    internal static bool IsYes(string? answer)
     {
-        if (duration.TotalDays >= 1)
-            return $"{(int)duration.TotalDays} day(s)";
-        if (duration.TotalHours >= 1)
-            return $"{(int)duration.TotalHours} hour(s)";
-        return $"{(int)duration.TotalMinutes} minute(s)";
+        var response = answer?.Trim().ToLowerInvariant();
+        return response == "y" || response == "yes";
     }
 
     #region Output Models

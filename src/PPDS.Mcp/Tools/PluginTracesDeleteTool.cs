@@ -36,7 +36,7 @@ public sealed class PluginTracesDeleteTool : McpToolBase
     public async Task<PluginTracesDeleteResult> ExecuteAsync(
         [Description("Trace IDs to delete (array of GUID strings from ppds_plugin_traces_list)")]
         string[]? ids = null,
-        [Description("Delete all traces older than this many days (minimum 1). Use for bulk cleanup.")]
+        [Description("Delete traces created more than this many days ago (a whole number from 1 to 36500; the cut-off is now in UTC less the days). Use for bulk cleanup.")]
         int? olderThanDays = null,
         [Description("Delete traces matching this plugin type name")]
         string? typeName = null,
@@ -74,6 +74,9 @@ public sealed class PluginTracesDeleteTool : McpToolBase
                     "Only one deletion mode may be used per call: 'ids', 'olderThanDays', or filter parameters (typeName, messageName, primaryEntity, errorsOnly).");
             }
 
+            // Checked before the scope (and its connection) is created.
+            TimeSpan? olderThan = olderThanDays.HasValue ? PluginTraceAge.FromDays(olderThanDays.Value) : null;
+
             await using var serviceProvider = await CreateScopeAsync(cancellationToken).ConfigureAwait(false);
             var traceService = serviceProvider.GetRequiredService<IPluginTraceService>();
 
@@ -82,9 +85,9 @@ public sealed class PluginTracesDeleteTool : McpToolBase
                 return await DeleteByIdsAsync(traceService, ids, cancellationToken).ConfigureAwait(false);
             }
 
-            if (olderThanDays != null)
+            if (olderThan != null)
             {
-                return await DeleteOlderThanAsync(traceService, olderThanDays.Value, cancellationToken).ConfigureAwait(false);
+                return await DeleteOlderThanAsync(traceService, olderThan.Value, cancellationToken).ConfigureAwait(false);
             }
 
             return await DeleteByFilterAsync(traceService, typeName, messageName, primaryEntity, errorsOnly, cancellationToken).ConfigureAwait(false);
@@ -132,15 +135,9 @@ public sealed class PluginTracesDeleteTool : McpToolBase
 
     private static async Task<PluginTracesDeleteResult> DeleteOlderThanAsync(
         IPluginTraceService traceService,
-        int olderThanDays,
+        TimeSpan olderThan,
         CancellationToken cancellationToken)
     {
-        if (olderThanDays < 1)
-        {
-            throw new ArgumentException("The 'olderThanDays' parameter must be at least 1.", nameof(olderThanDays));
-        }
-
-        var olderThan = PluginTraceAge.FromDays(olderThanDays);
         var deletedCount = await traceService.DeleteOlderThanAsync(olderThan, progress: null, cancellationToken).ConfigureAwait(false);
 
         return new PluginTracesDeleteResult

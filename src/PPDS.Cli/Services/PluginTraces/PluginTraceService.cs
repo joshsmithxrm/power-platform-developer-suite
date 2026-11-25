@@ -263,6 +263,15 @@ public class PluginTraceService : IPluginTraceService
             var batchDeleted = await DeleteByIdsAsync(ids, batchProgress, cancellationToken);
             totalDeleted += batchDeleted;
 
+            // A full page of which nothing could be deleted would be listed again for ever.
+            if (batchDeleted == 0 && result.Items.Count >= 5000)
+            {
+                throw new PpdsException(
+                    ErrorCodes.PluginTrace.DeleteMadeNoProgress,
+                    $"Deleting plug-in traces stopped: a full page of {result.Items.Count} matching traces was listed again " +
+                    $"but none of them could be deleted. {totalDeleted} trace(s) were deleted before this.");
+            }
+
             // If we deleted fewer than requested, we're done
             if (result.Items.Count < 5000)
             {
@@ -441,6 +450,16 @@ public class PluginTraceService : IPluginTraceService
         return countValue?.Value is int count ? count : 0;
     }
 
+    /// <summary>
+    /// A date for a FetchXML condition. A UTC value on a whole second (every age cut-off) is sent as
+    /// <c>yyyy-MM-ddTHH:mm:ssZ</c>, the form observed to be read as a UTC instant; any other value keeps
+    /// the round-trip form, so no instant is moved.
+    /// </summary>
+    private static string FetchDate(DateTime value)
+        => value.Kind == DateTimeKind.Utc && value.Ticks % TimeSpan.TicksPerSecond == 0
+            ? value.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture)
+            : value.ToString("o", System.Globalization.CultureInfo.InvariantCulture);
+
     private static string BuildCountFetchXml(PluginTraceFilter? filter)
     {
         var conditions = new System.Text.StringBuilder();
@@ -469,10 +488,10 @@ public class PluginTraceService : IPluginTraceService
                 conditions.Append($"<condition attribute=\"depth\" operator=\"le\" value=\"{filter.MaxDepth.Value}\" />");
 
             if (filter.CreatedAfter.HasValue)
-                conditions.Append($"<condition attribute=\"createdon\" operator=\"ge\" value=\"{filter.CreatedAfter.Value:o}\" />");
+                conditions.Append($"<condition attribute=\"createdon\" operator=\"ge\" value=\"{FetchDate(filter.CreatedAfter.Value)}\" />");
 
             if (filter.CreatedBefore.HasValue)
-                conditions.Append($"<condition attribute=\"createdon\" operator=\"lt\" value=\"{filter.CreatedBefore.Value:o}\" />");
+                conditions.Append($"<condition attribute=\"createdon\" operator=\"lt\" value=\"{FetchDate(filter.CreatedBefore.Value)}\" />");
 
             if (filter.MinDurationMs.HasValue)
                 conditions.Append($"<condition attribute=\"performanceexecutionduration\" operator=\"ge\" value=\"{filter.MinDurationMs.Value}\" />");

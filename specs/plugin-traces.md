@@ -250,8 +250,16 @@ public interface IPluginTraceService
     Task<int> DeleteAllAsync(
         IProgress<int>? progress = null,
         CancellationToken cancellationToken = default);
+    // Age 1 minute to 36500 days, else Validation.InvalidValue; deletes traces created
+    // strictly before (service clock in UTC less the age, floored to the whole second).
     Task<int> DeleteOlderThanAsync(
         TimeSpan olderThan, IProgress<int>? progress = null,
+        CancellationToken cancellationToken = default);
+    // Deletes traces created strictly before cutoffUtc, which must be UTC and at least one
+    // minute in the past (else Validation.InvalidValue). A caller that shows a count first
+    // passes the cut-off it counted with (PluginTraceAge.CutoffUtc).
+    Task<int> DeleteCreatedBeforeAsync(
+        DateTime cutoffUtc, IProgress<int>? progress = null,
         CancellationToken cancellationToken = default);
 
     // Settings

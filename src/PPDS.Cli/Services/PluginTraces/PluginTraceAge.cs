@@ -115,8 +115,9 @@ public static class PluginTraceAge
     }
 
     /// <summary>
-    /// The cut-off for an age: <paramref name="utcNow"/> less <paramref name="age"/>. Traces created
-    /// strictly before it are older than the age.
+    /// The cut-off for an age: <paramref name="utcNow"/> less <paramref name="age"/>, floored to the
+    /// whole second, so the instant shown (<see cref="Format"/>) is the instant counted and deleted.
+    /// Traces created strictly before it are older than the age (flooring can only delete fewer).
     /// </summary>
     /// <param name="age">The age, checked with <see cref="EnsureValid"/>.</param>
     /// <param name="utcNow">The current time, in UTC.</param>
@@ -133,7 +134,8 @@ public static class PluginTraceAge
             throw new ArgumentException("The current time must be given in UTC.", nameof(utcNow));
         }
 
-        return utcNow - age;
+        var cutoff = utcNow - age;
+        return new DateTime(cutoff.Ticks - (cutoff.Ticks % TimeSpan.TicksPerSecond), DateTimeKind.Utc);
     }
 
     /// <summary>The cut-off as shown to the user: ISO 8601 in UTC, to the second.</summary>
