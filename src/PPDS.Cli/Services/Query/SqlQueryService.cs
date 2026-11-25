@@ -60,7 +60,6 @@ public sealed class SqlQueryService : ISqlQueryService
     private string? _environmentUrl;
     private string? _environmentLabel;
     private string? _environmentType;
-    private bool _environmentTypeUnknown;
 
     /// <summary>
     /// Refuses a confirmed DML request that does not name the environment it was confirmed for, or names another one than
@@ -110,24 +109,22 @@ public sealed class SqlQueryService : ISqlQueryService
     }
 
     /// <summary>
-    /// Applies the connected environment's DML safety settings and protection level (from its configuration, when
-    /// there is one; otherwise the defaults stay: Production protection) and records its identity, which is reported
-    /// as the write target when confirmation is required. Every surface calls this, so they configure the guard alike.
+    /// Applies the connected environment's DML safety settings and protection level, as
+    /// <see cref="PPDS.Cli.Services.Environment.WriteProtectionResolver.ResolveForSqlDml"/> gives it for
+    /// <paramref name="config"/> (null when the environment has no saved entry), and records its identity, which is
+    /// reported as the write target when confirmation is required. Every surface calls this, so they configure the
+    /// guard alike.
     /// </summary>
     public void ConfigureEnvironment(string environmentUrl, EnvironmentConfig? config)
     {
         _environmentUrl = environmentUrl;
         _environmentLabel = config?.Label;
         _environmentType = config?.Type?.ToString();
-        // A configuration that states neither a protection level nor a known type is Production (maintainer decision,
-        // 2026-11-24: no saved type counts as Production), and is reported so in the confirmation's target.
-        _environmentTypeUnknown = config != null && config.Protection == null && config.Type is null or EnvironmentType.Unknown;
-        if (config == null)
-            return;
-
-        EnvironmentSafetySettings = config.SafetySettings;
-        EnvironmentProtectionLevel = config.Protection
-            ?? (_environmentTypeUnknown ? ProtectionLevel.Production : DmlSafetyGuard.DetectProtectionLevel(config.Type!.Value));
+        // One rule for every writer (#1891): an explicit protection wins; otherwise the saved type decides, and no saved
+        // type (no entry, an entry without a type, Unknown, or a value that is not a defined member) is Production.
+        // Both are always set, so an entry removed since the last configuration does not keep its settings or level.
+        EnvironmentSafetySettings = config?.SafetySettings;
+        EnvironmentProtectionLevel = PPDS.Cli.Services.Environment.WriteProtectionResolver.ResolveForSqlDml(config);
     }
 
     /// <summary>
@@ -910,12 +907,11 @@ public sealed class SqlQueryService : ISqlQueryService
             }
 
             // BYPASS_PLUGINS bypasses synchronous logic, so only settings that already bypass synchronous plugins allow it.
-            // An environment whose configuration states neither a type nor a protection level counts as Production here.
+            // An environment with no saved type is Production here too: EnvironmentProtectionLevel comes from the shared resolver.
             var settings = EnvironmentSafetySettings ?? new QuerySafetySettings();
             var allowed = (hints.BypassPlugins != true || settings.BypassCustomPlugins is BypassPluginMode.Synchronous or BypassPluginMode.All)
                 && (hints.BypassFlows != true || settings.BypassPowerAutomateFlows);
-            var gateProtection = _environmentTypeUnknown ? ProtectionLevel.Production : EnvironmentProtectionLevel;
-            if (gateProtection == ProtectionLevel.Production && !allowed)
+            if (EnvironmentProtectionLevel == ProtectionLevel.Production && !allowed)
             {
                 throw new PpdsException(
                     ErrorCodes.Query.DmlBlocked,

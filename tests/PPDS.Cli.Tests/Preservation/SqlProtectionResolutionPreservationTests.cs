@@ -18,15 +18,30 @@ public class SqlProtectionResolutionPreservationTests
     private static readonly string Src = Path.Combine(PathHelpers.RepoRoot(), "src");
 
     [Theory]
-    [InlineData("PPDS.Cli/Commands/Query/SqlCommand.cs", "ResolveForSqlDml(envConfig)")]
-    [InlineData("PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.Query.cs", "ResolveForSqlDml(envConfig)")]
-    [InlineData("PPDS.Cli/Tui/InteractiveSession.cs", "ResolveForSqlDml(envConfig)")]
+    [InlineData("PPDS.Cli/Services/Query/SqlQueryService.cs", "ResolveForSqlDml(config)")]
     [InlineData("PPDS.Cli/Services/Query/SqlQueryService.cs", "ResolveForCrossEnvironmentTarget(targetConfig)")]
     public void EachSqlSite_ResolvesThroughTheSharedRule(string file, string call)
     {
         var text = File.ReadAllText(Path.Combine(Src, file));
 
         Assert.Contains("WriteProtectionResolver." + call, text);
+    }
+
+    /// <summary>
+    /// The CLI, the daemon and the TUI configure the service for the connected environment only through
+    /// <c>SqlQueryService.ConfigureEnvironment</c>, which resolves the level with <c>ResolveForSqlDml</c> (above), and
+    /// none of them sets the level itself (#1698 merged with #1891).
+    /// </summary>
+    [Theory]
+    [InlineData("PPDS.Cli/Commands/Query/SqlCommand.cs")]
+    [InlineData("PPDS.Cli/Commands/Serve/Handlers/RpcMethodHandler.Query.cs")]
+    [InlineData("PPDS.Cli/Tui/InteractiveSession.cs")]
+    public void EachSurface_ConfiguresTheConnectedEnvironmentThroughTheService(string file)
+    {
+        var text = File.ReadAllText(Path.Combine(Src, file));
+
+        Assert.Contains(".ConfigureEnvironment(", text);
+        Assert.DoesNotMatch(@"EnvironmentProtectionLevel\s*=(?!=)", text);
     }
 
     [Fact]

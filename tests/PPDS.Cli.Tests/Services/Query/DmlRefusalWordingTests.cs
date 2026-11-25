@@ -68,7 +68,8 @@ public class DmlRefusalWordingTests
             new SqlQueryRequest { Sql = DeleteSql, DmlSafety = new DmlSafetyOptions() }));
 
         var target = Assert.Single(ex.Targets);
-        Assert.Equal(new DmlTarget(null, "https://dev.crm.dynamics.com/", null, "Development"), target);
+        // No saved entry is Production (#1891's shared rule), whatever level the service had before.
+        Assert.Equal(new DmlTarget(null, "https://dev.crm.dynamics.com/", null, "Production"), target);
     }
 
     [Fact]
