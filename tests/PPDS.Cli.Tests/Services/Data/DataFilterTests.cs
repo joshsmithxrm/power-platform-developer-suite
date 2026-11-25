@@ -228,6 +228,26 @@ public class DataFilterTests
     }
 
     [Theory]
+    [InlineData("createdon = '2024-01-15T10:30:00+01:00'")]
+    [InlineData("createdon BETWEEN '2024-01-01T00:00:00Z' AND '2024-02-01T00:00:00-05:00'")]
+    public void DateAndTime_WithAnOffset_IsRefusedByBind(string filter)
+    {
+        var act = () => Bound(filter);
+
+        act.Should().Throw<PpdsException>().Which.UserMessage.Should().Contain("yyyy-MM-ddTHH:mm:ssZ");
+    }
+
+    [Theory]
+    [InlineData("price = 1.12345678901", "decimal column keeps (10)")]
+    [InlineData("revenue IN (1.5, 2.12345)", "currency column keeps (4)")]
+    public void Number_WithMoreDecimalPlacesThanTheColumnKeeps_IsRefusedByBind(string filter, string kind)
+    {
+        var act = () => Bound(filter);
+
+        act.Should().Throw<PpdsException>().Which.UserMessage.Should().Contain(kind);
+    }
+
+    [Theory]
     [InlineData("UPPER(name) = 'SECRETMARKER'")]
     [InlineData("name = 'SECRETMARKER '")]
     [InlineData("name = 'SECRETMARKER' OR LEN(name) = 1")]

@@ -427,6 +427,29 @@ public class DataFilterExactRowsTests
         calls().Should().Be(2);
     }
 
+    [Fact]
+    public async Task AnEmptyFirstPageWithMoreRecords_IsRefused()
+    {
+        var (pool, calls) = PagedPool(Page(true), Page(true), Page(true));
+
+        var act = () => PagedService(pool).QueryIdsByFilterAsync(Entity, "numberofemployees = 0", limit: null);
+
+        (await act.Should().ThrowAsync<PpdsException>()).Which.UserMessage.Should().Contain("returned an empty page");
+        calls().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task AnInListOverTheCap_IsRefusedBeforeAnyRecordIsRead()
+    {
+        var fake = SixAccounts();
+        var filter = "numberofemployees IN (" + string.Join(", ", Enumerable.Range(0, DataFilter.MaxInListValues + 1)) + ")";
+
+        var act = () => Service(fake).QueryIdsByFilterAsync(Entity, filter, limit: null);
+
+        (await act.Should().ThrowAsync<PpdsException>()).Which.ErrorCode.Should().Be(ErrorCodes.Validation.FilterNotSupported);
+        fake.AnythingRead.Should().BeFalse();
+    }
+
     private static DataQueryService PagedService(PPDS.Dataverse.Pooling.IDataverseConnectionPool pool)
         => new(pool, FilterTestColumns.Provider(), NullLogger<DataQueryService>.Instance);
 
