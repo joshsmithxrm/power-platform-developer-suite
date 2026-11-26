@@ -7,6 +7,7 @@ using System.Text;
 using System.Xml.Linq;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Dataverse.Query.Planning.Partitioning;
@@ -352,6 +353,7 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private static IReadOnlyList<MergeMatchColumn> ExtractMergeMatchColumns(BooleanExpression? searchCondition)
     {
+        QueryStack.EnsureSufficientStack();
         var matchColumns = new List<MergeMatchColumn>();
 
         if (searchCondition is BooleanComparisonExpression comp

@@ -211,10 +211,12 @@ public sealed class WindowSpoolNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // Step 1: Materialize all input rows
         var allRows = new List<QueryRow>();
         await foreach (var row in _input.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
             allRows.Add(row);
 

@@ -7,6 +7,7 @@ using System.Text;
 using System.Xml.Linq;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Dataverse.Query.Planning.Partitioning;
@@ -32,6 +33,7 @@ public sealed partial class ExecutionPlanBuilder
         BinaryQueryExpression binaryQuery,
         QueryPlanOptions options)
     {
+        QueryStack.EnsureSufficientStack();
         // For INTERSECT and EXCEPT, handle as two-branch operations (no flattening)
         if (binaryQuery.BinaryQueryExpressionType == BinaryQueryExpressionType.Intersect)
         {
@@ -56,6 +58,7 @@ public sealed partial class ExecutionPlanBuilder
         QueryPlanOptions options,
         bool isIntersect)
     {
+        QueryStack.EnsureSufficientStack();
         var leftNode = PlanQueryExpression(binaryQuery.FirstQueryExpression, options);
         var rightNode = PlanQueryExpression(binaryQuery.SecondQueryExpression, options);
 
@@ -83,6 +86,7 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private QueryPlanResult PlanQueryExpression(QueryExpression queryExpr, QueryPlanOptions options)
     {
+        QueryStack.EnsureSufficientStack();
         if (queryExpr is QuerySpecification querySpec)
         {
             // Route directly through PlanSelect with a synthetic SelectStatement
@@ -129,6 +133,7 @@ public sealed partial class ExecutionPlanBuilder
         BinaryQueryExpression binaryQuery,
         QueryPlanOptions options)
     {
+        QueryStack.EnsureSufficientStack();
         // Flatten the union tree into a list of queries
         var querySpecs = new List<QuerySpecification>();
         var isUnionAll = new List<bool>();
@@ -259,6 +264,7 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private static bool ReferencesTableName(TableReference tableRef, string name)
     {
+        QueryStack.EnsureSufficientStack();
         return tableRef switch
         {
             NamedTableReference named =>
@@ -392,6 +398,7 @@ public sealed partial class ExecutionPlanBuilder
         string entityName,
         QueryPlanOptions options)
     {
+        QueryStack.EnsureSufficientStack();
         IQueryPlanNode rootNode = cteNode;
 
         // Apply WHERE filter client-side
@@ -428,6 +435,7 @@ public sealed partial class ExecutionPlanBuilder
     private QueryPlanResult PlanQueryExpressionAsSelect(
         QueryExpression queryExpr, QueryPlanOptions options)
     {
+        QueryStack.EnsureSufficientStack();
         if (queryExpr is QuerySpecification querySpec)
         {
             var syntheticSelect = new SelectStatement { QueryExpression = querySpec };
@@ -600,6 +608,7 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private QueryPlanResult PlanDeclareCursor(DeclareCursorStatement declareCursor, QueryPlanOptions options)
     {
+        QueryStack.EnsureSufficientStack();
         var session = _sessionContext
             ?? throw new QueryParseException("Cursor operations require a SessionContext.");
 

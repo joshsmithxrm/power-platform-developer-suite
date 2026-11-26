@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
 
@@ -93,6 +94,7 @@ public sealed class ExecutionPlanOptimizer
     /// </remarks>
     private static IQueryPlanNode ApplyConstantFolding(IQueryPlanNode node)
     {
+        QueryStack.EnsureSufficientStack();
         if (node is ClientFilterNode filterNode)
         {
             // Compiled predicate: recurse into children but cannot fold the predicate itself

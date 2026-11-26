@@ -57,6 +57,7 @@ public sealed class RemoteScanNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // Execute FetchXML against the REMOTE executor (not context.QueryExecutor)
         // with auto-paging to retrieve all pages.
         string? pagingCookie = null;

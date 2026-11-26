@@ -274,6 +274,12 @@ public static class ErrorCodes
 
         /// <summary>Subquery returned more than one row.</summary>
         public const string SubqueryMultipleRows = "Query.SubqueryMultipleRows";
+
+        /// <summary>
+        /// The statement is nested too deeply or is too large to parse, plan or run without running out of
+        /// stack. The refused statement is not run (#1952).
+        /// </summary>
+        public const string NestedTooDeeply = "Query.NestedTooDeeply";
     }
 
     /// <summary>

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 
 namespace PPDS.Query.Planning.Nodes;
@@ -58,12 +59,14 @@ public sealed class TableSpoolNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // Materialize on first execution
         if (_materializedRows == null)
         {
             _materializedRows = new List<QueryRow>();
             await foreach (var row in _source.ExecuteAsync(context, cancellationToken))
             {
+                QueryStack.EnsureSufficientStack();
                 _materializedRows.Add(row);
             }
         }

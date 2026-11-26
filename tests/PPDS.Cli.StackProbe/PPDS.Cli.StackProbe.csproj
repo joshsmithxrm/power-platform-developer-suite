@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Child process for the #1952 stack tests in PPDS.Cli.Tests (StackProbeTests). Each run handles one statement
+    in a fresh process, so the JIT is cold as in a real start, any thread stack can be chosen, and a stack
+    overflow ends only this process: the test sees the dead process and fails. Not a test project itself.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The same default thread stack as the CLI and MCP hosts, so the reservation test measures the shipped setting. -->
+    <RuntimeHostConfigurationOption Include="System.Threading.DefaultStackSize" Value="0x4000000" />
+    <!-- The probe uses in-memory fakes and never signs in; keep the guard on anyway. -->
+    <RuntimeHostConfigurationOption Include="PPDS.BlockInteractiveSignIn" Value="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\PPDS.Cli\PPDS.Cli.csproj" />
+  </ItemGroup>
+
+</Project>

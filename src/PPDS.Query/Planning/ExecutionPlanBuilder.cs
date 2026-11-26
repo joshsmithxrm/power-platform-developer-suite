@@ -7,6 +7,7 @@ using System.Text;
 using System.Xml.Linq;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Dataverse.Query.Planning.Partitioning;
@@ -56,6 +57,11 @@ public sealed partial class ExecutionPlanBuilder
     /// <param name="options">Planning options (pool capacity, row limits, etc.).</param>
     /// <returns>The execution plan result containing the root node and metadata.</returns>
     /// <exception cref="QueryParseException">If the statement type is not supported.</exception>
+    /// <exception cref="QueryNestedTooDeeplyException">The statement is too deeply nested to plan.</exception>
+    /// <remarks>
+    /// Planning runs on a <see cref="QueryStack"/> thread (inline when already on one), because it calls
+    /// ScriptDom's script generator, which recurses in code we cannot check (#1952).
+    /// </remarks>
     public QueryPlanResult Plan(TSqlFragment fragment, QueryPlanOptions? options = null)
     {
         var opts = options ?? new QueryPlanOptions();
@@ -69,8 +75,13 @@ public sealed partial class ExecutionPlanBuilder
     /// <summary>
     /// Plans a single TSqlStatement. Entry point for recursive planning (used by script execution).
     /// </summary>
-    public QueryPlanResult PlanStatement(TSqlStatement statement, QueryPlanOptions options)
+    /// <exception cref="QueryNestedTooDeeplyException">The statement is too deeply nested to plan.</exception>
+    public QueryPlanResult PlanStatement(TSqlStatement statement, QueryPlanOptions options) =>
+        QueryStack.Run(() => PlanStatementOnThisThread(statement, options));
+
+    private QueryPlanResult PlanStatementOnThisThread(TSqlStatement statement, QueryPlanOptions options)
     {
+        QueryStack.EnsureSufficientStack();
         return statement switch
         {
             SelectStatement selectStmt => PlanSelectStatement(selectStmt, options),
@@ -138,6 +149,7 @@ public sealed partial class ExecutionPlanBuilder
         QuerySpecification querySpec,
         QueryPlanOptions options)
     {
+        QueryStack.EnsureSufficientStack();
         // Table-valued function routing: STRING_SPLIT
         var tvfResult = TryPlanTableValuedFunction(querySpec, options);
         if (tvfResult != null)

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using PPDS.Dataverse.Query.Execution;
 
 namespace PPDS.Dataverse.Query.Planning.Nodes;
 
@@ -48,10 +49,12 @@ public sealed class ConcatenateNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         foreach (var input in Inputs)
         {
             await foreach (var row in input.ExecuteAsync(context, cancellationToken))
             {
+                QueryStack.EnsureSufficientStack();
                 cancellationToken.ThrowIfCancellationRequested();
                 yield return row;
             }

@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Query.Execution;
 
@@ -57,6 +58,7 @@ public sealed class ExecuteAsNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         if (CallerObjectId.HasValue)
         {
             Session.CallerObjectId = CallerObjectId.Value;
@@ -109,6 +111,7 @@ public sealed class RevertNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         Session.CallerObjectId = null;
         await Task.CompletedTask;
         yield break;

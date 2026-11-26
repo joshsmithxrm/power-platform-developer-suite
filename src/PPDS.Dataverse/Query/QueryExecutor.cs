@@ -13,6 +13,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Dataverse.Pooling;
+using PPDS.Dataverse.Query.Execution;
 
 namespace PPDS.Dataverse.Query;
 
@@ -503,6 +504,7 @@ public class QueryExecutor : IQueryExecutor
         List<QueryColumn> columns,
         bool isAggregate)
     {
+        QueryStack.EnsureSufficientStack();
         foreach (var linkEntity in parentElement.Elements("link-entity"))
         {
             var linkAlias = linkEntity.Attribute("alias")?.Value;

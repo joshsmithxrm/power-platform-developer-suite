@@ -53,10 +53,12 @@ public sealed class ClientWindowNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // Step 1: Materialize all input rows (window functions need complete data)
         var allRows = new List<QueryRow>();
         await foreach (var row in Input.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
             allRows.Add(row);
 

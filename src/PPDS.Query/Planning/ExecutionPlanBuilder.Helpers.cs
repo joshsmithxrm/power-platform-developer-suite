@@ -7,6 +7,7 @@ using System.Text;
 using System.Xml.Linq;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Dataverse.Query.Planning.Partitioning;
@@ -455,6 +456,7 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private static string ScriptDomToSql(TSqlFragment fragment)
     {
+        QueryStack.EnsureSufficientStack();
         var generator = s_scriptGenerator;
         generator.GenerateScript(fragment, out var sql);
         return sql.Trim();
@@ -572,6 +574,7 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private static BooleanExpression? ExtractClientSideWhereFilter(BooleanExpression? where)
     {
+        QueryStack.EnsureSufficientStack();
         if (where is null) return null;
 
         // Any non-pushdown comparison needs client evaluation
@@ -665,6 +668,7 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private static bool ContainsExpressionComparison(BooleanExpression expr)
     {
+        QueryStack.EnsureSufficientStack();
         return expr switch
         {
             BooleanComparisonExpression => IsExpressionComparison(expr),
@@ -682,6 +686,7 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private static bool ContainsExistsPredicate(BooleanExpression expr)
     {
+        QueryStack.EnsureSufficientStack();
         return expr switch
         {
             ExistsPredicate => true,
@@ -698,6 +703,7 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private static bool ContainsInSubqueryPredicate(BooleanExpression expr)
     {
+        QueryStack.EnsureSufficientStack();
         return expr switch
         {
             InPredicate inPred => inPred.Subquery != null,
@@ -779,6 +785,7 @@ public sealed partial class ExecutionPlanBuilder
 
     private static string? ExtractEntityNameFromTableReference(TableReference tableRef)
     {
+        QueryStack.EnsureSufficientStack();
         return tableRef switch
         {
             NamedTableReference named => GetMultiPartName(named.SchemaObject),
@@ -945,6 +952,7 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private IQueryPlanNode BuildProjectNodeFromScriptDom(IQueryPlanNode input, QuerySpecification querySpec)
     {
+        QueryStack.EnsureSufficientStack();
         var projections = new List<ProjectColumn>();
 
         foreach (var element in querySpec.SelectElements)
@@ -1026,6 +1034,7 @@ public sealed partial class ExecutionPlanBuilder
     /// </summary>
     private IQueryPlanNode BuildSelectListProjection(IQueryPlanNode input, QuerySpecification querySpec)
     {
+        QueryStack.EnsureSufficientStack();
         var projections = new List<ProjectColumn>();
 
         foreach (var element in querySpec.SelectElements)
@@ -1155,6 +1164,7 @@ public sealed partial class ExecutionPlanBuilder
 
     private static void ExtractColumnNamesFromScriptDomRecursive(ScalarExpression expr, List<string> columns)
     {
+        QueryStack.EnsureSufficientStack();
         switch (expr)
         {
             case ColumnReferenceExpression col:
@@ -1299,6 +1309,7 @@ public sealed partial class ExecutionPlanBuilder
         List<QuerySpecification> queries,
         List<bool> isUnionAll)
     {
+        QueryStack.EnsureSufficientStack();
         if (binaryQuery.FirstQueryExpression is BinaryQueryExpression leftBinary)
         {
             FlattenUnion(leftBinary, queries, isUnionAll);

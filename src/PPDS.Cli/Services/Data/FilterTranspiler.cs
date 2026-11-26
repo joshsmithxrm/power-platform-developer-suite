@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Query.Parsing;
 using PPDS.Query.Transpilation;
 
@@ -38,6 +39,10 @@ public static class FilterTranspiler
             var stmt = parser.ParseStatement(sql);
             var generator = new FetchXmlGenerator();
             fetchXml = generator.Generate(stmt);
+        }
+        catch (Exception ex) when (QueryStack.IsDepthRefusal(ex))
+        {
+            throw new PpdsException(ErrorCodes.Query.NestedTooDeeply, QueryStack.AsNestedTooDeeply(ex).Message, ex);
         }
         catch (Exception ex)
         {

@@ -32,6 +32,7 @@ public sealed class PlanExecutor
 
         await foreach (var row in planResult.RootNode.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
 
             records.Add(row.Values);
@@ -79,6 +80,7 @@ public sealed class PlanExecutor
     {
         await foreach (var row in planResult.RootNode.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
             context.Statistics.IncrementRowsOutput();
             yield return row;

@@ -75,11 +75,13 @@ public sealed class RecursiveCteNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // Phase 1: Execute anchor query and collect results
         var currentIterationRows = new List<QueryRow>();
 
         await foreach (var row in _anchorNode.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
             currentIterationRows.Add(row);
             yield return row;
@@ -103,6 +105,7 @@ public sealed class RecursiveCteNode : IQueryPlanNode
             var newRows = new List<QueryRow>();
             await foreach (var row in recursiveNode.ExecuteAsync(context, cancellationToken))
             {
+                QueryStack.EnsureSufficientStack();
                 cancellationToken.ThrowIfCancellationRequested();
                 newRows.Add(row);
                 yield return row;

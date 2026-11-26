@@ -81,4 +81,10 @@ public static class QueryErrorCode
 
     /// <summary>TDS Endpoint connection failed (endpoint may be disabled on environment).</summary>
     public const string TdsConnectionFailed = "Query.TdsConnectionFailed";
+
+    /// <summary>
+    /// The statement is nested too deeply or is too large to process without running out of stack.
+    /// See <see cref="QueryNestedTooDeeplyException"/>.
+    /// </summary>
+    public const string NestedTooDeeply = "Query.NestedTooDeeply";
 }

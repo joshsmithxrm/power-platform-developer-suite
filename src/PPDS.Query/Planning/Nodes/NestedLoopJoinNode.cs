@@ -5,6 +5,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 
 namespace PPDS.Query.Planning.Nodes;
@@ -111,6 +112,7 @@ public sealed class NestedLoopJoinNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // APPLY mode: correlated inner evaluation per outer row
         if (_correlatedInnerFactory != null)
         {
@@ -118,6 +120,7 @@ public sealed class NestedLoopJoinNode : IQueryPlanNode
 
             await foreach (var outerRow in _left.ExecuteAsync(context, cancellationToken))
             {
+                QueryStack.EnsureSufficientStack();
                 cancellationToken.ThrowIfCancellationRequested();
                 var correlatedRows = _correlatedInnerFactory(outerRow).ToList();
 
@@ -143,6 +146,7 @@ public sealed class NestedLoopJoinNode : IQueryPlanNode
         QueryRow? rightTemplate = null;
         await foreach (var row in _right!.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
             innerRows.Add(row);
             rightTemplate ??= row;
@@ -162,6 +166,7 @@ public sealed class NestedLoopJoinNode : IQueryPlanNode
         // Phase 2: For each outer (left) row, scan inner rows
         await foreach (var outerRow in _left.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
             leftTemplate ??= outerRow;
             var matched = false;

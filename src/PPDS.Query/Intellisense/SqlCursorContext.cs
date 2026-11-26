@@ -1,9 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Sql.Intellisense;
+using PPDS.Query.Parsing;
 
 namespace PPDS.Query.Intellisense;
 
@@ -49,16 +50,36 @@ public static class SqlCursorContext
     /// <param name="sql">The SQL text being edited.</param>
     /// <param name="cursorOffset">The 0-based character offset of the cursor.</param>
     /// <returns>A context result describing what completions are appropriate.</returns>
+    /// <remarks>
+    /// Runs on a <see cref="QueryStack"/> thread, so a deeply nested text never overflows the stack: a text
+    /// too large to parse falls back to the token heuristic, and one too large to lex gets the statement
+    /// keywords (#1952).
+    /// </remarks>
     public static SqlCursorContextResult Analyze(string sql, int cursorOffset)
     {
         if (string.IsNullOrEmpty(sql) || cursorOffset < 0)
         {
-            return new SqlCursorContextResult
-            {
-                Kind = SqlCompletionContextKind.Keyword,
-                KeywordSuggestions = StatementStartKeywords
-            };
+            return StatementStartResult();
         }
+
+        try
+        {
+            return QueryStack.Run(() => AnalyzeOnThisThread(sql, cursorOffset));
+        }
+        catch (Exception ex) when (QueryStack.IsDepthRefusal(ex))
+        {
+            return StatementStartResult();
+        }
+    }
+
+    private static SqlCursorContextResult StatementStartResult() => new()
+    {
+        Kind = SqlCompletionContextKind.Keyword,
+        KeywordSuggestions = StatementStartKeywords
+    };
+
+    private static SqlCursorContextResult AnalyzeOnThisThread(string sql, int cursorOffset)
+    {
 
         // Clamp cursor offset
         cursorOffset = Math.Min(cursorOffset, sql.Length);
@@ -67,8 +88,7 @@ public static class SqlCursorContext
         try
         {
             var parser = new TSql170Parser(initialQuotedIdentifiers: true);
-            using var reader = new StringReader(sql);
-            var fragment = parser.Parse(reader, out IList<ParseError> errors);
+            var fragment = BoundedSqlParser.Parse(parser, sql, out IList<ParseError> errors);
 
             if (errors.Count == 0 && fragment is TSqlScript script)
             {
@@ -191,6 +211,7 @@ public static class SqlCursorContext
     private static void CollectTableReferences(
         TableReference tableRef, Dictionary<string, string> map)
     {
+        QueryStack.EnsureSufficientStack();
         switch (tableRef)
         {
             case NamedTableReference namedTable:
@@ -813,8 +834,7 @@ public static class SqlCursorContext
         try
         {
             var parser = new TSql170Parser(initialQuotedIdentifiers: true);
-            using var tokenReader = new StringReader(sql);
-            var tokens = parser.GetTokenStream(tokenReader, out IList<ParseError> _);
+            var tokens = BoundedSqlParser.GetTokenStream(parser, sql, out IList<ParseError> _);
 
             if (tokens == null)
                 return Array.Empty<TSqlParserToken>();

@@ -57,6 +57,7 @@ public sealed class ClientAggregateNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // Collect all input rows
         var maxRows = context.MaxMaterializationRows;
         var totalRows = 0;
@@ -64,6 +65,7 @@ public sealed class ClientAggregateNode : IQueryPlanNode
 
         await foreach (var row in Input.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
             totalRows++;
 

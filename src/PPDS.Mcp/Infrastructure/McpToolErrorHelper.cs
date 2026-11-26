@@ -2,6 +2,7 @@ using System.Text.Json;
 using ModelContextProtocol;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Dataverse.Metadata.Authoring;
+using PPDS.Dataverse.Query.Execution;
 
 namespace PPDS.Mcp.Infrastructure;
 
@@ -65,6 +66,15 @@ public static class McpToolErrorHelper
         {
             var filePayload = new StructuredErrorPayload { ErrorCode = file.ErrorCode, UserMessage = file.Message };
             throw new McpException(JsonSerializer.Serialize(filePayload, SerializerOptions), McpErrorCode.InternalError);
+        }
+
+        // A statement too deeply nested or too large to process safely (#1952): the message is fixed text
+        // that never contains the statement, so it is safe to return.
+        if (QueryStack.IsDepthRefusal(ex))
+        {
+            var depth = QueryStack.AsNestedTooDeeply(ex);
+            var depthPayload = new StructuredErrorPayload { ErrorCode = depth.ErrorCode, UserMessage = depth.Message };
+            throw new McpException(JsonSerializer.Serialize(depthPayload, SerializerOptions), McpErrorCode.InternalError);
         }
 
         var payload = new StructuredErrorPayload

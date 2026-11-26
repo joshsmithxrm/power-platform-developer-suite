@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using PPDS.Dataverse.Query.Execution;
 
 namespace PPDS.Dataverse.Query.Planning;
 
@@ -30,6 +31,7 @@ public sealed class QueryPlanDescription
     /// </summary>
     public static QueryPlanDescription FromNode(IQueryPlanNode node)
     {
+        QueryStack.EnsureSufficientStack();
         var children = new List<QueryPlanDescription>();
         foreach (var child in node.Children)
         {

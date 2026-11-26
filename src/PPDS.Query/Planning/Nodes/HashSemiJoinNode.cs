@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 
 namespace PPDS.Query.Planning.Nodes;
@@ -52,11 +53,13 @@ public sealed class HashSemiJoinNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // Phase 1: Build hash set from inner side
         var innerKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         bool innerHasNull = false;
         await foreach (var innerRow in _inner.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             var innerVal = innerRow.Values.TryGetValue(_innerKeyColumn, out var val)
                 ? val
                 : innerRow.Values.FirstOrDefault(kvp => string.Equals(kvp.Key, _innerKeyColumn, StringComparison.OrdinalIgnoreCase)).Value;
@@ -77,6 +80,7 @@ public sealed class HashSemiJoinNode : IQueryPlanNode
         // Phase 2: Probe outer side
         await foreach (var outerRow in _outer.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
 
             var outerQv = outerRow.Values.TryGetValue(_outerKeyColumn, out var outerVal2)

@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using PPDS.Dataverse.Query.Execution;
 
 namespace PPDS.Dataverse.Query.Planning.Nodes;
 
@@ -45,6 +46,7 @@ public sealed class PrefetchScanNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         var channel = Channel.CreateBounded<QueryRow>(new BoundedChannelOptions(BufferSize)
         {
             SingleWriter = true,
@@ -59,6 +61,7 @@ public sealed class PrefetchScanNode : IQueryPlanNode
             {
                 await foreach (var row in Source.ExecuteAsync(context, cancellationToken))
                 {
+                    QueryStack.EnsureSufficientStack();
                     await channel.Writer.WriteAsync(row, cancellationToken).ConfigureAwait(false);
                 }
                 channel.Writer.Complete();

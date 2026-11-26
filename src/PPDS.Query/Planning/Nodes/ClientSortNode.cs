@@ -59,11 +59,13 @@ public sealed class ClientSortNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // Materialize all rows (sorting requires full dataset)
         var maxRows = context.MaxMaterializationRows;
         var rows = new List<QueryRow>();
         await foreach (var row in _input.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
             rows.Add(row);
 

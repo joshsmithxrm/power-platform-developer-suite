@@ -49,8 +49,10 @@ public sealed class ProjectNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         await foreach (var inputRow in Input.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
 
             var outputValues = new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase);
