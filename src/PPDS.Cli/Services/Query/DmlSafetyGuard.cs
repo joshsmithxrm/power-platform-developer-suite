@@ -1,6 +1,7 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Auth.Profiles;
 using PPDS.Cli.Infrastructure.Errors;
+using PPDS.Dataverse.Query.Execution;
 
 namespace PPDS.Cli.Services.Query;
 
@@ -48,6 +49,7 @@ public sealed class DmlSafetyGuard
         DmlSafetyOptions options,
         QuerySafetySettings settings)
     {
+        QueryStack.EnsureSufficientStack();
         return statement switch
         {
             DeleteStatement delete => CheckDelete(delete, options, settings),
@@ -261,6 +263,7 @@ public sealed class DmlSafetyGuard
         DmlSafetyOptions options,
         QuerySafetySettings settings)
     {
+        QueryStack.EnsureSufficientStack();
         var aggregate = new DmlSafetyResult { IsBlocked = false };
         foreach (var statement in statements)
         {
@@ -274,6 +277,7 @@ public sealed class DmlSafetyGuard
 
     private DmlSafetyResult CheckIf(IfStatement ifStmt, DmlSafetyOptions options, QuerySafetySettings settings)
     {
+        QueryStack.EnsureSufficientStack();
         var result = CheckCore(ifStmt.ThenStatement, options, settings);
         if (result.IsBlocked || ifStmt.ElseStatement == null)
             return result;
@@ -286,6 +290,7 @@ public sealed class DmlSafetyGuard
         DmlSafetyOptions options,
         QuerySafetySettings settings)
     {
+        QueryStack.EnsureSufficientStack();
         var tryResult = CheckStatements(tryCatch.TryStatements.Statements, options, settings);
         if (tryResult.IsBlocked)
             return tryResult;

@@ -40,6 +40,7 @@ public sealed class OpenJsonNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         await Task.CompletedTask;
 
         var jsonValue = _jsonExpression(new Dictionary<string, QueryValue>());

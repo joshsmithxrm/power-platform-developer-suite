@@ -1,4 +1,5 @@
 using System.Text;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using Terminal.Gui;
 
@@ -63,7 +64,15 @@ internal sealed class QueryPlanView : FrameView
     internal static string FormatPlanTree(QueryPlanDescription plan, long totalExecutionTimeMs = 0)
     {
         var sb = new StringBuilder();
-        FormatNode(sb, plan, "", true);
+        try
+        {
+            FormatNode(sb, plan, "", true);
+        }
+        catch (Exception ex) when (QueryStack.IsDepthRefusal(ex))
+        {
+            // A plan too deep to draw on this thread's stack: say so instead of ending the TUI (#1952).
+            return "(The execution plan is nested too deeply to display.)";
+        }
 
         if (plan.PoolCapacity.HasValue)
         {
@@ -85,6 +94,7 @@ internal sealed class QueryPlanView : FrameView
 
     private static void FormatNode(StringBuilder sb, QueryPlanDescription node, string indent, bool isLast)
     {
+        QueryStack.EnsureSufficientStack();
         var connector = indent.Length == 0 ? "" : (isLast ? "\u2514\u2500 " : "\u251c\u2500 ");
         var childIndent = indent.Length == 0 ? "" : indent + (isLast ? "   " : "\u2502  ");
 

@@ -59,10 +59,12 @@ public sealed class MergeNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // Collect source rows
         var sourceRows = new List<QueryRow>();
         await foreach (var row in _sourceNode.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
             sourceRows.Add(row);
         }

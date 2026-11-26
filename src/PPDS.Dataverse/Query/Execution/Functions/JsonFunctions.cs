@@ -360,6 +360,7 @@ public static class JsonFunctions
         private static void WriteModified(
             Utf8JsonWriter writer, JsonElement element, PathSegment[] segments, int depth, object? newValue)
         {
+            QueryStack.EnsureSufficientStack();
             if (depth >= segments.Length)
             {
                 // Past end of path — write element as-is

@@ -7,6 +7,7 @@ using System.Text;
 using System.Xml.Linq;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Dataverse.Query.Planning.Partitioning;
@@ -32,6 +33,7 @@ public sealed partial class ExecutionPlanBuilder
         QuerySpecification querySpec,
         QueryPlanOptions options)
     {
+        QueryStack.EnsureSufficientStack();
         var fromClause = querySpec.FromClause;
         if (fromClause?.TableReferences.Count != 1)
             throw new QueryParseException("Expected exactly one table reference in FROM clause for client-side join planning.");
@@ -117,6 +119,7 @@ public sealed partial class ExecutionPlanBuilder
         QuerySpecification querySpec,
         QueryPlanOptions options)
     {
+        QueryStack.EnsureSufficientStack();
         // 1. Extract IN subquery predicates from WHERE, collecting them and building a cleaned expression
         var inPredicates = new List<InPredicate>();
         var cleanedWhere = ExtractInSubqueryPredicates(querySpec.WhereClause?.SearchCondition, inPredicates);
@@ -316,6 +319,7 @@ public sealed partial class ExecutionPlanBuilder
         BooleanExpression expr,
         List<InnerFilterCondition> filters)
     {
+        QueryStack.EnsureSufficientStack();
         switch (expr)
         {
             case BooleanComparisonExpression comparison:
@@ -444,6 +448,7 @@ public sealed partial class ExecutionPlanBuilder
         BooleanExpression? expr,
         List<InPredicate> collected)
     {
+        QueryStack.EnsureSufficientStack();
         if (expr is null) return null;
 
         // Direct IN (subquery) — consume it entirely
@@ -515,6 +520,7 @@ public sealed partial class ExecutionPlanBuilder
         QuerySpecification querySpec,
         QueryPlanOptions options)
     {
+        QueryStack.EnsureSufficientStack();
         // 1. Extract EXISTS predicates from WHERE, collecting them and building a cleaned expression
         var existsPredicates = new List<(ExistsPredicate exists, bool isNot)>();
         var cleanedWhere = ExtractExistsPredicates(querySpec.WhereClause?.SearchCondition, existsPredicates);
@@ -590,6 +596,7 @@ public sealed partial class ExecutionPlanBuilder
         BooleanExpression? expr,
         List<(ExistsPredicate exists, bool isNot)> collected)
     {
+        QueryStack.EnsureSufficientStack();
         if (expr is null) return null;
 
         // Direct ExistsPredicate
@@ -646,6 +653,7 @@ public sealed partial class ExecutionPlanBuilder
 
     private static string? ExtractAliasFromTableReference(TableReference tableRef)
     {
+        QueryStack.EnsureSufficientStack();
         return tableRef switch
         {
             NamedTableReference named => named.Alias?.Value,
@@ -682,6 +690,7 @@ public sealed partial class ExecutionPlanBuilder
         string outerEntityName,
         string? outerAlias)
     {
+        QueryStack.EnsureSufficientStack();
         if (expr is BooleanComparisonExpression comp
             && comp.ComparisonType == BooleanComparisonType.Equals
             && comp.FirstExpression is ColumnReferenceExpression left
@@ -741,6 +750,7 @@ public sealed partial class ExecutionPlanBuilder
         QualifiedJoin join,
         QueryPlanOptions options)
     {
+        QueryStack.EnsureSufficientStack();
         var leftResult = PlanTableReference(join.FirstTableReference, options);
         var rightResult = PlanTableReference(join.SecondTableReference, options);
 
@@ -779,6 +789,7 @@ public sealed partial class ExecutionPlanBuilder
         TableReference tableRef,
         QueryPlanOptions options)
     {
+        QueryStack.EnsureSufficientStack();
         if (tableRef is QualifiedJoin nestedJoin)
             return PlanJoinTree(nestedJoin, options);
 
@@ -920,6 +931,7 @@ public sealed partial class ExecutionPlanBuilder
 
     private static bool ContainsUnqualifiedJoinInTableRef(TableReference tableRef)
     {
+        QueryStack.EnsureSufficientStack();
         if (tableRef is UnqualifiedJoin)
             return true;
         if (tableRef is QualifiedJoin qualified)
@@ -945,6 +957,7 @@ public sealed partial class ExecutionPlanBuilder
 
     private static bool ContainsDerivedTableInTableRef(TableReference tableRef)
     {
+        QueryStack.EnsureSufficientStack();
         if (tableRef is QueryDerivedTable)
             return true;
         if (tableRef is QualifiedJoin qualified)
@@ -973,6 +986,7 @@ public sealed partial class ExecutionPlanBuilder
 
     private static bool ContainsCrossEnvironmentReferenceInTableRef(TableReference tableRef)
     {
+        QueryStack.EnsureSufficientStack();
         if (tableRef is NamedTableReference named)
         {
             // 3/4-part names: [LABEL].dbo.entity or [SERVER].[DB].dbo.entity
@@ -1005,6 +1019,7 @@ public sealed partial class ExecutionPlanBuilder
 
     private static void ExtractJoinColumnsRecursive(BooleanExpression expr, List<(string leftCol, string rightCol)> result)
     {
+        QueryStack.EnsureSufficientStack();
         if (expr is BooleanComparisonExpression comp
             && comp.ComparisonType == BooleanComparisonType.Equals
             && comp.FirstExpression is ColumnReferenceExpression leftRef

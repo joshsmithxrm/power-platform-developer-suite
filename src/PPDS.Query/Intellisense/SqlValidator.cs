@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Dataverse.Metadata;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Sql.Intellisense;
+using PPDS.Query.Parsing;
 
 namespace PPDS.Query.Intellisense;
 
@@ -63,8 +64,12 @@ public sealed class SqlValidator
 
         try
         {
-            using var reader = new StringReader(sql);
-            fragment = _parser.Parse(reader, out parseErrors);
+            fragment = BoundedSqlParser.Parse(_parser, sql, out parseErrors);
+        }
+        catch (QueryNestedTooDeeplyException ex)
+        {
+            diagnostics.Add(new SqlDiagnostic(0, sql.Length, SqlDiagnosticSeverity.Error, ex.Message));
+            return diagnostics;
         }
         catch (Exception ex)
         {
@@ -97,7 +102,16 @@ public sealed class SqlValidator
         // Step 3: Semantic validation (requires metadata)
         if (_metadataProvider != null && fragment is TSqlScript script)
         {
-            await ValidateScriptAsync(script, sql, diagnostics, cancellationToken);
+            try
+            {
+                await ValidateScriptAsync(script, sql, diagnostics, cancellationToken);
+            }
+            catch (Exception ex) when (QueryStack.IsDepthRefusal(ex))
+            {
+                // A tree too deep for this thread's stack: one diagnostic, never a crash (#1952).
+                diagnostics.Add(new SqlDiagnostic(0, sql.Length, SqlDiagnosticSeverity.Error,
+                    QueryStack.AsNestedTooDeeply(ex).Message));
+            }
         }
 
         return diagnostics;
@@ -244,6 +258,7 @@ public sealed class SqlValidator
         Dictionary<string, string> tableMap,
         List<SqlDiagnostic> diagnostics, CancellationToken ct)
     {
+        QueryStack.EnsureSufficientStack();
         switch (tableRef)
         {
             case NamedTableReference namedTable:
@@ -377,6 +392,7 @@ public sealed class SqlValidator
         Dictionary<string, string> tableMap,
         string sql, List<SqlDiagnostic> diagnostics, CancellationToken ct)
     {
+        QueryStack.EnsureSufficientStack();
         if (expression == null) return;
 
         switch (expression)
@@ -453,6 +469,7 @@ public sealed class SqlValidator
         Dictionary<string, string> tableMap,
         string sql, List<SqlDiagnostic> diagnostics, CancellationToken ct)
     {
+        QueryStack.EnsureSufficientStack();
         if (condition == null) return;
 
         switch (condition)

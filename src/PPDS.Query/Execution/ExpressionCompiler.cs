@@ -107,12 +107,13 @@ public sealed class ExpressionCompiler
         ScalarExpression expression,
         Dictionary<string, string>? aggregateAliasMap = null)
     {
+        QueryStack.EnsureSufficientStack();
         var saved = _aggregateAliasMap;
         if (aggregateAliasMap is { Count: > 0 })
             _aggregateAliasMap = aggregateAliasMap;
         try
         {
-        return expression switch
+        var compiled = expression switch
         {
             IntegerLiteral intLit => CompileIntegerLiteral(intLit),
             StringLiteral strLit => CompileStringLiteral(strLit),
@@ -137,6 +138,9 @@ public sealed class ExpressionCompiler
             _ => throw new NotSupportedException(
                 $"ScriptDom expression type {expression.GetType().Name} is not yet supported by ExpressionCompiler.")
         };
+        return expression is Literal or ColumnReferenceExpression or VariableReference
+            ? compiled
+            : StackChecked(compiled);
         }
         finally
         {
@@ -161,11 +165,12 @@ public sealed class ExpressionCompiler
         BooleanExpression predicate,
         Dictionary<string, string>? aggregateAliasMap = null)
     {
+        QueryStack.EnsureSufficientStack();
         var saved = _aggregateAliasMap;
         _aggregateAliasMap = aggregateAliasMap is { Count: > 0 } ? aggregateAliasMap : saved;
         try
         {
-            return predicate switch
+            return StackChecked(predicate switch
             {
                 BooleanComparisonExpression comp => CompileBooleanComparison(comp),
                 BooleanIsNullExpression isNull => CompileBooleanIsNull(isNull),
@@ -180,13 +185,28 @@ public sealed class ExpressionCompiler
                     "EXISTS predicates are handled at the plan level, not by the ExpressionCompiler."),
                 _ => throw new NotSupportedException(
                     $"ScriptDom predicate type {predicate.GetType().Name} is not yet supported by ExpressionCompiler.")
-            };
+            });
         }
         finally
         {
             _aggregateAliasMap = saved;
         }
     }
+
+    // Compiled closures call their children's closures once per row, so evaluation recurses as deep as
+    // the expression: every closure with children checks the stack before it runs (#1952). A refusal is
+    // a coded error on whichever thread evaluates the row, never a stack overflow.
+    private static CompiledScalarExpression StackChecked(CompiledScalarExpression inner) => row =>
+    {
+        QueryStack.EnsureSufficientStack();
+        return inner(row);
+    };
+
+    private static CompiledPredicate StackChecked(CompiledPredicate inner) => row =>
+    {
+        QueryStack.EnsureSufficientStack();
+        return inner(row);
+    };
 
     // ═══════════════════════════════════════════════════════════════════
     //  Scalar compilation methods

@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using PPDS.Dataverse.Query.Execution;
 
 namespace PPDS.Dataverse.Query.Planning.Nodes;
 
@@ -40,6 +41,7 @@ public sealed class ParallelPartitionNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // Suppress paging metadata writes — each partition has its own paging
         // state and writing from multiple threads would be a data race.
         context.Statistics.SuppressPagingMetadata = true;
@@ -78,6 +80,7 @@ public sealed class ParallelPartitionNode : IQueryPlanNode
                         {
                             await foreach (var row in partition.ExecuteAsync(context, cancellationToken))
                             {
+                                QueryStack.EnsureSufficientStack();
                                 await channel.Writer.WriteAsync(row, cancellationToken).ConfigureAwait(false);
                             }
                         }

@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using PPDS.Dataverse.Query.Execution;
 
 namespace PPDS.Dataverse.Query.Planning.Nodes;
 
@@ -61,11 +62,13 @@ public sealed class MergeAggregateNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // Collect all input rows (partial aggregates from partitions)
         var groups = new Dictionary<string, AggregateAccumulator>(StringComparer.Ordinal);
 
         await foreach (var row in Input.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
 
             var groupKey = BuildGroupKey(row);

@@ -158,6 +158,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         if (context.BulkOperationExecutor == null)
         {
             throw new QueryExecutionException(
@@ -249,6 +250,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
 
         await foreach (var row in SourceNode!.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             if (entities.Count >= RowCap)
             {
                 break;
@@ -306,6 +308,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
 
         await foreach (var row in SourceNode!.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             if (entities.Count >= RowCap)
             {
                 break;
@@ -351,6 +354,7 @@ public sealed class DmlExecuteNode : IQueryPlanNode
 
         await foreach (var row in SourceNode!.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             if (ids.Count >= RowCap)
             {
                 break;

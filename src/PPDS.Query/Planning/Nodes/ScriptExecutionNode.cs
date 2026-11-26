@@ -49,6 +49,10 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
     private readonly SessionContext? _session;
     private readonly QueryPlanOptions? _baseOptions;
 
+    // Start lines of the Dataverse writes (INSERT, UPDATE, DELETE, MERGE) this execution has completed,
+    // so a later statement refused for depth can name what already ran (#1952).
+    private List<int> _completedWriteLines = new();
+
     /// <inheritdoc />
     public string Description => $"ScriptExecution: {_statements.Count} statements";
 
@@ -114,6 +118,7 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         List<string> fetchXmlParts,
         List<IQueryPlanNode> plannedNodes)
     {
+        QueryStack.EnsureSufficientStack();
         var descriptions = new List<QueryPlanDescription>();
         foreach (var statement in statements)
             descriptions.Add(DescribeStatement(statement, fetchXmlParts, plannedNodes));
@@ -125,6 +130,7 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         List<string> fetchXmlParts,
         List<IQueryPlanNode> plannedNodes)
     {
+        QueryStack.EnsureSufficientStack();
         switch (statement)
         {
             case BeginEndBlockStatement block:
@@ -290,13 +296,45 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         var scope = context.VariableScope ?? new VariableScope();
+        _completedWriteLines = new List<int>();
 
-        await foreach (var row in ExecuteStatementListAsync(
-            _statements, scope, context, cancellationToken))
+        await using var rows = ExecuteStatementListAsync(
+            _statements, scope, context, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        while (true)
         {
-            yield return row;
+            bool hasRow;
+            try
+            {
+                hasRow = await rows.MoveNextAsync();
+            }
+            catch (Exception ex) when (QueryStack.IsDepthRefusal(ex) && _completedWriteLines.Count > 0)
+            {
+                throw RefusedAfterWrites(ex, _completedWriteLines);
+            }
+
+            if (!hasRow)
+                break;
+            yield return rows.Current;
         }
+    }
+
+    /// <summary>
+    /// A statement refused for depth after earlier statements of the script wrote: the refusal names the
+    /// lines of the writes that ran, since they are not undone. No text from the script is included.
+    /// </summary>
+    internal static QueryNestedTooDeeplyException RefusedAfterWrites(Exception refusal, IReadOnlyList<int> writeLines)
+    {
+        var lines = string.Join(", ", writeLines.Select(line => line.ToString(CultureInfo.InvariantCulture)));
+        var limit = (refusal as QueryNestedTooDeeplyException)?.Limit ?? QueryDepthLimit.ExecutionStack;
+        var plural = writeLines.Count == 1 ? "" : "s";
+        return new QueryNestedTooDeeplyException(
+            limit,
+            QueryNestedTooDeeplyException.DefaultMessage +
+            " The script stopped at this statement. Statements before it had already run and are not undone; " +
+            $"these wrote to Dataverse: the statement{plural} starting at line{plural} {lines}.",
+            refusal);
     }
 
     /// <summary>
@@ -309,6 +347,7 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        QueryStack.EnsureSufficientStack();
         List<QueryRow>? lastResultRows = null;
 
         foreach (var statement in statements)
@@ -461,6 +500,7 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         QueryPlanContext context,
         CancellationToken cancellationToken)
     {
+        QueryStack.EnsureSufficientStack();
         var compiledPredicate = _expressionCompiler.CompilePredicate(ifStmt.Predicate);
         var conditionResult = compiledPredicate(
             new Dictionary<string, QueryValue>(StringComparer.OrdinalIgnoreCase));
@@ -492,6 +532,7 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         QueryPlanContext context,
         CancellationToken cancellationToken)
     {
+        QueryStack.EnsureSufficientStack();
         const int maxIterations = 10000;
         List<QueryRow>? lastRows = null;
 
@@ -546,6 +587,7 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         QueryPlanContext context,
         CancellationToken cancellationToken)
     {
+        QueryStack.EnsureSufficientStack();
         try
         {
             var tryStatements = tryCatch.TryStatements?.Statements
@@ -568,6 +610,10 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         catch (OperationCanceledException)
         {
             throw; // Don't catch cancellation
+        }
+        catch (Exception ex) when (QueryStack.IsDepthRefusal(ex))
+        {
+            throw; // A statement too deep for the stack is refused; CATCH must not run on an exhausted stack (#1952)
         }
         catch (BreakException)
         {
@@ -1046,8 +1092,12 @@ public sealed class ScriptExecutionNode : IQueryPlanNode
         var rows = new List<QueryRow>();
         await foreach (var row in planResult.RootNode.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             rows.Add(row);
         }
+
+        if (statement is InsertStatement or UpdateStatement or DeleteStatement or MergeStatement)
+            _completedWriteLines.Add(statement.StartLine);
         return rows;
     }
 

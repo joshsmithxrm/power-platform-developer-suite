@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 
@@ -21,13 +20,19 @@ namespace PPDS.Query.Parsing
         /// <returns>The parsed AST fragment.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="sql"/> is null.</exception>
         /// <exception cref="QueryParseException">The SQL text contains syntax errors.</exception>
+        /// <exception cref="PPDS.Dataverse.Query.Execution.QueryNestedTooDeeplyException">
+        /// The text is too large or too deeply nested to parse without running out of stack; nothing was parsed.
+        /// </exception>
+        /// <remarks>
+        /// The lexer and parser run on a dedicated thread with a large stack, behind a bound on the text's
+        /// token count (see <c>BoundedSqlParser</c>), so no text can overflow the stack and end the process.
+        /// </remarks>
         public TSqlFragment Parse(string sql)
         {
             if (sql is null)
                 throw new ArgumentNullException(nameof(sql));
 
-            using var reader = new StringReader(sql);
-            var fragment = _parser.Parse(reader, out IList<ParseError> errors);
+            var fragment = BoundedSqlParser.Parse(_parser, sql, out IList<ParseError> errors);
 
             if (errors.Count > 0)
                 throw new QueryParseException(errors, sql);
@@ -43,13 +48,15 @@ namespace PPDS.Query.Parsing
         /// <param name="errors">The parse errors, empty on success.</param>
         /// <returns>True if parsing succeeded with no errors; otherwise false.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="sql"/> is null.</exception>
+        /// <exception cref="PPDS.Dataverse.Query.Execution.QueryNestedTooDeeplyException">
+        /// The text is too large or too deeply nested to parse without running out of stack; nothing was parsed.
+        /// </exception>
         public bool TryParse(string sql, out TSqlFragment? fragment, out IList<ParseError> errors)
         {
             if (sql is null)
                 throw new ArgumentNullException(nameof(sql));
 
-            using var reader = new StringReader(sql);
-            fragment = _parser.Parse(reader, out errors);
+            fragment = BoundedSqlParser.Parse(_parser, sql, out errors);
 
             if (errors.Count > 0)
             {

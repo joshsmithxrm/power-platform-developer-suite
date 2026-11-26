@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 
 namespace PPDS.Query.Planning.Nodes;
@@ -52,6 +53,7 @@ public sealed class ExecuteMessageNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         if (cancellationToken.IsCancellationRequested)
         {
             yield break;

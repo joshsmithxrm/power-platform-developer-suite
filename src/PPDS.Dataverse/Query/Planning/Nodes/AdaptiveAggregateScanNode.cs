@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using PPDS.Dataverse.Query.Execution;
 
 namespace PPDS.Dataverse.Query.Planning.Nodes;
 
@@ -63,6 +64,7 @@ public sealed class AdaptiveAggregateScanNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // Inject date range filter into template FetchXML
         var fetchXml = InjectDateRangeFilter(TemplateFetchXml, RangeStart, RangeEnd);
         var scanNode = new FetchXmlScanNode(fetchXml, EntityLogicalName, autoPage: false);
@@ -77,6 +79,7 @@ public sealed class AdaptiveAggregateScanNode : IQueryPlanNode
             rows = new List<QueryRow>();
             await foreach (var row in scanNode.ExecuteAsync(context, cancellationToken))
             {
+                QueryStack.EnsureSufficientStack();
                 rows.Add(row);
             }
         }
@@ -111,6 +114,7 @@ public sealed class AdaptiveAggregateScanNode : IQueryPlanNode
         {
             await foreach (var row in leftNode.ExecuteAsync(context, cancellationToken))
             {
+                QueryStack.EnsureSufficientStack();
                 yield return row;
             }
         }
@@ -119,6 +123,7 @@ public sealed class AdaptiveAggregateScanNode : IQueryPlanNode
         {
             await foreach (var row in rightNode.ExecuteAsync(context, cancellationToken))
             {
+                QueryStack.EnsureSufficientStack();
                 yield return row;
             }
         }

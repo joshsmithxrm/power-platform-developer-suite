@@ -77,6 +77,7 @@ public sealed class DeclareCursorNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         Session.DeclareCursor(CursorName, QueryNode);
         await Task.CompletedTask;
         yield break;
@@ -118,6 +119,7 @@ public sealed class OpenCursorNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         await Session.OpenCursorAsync(CursorName, context, cancellationToken);
         yield break;
     }
@@ -163,6 +165,7 @@ public sealed class FetchCursorNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         var row = Session.FetchNextFromCursor(CursorName);
 
         if (row != null && context.VariableScope != null)
@@ -216,6 +219,7 @@ public sealed class CloseCursorNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         Session.CloseCursor(CursorName);
         await Task.CompletedTask;
         yield break;
@@ -257,6 +261,7 @@ public sealed class DeallocateCursorNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         Session.DeallocateCursor(CursorName);
         await Task.CompletedTask;
         yield break;

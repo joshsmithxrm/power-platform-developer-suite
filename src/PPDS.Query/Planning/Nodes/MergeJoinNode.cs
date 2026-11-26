@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 
 namespace PPDS.Query.Planning.Nodes;
@@ -71,18 +72,21 @@ public sealed class MergeJoinNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // Materialize both sides since we need random access for handling duplicates.
         var leftRows = new List<QueryRow>();
         var rightRows = new List<QueryRow>();
 
         await foreach (var row in _left.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
             leftRows.Add(row);
         }
 
         await foreach (var row in _right.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
             rightRows.Add(row);
         }

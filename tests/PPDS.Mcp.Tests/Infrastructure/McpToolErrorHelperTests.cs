@@ -163,4 +163,24 @@ public sealed class McpToolErrorHelperTests
         doc.RootElement.GetProperty("userMessage").GetString()
             .Should().NotBeNullOrEmpty();
     }
+
+    // ─── #1952: a statement too deep or too large to process ────────────────
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ThrowStructuredError_DepthRefusal_ReturnsTheCodeAndTheFixedMessage(bool runtimeRefusal)
+    {
+        Exception refusal = runtimeRefusal
+            ? new InsufficientExecutionStackException("runtime text")
+            : new PPDS.Dataverse.Query.Execution.QueryNestedTooDeeplyException(
+                PPDS.Dataverse.Query.Execution.QueryDepthLimit.TokenCount);
+
+        var ex = Assert.Throws<McpException>(() => McpToolErrorHelper.ThrowStructuredError(refusal));
+
+        var doc = JsonDocument.Parse(ex.Message);
+        doc.RootElement.GetProperty("errorCode").GetString().Should().Be(ErrorCodes.Query.NestedTooDeeply);
+        doc.RootElement.GetProperty("userMessage").GetString().Should()
+            .Be(PPDS.Dataverse.Query.Execution.QueryNestedTooDeeplyException.DefaultMessage);
+    }
 }

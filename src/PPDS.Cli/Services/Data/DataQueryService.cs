@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk.Query;
 using PPDS.Cli.Infrastructure.Errors;
 using PPDS.Dataverse.Pooling;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Query.Parsing;
 using PPDS.Query.Transpilation;
 
@@ -114,6 +115,10 @@ public sealed class DataQueryService : IDataQueryService
             var stmt = parser.ParseStatement(sql);
             var generator = new FetchXmlGenerator();
             fetchXml = generator.Generate(stmt);
+        }
+        catch (Exception ex) when (QueryStack.IsDepthRefusal(ex))
+        {
+            throw new PpdsException(ErrorCodes.Query.NestedTooDeeply, QueryStack.AsNestedTooDeeply(ex).Message, ex);
         }
         catch (Exception ex)
         {

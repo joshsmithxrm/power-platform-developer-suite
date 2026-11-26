@@ -127,6 +127,7 @@ public sealed class FetchXmlScanNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         var rowCount = 0;
         string? pagingCookie = InitialPagingCookie;
         var pageNumber = InitialPageNumber ?? 1;

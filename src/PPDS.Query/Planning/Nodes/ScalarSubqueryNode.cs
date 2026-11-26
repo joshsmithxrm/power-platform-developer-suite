@@ -43,6 +43,7 @@ public sealed class ScalarSubqueryNode : IQueryPlanNode
 
         await foreach (var row in _inner.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             rowCount++;
             if (rowCount == 1)
                 firstRow = row;
@@ -65,10 +66,12 @@ public sealed class ScalarSubqueryNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // ScalarSubqueryNode is typically used via ExecuteScalarAsync,
         // but supports the standard interface for plan tree consistency
         await foreach (var row in _inner.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             yield return row;
         }
     }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Query.Execution;
 
@@ -46,6 +47,7 @@ public sealed class TempTableScanNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         var rows = _sessionContext.GetTempTableRows(TableName);
 
         foreach (var row in rows)

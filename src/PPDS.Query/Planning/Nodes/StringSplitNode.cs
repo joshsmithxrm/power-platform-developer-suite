@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 
 namespace PPDS.Query.Planning.Nodes;
@@ -48,6 +49,7 @@ public sealed class StringSplitNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         if (string.IsNullOrEmpty(_inputString))
         {
             yield break;

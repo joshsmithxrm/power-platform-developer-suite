@@ -49,6 +49,7 @@ public sealed class WhileNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         for (var iteration = 0; iteration < MaxIterations; iteration++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -67,6 +68,7 @@ public sealed class WhileNode : IQueryPlanNode
             // Execute the body
             await foreach (var row in _body.ExecuteAsync(context, cancellationToken))
             {
+                QueryStack.EnsureSufficientStack();
                 cancellationToken.ThrowIfCancellationRequested();
                 yield return row;
             }

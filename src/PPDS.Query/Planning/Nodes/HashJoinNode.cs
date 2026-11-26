@@ -5,6 +5,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using PPDS.Dataverse.Query;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 
 namespace PPDS.Query.Planning.Nodes;
@@ -87,6 +88,7 @@ public sealed class HashJoinNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // Phase 1: Build hash table from the right (build) side
         var hashTable = new Dictionary<string, List<(QueryRow row, int index)>>(StringComparer.OrdinalIgnoreCase);
         var nullKeyBuildRows = new List<(QueryRow row, int index)>();
@@ -95,6 +97,7 @@ public sealed class HashJoinNode : IQueryPlanNode
 
         await foreach (var row in _right.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
             rightTemplate ??= row;
 
@@ -128,6 +131,7 @@ public sealed class HashJoinNode : IQueryPlanNode
         // Phase 2: Probe the hash table with each left-side row
         await foreach (var leftRow in _left.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
             leftTemplate ??= leftRow;
 

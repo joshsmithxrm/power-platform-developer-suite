@@ -49,9 +49,18 @@
     <EmbeddedResource Include="Resources\Schemas\*.xsd" />
   </ItemGroup>
 
+  <!-- Threads the runtime creates (the thread pool, Terminal.Gui, the SDK) get a 64 MiB stack instead of
+       1.5 MB (Windows, macOS) or 8 MB (Linux), so query execution, which recurses as deep as the statement
+       on pool threads, has the same room on every platform (#1952). A reservation: memory is committed only
+       as a stack is used. The main thread is not affected. -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.Threading.DefaultStackSize" Value="0x4000000" />
+  </ItemGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="PPDS.Cli.Tests" />
     <InternalsVisibleTo Include="PPDS.Cli.DaemonTests" />
+    <InternalsVisibleTo Include="PPDS.Cli.StackProbe" />
     <InternalsVisibleTo Include="PPDS.LiveTests" />
     <InternalsVisibleTo Include="PPDS.NotebookLiveHost" />
   </ItemGroup>

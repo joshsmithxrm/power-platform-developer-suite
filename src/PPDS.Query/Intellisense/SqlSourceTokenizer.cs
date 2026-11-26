@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using PPDS.Dataverse.Sql.Intellisense;
+using PPDS.Query.Parsing;
 
 namespace PPDS.Query.Intellisense;
 
@@ -143,9 +143,9 @@ public sealed class SqlSourceTokenizer : ISourceTokenizer
         try
         {
             var parser = new TSql170Parser(initialQuotedIdentifiers: true);
-            IList<ParseError> errors;
-            using var reader = new StringReader(text);
-            var scriptDomTokens = parser.GetTokenStream(reader, out errors);
+            // On a large-stack thread, behind the nested-comment bound: a text with too many "/*"
+            // falls to the catch below and is shown as one error span (#1952).
+            var scriptDomTokens = BoundedSqlParser.GetTokenStream(parser, text, out IList<ParseError> errors);
 
             if (scriptDomTokens == null || scriptDomTokens.Count == 0)
                 return new[] { new SourceToken(0, text.Length, SourceTokenType.Error) };

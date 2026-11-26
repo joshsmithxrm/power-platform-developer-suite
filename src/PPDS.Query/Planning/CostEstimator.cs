@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 using PPDS.Dataverse.Query.Planning.Nodes;
 using PPDS.Query.Planning.Nodes;
@@ -67,6 +68,7 @@ public sealed class CostEstimator
 
     private long EstimateNode(IQueryPlanNode node, CostContext context)
     {
+        QueryStack.EnsureSufficientStack();
         // For nodes with specialized estimation logic, always use the estimator's formula
         // rather than the node's built-in heuristic. This allows the CostEstimator to apply
         // selectivity factors and metadata-based cardinalities.

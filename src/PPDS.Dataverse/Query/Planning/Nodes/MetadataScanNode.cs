@@ -54,6 +54,7 @@ public sealed class MetadataScanNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // Use the executor provided at construction, or fall back to the context's executor
         var executor = MetadataExecutor ?? context.MetadataQueryExecutor
             ?? throw new QueryExecutionException(

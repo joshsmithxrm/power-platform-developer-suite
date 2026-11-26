@@ -97,6 +97,18 @@ public sealed class SqlQueryService : ISqlQueryService
 
         try
         {
+            return QueryStack.Run(() => TranspileOnThisThread(sql, topOverride));
+        }
+        catch (Exception ex) when (QueryStack.IsDepthRefusal(ex))
+        {
+            throw NestedTooDeeply(ex);
+        }
+    }
+
+    private string TranspileOnThisThread(string sql, int? topOverride)
+    {
+        try
+        {
             var fragment = _queryParser.Parse(sql);
 
             if (topOverride.HasValue)
@@ -122,6 +134,13 @@ public sealed class SqlQueryService : ISqlQueryService
             throw new PpdsException(ErrorCodes.Query.ParseError, ex.Message, ex);
         }
     }
+
+    /// <summary>
+    /// The coded refusal for a statement too deeply nested, or too large, to parse, plan or run without
+    /// running out of stack (#1952). The message never contains text from the statement.
+    /// </summary>
+    private static PpdsException NestedTooDeeply(Exception refusal) =>
+        new(ErrorCodes.Query.NestedTooDeeply, QueryStack.AsNestedTooDeeply(refusal).Message, refusal);
 
     /// <summary>
     /// Extracts the first <see cref="TSqlStatement"/> from a parsed fragment.
@@ -181,6 +200,20 @@ public sealed class SqlQueryService : ISqlQueryService
         SqlQueryRequest request,
         CancellationToken cancellationToken = default)
     {
+        try
+        {
+            return await ExecuteCoreAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (QueryStack.IsDepthRefusal(ex))
+        {
+            throw NestedTooDeeply(ex);
+        }
+    }
+
+    private async Task<SqlQueryResult> ExecuteCoreAsync(
+        SqlQueryRequest request,
+        CancellationToken cancellationToken)
+    {
         var (fragment, planResult, safetyResult, executionOptions, hints) =
             await PrepareExecutionAsync(request, cancellationToken).ConfigureAwait(false);
 
@@ -228,7 +261,8 @@ public sealed class SqlQueryService : ISqlQueryService
             request.UseTdsEndpoint
             && ContainsTdsScanNode(planResult.RootNode)
             && ex is not OperationCanceledException
-            && ex is not PpdsException)
+            && ex is not PpdsException
+            && !QueryStack.IsDepthRefusal(ex))
         {
             throw new PpdsException(
                 ErrorCodes.Query.TdsConnectionFailed,
@@ -261,10 +295,23 @@ public sealed class SqlQueryService : ISqlQueryService
     }
 
     /// <inheritdoc />
-    public Task<QueryPlanDescription> ExplainAsync(string sql, CancellationToken cancellationToken = default)
+    public async Task<QueryPlanDescription> ExplainAsync(string sql, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
 
+        // Parse, plan and describe on a large-stack thread (#1952); nothing here awaits.
+        try
+        {
+            return await QueryStack.RunAsync(() => ExplainOnThisThread(sql), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (QueryStack.IsDepthRefusal(ex))
+        {
+            throw NestedTooDeeply(ex);
+        }
+    }
+
+    private QueryPlanDescription ExplainOnThisThread(string sql)
+    {
         TSqlFragment fragment;
         try
         {
@@ -314,7 +361,7 @@ public sealed class SqlQueryService : ISqlQueryService
         description.PoolCapacity = ExtractPoolCapacity(planResult.RootNode);
         description.EffectiveParallelism = ExtractEffectiveParallelism(planResult.RootNode);
 
-        return Task.FromResult(description);
+        return description;
     }
 
     /// <inheritdoc />
@@ -325,10 +372,23 @@ public sealed class SqlQueryService : ISqlQueryService
     {
         if (chunkSize <= 0) chunkSize = 100;
 
-        var (fragment, planResult, safetyResult, executionOptions, hints) =
-            await PrepareExecutionAsync(request, cancellationToken).ConfigureAwait(false);
+        TSqlFragment fragment;
+        QueryPlanResult planResult;
+        DmlSafetyResult? safetyResult;
+        QueryExecutionOptions? executionOptions;
+        QueryHintOverrides hints;
+        List<QueryDataSource> streamDataSources;
+        try
+        {
+            (fragment, planResult, safetyResult, executionOptions, hints) =
+                await PrepareExecutionAsync(request, cancellationToken).ConfigureAwait(false);
+            streamDataSources = CollectDataSources(planResult.RootNode, "Local");
+        }
+        catch (Exception ex) when (QueryStack.IsDepthRefusal(ex))
+        {
+            throw NestedTooDeeply(ex);
+        }
 
-        var streamDataSources = CollectDataSources(planResult.RootNode, "Local");
         var streamAppliedHints = CollectAppliedHints(hints);
 
         // Dry-run: yield empty completion chunk
@@ -394,7 +454,8 @@ public sealed class SqlQueryService : ISqlQueryService
                     request.UseTdsEndpoint
                     && ContainsTdsScanNode(planResult.RootNode)
                     && ex is not OperationCanceledException
-                    && ex is not PpdsException)
+                    && ex is not PpdsException
+                    && !QueryStack.IsDepthRefusal(ex))
                 {
                     throw new PpdsException(
                         ErrorCodes.Query.TdsConnectionFailed,
@@ -402,6 +463,10 @@ public sealed class SqlQueryService : ISqlQueryService
                         "on this environment. Disable TDS mode to query via Dataverse, or ask your Power " +
                         "Platform admin to enable the TDS Endpoint.",
                         ex);
+                }
+                catch (Exception ex) when (QueryStack.IsDepthRefusal(ex))
+                {
+                    throw NestedTooDeeply(ex);
                 }
 
                 // Infer columns from first row
@@ -471,6 +536,40 @@ public sealed class SqlQueryService : ISqlQueryService
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Sql);
 
+        // The synchronous work (parse, hints, the DML safety check, planning) runs on a large-stack thread,
+        // in two hops around the one await, so a deep statement is refused with a coded error and never
+        // overflows the caller's stack (#1952). Nothing inside a hop awaits.
+        var prepared = await QueryStack.RunAsync(() => ParseAndCheck(request), cancellationToken).ConfigureAwait(false);
+
+        // For aggregate queries, fetch metadata needed for partitioning decisions.
+        // A DML dry-run must remain side-effect-free, including avoiding Dataverse
+        // metadata calls made only to optimize a read that will not be executed.
+        var (estimatedRecordCount, minDate, maxDate) =
+            prepared.SafetyResult is { ContainsDml: true, IsDryRun: true }
+                ? (null, null, null)
+                : await FetchAggregateMetadataAsync(prepared.Fragment, cancellationToken).ConfigureAwait(false);
+
+        var (planResult, executionOptions) = await QueryStack.RunAsync(
+            () => PlanAndCheck(prepared, estimatedRecordCount, minDate, maxDate),
+            cancellationToken).ConfigureAwait(false);
+
+        return (prepared.Fragment, planResult, prepared.SafetyResult, executionOptions, prepared.Hints);
+    }
+
+    /// <summary>The parsed statement and the checks made before the metadata call.</summary>
+    private sealed record PreparedStatement(
+        TSqlFragment Fragment,
+        QueryHintOverrides Hints,
+        SqlQueryRequest Request,
+        DmlSafetyResult? SafetyResult,
+        int? DmlRowCap);
+
+    /// <summary>
+    /// First hop of <see cref="PrepareExecutionAsync"/>: parse, hints, the TDS pre-check and the DML safety
+    /// check. Synchronous; runs on a <see cref="QueryStack"/> thread.
+    /// </summary>
+    private PreparedStatement ParseAndCheck(SqlQueryRequest request)
+    {
         TSqlFragment fragment;
         try
         {
@@ -554,13 +653,20 @@ public sealed class SqlQueryService : ISqlQueryService
             dmlRowCap = safetyResult.RowCap;
         }
 
-        // For aggregate queries, fetch metadata needed for partitioning decisions.
-        // A DML dry-run must remain side-effect-free, including avoiding Dataverse
-        // metadata calls made only to optimize a read that will not be executed.
-        var (estimatedRecordCount, minDate, maxDate) =
-            safetyResult is { ContainsDml: true, IsDryRun: true }
-                ? (null, null, null)
-                : await FetchAggregateMetadataAsync(fragment, cancellationToken).ConfigureAwait(false);
+        return new PreparedStatement(fragment, hints, request, safetyResult, dmlRowCap);
+    }
+
+    /// <summary>
+    /// Second hop of <see cref="PrepareExecutionAsync"/>: the plan and the cross-environment check.
+    /// Synchronous; runs on a <see cref="QueryStack"/> thread.
+    /// </summary>
+    private (QueryPlanResult PlanResult, QueryExecutionOptions? ExecutionOptions) PlanAndCheck(
+        PreparedStatement prepared,
+        long? estimatedRecordCount,
+        DateTime? minDate,
+        DateTime? maxDate)
+    {
+        var (fragment, hints, request, safetyResult, dmlRowCap) = prepared;
 
         // Apply hint-level overrides to pool capacity
         var effectivePoolCapacity = hints.MaxParallelism.HasValue
@@ -616,7 +722,7 @@ public sealed class SqlQueryService : ISqlQueryService
         // Check cross-environment DML policy after planning
         CheckCrossEnvironmentDmlPolicy(fragment, planResult, request.DmlSafety, safetyResult);
 
-        return (fragment, planResult, safetyResult, executionOptions, hints);
+        return (planResult, executionOptions);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -812,6 +918,7 @@ public sealed class SqlQueryService : ISqlQueryService
         IEnumerable<IQueryPlanNode> rootNodes,
         string localLabel)
     {
+        QueryStack.EnsureSufficientStack();
         var sources = new List<QueryDataSource>
         {
             new() { Label = localLabel, IsRemote = false }
@@ -837,6 +944,7 @@ public sealed class SqlQueryService : ISqlQueryService
 
     private static void CollectRemoteLabels(IQueryPlanNode node, List<QueryDataSource> sources)
     {
+        QueryStack.EnsureSufficientStack();
         if (node is RemoteScanNode remote)
         {
             if (!sources.Any(s => s.Label == remote.RemoteLabel))
@@ -889,6 +997,7 @@ public sealed class SqlQueryService : ISqlQueryService
         List<string> labels,
         HashSet<string> seen)
     {
+        QueryStack.EnsureSufficientStack();
         switch (statement)
         {
             case InsertStatement insert:
@@ -934,6 +1043,7 @@ public sealed class SqlQueryService : ISqlQueryService
         List<string> labels,
         HashSet<string> seen)
     {
+        QueryStack.EnsureSufficientStack();
         foreach (var statement in statements)
             CollectCrossEnvironmentDmlTargets(statement, labels, seen);
     }
@@ -950,6 +1060,7 @@ public sealed class SqlQueryService : ISqlQueryService
         List<string> labels,
         HashSet<string> seen)
     {
+        QueryStack.EnsureSufficientStack();
         var label = GetRemoteTargetLabel(target)
             ?? ResolveRemoteTargetAlias(target, fromClause);
         if (label != null && seen.Add(label))
@@ -997,6 +1108,7 @@ public sealed class SqlQueryService : ISqlQueryService
         List<NamedTableReference> aliasMatches,
         List<NamedTableReference> baseNameMatches)
     {
+        QueryStack.EnsureSufficientStack();
         switch (tableReference)
         {
             case NamedTableReference named:
@@ -1093,6 +1205,7 @@ public sealed class SqlQueryService : ISqlQueryService
 
     private static int? ExtractPoolCapacity(IQueryPlanNode node)
     {
+        QueryStack.EnsureSufficientStack();
         if (node is ParallelPartitionNode ppn)
             return ppn.MaxParallelism;
 
@@ -1107,6 +1220,7 @@ public sealed class SqlQueryService : ISqlQueryService
 
     private static int? ExtractEffectiveParallelism(IQueryPlanNode node)
     {
+        QueryStack.EnsureSufficientStack();
         if (node is ParallelPartitionNode ppn)
             return ppn.Partitions.Count;
 
@@ -1131,6 +1245,7 @@ public sealed class SqlQueryService : ISqlQueryService
 
     private static bool ContainsTdsScanNode(IQueryPlanNode node)
     {
+        QueryStack.EnsureSufficientStack();
         if (node is TdsScanNode)
             return true;
         foreach (var child in node.Children)

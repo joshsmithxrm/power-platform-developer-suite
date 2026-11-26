@@ -31,7 +31,12 @@ public static class ExceptionMapper
         var (code, target) = MapExceptionToCode(ex);
         var details = BuildDetails(context, ex, debug);
 
-        var message = ex is PpdsException ppdsEx ? ppdsEx.UserMessage : ex.Message;
+        var message = ex switch
+        {
+            PpdsException ppdsEx => ppdsEx.UserMessage,
+            InsufficientExecutionStackException => QueryNestedTooDeeplyException.DefaultMessage,
+            _ => ex.Message
+        };
         return StructuredError.Create(code, message, details, target, debug);
     }
 
@@ -62,6 +67,11 @@ public static class ExceptionMapper
             PPDS.Auth.Profiles.EnvironmentConfigFileException => ExitCodes.InvalidArguments,
             ArgumentException => ExitCodes.InvalidArguments,
             ConfigurationException => ExitCodes.InvalidArguments,
+
+            // A statement too deeply nested or too large to process safely (#1952): the input is the problem
+            QueryExecutionException { ErrorCode: QueryErrorCode.NestedTooDeeply } => ExitCodes.InvalidArguments,
+            InsufficientExecutionStackException => ExitCodes.InvalidArguments,
+            PpdsException { ErrorCode: ErrorCodes.Query.NestedTooDeeply } => ExitCodes.InvalidArguments,
 
             // Query execution errors
             QueryExecutionException => ExitCodes.Failure,
@@ -165,6 +175,10 @@ public static class ExceptionMapper
             // Query execution exceptions (must be before InvalidOperationException — subclass)
             QueryExecutionException queryEx =>
                 (queryEx.ErrorCode, null),
+
+            // The runtime's own refusal when a recursion is close to the end of the stack (#1952)
+            InsufficientExecutionStackException =>
+                (ErrorCodes.Query.NestedTooDeeply, null),
 
             // Operation exceptions
             OperationCanceledException =>

@@ -1,4 +1,5 @@
 using System.Text;
+using PPDS.Dataverse.Query.Execution;
 
 namespace PPDS.Dataverse.Query.Planning;
 
@@ -41,6 +42,7 @@ public static class PlanFormatter
 
     private static void FormatNode(StringBuilder sb, QueryPlanDescription node, string indent, bool isLast)
     {
+        QueryStack.EnsureSufficientStack();
         var connector = isLast ? "└── " : "├── ";
         var childIndent = indent + (isLast ? "    " : "│   ");
 

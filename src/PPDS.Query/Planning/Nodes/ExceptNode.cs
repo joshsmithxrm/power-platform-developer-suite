@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using PPDS.Dataverse.Query.Execution;
 using PPDS.Dataverse.Query.Planning;
 
 namespace PPDS.Query.Planning.Nodes;
@@ -53,11 +54,13 @@ public sealed class ExceptNode : IQueryPlanNode
         QueryPlanContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        QueryStack.EnsureSufficientStack();
         // Phase 1: Materialize the right side into a hash set
         var rightKeys = new HashSet<string>(StringComparer.Ordinal);
 
         await foreach (var row in _right.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
             rightKeys.Add(IntersectNode.BuildCompositeKey(row));
         }
@@ -67,6 +70,7 @@ public sealed class ExceptNode : IQueryPlanNode
 
         await foreach (var row in _left.ExecuteAsync(context, cancellationToken))
         {
+            QueryStack.EnsureSufficientStack();
             cancellationToken.ThrowIfCancellationRequested();
 
             var key = IntersectNode.BuildCompositeKey(row);

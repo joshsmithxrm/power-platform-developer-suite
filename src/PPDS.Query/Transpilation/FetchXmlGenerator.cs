@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using PPDS.Dataverse.Query.Execution;
 
 namespace PPDS.Query.Transpilation;
 
@@ -42,7 +43,15 @@ public sealed class FetchXmlGenerator
     /// </summary>
     /// <param name="fragment">A <see cref="SelectStatement"/> or <see cref="QuerySpecification"/>.</param>
     /// <returns>A <see cref="TranspileResult"/> containing FetchXML and virtual column info.</returns>
-    public TranspileResult GenerateWithVirtualColumns(TSqlFragment fragment)
+    /// <exception cref="QueryNestedTooDeeplyException">The statement is too deeply nested to transpile.</exception>
+    /// <remarks>
+    /// Runs on a <see cref="QueryStack"/> thread (inline when already on one), so a deep condition is refused
+    /// with a coded error rather than overflowing the caller's stack (#1952).
+    /// </remarks>
+    public TranspileResult GenerateWithVirtualColumns(TSqlFragment fragment) =>
+        QueryStack.Run(() => GenerateOnThisThread(fragment));
+
+    private TranspileResult GenerateOnThisThread(TSqlFragment fragment)
     {
         var querySpec = ExtractQuerySpecification(fragment);
         if (querySpec is null)
@@ -266,6 +275,7 @@ public sealed class FetchXmlGenerator
     /// </summary>
     private static void CollectJoinsRecursive(TableReference tableRef, List<JoinInfo> joins)
     {
+        QueryStack.EnsureSufficientStack();
         if (tableRef is QualifiedJoin qualifiedJoin)
         {
             // Recurse into the left side first (handles chained joins)
@@ -933,6 +943,7 @@ public sealed class FetchXmlGenerator
     private static void CollectExpressionConditionColumns(
         BooleanExpression condition, List<string> columnNames)
     {
+        QueryStack.EnsureSufficientStack();
         switch (condition)
         {
             case BooleanComparisonExpression comparison:
@@ -991,6 +1002,7 @@ public sealed class FetchXmlGenerator
     /// </summary>
     private static void CollectColumnsFromScalar(ScalarExpression expression, List<string> columnNames)
     {
+        QueryStack.EnsureSufficientStack();
         switch (expression)
         {
             case ColumnReferenceExpression colRef when colRef.ColumnType != ColumnType.Wildcard:
@@ -1150,6 +1162,7 @@ public sealed class FetchXmlGenerator
     /// </summary>
     private void EmitFilter(BooleanExpression condition, List<string> lines, string indent)
     {
+        QueryStack.EnsureSufficientStack();
         switch (condition)
         {
             case BooleanComparisonExpression comparison:
@@ -1308,6 +1321,7 @@ public sealed class FetchXmlGenerator
     private void EmitLogicalFilter(
         BooleanBinaryExpression binaryBool, List<string> lines, string indent)
     {
+        QueryStack.EnsureSufficientStack();
         var filterType = binaryBool.BinaryExpressionType == BooleanBinaryExpressionType.Or
             ? "or"
             : "and";
@@ -1325,6 +1339,7 @@ public sealed class FetchXmlGenerator
     /// </summary>
     private void EmitNotFilter(BooleanNotExpression notExpr, List<string> lines, string indent)
     {
+        QueryStack.EnsureSufficientStack();
         // For NOT, we need to handle specific inner condition types
         switch (notExpr.Expression)
         {
@@ -1387,6 +1402,7 @@ public sealed class FetchXmlGenerator
     /// </summary>
     private void EmitFilterInner(BooleanExpression condition, List<string> lines, string indent)
     {
+        QueryStack.EnsureSufficientStack();
         switch (condition)
         {
             case BooleanComparisonExpression comparison:
